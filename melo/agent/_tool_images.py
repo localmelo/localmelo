@@ -31,8 +31,25 @@ from localmelo.melo.schema import ImagePart, Message, ToolResult, decode_base64
 MAX_IMAGE_WIDTH: Final = 1280
 JPEG_QUALITY: Final = 75
 SCALE_TIMEOUT_S: Final = 20.0
+# Pictures the person added whose pixels stay in RAM; older ones lose them.
+USER_KEEP: Final = 8
 # Added to the tool message of an image whose pixels an earlier one carries.
 UNCHANGED_NOTE: Final = "[same image as an earlier tool result; its pixels are above]"
+# Ends the tool message of a picture that does not reach the model (images off, or the
+# server does not say it reads them), so the model does not describe what it cannot see.
+WITHHELD_NOTE: Final = (
+    "You cannot see this picture (this model is not sent pictures); the person can. "
+    "Do not describe it or guess what it shows."
+)
+# The tools that read a page as text; the note points to those the model has.
+TEXT_READERS: Final = ("browser_read", "browser_find")
+
+
+def withheld_note(readers: Sequence[str]) -> str:
+    """The line that ends a tool message whose picture is withheld; *readers* are the text tools the model has."""
+    if not readers:
+        return WITHHELD_NOTE
+    return f"{WITHHELD_NOTE} Read the page with {' or '.join(readers)}."
 
 
 def _sips_jpeg(raw: bytes, width: int) -> bytes | None:
@@ -86,6 +103,11 @@ class ToolImageStore:
         self._payloads: dict[str, ImagePart] = {}
         self._live: list[ImagePart] = []
         self._repeats: list[ImagePart] = []
+        # The pictures the person added: payloads by digest, oldest first.
+        self._user: dict[str, ImagePart] = {}
+        # Whether the messages last hydrated carry any pixels (a request the server
+        # refused for its pictures is told apart from one it refused for another reason).
+        self.sent_pixels = False
 
     @property
     def live(self) -> list[ImagePart]:
@@ -116,14 +138,48 @@ class ToolImageStore:
         self._repeats = [image for image in self._repeats if image.sha256 in digests]
         self._payloads = {d: p for d, p in self._payloads.items() if d in digests}
 
+    def keep_user(self, images: Sequence[ImagePart]) -> list[ImagePart]:
+        """Keep the payloads of pictures the person added; the reference copies for their message.
+
+        The newest :data:`USER_KEEP` stay. They are not scaled again: the
+        gateway normalized them when they were added.
+        """
+        for image in images:
+            if image.data:
+                self._user.pop(image.sha256, None)
+                self._user[image.sha256] = image
+        while len(self._user) > USER_KEEP:
+            del self._user[next(iter(self._user))]
+        return [image.as_reference() for image in images]
+
+    def _hydrate_user(self, message: Message) -> Message:
+        """A person's message with the payloads that are kept, and a line for the others."""
+        if not message.images or all(image.data for image in message.images):
+            return message
+        images = [self._user.get(image.sha256, image) for image in message.images]
+        gone = [image for image in images if not image.data]
+        content = message.content
+        if gone:
+            noun = "picture" if len(gone) == 1 else "pictures"
+            content = f"{content}\n[{len(gone)} {noun} no longer attached: " + (
+                ", ".join(image.ref for image in gone) + "]"
+            )
+        return dataclasses.replace(message, content=content, images=images)
+
     def hydrate(self, messages: list[Message]) -> list[Message]:
         """*messages* with the payloads of live images; the same list when none are."""
-        if not self._live:
+        if not self._live and not any(
+            message.role == "user" and message.images for message in messages
+        ):
+            self.sent_pixels = False
             return messages
         live = {id(image) for image in self._live}
         repeats = {id(image) for image in self._repeats}
         out: list[Message] = []
         for message in messages:
+            if message.role == "user":
+                out.append(self._hydrate_user(message))
+                continue
             ids = {id(image) for image in message.images}
             if message.role == "tool" and ids & (live | repeats):
                 content = message.content
@@ -135,4 +191,7 @@ class ToolImageStore:
                 ]
                 message = dataclasses.replace(message, content=content, images=images)
             out.append(message)
+        self.sent_pixels = any(
+            image.data for message in out for image in message.images
+        )
         return out

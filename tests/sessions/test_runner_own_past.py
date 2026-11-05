@@ -68,7 +68,6 @@ async def talk(
     stub: Any,
     workspace: Path,
     said: list[str],
-    eviction: Any = "slide",
 ) -> list[tuple[str, dict[str, Any]]]:
     """One chat of the *said* turns in one runner; each turn's request text and
     its ``turn.memory`` event."""
@@ -79,7 +78,7 @@ async def talk(
         base_url=stub.base_url,
         model="stub-model",
         workspace=str(workspace),
-        options=AgentOptions(window_messages=8, window_eviction=eviction),
+        options=AgentOptions(window_messages=8),
         identify=True,
         memory=memory,
     )
@@ -126,8 +125,8 @@ async def test_a_turn_that_left_the_window_is_recalled_as_this_chat(
 async def test_a_turn_the_window_still_shows_is_not_recalled(
     memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
 ) -> None:
-    # The dentist is turn 3 of 5 earlier turns: the window holds turns 2-5.
-    said = [LATER[0], LATER[1], DENTIST, LATER[2], LATER[3], ASKS]
+    # The dentist is turn 2 of 3 earlier turns: the window holds all three.
+    said = [LATER[0], DENTIST, LATER[1], ASKS]
     request, data = (await talk(memory, store, stub, tmp_path / "w", said))[-1]
     assert data["used"] == [] and BLOCK_HEADER not in request
     assert request == ASKS
@@ -139,8 +138,7 @@ async def test_a_turn_whose_question_left_the_window_is_recalled_though_its_answ
     # With chunk eviction the window drops down to 5 messages at once: turn 3's
     # answer is the first message left, its question is gone.
     said = [LATER[0], LATER[1], DENTIST, LATER[2], LATER[3], ASKS]
-    chunked = await talk(memory, store, stub, tmp_path / "w", said, eviction="chunk")
-    request, data = chunked[-1]
+    request, data = (await talk(memory, store, stub, tmp_path / "w", said))[-1]
     (used,) = data["used"]
     assert used["turn"] == 3 and used["source"] == f"this chat, {today()}"
     assert "Nov 3" in request

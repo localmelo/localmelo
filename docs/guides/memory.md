@@ -27,14 +27,6 @@ What a later run recalls:
 - In explicit modes, recall must be enabled and include the `long` kind; `drop` and `replay` leave `auto` recall off by default.
 - Attempt digests enter long-term memory only with a confirmed file write or an eligible passing check; recall prefers digests from the same task and workspace, and a new task gets no cross-task digests until a same-task digest matches (see [digest recall](../reference/memory.md#digest-recall)).
 
-## Experimental typed facts
-
-Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit reasoning mode.
-
-- It retains supported short facts, and can keep an older assertion as labelled history when a verified, ordered change replaces it.
-- Ambiguous or unlinked facts are not silently linked; the parser and source check are conservative and incomplete, and recall is relevance-limited.
-- See the [typed assertions reference](../reference/memory.md#experimental-typed-assertions).
-
 ## Notes melo keeps about you
 
 ![The Memory tab: notes melo keeps about you, each with its source chat and Edit and Delete buttons.](../assets/img/memory-tab.webp)
@@ -127,7 +119,7 @@ asyncio.run(main())
 
 - **What `forget(task_id)` removes.** The task's rows from history's `tasks`, `steps` and `llm_calls` tables, and the long-term entries whose metadata names the task: its reflections (`"task_id"`), not its step summaries (only `"step_id"`).
 - **What `forget_all()` removes.** Every long-term entry and every row of the three history tables.
-- **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget` clears that), the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`) and the legacy playground's memory in `~/.cache/localmelo/playground/`.
+- **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget` clears that), and the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`).
 - **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock; the deletes overwrite what they free (`PRAGMA secure_delete=ON`) and a checkpoint truncates the WAL, so the text is not left in the database file or its `-wal` file; if another connection keeps the WAL from truncating, the checkpoint is skipped with a WARNING and a later one clears it.
 - A forget is safe while localmelo runs; removing the files is not.
 
@@ -151,9 +143,6 @@ To delete everything, including what the API does not touch, stop every localmel
 
    # The console's session store (including chats)
    rm -f ~/.cache/localmelo/gateway/sessions.db*
-
-   # The legacy playground's memory, if it was enabled
-   rm -rf ~/.cache/localmelo/playground
    ```
 
 3. Start localmelo again. It creates new files when it needs them.
@@ -183,7 +172,6 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 | `~/.cache/localmelo/memory/procedures.db` | Each task's normalized query, the folder it ran in and its tool calls' labels (file names and program names, never their content or output). |
 | `~/.cache/localmelo/cli/sessions.db` and `~/.cache/localmelo/cli_history` | Every terminal turn with its tool calls and output; your messages (both `0600`). |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's session rows and turns. |
-| `~/.cache/localmelo/playground/` | Only with `melo serve --playground` (disabled by default): its chats' history and procedural memory, and long-term memory when an embedding model is selected. |
 
 - The files are not encrypted; they are as private as your home directory.
 - The query and the labels in `procedures.db` pass a minimal redaction: PEM private key bodies, the key shapes, bearer tokens and one-time codes of [Model calls](../reference/memory.md#model-calls), then a URL's password (`postgres://app:<redacted>@host`, the user name kept) and the value of `NAME=value` or `NAME: value` when NAME contains `key`, `token`, `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`); anything else stays as written, such as host names, paths and other values.

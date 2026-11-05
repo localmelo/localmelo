@@ -362,9 +362,6 @@ def build(output: Path) -> None:
                 package / name,
                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
-        scenario = package / "tests/smoke/data/scenarios.json"
-        scenario.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / "tests/smoke/data/scenarios.json", scenario)
         with (ROOT / "pyproject.toml").open("rb") as f:
             version = tomllib.load(f)["project"]["version"]
         metadata = site / f"localmelo-{version}.dist-info"

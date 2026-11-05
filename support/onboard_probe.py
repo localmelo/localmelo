@@ -31,7 +31,7 @@ async def probe_chat(cfg: _config_mod.Config) -> None:
     the provider's HTTP timeout it would fail the ping (or, as ``true``,
     pass it) with an error that does not name the key.
     """
-    timeout_errors = cfg._validate_request_timeout()
+    timeout_errors = cfg.validate_request_timeout()
     if timeout_errors:
         raise ProbeError(f"chat probe failed: {'; '.join(timeout_errors)}")
     backend = get_backend(cfg.chat_backend)

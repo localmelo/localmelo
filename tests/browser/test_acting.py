@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
-from localmelo.support.browser import render, safari
+from localmelo.support.browser import pagescript, render, safari
 from localmelo.support.browser.driver import (
     ActResult,
     BrowserDriver,
@@ -93,6 +93,27 @@ def world(*elements: Element, **kwargs: Any) -> Anywhere:
 
 
 # ── Clicking ──
+
+
+async def test_a_click_stopped_by_what_covers_the_element_keeps_the_page_and_its_refs() -> (
+    None
+):
+    driver = world(button("Check in"), button("Again"))
+    words = "A sticky header (h1) covers that button, so melo stopped it."
+    driver.covers["Check in"] = words
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and out.text == words
+    # Nothing was done, so the reading stays: no page has to be opened or read again.
+    shot = await run(tools, "browser_screenshot")
+    assert not shot.is_error
+    assert [c for c in driver.calls if c[0] in ("open", "page")] == [
+        ("open", HOME),
+        ("page", "t1"),
+    ]
+    other = await run(tools, "browser_click", ref="e2")
+    assert not other.is_error and other.text.startswith("Clicked e2")
 
 
 async def test_a_click_acts_on_the_page_and_reads_it_again() -> None:
@@ -839,9 +860,9 @@ async def test_a_button_that_sends_a_form_says_so_in_the_page_block() -> None:
 
 def test_nothing_the_page_scripts_do_reads_cookies_or_storage() -> None:
     for script in (
-        safari.PAGE_JS,
-        safari.FOCUS_JS,
-        safari.act_script({"act": "click", "url": "", "at": 0}),
+        pagescript.PAGE_JS,
+        pagescript.FOCUS_JS,
+        pagescript.act_script({"act": "click", "url": "", "at": 0}),
     ):
         for word in ("cookie", "localStorage", "sessionStorage", "indexedDB", "caches"):
             assert word.lower() not in script.lower(), word
@@ -854,7 +875,8 @@ def test_there_is_no_tool_or_driver_call_for_cookies_or_storage() -> None:
         assert word not in names, word
         assert word not in members, word
     # The one place the word appears is the comment that promises it.
-    source = inspect.getsource(safari).lower().replace("cookies or storage", "")
+    source = (inspect.getsource(safari) + inspect.getsource(pagescript)).lower()
+    source = source.replace("cookies or storage", "")
     assert "cookie" not in source
 
 

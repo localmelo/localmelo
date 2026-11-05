@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.agent.test_reflection_gate import _prefix_scope
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -383,7 +383,7 @@ async def test_history_keeps_the_raw_reply_and_gets_no_notes_table(
 
 @pytest.mark.asyncio
 async def test_live_note_kinds_match_the_exported_corpus(tmp_path: Path) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )
@@ -583,7 +583,7 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
     from localmelo.melo.schema import CheckResult, TaskRecord
 
     server = FakeLLM()
-    agent = _agent(server, _options(reasoning="compress", **LEGACY_CACHE_OPTIONS))
+    agent = _agent(server, _options(reasoning="compress"))
     agent.hippo.working.notes.add(
         "note",
         "found: a fact",
@@ -601,12 +601,13 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
         return await original(messages, **kwargs)
 
     agent.checker.pre_plan = pre_plan  # type: ignore[method-assign]
-    result = await agent._do_reflect(
-        TaskRecord(query="q"),
-        attempt_id=1,
-        failure_type="",
-        run=_RunState(attempts=1),
-    )
+    with _prefix_scope(agent):
+        result = await agent._do_reflect(
+            TaskRecord(query="q"),
+            attempt_id=1,
+            failure_type="",
+            run=_RunState(attempts=1),
+        )
     await agent.close()
     assert result is None
     assert seen == [True]
@@ -617,7 +618,7 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
 async def test_live_and_exported_draft_targets_agree_on_recent_path(
     tmp_path: Path,
 ) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )
@@ -666,7 +667,7 @@ async def test_live_and_exported_draft_targets_agree_on_recent_path(
 async def test_live_and_exported_draft_targets_use_the_recent_path(
     tmp_path: Path,
 ) -> None:
-    from localmelo.melo.memory.retrieval.corpus import (
+    from localmelo.support.memory.retrieval_corpus import (
         docs_from_calls,
         load_history_calls,
     )

@@ -53,12 +53,9 @@ def test_it_is_off_by_default_saved_only_when_set_and_checked(tmp_path: Path) ->
     assert any("[memory] sleep 'deep' is not recognised" in e for e in cfg.validate())
 
 
-def test_sleep_lock_round_trips_and_is_validated(home: Path) -> None:
+def test_a_sleep_lock_path_with_a_nul_is_refused(home: Path) -> None:
     cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory.sleep_lock = str(home / "idle.lock")
-    save(cfg)
-    assert config.load().memory.sleep_lock == cfg.memory.sleep_lock
-    cfg.memory.sleep_lock = 3  # type: ignore[assignment]
+    cfg.memory.sleep_lock = "a\x00b"
     assert any("sleep_lock must be a path string" in e for e in cfg.validate())
 
 

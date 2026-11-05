@@ -107,7 +107,8 @@ SETTINGS = [
         {"recall_excerpt": "match", "recall_item_chars": 400, "recall_chars": 4000},
         id="match",
     ),
-    pytest.param({"recall_form": "list"}, id="list"),
+    # The guide line as it was: its sentences are pinned in test_premise_check.py.
+    pytest.param({"recall_form": "list", "premise_check": "off"}, id="list"),
 ]
 
 

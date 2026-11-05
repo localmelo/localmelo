@@ -114,11 +114,11 @@ async def test_each_response_is_one_row() -> None:
     await _record(log, "plan", _reply("Done.", thinking="It is done."))
     run.attempts = 2
     await _record(log, "reflect", _reply('{"recommended_action": "stop"}'))
-    await _record(log, "estimate", _reply("3", thinking="About three."))
+    await _record(log, "retrieve", _reply("3", thinking="About three."))
 
     rows = history.rows
     assert [r.seq for r in rows] == [0, 1, 2, 3, 4]
-    assert [r.kind for r in rows] == ["plan", "plan", "plan", "reflect", "estimate"]
+    assert [r.kind for r in rows] == ["plan", "plan", "plan", "reflect", "retrieve"]
     assert [r.outcome for r in rows] == ["tools", "empty", "answer", "aux", "aux"]
     assert [(r.step, r.attempt) for r in rows] == [
         (1, 1),

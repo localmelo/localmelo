@@ -69,11 +69,10 @@ error: externally-managed-environment
 FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smoke/data/scenarios.json'
 ```
 
-- **Cause:** an older build omitted this required data file from its wheel.
-  Current builds package it along with the web workspace's assets.
+- **Cause:** an older build needed this data file and omitted it from its
+  wheel. Current builds no longer use it.
 - **Fix:** update and reinstall localmelo as described in
-  [Update localmelo](../guides/configure.md#update-localmelo). An editable source
-  install with `pip install -e ".[gateway]"` also includes the file.
+  [Update localmelo](../guides/configure.md#update-localmelo).
 
 ## Setup and configuration
 
@@ -177,6 +176,7 @@ saving · q quits:`.
 | `api_key: … is not a keychain reference` | Write `api_key = "keychain:localmelo.<name>"`, or leave it empty. |
 | `embedding_url is empty`, `embedding_model is empty` | Add both to the backend's table, or set `embedding_backend = "none"`. |
 | `request_timeout_s must be a finite number of seconds > 0` | Write a number without quotes, such as `request_timeout_s = 600`. |
+| `[gateway] port must be a whole number, got '8401'` | The value has the wrong kind (here, quotes around a number). Write it as the message says: a whole number without quotes, `true` or `false` for an on/off setting, text in quotes. |
 | `extra_body must not set 'model'` | Remove that key from `extra_body`. |
 
 ### LOCALMELO_THINKING_RETENTION_DAYS must be a number of days
@@ -379,10 +379,7 @@ melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: 
 - **Cause:** after an attempt, the reflection decided to stop, or its
   decision to continue did not pass the continuation gate. The error is the
   model's reason, or `Stopped after attempt <n> (stop reason: <code>)` when it gave none;
-  the `reflection` event's `stop_reason` names the check in every case. With
-  `--reflection-gate utility`, it can also be
-  `Could not parse reflection response`: the model twice replied without the
-  JSON object that a reflection asks for.
+  the `reflection` event's `stop_reason` names the check in every case.
 - **Fix:** read the reason. If the model cannot write reflections, try
   another model or `--attempt-policy none`.
 

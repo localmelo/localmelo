@@ -61,6 +61,7 @@ from localmelo.support.sessions.store import (
     CLOSED_ERROR,
     LEASE_S,
     MEMORY_EVENT_TYPE,
+    NOTE_EVENT_TYPE,
     PICTURES_EVENT_TYPE,
     RESERVED_EVENT_PREFIXES,
     RESERVED_EVENT_TYPE_RE,
@@ -155,6 +156,8 @@ class _Turn:
     routine: str | None = None
     # Who began a turn the person did not (``TurnInfo.origin``); "" for theirs.
     origin: str = ""
+    # The pictures the person added to the message, with their data.
+    images: tuple[ImagePart, ...] = ()
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -514,6 +517,7 @@ class SessionRunner:
         attachments: Sequence[TextAttachment] = (),
         words: str | None = None,
         origin: str = "",
+        images: Sequence[ImagePart] = (),
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -522,7 +526,9 @@ class SessionRunner:
         ``routine=``), passed only when given. *words* are the person's own
         words when *text* is not (``Agent.run_task``'s ``user_words=``; the
         typed text otherwise). *origin* marks a turn the person did not
-        begin (``SessionStore.begin_turn``). With *client_request_id*, a
+        begin (``SessionStore.begin_turn``). *images* are the pictures the
+        person added: stored with the turn and sent to the model with *text*
+        (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
         turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
         and one used for another text ``SubmissionConflict``.
@@ -537,6 +543,7 @@ class SessionRunner:
             own_task=True,
             words=words,
             origin=origin,
+            images=tuple(images),
         )
         return turn.turn
 
@@ -565,8 +572,11 @@ class SessionRunner:
         own_task: bool,
         words: str | None = None,
         origin: str = "",
+        images: tuple[ImagePart, ...] = (),
     ) -> _Turn:
         self._check_open()
+        if images and self._worker:
+            raise ValueError("worker sessions do not support pictures")
         typed_text = text
         if attachments:
             if self._worker:
@@ -619,6 +629,7 @@ class SessionRunner:
                 typed_text,
                 words,
                 origin,
+                images,
             )
         )
         self._begin = begin
@@ -662,6 +673,7 @@ class SessionRunner:
         typed_text: str,
         words: str | None = None,
         origin: str = "",
+        images: tuple[ImagePart, ...] = (),
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -678,6 +690,7 @@ class SessionRunner:
                 attachments=attachments,
                 typed_text=typed_text if attachments else None,
                 origin=origin,
+                images=images,
             )
             self._create_scope_key = False
         finally:
@@ -696,6 +709,7 @@ class SessionRunner:
             typed="" if origin else typed_text,
             words=words,
             origin=origin,
+            images=images,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
@@ -804,6 +818,8 @@ class SessionRunner:
             }
             if turn.routine is not None:
                 kwargs["routine"] = turn.routine
+            if turn.images:
+                kwargs["images"] = turn.images
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words
@@ -1592,6 +1608,58 @@ class SessionRunner:
         if turn is None or not turn.accepting:
             raise RuntimeError("No turn is running")
         self._enqueue(turn, type, data)
+
+    def takes_notes(self, turn_id: str) -> bool:
+        """Whether turn *turn_id* runs and can still read words added to it.
+
+        False for another turn, a turn being stopped or closed, and one whose
+        run has ended: its words would not be read at a next step.
+        """
+        turn = self._active
+        return (
+            turn is not None
+            and turn.turn.id == turn_id
+            and turn.accepting
+            and turn.cause is None
+            and not turn.closing
+            and not self.run_ended
+        )
+
+    def publish_note(
+        self,
+        turn_id: str,
+        note: int,
+        text: str,
+        images: Sequence[ImagePart] = (),
+    ) -> bool:
+        """Queue the ``turn.note`` event of words added to turn *turn_id*.
+
+        *note* is the number the run's inbox reads them by (``inbox.accepted``
+        names it as ``offset``). *images* are the pictures that came with the
+        words, already kept in the store's blobs (``SessionStore.put_blobs``):
+        the event lists them as references. False, and nothing stored, when
+        the turn no longer takes events.
+        """
+        turn = self._active
+        if turn is None or turn.turn.id != turn_id or not turn.accepting:
+            return False
+        data: dict[str, Any] = {
+            "turn": turn.turn.turn,
+            "turn_id": turn_id,
+            "note": note,
+            "text": text,
+        }
+        if images:
+            data["images"] = [
+                {
+                    "sha256": image.sha256,
+                    "mime_type": image.mime_type,
+                    "size_bytes": image.size_bytes,
+                }
+                for image in images
+            ]
+        self._enqueue(turn, NOTE_EVENT_TYPE, data)
+        return True
 
     def _enqueue(self, turn: _Turn, type_: str, data: Mapping[str, Any]) -> None:
         if not turn.accepting:

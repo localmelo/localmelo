@@ -15,10 +15,10 @@ from typing import Any, Literal
 # ── Config ──
 
 SHORT_TERM_MAX = 20
-# window_eviction="chunk"/"boundary": a full window drops whole units down to
-# SHORT_TERM_MAX - WINDOW_EVICT_CHUNK messages at once, and the prompt-cap fit
-# and the context fit drop down to WINDOW_FIT_TARGET of their limit, so the
-# retained history stays the same for several steps (prompt-cache reuse).
+# A full window drops whole units down to SHORT_TERM_MAX - WINDOW_EVICT_CHUNK
+# messages at once, and the prompt-cap fit and the context fit drop down to
+# WINDOW_FIT_TARGET of their limit, so the retained history stays the same for
+# several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
 # The working window's message cap (``window_messages``): any value in this
@@ -38,15 +38,12 @@ TOOL_SEARCH_TOP_K = 3
 # 50 steps without an answer. The earlier defaults were 30, 10 and 5; the
 # options ``max_steps=30, steps_per_attempt=10`` still give that run.
 MAX_AGENT_STEPS = 100
-MIN_AGENT_STEPS = 3
 STEPS_PER_ATTEMPT = 50
 MAX_ATTEMPTS = 5
 
 # Reflection budget. Only one reflection is carried into the next attempt's
 # prompt. If its serialized form exceeds the char cap, the agent trims it to
-# fit (AgentOptions.reflection_gate="flags", the default) or forces a
-# decompose action instead of continuing ("utility").
-MAX_REFLECTIONS_IN_PROMPT = 1
+# fit.
 MAX_REFLECTION_CHARS = 2000
 
 # ── Empty replies ──
@@ -84,6 +81,12 @@ TOOL_CALL_TEXT_NUDGE = (
     "tool through the tool interface, or give your final answer in plain words."
 )
 TOOL_CALL_TEXT_ERROR = "tool call written as text"
+# The run's error when the model server refused a request that carried pictures,
+# because the model cannot read them. The gateway reads it to remember the model
+# as text only, and the console words it for the person.
+PICTURES_REFUSED_ERROR = (
+    "This model can't see pictures; choose one that can in Settings → Model"
+)
 # The stand-ins for a reply that is no answer, and the nudges after them.
 REPLY_LABELS = (EMPTY_REPLY_LABEL, TOOL_CALL_TEXT_LABEL)
 REPLY_NUDGES = (EMPTY_REPLY_NUDGE, TOOL_CALL_TEXT_NUDGE)
@@ -223,6 +226,51 @@ def has_content(text: str) -> bool:
     nothing, and the agent treats it as an empty reply.
     """
     return any(unicodedata.category(char)[0] in "LN" for char in text)
+
+
+def shorten(text: str, width: int) -> str:
+    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
+
+    Text that fits is returned as it is. When the cut falls inside the
+    first word, there is no boundary to go back to, and the text is cut
+    where *width* falls.
+    """
+    if len(text) <= width:
+        return text
+    if width < 1:
+        return ""
+    head = text[: width - 1]
+    if not text[len(head)].isspace() and not head[-1:].isspace():
+        # The cut falls inside a word: leave that word out.
+        words = head.rsplit(None, 1)
+        if len(words) == 2:
+            head = words[0]
+    return head.rstrip() + "…"
+
+
+def collapse(text: str) -> str:
+    """*text* with each run of whitespace made one space, and stripped."""
+    return " ".join(text.split())
+
+
+def first_nonblank_line(text: str) -> str:
+    """The first line of *text* that is not blank, stripped; "" if none."""
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def strip_code_fences(text: str) -> str:
+    """*text* without a Markdown code fence around it, such as ```json ... ```."""
+    body = text.strip()
+    if body.startswith("```"):
+        # The opening fence may name a language; drop its whole line.
+        newline = body.find("\n")
+        body = body[newline + 1 :] if newline != -1 else body[3:]
+    if body.endswith("```"):
+        body = body[:-3]
+    return body.strip()
 
 
 def split_thinking(
@@ -1092,12 +1140,6 @@ class ReflectionDecision:
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
-    # Active-learning acquisition signals
-    estimated_info_gain: float = 0.0
-    estimated_cost: float = 0.0
-    repeat_risk: float = 0.0
-    novelty: float = 0.0
-    feasibility: float = 0.0
 
 
 # ── Long-term memory candidates (R6-lite) ──
@@ -1109,7 +1151,6 @@ class CandidateItem:
 
     text: str
     source_ids: tuple[str, ...] | None = None
-    evidence: str | None = None
 
 
 @dataclass

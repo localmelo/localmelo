@@ -82,17 +82,10 @@ class _FakeBackend(BaseBackend):
         chat: BaseLLMProvider | None = None,
         embedding: BaseEmbeddingProvider | None = None,
     ) -> None:
-        self._key = key
+        self.key = key
+        self.display_name = f"fake:{key}"
         self._chat = chat
         self._embedding = embedding
-
-    @property
-    def key(self) -> str:
-        return self._key
-
-    @property
-    def display_name(self) -> str:
-        return f"fake:{self._key}"
 
     def validate(self, cfg: Any) -> list[str]:
         return []
@@ -326,21 +319,19 @@ async def test_probe_embedding_rejects_empty_vector() -> None:
         await probe_embedding(cfg)
 
 
-def test_backend_defaults_matches_onboarding_tables() -> None:
+def test_backend_defaults_has_every_backend_with_its_setup_defaults() -> None:
     from localmelo.support import onboard
+    from localmelo.support.config import VALID_CHAT_BACKENDS
 
     defaults = onboard.backend_defaults()
-    assert set(defaults) == set(onboard._LOCAL_DEFAULTS) | set(onboard._CLOUD_DEFAULTS)
-    for key, (chat_url, chat_model) in onboard._LOCAL_DEFAULTS.items():
-        emb_url, emb_model = onboard._EMBEDDING_DEFAULTS[key]
-        assert defaults[key] == {
-            "chat_url": chat_url,
-            "chat_model": chat_model,
-            "embedding_url": emb_url,
-            "embedding_model": emb_model,
-        }
-    for key, (api_key_env, chat_model) in onboard._CLOUD_DEFAULTS.items():
-        assert defaults[key] == {
-            "api_key_env": api_key_env,
-            "chat_model": chat_model,
-        }
+    assert list(defaults) == list(VALID_CHAT_BACKENDS)
+    assert defaults["ollama"] == {
+        "chat_url": "http://localhost:11434",
+        "chat_model": "qwen3:8b",
+        "embedding_url": "http://localhost:11434",
+        "embedding_model": "nomic-embed-text",
+    }
+    assert defaults["openai"] == {
+        "api_key_env": "OPENAI_API_KEY",
+        "chat_model": "gpt-4o",
+    }

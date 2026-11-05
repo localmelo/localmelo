@@ -18,23 +18,24 @@ import threading
 import tomllib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from localmelo.melo.memory.retrieval import (
+from localmelo.melo.memory.retrieval.llm import RETRIEVE_SYSTEM_PROMPT
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.memory.retrieval_corpus import (
     RawCall,
     doc_to_dict,
     docs_from_calls,
     load_raw_calls,
 )
-from localmelo.melo.memory.retrieval.llm import RETRIEVE_SYSTEM_PROMPT
-from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.retrieve import main
+from localmelo.tests.fixtures.http_stub import HttpStub
 from localmelo.tests.memory.history_fixture import write_history_sync
 
 FIXTURES = Path(__file__).parents[1] / "memory" / "fixtures" / "retrieval"
@@ -136,7 +137,7 @@ def _embedding(text: str) -> list[float]:
     return vector
 
 
-class ModelServer:
+class ModelServer(HttpStub):
     """``POST …/chat/completions`` and ``…/embeddings`` on 127.0.0.1, port 0.
 
     :attr:`chat` answers each chat body with ``(status, body)``: an object
@@ -176,16 +177,7 @@ class ModelServer:
                 self.end_headers()
                 self.wfile.write(data)
 
-            def log_message(self, format: str, *args: Any) -> None:
-                pass  # no request log in the test output
-
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
+        super().__init__(Handler, path="/v1")
 
     def chat_requests(self) -> list[Request]:
         return [r for r in self.requests if r.path.endswith("/chat/completions")]
@@ -200,11 +192,6 @@ class ModelServer:
             for i, text in enumerate(texts)
         ]
         return 200, {"object": "list", "model": "stub-embedding", "data": data}
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
 
 
 @pytest.fixture

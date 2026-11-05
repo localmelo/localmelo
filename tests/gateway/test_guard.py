@@ -3,8 +3,8 @@
 A web page can reach a gateway on 127.0.0.1 through the browser: through
 DNS rebinding, with the page's own name in the Host header, or as a
 cross-origin request, with the page's Origin. These tests send such
-requests to the real gateway app, whose sessions and playground are
-fakes that record what runs, and send what a test client cannot (no
+requests to the real gateway app, whose sessions are a fake that
+records what runs, and send what a test client cannot (no
 Host, a repeated header) to LoopbackGuard directly.
 
 Requires fastapi + uvicorn (gateway extra). Collection-safe without either.
@@ -12,11 +12,9 @@ Requires fastapi + uvicorn (gateway extra). Collection-safe without either.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 from dataclasses import dataclass
-from types import ModuleType
 from typing import Any
 
 import pytest
@@ -37,13 +35,13 @@ from localmelo.support.config import (  # noqa: E402
 from localmelo.support.gateway import GatewayServer  # noqa: E402
 from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
-from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
-from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
-
-# mount() registers its shutdown hook with FastAPI's deprecated on_event.
-pytestmark = pytest.mark.filterwarnings(
-    r"ignore:\s*on_event is deprecated:DeprecationWarning"
+from localmelo.support.gateway.guard import (  # noqa: E402
+    LoopbackGuard,
+    is_json_content_type,
+    is_loopback,
+    is_upload_content_type,
 )
+from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
 
 PORT = 8401
 GATEWAY = f"http://127.0.0.1:{PORT}"
@@ -75,28 +73,6 @@ ROUTES = [
     pytest.param("GET", "/v1/sessions", None, id="sessions"),
     pytest.param("DELETE", "/v1/sessions/s1", None, id="close-session"),
     pytest.param("POST", "/v1/agent/run", {"query": "ls"}, id="agent-run"),
-    pytest.param("GET", "/v1/playground/scenarios", None, id="playground-scenarios"),
-    pytest.param(
-        "POST",
-        "/v1/playground/discover",
-        {"chat_url": "http://evil.example/v1"},
-        id="playground-discover",
-    ),
-    pytest.param(
-        "POST",
-        "/v1/playground/session",
-        {"chat_url": "http://evil.example/v1", "chat_model": "m"},
-        id="playground-session",
-    ),
-    pytest.param(
-        "POST", "/v1/playground/session/pg1/run", {"query": "ls"}, id="playground-run"
-    ),
-    pytest.param("DELETE", "/v1/playground/session/pg1", None, id="playground-close"),
-    pytest.param("GET", "/v1/playground/sessions", None, id="playground-sessions"),
-    pytest.param("GET", "/v1/playground/session/pg1", None, id="playground-get"),
-    pytest.param(
-        "POST", "/v1/playground/session/pg1/cancel", None, id="playground-cancel"
-    ),
     pytest.param("GET", "/assets/workspace.js", None, id="workspace-assets"),
     pytest.param("GET", "/no/such/route", None, id="404"),
     pytest.param("POST", "/v1/agent/run", ["not", "an", "object"], id="422"),
@@ -149,64 +125,18 @@ class QuietProbe:
         pass
 
 
-class _QuietGate:
-    async def close(self) -> None:
-        pass
-
-
-class RecordingPlayground:
-    """Stands in for SmokePlayground: records each call, contacts no server."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-        self.gate = _QuietGate()
-
-    def scenarios_payload(self) -> list[dict[str, Any]]:
-        self.calls.append("scenarios")
-        return []
-
-    async def discover(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("discover")
-        return {"adapter": "mlc", "chat_models": [], "embedding_models": []}
-
-    async def create_session(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("create_session")
-        return {"session_id": "pg1"}
-
-    async def run(self, session_id: str, query: str) -> dict[str, Any]:
-        self.calls.append("run")
-        return {"result": f"echo: {query}"}
-
-    async def close(self, session_id: str) -> bool:
-        self.calls.append("close")
-        return True
-
-    async def close_all(self) -> None:
-        pass
-
-    async def close_sessions(self) -> None:
-        pass
-
-
 @dataclass
 class Gateway:
     server: GatewayServer
     sessions: RecordingSessions
-    playground: RecordingPlayground
     client: TestClient
 
     def ran_nothing(self) -> bool:
-        return not self.sessions.runs and not self.playground.calls
+        return not self.sessions.runs
 
 
-def _build_gateway(
-    monkeypatch: pytest.MonkeyPatch, *, host: str = "127.0.0.1", port: int = PORT
-) -> Gateway:
-    """The real gateway app with the web UI, its sessions and playground faked."""
-    playground = RecordingPlayground()
-    monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
-    )
+def _build_gateway(*, host: str = "127.0.0.1", port: int = PORT) -> Gateway:
+    """The real gateway app with the web UI and its sessions faked."""
     cfg = Config(
         chat_backend="mlc",
         embedding_backend="mlc",
@@ -217,7 +147,6 @@ def _build_gateway(
             embedding_model="e",
         ),
         gateway=GatewayConfig(port=port, host=host),
-        _enable_playground=True,
     )
     server = GatewayServer(
         cfg,
@@ -234,12 +163,12 @@ def _build_gateway(
         raise_server_exceptions=False,
         headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     )
-    return Gateway(server, sessions, playground, client)
+    return Gateway(server, sessions, client)
 
 
 @pytest.fixture()
-def gateway(monkeypatch: pytest.MonkeyPatch) -> Gateway:
-    return _build_gateway(monkeypatch)
+def gateway() -> Gateway:
+    return _build_gateway()
 
 
 class InnerApp:
@@ -411,10 +340,8 @@ async def test_a_missing_empty_or_repeated_host_is_refused(
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "[::1]", "LOCALHOST"])
-def test_port_80_also_accepts_the_bare_host(
-    monkeypatch: pytest.MonkeyPatch, host: str
-) -> None:
-    gateway = _build_gateway(monkeypatch, port=80)
+def test_port_80_also_accepts_the_bare_host(host: str) -> None:
+    gateway = _build_gateway(port=80)
     for value in (host, f"{host}:80"):
         resp = gateway.client.get("/v1/health", headers={"Host": value})
         assert resp.status_code == 200
@@ -464,8 +391,8 @@ def test_a_foreign_origin_is_refused(
     ("path", "body"),
     [
         ("/", None),
-        ("/v1/playground/session", {"chat_url": "http://evil.example/v1"}),
-        ("/v1/playground/session/pg1/run", {"query": "ls"}),
+        ("/v1/sessions", {"query": "ls"}),
+        ("/no/such/route", {"query": "ls"}),
     ],
 )
 def test_a_foreign_origin_is_refused_on_any_path(
@@ -541,10 +468,8 @@ async def test_the_origin_rule_ignores_the_case_of_the_method(method: str) -> No
     assert inner.scopes == []
 
 
-def test_port_80_accepts_an_origin_without_the_port(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gateway = _build_gateway(monkeypatch, port=80)
+def test_port_80_accepts_an_origin_without_the_port() -> None:
+    gateway = _build_gateway(port=80)
     for origin in ("http://localhost", "http://127.0.0.1:80", "http://[::1]"):
         resp = gateway.client.post(
             "/v1/agent/run",
@@ -566,7 +491,6 @@ def test_port_80_accepts_an_origin_without_the_port(
         ("GET", "/v1/health", None),
         ("GET", "/v1/sessions", None),
         ("POST", "/v1/agent/run", {"query": "ls"}),
-        ("GET", "/v1/playground/scenarios", None),
     ],
 )
 def test_a_request_from_another_site_is_refused_under_v1(
@@ -723,10 +647,10 @@ def test_every_response_forbids_framing(
     ],
 )
 def test_a_loopback_host_installs_the_guard(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, host: str
+    caplog: pytest.LogCaptureFixture, host: str
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="localmelo.gateway"):
-        gateway = _build_gateway(monkeypatch, host=host)
+        gateway = _build_gateway(host=host)
     # The guard is outermost; the console's error middleware is inside it.
     assert gateway.server.app.user_middleware[0].cls is LoopbackGuard
     assert not caplog.records
@@ -734,17 +658,15 @@ def test_a_loopback_host_installs_the_guard(
     assert resp.status_code == 421
 
 
-def test_a_host_in_brackets_listens_without_them(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gateway = _build_gateway(monkeypatch, host="[::1]")
+def test_a_host_in_brackets_listens_without_them() -> None:
+    gateway = _build_gateway(host="[::1]")
     assert gateway.server.host == "::1"
     assert gateway.server.uvicorn_server().config.host == "::1"
 
 
-def test_a_non_loopback_host_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_non_loopback_host_is_refused() -> None:
     with pytest.raises(ValueError, match="loopback"):
-        _build_gateway(monkeypatch, host="0.0.0.0")
+        _build_gateway(host="0.0.0.0")
 
 
 def test_the_guarded_gateway_starts_and_stops(gateway: Gateway) -> None:
@@ -812,67 +734,6 @@ def test_a_websocket_from_the_gateway_page_or_a_script_is_accepted(
         f"ws://127.0.0.1:{PORT}/v1/ws", headers=dict(headers)
     ) as websocket:
         assert websocket.receive_text() == "hello"
-
-
-# ---------------------------------------------------------------------------
-# The standalone playground server
-# ---------------------------------------------------------------------------
-
-
-def _standalone_playground_server(
-    monkeypatch: pytest.MonkeyPatch, playground: RecordingPlayground
-) -> ModuleType:
-    """A fresh copy of _test_webapp whose playground is *playground*."""
-    monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
-    )
-    spec = importlib.util.find_spec("localmelo.support.gateway._test_webapp")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_the_standalone_playground_server_is_guarded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # python -m localmelo.support.gateway._test_webapp serves the same
-    # playground routes, which run tasks with tools.
-    playground = RecordingPlayground()
-    monkeypatch.setattr(
-        "localmelo.support.config.load",
-        lambda: Config(
-            chat_backend="mlc",
-            embedding_backend="none",
-            mlc=LocalBackendConfig(chat_url="http://llm.test/v1", chat_model="m"),
-        ),
-    )
-    server = _standalone_playground_server(monkeypatch, playground)
-    assert server.PORT == PORT
-    client = TestClient(
-        server.app,
-        base_url=GATEWAY,
-        headers={
-            "Authorization": "Bearer " + server.server.auth.read_token().decode("ascii")
-        },
-    )
-    body: dict[str, str] = {}
-
-    resp = client.post(
-        "/v1/playground/session", json=body, headers={"Host": FOREIGN_HOST}
-    )
-    assert resp.status_code == 421
-    assert resp.json() == HOST_ERROR
-    resp = client.post(
-        "/v1/playground/session", json=body, headers={"Origin": FOREIGN_ORIGIN}
-    )
-    assert resp.status_code == 403
-    assert resp.json() == ORIGIN_ERROR
-    assert playground.calls == []
-
-    resp = client.post("/v1/playground/session", json=body, headers={"Origin": GATEWAY})
-    assert resp.status_code == 200
-    assert playground.calls == ["create_session"]
 
 
 # ---------------------------------------------------------------------------
@@ -1015,6 +876,174 @@ def test_a_non_empty_api_body_without_json_content_type_is_415(
     assert resp.status_code == 415
     assert resp.headers["cache-control"] == "no-store"
     assert resp.json()["error"]["code"] == "unsupported_media_type"
+
+
+@pytest.mark.parametrize(
+    ("values", "accepted"),
+    [
+        (["application/json"], True),
+        (["Application/JSON; charset=UTF-8"], True),
+        (['application/json; charset="utf-8"'], True),
+        ([], False),
+        (["text/plain"], False),
+        (["application/json", "application/json"], False),
+        (["application/json;"], False),
+        (["application/json; charset"], False),
+        (["application/json; charset=utf-16"], False),
+    ],
+)
+def test_only_one_json_content_type_is_json(values: list[str], accepted: bool) -> None:
+    assert is_json_content_type(values) is accepted
+
+
+@pytest.mark.parametrize(
+    ("values", "accepted"),
+    [
+        (["image/png"], True),
+        (["Image/PNG; charset=binary"], True),
+        ([" image/jpeg ;x=y"], True),
+        (["application/octet-stream"], True),
+        ([], False),
+        (["text/plain"], False),
+        (["application/json"], False),
+        (["image/png", "image/png"], False),
+        (["image/png", "image/jpeg"], False),
+    ],
+)
+def test_only_one_image_content_type_is_an_upload(
+    values: list[str], accepted: bool
+) -> None:
+    assert is_upload_content_type(values) is accepted
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers", "status"),
+    [
+        ("PUT", "/api/settings", [(b"content-length", b"1048577")], 413),
+        ("POST", "/v1/agent/run", [(b"content-length", b"1048577")], 413),
+        ("POST", "/api/uploads", [(b"content-length", b"20971521")], 413),
+        ("PUT", "/api/settings", [(b"content-length", b"5")], 415),
+        ("POST", "//api/uploads", [(b"content-length", b"5")], 415),
+        # Several Content-Length headers: one over the limit refuses the body.
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"5"), (b"content-length", b"1048577")],
+            413,
+        ),
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"1048577"), (b"content-length", b"5")],
+            413,
+        ),
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"0"), (b"content-length", b"5")],
+            415,
+        ),
+        # Two image types are no image type.
+        (
+            "POST",
+            "/api/uploads",
+            [
+                (b"content-length", b"5"),
+                (b"content-type", b"image/png"),
+                (b"content-type", b"image/png"),
+            ],
+            415,
+        ),
+    ],
+)
+async def test_a_body_its_headers_refuse_is_never_read(
+    method: str, path: str, headers: list[tuple[bytes, bytes]], status: int
+) -> None:
+    inner = InnerApp()
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        raise AssertionError("the body was read")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "headers": [(b"host", f"127.0.0.1:{PORT}".encode()), *headers],
+    }
+    await LoopbackGuard(inner, port=PORT)(scope, receive, send)
+    assert sent[0]["status"] == status
+    assert inner.scopes == []
+
+
+@pytest.mark.parametrize(
+    ("length", "status"),
+    [
+        pytest.param(b"abc", 200, id="letters"),
+        # "²" is a digit to str.isdigit and no number to int.
+        pytest.param(b"\xb2", 200, id="superscript"),
+        pytest.param(b"\xd9\xa5", 200, id="utf8-digit-read-as-latin-1"),
+        # More digits than int() will read.
+        pytest.param(b"1" * 5000, 413, id="5000-digits"),
+        pytest.param(b"0" * 5000, 200, id="5000-zeros"),
+    ],
+)
+async def test_a_content_length_that_is_not_plain_digits_is_no_number(
+    length: bytes, status: int
+) -> None:
+    """Such a header is judged as the guard judges any text, and never raises."""
+    scope = _http_scope(
+        [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"content-type", b"application/json"),
+            (b"content-length", length),
+        ]
+    )
+
+    sent, _ = await _call_guard(scope)
+
+    assert sent[0]["status"] == status
+
+
+async def test_the_body_is_replayed_once_and_the_servers_disconnect_follows() -> None:
+    """The app reads the whole body in one message, then hears the client go."""
+    received: list[Message] = []
+
+    async def reads_twice(scope: Scope, receive: Receive, send: Send) -> None:
+        received.append(await receive())
+        received.append(await receive())
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    pieces = [b'{"a"', b":1}"]
+
+    async def receive() -> Message:
+        if pieces:
+            return {
+                "type": "http.request",
+                "body": pieces.pop(0),
+                "more_body": bool(pieces),
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        pass
+
+    scope = _http_scope(
+        [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"content-type", b"application/json"),
+        ]
+    )
+    await LoopbackGuard(reads_twice, port=PORT)(scope, receive, send)
+
+    assert received == [
+        {"type": "http.request", "body": b'{"a":1}', "more_body": False},
+        {"type": "http.disconnect"},
+    ]
 
 
 def test_an_empty_api_body_needs_no_content_type(gateway: Gateway) -> None:

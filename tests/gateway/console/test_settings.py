@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from localmelo.support import config, onboard
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.config import (
     CloudVendorConfig,
     Config,
@@ -52,17 +53,15 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
     assert body["workspace"] == "~/localmelo-workspace"
     assert body["revision"] == ""
     assert body["defaults"] == onboard.backend_defaults()
-    assert set(body["sections"]) == set(config._LOCAL_SECTIONS) | set(
-        config._CLOUD_SECTIONS
-    )
-    for key in config._LOCAL_SECTIONS:
+    assert set(body["sections"]) == {*LOCAL_BACKENDS, *CLOUD_BACKENDS}
+    for key in LOCAL_BACKENDS:
         assert set(body["sections"][key]) == {
             "chat_url",
             "chat_model",
             "embedding_url",
             "embedding_model",
         }
-    for key in config._CLOUD_SECTIONS:
+    for key in CLOUD_BACKENDS:
         assert set(body["sections"][key]) == {
             "api_key_env",
             "api_key_set",
@@ -77,7 +76,7 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
         {
             "key": key,
             "label": label,
-            "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
+            "kind": "local" if key in LOCAL_BACKENDS else "cloud",
         }
         for key, label in onboard.CHAT_BACKENDS
     ]
@@ -939,6 +938,25 @@ def test_a_hand_written_mode_wins_and_a_bad_one_reads_default(
     assert "expert" not in isolated_config.read_text()
 
 
+def test_a_model_name_saved_from_the_page_is_saved_without_the_blanks_around_it(
+    client: TestClient, isolated_config: Path
+) -> None:
+    import tomllib
+
+    _saved_cfg()
+    revision = client.get("/api/settings").json()["revision"]
+    section = {"chat_url": "http://127.0.0.1:9/v1 ", "chat_model": "Qwen3-8B "}
+    resp = client.put(
+        "/api/settings", json=_put_body(revision, sections={"mlc": section})
+    )
+    assert resp.status_code == 200
+    saved = tomllib.loads(isolated_config.read_text())["mlc"]
+    assert (saved["chat_url"], saved["chat_model"]) == (
+        "http://127.0.0.1:9/v1",
+        "Qwen3-8B",
+    )
+
+
 # ── The spelling of an oMLX server ──
 
 
@@ -1105,6 +1123,51 @@ def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
     assert word.status_code == 400, "only true or false"
 
 
+def test_the_browser_choice_names_the_driver_and_says_whether_chrome_is_installed(
+    client: TestClient, isolated_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings' Browser choice: off, Safari windows or Chrome in the background."""
+    from localmelo.support.browser import chrome
+
+    _saved_cfg()
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: False)
+    loaded = client.get("/api/settings").json()
+    assert loaded["browser_driver"] == "off" and loaded["chrome_installed"] is False
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: True)
+    picked = client.put(
+        "/api/settings",
+        json=_put_body(loaded["revision"], browser_driver="chrome"),
+    )
+    assert picked.status_code == 200
+    assert picked.json()["browser_driver"] == "chrome"
+    assert picked.json()["browser"] is True and picked.json()["chrome_installed"]
+    assert 'driver = "chrome"' in isolated_config.read_text()
+    # On again after off keeps nothing: on is Safari's windows, the default.
+    off = client.put(
+        "/api/settings", json=_put_body(picked.json()["revision"], browser=False)
+    )
+    assert off.json()["browser_driver"] == "off"
+    again = client.put(
+        "/api/settings", json=_put_body(off.json()["revision"], browser=True)
+    )
+    assert again.json()["browser_driver"] == "safari-automation"
+    # /browser on while a driver is chosen keeps it.
+    chosen = client.put(
+        "/api/settings",
+        json=_put_body(again.json()["revision"], browser_driver="chrome"),
+    )
+    kept = client.put(
+        "/api/settings", json=_put_body(chosen.json()["revision"], browser=True)
+    )
+    assert kept.json()["browser_driver"] == "chrome"
+    bad = client.put(
+        "/api/settings",
+        json=_put_body(kept.json()["revision"], browser_driver="firefox"),
+    )
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"] == "invalid_request"
+
+
 def test_the_settings_carry_whether_melo_reads_web_pages_and_save_it_only_when_sent(
     client: TestClient, isolated_config: Path
 ) -> None:
@@ -1224,7 +1287,9 @@ def test_the_settings_carry_the_follow_up_switch_and_save_it_only_when_sent(
     assert word.status_code == 400
     bad = config.Config()
     bad.tasks.follow_up = "no"  # type: ignore[assignment]
-    assert any("[tasks] follow_up must be a bool" in e for e in bad.setting_errors())
+    assert any(
+        "[tasks] follow_up must be true or false" in e for e in bad.setting_errors()
+    )
 
 
 def test_the_settings_carry_the_reflection_switch_and_save_it_only_when_off(

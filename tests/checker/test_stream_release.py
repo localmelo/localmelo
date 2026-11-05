@@ -5,11 +5,8 @@ import codecs
 import pytest
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.checker.stream_filter import (
-    ReasoningTags,
-    StreamFilter,
-    split_framed,
-)
+from localmelo.melo.checker.stream_filter import ReasoningTags, StreamFilter
+from localmelo.melo.schema import split_thinking
 
 
 @pytest.mark.parametrize(
@@ -40,7 +37,9 @@ from localmelo.melo.checker.stream_filter import (
 )
 def test_byte_splits_equal_whole_policy(hint: ReasoningTags, text: str) -> None:
     raw = text.encode("utf-8")
-    thinking, content = split_framed(redact_secrets(text)[0], hint)
+    thinking, content = split_thinking(
+        redact_secrets(text)[0], strip_answer=False, reasoning_tags=hint
+    )
     expected = redact_secrets(thinking)[0], redact_secrets(content)[0]
     for i in range(len(raw) + 1):
         decoder = codecs.getincrementaldecoder("utf-8")()
@@ -60,25 +59,6 @@ def test_byte_splits_equal_whole_policy(hint: ReasoningTags, text: str) -> None:
         "".join(t for t, _ in observed),
         "".join(c for _, c in observed),
     ) == expected
-
-
-def test_redaction_rules_are_snapshotted_per_stream(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import re
-
-    from localmelo.melo.checker import redaction
-
-    stream = StreamFilter(reasoning_tags="none")
-    assert stream.feed("first\n") == ("", "first\n")
-    monkeypatch.setattr(redaction, "_KEY", re.compile(r"new-secret"))
-    assert stream.feed("new-secret\n") == ("", "new-secret\n")
-    assert stream.finish() == ("", "")
-    assert stream.redact_for_storage("first\nnew-secret\n") == "first\n[redacted]\n"
-
-    later = StreamFilter(reasoning_tags="none")
-    assert later.feed("new-secret\n") == ("", "")
-    assert later.finish() == ("", "[redacted]\n")
 
 
 @pytest.mark.parametrize("hint", ["none", "explicit", "closing_only"])

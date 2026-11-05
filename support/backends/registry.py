@@ -22,10 +22,7 @@ def register(backend: BaseBackend) -> None:
 
 
 def ensure_defaults_registered() -> None:
-    """Import and register the eight built-in backends.
-
-    Local: mlc, ollama, vllm, sglang
-    Cloud: openai, gemini, anthropic, nvidia
+    """Register the built-in backends: the rows of :mod:`openai_family`.
 
     Safe to call repeatedly -- the actual registration runs at most once.
     This is called automatically by :func:`get_backend` and
@@ -39,23 +36,13 @@ def ensure_defaults_registered() -> None:
         if _DEFAULT_BACKENDS_REGISTERED:
             return  # double-check after acquiring lock
 
-        from localmelo.support.backends.cloud.anthropic_api import AnthropicBackend
-        from localmelo.support.backends.cloud.gemini_api import GeminiBackend
-        from localmelo.support.backends.cloud.nvidia_api import NvidiaBackend
-        from localmelo.support.backends.cloud.openai_api import OpenAIBackend
-        from localmelo.support.backends.local.mlc import MlcBackend
-        from localmelo.support.backends.local.ollama import OllamaBackend
-        from localmelo.support.backends.local.sglang import SglangBackend
-        from localmelo.support.backends.local.vllm import VllmBackend
+        from localmelo.support.backends.openai_family import (
+            HOSTED_SERVICES,
+            LOCAL_SERVERS,
+        )
 
-        register(MlcBackend())
-        register(OllamaBackend())
-        register(VllmBackend())
-        register(SglangBackend())
-        register(OpenAIBackend())
-        register(GeminiBackend())
-        register(AnthropicBackend())
-        register(NvidiaBackend())
+        for backend in (*LOCAL_SERVERS, *HOSTED_SERVICES):
+            register(backend)
         _DEFAULT_BACKENDS_REGISTERED = True
 
 

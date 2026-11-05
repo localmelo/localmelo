@@ -26,21 +26,21 @@ import asyncio
 import contextlib
 import json
 import os
-import threading
 import time
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
 import pytest
 
-from localmelo.support.browser import addresses, safari, sites
+from localmelo.support.browser import addresses, pagescript, sites
 from localmelo.support.browser import provider as provider_module
 from localmelo.support.browser.driver import Act, Element, RawPage, StaleElementError
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.safari import SafariAutomationDriver
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("LOCALMELO_SAFARI") != "1",
@@ -63,9 +63,6 @@ SENT = "<!doctype html><title>Sent</title><body><p>Form received.</p></body>"
 class Site(BaseHTTPRequestHandler):
     posts: list[dict[str, list[str]]] = []
 
-    def log_message(self, *args: Any) -> None:
-        pass
-
     def _send(self, body: str) -> None:
         data = body.encode("utf-8")
         self.send_response(200)
@@ -86,14 +83,8 @@ class Site(BaseHTTPRequestHandler):
 @pytest.fixture
 def base() -> Iterator[str]:
     Site.posts = []
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)  # the system picks the port
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}/"
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(Site, path="/") as stub:
+        yield stub.base_url
 
 
 def label(raw: RawPage, text: str) -> Element:
@@ -182,9 +173,6 @@ class Fixtures(BaseHTTPRequestHandler):
     other = ""  # the second origin, for the frame page
     posts: list[str] = []
 
-    def log_message(self, *args: Any) -> None:
-        pass
-
     def _send(self, body: str, kind: str = "text/html; charset=utf-8") -> None:
         data = body.encode("utf-8")
         self.send_response(200)
@@ -216,25 +204,17 @@ class Fixtures(BaseHTTPRequestHandler):
 def two_origins() -> Iterator[tuple[str, str]]:
     """Two servers on this computer's loopback, two origins; the system picks the ports."""
     Fixtures.posts = []
-    servers = [ThreadingHTTPServer(("127.0.0.1", 0), Fixtures) for _ in range(2)]
-    for server in servers:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-    first, second = (f"http://127.0.0.1:{s.server_address[1]}" for s in servers)
-    Fixtures.other = second
-    try:
-        yield first, second
-    finally:
-        for server in servers:
-            server.shutdown()
-            server.server_close()
+    with HttpStub(Fixtures) as one, HttpStub(Fixtures) as other:
+        Fixtures.other = other.base_url
+        yield one.base_url, other.base_url
 
 
 @pytest.fixture
 def real_timing(monkeypatch: pytest.MonkeyPatch) -> None:
     """A real page takes real time: the look after an act waits as it does for a person."""
-    monkeypatch.setattr(safari, "LOOK_STEP_S", 0.1)
-    monkeypatch.setattr(safari, "QUIET_S", 0.3)
-    monkeypatch.setattr(safari, "LOOK_CAP_S", 2.0)
+    monkeypatch.setattr(pagescript, "LOOK_STEP_S", 0.1)
+    monkeypatch.setattr(pagescript, "QUIET_S", 0.3)
+    monkeypatch.setattr(pagescript, "LOOK_CAP_S", 2.0)
     monkeypatch.setattr(provider_module, "SETTLE_S", 0.3)
 
 

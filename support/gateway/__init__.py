@@ -8,7 +8,6 @@ import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from typing import Any
 
 try:
@@ -87,18 +86,14 @@ class GatewayServer:
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
-        mount_webapp(
-            self.app,
-            self.cfg,
-            enable_playground=getattr(cfg, "_enable_playground", False),
-        )
+        mount_webapp(self.app, self.cfg)
 
         # The guard stays outermost, before console error middleware, so it
         # rejects foreign and unauthenticated requests before any route runs.
         self.console: Console | None = Console(
             self.cfg,
             port=self.port,
-            options=self._console_options(console_options),
+            options=console_options or ConsoleOptions(),
         )
         self.console.mount(self.app)
         self.console.on_store_open = self.publish
@@ -108,21 +103,6 @@ class GatewayServer:
             auth=self.auth,
             instance=self.instance,
         )
-
-    def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
-        """*options*, with the workspace page's gate when it built one.
-
-        One scheduler, one gate: the workspace page and the console share a
-        process-wide slot budget, so a call waits behind the other surface's
-        calls. A test may pass a gate of its own and keep it.
-        """
-        if options is not None and options.gate is not None:
-            return options
-        playground = getattr(self.app.state, "smoke_playground", None)
-        gate = getattr(playground, "gate", None)
-        if gate is None:
-            return options or ConsoleOptions()
-        return replace(options or ConsoleOptions(), gate=gate)
 
     # ── The endpoint file ──
 
@@ -166,12 +146,6 @@ class GatewayServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-arg]
         self._started_at = time.time()
-        # The web workspace's machine monitor starts before the gateway
-        # reports ready, so a lock present at startup is observed at once.
-        playground = getattr(app.state, "smoke_playground", None)
-        starter = getattr(playground, "start", None)
-        if starter is not None:
-            await starter()
         # Auto mode's calls may not read its sign-in or chats, nor call it
         # (#339): known before the console starts a chat or a task.
         guarded = [str(self.auth.path)]
@@ -195,24 +169,8 @@ class GatewayServer:
             try:
                 await self.sessions.close_all()
             finally:
-                try:
-                    # FastAPI does not run on_event handlers when an explicit
-                    # lifespan is installed. Close the web workspace's
-                    # providers here as well.
-                    playground = getattr(app.state, "smoke_playground", None)
-                    if playground is not None:
-                        await playground.close_sessions()
-                finally:
-                    try:
-                        if self.console is not None:
-                            await self.console.aclose()
-                    finally:
-                        # The one shared gate goes last: a console turn
-                        # waiting for its slot must end `cancelled`, cause
-                        # `shutdown`, not fail on a closed gate.
-                        playground = getattr(app.state, "smoke_playground", None)
-                        if playground is not None:
-                            await playground.gate.close()
+                if self.console is not None:
+                    await self.console.aclose()
 
     # ── Routes ──
 

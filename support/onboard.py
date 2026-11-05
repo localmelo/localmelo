@@ -8,11 +8,16 @@ import os
 import sys
 import textwrap
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 
 from localmelo.support import config, hosted, hosted_check, keychain
 from localmelo.support.backends import discovery
+from localmelo.support.backends.openai_family import (
+    LOCAL_BACKENDS,
+    LOCAL_SERVERS,
+    USUAL_URL,
+)
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
 from localmelo.support.server_setup import plan as server_setup
 from localmelo.support.words import t_in
@@ -60,16 +65,12 @@ def _confirm(prompt: str = "Save and continue?") -> bool:
 
 # ── Backend choice lists ──
 
-# oMLX is the "vllm" backend, so its entry names it. A menu is drawn before any
-# server is chosen, so it cannot tell oMLX from vLLM; a banner can (see
-# discovery.server_name).
-VLLM_LABEL = "oMLX or vLLM (OpenAI-compatible, local)"
+# The local servers are the rows of backends/openai_family.py; a hosted service
+# is a preset (support/hosted.py).
+_LOCAL = {server.key: server for server in LOCAL_SERVERS}
 
 CHAT_BACKENDS: list[tuple[str, str]] = [
-    ("mlc", "MLC (local endpoint)"),
-    ("ollama", "Ollama (local endpoint)"),
-    ("vllm", VLLM_LABEL),
-    ("sglang", "SGLang (local endpoint)"),
+    *[(server.key, server.menu) for server in LOCAL_SERVERS],
     *[(p.id, p.label) for p in hosted.PRESETS if p.id == p.backend],
 ]
 
@@ -81,26 +82,12 @@ SETUP_CHOICES: list[tuple[str, str]] = [
 ]
 
 EMBEDDING_BACKENDS: list[tuple[str, str]] = [
-    ("mlc", "MLC (local endpoint)"),
-    ("ollama", "Ollama (local endpoint)"),
-    ("vllm", VLLM_LABEL),
-    ("sglang", "SGLang (local endpoint)"),
+    *[(server.key, server.menu) for server in LOCAL_SERVERS],
     ("none", "None (no long-term memory)"),
 ]
 
 
 # ── Chat backend handlers ──
-
-_LOCAL_DEFAULTS: dict[str, tuple[str, str]] = {
-    "mlc": ("http://localhost:8400/v1", "qwen3-1.7b"),
-    "ollama": ("http://localhost:11434", "qwen3:8b"),
-    "vllm": ("http://localhost:8000/v1", ""),
-    "sglang": ("http://localhost:30000/v1", ""),
-}
-
-_CLOUD_DEFAULTS: dict[str, tuple[str, str]] = {
-    p.id: (p.key_env, p.models[0]) for p in hosted.PRESETS if p.id == p.backend
-}
 
 
 def _onboard_local(cfg: config.Config, key: str) -> bool:
@@ -108,13 +95,9 @@ def _onboard_local(cfg: config.Config, key: str) -> bool:
 
     The defaults are the section's current values, else the backend's.
     """
-    default_url, default_model = _LOCAL_DEFAULTS.get(
-        key, ("http://localhost:8000/v1", "")
-    )
-    section = getattr(cfg, key, None)
-    if section is not None:
-        default_url = section.chat_url or default_url
-        default_model = section.chat_model or default_model
+    server, section = _LOCAL[key], getattr(cfg, key)
+    default_url = section.chat_url or server.url
+    default_model = section.chat_model or server.chat_model
 
     name = "oMLX or vLLM" if key == "vllm" else key
     print(f"\n  -- {name} (local endpoint) --\n")
@@ -122,10 +105,8 @@ def _onboard_local(cfg: config.Config, key: str) -> bool:
     url = _ask("Base URL", default_url)
     model = _ask("Chat model name", default_model)
 
-    # Store in the matching config section
-    if section is not None:
-        section.chat_url = url
-        section.chat_model = model
+    section.chat_url = url
+    section.chat_model = model
 
     print()
     return _confirm()
@@ -246,10 +227,7 @@ def _onboard_hosted(cfg: config.Config, preset_id: str) -> bool:
 # ── Chat backend setup dispatch ──
 
 _CHAT_SETUP: dict[str, Callable[[config.Config], bool]] = {
-    "mlc": lambda cfg: _onboard_local(cfg, "mlc"),
-    "ollama": lambda cfg: _onboard_local(cfg, "ollama"),
-    "vllm": lambda cfg: _onboard_local(cfg, "vllm"),
-    "sglang": lambda cfg: _onboard_local(cfg, "sglang"),
+    key: partial(_onboard_local, key=key) for key in _LOCAL
 }
 _CHAT_SETUP.update(
     {p.id: partial(_onboard_hosted, preset_id=p.id) for p in hosted.PRESETS}
@@ -258,30 +236,23 @@ _CHAT_SETUP.update(
 
 # ── Embedding backend handlers ──
 
-_EMBEDDING_DEFAULTS: dict[str, tuple[str, str]] = {
-    "mlc": ("http://localhost:8400/v1", "nomic-embed"),
-    "ollama": ("http://localhost:11434", "nomic-embed-text"),
-    "vllm": ("http://localhost:8000/v1", ""),
-    "sglang": ("http://localhost:30000/v1", ""),
-}
-
 
 def backend_defaults() -> dict[str, dict[str, str]]:
     """Default field values per backend section, as the setup wizard offers them."""
     defaults: dict[str, dict[str, str]] = {}
-    for key, (chat_url, chat_model) in _LOCAL_DEFAULTS.items():
-        emb_url, emb_model = _EMBEDDING_DEFAULTS.get(key, ("", ""))
-        defaults[key] = {
-            "chat_url": chat_url,
-            "chat_model": chat_model,
-            "embedding_url": emb_url,
-            "embedding_model": emb_model,
+    for server in LOCAL_SERVERS:
+        defaults[server.key] = {
+            "chat_url": server.url,
+            "chat_model": server.chat_model,
+            "embedding_url": server.url,
+            "embedding_model": server.embedding_model,
         }
-    for key, (api_key_env, chat_model) in _CLOUD_DEFAULTS.items():
-        defaults[key] = {
-            "api_key_env": api_key_env,
-            "chat_model": chat_model,
-        }
+    for preset in hosted.PRESETS:
+        if preset.id == preset.backend:
+            defaults[preset.id] = {
+                "api_key_env": preset.key_env,
+                "chat_model": preset.models[0],
+            }
     return defaults
 
 
@@ -290,20 +261,12 @@ def _onboard_embedding_local(cfg: config.Config, key: str) -> None:
 
     The defaults are the section's current values, else the backend's.
     """
-    default_url, default_model = _EMBEDDING_DEFAULTS.get(
-        key, ("http://localhost:8000/v1", "")
-    )
-    section = getattr(cfg, key, None)
-    if section is not None:
-        default_url = section.embedding_url or default_url
-        default_model = section.embedding_model or default_model
+    server, section = _LOCAL[key], getattr(cfg, key)
+    default_url = section.embedding_url or server.url
+    default_model = section.embedding_model or server.embedding_model
 
-    url = _ask("Embedding endpoint URL", default_url)
-    model = _ask("Embedding model name", default_model)
-
-    if section is not None:
-        section.embedding_url = url
-        section.embedding_model = model
+    section.embedding_url = _ask("Embedding endpoint URL", default_url)
+    section.embedding_model = _ask("Embedding model name", default_model)
 
 
 # ── Main setup flow ──
@@ -344,7 +307,7 @@ def _embedding_choices(cfg: config.Config, models: list[str]) -> list[EmbeddingC
     clear next to the generic local-endpoint options.
     """
     key = cfg.chat_backend
-    if key not in _EMBEDDING_DEFAULTS:
+    if key not in LOCAL_BACKENDS:
         return []
     section = getattr(cfg, key, None)
     url = getattr(section, "chat_url", "")
@@ -457,7 +420,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         models: list[str] = []
         chat_section = getattr(cfg, selected_backend, None)
         chat_url = getattr(chat_section, "chat_url", "")
-        if selected_backend in _EMBEDDING_DEFAULTS and chat_url:
+        if selected_backend in LOCAL_BACKENDS and chat_url:
             try:
                 models = asyncio.run(discovery.list_models(selected_backend, chat_url))
             except discovery.DiscoveryError:
@@ -498,7 +461,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
         section = getattr(cfg, picked_choice.key)
         section.embedding_url, section.embedding_model = old_embedding
 
-    _spell_omlx(cfg)
+    spell_omlx(cfg)
     config.save(cfg)
     print(f"\n  Config saved to {_home_path(config.CONFIG_PATH)}")
     return cfg
@@ -594,7 +557,7 @@ def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> 
 def _wants_a_key(cfg: config.Config, exc: ProbeError) -> bool:
     """Whether a local chat server refused the check for want of an API key."""
     status = getattr(exc.__cause__, "status_code", None)
-    return status in (401, 403) and cfg.chat_backend in _LOCAL_DEFAULTS
+    return status in (401, 403) and cfg.chat_backend in LOCAL_BACKENDS
 
 
 def _hosted_hint(cfg: config.Config, exc: ProbeError) -> str:
@@ -633,7 +596,7 @@ class FirstSetup:
     saved: bool
 
 
-_FIRST_RUN_URL = "http://127.0.0.1:8000/v1"
+_FIRST_RUN_URL = USUAL_URL
 
 
 @dataclass(frozen=True)
@@ -733,40 +696,7 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _review_setup(setup: server_setup.SetupPlan) -> None:
-    """Developer preview choices: even Set up and start cannot authorize execution.
-
-    The summary is not printed again here; the caller printed it, and Details
-    shows the full manifest on request.
-    """
-    while True:
-        rows = [
-            "Set up and start",
-            f"Keep available after melo closes: {'On' if setup.keep_running else 'Off'}",
-            "Show manual steps",
-            "Details",
-            "Back",
-        ]
-        if setup.detection.asset is None:
-            rows = rows[2:]
-        choice = _choose_from("Review setup (nothing will run)", rows, 0, len(rows) - 1)
-        if setup.detection.asset is None:
-            choice += 2
-        if choice == 4:
-            return
-        if choice == 3:
-            for line in server_setup.details(setup):
-                _say(line)
-        elif choice == 1:
-            setup = replace(setup, keep_running=not setup.keep_running)
-        else:
-            if choice == 0:
-                _say(server_setup.AUTOMATIC_SOON)
-            for line in server_setup.manual_steps(setup):
-                print(line)  # Keep copy-only shell commands on one logical line.
-
-
-def _show_steps(setup: server_setup.SetupPlan) -> None:
+def _show_steps(setup: server_setup.Detection) -> None:
     """Print the numbered steps; a command is kept whole, a sentence is wrapped."""
     print()
     for line in server_setup.numbered_steps(setup):
@@ -777,42 +707,20 @@ def _show_steps(setup: server_setup.SetupPlan) -> None:
     print()
 
 
-def _summary_lines(
-    setup: server_setup.SetupPlan, *, developer: bool
-) -> tuple[str, ...]:
-    """What the no-server screen says: the full manifest, or the short summary."""
-    if developer:
-        return server_setup.details(setup)
-    return server_setup.preview(setup, interactive=_arrow_keys())
-
-
-def _show_summary(setup: server_setup.SetupPlan, *, developer: bool) -> tuple[str, ...]:
-    """Print the no-server summary; the lines, to tell a later change."""
-    lines = _summary_lines(setup, developer=developer)
-    for line in lines:
-        _say(line)
-    if developer and not _arrow_keys():
-        for line in server_setup.manual_steps(setup):
-            print(line)
-    return lines
-
-
 def _wait_for_a_server(
-    urls: Sequence[str], *, developer: bool = False
+    urls: Sequence[str],
 ) -> discovery.FoundServer | str | _UseHosted | None:
-    """Preview setup, then reuse discovery on Enter; return a server/address or quit.
+    """Print how to set one up, then reuse discovery on Enter; return a server/address or quit.
 
-    The summary is printed once. On a terminal it is printed again only when
-    Check again finds no server and the setup readings (cache, space) have
-    changed since. EOFError and KeyboardInterrupt reach the caller. Piped
-    input never enters the setup picker or approves anything; Enter/address/q
-    keep their meanings. On a terminal, "Use a hosted service" is the way
-    in for a person with no server.
+    The summary is printed once. EOFError and KeyboardInterrupt reach the
+    caller. Piped input keeps Enter/address/q; on a terminal, "Use a hosted
+    service" is the way in for a person with no server.
     """
     setup = None
-    shown: tuple[str, ...] = ()
     try:
-        setup = server_setup.plan(server_setup.detect_bounded())
+        setup = server_setup.detect()
+        for line in server_setup.preview(setup, interactive=_arrow_keys()):
+            _say(line)
     except Exception:
         how = discovery.how_to_start()
         _say(f"Setup checks unavailable. Start {how.name} manually:")
@@ -820,12 +728,7 @@ def _wait_for_a_server(
             print(command)
         _say(how.note)
         print(discovery.GUIDE_URL)
-    if setup is not None:
-        shown = _show_summary(setup, developer=developer)
-    if developer:
-        rows = ["Check again", "Review setup plan", "Enter an address"]
-    else:
-        rows = ["Check again", "Show how to set one up", "Enter an address"]
+    rows = ["Check again", "Show how to set one up", "Enter an address"]
     rows += ["Use a hosted service", "Quit"]
     if setup is None:
         del rows[1]
@@ -837,10 +740,7 @@ def _wait_for_a_server(
             if choice == len(rows) - 1:
                 return None
             if setup is not None and choice == 1:
-                if developer:
-                    _review_setup(setup)
-                else:
-                    _show_steps(setup)
+                _show_steps(setup)
                 continue
             if choice == len(rows) - 2:
                 return _UseHosted()
@@ -862,22 +762,6 @@ def _wait_for_a_server(
             return found
         ports = ", ".join(_port(url) for url in urls)
         _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
-        if setup is not None and _arrow_keys():
-            setup, shown = _refreshed(setup, shown, developer=developer)
-
-
-def _refreshed(
-    setup: server_setup.SetupPlan, shown: tuple[str, ...], *, developer: bool
-) -> tuple[server_setup.SetupPlan, tuple[str, ...]]:
-    """Look at the cache and free space again; print the summary only if it changed."""
-    try:
-        fresh = server_setup.plan(server_setup.detect_bounded())
-    except Exception:
-        return setup, shown
-    fresh = replace(fresh, keep_running=setup.keep_running)
-    if _summary_lines(fresh, developer=developer) == shown:
-        return setup, shown
-    return fresh, _show_summary(fresh, developer=developer)
 
 
 def _servers_named() -> str:
@@ -943,12 +827,7 @@ def _choose_model(url: str, models: list[str]) -> str:
     if len(models) == 1 and chat:
         return models[0]
     listed = chat + [model for model in models if model not in chat]
-    # Only a choice between chat models needs to know which are in memory.
-    loaded = (
-        asyncio.run(discovery.loaded_models(url))
-        if len(chat) > 1
-        else discovery.LoadedModels()
-    )
+    loaded = asyncio.run(discovery.loaded_among(url, chat))
     arrows = _arrow_keys()
     if not arrows:
         print(f"Models on {url}:")
@@ -984,7 +863,7 @@ def _choose_model(url: str, models: list[str]) -> str:
             _say(f"Type a number from 1 to {len(listed)}, or a model id.", indent=2)
 
 
-def _spell_omlx(cfg: config.Config) -> None:
+def spell_omlx(cfg: config.Config) -> None:
     """Spell a ``vllm`` backend ``omlx`` where a model listing named oMLX.
 
     The first run, ``/backend`` and the wizard list the server they save, so
@@ -1014,23 +893,8 @@ def _with_chat_server(
     what it will save. A file's ``omlx`` spelling stays while the chat server is
     the same. Nothing is written to disk.
     """
-    if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
-        cfg.chat_alias = ""  # the file's "omlx" named another server
-    if ollama:
-        cfg.chat_backend = "ollama"
-        cfg.ollama.chat_url = url
-        cfg.ollama.chat_model = model
-    else:
-        cfg.chat_backend = "vllm"
-        cfg.vllm.chat_url = url
-        cfg.vllm.chat_model = model
-    if embedding_model is not None:
-        cfg.embedding_alias = ""
-        cfg.embedding_backend = cfg.chat_backend
-        embedding_section = getattr(cfg, cfg.chat_backend)
-        embedding_section.embedding_url = url
-        embedding_section.embedding_model = embedding_model
-    _spell_omlx(cfg)
+    cfg.use_chat_server(url, model, ollama=ollama, embedding_model=embedding_model)
+    spell_omlx(cfg)
     return cfg
 
 
@@ -1120,9 +984,7 @@ def _offer_embedding(
     return candidate, ollama
 
 
-def run_first_setup(
-    *, ask_keep: bool = False, developer: bool = False
-) -> FirstSetup | None:
+def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     The first line says what the first run needs: a model server. A server
@@ -1148,7 +1010,7 @@ def run_first_setup(
     found = asyncio.run(discovery.detect_local_server(urls)) if urls else None
     typed = ""
     if found is None and urls and first:
-        waited = _wait_for_a_server(urls, developer=developer)
+        waited = _wait_for_a_server(urls)
         if waited is None:
             return None
         if isinstance(waited, _UseHosted):

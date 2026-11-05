@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import REFLECTION_PROMPT
+from localmelo.melo.agent._tool_images import withheld_note
 from localmelo.melo.agent.agent import (
     ASSISTANT_TEXT_SHARE,
     WITHHELD_PREVIEW_CHARS,
@@ -50,7 +50,10 @@ from localmelo.support.providers.llm.openai_compat import (
 from localmelo.support.providers.llm.openai_compat import (
     _tool_def_to_openai as _openai_tool_def,
 )
-from localmelo.tests.legacy_options import legacy_options
+from localmelo.tests.agent.test_reflection_gate import (
+    _planning_calls,
+    _reflection_calls,
+)
 
 # ── Schema: tool call ids ──────────────────────────────────────────────────
 
@@ -254,20 +257,6 @@ def _cut_parts(content: str) -> tuple[str, int]:
     match = _CUT_MARKER.search(content)
     assert match, f"not a cut result: ...{content[-80:]!r}"
     return content[: match.start()], int(match.group(1))
-
-
-def _is_reflection(call: dict[str, Any]) -> bool:
-    return bool(call["messages"]) and call["messages"][0].content.startswith(
-        REFLECTION_PROMPT
-    )
-
-
-def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if not _is_reflection(c)]
-
-
-def _reflection_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if _is_reflection(c)]
 
 
 # ── Multiple tool calls per step ───────────────────────────────────────────
@@ -773,6 +762,10 @@ class TestCheckedTurnWrites:
 SHOT = ImagePart.from_bytes(b"\x89PNG\r\n\x1a\n screenshot bytes", "image/png")
 # What the model reads in place of SHOT.
 MARKER = f"[1 image: sha256:{SHOT.sha256[:12]} image/png]"
+# These runs ask a model that does not say it reads images, so each picture's
+# tool message ends with the marker and then a line that the model cannot see it.
+UNSEEN = withheld_note(())
+SEEN_AS = f"{MARKER}\n{UNSEEN}"
 
 
 def _returning(output: ToolOutput) -> Callable[[], Coroutine[Any, Any, ToolOutput]]:
@@ -827,7 +820,7 @@ def _assert_markers_without_images(body: dict[str, Any]) -> None:
     """*body* answers the shot and shot_only calls and carries no image."""
     sent = body["messages"]
     assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "tool"]
-    assert [m["content"] for m in sent[3:]] == [f"captured\n{MARKER}", MARKER]
+    assert [m["content"] for m in sent[3:]] == [f"captured\n{SEEN_AS}", SEEN_AS]
     # No Ollama "images" field, no OpenAI content parts, no base64 anywhere.
     assert not any("images" in m or not isinstance(m["content"], str) for m in sent)
     assert SHOT.data not in json.dumps(body)
@@ -855,9 +848,9 @@ class TestToolResultImages:
         results = {m.tool_call_id: m.content for m in second if m.role == "tool"}
         # An image-only result reads the marker, not "(no output)".
         assert results == {
-            "call_text": f"captured\n{MARKER}",
-            "call_only": MARKER,
-            "call_error": f"Error: window not found\n{MARKER}",
+            "call_text": f"captured\n{SEEN_AS}",
+            "call_only": SEEN_AS,
+            "call_error": f"Error: window not found\n{SEEN_AS}",
         }
         # The images themselves are not sent yet.
         assert not [img for m in second for img in m.images if img.data]
@@ -889,7 +882,7 @@ class TestToolResultImages:
         assert await agent.run("take a large screenshot with shot") == "done"
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
-        assert result.content == f"{output}\n{MARKER}"
+        assert result.content == f"{output}\n{SEEN_AS}"
         assert result.images == [SHOT.as_reference()]
 
     @pytest.mark.asyncio
@@ -907,8 +900,8 @@ class TestToolResultImages:
         await agent.run("take a large screenshot with shot")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
-        text, marker = result.content.rsplit("\n", 1)
-        assert marker == MARKER
+        text, marker, unseen = result.content.rsplit("\n", 2)
+        assert (marker, unseen) == (MARKER, UNSEEN)
         kept, left_out = _cut_parts(text)
         assert kept == "x" * len(kept)
         # The count covers the whole output, as the tool returned it.
@@ -942,11 +935,11 @@ class TestToolResultImages:
         assert await agent.run("annotate the screenshot") == "done"
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
-        notice, preview, marker = result.content.split("\n")
+        notice, preview, marker, unseen = result.content.split("\n")
         assert notice.startswith("[Tool result withheld")
         assert "Tool calls and results too large" in notice
         assert preview == "y" * WITHHELD_PREVIEW_CHARS
-        assert marker == MARKER
+        assert (marker, unseen) == (MARKER, UNSEEN)
         assert result.images == []
 
     @pytest.mark.asyncio
@@ -1021,9 +1014,9 @@ class TestToolResultImages:
         reason = "Too many images in one memory write: 1 (max 0)"
         notice = f"[Tool result withheld from working memory: {reason}."
         expected = {
-            "shot": f"{notice} First 8 characters follow.]\ncaptured\n{MARKER}",
+            "shot": f"{notice} First 8 characters follow.]\ncaptured\n{SEEN_AS}",
             # An image-only result has no text to preview.
-            "shot_only": f"{notice}]\n{MARKER}",
+            "shot_only": f"{notice}]\n{SEEN_AS}",
         }
         assert result.content == expected[tool]
         assert result.images == []
@@ -1053,12 +1046,12 @@ class TestToolResultImages:
         assert_protocol_valid(second)
         results = {m.tool_call_id: m for m in second if m.role == "tool"}
         page, shot = results["call_page"], results["call_shot"]
-        assert page.content == f"{'p' * 20_000}\n{MARKER}"
+        assert page.content == f"{'p' * 20_000}\n{SEEN_AS}"
         assert page.images == [SHOT.as_reference()]
         # Cut to the room the other result leaves it, it keeps its images,
         # and its message still ends with the line that names them.
-        text, marker = shot.content.rsplit("\n", 1)
-        assert marker == MARKER
+        text, marker, unseen = shot.content.rsplit("\n", 2)
+        assert (marker, unseen) == (MARKER, UNSEEN)
         kept, left_out = _cut_parts(text)
         assert kept == "x" * len(kept)
         assert len(kept) + left_out == 30_000
@@ -1260,7 +1253,7 @@ class TestAgentWindowTruncation:
 
     @pytest.mark.asyncio
     async def test_reflection_window_is_protocol_valid(self) -> None:
-        options = legacy_options(steps_per_attempt=3, max_attempts=1)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(
@@ -1534,7 +1527,9 @@ class TestStuckDetectionMultiCall:
 
     @pytest.mark.asyncio
     async def test_loop_stops_on_repeated_batches(self) -> None:
-        options = legacy_options(steps_per_attempt=6, max_attempts=1)
+        options = AgentOptions(
+            steps_per_attempt=6, max_attempts=1, answer_on_stop=False
+        )
         llm = FakeLLM(
             [
                 Message(

@@ -14,16 +14,15 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
+from localmelo.support.gateway import workers as workers_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.errors import ApiError
-from localmelo.support.gateway.console.routes_tasks import _call
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.scheduler.model import Machine
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 
 async def wait_for(predicate: Callable[[], bool], timeout: float = 3) -> None:
@@ -281,6 +280,13 @@ async def test_stop_wins_when_park_cleanup_fails(
         monkeypatch.setattr(SessionRunner, "close", original)
 
 
+@pytest.fixture
+def short_close_at_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shutdown gives up on a worker that will not close after 0.3 s, not 10 s."""
+    monkeypatch.setattr(workers_module, "_CLOSE_AT_SHUTDOWN_SECONDS", 0.3)
+
+
+@pytest.mark.usefixtures("short_close_at_shutdown")
 async def test_shutdown_bounds_a_blocked_initial_cleanup(
     worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -299,7 +305,7 @@ async def test_shutdown_bounds_a_blocked_initial_cleanup(
     try:
         await workers.update(task_id, state="pause")
         await asyncio.wait_for(entered.wait(), 3)
-        async with asyncio.timeout(11):
+        async with asyncio.timeout(3):
             await workers.aclose()
         assert not calls
     finally:
@@ -307,6 +313,7 @@ async def test_shutdown_bounds_a_blocked_initial_cleanup(
         monkeypatch.setattr(SessionRunner, "close", original)
 
 
+@pytest.mark.usefixtures("short_close_at_shutdown")
 async def test_quarantined_shutdown_is_bounded(
     worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -334,7 +341,7 @@ async def test_quarantined_shutdown_is_bounded(
             await asyncio.sleep(0.001)
     assert task_id in workers._runs
     try:
-        async with asyncio.timeout(11):
+        async with asyncio.timeout(3):
             await workers.aclose()
         assert shutdown_close.is_set()
         assert not calls
@@ -426,18 +433,15 @@ async def test_finalization_store_failure_retains_runner_until_recovery(
     assert workers._runners.get(task_id) is runner
     assert task_id in workers._runs
     assert not calls
-    console = SimpleNamespace(store=workers.store, _store_error=None)
-    console.store_api_error = lambda exc: Console.store_api_error(
-        cast(Console, console), exc
-    )
+    console = SimpleNamespace(store=workers.store)
     for state in ("resume", "stop"):
-        with pytest.raises(ApiError) as exc:
+        with pytest.raises(SessionStoreError) as exc:
             async with asyncio.timeout(2):
-                await _call(
-                    cast(Console, console), workers.update(task_id, state=state)
-                )
-        assert exc.value.status_code == 503
-        assert exc.value.code == "store_unavailable"
+                await workers.update(task_id, state=state)
+        # The console's handler answers a store failure like this.
+        error = await Console.store_api_error(cast(Console, console), exc.value)
+        assert error.status_code == 503
+        assert error.code == "store_unavailable"
         assert workers._runners.get(task_id) is runner
         assert (await workers.get(task_id))["state"] == "held"
     recovered = True

@@ -703,7 +703,7 @@ async def test_park_rollback_redispatches_policy_call() -> None:
     await gate.close()
 
 
-@pytest.mark.parametrize("kind", ["plan", "reflect", "embed", "retrieve", "estimate"])
+@pytest.mark.parametrize("kind", ["plan", "reflect", "embed", "retrieve"])
 async def test_park_refuses_unsafe_or_admitted_calls(kind: str) -> None:
     gate = ChatGate(policy="off", lock_gate="wait")
     gate.register_task(task(phase="running"))

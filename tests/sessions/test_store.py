@@ -42,7 +42,6 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     cli_host_id,
     default_path,
-    title_from_text,
 )
 from localmelo.support.sessions.submissions import (
     SubmissionConflict,
@@ -783,10 +782,12 @@ def test_the_session_event_keys_are_pinned() -> None:
             "user_text",
             "client_request_id",
             "origin",
+            "images",
         },
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "turn.pictures": {"turn", "turn_id", "pictures"},
+        "turn.note": {"turn", "turn_id", "note", "text", "images"},
         "turn.memory": {
             "turn",
             "turn_id",
@@ -821,7 +822,8 @@ def test_the_session_event_keys_are_pinned() -> None:
         },
     }
     assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
-        "turn.started": {"origin"},
+        "turn.started": {"origin", "images"},
+        "turn.note": {"images"},
         "turn.memory": {"searched", "opened", "search_hint", "digest"},
     }
     assert RESERVED_EVENT_PREFIXES == ("task.", "sched.", "attention.")
@@ -1077,7 +1079,7 @@ async def test_the_first_title_comes_from_the_typed_text(tmp_path: Path) -> None
     assert rows(path, "SELECT typed_text FROM turns WHERE turn = 2") == [("Other",)]
     blank = await store.begin_turn(
         None,
-        "  the   user\ntext  ",
+        "  the   user  text  ",
         holder=HOLDER,
         title="  ",
         new_session=NewSession(),
@@ -1087,13 +1089,6 @@ async def test_the_first_title_comes_from_the_typed_text(tmp_path: Path) -> None
         path, "SELECT typed_text FROM turns WHERE session_id = ?", blank.session_id
     ) == [("",)]
     await store.aclose()
-
-
-def test_title_from_text_collapses_whitespace_and_keeps_60_characters() -> None:
-    assert title_from_text("  a\n\tb  c ") == "a b c"
-    long = title_from_text("word " * 30)
-    assert len(long) == 60 and long.endswith("…")
-    assert long[:59] == ("word " * 30).strip()[:59]
 
 
 async def test_turn_counts_leave_out_running_and_undone_turns(tmp_path: Path) -> None:
@@ -1528,8 +1523,6 @@ async def test_a_reflection_from_before_the_prefix_key_is_stored(
     for key in (
         "prefix",
         "flags",
-        "gate",
-        "utility",
         "stop_reason",
         "unreadable_reason",
         "repaired",
@@ -1621,6 +1614,32 @@ async def test_blobs_are_stored_once_per_digest(tmp_path: Path) -> None:
         b"\x89PNG data",
     )
     assert await store.get_blob(turn.session_id, "0" * 64) is None
+    await store.aclose()
+
+
+async def test_put_blobs_keeps_pictures_of_a_session_once_per_digest(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "s.db"
+    store = gateway(path)
+    session = await store.create_session()
+    image = ImagePart.from_bytes(b"\x89PNG note data", "image/png")
+    other = ImagePart.from_bytes(b"\xff\xd8\xff other", "image/jpeg")
+    await store.put_blobs(session.id, [image, other])
+    await store.put_blobs(session.id, [image])
+    assert rows(path, "SELECT COUNT(*) FROM blobs") == [(2,)]
+    assert await store.get_blob(session.id, image.sha256) == (
+        "image/png",
+        b"\x89PNG note data",
+    )
+    # Another session has its own copy: a blob is read by session and digest.
+    elsewhere = await store.create_session()
+    assert await store.get_blob(elsewhere.id, image.sha256) is None
+    # A reference has no payload to keep, and an unknown session is refused.
+    with pytest.raises(ValueError):
+        await store.put_blobs(session.id, [image.as_reference()])
+    with pytest.raises(SessionStoreError):
+        await store.put_blobs("f" * 32, [image])
     await store.aclose()
 
 

@@ -24,7 +24,7 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.agent.test_reflection_gate import _prefix_scope
 
 CALL_ID = "call_1"
 
@@ -357,7 +357,7 @@ async def test_replay_required_evicts_whole_units_and_never_cuts() -> None:
     )
     agent = _agent(
         llm,
-        _options(reasoning="replay", replay_scope="window", **LEGACY_CACHE_OPTIONS),
+        _options(reasoning="replay", replay_scope="window"),
     )
     agent.load_conversation(
         [
@@ -373,9 +373,9 @@ async def test_replay_required_evicts_whole_units_and_never_cuts() -> None:
     assert result.memory_stats is not None
     assert result.memory_stats["replay_skipped"] == 0
     assert result.memory_stats["replay_stripped"] == 0
-    sent = _assistant(server.bodies[0])
-    assert [m["content"] for m in sent] == ["new"]
-    assert sent[0]["reasoning_content"] == "y" * 60_000
+    # The default eviction drops whole units down to 70% of the cap, and the
+    # query is the newest unit here: both turns go, whole, and none is cut.
+    assert _assistant(server.bodies[0]) == []
 
 
 @pytest.mark.asyncio
@@ -669,7 +669,7 @@ async def test_do_reflect_fits_the_request_it_sends() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+        _options(reasoning="replay"),
     )
     agent.load_conversation(
         [
@@ -680,7 +680,8 @@ async def test_do_reflect_fits_the_request_it_sends() -> None:
     )
     task = TaskRecord(query="q")
     run = _RunState(task_id=task.task_id)
-    reflection = await agent._do_reflect(task, 0, "budget", run=run)
+    with _prefix_scope(agent):
+        reflection = await agent._do_reflect(task, 0, "budget", run=run)
     await agent.close()
 
     assert reflection is not None
@@ -699,7 +700,7 @@ async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+        _options(reasoning="replay"),
     )
     agent.load_conversation(
         [
@@ -709,7 +710,8 @@ async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
     )
     task = TaskRecord(query="q")
     run = _RunState(task_id=task.task_id)
-    reflection = await agent._do_reflect(task, 0, "budget", run=run)
+    with _prefix_scope(agent):
+        reflection = await agent._do_reflect(task, 0, "budget", run=run)
     await agent.close()
 
     assert reflection is not None
@@ -723,12 +725,13 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
-        _options(reasoning="replay", **LEGACY_CACHE_OPTIONS),
+        _options(reasoning="replay"),
     )
     agent.load_conversation([*_unit("a", "x" * 120_000, thinking="t" * 50_000)])
     task = TaskRecord(query="q")
     run = _RunState(task_id=task.task_id)
-    reflection = await agent._do_reflect(task, 0, "budget", run=run)
+    with _prefix_scope(agent):
+        reflection = await agent._do_reflect(task, 0, "budget", run=run)
     await agent.close()
 
     assert reflection is None
@@ -740,7 +743,7 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
 async def test_a_reflection_too_large_to_fit_is_not_sent() -> None:
     server = Scripted(_reply("done"))
     llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay", **LEGACY_CACHE_OPTIONS))
+    agent = _agent(llm, _options(reasoning="replay"))
     huge = Message(
         role="assistant",
         content="a",
@@ -754,7 +757,8 @@ async def test_a_reflection_too_large_to_fit_is_not_sent() -> None:
     async def fit(messages: list[Message]) -> list[Message] | None:
         return await agent._fit_reflection_messages(messages, None)
 
-    answer = await agent.chat.reflect(short=short, query="q", attempt_id=0, fit=fit)
+    with _prefix_scope(agent):
+        answer = await agent.chat.reflect(short=short, query="q", attempt_id=0, fit=fit)
     assert answer is None
     assert server.bodies == []
     await agent.close()
@@ -814,13 +818,13 @@ async def test_recall_is_read_only_in_legacy(mode: str, recall: bool) -> None:
     llm = RecordingLLM()
     agent = _agent(
         llm,
-        _options(reasoning=mode, **LEGACY_CACHE_OPTIONS),
+        _options(reasoning=mode),
         embedding=embedding,
     )
     await agent.hippo.long.add("a fact", [1.0, 0.0, 0.0, 0.0])
     await agent.run_task("q")
     await agent.close()
-    prompt = llm.calls[0][0].content
+    prompt = "\n".join(message.content for message in llm.calls[0])
     assert ("[RECALL]" in prompt) is recall
     assert embedding.calls == (1 if recall else 0)
 
@@ -982,7 +986,7 @@ async def test_a_replay_required_answer_keeps_its_thinking() -> None:
 async def test_agent_config_clears_the_section_field_outside_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.backends.openai_family import VllmBackend
     from localmelo.support.config import Config, LocalBackendConfig
 
     server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
@@ -1018,7 +1022,7 @@ async def test_agent_config_clears_the_section_field_outside_replay(
 async def test_agent_config_keeps_the_section_field_in_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.backends.openai_family import VllmBackend
     from localmelo.support.config import Config, LocalBackendConfig
 
     server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
@@ -1051,14 +1055,7 @@ async def test_agent_config_keeps_the_section_field_in_replay(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("gate", "status", "bodies"),
-    [("flags", "completed", 2), ("utility", "gate_stopped", 1)],
-)
 async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
-    gate: str,
-    status: str,
-    bodies: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def refuse(
@@ -1077,7 +1074,6 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
         server.llm(reasoning_field="auto"),
         _options(
             reasoning="replay",
-            reflection_gate=gate,  # type: ignore[arg-type]
             answer_on_stop=False,  # the request it adds is not what this counts
             max_steps=5,
             steps_per_attempt=1,
@@ -1087,15 +1083,10 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
     result = await agent.run_task("q")
     await agent.close()
 
-    assert result.status == status
-    assert len(server.bodies) == bodies
-    # The refused request is never sent: flags starts the second attempt,
-    # utility keeps the unreadable stop and ends there.
-    assert result.steps == (2 if gate == "flags" else 1)
-    if gate == "utility":
-        assert result.error == "Could not parse reflection response"
-        assert result.result == ""
-        assert result.attempts == 1
+    assert result.status == "completed"
+    assert len(server.bodies) == 2
+    # The refused request is never sent: the second attempt starts.
+    assert result.steps == 2
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 # Reference: Http v1
 
-This page lists the gateway's HTTP v1 endpoints and notes the API v2 and legacy playground routes beside them. Use it when your own program calls the gateway over HTTP; to start and secure the gateway, see the [gateway guide](../guides/gateway.md).
+This page lists the gateway's HTTP v1 endpoints and notes the API v2 routes beside them. Use it when your own program calls the gateway over HTTP; to start and secure the gateway, see the [gateway guide](../guides/gateway.md).
 
 ## HTTP API
 
@@ -42,16 +42,14 @@ least recently used idle one is closed with its conversation kept.
 Approvals wait in the gateway's memory with no timeout until a client
 answers them or the turn stops, and stopping the gateway ends a waiting
 turn `cancelled` with cause `shutdown`. A console turn passes the
-scheduler gate like a workspace chat: the gateway builds one gate from the
-`[scheduler]` table and both surfaces use it, so their calls share one
-`n_srv` budget and one call log, and the monitor the workspace page runs
-feeds both (a foreign GPU lock holds a console turn under
-`lock_gate = "wait"`; the battery is read for the page's chip and never
+scheduler gate: the console builds one gate from the `[scheduler]` table,
+so every chat's calls share one `n_srv` budget and one call log, and the
+console's machine monitor feeds it (a foreign GPU lock holds a console turn
+under `lock_gate = "wait"`; the battery is read for the page's chip and never
 holds a call).
 
-The gateway closes that gate last at shutdown, after both
-surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
-cause `shutdown`.
+The console closes that gate after its sessions at shutdown, so a turn
+waiting for its slot ends `cancelled` with cause `shutdown`.
 
 Task workers use that same gate for model and embedding calls, with
 memory off and gateway tools (no `shell_exec`). Up to four workers can be
@@ -71,32 +69,6 @@ pending approval waits until resume.
 Resume restores the priority before pause,
 or computed P2 if retention pruned the pause log; an unpaused task returns
 409 `not_paused`. Task PATCH rejects `first` (400); it is not supported yet.
-
-### Legacy playground
-
-The internal `/v1/playground/` routes are disabled by default (404), and their
-manager is not started. Opt in with `melo --serve --enable-playground`;
-authentication and Host/Origin checks still apply.
-
-Discovery and sessions use
-the saved local chat backend and model, not request overrides. These routes
-include:
-
-- `GET /v1/playground/sessions` for summaries;
-- `GET /v1/playground/session/{id}` for a transcript;
-- `POST /v1/playground/session/{id}/cancel` to cancel a chat;
-- `POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a level;
-- `POST /v1/playground/presence` with `{"session_id": ...}` for a typing heartbeat.
-
-The separate `/v1/agent/` API requires authentication too, but its calls do not
-pass through the playground and console's shared scheduler gate.
-
-For development, this starts the authenticated gateway with the playground
-enabled, using its saved configuration and configured loopback address:
-
-```bash
-uv run python -m localmelo.support.gateway._test_webapp
-```
 
 ### GET /v1/health
 
@@ -194,8 +166,7 @@ and the task goes on.
 shows which sessions are busy.
 
 The `/v1/agent` API has no route that stops a run, so wait for it to finish
-and close the session after. When enabled, `POST /v1/playground/session/{id}/cancel`
-stops a legacy playground chat, not an `/v1/agent` run.
+and close the session after.
 
 The current [web workspace](../guides/web-console.md#web-workspace) instead stops its turns
 with [`POST /api/turns/{turn_id}/cancel`](api-v2.md#post-apiturnsturn_idcancel).

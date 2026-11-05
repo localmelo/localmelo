@@ -151,6 +151,18 @@ def home_label(path: str) -> str:
     return path
 
 
+def home_labelled(text: str) -> str:
+    """*text* with every mention of the home folder written ``~``, wherever it stands.
+
+    For a message that names a path in the middle (``Cannot open /Users/x/...``);
+    :func:`home_label` is for a value that is one path.
+    """
+    for home in sorted(_homes(), key=len, reverse=True):
+        if home != os.sep:
+            text = re.sub(re.escape(home) + r"(?=$|/|\\|[\s:;,'\")\]])", "~", text)
+    return text
+
+
 def folder_name(root: str | None) -> str:
     """The last part of the workspace *root*, for a question that names the folder."""
     name = (root or "").rstrip(os.sep).rsplit(os.sep, 1)[-1]
@@ -677,9 +689,84 @@ def drop_leading_ack(rows: Iterable[str]) -> list[str] | None:
 TITLE_WIDTH: Final = 48
 # A clause shorter than this is no title ("Fix this today" says nothing).
 _CLAUSE_WIDTH: Final = 16
-_SENTENCE_END: Final = re.compile(r"(?<=[.!?;])\s|(?<=[。！？；])")
+# Only this much of a request is read for its title, so that a huge first line
+# costs no more than a short one.
+_READ_CHARS: Final = 1000
+# Words that set a task's level. The gateway's triage reads them (P1 for the
+# urgent ones, P3 for the easy ones); a title leaves them out when they open it.
+URGENT_WORDS: Final = (
+    "as soon as possible",
+    "right away",
+    "right now",
+    "immediately",
+    "urgently",
+    "urgent",
+    "asap",
+    "end of day",
+    "end of the day",
+    "紧急",
+    "尽快",
+    "马上",
+    "立刻",
+    "立即",
+    "很急",
+    "着急",
+    "急用",
+    "今天之内",
+    "今晚之前",
+    "下班前",
+)
+EASY_WORDS: Final = (
+    "no rush",
+    "not urgent",
+    "no hurry",
+    "whenever",
+    "low priority",
+    "when you have time",
+    "不急",
+    "不着急",
+    "不紧急",
+    "有空",
+    "慢慢来",
+)
+_TODAY_WORDS: Final = ("今天", "today", "tonight", "今晚")
+# A line that is only a greeting ("Hi,", "Good morning!", "你好") or thanks, and a
+# line that opens a code block (its lines are code, not the request).
+GREETING: Final = re.compile(
+    r"^(?:hi|hello|hey|yo|thanks|thank you|thx|good (?:morning|afternoon|evening|night)|"
+    r"你好|您好|嗨|哈喽|谢谢|早上好|早安|晚安|晚上好)(?:\s+(?:there|melo|all))?[\s!.,，！。~]*$",
+    re.IGNORECASE,
+)
+_FENCE: Final = re.compile(r"^```\w*$")
+# What opens a request and is no part of its title: a polite word ("please",
+# "请", "帮我": "请问" is a word of its own, and "请假" or "请求" are not polite),
+# "/task", or a level word followed by a colon or comma ("no rush: tidy the
+# photos", "今天：修小药丸"). A level word followed by a bare space or by Chinese
+# text stays, as in "Whenever possible, update the docs" and "今天修一下".
+_OPENING: Final = re.compile(
+    r"^(?:(?:(?:/task|please|pls|kindly|could you|can you|would you)\b|请问"
+    r"|请(?![假求客教])|麻烦你?|帮我|帮忙)[\s,，]*|(?:"
+    + "|".join(
+        re.escape(word)
+        for word in sorted(
+            (*URGENT_WORDS, *EASY_WORDS, *_TODAY_WORDS), key=len, reverse=True
+        )
+    )
+    + r")\s*[：:，,]\s*)+",
+    re.IGNORECASE,
+)
+# A sentence ends at a full stop, "!" or "?" before a space (but "1." is a list
+# number), or at a Chinese sentence end. A question keeps its "?" (or "？").
+_SENTENCE_END: Final = re.compile(r"(?<=[^\d][.!?])\s|[。！；;]|(?<=？)")
 _CLAUSE_END: Final = re.compile(r"(?<=,)\s|(?<=，)")
-_TITLE_TAIL: Final = " ,;:.!?-–—·，；：。！？"
+_TITLE_TAIL: Final = " ,;:.!-–—·，；：。！"
+# A path reads as its file's name.
+_IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
+# Words a cut title does not end on: "fix the failing test in…".
+_DANGLING: Final = re.compile(
+    r"(?:[\s,;:]+(?:the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so))+$",
+    re.IGNORECASE,
+)
 
 
 def _wide(char: str) -> bool:
@@ -691,19 +778,53 @@ def title_width(text: str) -> int:
     return sum(2 if _wide(char) else 1 for char in text)
 
 
-def short_title(text: str) -> str:
-    """A short title from a request: its first clause, at most :data:`TITLE_WIDTH` wide.
+def _title_line(text: str) -> str:
+    """The line of *text* that names the request, cut to :data:`_READ_CHARS`.
 
-    The first non-blank line, whitespace collapsed, ends at its first
-    sentence end, or at a comma when what comes before it is a clause
-    on its own (at least 16 wide). A clause that is still too long is cut at
-    the last word (or, in Chinese or Japanese, character) that fits and ends
-    in ``…``; one long word with no break is cut where it must be. Nothing
-    longer than the limit comes back, and an empty request reads ``Task``.
+    The first non-blank line, unless it is only a greeting or opens a code block:
+    then the first such line after the greeting, or after the block's closing
+    fence. With nothing left to name the request, the first line.
     """
-    line = next((row for row in text.splitlines() if row.strip()), "")
-    line = " ".join(line.split())
-    clause = _SENTENCE_END.split(line, maxsplit=1)[0].rstrip(_TITLE_TAIL)
+    first = ""
+    in_code = False
+    for row in text.splitlines():
+        row = row.strip()[:_READ_CHARS]
+        if not row:
+            continue
+        first = first or row
+        if in_code:
+            in_code = row != "```"
+        elif _FENCE.match(row):
+            in_code = True
+        elif not GREETING.match(row):
+            return row
+    return first
+
+
+def short_title(text: str) -> str:
+    """A short title from a request, at most :data:`TITLE_WIDTH` wide.
+
+    Every task and every chat is named by this one function, so a request reads
+    the same wherever it was typed. The title is the person's own first words,
+    from the first non-blank line (not one that is only a greeting, and not a
+    code block), with whitespace collapsed. A polite word or a level word that opens
+    it goes, and a path reads as its file's name (a link stays whole). The title
+    ends at the first sentence end (a question keeps its mark), or at a comma
+    when what comes before it is a clause on its own (at least 16 wide). A
+    clause that is still too long is cut at the last word (or, in Chinese or
+    Japanese, character) that fits, without a "the" or "in" left hanging, and
+    ends in ``…``; one long word with no break is cut where it must be. An empty
+    request reads ``Task``.
+    """
+    line = " ".join(_title_line(text).split())
+    opening = _OPENING.match(line)
+    # A request that is nothing but its opening keeps it.
+    line = (line[opening.end() :] if opening else "") or line
+    sentence = _SENTENCE_END.split(line, maxsplit=1)[0]
+    clause = " ".join(
+        word if "://" in word else _IN_FOLDER.sub(r"\1", word)
+        for word in sentence.split()
+    ).rstrip(_TITLE_TAIL)
     if title_width(clause) <= TITLE_WIDTH:
         return clause or "Task"
     for found in _CLAUSE_END.finditer(clause):
@@ -724,7 +845,8 @@ def short_title(text: str) -> str:
         clause[cut] == " " or _wide(clause[cut]) or _wide(clause[cut - 1])
     ):
         cut -= 1
-    return clause[: cut or end].rstrip(_TITLE_TAIL) + "…"
+    head = _DANGLING.sub("", clause[: cut or end].rstrip(_TITLE_TAIL))
+    return head.rstrip(_TITLE_TAIL) + "…"
 
 
 def clean_output(text: str) -> str:

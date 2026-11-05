@@ -38,7 +38,9 @@ from localmelo.melo.schema import RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
+from localmelo.support.backends.openai_family import USUAL_URL
 from localmelo.support.cli import browsing, commands, hanging, usershell
+from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import (
@@ -84,9 +86,12 @@ from localmelo.support.sessions.display import (
     format_duration,
     format_tokens,
     home_label,
+    short_title,
 )
+from localmelo.support.sessions.grants import GrantBook, MainChatGrants
 from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
+    GATEWAY_SESSIONS_DB,
     NewSession,
     SessionBusyError,
     SessionStore,
@@ -94,7 +99,6 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
     UnknownSessionError,
-    title_from_text,
 )
 from localmelo.support.sessions.sync import SessionMark
 from localmelo.support.usage_snapshot import (
@@ -126,6 +130,21 @@ def _toggle(arguments: str, current: bool) -> bool | None:
     if value == "off":
         return False
     return None
+
+
+async def _model_rows(url: str, models: list[str]) -> tuple[list[ModelRow], str | None]:
+    """The rows of a server's model list, and the model the list starts on.
+
+    The chat models only, when there are any; a model is marked when the server
+    says it is in memory (asked only between several chat models). The start is
+    what :func:`discovery.pick_model` allows, None when nothing is known loaded.
+    """
+    kinds = {model: discovery.model_kind(model) for model in models}
+    chat = [model for model in models if kinds[model] == "chat"]
+    loaded = await discovery.loaded_among(url, chat)
+    shown = chat or models
+    rows = [ModelRow(model, model in loaded.ids, kinds[model]) for model in shown]
+    return rows, discovery.pick_model(shown, loaded)
 
 
 def _progress_lines(payload: Mapping[str, Any], symbols: Any) -> list[str]:
@@ -272,6 +291,10 @@ class CliSession:
         self.renderer.tool_tiers = lambda: {
             tool.name: tool.tier for tool in self.agent.list_tools()
         }
+        # The grants of the terminal's own chat, kept in its sessions file;
+        # what the person allowed in the main chat holds here too, read from
+        # the gateway's file at every check, so a revoke there holds at once.
+        self.grant_book = GrantBook(store, outside=MainChatGrants(GATEWAY_SESSIONS_DB))
         # [approvals] auto_asks: Auto asks on the panel while someone is at
         # the terminal (#465).
         self.approvals = Approvals(
@@ -279,6 +302,7 @@ class CliSession:
             mode,
             snapshots=self.approver.snapshots,
             watch=terminal_watch(self.approver, auto_asks=auto_asks),
+            grants=self.grant_book.view(self._session_id, "terminal"),
         )
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
@@ -306,6 +330,21 @@ class CliSession:
         self.saved_resume_hint = ""
         # The main chat through the gateway; None: the terminal's own chat.
         self.remote: MainChat | None = None
+
+    def _session_id(self) -> str | None:
+        """The terminal's own chat's id; ``None`` before its first turn."""
+        return self.runner.session_id if self.runner is not None else None
+
+    async def grants_ready(self) -> None:
+        """Read the grants of the terminal's file once (the main chat's are read at every check).
+
+        A file that cannot be read leaves the grants in this process only.
+        """
+        if not self.grant_book.opened:
+            try:
+                await self.grant_book.open()
+            except Exception as exc:
+                logger.warning("The grants of this chat are not kept: %s", exc)
 
     # ── What the app reads ──
 
@@ -646,7 +685,7 @@ class CliSession:
             self._work = self.spawn(self._remote_turn(text))
             return
         if self.runner is None or self.runner.session_id is None:
-            self.title = self.session_tools.pending_title or title_from_text(text)
+            self.title = self.session_tools.pending_title or short_title(text)
         first_turn = self.runner is None or self.runner.session_id is None
         self.renderer.begin_turn(text, first_turn=first_turn)
         staged, self._attachments = self._attachments, ()
@@ -704,6 +743,7 @@ class CliSession:
                 if attachments
                 else {}
             )
+            await self.grants_ready()
             token = (
                 STREAM_DISPLAY.set(self.renderer.stream_feed()) if self.stream else None
             )
@@ -1024,6 +1064,8 @@ class CliSession:
             self.progress()
         elif name == "approvals":
             await self.approvals_command(arguments)
+        elif name == "grants":
+            await grant_commands.command(self, arguments)
         elif name == "status":
             await self.status(arguments)
         elif name == "retry":
@@ -1592,7 +1634,7 @@ class CliSession:
             if what in ("ask", "auto", "deny"):
                 await self.switch_mode(cast(Literal["ask", "auto", "deny"], what))
             elif what == "forget":
-                approvals.forget(parts[1] if len(parts) > 1 else None)
+                await grant_commands.forget(self, parts[1] if len(parts) > 1 else None)
             else:
                 self.out.print(
                     self._text(
@@ -1808,17 +1850,7 @@ class CliSession:
                 self._text(f"✗ {backend.base_url} lists no models.", style="error")
             )
             return
-        kinds = {model: discovery.model_kind(model) for model in self.models}
-        chat = [model for model in self.models if kinds[model] == "chat"]
-        loaded = (
-            await discovery.loaded_models(backend.base_url)
-            if len(chat) > 1
-            else discovery.LoadedModels()
-        )
-        rows = [
-            ModelRow(model, model in loaded.ids, kinds[model])
-            for model in (chat or self.models)
-        ]
+        rows, _ = await _model_rows(backend.base_url, self.models)
         where = redact_secrets(f"{backend.label} · {backend.base_url}")[0]
         picked = await self.app.choose_model(rows, where=where, current=backend.model)
         if picked is None:
@@ -1836,7 +1868,7 @@ class CliSession:
             return
         old = self.factory.backend
         url = arguments or await self.app.ask(
-            "Model server URL", old.base_url or "http://127.0.0.1:8000/v1"
+            "Model server URL", old.base_url or USUAL_URL
         )
         if not url:
             return
@@ -1880,22 +1912,15 @@ class CliSession:
 
     async def _pick_model(self, url: str, models: list[str]) -> str | None:
         """The model to use on *url*, from the list the first run shows; None on Esc."""
-        kinds = {model: discovery.model_kind(model) for model in models}
-        chat = [model for model in models if kinds[model] == "chat"]
-        if len(models) == 1 and chat:
+        if len(models) == 1 and discovery.model_kind(models[0]) == "chat":
             return models[0]
-        loaded = (
-            await discovery.loaded_models(url)
-            if len(chat) > 1
-            else discovery.LoadedModels()
-        )
-        shown = chat or models
-        pick = discovery.pick_model(shown, loaded)
-        if len(chat) > 1 and pick is None:  # nothing is highlighted: say why
+        rows, pick = await _model_rows(url, models)
+        if sum(row.kind == "chat" for row in rows) > 1 and pick is None:
+            # nothing is highlighted: say why
             self.out.print(self._text(discovery.LOAD_COST_NOTE, style="muted"))
         assert self.app is not None
         return await self.app.choose_model(
-            [ModelRow(model, model in loaded.ids, kinds[model]) for model in shown],
+            rows,
             where=redact_secrets(url)[0],
             current="",
             start=pick,

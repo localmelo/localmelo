@@ -103,7 +103,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7
 Example output (values vary):
 
 ```json
-{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
+{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
 ```
 
 stdout holds exactly this one line. The exit code is 0 only when `status`
@@ -205,18 +205,16 @@ Try: What is this project? · / commands · ctrl+d quit
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
 With no backend saved and no model server running, first-run `melo` and
-`melo setup` show a short, read-only preview: the recommendation, download upper
-bound, cached amount and free disk space. On supported
+`melo setup` show a short, read-only preview: the recommendation and download upper
+bound. On supported
 Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
 summary is printed once. Choose `Show how to set one up` for at most six
 numbered steps: download oMLX, move it to Applications, download the model,
 start the server, then `Enter an address` in melo. Automatic setup is coming
-soon, and nothing installs, downloads, starts or saves. Developer mode keeps
-the detailed view and a review menu with `Details` for exact versions, paths and
-checksums.
+soon, and nothing installs, downloads, starts or saves.
 Pipes retain `Press Enter to check again, type an address, or q to quit:`;
 other systems keep their platform's manual-server guidance. Start the server
-yourself and enter its address: the suggested high port is outside default
+yourself and enter its address: the high port in the steps is outside default
 discovery. [Model servers](../guides/model-servers.md#setup-preview) explains
 the manual path. Existing connections and direct tasks are unchanged.
 

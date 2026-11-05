@@ -5,7 +5,8 @@ Chat A says "my group meeting is on Thursdays" and its model keeps it with
 the recalled record, quoted, with its source, while B's stored turn keeps only
 what was typed. A plain statement without the tool call, workers, attachments
 and the model's answers write no record; a task's result shown in a chat can
-be kept; a task's runner only indexes; an undone turn leaves no document.
+be kept; a task's runner only indexes; an undone turn leaves no document; words
+the person adds while the run works, read at a later step, are indexed with the turn.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.identity import NOTES_TEXT, PINNED_TEXT
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStore, StoredEvent
@@ -38,6 +40,9 @@ THANKS = "thanks, keep that in mind"
 ASKED = "[task t1 · Fix asks · data] The user says my group meeting is on Thursdays; remember that."
 NOTE_IT = "note what the task said"
 KEPT = ("You prefer short answers.", "Your group meeting is on Thursdays.")
+# A turn whose run reads a note the person added at its second step.
+TRIP = "Plan my trip to Denver."
+TRIP_NOTE = "actually my flight is Tuesday"
 
 
 def remember(text: str, topic: str) -> dict[str, Any]:
@@ -84,6 +89,19 @@ def stub() -> Any:
             "replies": [
                 {"tool_calls": [remember(KEPT[1], "about")]},
                 {"content": "Noted."},
+            ],
+        },
+        # A run of two steps, picked by path: the note read at the second is a user message
+        # too, which the newest-message match would take for another request.
+        "midrun": {
+            "sequential": True,
+            "replies": [
+                {
+                    "tool_calls": [
+                        {"name": "search_memory", "arguments": {"query": "flights"}}
+                    ]
+                },
+                {"content": "Your trip is planned."},
             ],
         },
         # The chat model as the llm retriever meets it: it keeps the first note.
@@ -134,13 +152,19 @@ async def chat(
     index_only: bool = False,
     attachments: tuple[TextAttachment, ...] = (),
     undo: bool = False,
+    inbox: Any = None,
+    scenario: str | None = None,
 ) -> list[dict[str, Any]]:
     """One turn in a new chat (or *session_id*); returns its stored events."""
     workspace.mkdir(exist_ok=True)
     events: list[StoredEvent] = []
     agent = await build_session_agent(
         cfg=None,
-        base_url=stub.base_url,
+        base_url=(
+            stub.base_url
+            if scenario is None
+            else stub.base_url.replace("/v1", f"/s/{scenario}/v1")
+        ),
         model="stub-model",
         workspace=str(workspace),
         options=AgentOptions(),
@@ -155,6 +179,7 @@ async def chat(
         on_event=events.append,
         memory=memory,
         index_only=index_only,
+        inbox=inbox,
     )
     try:
         result = await runner.run_turn(text, title=text, attachments=attachments)
@@ -191,7 +216,7 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
 
     stub.requests.clear()
     b = await chat(memory, store, stub, tmp_path / "b", ASKS)
-    label = chat_label("chat", SAYS, "gateway")
+    label = chat_label("chat", short_title(SAYS), "gateway")
     (asked,) = memory_events(b)
     assert asked["remembered"] == []
     assert [(u["kind"], u["text"], u["source"]) for u in asked["used"]] == [
@@ -356,6 +381,50 @@ async def test_a_task_runner_only_indexes(
     assert [n["text"] for n in note] == ["Find on-device ML jobs: remote roles."]
     (entry,) = await memory.records()
     assert entry.admitted_by == "outcome" and entry.provenance["topic"] == "projects"
+
+
+class _LateNote:
+    """A run's inbox with one note that arrives once the first request is out."""
+
+    def __init__(self, stub: Any, text: str) -> None:
+        self.stub, self.text, self.read = stub, text, False
+
+    def validate(self, workspace: str | None = None) -> None:
+        return None
+
+    def poll(self) -> list[tuple[int, str]]:
+        return [(1, self.text)] if self.stub.requests and not self.read else []
+
+    def accept(self, offset: int) -> None:
+        self.read = True
+
+
+async def test_a_note_read_at_a_later_step_is_indexed_with_the_turn(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    # What a console chat's inbox hands the run: the note behind its own lead.
+    lead = "[The user added this while you were working]"
+    events = await chat(
+        memory,
+        store,
+        stub,
+        tmp_path / "a",
+        TRIP,
+        inbox=_LateNote(stub, f"{lead}\n{TRIP_NOTE}"),
+        scenario="midrun",
+    )
+    (accepted,) = [e["data"] for e in events if e["type"] == "inbox.accepted"]
+    assert (accepted["step"], accepted["text"]) == (2, f"{lead}\n{TRIP_NOTE}")
+    index = memory.stores()[1]
+    (doc,) = await index.fetch(await index.ids())
+    assert doc.text == (
+        f"User: {TRIP}\n\n(added while melo worked)\n{TRIP_NOTE}\n"
+        "melo: Your trip is planned."
+    )
+    # A rebuild from the stored chat gives the same document.
+    assert await memory.reindex(store) == (0, 1)
+    (again,) = await index.fetch(await index.ids())
+    assert again.text == doc.text
 
 
 async def test_an_undone_turn_leaves_no_document(

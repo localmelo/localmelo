@@ -105,7 +105,7 @@
         <ul>
           <li><code>uv</code> 根据 <code>uv.lock</code> 创建 <code>.venv/</code>，使用 <code>.python-version</code> 中的 Python 3.13；localmelo 支持 3.11 或更高版本。</li>
           <li><code>--extra dev</code> 加入 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 加入 FastAPI 和 uvicorn。</li>
-          <li><code>uv run pre-commit install</code> 安装的钩子会在每次提交时运行 ruff、black、mypy 和完整测试。</li>
+          <li><code>uv run pre-commit install</code> 安装的钩子会在每次提交时运行 ruff、black、mypy，以及改动涉及的测试（<code>pytest --testmon</code>）。</li>
         </ul>
       </section>
 
@@ -153,7 +153,7 @@
               <tr><td><code>tests/sessions</code></td><td>保存在 SQLite 中的对话：存储、运行器、恢复、重启、审批和事件窗口</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/gateway</code></td><td>会话、HTTP API、<code>Host</code> 和 <code>Origin</code> 检查，以及网页工作区；<code>.mjs</code> 文件测试工作区的 JavaScript</td><td><code>dev</code> 和 <code>gateway</code>；<code>.mjs</code> 文件需要 Node</td></tr>
               <tr><td><code>tests/integration</code></td><td>多个部分协同工作</td><td><code>dev</code> 和 <code>gateway</code></td></tr>
-              <tr><td><code>tests/smoke</code></td><td>冒烟测试工具的离线测试（解析、指标、日志），以及需要手动开启的 <code>test_backend_smoke.py</code></td><td><code>dev</code>；那个文件需要模型服务器</td></tr>
+              <tr><td><code>tests/smoke</code></td><td>需要手动开启的 <code>test_backend_smoke.py</code></td><td><code>dev</code>；需要模型服务器</td></tr>
             </tbody>
           </table>
         </div>
@@ -163,7 +163,6 @@
         <!-- usage:dev-smoke --><figure class="usage" aria-label="真实后端的冒烟测试" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">真实后端的冒烟测试</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>它们询问 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM，跳过没有响应的服务器。</li>
-          <li><code class="wrap">tests/smoke/core_loop_test.py</code> 运行更长的记忆场景；见它的 <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>。</li>
         </ul>
       </section>
 
@@ -184,22 +183,16 @@
         </p>
         <ol>
           <li>
-            在 <code>support/backends/local/</code> 或 <code>support/backends/cloud/</code> 中写一个实现 <code>BaseBackend</code> 的类（<code>support/backends/base.py</code>）：<code>key</code>、<code>display_name</code>、<code>validate</code>、<code>validate_embedding</code>、<code>has_embedding</code>、<code>build_chat_provider</code> 和 <code>build_embedding_provider</code>。大多数服务器可以共用 <code>support/backends/openai_compat.py</code> 里兼容 OpenAI 的代码。
+            添加它的一行。这台电脑上的模型服务器是 <code>support/backends/openai_family.py</code> 里 <code>LOCAL_SERVERS</code> 的一行 <code>LocalBackend(...)</code>：key、名称、设置列表里的那一行、默认地址和建议的模型。托管服务是 <code>support/hosted.py</code> 里 id 等于它的后端的一个 <code>Preset</code>：地址、密钥变量和建议的模型。需要自己行为的服务器继承 <code>LocalBackend</code>（Ollama 的原生对话、oMLX 的标签）。不使用 OpenAI API 的后端实现 <code>BaseBackend</code>（<code>support/backends/base.py</code>），并在 <code>support/backends/registry.py</code> 的 <code>ensure_defaults_registered()</code> 中注册。
           </li>
           <li>
-            在 <code>support/backends/registry.py</code> 的 <code>ensure_defaults_registered()</code> 中注册它。
+            为它添加配置表：在 <code>Config</code> 上加一个以它的 key 命名的字段（<code>LocalBackendConfig</code> 或 <code>CloudVendorConfig</code>）。有效后端列表、设置列表、设置页、启动横幅、模型服务器检测和失败提示都由这一行推出。修改配置结构时，请在 <code>load()</code> 里添加迁移，而不是让已有的配置文件失效。
           </li>
           <li>
-            把它的 key 加到 <code>support/config.py</code> 的 <code>VALID_CHAT_BACKENDS</code>；如果它提供嵌入，也加到 <code>VALID_EMBEDDING_BACKENDS</code>。
+            可选：在 <code>support/gateway/static/i18n/</code> 的两个语言文件里写 <code>settings.backend.&lt;key&gt;</code>，让设置列表有自己的文字；没有时显示设置列表里的那一行。
           </li>
           <li>
-            为它添加配置表：在 <code>Config</code> 上加一个字段，并把名字写进 <code>_LOCAL_SECTIONS</code> 或 <code>_CLOUD_SECTIONS</code>，让 <code>load()</code> 和 <code>save()</code> 能处理它。修改配置结构时，请在 <code>load()</code> 里添加迁移，而不是让已有的配置文件失效。
-          </li>
-          <li>
-            把它加到 <code>support/onboard.py</code> 的配置向导中：<code>CHAT_BACKENDS</code>、<code>EMBEDDING_BACKENDS</code>、默认值（<code>_LOCAL_DEFAULTS</code>、<code>_CLOUD_DEFAULTS</code> 或 <code>_EMBEDDING_DEFAULTS</code>）和 <code>_CHAT_SETUP</code>。
-          </li>
-          <li>
-            在 <code>tests/backends/</code> 中添加测试。连接检查要 mock：测试绝不能连接真实服务器。
+            只为新增的行为加测试：每一行都已经在 <code>tests/backends/test_openai_family.py</code> 里跑过。连接检查要 mock：测试绝不能连接真实服务器。
           </li>
           <li>
             写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">docs/configuration.md（英文）</a>中的后端表和示例。
@@ -210,7 +203,7 @@
       <section class="section" id="tools">
         <h2>添加内置工具</h2>
         <p>
-          一个内置工具由一个 <code>ToolDef</code>（名称、说明、JSON 参数和语义标签）和一个返回文本的异步函数组成。两者都放在 <code>melo/executor/builtins.py</code> 中，<code>_builtin()</code> 装饰器会把它们加入 <code>BUILTINS</code>。<code>melo/executor/__init__.py</code> 里的 <code>register_builtins()</code> 会把每一个都注册到执行器和记忆的工具注册表中，并把权限级别不是 <code>read</code> 的工具标记为需要审批。
+          一个内置工具由一个 <code>ToolDef</code>（名称、说明、JSON 参数和语义标签）和一个返回文本、并把工作区根目录作为第一个参数的异步函数组成。两者都放在 <code>melo/executor/builtins.py</code> 中，<code>_builtin()</code> 装饰器会把它们加入 <code>BUILTINS</code>。<code>melo/executor/__init__.py</code> 里的 <code>register_builtins()</code> 会把每一个都注册到执行器和记忆的工具注册表中，并把权限级别不是 <code>read</code> 的工具标记为需要审批。
         </p>
         <ol>
           <li>
@@ -220,7 +213,7 @@
             为它指定权限级别：把名字加入 <code>melo/checker/tiers.py</code> 的 <code>BUILTIN_TIERS</code>（<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>）。有一个测试保证这张表和内置工具名一致，所以新增内置工具必须同时指定级别。运行有审批策略时，级别不是 <code>read</code> 的调用都会先询问；<code>APPROVAL_BUILTINS</code> 由这张表推导得出。
           </li>
           <li>
-            如果它需要工作区根目录，请把它的受限版本加入同一个文件中的 <code>rooted_builtins()</code>。启动子进程的工具会把子进程的退出状态写入 <code>TOOL_EXIT_CODE</code>，<code>tool.finished</code> 事件因此带有 <code>exit_code</code>。
+            函数的第一个参数是工作区根目录，没有工作区时为 <code>None</code>（用不到它的工具忽略即可）；一个函数同时服务两种情况，<code>builtin_callables()</code> 会在模型给出的参数之前绑定根目录。启动子进程的工具会把子进程的退出状态写入 <code>TOOL_EXIT_CODE</code>，<code>tool.finished</code> 事件因此带有 <code>exit_code</code>。
           </li>
           <li>
             在 <code>tests/executor/</code> 中添加测试。

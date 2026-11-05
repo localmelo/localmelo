@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PICTURES_SHOWN, failureNote, pictureFacts, pictureName, pictureRow, pictureUrl,
-  picturesNode, setupPictureBox,
+  picturesNode, setupPictureBox, shotsNode, takenPictures,
 } from '../../support/gateway/static/pictures.mjs';
 import {applyEvent, newView, readPictures} from '../../support/gateway/static/turns.mjs';
 
@@ -175,4 +175,58 @@ test('an SVG in the light box gets the vector size', () => {
   const b = box();
   b.open(pic('plot.SVG'), '/u');
   assert.equal(b.image.className, 'vector');
+});
+
+// ── The pictures melo takes (a page, another app's window) ──
+
+const sha = (n) => String(n).repeat(64).slice(0, 64);
+const shot = (n, extra = {}) => ({sha256: sha(n), mime_type: 'image/jpeg', size_bytes: 52_000, ...extra});
+const step = (name, images, extra = {}) => ({kind: 'tool', name, images, ...extra});
+
+test('the pictures a turn took are its steps\' pictures, each once, in the order taken', () => {
+  const turn = {items: [
+    step('browser_open', []),
+    step('browser_screenshot', [shot(1)]),
+    {kind: 'assistant_text', text: 'x', images: [shot(9)]},
+    step('browser_screenshot', [shot(1)]),
+    step('browser_window_read', [shot(2, {mime_type: 'image/png'})]),
+    step('mcp__x__draw', [shot(3, {mime_type: 'text/html'}), {sha256: '../x', mime_type: 'image/png'}, null]),
+  ]};
+  assert.deepEqual(takenPictures(turn).map((item) => [item.sha256[0], item.mime_type, item.size]),
+    [['1', 'image/jpeg', 52_000], ['2', 'image/png', 52_000]]);
+  assert.deepEqual(takenPictures({}), []);
+  assert.deepEqual(takenPictures(null), []);
+});
+
+test('a browser picture of a step fills the turn, so the chat can show it', () => {
+  const view = newView('s1');
+  applyEvent(view, {id: 1, turn: 1, type: 'turn.started', ts: 1, data: {turn: 1, turn_id: 't1', user_text: 'look', client_request_id: null}});
+  applyEvent(view, {id: 2, turn: 1, type: 'tool.started', ts: 2, data: {call_id: 'c1', name: 'browser_screenshot', arguments: {}}});
+  applyEvent(view, {id: 3, turn: 1, type: 'tool.finished', ts: 3, data: {call_id: 'c1', name: 'browser_screenshot', status: 'success', images: [shot(4)]}});
+  assert.deepEqual(takenPictures(view.turns[0]).map((item) => item.sha256), [sha(4)]);
+});
+
+test('the pictures melo took show in the chat as previews of the chat\'s own copies, and a click opens one', () => {
+  const opened = [];
+  assert.equal(shotsNode({doc, shots: [], sessionId: 's1', open() {}, toggle() {}}), null);
+  const shots = takenPictures({items: [step('browser_screenshot', [shot(5), shot(6, {mime_type: 'image/png', size_bytes: 4_100})])]});
+  const node = shotsNode({doc, shots, sessionId: 's/1', open: (picture, url) => opened.push([picture.path, url]), toggle() {}});
+  assert.equal(node.attributes['aria-label'], 'Pictures melo took');
+  assert.ok(node.className.split(' ').includes('picture-shots'));
+  const images = node.all('img');
+  assert.deepEqual(images.map((image) => image.src), [`/api/sessions/s%2F1/blobs/${sha(5)}`, `/api/sessions/s%2F1/blobs/${sha(6)}`]);
+  assert.deepEqual(node.byClass('picture-name').map((item) => item.textContent), ['Picture 1', 'Picture 2']);
+  assert.deepEqual(node.byClass('picture-facts').map((item) => item.textContent), ['52 KB', '4.1 KB']);
+  node.all('button')[1].handlers.click();
+  assert.deepEqual(opened, [['Picture 2', `/api/sessions/s%2F1/blobs/${sha(6)}`]]);
+  const one = shotsNode({doc, shots: shots.slice(0, 1), sessionId: 's1', open() {}, toggle() {}});
+  assert.equal(one.attributes['aria-label'], 'Picture melo took');
+});
+
+test('a picture melo took that the chat no longer has says so', async () => {
+  const node = shotsNode({doc, shots: takenPictures({items: [step('browser_screenshot', [shot(7)])]}), sessionId: 's1',
+    open() {}, toggle() {}, status: async () => 404});
+  const [tile] = node.all('button');
+  await tile.children[0].children[0].handlers.error();
+  assert.equal(tile.children[0].children[0].textContent, 'Cannot be shown');
 });

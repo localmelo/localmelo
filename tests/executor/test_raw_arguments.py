@@ -13,7 +13,12 @@ import pytest
 
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.tools import ProvidedTool
-from localmelo.melo.executor import BUILTINS, Executor, ToolOutput, register_builtins
+from localmelo.melo.executor import (
+    Executor,
+    ToolOutput,
+    builtin_callables,
+    register_builtins,
+)
 from localmelo.melo.executor.models import (
     ErrorCategory,
     ExecutionRequest,
@@ -43,7 +48,7 @@ class _BlockEverything(Checker):
 
 async def test_builtin_tool_is_not_called() -> None:
     executor = _with_builtins()
-    python_exec = next(fn for td, fn in BUILTINS if td.name == "python_exec")
+    python_exec = builtin_callables(None)["python_exec"][0]
     calls: list[dict[str, Any]] = []
 
     async def spy(**arguments: Any) -> str:

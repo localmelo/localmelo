@@ -91,8 +91,6 @@ from localmelo.support.gateway.front_rules import (
     FINISHED,
     STARTED_TEXT,
     STARTED_TEXT_ZH,
-    TITLE_CHARS,
-    TITLE_CHARS_ZH,
     Action,
     Routed,
     TaskRef,
@@ -111,7 +109,6 @@ from localmelo.support.gateway.front_rules import (
     norm,
     reply_language,
     route,
-    short_title,
     start_rule,
     triage,
     work_request,
@@ -135,10 +132,13 @@ from localmelo.support.gateway.task_policy import (
 )
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.memory.service import CHAT_TURN
+from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
 from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_session_options,
 )
+from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_width
+from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStoreError,
@@ -182,18 +182,26 @@ HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
 FRONT_TEXT: Final = (
     "You are the main chat. Do what you can with your own tools: search_files "
     "finds where something is in the user's folder, and you can read files "
-    "and public web pages. When a request needs what you cannot do here "
-    "(running commands, changing files, many steps), start it with "
-    "task_create right away; do not ask whether to. Answer a question you "
+    "and public web pages. When you have the browser tools, you also act on a "
+    "site with them (open, click, type, submit). A request to do something for "
+    "the user online (find openings and apply, sign in, fill in and submit a "
+    "form, book, send) is work, not advice: do it with the browser tools, and "
+    "start the many-step part (research, running commands, changing files) with "
+    "task_create right away; do not ask whether to, and do not answer with a "
+    "list of links for the user to follow themselves. Answer a question you "
     "can answer, and ask one short question when a request is too unclear to "
     "act on. A follow-up on a task goes to it with task_message; a question "
     "about a task (is it done, what did it find) is answered from task_get, "
-    "which gives its whole answer and the files it wrote. Never reply with only "
+    "which gives its whole answer and the files it wrote. When the user asks "
+    "for something online and authorizes it, your next step is a tool call "
+    "(open the page, start the task), not an explanation. Never reply with only "
     "what you are about to do: do it, or start the task."
 )
 # What a side chat is told about itself, after melo's identity.
 SIDE_TEXT: Final = (
-    "You are a side chat. Answer and work in this chat yourself. Work that takes "
+    "You are a side chat. Answer and work in this chat yourself. When you have "
+    "the browser tools, you act on a site with them, and a request to do "
+    "something for the user online is work, not advice. Work that takes "
     "many steps or runs long can go to a task with task_create, started right "
     "away; a follow-up on a task goes to it with task_message. A task you start "
     "reports back to this chat."
@@ -308,9 +316,7 @@ def handoff_text(typed: str, *, asks: bool) -> str:
 def wants_title(request: str) -> bool:
     """Whether *request* is too long to be its own title (one line that fits one is)."""
     text = request.strip()
-    return "\n" in text or len(text) > (
-        TITLE_CHARS_ZH if is_chinese(text) else TITLE_CHARS
-    )
+    return "\n" in text or title_width(text) > TITLE_WIDTH
 
 
 def clean_title(raw: str) -> str:
@@ -404,7 +410,7 @@ def thinking_off(settings: Config) -> Config:
     they are.
     """
     section = getattr(settings, settings.chat_backend, None)
-    if settings.chat_backend not in ("vllm", "sglang") or not isinstance(
+    if settings.chat_backend not in TEMPLATE_KWARGS_BACKENDS or not isinstance(
         section, LocalBackendConfig
     ):
         return settings
@@ -469,7 +475,11 @@ class FrontAgent(Agent):
             return await self.answer_ask(query, on_event=on_event, **kwargs)
         if front is not None and turn is not None and turn.origin == FOLLOWUP_ORIGIN:
             return await self.follow_up(query, on_event=on_event, **kwargs)
+        # The reviews read the person's words: never the notes appended below.
+        if kwargs.get("user_words") is None:
+            kwargs["user_words"] = query
         if front is None or turn is None or on_event is None:
+            query = f"{query}\n\n{ACTING_NOTE}"
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
         # A turn that could not settle (out of steps, stuck, or a reply that only
@@ -495,6 +505,7 @@ class FrontAgent(Agent):
             query = f"{query}\n\n{news}"
         if quick:
             query = f"{query}\n\n{BRIEF_NOTE}"
+        query = f"{query}\n\n{ACTING_NOTE}"
 
         def sink(event: AgentEvent) -> None:
             result = event.data.get("result")
@@ -656,6 +667,9 @@ class SideAgent(FrontAgent):
             return await self.answer_ask(query, on_event=on_event, **kwargs)
         if turn is not None and turn.origin == FOLLOWUP_ORIGIN:
             return await self.follow_up(query, on_event=on_event, **kwargs)
+        # The reviews read the person's words: never the notes appended below.
+        if kwargs.get("user_words") is None:
+            kwargs["user_words"] = query
         news = ""
         if self.front is not None:
             try:
@@ -664,6 +678,7 @@ class SideAgent(FrontAgent):
                 logger.exception("A side chat could not read its tasks")
         if news:
             query = f"{query}\n\n{news}"
+        query = f"{query}\n\n{ACTING_NOTE}"
         return await Agent.run_task(self, query, on_event=on_event, **kwargs)
 
 

@@ -6,7 +6,7 @@ API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提�
 
 除认证要求外，API 字段保持增量兼容：会新增端点、可选的请求字段和响应键。客户端可以忽略它不认识的键。
 
-本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
+本页记录每一个 API v2 路由：健康检查、设置、密钥状态、连接测试、模型列表、会话、轮次、补充的话、上传、SSE 事件、blob、图片、提交记录、审批、工具、授权、记忆、运行，以及调度器任务。
 
 `POST /api/auth/login` 用一个有效的一次性代码换取浏览器 cookie；`POST /api/auth/logout` 撤销该 cookie。`POST /api/auth/rotate` 需要 bearer 令牌，并会轮换它。
 
@@ -18,7 +18,7 @@ API v2 是网页控制台的 HTTP API。它在网关上以 `/api/` 为前缀提�
 
 JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`，图片 blob 和图片文件使用其图片媒体类型，成功的 204 响应没有响应体。
 
-非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。
+非空请求体需要 `Content-Type: application/json`，且请求体最多 1 MiB（1,048,576 字节）；唯一的例外是 [`POST /api/uploads`](#post-apiuploads)，它接收图片的字节（图片类型的 `Content-Type`，最多 20 MiB）。请求中的每个字符串都必须是有效的 UTF-8，且不含孤立代理项。
 
 响应带有 `Cache-Control: no-store`、`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`（blob 除外，其策略为 `default-src 'none'; sandbox; frame-ancestors 'none'`；图片见[它的路由](#get-apisessionsidpictures)）、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin`、`X-Frame-Options: DENY` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。被拒绝的请求只有一种错误结构：
 
@@ -37,15 +37,15 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 | 404 | `not_found` | 未知的会话、blob、图片或路由 |
 | 405 | `method_not_allowed` | 已知路径，但不支持该方法；`Allow` 请求头列出它支持的方法 |
 | 409 | `settings_changed` | 自 `GET /api/settings` 读取其 `revision` 以来，`config.toml` 在磁盘上已被改动 |
-| 413 | `too_large` | 请求体超过 1 MiB，或所请求的图片超过 20 MB |
-| 415 | `unsupported_media_type` | 非空请求体没有 `Content-Type: application/json` |
+| 413 | `too_large` | 请求体超过 1 MiB（`POST /api/uploads` 为 20 MiB），或所请求的图片超过 20 MB |
+| 415 | `unsupported_media_type` | 非空请求体没有 `Content-Type: application/json`（`POST /api/uploads` 要求图片类型） |
 | 415 | `not_a_picture` | 图片请求的文件，其名称或内容不是 PNG、JPEG、GIF、WebP 或 SVG |
 | 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`，或由应用启动的网关的 `/api/auth/login` 没有匹配的 `X-LocalMelo-Instance` |
 | 500 | `internal_error` | 意外失败；消息为 `Internal error; see the gateway log.`，从不包含堆栈跟踪或请求中的值 |
 | 502 | `backend_unreachable` | 列出模型失败或没有返回任何模型 |
 | 503 | `store_unavailable` | 网关的会话存储无法打开，或停止记录变更；第二种情况下请重启网关 |
 
-网关会记录 500 错误的原因，其响应只带固定的消息。503 会重复存储的原因，并把主目录写作 `~`；它从不包含堆栈跟踪、租约持有者或密钥。
+网关会记录 500 错误的原因，其响应只带固定的消息。存储调用失败时的 503 只带固定的消息“The session store is not available.”，原因记入网关日志；存储无法打开时则重复其原因，并把主目录写作 `~`。503 从不包含堆栈跟踪、租约持有者或密钥。
 
 旧版 `/v1/*` 路由保留它们自己的响应体，包括 FastAPI 的 `422` 和 `{"detail": ...}`。
 
@@ -67,7 +67,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "version": "0.1.0",
   "configured": true,
   "config_errors": [],
-  "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
+  "model": {"backend": "ollama", "backend_label": "Ollama", "local": true, "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
@@ -83,13 +83,14 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
+  "desktop_helper": {"state": "granted", "app": "Cua Driver", "pictures": true, "problem": ""},
   "uptime_s": 132.4
 }
 ```
 
 - `version` 是已安装包的版本；在检出的代码中则为 `git describe` 的结果。
 - `configured` 表示配置文件是否指定了对话后端；`config_errors` 是对所用设置执行 `Config.validate()` 的结果。
-- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`（请求带 `X-LocalMelo-Language: zh-Hans` 时是中文；不带该头的客户端读到英文）。未配置嵌入后端时，`model.embedding` 为 `none`。
+- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`（请求带 `X-LocalMelo-Language: zh-Hans` 时是中文；不带该头的客户端读到英文）。`model.local` 表示对话后端是否是用户自己的服务器（`mlc`、`ollama`、`vllm`、`sglang`），而不是托管服务；页面据此措辞运行失败的提示。未配置嵌入后端时，`model.embedding` 为 `none`。
 - 对于云端后端，`model_server` 为 `null`。对于本地后端，它是 `GET <url>/models` 的缓存结果：在第一次检查结束之前，`reachable` 为 `null`，`checked_s_ago` 为该结果的时长。请求从不等待检查；过期的结果会在后台启动一次检查（30 秒之后，或服务器无响应时的 5 秒之后）。当 `chat_url` 不是绝对的 `http` 或 `https` URL 时，`url_label` 为空，`reachable` 为 `false`；这样的值从不被探测，其文本（包括用户信息）也不会被回显。
 - `limits` 是入口文本上限、会话文本预算，以及以字节计的 API 请求体上限。
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。
@@ -98,6 +99,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `activity` 用平实的话说明该项正在做什么（请求带 `X-LocalMelo-Language` 时用那种语言，macOS 的活动胶囊就是这样；否则是英文），`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Needs your approval`（`wait`，因批准而被扣住的任务）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `answering` 只有在该项最新的事件是已开始的步骤、轮次或反思，且其后没有未结束的工具调用、审批或暂缓时才为 true：模型正在作答。因为没有事件可读（还没读到，或存储无法读取）而说的 `Thinking` 为 `false`。macOS 应用的桌面 Melo 和控制台的头像只在它为 true 时显示 Melo 在思考。`GET /api/activity` 中运行中的行也带有它。
+- `desktop_helper` 是桌面控制助手的状态，取最近一次对话或检查得到的结果：`state` 为 `missing`（未安装）、`installed`（还没检查）、`granted`（它能运行并有“辅助功能”权限；`pictures` 表示它是否也有“录屏”权限）、`no_grant`（“辅助功能”权限没有打开）或 `failed`（没有启动）；`app` 是要给予权限的应用，`problem` 说明问题所在。`GET /api/health?helper=check` 会启动助手一次来读取它的权限（不弹出提示，至少相隔 30 秒，并且只在浏览已开启且 `[browser] app_windows` 为 true 时）；其他情况下不会启动任何东西。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
 - `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
@@ -218,10 +220,11 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `memory_retriever` 可选：`auto`、`bm25`、`embedding` 或 `llm`，设置 `[memory] retriever`（其他值返回 400 `invalid_request`；没有嵌入模型时设为 `embedding` 返回 400 `invalid_settings`）；省略时保留已保存的值。
 - `language` 可选：`auto`、`en` 或 `zh-Hans`，设置 `[console] language`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。页面会重新载入，显示新的语言。
 - `approvals` 可选：`ask` 或 `auto`，设置 `[approvals] mode`，即新对话开始时的模式（其他值返回 400 `invalid_request`）；省略时保留已保存的值。之前创建的对话保留各自的模式。
-- `browser` 可选：`true` 把 `[browser] driver` 设为 `safari-automation`，`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser` 可选：`true` 开启浏览（`[browser] driver` 保留之前选过的浏览器，否则设为 `safari-automation`），`false` 设为 `off`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。`/browser on` 和 `/browser off` 保存的就是它。
+- `browser_driver` 可选：`off`、`safari-automation` 或 `chrome`，按名字设置 `[browser] driver`，并优先于 `browser`（其他值返回 400 `invalid_request`）；省略时保留已保存的值。设置中的**浏览器**选项、`/browser chrome` 和 `/browser safari` 保存的就是它。响应中带有 `browser_driver` 和 `chrome_installed`（是否已安装 Google Chrome，以便选项提示先安装）。
 - 控制台一次保存一项更改：带上读取时的 `revision`，只发送改动的字段；它的 Undo 是同一个请求，换成之前的值。
 - 与磁盘上的文件不匹配的 `revision` 会返回 409 `settings_changed`。两个并发的 `PUT` 请求若读取了同一个 `revision`，两者都可能通过检查；最后写入者胜出，`os.replace` 保证文件不会被撕裂。
-- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开，并返回更新后的 `GET /api/settings` 响应体。
+- 服务器会重新加载 `config.toml`，因此命令行的 `--host` 和 `--port` 覆盖值从不写入磁盘；它会保留其他节、`extra_body`、`mcp_config`、`request_timeout_s`、`[agent]` 和 `[scheduler]`，校验候选设置（失败时返回 `400 invalid_settings` 并附 `details.errors`），以原子方式写入 `config.toml`，关闭空闲的会话智能体，使下一轮以新设置打开（正在进行一轮或有问题在等待回答的会话，会保留原来的智能体，到下一轮再换新的），并返回更新后的 `GET /api/settings` 响应体。
 
 ## POST /api/settings/test
 
@@ -471,7 +474,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 }
 ```
 
-- `grants` 是本会话剩余部分允许使用的工具；`granted_at` 把每一项映射到授权开始的时间。
+- `grants` 是对话里允许的名称（工具、网站、窗口），无论对话是否打开：它自己的，以及（旁支对话）主对话的，后者在所有对话里都算；`granted_at` 把每一项映射到授权开始的时间。`grants_everywhere` 列出旁支对话的 `grants` 里因为主对话允许而算数的那些（主对话和任务里为 `[]`）：在这里收回其中一项，会在所有对话里一并收回。[`GET /api/grants`](#get-apigrants) 列出同样的授权及其详情。
 - `mcp_error` 说明本会话为何在没有 MCP 工具的情况下运行，否则为 `""`。目前它始终为 `""`：控制台尚未实现 MCP。
 - `agent` 为 `open`、`paused`（已关闭，但保留其对话）或 `not_loaded`（本网关尚未打开的会话，例如重启之后）。创建操作即使没有轮次也会打开会话；读取路由从不打开会话，而轮次或重试会打开。因此，`not_loaded` 会持续到网关启动后的第一次打开，而已关闭的智能体读作 `paused`。
 - `tokens` 汇总该会话已结束轮次的 `completion_tokens`，与回答所报告的字段相同。
@@ -589,7 +592,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `retry: 2000` 只发送一次。每当静默 15 秒，就发送一次 `: keepalive`。
 - `after` 默认为 0。当两者同时存在时，`Last-Event-ID` 请求头优先；这正是浏览器的 `EventSource` 在重连时发送的内容；此时无效的 `after` 不会被读取。否则它必须是有符号 64 位整数范围内的十进制数字：负数、`+1`、`1_0`、非数字以及过大的值，都是 400 `invalid_request`。
 - `follow=false` 发送起点之后已保存的事件，直到该请求读取到的最新事件 id，然后结束响应；它是一次性的追赶，而在它分页期间开始的轮次不会增加任何帧。
-- `watch=true` 表示客户端把这个对话显示给一个人；控制台、应用和终端都会发送它。当一个对话（或一个任务，或它的对话）有这样的流打开时，Auto 拦下的、这个人可以允许的步骤会在对话的卡片上询问。没有这样的流打开时，Auto 会立即拦下该步骤，就像对一个不带 `watch` 读取流的脚本一样。1 分钟内没有人回答的卡片，或者最后一个查看者离开 5 秒的卡片，算作拒绝：`approval.resolved`，`outcome` 为 `denied`，`origin` 为 `timeout`。
+- `watch=true` 表示客户端把这个对话显示给一个人；控制台、应用和终端都会发送它。当一个对话（或一个任务，或它的对话）有这样的流打开时，Auto 拦下的、这个人可以允许的步骤会在对话的卡片上询问。没有这样的流打开时，Auto 会立即拦下该步骤，就像对一个不带 `watch` 读取流的脚本一样。1 分钟内没有人回答的卡片，或者最后一个查看者离开 5 秒的卡片，算作拒绝：`approval.resolved`，`outcome` 为 `denied`，`origin` 为 `timeout`。控制台的页面被隐藏时仍保持事件流打开，所以隐藏的页面仍算一个查看者。
 - 当客户端断开连接、会话不再存在（此时重连会得到 404），以及网关关闭时，流即结束。浏览器使用 `Last-Event-ID` 重连，并且恰好一次地收到它错过的每个事件。
 - worker 运行（CLI 文件中的会话）从 CLI 文件提供，帧、`after`、`follow` 和 `Last-Event-ID` 都相同。该文件由另一个进程写入，因此跟随的流约每秒读取一次，发送带 id 的新事件，并在运行不再持有有效租约且最后一个事件已发送后结束（会话对象中 `busy` 为 false）。没有有效租约的运行（例如崩溃后留下的）会被回放并立即结束。保活与对话相同；每个打开的流是该文件的一个读取者，客户端离开时关闭。
 - 终端对话以同样方式流式提供，并经过脱敏。当它的某个轮次在终端的租约下运行时它处于活动状态，因此该轮次结束时流也结束；请再次读取会话对象，查看是否有另一个轮次在运行。
@@ -610,6 +613,7 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 
 - 列表就是终端自己的命令表，顺序相同，所以终端里新增的命令会出现在这里。`help` 是 `en` 和 `zh-Hans` 的一行说明；`args` 是用法文字（`[name]`、`PATH`）；`keys` 是效果相同的按键。
 - `during_turn` 为 `true`（一轮运行时可用）、`false`（那时被拒绝）或 `"show"`（那时只有不带参数才可用）。`action` 是页面对该命令的处理；`everyday` 是 `/help` 先列出的命令。
+- `grants`（`[revoke N]`）在表里，`action` 为 `grants`：页面列出本人允许过的事并可收回一项，与 [`GET /api/grants`](#get-apigrants) 和 [`DELETE /api/grants/{id}`](#delete-apigrantsid) 相同。
 - 一条消息只有以 `/` 加小写名字开头、后面是空白或结尾时才是命令。页面自己运行命令，从不把它发给对话。
 
 ## GET /api/sessions/{id}/status
@@ -671,6 +675,40 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 名称必须以 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 或 `.svg` 结尾，内容也必须是这类图片（根据开头几个字节判断；`Content-Type` 取自内容而不是名称）；否则返回 415 `not_a_picture`（名为 `chart.png` 的文本文件，或实为 HTML 页面的 SVG）。超过 20 MB 的文件返回 413 `too_large`。
 - 每个响应都带有 `Content-Disposition: inline`、`X-Content-Type-Options: nosniff` 和 `Cache-Control: private`。PNG、JPEG、GIF 或 WebP 带有 `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'`；SVG 带有 `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`，因此它可以绘制，但绝不会运行脚本，也不会作为页面打开。该路由只读取一个文件，不写入也不列出任何内容。
 
+## GET /api/sessions/{id}/browser
+
+对话在 melo 的浏览器里是否有打开的页面，以及是哪一个。melo 开始浏览时，控制台用它来打开**浏览器**面板。它不启动任何东西，也不传送画面。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
+```
+
+```json
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
+```
+
+- 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
+- `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+
+## WS /api/sessions/{id}/browser/live
+
+对话浏览器的实时画面：melo 正在操作的页面，以 JPEG 画面的形式送出，相关信息每次变化时再送一条小小的 JSON 消息。用户也可以通过它接管这个网页。控制台和 App 的弹出窗口使用它。
+
+```text
+{"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
+<binary frame: one JPEG>
+```
+
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`grace` 是没有观看者之后标签页仍归用户的秒数（120），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
+- 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
+- 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
+- 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
+- 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
+- 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
+- 用户手里的标签页没人观看时（最后一个观看者关闭，或令牌轮换），它还会归用户 120 秒，然后回到 melo。在此期间，melo 在这个标签页上的浏览步骤会等待，每次最多 45 秒。
+- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
+
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 
 客户端用 `client_request_id` 命名的消息最终如何。不带会话的同一查询为 `GET /api/submissions/{client_request_id}`，供从未得知新会话 id 的客户端使用。
@@ -700,12 +738,16 @@ worker 运行或终端对话从 CLI 的文件读取。
 |---|---|---|
 | 400 | `invalid_workspace` | 文件夹不是绝对路径或 `~/` 开头，已不再是目录，或者无法创建默认工作区 |
 | 400 | `text_rejected` | 检查器拒绝了消息文本，与 `/v1/agent/run` 请求的处理方式相同 |
+| 400 | `picture_gone` | 轮次所指的图片已不再等待：已被移除、已过期或已发送 |
+| 409 | `model_text_only` | 轮次（或对它的重试）带有图片，而对话模型已知读不了图片 |
+| 409 | `chat_answering` | 对话正在回答任务的提问时，收到了带图片的消息 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
 | 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
 | 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
 | 409 | `submission_withdrawn` | 该 `client_request_id` 在开始之前已被取消 |
-| 409 | `turn_not_running` | 取消所指的轮次并未在运行 |
+| 409 | `turn_not_running` | 取消或补充的话所指的轮次并未在运行（或正在被停止） |
+| 409 | `not_your_turn` | 补充的话所指的轮次不是用户开始的（对话对任务提问的回答） |
 | 409 | `already_answered` | 该审批已经答复 |
 | 409 | `sleep_running` | 整理正在处理笔记时撤销 `sleep` 回执 |
 | 502 | `agent_start_failed` | 会话的智能体无法启动；消息为构建器的错误 |
@@ -743,7 +785,9 @@ worker 运行或终端对话从 CLI 的文件读取。
 - `turn` 是可选的。不带它时，回答是仅含 `session` 的 201，会话等待 `POST /api/sessions/{id}/turns`。
 - `session.model` 是本请求中设置的对话模型。第一条消息的文本会成为标题：空白被折叠，最多 60 个字符，超出时以 `…` 结尾。
 - `client_request_id` 使创建可以安全地重复。相同的键加相同的文本，返回 200，附带它所创建的会话和轮次以及 `"repeated": true`，且不再构建任何东西；文本不同则为 409 `submission_conflict`；在开始之前已撤回的键则为 409 `submission_withdrawn`。两个针对同一个键的竞争创建只会生成一个会话。
-- `attachments` 目前必须为空：任何条目都是 400 `invalid_request`，即 `attachments: files are not supported yet; send the text alone`。文本由网关入口检查器检查；被拒绝则为 400 `text_rejected`。
+- `attachments` 是用户加入的文本文件：`[{"name": "notes.md", "text": "…", "chars": 1234}]`，最多 8 个，每个 256 KiB，合计 512 KiB。二进制或过大的文件返回 400 `invalid_request`，并指出该文件。网关会清理每个文件、遮蔽其中的密钥，并把它作为 `<attachment>` 块加到消息里，所以轮次的 `user_text` 同时包含这些话和这些文件。
+- `images` 是用户加入的图片：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不可重复。已不存在的 id 返回 400 `picture_gone`；超过 4 个返回 400 `invalid_request`；对话模型已知读不了图片则返回 409 `model_text_only`。带图片的消息交给模型：没有任何任务规则会读它，带图片的 `as_task` 返回 400 `invalid_request`，对话正在回答任务的提问时返回 409 `chat_answering`。图片随轮次一起保存（`turn.started` 把它们列为 `images`，由 [blob 路由](#get-apisessionsidblobssha256)提供），所以重试会再次发送它们。
+- 有图片或文件时，消息可以没有文字：`text` 此时可以为空，轮次的文字读作 `[2 pictures]` 或 `[attached: notes.md]`。文本由网关入口检查器检查；被拒绝则为 400 `text_rejected`。
 
 ## POST /api/sessions/{id}/turns
 
@@ -760,6 +804,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 轮次运行期间返回 409 `session_busy`。每个会话同时只运行一个轮次；第二个请求会在任何东西进入队列之前被拒绝。
 - 重复的 `client_request_id` 会以 200 返回该键已保存的轮次和 `"repeated": true`，无论该轮次是否仍在运行。
 - 会话的文件夹必须仍然存在：文件夹被删除则返回 400 `invalid_workspace`，且轮次不会开始。
+- `attachments` 和 `images` 与创建时相同。要向正在运行的轮次补充话语，请使用 [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes)，而不是等待。
 
 ## POST /api/sessions/{id}/retry
 
@@ -774,6 +819,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 任务会话返回 409 `task_session_read_only`；它不能作为对话重试。
 - 除非该 id 是最新的、已结束且未撤销的轮次，否则返回 409 `not_latest_turn`：丢失了某个轮次结束信息的客户端，应重试它所持有的那个 id。轮次运行期间返回 409 `session_busy`。
 - 回答任务提问的轮次（`origin` 为 `ask_owner`）返回 409 `not_retryable`：其中的话不是用户说的。
+- 带图片的轮次，当对话模型已知读不了图片时返回 409 `model_text_only`：重试会再次发送同样的图片。
 
 ## POST /api/sessions/{id}/undo
 
@@ -802,6 +848,58 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 本网关运行该轮次时返回 202；对于已结束的轮次，或本网关不运行的轮次，返回 409 `turn_not_running`。
 - 轮次在其下一个边界处停止，并以 `cancelled` 结束，原因为 `user_stop`；`turn.finished` 会说明这一点。若它没有说任何话，其保存的 `answer` 为 `[interrupt: no assistant output for this turn]`。
 - 在审批等待期间取消，会撤回该卡片：请求会被答复为 `withdrawn`，并离开 `pending_approvals`。
+- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。带图片的补充还有 `"images"`：这些图片重新暂存后的样子，每张与 [`POST /api/uploads`](#post-apiuploads) 的回答相同（`id`、`name`、`mime_type`、`size_bytes`、`width`、`height`、`model_reads`），由客户端放回图片那一行，随下一条消息发送。没有时不会有这个键。
+
+## POST /api/turns/{turn_id}/notes
+
+向正在运行的轮次补充话语和图片。它的运行会在下一步读到这些内容。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "use the 2024 file instead", "client_request_id": "curl-note-1"}'
+```
+
+```json
+{"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
+```
+
+带一张图片（[先暂存](#post-apiuploads)，把它的 id 写进 `images`）：
+
+```json
+{"text": "this is the file I mean", "images": ["46fb64ffc2a04ad98a9a0bb3a1a0f0c1"], "client_request_id": "curl-note-2"}
+```
+
+```json
+{"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
+```
+
+- 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
+- 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
+- `text` 会去掉首尾空白，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。除非 `images` 里有图片，否则不能为空；此时模型读到的是 `[1 picture]`，`text` 为 `""`。一个轮次最多接收 20 条补充。
+- `images` 可选：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不能重复，且都还在暂存区，规则与消息的 `images` 相同（400 `invalid_request`、400 `picture_gone`；已知聊天模型读不了图片时为 409 `model_text_only`）。回答在 `images` 下列出它们，写法与轮次的 `images` 相同（`sha256`、`mime_type`、`size_bytes`；图片本身用 [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256) 取），`turn.note` 事件也一样。它们在调用返回之前就已保存在对话里，所以变成下一个轮次、或等过一次重启的补充仍然带着它们。运行在下一步把它们作为这条补充消息的图片部分发送（每一步最多 8 张，其余的补充在再下一步读到）；若到那时发现模型读不了图片，补充的文字里会说明这一点，并且不发送图片。
+- 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话和图片作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。
+- 文本文件不能加入正在运行的轮次。
+
+## POST /api/uploads
+
+为一条消息暂存一张图片。请求体是图片的字节，不是 JSON：这是唯一接收字节的路由。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST 'http://127.0.0.1:8401/api/uploads?name=shot.png' \
+  -H 'Content-Type: image/png' --data-binary @shot.png
+```
+
+```json
+{"id": "46fb64ffc2a04ad98a9a0bb3a1a0f0c1", "name": "shot.png", "mime_type": "image/png", "size_bytes": 20481, "width": 1280, "height": 720, "model_reads": true}
+```
+
+- 返回 201。请求体最多 20 MiB，`Content-Type` 是图片类型（`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/heic`、`image/heif`）或 `application/octet-stream`；类型只是提示，网关根据字节判断它是什么。其他路由仍保持 1 MiB 的 JSON 限制。
+- PNG 和 JPEG 的长边不超过 1,280 像素时保留原有像素，否则缩放到该尺寸；GIF（动图也一样）的第一帧和 WebP 图片变成 PNG，HEIC 图片变成 JPEG，使用这台 Mac 自带的图像工具（`sips`）。输出的图片会被再量一次，必须不超过 1,280 像素。`mime_type`、`size_bytes`、`width` 和 `height` 描述的是实际发送的图片。`name` 是可选的查询参数，会去掉路径和控制字符（最多 120 个字符）。
+- 每张图片都会被重写、去掉元数据，不需要改动的也一样：JPEG 只保留图像段（所有 `APPn` 段和注释都会被丢弃，图像结束之后的内容也一样），以及重新写出的两个固定段，即方向和 Adobe 颜色变换；PNG 只保留 `IHDR`、`PLTE`、`IDAT`、`IEND`、`tRNS`、`gAMA`、`cHRM`、`sRGB` 和 `cICP`。EXIF（相机、时间、GPS）、XMP、注释、文本块和内嵌的颜色配置文件都不会到达模型。结构不完整的图片会以 `picture_unreadable` 被拒绝，而不是原样传下去。
+- `model_reads` 说明对话模型是否读得了图片：`true`、`false`（页面会立刻提醒），或网关无法判断时的 `null`（此时会发送图片）。当某一轮因为图片而被拒绝之后一分钟内（或直到换了模型）它也是 `false`；之后会再次询问服务器。
+- 图片留在内存里，不写磁盘：同时最多 24 张、64 MiB，先放入的先丢，保留 30 分钟。在 `images` 中写上它的 `id` 的轮次会取走它。超过 20 MiB 返回 413 `too_large`；超过 1.2 亿像素返回 413 `picture_too_many_pixels`，依据是文件头里的尺寸（GIF 的每一帧、HEIC 的每张图），在任何程序打开文件之前判断；长边超过 1,280 像素的图片无法缩放（没有 `sips`，或它没能缩小）返回 413 `picture_scale`，因为不会有任何图片未经缩放就被传下去；字节不是 PNG、JPEG、GIF、WebP 或 HEIC 图片返回 415 `picture_unsupported`；图片损坏返回 415 `picture_unreadable`；这台 Mac 无法转换返回 415 `picture_convert`；请求体为空返回 400 `invalid_request`。
+- `GET /api/uploads/{id}` 返回实际发送的图片（已不存在则返回 404 `not_found`），安全策略与 blob 相同。`DELETE /api/uploads/{id}` 丢弃它，无论它是否存在都返回 204。
 
 ## POST /api/sessions/{id}/submissions/{client_request_id}/cancel
 
@@ -816,7 +914,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"submission": {"client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07", "state": "withdrawn", "session_id": "3f9c2a7b1d4e", "turn_id": null, "status": null, "cause": null, "turn": null, "error": "Request cancelled before acceptance.", "created_at": 1793163793.49}, "cancelling": false}
 ```
 
-- 请求体的 `text` 是消息的文本。对已保存的键使用另一段文本会返回 409 `submission_conflict`。
+- 请求体的 `text` 是消息的文本；带有 `attachments` 或 `images` 发送的消息要再次写出它们（图片只读取数量）。对已保存的键使用另一段文本会返回 409 `submission_conflict`。
 - 不带会话保存的撤回——即不带 id 的路由——其 `"session_id": null`。
 - 当该键的轮次已被接受且仍在运行时，返回 202 并附带 `"cancelling": true`：该轮次会按上述方式停止。`submission` 是本次调用读取到的键，因此其中的轮次仍为 `running`：它会在回答之后结束。请跟踪其 `turn.finished`（原因为 `user_stop`），或再次查询以获知结束。
 - 其他情况返回 200。已被接受且已经结束的轮次按原样返回。没有提交的键会被记录为已撤回，因此之后用它的创建或轮次会返回 409 `submission_withdrawn`；重复调用会返回相同的撤回结果。
@@ -838,7 +936,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 - `choice` 为 `once`（仅本次调用）、`session`（本次调用及本会话中该工具之后的每一次常规调用）或 `deny`。对 `high` 调用（见 `GET /api/sessions/{id}` 的 `review`），`session` 只允许这一次调用：回复为 `"remember": false`，不会产生授权。
 - `reason` 只属于 `deny`，最多 500 个字符；与其他 choice 一起使用的 reason 会返回 400 `invalid_request`。
 - 未知或已过期的请求返回 404 `not_found`；已被答复的请求返回 409 `already_answered`，因此两个客户端竞争同一张卡片时，只会得到一个答复。
-- 审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。
+- 被保留的 `session` 答复会成为 [`GET /api/grants`](#get-apigrants) 所列表格里的一项授权：在主对话里给出的，在所有对话里都算（`scope` 为 `global`），在其他对话里给出的只在那个对话里算。
+- 等待中的审批保存在网关的内存中。网关停止时，等待某个审批的轮次会以 `cancelled` 结束，原因为 `shutdown`，且其卡片被保存为已撤回。
 
 <a id="a-tasks-approvals-go-through-its-chat"></a>
 
@@ -846,8 +945,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 本人开始的任务，通过拥有它的对话（它的 `front_id`，否则是主对话）来问。在问任何人之前，代码先查这个对话记录的批准；是否匹配从不由模型决定。
 
-- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
-- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。对话的会话授权也覆盖它的任务对该工具的常规调用。使用对话记录或授权的任务，审查时会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会在记录或授权放行一步之前被读到；读不到对话的开始时间时，两者都不适用，改为问本人。
+- **记录。** 本人在某个对话里、或在它的任务（`origin` 为 `user` 的任务）的审批中给出的每次允许，只要这次调用可以复用，就为这个对话记录下来：工具是 melo 的规则会读的（`python_exec`、`shell_exec`、`file_write`、`file_edit`），且规则自己判定为 `routine`、没有类别。Auto 的允许一次、定时事项里的允许，以及对话被删除之后才给出的允许，从不记录。记录只保存在网关内存里（授权则保存在表格里）；重启或删除对话都会忘掉它们。等待中的审批的 `remembered` 由代码说明它的允许是否会被记录。
+- **匹配。** 当这个对话的某条记录与任务的这一步工具相同、步骤相同（Python 按语法树，命令按确切文本，文件写入按路径和内容，规则为它读过的文件没有变化）、文件夹相同，且这一步也可以复用时，这一步不再询问就运行，审批的 `origin` 为 `earlier`。对话会得到一条 `earlier` 回执，任务的 `earlier` 列出这一步（在记录被撤回之前 `live` 为 true）。在这个对话里算数的授权（它自己的或主对话的）也覆盖它的任务对该工具的常规调用；任务自己的授权只在那个任务里算。使用对话记录或授权的任务，审查时会读这个对话开始以来改动过的所有文件，所以早先的任务写下的文件会在记录或授权放行一步之前被读到；读不到对话的开始时间时，两者都不适用，改为问本人。
 - **从不。** 高影响、`undecided`、由模型判定或未经审查的步骤，以及规则不读的工具（网络、MCP 和其他工具）的每次调用，每次都问；`origin` 不是 `user` 的任务（包括定时事项的 `user_rule`）既不使用也不记录批准；别的对话的记录从不算数；Auto 从不凭记录运行它拦下的步骤。通过 `POST /api/tasks` 创建的任务属于本人（`origin` 为 `user`），除非 `front_id` 指向别的对话，否则属于主对话。
 - **说明。** `origin` 为 `user` 或 `user_rule` 的任务问本人时，它的对话的模型会就这一步写几句话（一次请求，最多 20 秒，依据任务的标题和目标、这次调用以及审查的理由，从不读取工具的输出）。它是审批的 `explanation`：`{"state": "pending" | "ready" | "none", "text"}`；其他任务的为 `none`。没有任何东西会读回它；决定的是答复。
 
@@ -881,7 +980,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 任务会话对任一变更都返回 409 `task_session_read_only`。
 - `title` 会被去除首尾空白，且必须为 1 到 200 个字符；其他长度返回 400 `invalid_request`。重命名的标题永远不会被自动标题替换。
-- `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话的工具授权会被遗忘。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
+- `workspace` 会移动会话：在新文件夹中，用会话的对话构建一个新的智能体，并且会话自己的授权会被收回（主对话的授权仍然有效）。规则与创建时相同：绝对路径或 `~/`，且为现有目录，否则返回 400 `invalid_workspace`。轮次运行期间返回 409 `session_busy`；被拒绝的移动会使该行保持原样。
 - `approvals` 是 `ask` 或 `auto`：从下一步起对话的[模式](#ask-and-auto)；已经在等待回答的调用继续等待。它在一个事务中写入会话的 `meta`，并保留其他键；`session.updated` 带有新的 `meta`。不是控制台对话（`chat` 或 `front`）的会话返回 409 `not_a_chat`。
 - 变更之后，回答为 200，附带会话。
 
@@ -972,22 +1071,60 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - `approvals` 是本人在这个对话里允许过的步骤，从新到旧，它的任务会不再询问就再次运行它们（[任务的批准](#a-tasks-approvals-go-through-its-chat)）。
 
-- `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示本会话在网关本次运行的剩余时间内允许它。
+- `source` 为 `builtin`、`provided`（MCP 服务器的工具）或 `custom`。`requires_approval` 表示调用它之前会先询问；`granted` 表示有一项授权在本会话里算数：它自己的、主对话的，或 Auto 让它读的网站。
 - 控制台会话处于网关模式：它列出 `file_read`、`file_write`、`list_files` 和 `python_exec`，从不列出 `shell_exec`。
 - 任务会话返回 409 `task_session_read_only`；此路由不能把它作为对话打开。
 - 此路由会打开会话，因为提供方的工具只有在其智能体启动之后才会出现。它可能需要数秒，而启动失败则返回 502 `agent_start_failed`。
 - 控制台尚未实现 MCP，因此不加载任何 MCP 工具：`mcp_config_label` 始终为 `""`，`mcp_error` 始终为 `MCP is not built in the console yet`。
 
+## GET /api/grants
+
+本人给出且尚未收回的每一项“为这个对话允许”，放在同一个列表里：它是 **设置 › 授权** 和 `/grants` 的数据。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/grants
+```
+
+```json
+{"grants": [
+  {"id": "5c1e0a9d47b2", "scope": "global", "session_id": "7b0f3c2e9a41", "session_kind": "main", "chat_title": "Main chat", "kind": "tool", "key": "shell_exec", "label": "Run shell commands", "action": "tool", "target": "shell_exec", "by": "person", "granted_at": 1793482098.4},
+  {"id": "a83d11f6c05e", "scope": "session", "session_id": "3f9c2a7b1d4e", "session_kind": "side", "chat_title": "Trip plans", "kind": "site", "key": "browser:https://example.com", "label": "Open example.com", "action": "open", "target": "example.com", "by": "person", "granted_at": 1793482131.9}
+]}
+```
+
+- `id` 是 12 位十六进制字符。`scope` 为 `global`（在主对话里给出，所以在每个对话、任务和终端里都算）或 `session`（只在 `session_id` 那个对话里算）。`session_kind` 为 `main`、`side`、`task` 或 `terminal`；`chat_title` 是那个对话的标题（主对话为 `Main chat`）。
+- `kind` 为 `tool`、`site`、`folder` 或 `window`。`key` 是检查时匹配的确切名称：`shell_exec`、`browser:https://example.com`、`browser-act:https://example.com`、文件夹路径、`window-read:<app>`。
+- `label` 是页面显示的文字（英文）。`action` 为 `tool`、`open`、`act`（点击和选择）、`read`（Auto 让对话读的网站）、`folder` 或 `window`。`target` 是工具名、网站、写成 `~/…` 的文件夹或应用。
+- `by` 为 `person` 或 `auto`；`granted_at` 是 Unix 秒。Auto 的授权只是读网站，且只在它所属的对话里算，主对话也一样。
+- 顺序与页面和 `/grants` 的编号一致：先是 `global` 授权，从新到旧；然后是各个对话，有最新授权的对话在前。
+- 从不保留，所以从不列出：允许一次、输入、提交表单、点击密码、验证码或银行卡字段、同意控件或来自其他网站的框、在其他应用的窗口里按键、付款、更改账号设置，以及每一个高影响的步骤。
+- 与其他路由使用相同的令牌和来源防护：没有令牌返回 401，来自其他来源返回 403 `foreign_origin`。
+
+## DELETE /api/grants/{id}
+
+收回一项授权。它立即停止生效，正在运行的对话也一样；下一个需要它的步骤会再次询问。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/grants/a83d11f6c05e
+```
+
+- 204 且无响应体。
+- id 未知或已收回时返回 404 `not_found`。
+- 与其他路由使用相同的令牌和来源防护。
+
 ## DELETE /api/sessions/{id}/grants/{tool}
 
-收回一项会话授权，使该工具下次再次询问。
+收回一项在对话里算数的授权，使该工具下次再次询问。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
-- 204 且无响应体；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。
-- 会话未打开或该工具没有授权时返回 404 `not_found`。`DELETE /api/sessions/{id}/grants` 不带工具名时，会忘记每一项授权，并返回 204，无论会话是否打开。
+- 200，响应体为 `{"revoked": [{"key": "python_exec", "scope": "session"}], "everywhere": false}`；`GET /api/sessions/{id}` 的 `grants` 和 `granted_at` 都会去掉它。它会收回这个对话自己的同名授权，以及主对话的同名授权（后者在所有对话里一并收回：这时 `everywhere` 为 `true`，那一行的 `scope` 为 `global`）。
+- 没有同名授权在该对话里算数时返回 404 `not_found`。对话不必处于打开状态。
+- `DELETE /api/sessions/{id}/grants` 不带名称时，会收回这个对话自己的授权并返回 200，响应体为 `{"revoked": N, "still_everywhere": M}`：旁支对话里还有 `M` 项主对话的授权仍然算数；在主对话里则收回每一项 `global` 授权。
+- 存储无法保存收回时返回 503 `store_unavailable`；检查已经不再使用这项授权，但重启后它会回来。
+- `DELETE /api/sessions/{id}/folders?path=PATH` 收回对话里允许读取的一个文件夹，回答和收回具名授权一样是 200：主对话允许的文件夹会在所有对话里一并收回，这时 `everywhere` 为 `true`（没有这样的授权时返回 404 `not_found`；存储无法保存时返回 503）。对话不处于打开状态时也可用。
 - 网站的授权以问题命名，例如 `browser-act:https://news.example`；名称里可以有斜杠，可以百分号编码后发送，也可以原样发送。
 
 ## DELETE /api/sessions/{id}/approvals/{entry_id}

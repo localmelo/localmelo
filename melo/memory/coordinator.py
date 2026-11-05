@@ -9,13 +9,7 @@ from localmelo.melo.checker.checker import Checker
 from localmelo.melo.checker.payloads import MemoryCandidatePayload
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
-from localmelo.melo.memory.assertions import (
-    parse_assertion,
-    record_observed_at,
-    verified_record,
-)
 from localmelo.melo.memory.hippo import (
-    EXACT_DUPLICATE_REASON,
     SIGNALS,
     CandidateItem,
     HippoPolicy,
@@ -176,18 +170,11 @@ class Hippo:
         short_term_empty_prefix: bool = False,
         short_term_evict_chunk: int = 0,
         memory: bool = True,
-        admit_on_outcome: bool = False,
         keep_decision_text: bool = False,
-        typed_assertions: bool = False,
     ) -> None:
         self.embedding = embedding
         self.memory = memory
-        self.admit_on_outcome = admit_on_outcome
         self.keep_decision_text = keep_decision_text
-        self.typed_assertions = typed_assertions
-        # User statements have no source timestamp; sentence/message order is
-        # their trusted observation order (review finding 2).
-        self._user_order = 0
         # R6-lite's typed write path exists only for a real long store: an
         # injected backend, never the in-memory fallback of a legacy run.
         self._store_enabled = long is not None and memory
@@ -209,11 +196,6 @@ class Hippo:
             procedures if procedures is not None else MemoryProcedures()
         )
         self.tools = ToolRegistry()
-
-    @property
-    def short(self) -> WorkingMemory:
-        """Backward-compat alias for ``self.working``."""
-        return self.working
 
     def close(self) -> None:
         """Close persistent backends if they support it.
@@ -396,40 +378,6 @@ class Hippo:
                 if item.source_ids is None
                 else item.source_ids
             )
-            typed = None
-            parsed = None
-            if self.typed_assertions:
-                item_provenance.pop("assertion", None)
-                verified = False
-                source_date = None
-                if candidate.source == "user" and candidate.task_id:
-                    from localmelo.melo.memory.notes import split_sentences
-
-                    task = await self.history.get_task(candidate.task_id)
-                    verified = bool(
-                        task
-                        and any(
-                            checked == sentence.strip()
-                            for _, sentence in split_sentences(task.query)
-                        )
-                    )
-                elif item.evidence is not None:
-                    verified, source_date = verified_record(
-                        checked, source_ids, item.evidence
-                    )
-                parsed = parse_assertion(checked, source_date=source_date)
-                if parsed is not None and verified:
-                    typed = parsed.to_dict()
-                    if candidate.source == "user":
-                        self._user_order += 1
-                        typed["user_order"] = float(self._user_order)
-                        typed["observed_at"] = candidate.created_at
-                    else:
-                        typed["observed_at"] = record_observed_at(item.evidence or "")
-                        if source_date is not None:
-                            typed["observed_date"] = source_date.isoformat()
-                    item_provenance["assertion"] = typed
-                    kind = "semantic"
             try:
                 active = await self.long.active_entries(kind)
             except LongTermSchemaError as exc:
@@ -465,46 +413,6 @@ class Hippo:
             except Exception as exc:  # malformed stored data or a policy bug
                 logger.warning("Could not route a memory candidate: %s", exc)
                 continue
-            if typed is not None and decision.reason not in (
-                "meta claim about the agent's own work",
-                "task-file-only fact",
-            ):
-                decision = replace(
-                    decision,
-                    action="NEW",
-                    kind=kind,
-                    target_id=None,
-                    reason="verified typed assertion",
-                )
-            elif typed is not None:
-                typed = None
-                item_provenance.pop("assertion", None)
-            elif (
-                self.typed_assertions
-                and decision.action in ("UPDATE", "IGNORE")
-                and decision.reason
-                not in (
-                    "short fact",
-                    "meta claim about the agent's own work",
-                    "task-file-only fact",
-                )
-                and not (
-                    decision.action == "IGNORE"
-                    and decision.reason == EXACT_DUPLICATE_REASON
-                )
-            ):
-                decision = replace(
-                    decision,
-                    action="NEW",
-                    target_id=None,
-                    reason="unverified assertion; retained without a link",
-                )
-            actual_decision: dict[str, Any] = {}
-            typed_options: dict[str, Any] = (
-                {"typed_assertion": True, "decision_details": actual_decision}
-                if typed is not None
-                else {}
-            )
             try:
                 entry_id, action = await self.long.apply(
                     text=checked,
@@ -524,7 +432,6 @@ class Hippo:
                     source_ids=source_ids,
                     keep_text=self.keep_decision_text,
                     candidate_id=candidate.candidate_id,
-                    **typed_options,
                 )
             except LongTermSchemaError as exc:
                 self._disable_store(exc)
@@ -543,8 +450,8 @@ class Hippo:
                     kind=kind,
                     admitted_by=signal,
                     entry_id=entry_id,
-                    target_id=actual_decision.get("target_id", decision.target_id),
-                    reason=actual_decision.get("reason", decision.reason),
+                    target_id=decision.target_id,
+                    reason=decision.reason,
                     source_ids=source_ids,
                     task_id=candidate.task_id,
                     redactions=redactions,
@@ -611,8 +518,6 @@ class Hippo:
                 selected.append((candidate, "user_request"))
             if digest is not None:
                 selected.append((digest, "user_request"))
-        elif self.admit_on_outcome and digest is not None:
-            selected.append((digest, "outcome"))
         decisions: list[MemoryDecision] = []
         for candidate, signal in selected:
             if self.staged.get(candidate.candidate_id) is None:
@@ -670,7 +575,6 @@ class Hippo:
                     top_k=pool,
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
-                    include_history=self.typed_assertions,
                 )
                 seen = {row[2].get("id") for row in raw_rows}
                 rows.extend(
@@ -687,7 +591,6 @@ class Hippo:
                         top_k=pool,
                         kinds=kinds,
                         exclude_task_ids=exclude_task_ids,
-                        include_history=self.typed_assertions,
                     )
                 ]
             same_rows: list[tuple[str, float, dict[str, Any]]] = []

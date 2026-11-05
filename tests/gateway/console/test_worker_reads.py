@@ -136,6 +136,43 @@ async def test_worker_blob_is_read_from_the_cli_store(
     await store.aclose()
 
 
+async def test_a_worker_store_failure_is_503_never_deleted(
+    client: TestClient, worker_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The id is no gateway chat's, so a read that fails after the lookup is a 503."""
+    store = SessionStore(worker_path, writer="cli")
+    turn = await store.begin_turn(
+        None, "task", holder=HOLDER, new_session=NewSession(kind="worker")
+    )
+    image = ImagePart(
+        mime_type="image/png", data=base64.b64encode(b"fixture-image").decode()
+    )
+    await store.append_events(
+        turn.session_id, turn.turn, [], holder=HOLDER, images=[image]
+    )
+    await store.aclose()
+    sid = turn.session_id
+    assert client.get(f"/api/sessions/{sid}").status_code == 200
+
+    async def broken(*args: object, **kwargs: object) -> None:
+        raise SessionStoreError("history file unreadable")
+
+    for name in ("list_turns", "list_events", "latest_event_id", "get_blob"):
+        monkeypatch.setattr(WorkerReader, name, broken)
+    for path in (
+        f"/api/sessions/{sid}",
+        f"/api/sessions/{sid}/turns",
+        f"/api/sessions/{sid}/status",
+        f"/api/sessions/{sid}/events?follow=false",
+        f"/api/sessions/{sid}/blobs/{image.sha256}",
+    ):
+        response = client.get(path)
+        assert response.status_code == 503, path
+        assert response.json()["error"]["code"] == "store_unavailable", path
+    # An id that is in neither file is still gone.
+    assert client.get("/api/sessions/nobody/turns").status_code == 404
+
+
 async def test_worker_rejects_foreign_file(
     client: TestClient, worker_path: Path
 ) -> None:

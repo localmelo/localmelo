@@ -1,4 +1,4 @@
-"""Opt-in fixed system prefix and per-run date contract."""
+"""The fixed system prefix and the per-run date contract."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions, _chat
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ReflectionEntry, ToolCall, ToolDef
+from localmelo.tests.agent.wire_runs import Call, Reply, ScriptedServer, _bodies, _llm
 
 
 class Provider(BaseLLMProvider):
@@ -50,7 +51,6 @@ async def test_prefix_frozen_across_steps_and_runs(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -96,7 +96,6 @@ async def test_tool_schema_behavior_when_registry_changes(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -123,14 +122,6 @@ async def test_tool_schema_behavior_when_registry_changes(
 async def test_provider_wire_preserves_common_prefix(
     kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Call,
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)"
     )
@@ -146,7 +137,6 @@ async def test_provider_wire_preserves_common_prefix(
     agent = Agent(
         llm=_llm(kind, httpx.MockTransport(server.handler)),
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -175,58 +165,43 @@ class AnswerProvider(Provider):
         return Message(role="assistant", content="done")
 
 
-async def test_dynamic_recall_reflection_and_schema_changes(
+async def test_dynamic_recall_and_schema_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC+05:30)"
     )
     provider = AnswerProvider()
-    chat = _chat.Chat(provider, fixed_prefix=True, system_notes=["Static note"])
+    chat = _chat.Chat(provider, system_notes=["Static note"])
     token = chat.begin_prefix()
     try:
-        reflection = ReflectionEntry(attempt_id=2, summary="earlier reflection")
         context = [Message("system", "[memory] source record 123")]
         task = Message("user", "unchanged task")
         first = [ToolDef("alpha", "first", {})]
         second = [ToolDef("beta", "second", {})]
-        await chat.plan_step(context, [task], first, task.content, [reflection])
-        await chat.plan_step([], [task], second, task.content, [])
-        await chat.reflect([task], task.content, 2, prior_reflections=[reflection])
+        await chat.plan_step(context, [task], first, task.content)
+        await chat.plan_step([], [task], second, task.content)
+        await chat.reflect([task], task.content, 2)
     finally:
         _chat.PREFIX_RUN.reset(token)
     one, two, reflected = [req[0] for req in provider.requests]
     prefix = one[0].content
     assert two[0].content == prefix and reflected[0].content.startswith(prefix)
-    assert "source record 123" not in prefix and "earlier reflection" not in prefix
+    assert "source record 123" not in prefix
     assert any(m.role == "user" and "source record 123" in m.content for m in one)
-    assert any(m.role == "user" and "earlier reflection" in m.content for m in one)
-    # The reflections follow the task query, at the tail of the request.
-    assert one[-1].role == "user" and one[-1].content.endswith("[end of reflections]")
-    assert one[-1].content.index(task.content) < one[-1].content.index(
-        "earlier reflection"
-    )
     data_message = next(m.content for m in one if "source record 123" in m.content)
     assert data_message.index(
         "[end of retrieved context and reflections]"
     ) < data_message.index(task.content)
-    reflection_message = next(
-        m.content for m in reflected if "earlier reflection" in m.content
-    )
-    assert reflection_message.index(
-        "[end of prior reflections]"
-    ) < reflection_message.index("Original task:")
     assert not any(
         a.role == b.role == "user" for a, b in zip(one, one[1:], strict=False)
     )
-    assert "earlier reflection" not in reflected[0].content
-    assert any("earlier reflection" in m.content for m in reflected[1:])
     assert chat.stats.schema_changes == 1
 
 
 async def test_data_delimiters_cannot_be_forged() -> None:
     provider = AnswerProvider()
-    chat = _chat.Chat(provider, fixed_prefix=True)
+    chat = _chat.Chat(provider)
     token = chat.begin_prefix()
     plan_marker = "[end of retrieved context and reflections]"
     reflect_marker = "[end of prior reflections]"
@@ -236,9 +211,8 @@ async def test_data_delimiters_cannot_be_forged() -> None:
 
     try:
         task = Message("user", "actual task")
-        await chat.plan_step(
-            [], [task], [], task.content, query_block=payload(plan_marker)
-        )
+        # The reflection comes first: a reflection after a planning request repeats
+        # it, and the earlier reflections are in the window already.
         await chat.reflect(
             [task],
             task.content,
@@ -247,10 +221,13 @@ async def test_data_delimiters_cannot_be_forged() -> None:
                 ReflectionEntry(attempt_id=1, summary=payload(reflect_marker))
             ],
         )
+        await chat.plan_step(
+            [], [task], [], task.content, query_block=payload(plan_marker)
+        )
     finally:
         _chat.PREFIX_RUN.reset(token)
     for (messages, _), marker in zip(
-        provider.requests, (plan_marker, reflect_marker), strict=True
+        provider.requests, (reflect_marker, plan_marker), strict=True
     ):
         text = "\n".join(m.content for m in messages[1:])
         lines = text.splitlines()
@@ -261,7 +238,7 @@ async def test_data_delimiters_cannot_be_forged() -> None:
 
 async def test_empty_recall_coalesces_multiple_task_messages() -> None:
     provider = AnswerProvider()
-    chat = _chat.Chat(provider, fixed_prefix=True)
+    chat = _chat.Chat(provider)
     token = chat.begin_prefix()
     try:
         await chat.plan_step(
@@ -276,77 +253,25 @@ async def test_empty_recall_coalesces_multiple_task_messages() -> None:
 
 
 @pytest.mark.parametrize("kind", ["openai", "ollama"])
-async def test_retrieve_exposure_offers_same_wire_schemas(
-    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Call,
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
-    monkeypatch.setattr(
-        _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC-04:00)"
-    )
-    (tmp_path / "sample.txt").write_text("evidence")
-    requests = []
-    for fixed in (False, True):
-        server = ScriptedServer(
-            _bodies(
-                kind,
-                [
-                    Reply(calls=(Call("file_read", {"path": "sample.txt"}),)),
-                    Reply(content="done"),
-                ],
-            )
+async def test_a_retrieval_request_keeps_its_messages_apart(kind: str) -> None:
+    server = ScriptedServer(_bodies(kind, [Reply(content="result")]))
+    provider = _llm(kind, httpx.MockTransport(server.handler))
+    chat = _chat.Chat(provider)
+    try:
+        await chat.retrieve(
+            [
+                Message("system", "retrieval policy"),
+                Message("user", "first"),
+                Message("user", "second"),
+            ]
         )
-        agent = Agent(
-            llm=_llm(kind, httpx.MockTransport(server.handler)),
-            options=AgentOptions(
-                fixed_prefix=fixed,
-                workspace_root=str(tmp_path),
-                builtins=frozenset({"file_read"}),
-                memory=False,
-                tool_exposure="retrieve",
-            ),
-        )
-        try:
-            assert (await agent.run_task("Read sample.txt")).status == "completed"
-        finally:
-            await agent.close()
-        requests.append([body.get("tools") for body in server.bodies])
-    assert requests[0] == requests[1]
-
-
-@pytest.mark.parametrize("kind", ["openai", "ollama"])
-async def test_retrieval_request_wire_is_unchanged(kind: str) -> None:
-    from localmelo.tests.agent.test_legacy_golden import (
-        Reply,
-        ScriptedServer,
-        _bodies,
-        _llm,
-    )
-
-    bodies = []
-    for fixed in (False, True):
-        server = ScriptedServer(_bodies(kind, [Reply(content="result")]))
-        provider = _llm(kind, httpx.MockTransport(server.handler))
-        chat = _chat.Chat(provider, fixed_prefix=fixed)
-        try:
-            await chat.retrieve(
-                [
-                    Message("system", "retrieval policy"),
-                    Message("user", "first"),
-                    Message("user", "second"),
-                ]
-            )
-        finally:
-            await provider.close()
-        bodies.append(server.bodies[0])
-    assert bodies[0] == bodies[1]
-    assert [m["role"] for m in bodies[0]["messages"]] == ["system", "user", "user"]
+    finally:
+        await provider.close()
+    assert [m["role"] for m in server.bodies[0]["messages"]] == [
+        "system",
+        "user",
+        "user",
+    ]
 
 
 async def test_cache_telemetry_excludes_unprefixed_calls(
@@ -363,7 +288,6 @@ async def test_cache_telemetry_excludes_unprefixed_calls(
             self.last_usage = {
                 "cached_tokens": {
                     "retrieve": 100,
-                    "estimate": 200,
                     "plan": 3,
                     "reflect": 5,
                 }[LLM_REQUEST_KIND.get()]
@@ -373,18 +297,17 @@ async def test_cache_telemetry_excludes_unprefixed_calls(
     monkeypatch.setattr(
         _chat, "local_date_line", lambda: "Date: 2026-10-28 (UTC+00:00)"
     )
-    chat = _chat.Chat(UsageProvider(), fixed_prefix=True)
+    chat = _chat.Chat(UsageProvider())
     token = chat.begin_prefix()
     try:
         await chat.retrieve([Message("user", "find")])
-        await chat.estimate_steps("task")
         assert chat.stats.prefix_cached_tokens is None
         await chat.plan_step([], [Message("user", "task")], [], "task")
         await chat.reflect([Message("user", "task")], "task", 1)
     finally:
         _chat.PREFIX_RUN.reset(token)
     assert chat.stats.prefix_cached_tokens == 8
-    assert chat.stats.details["cached_tokens"] == 308
+    assert chat.stats.details["cached_tokens"] == 108
 
 
 async def test_fit_before_coalescing_preserves_current_recall(
@@ -407,7 +330,7 @@ async def test_fit_before_coalescing_preserves_current_recall(
         Message("tool", "result\n" + current, tool_call_id="c1"),
     ]
     provider = AnswerProvider()
-    chat = _chat.Chat(provider, fixed_prefix=True)
+    chat = _chat.Chat(provider)
     token = chat.begin_prefix()
     try:
         await chat.plan_step(
@@ -467,7 +390,6 @@ async def test_run_freezes_day_across_midnight_and_dst(
     agent = Agent(
         llm=provider,
         options=AgentOptions(
-            fixed_prefix=True,
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
             memory=False,
@@ -487,40 +409,6 @@ async def test_run_freezes_day_across_midnight_and_dst(
         systems[0].replace("2026-10-31 (UTC-04:00)", "2026-11-01 (UTC-05:00)")
         == systems[2]
     )
-
-
-def test_fixed_prefix_preserves_option_positional_order() -> None:
-    from dataclasses import fields
-
-    names = [item.name for item in fields(AgentOptions)]
-    assert names[0] == "context_window"
-    assert names[-22:-14] == [
-        "mode",
-        "fixed_prefix",
-        "captured_history",
-        "typed_assertions",
-        "window_eviction",
-        "brief_probe",
-        "brief_check",
-        "reflect_tool_guard",
-    ]
-    # New fields go last, so a positional caller keeps every earlier one.
-    assert names[-14:] == [
-        "cache_layout",
-        "window_messages",
-        "brief_items",
-        "lean_output",
-        "confine_writes",
-        "identity",
-        "tool_images",
-        "tool_images_keep",
-        "tool_images_retire",
-        "answer_on_stop",
-        "max_calls",
-        "task_aids",
-        "refused_steps",
-        "empty_reply_fallback",
-    ]
 
 
 def test_local_date_line_includes_local_offset(monkeypatch: pytest.MonkeyPatch) -> None:

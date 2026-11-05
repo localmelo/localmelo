@@ -22,8 +22,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from localmelo.melo.memory.history.sqlite import SqliteHistory
-from localmelo.melo.memory.retrieval import RawCall
 from localmelo.melo.schema import LLMCallRecord, StepRecord, TaskRecord
+from localmelo.support.memory.retrieval_corpus import RawCall
 
 StepIds = dict[tuple[str, int], list[str]]
 

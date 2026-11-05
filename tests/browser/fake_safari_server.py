@@ -43,6 +43,8 @@ melo sends to answer from a tiny set of pages. ``screenshot`` answers as the rea
 - ``native_error``: ``page_interactions`` fails and does nothing
 - ``native_missed``: ``page_interactions`` answers but its input reaches nothing
 - ``native_redirect``: a real click lands on another element, which melo's guard stops
+  (every time; the guard says it was a sticky header)
+- ``native_redirect_once``: only the first real click lands on another element
 
 A script that acts (melo's ``act_script``) is answered from the tiny page
 model too: an element may say ``goes`` (the address a click lands on), and a
@@ -53,7 +55,8 @@ real server's ``textTree`` lines; its own input acts on that node and is recorde
 ``native`` (and in ``FAKE_SAFARI_LOG``, a file a test reads); an element that
 says ``trusted_only`` ignores the page script's click, ``notice`` is text the
 page shows after a click, ``redraw`` makes every click redraw the page (new
-fingerprints), ``covered`` puts another element over it. A page's ``points``
+fingerprints), ``covered`` puts another element over it (``by`` says which, as
+the page script tells it; ``shifted`` says only a part of it is clear). A page's ``points``
 say what is at a point of the view (``"x,y"``).
 """
 
@@ -161,6 +164,14 @@ PAGES: dict[str, dict[str, Any]] = {
                 "label": "Hidden away",
                 "fp": "button|hidden|1",
                 "covered": True,
+                "by": {"what": "an ad", "detail": "iframe from ads.example.net"},
+            },
+            {
+                "kind": "button",
+                "label": "Half hidden",
+                "fp": "button|half|1",
+                "shifted": True,
+                "by": {"what": "a sticky header", "detail": "h1"},
             },
         ],
         "points": {
@@ -212,6 +223,7 @@ body_looks = 0
 STYLE_RETURN = MODE == "return_style"
 redraws: dict[str, int] = {}
 looks: dict[str, dict[str, Any]] = {}
+redirected: list[int] = []  # the real clicks the page has already moved elsewhere
 armed = ""
 native: list[str] = []
 LOG = os.environ.get("FAKE_SAFARI_LOG", "")
@@ -385,6 +397,8 @@ def do_act(spec: dict[str, Any]) -> dict[str, Any]:
         return {
             "ok": True,
             "covered": bool(element.get("covered")),
+            "shifted": bool(element.get("shifted")),
+            "by": element.get("by"),
             "tag": TAGS[element["kind"]],
             said: element.get("label", ""),
         }
@@ -431,8 +445,10 @@ def interact(args: dict[str, Any]) -> dict[str, Any]:
     here = tabs[current]["history"]
     page = PAGES.get(here[-1], {"elements": []})
     look = looks.setdefault(armed, {})
-    if MODE == "native_redirect":
+    if MODE == "native_redirect" or (MODE == "native_redirect_once" and not redirected):
+        redirected.append(1)
         look["blocked"] = ["moved"]
+        look["moved_by"] = {"what": "a sticky header", "detail": "h1"}
         return text("Clicked.")
     if "point" in item:
         spot = page.get("points", {}).get(
@@ -511,9 +527,11 @@ def run_script(source: str) -> Any:
                 "count": look.get("count", 0),
                 "quiet": 5000,
                 "target": False,
+                "moved": "moved" in look.get("blocked", []),
             }
         looks.pop(asked["key"])
         return {
+            "movedBy": look.get("moved_by"),
             "blocked": look.get("blocked", []),
             "texts": look.get("texts", []),
             "before": look.get("before", ""),

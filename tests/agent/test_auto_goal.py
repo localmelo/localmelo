@@ -301,6 +301,35 @@ async def test_a_sign_in_click_is_no_credential_use(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_failing_review_refuses_the_question_and_keeps_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def down(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("the review is down")
+
+    monkeypatch.setattr(StepReviewer, "review", down)
+    tool = Steps()
+    agent = _agent(FakeModel(_steps("mood"), []), tmp_path / "ws", tool)
+    card = Card()
+    recorder = Recorder()
+
+    result = await agent.run_task(
+        CHECK_IN, on_event=recorder, approval=ChatPolicy(card, "auto")
+    )
+
+    # The question is refused, nobody is asked, and the run goes on.
+    assert (result.status, tool.answers, card.asked) == ("completed", [], [])
+    [finished] = recorder.of("tool.finished")
+    [kept] = finished.data["tool_asks"]
+    assert (kept["tool"], kept["allowed"], kept["origin"], kept["reason"]) == (
+        STEPS["mood"][0],
+        False,
+        "error",
+        "RuntimeError: the review is down",
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_step_the_review_finds_on_the_goal_runs_whatever_the_words_name(
     tmp_path: Path,
 ) -> None:
@@ -454,7 +483,7 @@ async def test_paying_or_an_account_change_asks_even_when_asked_for_and_on_the_g
     card = Card(ApprovalDecision(True, remember=True))
     policy = ChatPolicy(card, "auto")
     # Clicking on the forum was allowed for the chat before.
-    policy.ask._granted.add(f"browser-act:https://{FORUM}")
+    policy.ask.grants.grant_now(f"browser-act:https://{FORUM}")
 
     await agent.run_task(f"buy premium on {FORUM}", approval=policy)
 

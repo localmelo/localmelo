@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -145,6 +146,47 @@ class TestConfigRoundtrip:
 
 
 # -- Config validation --
+
+
+def _changed(value: Any) -> Any:
+    """A value of the same kind as *value* that is not *value*."""
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, int):
+        return value + 1
+    if isinstance(value, float):
+        return value + 0.5
+    if isinstance(value, str):
+        return value + "x"
+    if isinstance(value, list):
+        return ["a"]
+    if isinstance(value, dict):
+        return {"k": "v"}
+    return 7  # a number that is unset by default
+
+
+def test_every_setting_is_saved_alone_and_loaded_back(config_path: Path) -> None:
+    """Each field of the config, changed on its own, is the only key the file gains."""
+    settings_by_key = config.flat(Config())
+    bad = []
+    for key, default in settings_by_key.items():
+        if key == "pricing":  # tables of its own, tested with the prices
+            continue
+        new = _changed(default)
+        cfg = Config()
+        config.set_key(cfg, key, new)
+        save(cfg)
+        section, dot, name = key.rpartition(".")
+        want: dict[str, Any] = {"chat_backend": "", "embedding_backend": ""}
+        if dot:
+            want[section] = {name: new}
+        else:
+            want[name] = new
+        written = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        if written != want or config.get_key(load(), key) != new:
+            bad.append(key)
+    assert bad == []
+    assert len(settings_by_key) > 100  # the walk found the tables
 
 
 class TestConfigValidation:
@@ -441,163 +483,6 @@ class TestHasEmbedding:
         assert cfg.has_embedding is False
 
 
-# -- Migration tests --
-
-
-class TestMigration:
-    """load() should migrate old configs to the new format."""
-
-    def test_migrate_online_without_local_embedding(self, tmp_path: Path) -> None:
-        """Old backend='online' without local_embedding -> openai + none."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-            "local_embedding = false\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "none"
-        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
-        assert loaded.openai.chat_model == "gpt-4o"
-
-    def test_migrate_online_with_local_embedding(self, tmp_path: Path) -> None:
-        """Old backend='online' with local_embedding=true -> openai + mlc."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-            "local_embedding = true\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "mlc"
-
-    def test_migrate_online_gemini(self, tmp_path: Path) -> None:
-        """Old backend='online' with provider='gemini' -> gemini vendor key."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "online"\n\n'
-            "[online]\n"
-            'provider = "gemini"\n'
-            'api_key_env = "GEMINI_API_KEY"\n'
-            'chat_model = "gemini-2.0-flash"\n'
-            "local_embedding = false\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "gemini"
-        assert loaded.embedding_backend == "none"
-        assert loaded.gemini.api_key_env == "GEMINI_API_KEY"
-        assert loaded.gemini.chat_model == "gemini-2.0-flash"
-
-    def test_migrate_mlc_llm_legacy(self, tmp_path: Path) -> None:
-        """Old backend='mlc-llm' -> mlc + mlc."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "mlc-llm"\n\n'
-            "[mlc]\n"
-            'chat_model = "Qwen3-1.7B"\n'
-            "chat_port = 8400\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "mlc"
-        assert loaded.embedding_backend == "mlc"
-        assert loaded.mlc.chat_model == "Qwen3-1.7B"
-        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
-
-    def test_migrate_ollama_without_embedding(self, tmp_path: Path) -> None:
-        """Old backend='ollama' without embedding_model -> ollama + none."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "ollama"\n\n'
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "ollama"
-        assert loaded.embedding_backend == "none"
-
-    def test_migrate_ollama_with_embedding(self, tmp_path: Path) -> None:
-        """Old backend='ollama' with embedding_model -> ollama + ollama."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'backend = "ollama"\n\n'
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n'
-            'embedding_model = "nomic-embed-text"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "ollama"
-        assert loaded.embedding_backend == "ollama"
-        assert loaded.ollama.embedding_model == "nomic-embed-text"
-
-    def test_migrate_chat_backend_mlc_llm(self, tmp_path: Path) -> None:
-        """New-ish format with chat_backend='mlc-llm' -> migrated to 'mlc'."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'chat_backend = "mlc-llm"\n'
-            'embedding_backend = "mlc-llm"\n\n'
-            "[mlc]\n"
-            'chat_model = "Qwen3-4B"\n'
-            "chat_port = 8400\n"
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "mlc"
-        assert loaded.embedding_backend == "mlc"
-        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
-
-    def test_migrate_chat_backend_cloud_api(self, tmp_path: Path) -> None:
-        """New-ish format with chat_backend='cloud_api' -> migrated to vendor key."""
-        config_path = str(tmp_path / "config.toml")
-        content = (
-            'chat_backend = "cloud_api"\n'
-            'embedding_backend = "none"\n\n'
-            "[cloud_api]\n"
-            'provider = "openai"\n'
-            'api_key_env = "OPENAI_API_KEY"\n'
-            'chat_model = "gpt-4o"\n'
-        )
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "none"
-        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
-        assert loaded.openai.chat_model == "gpt-4o"
-
-    def test_new_format_not_migrated(self, tmp_path: Path) -> None:
-        """New format with vendor-specific keys should NOT trigger migration."""
-        config_path = str(tmp_path / "config.toml")
-        content = 'chat_backend = "openai"\n' 'embedding_backend = "ollama"\n'
-        (tmp_path / "config.toml").write_text(content)
-        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
-            loaded = load()
-        assert loaded.chat_backend == "openai"
-        assert loaded.embedding_backend == "ollama"
-
-
 # -- Fail-fast config validation --
 
 
@@ -629,6 +514,15 @@ class TestFailFastValidation:
         errors = cfg.validate()
         assert len(errors) == 1
         assert "chat_backend is not set" in errors[0]
+
+    def test_a_file_in_the_old_single_backend_format_has_no_backend(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            'backend = "ollama"\n\n[ollama]\nchat_model = "qwen3:8b"\n',
+            encoding="utf-8",
+        )
+        assert "chat_backend is not set" in load().validate()[0]
 
     def test_invalid_chat_backend_returns_early(self) -> None:
         cfg = Config(chat_backend="nope", embedding_backend="none")
@@ -799,9 +693,25 @@ def _timeout_cfg(request_timeout_s: Any = None) -> Config:
     )
 
 
-# What save() wrote for _timeout_cfg() before request_timeout_s existed. A
-# config without the key must still be saved byte for byte like this.
-_SAVED_BEFORE_REQUEST_TIMEOUT = """\
+# What save() writes for _timeout_cfg(): the two backends, then only what is not
+# at its default, a table at a time.
+_SAVED = """\
+chat_backend = "vllm"
+embedding_backend = "none"
+
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B"
+extra_body = {chat_template_kwargs = {enable_thinking = false}}
+
+[openai]
+api_key_env = "OPENAI_API_KEY"
+chat_model = "gpt-4o"
+"""
+
+# What the version before wrote for the same config: every table, and the keys
+# that were always written. It must load to the same config.
+_SAVED_BEFORE_DEFAULTS_WERE_LEFT_OUT = """\
 chat_backend = "vllm"
 embedding_backend = "none"
 
@@ -867,6 +777,91 @@ def config_path(tmp_path: Path) -> Iterator[Path]:
         yield path
 
 
+class TestSavedFile:
+    def test_only_what_differs_from_the_defaults_is_written(
+        self, config_path: Path
+    ) -> None:
+        save(_timeout_cfg())
+        assert config_path.read_text(encoding="utf-8") == _SAVED
+
+    def test_a_file_the_earlier_version_wrote_loads_to_the_same_config(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(_SAVED_BEFORE_DEFAULTS_WERE_LEFT_OUT, encoding="utf-8")
+        loaded = load()
+        assert loaded == _timeout_cfg()
+        save(loaded)
+        assert config_path.read_text(encoding="utf-8") == _SAVED
+
+    def test_blanks_around_a_model_name_or_an_address_are_dropped_when_read(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "vllm"\n\n'
+            '[vllm]\nchat_url = "http://h:1/v1 "\nchat_model = " m"\n'
+            'embedding_url = "http://h:2/v1"\n'
+            'embedding_model = "Qwen3-Embedding-0.6B "\n\n'
+            '[openai]\napi_key_env = "KEY "\napi_key = " keychain:localmelo.k "\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.vllm.chat_url == "http://h:1/v1"
+        assert loaded.vllm.chat_model == "m"
+        assert loaded.vllm.embedding_model == "Qwen3-Embedding-0.6B"
+        assert loaded.openai.api_key_env == "KEY"
+        assert loaded.openai.api_key == " keychain:localmelo.k "  # never the key
+
+
+class TestWrongKindOfValue:
+    def test_a_port_in_quotes_is_a_sentence_and_not_a_traceback(
+        self, config_path: Path
+    ) -> None:
+        save(_timeout_cfg())
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8") + '\n[gateway]\nport = "8401"\n',
+            encoding="utf-8",
+        )
+        assert load().validate() == [
+            "[gateway] port must be a whole number, got '8401'"
+        ]
+
+    def test_a_quoted_false_in_approvals_stops_the_check(
+        self, config_path: Path
+    ) -> None:
+        # "false" in quotes would read as true and turn on what the person
+        # meant to turn off: [approvals] changes behaviour, so it is checked.
+        save(_timeout_cfg())
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8")
+            + '\n[approvals]\nauto_asks = "false"\n',
+            encoding="utf-8",
+        )
+        assert load().validate() == [
+            "[approvals] auto_asks must be true or false, got 'false'"
+        ]
+
+    def test_a_table_that_is_not_a_table_is_ignored(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\ngateway = 5\n',
+            encoding="utf-8",
+        )
+        assert load().gateway == GatewayConfig()
+
+    def test_every_field_of_every_table_is_checked_and_nothing_raises(self) -> None:
+        silent = []
+        for key, default in config.flat(Config()).items():
+            section, dot, name = key.rpartition(".")
+            if dot:
+                cfg = _timeout_cfg()
+                config.set_key(cfg, key, 12345 if isinstance(default, str) else "oops")
+                errors = [*cfg.validate(), *cfg.setting_errors(), *cfg.cli_errors()]
+                if not any(
+                    e.startswith(f"[{section}] {name} must be ") for e in errors
+                ):
+                    silent.append(key)
+        assert silent == []
+
+
 class TestRequestTimeoutConfig:
     def test_unset_by_default(self, config_path: Path) -> None:
         assert Config().request_timeout_s is None
@@ -874,13 +869,6 @@ class TestRequestTimeoutConfig:
             'chat_backend = "vllm"\nembedding_backend = "none"\n', encoding="utf-8"
         )
         assert load().request_timeout_s is None
-
-    def test_a_config_without_it_is_saved_as_before(self, config_path: Path) -> None:
-        save(_timeout_cfg())
-        assert config_path.read_bytes() == _SAVED_BEFORE_REQUEST_TIMEOUT.encode()
-        loaded = load()
-        assert loaded.request_timeout_s is None
-        assert loaded.validate() == []
 
     @pytest.mark.parametrize(
         ("value", "written"), [(600, "600"), (450.5, "450.5"), (0.25, "0.25")]
@@ -890,12 +878,10 @@ class TestRequestTimeoutConfig:
     ) -> None:
         save(_timeout_cfg(value))
         # One more line in the top-level block, after embedding_backend.
-        assert config_path.read_text(encoding="utf-8") == (
-            _SAVED_BEFORE_REQUEST_TIMEOUT.replace(
-                'embedding_backend = "none"\n',
-                f'embedding_backend = "none"\nrequest_timeout_s = {written}\n',
-                1,
-            )
+        assert config_path.read_text(encoding="utf-8") == _SAVED.replace(
+            'embedding_backend = "none"\n',
+            f'embedding_backend = "none"\nrequest_timeout_s = {written}\n',
+            1,
         )
         loaded = load()
         assert loaded.request_timeout_s == value
@@ -905,18 +891,6 @@ class TestRequestTimeoutConfig:
         before = config_path.read_bytes()
         save(loaded)
         assert config_path.read_bytes() == before
-
-    def test_a_legacy_file_keeps_it(self, config_path: Path) -> None:
-        config_path.write_text(
-            'backend = "ollama"\n'
-            "request_timeout_s = 900\n\n"
-            "[ollama]\n"
-            'chat_url = "http://localhost:11434"\n'
-            'chat_model = "qwen3:8b"\n',
-            encoding="utf-8",
-        )
-        loaded = load()
-        assert (loaded.chat_backend, loaded.request_timeout_s) == ("ollama", 900)
 
     def test_a_key_inside_a_table_is_not_the_top_level_key(
         self, config_path: Path
@@ -936,7 +910,7 @@ class TestRequestTimeoutConfig:
         save(_timeout_cfg())
         text = config_path.read_text(encoding="utf-8")
         config_path.write_text(
-            text.replace("\n\n[mlc]", '\nrequest_timeout_s = "600"\n\n[mlc]', 1),
+            text.replace("\n\n[vllm]", '\nrequest_timeout_s = "600"\n\n[vllm]', 1),
             encoding="utf-8",
         )
         loaded = load()
@@ -1074,35 +1048,6 @@ def test_the_mcp_config_key_round_trips(tmp_path: Path) -> None:
 
 
 class TestSchedulerConfig:
-    def test_scheduler_defaults_are_not_written(self, config_path: Path) -> None:
-        save(_timeout_cfg())
-        # The exact file of a config without scheduler settings is unchanged.
-        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
-
-    def test_a_non_default_scheduler_section_round_trips(
-        self, config_path: Path
-    ) -> None:
-        cfg = _timeout_cfg()
-        cfg.scheduler = SchedulerConfig(
-            policy="class",
-            n_srv=2,
-            r_f=0,
-            n_fg=0,
-            focus_s=5.0,
-            call_log=False,
-            call_log_dir="/tmp/x",
-        )
-        save(cfg)
-        assert "[scheduler]" in config_path.read_text(encoding="utf-8")
-        loaded = load()
-        assert loaded.scheduler.policy == "class"
-        assert loaded.scheduler.n_srv == 2
-        assert loaded.scheduler.r_f == 0
-        assert loaded.scheduler.n_fg == 0
-        assert loaded.scheduler.focus_s == 5.0
-        assert loaded.scheduler.call_log is False
-        assert loaded.scheduler.call_log_dir == "/tmp/x"
-        assert loaded.validate() == []
 
     @pytest.mark.parametrize(
         "changes",
@@ -1164,22 +1109,6 @@ class TestSchedulerConfig:
         assert loaded.scheduler.n_fg == 0
         assert not hasattr(loaded.scheduler, "future_key")
 
-    def test_a_non_default_lock_section_round_trips(self, config_path: Path) -> None:
-        cfg = _timeout_cfg()
-        cfg.scheduler = SchedulerConfig(
-            gpu_lock_file="~/Developer/mlsys/experiments/.gpu-lock",
-            lock_self="local_ai-benchmark session",
-            lock_gate="wait",
-        )
-        save(cfg)
-        text = config_path.read_text(encoding="utf-8")
-        assert 'gpu_lock_file = "~/Developer/mlsys/experiments/.gpu-lock"' in text
-        assert 'lock_self = "local_ai-benchmark session"' in text
-        assert 'lock_gate = "wait"' in text
-        loaded = load()
-        assert loaded.scheduler == cfg.scheduler
-        assert loaded.validate() == []
-
     @pytest.mark.parametrize(
         "changes",
         [
@@ -1213,16 +1142,6 @@ class TestSchedulerConfig:
 
 
 class TestGatewayWorkspaceAndAtomicSave:
-    def test_gateway_workspace_round_trips(self, config_path: Path) -> None:
-        cfg = _timeout_cfg()
-        cfg.gateway.workspace = "~/demo-project"
-        save(cfg)
-        assert 'workspace = "~/demo-project"' in config_path.read_text(encoding="utf-8")
-        loaded = load()
-        assert loaded.gateway.workspace == "~/demo-project"
-        cfg.gateway.workspace = ""
-        save(cfg)
-        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
 
     def test_every_string_field_round_trips_quotes_backslashes_brackets_and_non_bmp(
         self, config_path: Path
@@ -1345,19 +1264,6 @@ class TestGatewayWorkspaceAndAtomicSave:
 
 
 class TestCliStatusLineConfig:
-    def test_the_default_is_auto_and_not_written(self, config_path: Path) -> None:
-        assert CliConfig().status_line == "auto"
-        save(_timeout_cfg())
-        assert "status_line" not in config_path.read_text(encoding="utf-8")
-
-    def test_off_round_trips(self, config_path: Path) -> None:
-        cfg = _timeout_cfg()
-        cfg.cli = CliConfig(status_line="off")
-        save(cfg)
-        assert 'status_line = "off"' in config_path.read_text(encoding="utf-8")
-        loaded = load()
-        assert loaded.cli.status_line == "off"
-        assert loaded.cli_errors() == []
 
     @pytest.mark.parametrize("value", ['"sometimes"', "true", "1", '["auto"]'])
     def test_a_bad_value_is_reported_and_is_not_a_config_error(
@@ -1375,20 +1281,6 @@ class TestCliStatusLineConfig:
 
 
 class TestCliColorConfig:
-    def test_auto_is_the_default_and_not_written(self, config_path: Path) -> None:
-        assert (CliConfig().colors, CliConfig().background) == ("auto", "auto")
-        save(_timeout_cfg())
-        assert "[cli]" not in config_path.read_text(encoding="utf-8")
-
-    def test_a_depth_and_a_background_round_trip(self, config_path: Path) -> None:
-        cfg = _timeout_cfg()
-        cfg.cli = CliConfig(colors="256", background="light")
-        save(cfg)
-        text = config_path.read_text(encoding="utf-8")
-        assert 'colors = "256"' in text and 'background = "light"' in text
-        loaded = load()
-        assert (loaded.cli.colors, loaded.cli.background) == ("256", "light")
-        assert loaded.cli_errors() == []
 
     def test_a_bare_number_reads_as_the_depth(self, config_path: Path) -> None:
         config_path.write_text(
@@ -1419,38 +1311,6 @@ class TestCliColorConfig:
 
 
 class TestCliStreamConfig:
-    def test_the_default_is_on_and_not_written(self, config_path: Path) -> None:
-        assert CliConfig().stream is True
-        save(_timeout_cfg())
-        assert "[cli]" not in config_path.read_text(encoding="utf-8")
-        assert load().cli == CliConfig()
-
-    def test_off_is_written_and_another_key_does_not_pin_the_default(
-        self, config_path: Path
-    ) -> None:
-        cfg = _timeout_cfg()
-        cfg.cli = CliConfig(stream=False)
-        save(cfg)
-        assert "stream = false" in config_path.read_text(encoding="utf-8")
-        assert load().cli.stream is False
-        cfg.cli = CliConfig(status_line="off")
-        save(cfg)
-        assert "stream" not in config_path.read_text(encoding="utf-8")
-        assert load().cli.stream is True
-
-    def test_stream_and_hints_round_trip(self, config_path: Path) -> None:
-        cfg = _timeout_cfg()
-        cfg.cli = CliConfig(
-            stream=True, reasoning_tags={"stub-model": "none", "qwen3": "explicit"}
-        )
-        save(cfg)
-        loaded = load()
-        assert loaded.cli.stream is True
-        assert loaded.cli.reasoning_tags == {
-            "stub-model": "none",
-            "qwen3": "explicit",
-        }
-        assert loaded.validate() == []
 
     def test_a_reasoning_tags_subtable_loads(self, config_path: Path) -> None:
         config_path.write_text(
@@ -1584,6 +1444,26 @@ class TestOmlxSpelling:
         text = config_path.read_text(encoding="utf-8")
         assert text.startswith('chat_backend = "vllm"\nembedding_backend = "vllm"\n')
 
+    def test_use_chat_server_puts_the_server_in_the_config(self) -> None:
+        cfg = Config(chat_backend="vllm", embedding_backend="vllm")
+        cfg.chat_alias = cfg.embedding_alias = "omlx"
+        cfg.vllm.chat_url = "http://h:1/v1"
+        cfg.use_chat_server("http://h:1/v1", "m")  # the same server keeps its spelling
+        assert (cfg.chat_alias, cfg.vllm.chat_model) == ("omlx", "m")
+        cfg.use_chat_server("http://h:2/v1", "n", embedding_model="e")
+        assert (cfg.chat_alias, cfg.embedding_alias) == ("", "")
+        assert (cfg.embedding_backend, cfg.vllm.embedding_url) == (
+            "vllm",
+            "http://h:2/v1",
+        )
+        assert (cfg.vllm.chat_model, cfg.vllm.embedding_model) == ("n", "e")
+        cfg.use_chat_server("http://h:3", "o", ollama=True)
+        assert (cfg.chat_backend, cfg.ollama.chat_url, cfg.ollama.chat_model) == (
+            "ollama",
+            "http://h:3",
+            "o",
+        )
+
     @pytest.mark.parametrize("spelling", ["OMLX", "omlx ", "omlx2", "oMLX"])
     def test_another_spelling_is_not_recognised(
         self, config_path: Path, spelling: str
@@ -1616,7 +1496,7 @@ class TestOmlxSpelling:
         )
         assert load().validate() == [
             "[vllm] chat_url is empty. "
-            "Set it to your oMLX URL (e.g. http://localhost:8000).",
+            "Set it to your oMLX URL (e.g. http://localhost:8000/v1).",
             "[vllm] chat_model is empty. Specify the oMLX model name.",
         ]
 
@@ -1691,33 +1571,7 @@ class TestSettingOverrides:
 class TestApprovalsConfig:
     """``[approvals] mode``: how a new chat starts (#339)."""
 
-    def test_ask_by_default_and_auto_saved_and_loaded_back(
-        self, config_path: Path
-    ) -> None:
-        assert Config().approvals.mode == "ask"
-        cfg = Config(chat_backend="vllm", embedding_backend="none")
-        save(cfg)
-        assert "[approvals]" not in config_path.read_text(encoding="utf-8")
-        cfg.approvals.mode = "auto"
-        save(cfg)
-        assert '[approvals]\nmode = "auto"\n' in config_path.read_text(encoding="utf-8")
-        assert load().approvals.mode == "auto"
-
     def test_another_mode_is_a_setting_error(self) -> None:
         cfg = Config()
         cfg.approvals.mode = "yolo"
         assert any("[approvals] mode" in e for e in cfg.setting_errors())
-
-    def test_auto_asks_is_on_by_default_and_off_is_saved_and_loaded_back(
-        self, config_path: Path
-    ) -> None:
-        # A developer setting (#465): off, Auto never asks and blocks as before.
-        assert Config().approvals.auto_asks is True
-        cfg = Config(chat_backend="vllm", embedding_backend="none")
-        cfg.approvals.auto_asks = False
-        save(cfg)
-        text = config_path.read_text(encoding="utf-8")
-        assert '[approvals]\nmode = "ask"\nauto_asks = false\n' in text
-        assert load().approvals.auto_asks is False
-        cfg.approvals.auto_asks = "no"  # type: ignore[assignment]
-        assert any("[approvals] auto_asks" in e for e in cfg.setting_errors())

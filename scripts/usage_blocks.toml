@@ -183,6 +183,14 @@ continue the recovery card task
 继续恢复卡片任务
 '''
 
+[block.browser-chrome]
+title = ["Browse in the background", "在后台浏览"]
+mode = "chat"
+caption = ["Type it in the terminal chat or the console. /browser on uses the browser you chose before, or Safari if you never chose one; /browser off turns browsing off.", "在终端对话或控制台里输入。/browser on 用你之前选的浏览器，没选过时用 Safari；/browser off 关闭浏览。"]
+text = '''
+/browser chrome
+'''
+
 [block.dev-setup]
 title = ["Development setup", "开发环境"]
 text = '''

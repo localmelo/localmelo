@@ -130,6 +130,21 @@ those tools can do.
 - **To limit what a task can do,** use `--builtins none` or a subset of the
   tools, `--mcp-only`, a container or virtual machine, or a separate user
   account.
+- **Pages in melo's background Chrome do not reach this Mac.** Chrome's
+  Local Network Access check stays on and melo grants no permission, so a
+  page's requests (its frames' included) cannot reach this computer or its
+  network (melo's gateway, a model server, a dev server). The one exception
+  is a sign-in app melo lists in code (today WeChat's quick login): melo
+  sends those requests itself, only from that app's own sign-in page (by the
+  `Origin` Chrome sets), only to its fixed ports at `127.0.0.1` with the
+  certificate checked for its name, never to melo's own ports, with no
+  cookie, and follows no redirect; only content, caching and CORS headers
+  come back. Chrome does not check where a page sends its own tab: melo
+  stops that before it is sent when the address is written as local (a user
+  part, `x@127.0.0.1`, included) or is a name of one word, but a name that
+  only resolves to this Mac (DNS rebinding, `/etc/hosts`) is checked by
+  neither, and melo only blanks that tab after it lands and reads nothing
+  from it. Safari's automation windows have no such check.
 - **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
   See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
   for sign-in and token rotation. Host, Origin and fetch-metadata checks remain

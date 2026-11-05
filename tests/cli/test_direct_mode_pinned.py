@@ -104,6 +104,18 @@ The setting ``[agent] reflection`` (``-X agent.reflection=off``) and the develop
 (``--max-steps 30``, ``steps_per_attempt=10``) and ``--attempt-policy none`` the requests
 are the same, as ``tests/agent/test_legacy_golden.py`` and ``tests/cli/test_reflection_config.py``
 check.
+The flags that set one option are read from the table in ``support/flag_options.py`` and the
+``[agent]`` table is checked once by ``Config.agent_errors()``, so ``_direct_options`` and
+``_build_direct_mode_agent`` have new hashes again; the options they resolve are the same for
+every command line and config the benchmark uses (``tests/cli/test_direct_agent_config.py``,
+``tests/cli/test_flag_options.py`` and the legacy golden check it). A ``--base-url`` run now
+refuses a bad ``[agent]`` value in any key, not only in those direct mode read.
+The options whose A/B was decided (``--fixed-prefix``, ``--reflect-tool-guard``,
+``--cache-layout``, ``--reflection-gate`` and ``--admit-on-outcome``) are gone, so
+``_build_direct_mode_agent`` no longer applies ``[memory] admit_on_outcome`` and has a new
+hash; the requests of a run with the defaults are the same, as
+``tests/agent/test_cache_defaults.py`` and the request digests in
+``tests/agent/test_lean_output.py`` check.
 ``_check_args`` is not pinned.
 """
 
@@ -126,12 +138,12 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "bfa01067a66362585dd4b253c0f96dfec294c66c7bfa9011d88c1a7b74292511",
+    "_build_direct_mode_agent": "dd0a0d63ce3fdd69e0c74192b77963163033480fb212ca59834e6e64a23d6bd3",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "4ca334b646b0410e488f768afbe1ae8864706641c81a81ff67df7c019f6379bf",
+    "_direct_options": "75d050739b74c5b80e7af4136de127695669800ae6b074d97dcb94e2db5b3b20",
     "_parse_builtins": "93c1b46e6db728f4114df712300ae06fccffd830e5d6e5df49da47abaa3fc460",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

@@ -21,7 +21,6 @@ import copy
 import hashlib
 import logging
 import os
-import re
 from typing import TYPE_CHECKING, Any, Final
 
 from fastapi import FastAPI
@@ -43,8 +42,9 @@ from localmelo.support import (
 from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.backends.registry import get_backend
-from localmelo.support.browser import desktop
+from localmelo.support.browser import chrome, desktop
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
@@ -86,7 +86,6 @@ probe_all = _ORIG_PROBE_ALL
 list_models = _ORIG_LIST_MODELS
 check_hosted = _ORIG_CHECK_HOSTED
 
-_ENV_NAME_RE: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _LOCAL_FIELDS: Final = (
     "chat_url",
     "chat_model",
@@ -131,8 +130,14 @@ class SettingsPutBody(_SettingsBaseBody):
     language: StrictStr | None = None
     # ``[approvals] mode``, how new chats start: ``ask`` or ``auto``; absent leaves it.
     approvals: StrictStr | None = None
-    # ``[browser] driver``: true reads web pages in Safari (``/browser on``), false turns it off; absent leaves it.
+    # ``[browser] driver``: true turns browsing on (``/browser on``: the driver
+    # chosen before, else Safari's automation windows), false turns it off;
+    # absent leaves it.
     browser: StrictBool | None = None
+    # ``[browser] driver`` by name: ``off``, ``safari-automation`` or ``chrome``
+    # (Settings' Browser choice, ``/browser chrome``); absent leaves it. It wins
+    # over ``browser``.
+    browser_driver: StrictStr | None = None
     # ``[browser] app_windows``: whether melo sees and answers a window another app
     # opens after its act in the browser; absent leaves it.
     app_windows: StrictBool | None = None
@@ -219,9 +224,10 @@ def _choice_label(key: str, label: str) -> str:
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend.
 
-    A ``vllm`` backend is labelled ``oMLX`` when the config says so or the
-    health probe's last model listing did. The generic label reads in the
-    language the request asks for (English for a client that asks for none).
+    ``local`` says the model runs on a server of the user's own (the page words
+    a failed run by it). A ``vllm`` backend is labelled ``oMLX`` when the config
+    says so or the health probe's last model listing did. The generic label reads
+    in the language the request asks for (English for a client that asks for none).
     """
     backend = cfg.chat_backend
     section = getattr(cfg, backend, None) if backend else None
@@ -233,12 +239,36 @@ def model_json(cfg: Any) -> dict[str, Any]:
     return {
         "backend": backend,
         "backend_label": _kind_words(label),
+        "local": backend in LOCAL_BACKENDS,
         "name": name,
         "embedding": cfg.embedding_backend or "none",
     }
 
 
-async def health_json(console: Console) -> dict[str, Any]:
+async def desktop_helper_json(
+    cfg: config.Config, *, check: bool = False
+) -> dict[str, Any]:
+    """The desktop control helper's status, as health reports it.
+
+    ``state`` is ``missing`` (not installed), ``installed`` (its permissions
+    not checked yet), ``granted``, ``no_grant`` (Accessibility is off) or
+    ``failed`` (it did not start); ``app`` is the app that needs the grants and
+    ``pictures`` whether it also holds Screen Recording (null: not known). The
+    status is what a chat last found. Only with *check*, and only while melo
+    watches other apps' windows, is the helper started (and stopped) to look.
+    """
+    watching = cfg.browser.driver != "off" and cfg.browser.app_windows is True
+    try:
+        status = await desktop.helper_status(check=check and watching)
+    except Exception:  # health never fails for one part (see running_status)
+        logger.warning("Could not read the desktop helper's status", exc_info=True)
+        return {"state": "failed", "app": "", "pictures": None, "problem": "unknown"}
+    return status.to_json()
+
+
+async def health_json(
+    console: Console, *, check_helper: bool = False
+) -> dict[str, Any]:
     """The whole ``GET /api/health`` body."""
     entries = console.sessions.entries()
     return {
@@ -267,6 +297,7 @@ async def health_json(console: Console) -> dict[str, Any]:
             "resume_mode": DEFAULT_RESUME_MODE,
         },
         "status": await running_status(console),
+        "desktop_helper": await desktop_helper_json(console.cfg, check=check_helper),
         "uptime_s": round(console.uptime_s(), 1),
     }
 
@@ -308,9 +339,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     chat = [model for model in found.models if discovery.is_chat_model(model)]
     if not chat:
         return {**body, "problem": body["problem"] or "it lists only embedding models"}
-    loaded = discovery.LoadedModels()
-    if len(chat) > 1:
-        loaded = await discovery.loaded_models(found.url, transport=transport)
+    loaded = await discovery.loaded_among(found.url, chat, transport=transport)
     return {
         **body,
         "state": "found",
@@ -364,7 +393,7 @@ def _developer_settings(cfg: config.Config) -> list[dict[str, Any]]:
     hold it. ``flag`` is the old option that sets it, ``issue`` the issue that
     decides a comparison.
     """
-    values = setting_keys.flat(cfg)
+    values = config.flat(cfg)
     groups: dict[str, list[dict[str, Any]]] = {}
     for key in setting_keys.catalog().values():
         default = _shown(key.default)
@@ -395,7 +424,7 @@ def settings_json() -> dict[str, Any]:
     revision = _file_revision()
     cfg = config.load()
     sections: dict[str, dict[str, Any]] = {}
-    for name in config._LOCAL_SECTIONS:
+    for name in LOCAL_BACKENDS:
         sec = getattr(cfg, name)
         sections[name] = {
             "chat_url": str(sec.chat_url),
@@ -403,7 +432,7 @@ def settings_json() -> dict[str, Any]:
             "embedding_url": str(sec.embedding_url),
             "embedding_model": str(sec.embedding_model),
         }
-    for name in config._CLOUD_SECTIONS:
+    for name in CLOUD_BACKENDS:
         sec = getattr(cfg, name)
         env_name = str(sec.api_key_env)
         preset = hosted.preset_for(name, sec)
@@ -438,7 +467,7 @@ def settings_json() -> dict[str, Any]:
                 {
                     "key": key,
                     "label": _choice_label(key, label),
-                    "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
+                    "kind": "local" if key in LOCAL_BACKENDS else "cloud",
                 }
                 for key, label in onboard.CHAT_BACKENDS
             ],
@@ -456,6 +485,14 @@ def settings_json() -> dict[str, Any]:
             cfg.approvals.mode if cfg.approvals.mode in config.APPROVAL_MODES else "ask"
         ),
         "browser": cfg.browser.driver != "off",
+        "browser_driver": (
+            cfg.browser.driver
+            if cfg.browser.driver in config.BROWSER_DRIVERS
+            else "off"
+        ),
+        # Whether Google Chrome is installed: without it the Chrome choice says
+        # to install it first.
+        "chrome_installed": chrome.chrome_installed(),
         "app_windows": cfg.browser.app_windows is True,
         # Whether the desktop control helper is installed: without it melo can
         # only name the app that came to the front.
@@ -495,9 +532,9 @@ def _extra_folders(cfg: config.Config) -> list[dict[str, Any]]:
 def _validate_sections(sections: dict[str, Any]) -> None:
     for sec_name, sec_fields in sections.items():
         _check_single_line("sections", sec_name)
-        if sec_name in config._LOCAL_SECTIONS:
+        if sec_name in LOCAL_BACKENDS:
             allowed: tuple[str, ...] = _LOCAL_FIELDS
-        elif sec_name in config._CLOUD_SECTIONS:
+        elif sec_name in CLOUD_BACKENDS:
             allowed = _CLOUD_FIELDS
         else:
             raise ApiError(
@@ -526,17 +563,17 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                 )
             _check_single_line(f"sections.{sec_name}.{field_name}", field_val)
             if (
-                sec_name in config._CLOUD_SECTIONS
+                sec_name in CLOUD_BACKENDS
                 and field_name == "api_key_env"
                 and field_val
-                and not _ENV_NAME_RE.fullmatch(field_val)
+                and not hosted.ENV_NAME_RE.fullmatch(field_val)
             ):
                 raise ApiError(
                     400,
                     "invalid_request",
                     f"sections.{sec_name}.api_key_env: Invalid environment variable name.",
                 )
-            if sec_name in config._CLOUD_SECTIONS and field_name == "api_key":
+            if sec_name in CLOUD_BACKENDS and field_name == "api_key":
                 try:
                     keychain.parse_ref(field_val)
                 except ValueError:
@@ -547,7 +584,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                         "keychain:localmelo.<name> reference.",
                     ) from None
             if (
-                sec_name in config._CLOUD_SECTIONS
+                sec_name in CLOUD_BACKENDS
                 and field_name == "thinking"
                 and field_val not in hosted.THINKING
             ):
@@ -590,6 +627,13 @@ def _build_candidate(
             f"language: Must be one of {config.CONSOLE_LANGUAGES}.",
         )
 
+    driver = getattr(body, "browser_driver", None)
+    if driver is not None and driver not in config.BROWSER_DRIVERS:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"browser_driver: Must be one of {config.BROWSER_DRIVERS}.",
+        )
     approvals = getattr(body, "approvals", None)
     if approvals is not None and approvals not in config.APPROVAL_MODES:
         raise ApiError(
@@ -626,8 +670,11 @@ def _build_candidate(
     if approvals is not None:
         candidate.approvals.mode = approvals
     browser = getattr(body, "browser", None)
-    if browser is not None:
-        candidate.browser.driver = "safari-automation" if browser else "off"
+    if browser is not None and driver is None:
+        on = candidate.browser.driver if candidate.browser.driver != "off" else ""
+        candidate.browser.driver = (on or "safari-automation") if browser else "off"
+    if driver is not None:
+        candidate.browser.driver = driver
     app_windows = getattr(body, "app_windows", None)
     if app_windows is not None:
         candidate.browser.app_windows = app_windows
@@ -649,6 +696,7 @@ def _build_candidate(
         target = getattr(candidate, sec_name)
         for field_name, field_val in sec_fields.items():
             setattr(target, field_name, field_val)
+        config.trim_text(target)
 
     errors = [_redact(err) for err in candidate.validate()]
     if errors:
@@ -670,7 +718,7 @@ def _spell_server(before: config.Config, candidate: config.Config) -> None:
     server = (candidate.chat_backend, candidate.vllm.chat_url)
     if server != (before.chat_backend, before.vllm.chat_url):
         candidate.chat_alias = ""
-    onboard._spell_omlx(candidate)
+    onboard.spell_omlx(candidate)
 
 
 def _check_probe_url(field: str, url: str) -> None:
@@ -683,12 +731,12 @@ def _check_probe_url(field: str, url: str) -> None:
 def _check_candidate_probe_urls(candidate: config.Config) -> None:
     backend = candidate.chat_backend
     section = getattr(candidate, backend)
-    if backend in config._LOCAL_SECTIONS:
+    if backend in LOCAL_BACKENDS:
         _check_probe_url(f"{backend}.chat_url", section.chat_url)
-    elif backend in config._CLOUD_SECTIONS and section.base_url:
+    elif backend in CLOUD_BACKENDS and section.base_url:
         _check_probe_url(f"{backend}.base_url", section.base_url)
     backend = candidate.embedding_backend
-    if backend in config._LOCAL_SECTIONS:
+    if backend in LOCAL_BACKENDS:
         _check_probe_url(
             f"{backend}.embedding_url", getattr(candidate, backend).embedding_url
         )
@@ -728,13 +776,13 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("follow_up")
     if before.agent.reflection != after.agent.reflection:
         changed.append("reflection")
-    for sec_name in config._LOCAL_SECTIONS:
+    for sec_name in LOCAL_BACKENDS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
         for field_name in _LOCAL_FIELDS:
             if getattr(b_sec, field_name) != getattr(a_sec, field_name):
                 changed.append(f"{sec_name}.{field_name}")
-    for sec_name in config._CLOUD_SECTIONS:
+    for sec_name in CLOUD_BACKENDS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
         for field_name in _CLOUD_FIELDS:
@@ -841,8 +889,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
     """Register the health, settings and models routes on *app*."""
 
     @app.get("/api/health")
-    async def api_health() -> JSONResponse:
-        return JSONResponse(content=await health_json(console))
+    async def api_health(helper: str = "") -> JSONResponse:
+        # ``?helper=check`` starts the desktop control helper once to read its permissions.
+        return JSONResponse(
+            content=await health_json(console, check_helper=helper == "check")
+        )
 
     @app.get("/api/settings")
     async def api_get_settings() -> JSONResponse:
@@ -862,7 +913,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             state = await asyncio.to_thread(keychain.status, found.service)
             env = bool(found.key_env and os.environ.get(found.key_env))
             return JSONResponse(content={"keychain": state, "env_set": env})
-        if not name or not _ENV_NAME_RE.fullmatch(name):
+        if not name or not hosted.ENV_NAME_RE.fullmatch(name):
             raise ApiError(
                 400,
                 "invalid_request",
@@ -924,7 +975,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def api_test_settings(body: SettingsTestBody) -> JSONResponse:
         _, candidate = _build_candidate(body)
         _check_candidate_probe_urls(candidate)
-        if candidate.chat_backend in config._CLOUD_SECTIONS:
+        if candidate.chat_backend in CLOUD_BACKENDS:
             return await _test_hosted(candidate)
         try:
             async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
@@ -958,13 +1009,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
         saved = config.load() if os.path.isfile(config.config_path()) else console.cfg
         resolved_backend = backend if backend else saved.chat_backend
-        if resolved_backend in config._CLOUD_SECTIONS:
+        if resolved_backend in CLOUD_BACKENDS:
             raise ApiError(
                 400,
                 "invalid_request",
                 t("errors.listLocalOnly"),
             )
-        if resolved_backend not in config._LOCAL_SECTIONS:
+        if resolved_backend not in LOCAL_BACKENDS:
             raise ApiError(
                 400,
                 "invalid_request",

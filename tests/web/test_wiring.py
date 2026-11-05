@@ -58,16 +58,6 @@ def test_web_fetch_is_on_by_default_and_a_default_config_says_nothing_of_it() ->
     assert (key.default, key.file, key.section) == (True, True, "tools")
 
 
-def test_turning_it_off_is_saved_loaded_and_checked() -> None:
-    cfg = _cfg(web_fetch=False)
-    config.save(cfg)
-    assert "[tools]\nweb_fetch = false" in Path(config.config_path()).read_text()
-    assert config.load().tools.web_fetch is False
-    cfg.tools.web_fetch = "no"  # type: ignore[assignment]
-    assert any("[tools] web_fetch must be a bool" in e for e in cfg.setting_errors())
-    assert any("[tools] web_fetch must be a bool" in e for e in cfg.validate())
-
-
 def test_x_turns_it_off_for_one_run() -> None:
     cli._parse(["-X", "tools.web_fetch=off", "q"])
     assert config.overrides() == {"tools.web_fetch": False}
@@ -159,7 +149,9 @@ async def test_the_terminal_and_the_tasks_pass_the_setting(
     factory._live.clear()
     await factory.build()
     assert seen == [True]
-    assert "web_fetch=loaded.tools.web_fetch is True" in inspect.getsource(launch)
+    assert "web_fetch=session_config.tools.web_fetch is True" in inspect.getsource(
+        launch
+    )
     source = inspect.getsource(workers)
     # A task's provider asks the chat that owns it about a site, or refuses.
     assert "[WebFetchProvider(task=True, cfg=self.settings())]" in source

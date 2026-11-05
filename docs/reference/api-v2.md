@@ -12,7 +12,7 @@ endpoints, optional request fields and response keys are added. A client may ign
 know.
 
 This page documents every API v2 route: health, settings, key status,
-connection test, model listing, sessions, turns, SSE events, blobs, pictures,
+connection test, model listing, sessions, turns, added words, uploads, SSE events, blobs, pictures,
 submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
@@ -37,7 +37,8 @@ JSON request bodies and JSON responses use UTF-8. Event streams use
 
 A request with a non-empty body
 needs `Content-Type: application/json`, and a body may have at most 1 MiB
-(1,048,576 bytes). Every string in a request must be valid UTF-8 without
+(1,048,576 bytes); the one exception is [`POST /api/uploads`](#post-apiuploads), which takes
+a picture's bytes (an image `Content-Type`, at most 20 MiB). Every string in a request must be valid UTF-8 without
 lone surrogates.
 
 Responses carry `Cache-Control: no-store`,
@@ -66,8 +67,8 @@ every route below:
 | 404 | `not_found` | an unknown session, blob, picture or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
 | 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
-| 413 | `too_large` | the request body is over 1 MiB, or a requested picture is over 20 MB |
-| 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
+| 413 | `too_large` | the request body is over 1 MiB (20 MiB for `POST /api/uploads`), or a requested picture is over 20 MB |
+| 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` (an image type for `POST /api/uploads`) |
 | 415 | `not_a_picture` | a picture request for a file whose name or content is not a PNG, JPEG, GIF, WebP or SVG |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, or an app-started gateway's `/api/auth/login` has no matching `X-LocalMelo-Instance` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
@@ -75,8 +76,10 @@ every route below:
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
 
 The gateway logs the cause of a 500, whose response carries a fixed
-message. A 503 repeats the store's reason with the home folder written as
-`~`; it never carries a traceback, a lease holder or a key.
+message. A 503 from a store call that failed says "The session store is not
+available." and the gateway logs the cause; a store that could not open repeats
+its reason with the home folder written as `~`. A 503 never carries a
+traceback, a lease holder or a key.
 
 The legacy `/v1/*` routes keep their own bodies, including FastAPI's `422` and
 `{"detail": ...}`.
@@ -103,7 +106,7 @@ output or log the header; same-user processes can still read the token file.
   "version": "0.1.0",
   "configured": true,
   "config_errors": [],
-  "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
+  "model": {"backend": "ollama", "backend_label": "Ollama", "local": true, "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
@@ -119,6 +122,7 @@ output or log the header; same-user processes can still read the token file.
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
+  "desktop_helper": {"state": "granted", "app": "Cua Driver", "pictures": true, "problem": ""},
   "uptime_s": 132.4
 }
 ```
@@ -131,7 +135,9 @@ output or log the header; same-user processes can still read the token file.
   is `oMLX` when the config file says `omlx` or a model listing of the server
   did, else `OpenAI-compatible server` (in the language of the request when it
   sends `X-LocalMelo-Language: zh-Hans`; a client that sends none reads
-  English). `model.embedding`
+  English). `model.local` is whether the chat backend is a server of the user's
+  own (`mlc`, `ollama`, `vllm`, `sglang`), not a hosted service; the page words a
+  failed run by it. `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the
@@ -207,6 +213,7 @@ output or log the header; same-user processes can still read the token file.
   and an undone turn does not count. It is for a client that shows how the last
   run went: the macOS app's pet and activity pill read it. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
+- `desktop_helper` is the desktop control helper's state as the last chat or check found it: `state` is `missing` (not installed), `installed` (not checked yet), `granted` (it runs and has Accessibility; `pictures` says whether it also has Screen Recording), `no_grant` (Accessibility is off) or `failed` (it did not start); `app` is the app to give the permissions to and `problem` says what is wrong. `GET /api/health?helper=check` starts the helper once to read its permissions (without a prompt, at most every 30 seconds, and only while browsing is on and `[browser] app_windows` is true); otherwise nothing is started.
 
 ## GET /api/activity
 
@@ -412,9 +419,16 @@ sessions.
 - `approvals` is optional: `ask` or `auto` sets `[approvals] mode`, the mode
   new chats start in (other values are 400 `invalid_request`); omitted, the
   saved value is kept. Chats made before keep their own mode.
-- `browser` is optional: `true` sets `[browser] driver` to `safari-automation`,
-  `false` to `off` (anything else is 400 `invalid_request`); omitted, the saved
-  value is kept. It is what `/browser on` and `/browser off` save.
+- `browser` is optional: `true` turns browsing on (`[browser] driver` keeps a
+  browser chosen before, else becomes `safari-automation`), `false` sets it to
+  `off` (anything else is 400 `invalid_request`); omitted, the saved value is
+  kept. It is what `/browser on` and `/browser off` save.
+- `browser_driver` is optional: `off`, `safari-automation` or `chrome` sets
+  `[browser] driver` by name and wins over `browser` (other values are 400
+  `invalid_request`); omitted, the saved value is kept. It is what Settings'
+  **Browser** choice, `/browser chrome` and `/browser safari` save. The
+  response carries `browser_driver` and `chrome_installed` (whether Google
+  Chrome is installed, so the choice can say to install it first).
 - The console saves one change at a time: the loaded `revision` with only the
   changed field, and its Undo is the same request with the earlier value.
 - A `revision` that does not match the file on disk returns 409
@@ -426,8 +440,10 @@ sessions.
   `extra_body`, `mcp_config`, `request_timeout_s`, `[agent]` and
   `[scheduler]`, validates the candidate (`400 invalid_settings` with
   `details.errors` on failure), writes `config.toml` atomically, closes
-  idle session Agents so the next turn opens with the new settings, and
-  returns the updated `GET /api/settings` body.
+  idle session Agents so the next turn opens with the new settings (a
+  session whose turn runs, or whose question waits, keeps its Agent until
+  then and gets a new one at its next turn), and returns the updated
+  `GET /api/settings` body.
 
 ## POST /api/settings/test
 
@@ -933,8 +949,13 @@ token total.
 }
 ```
 
-- `grants` are the tools allowed for the rest of the session; `granted_at`
-  maps each one to when the grant began.
+- `grants` are the names allowed in the chat (tools, sites, windows), whether
+  the chat is open or not: its own and, for a side chat, the main chat's, which
+  hold everywhere; `granted_at` maps each one to when the grant began.
+  `grants_everywhere` names those of a side chat's `grants` that hold because
+  the main chat allowed them (`[]` in the main chat and a task): taking one back
+  here takes it back everywhere.
+  [`GET /api/grants`](#get-apigrants) lists the same grants with their details.
 - `mcp_error` is why this session runs without MCP tools, or `""`. It is
   always `""` today: MCP in the console is not built yet.
 - `agent` is `open`, `paused` (closed, its conversation kept) or
@@ -1271,7 +1292,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   the chat's card. With none open, Auto blocks the step at once, as for a
   script that reads the stream without `watch`. A card nobody answers within
   1 minute, or whose last viewer is gone for 5 seconds, is declined:
-  `approval.resolved` with `outcome` `denied` and `origin` `timeout`.
+  `approval.resolved` with `outcome` `denied` and `origin` `timeout`. The
+  console keeps its stream open while its page is hidden, so a hidden page
+  still counts as a viewer.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it
@@ -1309,6 +1332,10 @@ rows.
 - `during_turn` is `true` (runs while a turn runs), `false` (refused then) or
   `"show"` (runs then only without arguments). `action` is what the page does
   with the command; `everyday` names the commands `/help` lists first.
+- `grants` (`[revoke N]`) is in the table with `action` `grants`: the page
+  lists what the person allowed and takes one back, as
+  [`GET /api/grants`](#get-apigrants) and
+  [`DELETE /api/grants/{id}`](#delete-apigrantsid) do.
 - A message is a command only when it starts with `/` and a lowercase name
   followed by whitespace or its end. The page runs a command itself and never
   sends it to a chat.
@@ -1415,6 +1442,40 @@ lists them).
   'unsafe-inline'; frame-ancestors 'none'`, so it can draw but never run a
   script or open as a page. The route reads one file and writes and lists nothing.
 
+## GET /api/sessions/{id}/browser
+
+Whether the chat has a page open in melo's browser, and which. The console asks it to open its Browser panel when melo starts browsing. It starts nothing and streams nothing.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
+```
+
+```json
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
+```
+
+- `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
+- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over). The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
+- `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
+
+## WS /api/sessions/{id}/browser/live
+
+A live picture of the chat's browser: the page melo works in, as JPEG pictures, and a small JSON message each time something about it changes. The person can take the page over through it. The console and the app's pop-out window use it.
+
+```text
+{"type":"meta","state":"live","tab":"t2","url":"https://example.com/","title":"Example Domain","browsing":true,"owner":"melo","w":1280,"h":713,"offsetTop":0,"scale":1}
+<binary frame: one JPEG>
+```
+
+- The server sends text frames and binary frames. A text frame is a `meta` message: `state` is `idle` (no page open), `loading` (a page is open and the first picture has not come), `live`, `stale` (the picture stream failed, so the last picture no longer updates) or `closed`; `reason` explains `closed` (`tab`, `browser`, `chat` or `unavailable`). `tab`, `url`, `title` and `browsing` are as above, `owner` is `melo` or `you` (the person took the tab over), and once a picture came `w` and `h` are the page view in CSS pixels, with `offsetTop` and `scale` (the page's zoom). `takeover: true` says the page may be taken over. While `owner` is `you`, `grace` is how many seconds the tab stays the person's once no viewer watches it (120), and `dialog` (`kind` `alert`, `confirm`, `prompt` or `beforeunload`, `message`, `default`) is a box the page shows, for the person to answer.
+- A binary frame is one JPEG. Only the newest picture is kept for each viewer, so a slow viewer skips pictures and never queues them. A page that does not change sends one picture and then none; moving pages are held to `[browser] live_fps` (15 by default).
+- The optional `tab=tN` query pins the view to one tab of this chat. Without it the view follows the tab melo works in, and a `meta` message tells of each switch. Another chat's tab, an unknown tab and a malformed name are refused.
+- The stream runs only while somebody watches: the browser keeps no picture stream for a chat with no viewer, a chat holds at most 4 viewers at a time, and nothing it carries is written to disk or to the session store.
+- It is behind the same guard as every `/api` route: the Host header, a same-origin Origin when one is sent, and the bearer or the console's cookie. A script sends `Authorization: Bearer <token>` and no Origin.
+- The client sends JSON text messages. `{"type":"take"}` hands the tab it watches to the person and `{"type":"give"}` gives it back to melo. While the person has it, and melo is not in the middle of a step, these are their input: `{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}` (page CSS pixels: the picture's point divided by `scale`, after `offsetTop`), `{"type":"wheel","x","y","dx","dy","mods"}`, `{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`, `{"type":"compose","text","start","end"}` (an input method's text being composed), `{"type":"text","text"}` (its commit) and `{"type":"paste","text"}` (plain text), at most 1,000 characters each; and `{"type":"dialog","accept","text"}` answers the page's box. `mods` is the sum of Alt 1, Control 2, Meta 4 and Shift 8. Input is held to 120 messages a second per viewer. Any other message, and input while melo has the tab, is dropped without an answer. Nothing a message carries is logged, stored or shown to a model.
+- While nobody watches a tab the person has (the last viewer closed, or the token rotated), it stays theirs for 120 seconds, then returns to melo. melo's browser steps on it wait meanwhile, at most 45 seconds each.
+- The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down.
+
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 
 What became of a message the client named with a `client_request_id`. The
@@ -1459,12 +1520,16 @@ These codes answer on the write routes besides the shared ones above:
 |---|---|---|
 | 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
 | 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
+| 400 | `picture_gone` | a turn named a picture that no longer waits: removed, expired or already sent |
+| 409 | `model_text_only` | a turn, or the retry of one, has pictures and the chat's model is known not to read them |
+| 409 | `chat_answering` | a message with pictures arrived while the chat answers a task's question |
 | 409 | `session_busy` | a turn is already running in the session |
 | 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
 | 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
-| 409 | `turn_not_running` | cancel named a turn that is not running |
+| 409 | `turn_not_running` | cancel, or an added word, named a turn that is not running (or is being stopped) |
+| 409 | `not_your_turn` | an added word named a turn the person did not start (the chat's answer to a task's question) |
 | 409 | `already_answered` | the approval was answered already |
 | 409 | `sleep_running` | Undo on a `sleep` echo while a sleep is tidying the notes |
 | 502 | `agent_start_failed` | the session's Agent could not start; the message is the builder's error |
@@ -1524,9 +1589,21 @@ Create a session, usually with its first turn.
   `"repeated": true`, building nothing; another text is 409
   `submission_conflict`; a key withdrawn before it started is 409
   `submission_withdrawn`. Two creates racing on one key make one session.
-- `attachments` must be empty for now: an entry is 400 `invalid_request`,
-  `attachments: files are not supported yet; send the text alone`. The
-  text is checked by the gateway ingress checker; a refusal is 400
+- `attachments` are the text files the person added: `[{"name": "notes.md", "text": "…", "chars": 1234}]`,
+  at most 8, 256 KiB each and 512 KiB together. A file that is binary or too large is 400
+  `invalid_request` with the file named. The gateway cleans each file, redacts secrets in it and
+  adds it to the message as an `<attachment>` block, so the turn's `user_text` holds the words and
+  the files.
+- `images` are the pictures the person added: ids from [`POST /api/uploads`](#post-apiuploads),
+  at most 4, none twice. An id that is gone is 400 `picture_gone`; more than 4 is 400 `invalid_request`;
+  a chat model known not to read pictures is 409 `model_text_only`. A message with pictures goes to
+  the model: no task rule reads it, `as_task` with pictures is 400 `invalid_request`, and while the
+  chat answers a task's question it is 409 `chat_answering`. The pictures are stored with the turn
+  (`turn.started` lists them as `images`, and the [blobs route](#get-apisessionsidblobssha256) serves
+  them), so a retry sends them again.
+- A message may have no words when it has pictures or files: `text` may then be empty, and the turn's
+  words read `[2 pictures]` or `[attached: notes.md]`.
+  The text is checked by the gateway ingress checker; a refusal is 400
   `text_rejected`.
 
 ## POST /api/sessions/{id}/turns
@@ -1553,6 +1630,8 @@ is no `workspace` here — the session's own folder is the Agent's.
   and `"repeated": true`, whether the turn still runs or not.
 - The session's folder must still exist: a deleted folder is 400
   `invalid_workspace`, and the turn does not start.
+- `attachments` and `images` are as in a create. To add words to a turn that is running, use
+  [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes) instead of waiting.
 
 ## POST /api/sessions/{id}/retry
 
@@ -1572,6 +1651,8 @@ Run the newest finished turn's text again.
   `session_busy` while a turn runs.
 - 409 `not_retryable` for a turn that answered a task's question
   (`origin` `ask_owner`): its words are not the person's.
+- 409 `model_text_only` for a turn with pictures when the chat's model is known not to read them: the retry
+  would send the same pictures again.
 
 ## POST /api/sessions/{id}/undo
 
@@ -1609,6 +1690,100 @@ Stop a running turn, from the id the events gave.
   `[interrupt: no assistant output for this turn]` when it said nothing.
 - Cancelling while an approval waits withdraws the card: the request is
   answered `withdrawn` and leaves `pending_approvals`.
+- Words [added to the turn](#post-apiturnsturn_idnotes) that its run had not read do not start
+  another turn: they are dropped from the queue and come back as `"unread_notes": [{"note": 3,
+  "text": "use the 2024 file"}]`, for the client to put back into its message box. A note that had
+  pictures also has `"images"`: those pictures staged again, each as [`POST /api/uploads`](#post-apiuploads)
+  answers (`id`, `name`, `mime_type`, `size_bytes`, `width`, `height`, `model_reads`), for the client to put back
+  in its row of pictures and send with a message. The key is absent when there are none.
+
+## POST /api/turns/{turn_id}/notes
+
+Add words, and pictures, to a turn that is running. Its run reads them at its next step.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "use the 2024 file instead", "client_request_id": "curl-note-1"}'
+```
+
+```json
+{"note": {"note": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "use the 2024 file instead", "client_request_id": "curl-note-1", "state": "sent"}}
+```
+
+With a picture ([staged first](#post-apiuploads); its id goes in `images`):
+
+```json
+{"text": "this is the file I mean", "images": ["46fb64ffc2a04ad98a9a0bb3a1a0f0c1"], "client_request_id": "curl-note-2"}
+```
+
+```json
+{"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
+```
+
+- 202. `state` is `sent` when the running turn takes the words, and `next` when the turn ended while they
+  were stored: they run as the chat's next turn. `client_request_id` is optional and makes the call safe
+  to repeat (the same body comes back, also after the turn ended).
+- The run puts each note into its next model request as the person's message, marked as added while it
+  worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note the run did not
+  read before the turn ended is sent as the chat's next turn, in order with the queued messages; they live in
+  the same store, so a restart keeps them. A Stop gives the unread ones back ([cancel](#post-apiturnsturn_idcancel)).
+- `text` is trimmed, has at most 8,000 characters and goes through the same checker as a message (400
+  `invalid_request`, 400 `text_rejected`). It must not be empty unless `images` names a picture; the note
+  then reads `[1 picture]` to the model and `text` is `""`. A turn takes at most 20 notes.
+- `images` is optional: ids from [`POST /api/uploads`](#post-apiuploads), at most 4, none twice, each still
+  staged, on the terms of a message's `images` (400 `invalid_request`, 400 `picture_gone`; 409
+  `model_text_only` when the chat model is known not to read pictures). The answer lists them under `images`
+  as a turn's `images` are listed (`sha256`, `mime_type`, `size_bytes`; the picture itself is
+  [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256)), and the `turn.note` event does the
+  same. They are kept in the chat before the call answers, so a note that becomes the next turn, or waits through
+  a restart, still has them. The run sends them as image parts of the note's message at its next step (at
+  most 8 pictures a step: further notes are read at the step after); a model found not to read pictures by
+  then is told so in the note's words and sent none.
+- 409 `turn_not_running` for a turn that is not running, is being stopped or has finished its run: the
+  client sends the words, and the pictures, as a message instead. 409 `not_your_turn` for a turn the person did not
+  start, and for a session that is a task.
+- Text files cannot be added to a running turn.
+
+## POST /api/uploads
+
+Stage a picture for a message. The body is the picture's bytes, not JSON: the one route that takes them.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST 'http://127.0.0.1:8401/api/uploads?name=shot.png' \
+  -H 'Content-Type: image/png' --data-binary @shot.png
+```
+
+```json
+{"id": "46fb64ffc2a04ad98a9a0bb3a1a0f0c1", "name": "shot.png", "mime_type": "image/png", "size_bytes": 20481, "width": 1280, "height": 720, "model_reads": true}
+```
+
+- 201. The body is at most 20 MiB and its `Content-Type` an image type (`image/png`, `image/jpeg`,
+  `image/gif`, `image/webp`, `image/heic`, `image/heif`) or `application/octet-stream`; the type is only a
+  hint, since the gateway decides what the bytes are from the bytes. Every other route keeps its 1 MiB JSON limit.
+- PNG and JPEG keep their pixels when their long side is at most 1,280 pixels, and otherwise are scaled to it;
+  the first frame of a GIF (an animated one too) and a WebP picture become PNG and a HEIC picture becomes JPEG,
+  with the Mac's own image tool (`sips`). What leaves is measured again and must fit in 1,280 pixels.
+  `mime_type`, `size_bytes`, `width` and `height` describe the picture as it will be sent.
+  `name` is the optional query parameter, cleaned of a path and control characters (at most 120 characters).
+- Every picture is rewritten without metadata, also one that needed no change: a JPEG keeps only its image
+  segments (every `APPn` segment and comment is dropped, and so is anything after the end of the image) and, as
+  two fixed segments written afresh, its orientation and Adobe color transform; a PNG keeps only `IHDR`, `PLTE`,
+  `IDAT`, `IEND`, `tRNS`, `gAMA`, `cHRM`, `sRGB` and `cICP`. EXIF (the camera, the time, GPS), XMP, comments,
+  text chunks and an embedded color profile do not reach the model. A picture whose structure does not hold
+  together is refused as `picture_unreadable`, not passed on.
+- `model_reads` says whether the chat's model reads pictures: `true`, `false` (the page warns at once) or `null`
+  when the gateway cannot tell (a picture is then sent). It is `false` also for a minute after a turn was
+  refused for its pictures (or until the model changes); then the server is asked again.
+- The picture waits in memory, not on disk: at most 24 pictures and 64 MiB at once, the oldest first, and 30
+  minutes. A turn that names its `id` in `images` takes it. 413 `too_large` over 20 MiB; 413 `picture_too_many_pixels`
+  over 120 million pixels, judged from the sizes in the file's headers (every frame of a GIF, every image of a HEIC)
+  before anything opens the file; 413 `picture_scale` when a picture over 1,280 pixels cannot be scaled (no `sips`,
+  or it did not shrink it), since nothing is passed on unscaled; 415 `picture_unsupported` for bytes that are not a
+  PNG, JPEG, GIF, WebP or HEIC picture; 415 `picture_unreadable` for a damaged one; 415 `picture_convert` when this
+  Mac cannot convert it; 400 `invalid_request` for an empty body.
+- `GET /api/uploads/{id}` returns the picture as it will be sent (404 `not_found` when it is gone), with the
+  policy of a blob. `DELETE /api/uploads/{id}` drops it and answers 204 whether or not it was there.
 
 ## POST /api/sessions/{id}/submissions/{client_request_id}/cancel
 
@@ -1625,7 +1800,8 @@ session, for a create whose answer was lost.
 {"submission": {"client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07", "state": "withdrawn", "session_id": "3f9c2a7b1d4e", "turn_id": null, "status": null, "cause": null, "turn": null, "error": "Request cancelled before acceptance.", "created_at": 1793163793.49}, "cancelling": false}
 ```
 
-- The body's `text` is the message's text. Another text on a stored key is
+- The body's `text` is the message's text; a message sent with `attachments` or `images` names them again
+  (for pictures only how many is read). Another text on a stored key is
   409 `submission_conflict`.
 - A withdrawal stored without a session — the route without an id — has
   `"session_id": null`.
@@ -1663,8 +1839,11 @@ event stream, or from `pending_approvals`.
   another choice is 400 `invalid_request`.
 - 404 `not_found` for an unknown or expired request; 409 `already_answered`
   for one answered already, so two clients racing one card get one answer.
-- Approvals live in the gateway's memory. A turn waiting on one when the
-  gateway stops is finished `cancelled` with cause `shutdown`, and its card
+- A `session` answer that is kept becomes a grant in the table that
+  [`GET /api/grants`](#get-apigrants) lists: in the main chat it holds
+  everywhere (`scope` `global`), in any other chat in that chat only.
+- A waiting approval lives in the gateway's memory. A turn waiting on one when
+  the gateway stops is finished `cancelled` with cause `shutdown`, and its card
   is stored as withdrawn.
 
 ### A task's approvals go through its chat
@@ -1679,17 +1858,18 @@ chat's recorded approvals; a model never decides a match.
   `shell_exec`, `file_write`, `file_edit`) that the rules themselves found
   `routine`, in no category. Auto's Allow once, a chore's Allow and an Allow
   answered after the chat was deleted are never recorded. Records live in
-  the gateway's memory; a restart or deleting the chat forgets them. A
-  waiting approval's `remembered` says, by code, whether its Allow will be
-  recorded.
+  the gateway's memory only (grants are kept in a table instead); a restart
+  or deleting the chat forgets them. A waiting approval's `remembered` says,
+  by code, whether its Allow will be recorded.
 - **Matched.** A task's step runs without asking, with approval `origin`
   `earlier`, when a record of its chat has the same tool, the same step
   (Python by its syntax tree, a command by its exact text, a file write by
   its path and content, the files the rules read for it unchanged) and the
   same folder, and the step is reusable too. The chat gets an `earlier` echo
   and the task's `earlier` lists the step (`live` until the record is
-  revoked). A session grant of the chat covers its tasks' routine calls of
-  that tool. A task that uses its chat's records or grants is reviewed with
+  revoked). A grant that holds in the chat, its own or the main chat's, covers
+  its tasks' routine calls of that tool; a task's own grant holds in that task
+  only. A task that uses its chat's records or grants is reviewed with
   every file changed since that chat began, so a file an earlier task wrote
   is read before a record or grant covers a step; when the chat's start
   cannot be read, neither applies and the person is asked.
@@ -1743,8 +1923,8 @@ Auto, or several at once.
 - `title` is stripped and must be 1 to 200 characters; another length is
   400 `invalid_request`. A rename is never replaced by the automatic title.
 - `workspace` moves the session: a new Agent is built in the new folder
-  with the session's conversation, and the session's tool grants are
-  forgotten. The rules are a create's: absolute or `~/`, an existing
+  with the session's conversation, and the session's own grants are taken back
+  (the main chat's still hold). The rules are a create's: absolute or `~/`, an existing
   directory, else 400 `invalid_workspace`. 409 `session_busy` while a turn
   runs; a refused move leaves the row as it was.
 - `approvals` is `ask` or `auto`: the chat's [mode](#ask-and-auto) from its
@@ -1887,8 +2067,8 @@ Every tool the session's Agent offers, with whether this session allows it.
   ([a task's approvals](#a-tasks-approvals-go-through-its-chat)).
 
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
-  `requires_approval` says a call of it asks first; `granted` says this
-  session allows it for the rest of the gateway run.
+  `requires_approval` says a call of it asks first; `granted` says a grant
+  holds in this session: its own, the main chat's, or a site Auto let it read.
 - A console session is gateway mode: it lists `file_read`, `file_write`,
   `list_files` and `python_exec`, never `shell_exec`.
 - A task session returns 409 `task_session_read_only`; this route cannot open it as a chat.
@@ -1899,19 +2079,83 @@ Every tool the session's Agent offers, with whether this session allows it.
   `mcp_config_label` is always `""` and `mcp_error` always says
   `MCP is not built in the console yet`.
 
+## GET /api/grants
+
+Every "allow ... for this chat" the person gave and has not taken back, in one
+list: the data of **Settings › Permissions** and of `/grants`.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/grants
+```
+
+```json
+{"grants": [
+  {"id": "5c1e0a9d47b2", "scope": "global", "session_id": "7b0f3c2e9a41", "session_kind": "main", "chat_title": "Main chat", "kind": "tool", "key": "shell_exec", "label": "Run shell commands", "action": "tool", "target": "shell_exec", "by": "person", "granted_at": 1793482098.4},
+  {"id": "a83d11f6c05e", "scope": "session", "session_id": "3f9c2a7b1d4e", "session_kind": "side", "chat_title": "Trip plans", "kind": "site", "key": "browser:https://example.com", "label": "Open example.com", "action": "open", "target": "example.com", "by": "person", "granted_at": 1793482131.9}
+]}
+```
+
+- `id` is 12 hex characters. `scope` is `global` (given in the main chat, so
+  it holds in every chat, task and terminal) or `session` (it holds in
+  `session_id` only). `session_kind` is `main`, `side`, `task` or `terminal`;
+  `chat_title` is that chat's title (`Main chat` for the main chat).
+- `kind` is `tool`, `site`, `folder` or `window`. `key` is the exact name a
+  check matches: `shell_exec`, `browser:https://example.com`,
+  `browser-act:https://example.com`, a folder path, `window-read:<app>`.
+- `label` is the words the page shows, in English. `action` is `tool`, `open`,
+  `act` (click and choose), `read` (a site Auto let the chat read), `folder`
+  or `window`. `target` is the tool name, the site, the folder as `~/…` or the
+  app.
+- `by` is `person` or `auto`; `granted_at` is Unix seconds. Auto's grants are
+  site reads and hold in their chat only, the main chat included.
+- The order is the one the page and `/grants` number: `global` grants first,
+  newest first, then each chat, the chat with the newest grant first.
+- Never kept, so never listed: **Allow once**, typing, sending a form, a click
+  on a password, code or card field, a consent control or a box from another
+  site, a press in another app's window, paying, changing an account's
+  settings, and every high-impact step.
+- Behind the same token and origin guard as every route: 401 without the
+  token, 403 `foreign_origin` from another origin.
+
+## DELETE /api/grants/{id}
+
+Take back one grant. It stops counting at once, in chats that are running too;
+the next step that needs it asks again.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/grants/a83d11f6c05e
+```
+
+- 204 with no body.
+- 404 `not_found` for an unknown or already revoked id.
+- The same token and origin guard as every route.
+
 ## DELETE /api/sessions/{id}/grants/{tool}
 
-Take back one session grant, so the tool asks again next time.
+Take back one grant that holds in the chat, so the tool asks again next time.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
-- 204 with no body; both `grants` and `granted_at` of
-  `GET /api/sessions/{id}` drop it.
-- 404 `not_found` when the session is not open or the tool has no grant.
-  `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
-  answers 204, whether or not the session is open.
+- 200 with `{"revoked": [{"key": "python_exec", "scope": "session"}], "everywhere": false}`;
+  both `grants` and `granted_at` of `GET /api/sessions/{id}` drop it. It takes
+  back the chat's own grant of that name and a main-chat grant of that name,
+  which is taken back everywhere: `everywhere` is then `true` and that row's
+  `scope` is `global`.
+- 404 `not_found` when no grant of that name holds in the chat. The chat need
+  not be open.
+- `DELETE /api/sessions/{id}/grants` without a name takes back the chat's own
+  grants and answers 200 with `{"revoked": N, "still_everywhere": M}`: `M`
+  main-chat grants still hold in a side chat; in the main chat it takes back
+  every `global` grant.
+- A revoke the store cannot save is 503 `store_unavailable`; the checks have
+  stopped using the grant all the same, but it would come back after a restart.
+- `DELETE /api/sessions/{id}/folders?path=PATH` takes back a folder allowed
+  for reading in the chat, with the same 200 answer as a named grant: a folder
+  the main chat allowed goes everywhere, and `everywhere` is then `true` (404
+  `not_found` when none holds there; 503 when the store cannot save it). It
+  works for a chat that is not open too.
 - A site's grant is named after the question, such as
   `browser-act:https://news.example`; the name may hold slashes, and is sent
   percent-encoded or as it is.

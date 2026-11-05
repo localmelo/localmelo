@@ -39,11 +39,7 @@ EMBED = [*BASE, "--embedding-base-url", "http://e/v1"]
 # fmt: off
 ROWS: list[tuple[str, str, list[str], list[str]]] = [
     ("agent.attempt_policy", "none", ["--attempt-policy", "none"], []),
-    ("agent.reflection_gate", "utility", ["--reflection-gate", "utility"], []),
-    ("agent.fixed_prefix", "false", ["--fixed-prefix", "off"], []),
-    ("agent.window_eviction", "slide", ["--window-eviction", "slide"], []),
-    ("agent.reflect_tool_guard", "off", ["--reflect-tool-guard", "off"], []),
-    ("agent.cache_layout", '"v3"', ["--cache-layout", "v3"], []),
+    ("agent.window_eviction", "boundary", ["--window-eviction", "boundary"], []),
     ("agent.window_messages", "64", ["--window-messages", "64"], []),
     ("agent.brief_items", "true", ["--brief-items", "on"], []),
     ("agent.reasoning", "compress", ["--reasoning", "compress"], []),
@@ -61,7 +57,6 @@ ROWS: list[tuple[str, str, list[str], list[str]]] = [
     ("retrieval.placement", "message", ["--recall-placement", "message"], []),
     ("retrieval.min_score", "0.5", ["--recall-min-score", "0.5"], []),
     ("retrieval.extra_body", '{"top_k": 3}', ["--retrieval-extra-body", '{"top_k": 3}'], []),
-    ("memory.admit_on_outcome", "true", ["--admit-on-outcome", "on"], []),
     ("memory.keep_decision_text", "true", ["--keep-decision-text"], []),
     ("memory.dir", "/tmp/mem", ["--memory-dir", "/tmp/mem"], []),
     ("request_timeout_s", "45.5", ["--request-timeout", "45.5"], []),
@@ -73,7 +68,7 @@ ROWS: list[tuple[str, str, list[str], list[str]]] = [
 # fmt: on
 
 
-def test_the_rows_cover_all_31_settings() -> None:
+def test_the_rows_cover_all_the_settings() -> None:
     assert {row[0] for row in ROWS} == {item.key for item in SETTINGS}
     assert [row[2][0] for row in ROWS] == [item.flag for item in SETTINGS]
 
@@ -105,8 +100,8 @@ def test_each_form_of_the_setter_is_the_option(form: list[str]) -> None:
 
 def test_booleans_read_true_on_false_and_off() -> None:
     for word, flag in (("true", "on"), ("on", "on"), ("false", "off"), ("off", "off")):
-        assert _namespace(["-X", f"agent.fixed_prefix={word}", "q"]) == _namespace(
-            ["--fixed-prefix", flag, "q"]
+        assert _namespace(["-X", f"agent.brief_items={word}", "q"]) == _namespace(
+            ["--brief-items", flag, "q"]
         )
 
 
@@ -114,7 +109,7 @@ def test_booleans_read_true_on_false_and_off() -> None:
     ("setter", "old"),
     [
         (["-X", "retrieval.k=99"], ["--recall-k", "99"]),
-        (["-X", "agent.cache_layout=v9"], ["--cache-layout", "v9"]),
+        (["-X", "agent.window_eviction=slide"], ["--window-eviction", "slide"]),
         (["-X", "retrieval.retriever=nope"], ["--retriever", "nope"]),
         (
             ["-X", "retrieval.retriever=off", "-X", "retrieval.k=2"],
@@ -133,8 +128,8 @@ def test_a_refusal_is_the_options_refusal(
 def test_a_value_the_option_refuses_names_what_it_allows(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code, err = _exit(["-X", "agent.cache_layout=v9", "q"], capsys)
-    assert code == 2 and "choose from 'v2', 'v3'" in err
+    code, err = _exit(["-X", "agent.window_eviction=slide", "q"], capsys)
+    assert code == 2 and "choose from 'chunk', 'boundary'" in err
 
 
 def test_a_setting_reaches_the_run_like_its_option() -> None:
@@ -173,8 +168,8 @@ def test_a_setting_works_with_a_command_word(tmp_path: Path) -> None:
     assert config.overrides() == {"scheduler.policy": "fcfs"}
     brief = tmp_path / "brief.md"
     brief.write_text("Write hello.txt\n", encoding="utf-8")
-    via_word = _namespace(["worker", str(brief), "-X", "agent.cache_layout=v3"])
-    assert via_word == _namespace(["--brief", str(brief), "--cache-layout", "v3"])
+    via_word = _namespace(["worker", str(brief), "-X", "agent.window_messages=64"])
+    assert via_word == _namespace(["--brief", str(brief), "--window-messages", "64"])
 
 
 @pytest.mark.parametrize(
@@ -310,7 +305,7 @@ def test_keys_lists_value_default_and_source(
         "retrieval.recall_at": ["[]", "[]", "default"],
         "retrieval.k": ["5", "3", "file"],
         "retrieval.kinds": ["[]", "[]", "default"],
-        "retrieval.placement": ['"tool"', '"tool"', "file"],  # save() writes the table
+        "retrieval.placement": ['"tool"', '"tool"', "default"],  # save() writes only k
         "retrieval.min_score": ["0.5", "0.35", "-X"],
         # The memory recall settings (#349) have "recall" in their names too.
         "memory.recall_records": ["3", "3", "default"],

@@ -1784,6 +1784,28 @@ dialog::backdrop {
   font-size: var(--text-caption);
   color: var(--muted);
 }
+/* Words the person added while melo worked: a smaller bubble among the steps, and whether melo has read it. */
+.note-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+  padding: 0 13px;
+}
+.note-bubble {
+  background: var(--tint);
+  padding: 8px 13px;
+  max-width: 80%;
+  font-size: var(--text-body);
+}
+.note-state {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.note-item[data-state="sending"] .note-bubble { opacity: 0.7; }
+.note-item[data-state="seen"] .note-state { color: var(--accent); }
 .live-row {
   padding: 8px 13px;
   display: grid;
@@ -2423,6 +2445,15 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* The hint of a list sits between its title and the list (the extra folders, #405). */
 .st-group-hint { max-width: 62ch; margin: 0 0 var(--space-2); }
 .st-row[data-valid="false"] .st-mono { text-decoration: line-through; text-decoration-color: var(--ink-3); }
+/* Permissions: what was allowed, by where it counts; a chat's grants sit under that chat's title. */
+.perm-tab:focus { outline: none; }
+.perm-status { margin: 0 0 var(--space-3); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+.perm-status:empty { display: none; }
+.perm-status[data-state="error"] { color: var(--error); }
+.perm-body > .st-group-title:first-child { margin-top: 0; }
+.perm-chat { margin-top: var(--space-4); }
+.st-group-title + .perm-chat { margin-top: 0; }
+.perm-chat-title { margin: 0 0 var(--space-2); color: var(--ink-2); font-size: var(--text-small); font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
 /* "Saved · Undo" after a change, at the foot of the section. */
 .st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: 44px; padding: var(--space-2) var(--space-7); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); }
 .st-foot > p { margin: 0; }
@@ -2569,3 +2600,127 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .slash-foot { display: none; }
   .local-choice { min-height: 44px; }
 }
+
+/* Pictures and text files in a message: the strip above the box while it is written, the row in the bubble after.
+   A picture is a small square you can open; a file is a chip with its name. Both can be removed before sending. */
+.media-tray { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); padding: var(--space-1) var(--space-1) 0 0; }
+.media-item { position: relative; display: flex; max-width: 100%; }
+.media-frame { display: grid; place-items: center; width: 64px; height: 64px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: repeating-conic-gradient(var(--raised) 0% 25%, var(--surface) 0% 50%) 50% / 16px 16px; cursor: zoom-in; }
+.media-frame:hover:not(:disabled) { border-color: var(--control); filter: none; }
+.media-frame:disabled { cursor: progress; background: var(--raised); }
+.media-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.media-wait { padding: 0 var(--space-1); color: var(--muted); font-size: var(--text-caption); }
+.media-chip { display: inline-flex; align-items: baseline; gap: var(--space-2); max-width: 100%; padding: 5px 14px 5px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--raised); color: var(--ink); font-size: var(--text-small); }
+.media-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-chip-size { flex: none; color: var(--muted); font-size: var(--text-caption); }
+.media-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 2px solid var(--surface); border-radius: var(--radius-pill); background: var(--primary); color: var(--on-primary); font-size: 13px; line-height: 1; cursor: pointer; }
+/* The target is larger than the mark: a thumb or a finger finds it. */
+.media-remove::after { content: ""; position: absolute; inset: -8px; }
+.media-warning { margin: 0 0 var(--space-3); color: var(--warn); font-size: var(--text-small); }
+.media-warning .link-button { margin-left: var(--space-1); padding: 0; font-size: inherit; }
+.attach-button { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -4px -4px -4px -8px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink-2); }
+.attach-button:hover:not(:disabled) { background: var(--soft); color: var(--ink); filter: none; }
+.drop-hint { position: absolute; inset: var(--space-3); z-index: 30; display: grid; place-items: center; padding: var(--space-4); border: 2px dashed var(--accent); border-radius: var(--radius-panel); background: var(--tint); background: color-mix(in srgb, var(--tint) 90%, transparent); color: var(--accent); font-size: var(--text-title); font-weight: 600; text-align: center; pointer-events: none; }
+.user-bubble.has-media { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
+.bubble-media { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.bubble-picture { padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); line-height: 0; cursor: zoom-in; }
+.bubble-picture:hover { border-color: var(--control); filter: none; }
+.bubble-picture img { display: block; width: auto; height: auto; max-width: 200px; max-height: 120px; }
+.bubble-picture:only-child img { max-width: min(300px, 100%); max-height: 220px; }
+/* A note is the smaller bubble among the steps: its pictures are smaller too. */
+.note-bubble .bubble-picture img { max-width: 140px; max-height: 90px; }
+.note-bubble .bubble-picture:only-child img { max-width: min(220px, 100%); max-height: 160px; }
+.bubble-file { max-width: 100%; padding: 3px 12px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink-2); font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
+.bubble-words { min-width: 0; align-self: stretch; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (pointer: coarse), (max-width: 700px) {
+  .attach-button { width: 44px; height: 44px; margin: -6px -6px -6px -12px; }
+  .media-remove { width: 24px; height: 24px; }
+  .media-remove::after { inset: -10px; }
+  .media-chip { min-height: 36px; align-items: center; }
+}
+/* The Browser panel: a view-only window onto the page melo is working in (browser-live.mjs). It takes a column
+   beside the chat while it is shown; where there is not room for it and Melo's panel, it takes Melo's place, and
+   below 900 px it is a sheet over the bottom of the chat, which stays in sight above it. */
+.browser-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--line); }
+.app:has(> .browser-panel:not([hidden])) { grid-template-columns: 248px minmax(0, 1fr) clamp(320px, 26vw, 440px) 340px; }
+.bp-head { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-4) var(--space-3) var(--space-3) var(--space-4); }
+.bp-titles { flex: 1; min-width: 0; }
+.bp-title, .bp-address { display: block; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-title { font-size: var(--text-body); font-weight: 650; letter-spacing: -0.01em; }
+.bp-address { margin-top: 2px; color: var(--ink-3); font-size: var(--text-small); }
+.bp-host { color: var(--ink-2); font-weight: 600; }
+.bp-pop { flex: none; margin-top: -2px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font-size: var(--text-caption); }
+.bp-hide { flex: none; margin: -6px 0 0; font-size: var(--text-title); color: var(--ink-2); }
+.bp-stage { flex: 1; min-height: 0; display: flex; padding: 0 var(--space-4) var(--space-3); }
+.bp-viewport { position: relative; flex: 1; min-width: 0; min-height: 0; }
+/* The page's picture, in a ring of the web colour while melo is in the middle of a browser step. */
+.bp-canvas { position: absolute; display: block; border-radius: var(--radius-card); background: var(--canvas); box-shadow: 0 0 0 1px var(--line), var(--tab-shadow); transition: opacity 0.3s, filter 0.3s; }
+.browser-panel[data-browsing="true"] .bp-canvas { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 5px color-mix(in srgb, var(--kind-web) 18%, transparent); animation: bp-breathe 2.4s ease-in-out infinite; }
+.browser-panel[data-state="stale"] .bp-canvas { opacity: 0.55; filter: grayscale(0.7); }
+@keyframes bp-breathe {
+  50% { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 8px color-mix(in srgb, var(--kind-web) 28%, transparent); }
+}
+/* Without a picture the note takes the picture's place, as an empty window; over a picture it is a small label. */
+.bp-note { position: absolute; inset: 0 0 auto; display: grid; place-items: center; aspect-ratio: 16 / 10; margin: 0; padding: 28px var(--space-5) var(--space-4); border: 1px dashed var(--control); border-radius: var(--radius-card); background: linear-gradient(var(--raised) 0 24px, transparent 24px); color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; text-align: center; text-wrap: balance; }
+.bp-note[data-over="true"] { inset: var(--space-2) auto auto var(--space-2); display: block; width: max-content; max-width: calc(100% - 16px); aspect-ratio: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); }
+.browser-panel[data-state="loading"] .bp-note { border-color: var(--kind-web); animation: bp-wait 2.4s ease-in-out infinite; }
+.browser-panel[data-state="idle"] .bp-note { border-color: var(--line); color: var(--ink-3); }
+@keyframes bp-wait {
+  50% { border-color: color-mix(in srgb, var(--kind-web) 35%, var(--line)); }
+}
+.bp-foot { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color 0.2s; }
+.bp-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 30px; }
+.bp-take, .bp-give { flex: none; padding: 5px 12px; font-size: var(--text-small); }
+.bp-hint { margin: 0; color: var(--ink-2); line-height: 1.45; text-wrap: pretty; }
+.bp-status { display: inline-flex; align-items: center; gap: 7px; min-height: 1.5em; color: var(--ink-2); }
+.bp-status:not(:empty)::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
+.browser-panel[data-state="live"] .bp-status::before { background: var(--ok); }
+.browser-panel[data-state="loading"] .bp-status::before { background: var(--kind-web); }
+.browser-panel[data-state="stale"] .bp-status::before { background: var(--warn); }
+.browser-panel[data-browsing="true"] .bp-status::before { background: var(--kind-web); animation: bp-dot 1.8s ease-in-out infinite; }
+@keyframes bp-dot {
+  50% { opacity: 0.35; }
+}
+/* Taken over: the page is the person's. Their colour is the console's own accent, held still (melo's web colour
+   breathes while it works); the ring widens while the keys go to the page, and the footer turns into the control bar. */
+.browser-panel[data-owner="you"] .bp-canvas { box-shadow: 0 0 0 2px var(--accent), var(--tab-shadow); cursor: default; touch-action: none; }
+.browser-panel[data-owner="you"][data-keys="true"] .bp-canvas { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 24%, transparent); }
+.browser-panel[data-owner="you"] .bp-canvas[data-input="false"] { cursor: progress; }
+.browser-panel[data-owner="you"] .bp-foot { background: var(--tint); border-top-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.browser-panel[data-owner="you"] .bp-status { color: var(--ink); font-weight: 600; }
+.browser-panel[data-owner="you"] .bp-status::before { background: var(--accent); animation: none; }
+/* The keys' box: invisible, over the point last clicked, so an input method's window opens where the person types. */
+.bp-keys { position: absolute; left: 0; top: 0; z-index: 1; width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
+/* A box the page put up while the person has it: answered here, over the bottom of the picture. */
+.bp-dialog { position: absolute; left: 50%; bottom: var(--space-3); z-index: 2; width: min(380px, calc(100% - 24px)); transform: translateX(-50%); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
+.bp-dialog-title { margin: 0 0 4px; font-weight: 650; }
+.bp-dialog-text { margin: 0; color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bp-dialog-input { width: 100%; margin-top: var(--space-3); }
+.bp-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+/* The header chip brings a hidden panel back, and tells while melo is browsing. */
+.browser-chip { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.browser-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
+.browser-chip[data-browsing="true"] .browser-dot { background: var(--kind-web); animation: bp-dot 1.8s ease-in-out infinite; }
+@media (max-width: 1479px) {
+  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 248px minmax(0, 1fr) clamp(320px, 30vw, 420px); }
+  .app:has(> .browser-panel:not([hidden])) > .panel { display: none; }
+}
+@media (min-width: 900px) and (max-width: 1179px) {
+  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr) clamp(300px, 36vw, 400px); }
+}
+@media (max-width: 899px) {
+  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr); }
+  .app:has(> .browser-panel:not([hidden])) > .panel { display: flex; }
+  :root:not([data-view="live"]) .browser-panel { position: fixed; inset: auto 0 0; z-index: 28; height: min(60dvh, 520px); border: 0; border-top: 1px solid var(--line); border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
+}
+@media (pointer: coarse), (max-width: 700px) {
+  .browser-chip, .bp-pop, .bp-hide, .bp-take, .bp-give, .bp-dialog-actions button { min-height: 44px; }
+  .bp-hide { min-width: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-panel[data-browsing="true"] .bp-canvas, .browser-panel[data-state="loading"] .bp-note, .browser-panel .bp-status::before, .browser-chip .browser-dot { animation: none; }
+}
+/* `#/live/<chat>`: the panel alone (the macOS app's pop-out window). */
+:root[data-view="live"] .app { display: block; }
+:root[data-view="live"] .app > :not(.browser-panel) { display: none !important; }
+:root[data-view="live"] .browser-panel { height: 100dvh; border: 0; }

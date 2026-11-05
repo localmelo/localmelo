@@ -35,6 +35,9 @@ from localmelo.melo.schema import (
     ReflectionEntry,
     ToolCall,
     ToolResult,
+    collapse,
+    first_nonblank_line,
+    shorten,
 )
 
 # ── Caps ──
@@ -209,45 +212,6 @@ class ThoughtChunk:
     text: str
 
 
-# ── Text helpers ──
-
-
-def _shorten(text: str, width: int) -> str:
-    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
-
-    Text that fits is returned as it is. When the cut falls inside the
-    first word, there is no boundary to go back to, and the text is cut
-    where *width* falls.
-
-    A copy of ``_shorten`` in ``melo/agent/agent.py``, which is private to
-    the agent loop.
-    """
-    if len(text) <= width:
-        return text
-    if width < 1:
-        return ""
-    head = text[: width - 1]
-    if not text[len(head)].isspace() and not head[-1:].isspace():
-        # The cut falls inside a word: leave that word out.
-        words = head.rsplit(None, 1)
-        if len(words) == 2:
-            head = words[0]
-    return head.rstrip() + "…"
-
-
-def _collapse(text: str) -> str:
-    """*text* with each run of whitespace made one space, and stripped."""
-    return " ".join(text.split())
-
-
-def _first_nonblank_line(text: str) -> str:
-    """The first line of *text* that is not blank, stripped; "" if none."""
-    for line in text.splitlines():
-        if line.strip():
-            return line.strip()
-    return ""
-
-
 # ── Note blocks ──
 
 _NOTE_BLOCK_RE = re.compile(r"<note>(.*?)(?:</note>|\Z)", re.IGNORECASE | re.DOTALL)
@@ -337,7 +301,7 @@ def parse_note_block(block: str) -> ReasoningNote:
         texts.setdefault(key, []).append(text)
 
     note = ReasoningNote(source="model")
-    note.plan = _shorten(
+    note.plan = shorten(
         " ".join(t for t in texts.get("plan", []) if t), NOTE_PLAN_CHARS
     )
     items: dict[str, list[str]] = {}
@@ -348,7 +312,7 @@ def parse_note_block(block: str) -> ReasoningNote:
             for item in _ITEM_SEPARATOR_RE.split(text)
             if item.strip()
         ]
-        items[key] = [_shorten(item, NOTE_ITEM_CHARS) for item in found[:limit]]
+        items[key] = [shorten(item, NOTE_ITEM_CHARS) for item in found[:limit]]
     note.found = items["found"]
     note.decided = items["decided"]
     note.hypotheses = items["hypotheses"]
@@ -738,7 +702,7 @@ def _command(call: ToolCall) -> str:
         command = " ".join(str(part) for part in command)
     if not isinstance(command, str):
         return ""
-    return _shorten(_collapse(command), _SHORT_COMMAND_CHARS)
+    return shorten(collapse(command), _SHORT_COMMAND_CHARS)
 
 
 def short_call(call: ToolCall) -> str:
@@ -759,15 +723,15 @@ def short_call(call: ToolCall) -> str:
     elif name == "shell_exec":
         form = _joined("run", _command(call))
     elif name == "python_exec":
-        line = _first_nonblank_line(_string_argument(call, "code"))
-        form = _joined("python", _shorten(line, _SHORT_COMMAND_CHARS))
+        line = first_nonblank_line(_string_argument(call, "code"))
+        form = _joined("python", shorten(line, _SHORT_COMMAND_CHARS))
     else:
         first = next(
             (v for v in call.arguments.values() if isinstance(v, str) and v.strip()),
             "",
         )
-        form = _joined(name, _shorten(_collapse(first), _SHORT_ARGUMENT_CHARS))
-    return _shorten(form, _SHORT_CALL_CHARS)
+        form = _joined(name, shorten(collapse(first), _SHORT_ARGUMENT_CHARS))
+    return shorten(form, _SHORT_CALL_CHARS)
 
 
 def _pytest_summary(output: str) -> str:
@@ -785,7 +749,7 @@ def _output_summary(output: str) -> str:
         return summary
     for line in output.splitlines():
         if any(char.isalnum() for char in line):
-            return _shorten(line.strip(), _SUMMARY_CHARS)
+            return shorten(line.strip(), _SUMMARY_CHARS)
     return "(no output)"
 
 
@@ -818,7 +782,7 @@ def _records(output: str) -> list[dict[str, Any]]:
 
 
 def _error(result: ToolResult) -> str:
-    return _first_nonblank_line(result.error)
+    return first_nonblank_line(result.error)
 
 
 # A result that says nothing about what the attempt did: no text, only a
@@ -872,7 +836,7 @@ def _observed(call: ToolCall, result: ToolResult) -> str:
         line = f"{name}: {len(result.output)} chars"
         if records:
             line += f", {len(records)} records"
-    return _shorten(line, NOTE_OBSERVED_CHARS)
+    return shorten(line, NOTE_OBSERVED_CHARS)
 
 
 def _outcome(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> str:
@@ -881,12 +845,12 @@ def _outcome(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> str:
     for _call, result in pairs:
         error = _error(result)
         if error:
-            return _shorten(f"Error: {error}", NOTE_OBSERVED_CHARS)
+            return shorten(f"Error: {error}", NOTE_OBSERVED_CHARS)
     summary = ""
     for call, result in pairs:
         if call.tool_name in ("shell_exec", "python_exec"):
             summary = _pytest_summary(result.output) or summary
-    return _shorten(summary or "ok", NOTE_OBSERVED_CHARS)
+    return shorten(summary or "ok", NOTE_OBSERVED_CHARS)
 
 
 def _source_records(
@@ -1152,7 +1116,7 @@ _TABLE_RULE_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 
 def _plain_line(text: str) -> str:
     """*text* without bullet or emphasis markers, whitespace collapsed."""
-    return _collapse(text.replace("**", "").replace("|", " "))
+    return collapse(text.replace("**", "").replace("|", " "))
 
 
 def _factual_lines(text: str) -> list[str]:
@@ -1305,7 +1269,7 @@ def _heuristic_note(
 
 
 def _items(sentences: Iterable[str]) -> list[str]:
-    return [_shorten(sentence, NOTE_ITEM_CHARS) for sentence in sentences]
+    return [shorten(sentence, NOTE_ITEM_CHARS) for sentence in sentences]
 
 
 def _plan(sentences: str, tool_calls: Sequence[ToolCall]) -> str:
@@ -1316,13 +1280,13 @@ def _plan(sentences: str, tool_calls: Sequence[ToolCall]) -> str:
     """
     calls = "; ".join(short_call(call) for call in tool_calls)
     if not calls:
-        return _shorten(sentences, NOTE_PLAN_CHARS)
+        return shorten(sentences, NOTE_PLAN_CHARS)
     if sentences:
         room = NOTE_PLAN_CHARS - len(" → ") - len(calls)
-        shortened = _shorten(sentences, room)
+        shortened = shorten(sentences, room)
         if shortened:
             return f"{shortened} → {calls}"
-    return _shorten(f"→ {calls}", NOTE_PLAN_CHARS)
+    return shorten(f"→ {calls}", NOTE_PLAN_CHARS)
 
 
 def _render(fields: dict[str, Any], executor: bool) -> str:
@@ -1376,7 +1340,7 @@ def render_note(
             text = _render(fields, executor)
     if len(text) > limit and fields["plan"]:
         room = limit - (len(text) - len(fields["plan"]))
-        fields["plan"] = _shorten(fields["plan"], room)
+        fields["plan"] = shorten(fields["plan"], room)
         text = _render(fields, executor)
     return text[:limit]
 
@@ -1395,9 +1359,9 @@ def note_title(note: ReasoningNote) -> str:
         *note.open_questions[:1],
         *note.observed[:1],
     ):
-        title = _collapse(candidate)
+        title = collapse(candidate)
         if title:
-            return _shorten(title, TITLE_CHARS)
+            return shorten(title, TITLE_CHARS)
     return ""
 
 
@@ -1406,7 +1370,7 @@ def note_title(note: ReasoningNote) -> str:
 
 def _normalized_item(item: str) -> str:
     """*item* with whitespace collapsed and lowercased, for equality tests."""
-    return _collapse(item).lower()
+    return collapse(item).lower()
 
 
 def _observed_key(line: str) -> str:
@@ -1443,7 +1407,7 @@ def _task_line(query: str) -> str:
     sentences = split_sentences(text)
     if sentences:
         text = sentences[0][1]
-    return _shorten(_collapse(text), DIGEST_TASK_CHARS)
+    return shorten(collapse(text), DIGEST_TASK_CHARS)
 
 
 def _workspace_relative(path: str, root: str) -> str:
@@ -1484,7 +1448,7 @@ def _digest_files(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> li
             continue
         path = _workspace_relative(_string_argument(call, "path"), root)
         if path and not _digest_internal_path(path) and path not in files:
-            files.append(_shorten(path, DIGEST_PATH_CHARS))
+            files.append(shorten(path, DIGEST_PATH_CHARS))
     if len(files) > DIGEST_FILES:
         more = len(files) - DIGEST_FILES
         files = [*files[:DIGEST_FILES], f"+{more}"]
@@ -1635,13 +1599,13 @@ def _check_command(call: ToolCall) -> str:
     text = _call_text(call)
     if call.tool_name == "python_exec":
         text = _python_check_command(text)
-    return _shorten(_collapse(text), DIGEST_COMMAND_CHARS)
+    return shorten(collapse(text), DIGEST_COMMAND_CHARS)
 
 
 def _check_result(result: ToolResult) -> str:
     """Summarize a check by test counts, exit code or neutral completion."""
     if result.error.strip():
-        return _shorten("Error: " + _error(result), DIGEST_RESULT_CHARS)
+        return shorten("Error: " + _error(result), DIGEST_RESULT_CHARS)
     output = result.output
     # Imported here: classify is a higher layer than the note types.
     from localmelo.melo.memory.procedures.classify import parse_test_summary
@@ -1788,7 +1752,7 @@ def digest_note(
         observed=observed,
         files=_digest_files(calls, root),
         verified=_digest_verified(calls, root),
-        outcome=_shorten(_collapse(outcome), NOTE_OBSERVED_CHARS),
+        outcome=shorten(collapse(outcome), NOTE_OBSERVED_CHARS),
         reasoning_chars=reasoning_chars,
         source_ids=source_ids,
         remember=True,
@@ -1842,7 +1806,7 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
             text = render()
     if len(text) > limit and plan:
         room = limit - (len(text) - len(plan))
-        plan = _shorten(plan, room)
+        plan = shorten(plan, room)
         text = render()
     return text[:limit]
 
@@ -1851,7 +1815,6 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
 
 CANDIDATE_TEXT_CHARS = 600  # a note's candidate text
 REFLECTION_CANDIDATE_CHARS = 2_000  # a reflection's
-RECORD_TEXT_CHARS = 500  # a source record's text in ReasoningNote.source_records
 
 _ITEM_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
 _ITEM_IDENT_RE = re.compile(
@@ -1862,7 +1825,6 @@ _ITEM_IDENT_RE = re.compile(
 )
 _ITEM_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
 _ITEM_CJK_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
-_SENTENCE_BREAK_RE = re.compile(r"(?:[.!?](?=\s|$))|\n")
 
 # A strong key is typed so that a date, a time, an amount and a number are
 # compared after normalisation, not as the text that happened to carry them.
@@ -2476,13 +2438,13 @@ def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]
     tied = False
     # Shared dates or names alone cannot establish a denial.
     negative = has_negative_assertion(item)
-    assertion = _collapse(item).lower().rstrip(".。!！ ")
+    assertion = collapse(item).lower().rstrip(".。!！ ")
     for record_id, text in records:
         # Opposite polarity is not evidence, in either direction. This is
         # deliberately conservative for records with several statements.
         if negative != has_negative_assertion(text):
             continue
-        if negative and assertion not in _collapse(text).lower():
+        if negative and assertion not in collapse(text).lower():
             continue
         score = _item_score(keys, text)
         if score > best_score:
@@ -2512,7 +2474,7 @@ def candidate_items(note: ReasoningNote) -> tuple[CandidateItem, ...]:
 def candidate_text(note: ReasoningNote) -> str:
     """A note's candidate text: its found and decided items, cut to 600."""
     items = [*note.found, *note.decided]
-    return _shorten(" | ".join(items), CANDIDATE_TEXT_CHARS)
+    return shorten(" | ".join(items), CANDIDATE_TEXT_CHARS)
 
 
 def reflection_candidate_text(entry: ReflectionEntry) -> str:
@@ -2533,7 +2495,7 @@ def reflection_candidate_text(entry: ReflectionEntry) -> str:
         parts.append(f"Try: {'; '.join(entry.next_promising_directions)}")
     if entry.unresolved_questions:
         parts.append(f"Open: {'; '.join(entry.unresolved_questions)}")
-    return _shorten(" | ".join(parts), REFLECTION_CANDIDATE_CHARS)
+    return shorten(" | ".join(parts), REFLECTION_CANDIDATE_CHARS)
 
 
 # ── Blocks the harness inserts into a turn ──
@@ -2722,7 +2684,7 @@ def draft_title(draft: Draft) -> str:
     first_line = next(
         (line.strip() for line in draft.text.splitlines() if line.strip()), ""
     )
-    return _shorten(
+    return shorten(
         f"{draft.target or 'no target'}, {draft.lines} lines: {first_line}",
         TITLE_CHARS,
     )
@@ -2805,4 +2767,4 @@ def _chunk_title(chunk: str) -> str:
     sentences = split_sentences(chunk)
     if not sentences:
         return ""
-    return _shorten(_collapse(sentences[0][1]), TITLE_CHARS)
+    return shorten(collapse(sentences[0][1]), TITLE_CHARS)

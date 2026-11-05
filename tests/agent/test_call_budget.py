@@ -144,7 +144,7 @@ class TestMaxCalls:
         self,
     ) -> None:
         llm = FakeLLM([_echo_call("a", "partial"), _echo_call("b"), _echo_call("c")])
-        agent = _agent(llm, max_calls=3)
+        agent = _agent(llm, max_calls=3, answer_on_stop=False)
         result = await agent.run_task(TASK)
         assert len(llm.calls) == 3
         assert result.status == "budget_exhausted"
@@ -398,13 +398,13 @@ class TestRefusal:
         )
 
     @pytest.mark.asyncio
-    async def test_off_by_default_a_refusal_ends_as_before(self) -> None:
+    async def test_without_answer_on_stop_a_refusal_ends_the_run(self) -> None:
         llm = RefusingLLM(
             [_echo_call("a", "partial")],
             at=2,
             error=ProviderError(BUDGET_BODY, status_code=400),
         )
-        result = await _agent(llm).run_task(TASK)
+        result = await _agent(llm, answer_on_stop=False).run_task(TASK)
         assert len(llm.calls) == 2
         assert (result.status, result.result) == ("provider_error", "")
         assert "answered_on_stop" not in result.to_dict()

@@ -10,18 +10,21 @@ the config this process loads (``config.set_overrides``), and ``save()`` never w
 
 from __future__ import annotations
 
-import dataclasses
 import difflib
 import functools
 import json
 import sys
 import tomllib
-import typing
 from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, NoReturn
 
 from localmelo.support import config
-from localmelo.support.option_tiers import OLD_SPELLINGS, OPTION_ROWS, SETTINGS
+from localmelo.support.option_tiers import (
+    OLD_SPELLINGS,
+    OPTION_ROWS,
+    REMOVED_SETTINGS,
+    SETTINGS,
+)
 
 # The order of sections in listings; a key with no section comes first.
 SECTIONS = (
@@ -78,20 +81,6 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(2)
 
 
-def flat(obj: object, prefix: str = "") -> dict[str, Any]:
-    """Every field of a config as ``section.name`` -> value (top-level names have no dot)."""
-    out: dict[str, Any] = {}
-    for field in dataclasses.fields(obj):  # type: ignore[arg-type]
-        if not field.compare:
-            continue  # bookkeeping (a private flag, the spelling of a backend), not a setting
-        value = getattr(obj, field.name)
-        if dataclasses.is_dataclass(value):
-            out.update(flat(value, f"{prefix}{field.name}."))
-        else:
-            out[prefix + field.name] = value
-    return out
-
-
 def show(value: Any) -> str:
     """A value as ``melo config`` prints it."""
     return "unset" if value is None else json.dumps(value, ensure_ascii=False)
@@ -101,17 +90,17 @@ def show(value: Any) -> str:
 def catalog() -> dict[str, Key]:
     """Every key ``-X`` and ``melo config`` know, grouped by section."""
     cfg = config.Config()
-    backends = {*config._LOCAL_SECTIONS, *config._CLOUD_SECTIONS}
+    backends = set(config.VALID_CHAT_BACKENDS)
     flags = {item.key: item.flag for item in SETTINGS}
     out: dict[str, Key] = {}
-    for name, default in flat(cfg).items():
+    for name, default in config.flat(cfg).items():
         section, dot, field = name.rpartition(".")
         if name in ("chat_backend", "embedding_backend") or section in backends:
             continue  # the backend is `melo setup`'s
         if isinstance(default, dict):
             continue  # a table, not a value
         owner = getattr(cfg, section) if dot else cfg
-        hint = typing.get_type_hints(type(owner))[field]
+        hint = config.hints(type(owner))[field]
         out[name] = Key(name, flags.get(name, ""), True, default, hint, section)
     for item in SETTINGS:
         if not item.file:
@@ -122,13 +111,18 @@ def catalog() -> dict[str, Key]:
     return dict(sorted(out.items(), key=lambda pair: rank.get(pair[1].section, 99)))
 
 
+def spelled(name: str) -> str:
+    """The option that the last part of the setting *name* spells (``--max-steps``)."""
+    return "--" + name.rpartition(".")[2].replace("_", "-")
+
+
 def option_for(name: str) -> str | None:
     """The option that the last part of *name* spells, as ``melo -h`` writes it.
 
     ``agent.max_steps`` spells ``--max-steps``, which ``-s N (--steps)`` replaces; None
     when no option has that name.
     """
-    option = "--" + name.rpartition(".")[2].replace("_", "-")
+    option = spelled(name)
     for names, meta, _ in OPTION_ROWS:
         spellings = names.split(", ")
         if option in spellings or OLD_SPELLINGS.get(option) == names:
@@ -138,8 +132,21 @@ def option_for(name: str) -> str | None:
     return None
 
 
+def refuse_removed(words: Sequence[str]) -> None:
+    """Exit 2 on the option of a removed setting in *words* (those before ``--``)."""
+    gone = {spelled(name): name for name in REMOVED_SETTINGS}
+    for word in words:
+        if word == "--":
+            return
+        option = word.partition("=")[0]
+        if option in gone:
+            fail(f"{option} was removed: {REMOVED_SETTINGS[gone[option]]}.")
+
+
 def lookup(name: str) -> Key:
     keys = catalog()
+    if name in REMOVED_SETTINGS:
+        fail(f"{name} was removed: {REMOVED_SETTINGS[name]}.")
     if name not in keys:
         # A name that is a key by its last part (`agent.mcp_config`) gets the nearest
         # keys; one that is only an option (`agent.max_steps`) gets the option.
@@ -160,27 +167,12 @@ def parse_value(text: str) -> Any:
         return text
 
 
-_EXPECTED = {
-    bool: "true or false",
-    int: "a whole number",
-    float: "a number",
-    str: "text",
-    list: 'a list such as ["a", "b"] or a,b',
-}
-
-
-def _base(hint: Any) -> tuple[Any, bool]:
-    """The type of a value, and whether ``None`` (unset) is allowed."""
-    args = typing.get_args(hint)
-    if typing.get_origin(hint) is list:
-        return list, False
-    inner = [arg for arg in args if arg is not type(None)]
-    return (inner[0] if inner else hint), len(inner) != len(args)
+_EXPECTED = {**config.KIND_WORDS, list: 'a list such as ["a", "b"] or a,b'}
 
 
 def coerce(key: Key, value: Any, text: str) -> Any:
     """*value* (what TOML or the text gave) as the type of *key*; exit 2 if it is not."""
-    base, optional = _base(key.hint)
+    base, optional = config.hint_base(key.hint)
     if optional and text.strip().lower() in ("", "none", "null", "unset"):
         return None
     number = isinstance(value, int | float) and not isinstance(value, bool)
@@ -214,7 +206,7 @@ def check(key: Key, value: Any) -> Any:
 
 
 def _flag_value(key: Key, value: Any, text: str) -> str:
-    base, _ = _base(key.hint)
+    base, _ = config.hint_base(key.hint)
     if base is bool:
         return "on" if coerce(key, value, text) else "off"
     if base is list and isinstance(value, list):
@@ -267,6 +259,7 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
     is False, becomes an override of the config this process loads.
     """
     rest, pairs = scan(argv)
+    refuse_removed(rest)
     found: list[str] = []
     values: dict[str, Any] = {}
     for pair in pairs:
@@ -286,6 +279,24 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
     config.set_overrides(values)
     cut = rest.index("--") if "--" in rest else len(rest)
     return [*rest[:cut], *found, *rest[cut:]]
+
+
+def removed_in(data: Mapping[str, Any]) -> list[str]:
+    """One note for each removed setting that a parsed ``config.toml`` still holds."""
+    held = file_keys(data)
+    notes = [
+        f"{name} was removed ({why}); the line in the file is ignored"
+        for name, why in REMOVED_SETTINGS.items()
+        if name in held
+    ]
+    agent = data.get("agent")
+    if isinstance(agent, dict) and agent.get("window_eviction") == "slide":
+        # config._SPELLINGS reads it as "chunk".
+        notes.append(
+            'agent.window_eviction = "slide" was removed (a full window drops in '
+            'chunks); it reads as "chunk"'
+        )
+    return notes
 
 
 def file_keys(data: Mapping[str, Any]) -> set[str]:

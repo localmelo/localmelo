@@ -13,7 +13,6 @@ from localmelo.melo.memory.notes import (
     RECALL_START,
     Draft,
     ReasoningNote,
-    _shorten,
 )
 from localmelo.melo.memory.recall import (
     DEFAULT_TRIGGERS,
@@ -42,7 +41,7 @@ from localmelo.melo.memory.recall import (
     resolve_plan,
 )
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
-from localmelo.melo.schema import Message, ReflectionEntry, ToolCall
+from localmelo.melo.schema import Message, ReflectionEntry, ToolCall, shorten
 
 TASK = "t-current"
 
@@ -177,7 +176,7 @@ def test_build_step_query_falls_back_when_the_note_is_empty() -> None:
     assert build_step_query("", [], fallback="  the clean reply ") == "the clean reply"
     query = build_step_query("", [], fallback="x" * 2_000)
     assert len(query) <= RECALL_QUERY_CHARS
-    assert query == _shorten("x" * 2_000, RECALL_QUERY_CHARS)
+    assert query == shorten("x" * 2_000, RECALL_QUERY_CHARS)
 
 
 def test_build_step_query_keeps_the_names_when_the_note_is_long() -> None:
@@ -748,4 +747,4 @@ def test_build_step_query_keeps_a_head_when_the_names_are_long() -> None:
     )
     assert len(query) <= RECALL_QUERY_CHARS
     assert query.startswith("read a.py")
-    assert query != _shorten("x" * 2_000, RECALL_QUERY_CHARS)
+    assert query != shorten("x" * 2_000, RECALL_QUERY_CHARS)

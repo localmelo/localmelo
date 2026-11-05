@@ -19,6 +19,7 @@ import httpx
 
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
 from localmelo.support.backends.discovery import list_models as discovery_list_models
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -27,8 +28,6 @@ if TYPE_CHECKING:
 PROBE_INTERVAL_S: Final = 30.0
 # Seconds an unreachable result is used before a fresh probe starts.
 PROBE_UNREACHABLE_INTERVAL_S: Final = 5.0
-# The backends that run a local model server, so health can probe one.
-LOCAL_BACKENDS: Final = frozenset({"mlc", "ollama", "vllm", "sglang"})
 
 ProbeFunction = Callable[[str, str], Awaitable[tuple[bool, str]]]
 
@@ -184,18 +183,6 @@ class ModelServerProbe:
             task, self._task = self._task, None
             if task is not None and not task.done():
                 task.cancel()
-
-    def probe_now(self) -> None:
-        """Start a background probe now if none is running and the backend is local."""
-        if self._closed or self._task is not None:
-            return
-        backend = self._cfg.chat_backend
-        if backend not in LOCAL_BACKENDS:
-            return
-        section = getattr(self._cfg, backend, None)
-        url = getattr(section, "chat_url", "") if section is not None else ""
-        if url and url_label(url):
-            self._start(backend, url)
 
     def _should_probe(self, now: float) -> bool:
         if self._closed or self._task is not None:

@@ -15,10 +15,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent
-from localmelo.melo.agent._chat import (
-    REFLECTION_RETRY_GUARD_NOTE,
-    REFLECTION_RETRY_NOTE,
-)
+from localmelo.melo.agent._chat import REFLECTION_RETRY_GUARD_NOTE
 from localmelo.melo.agent._json_repair import (
     ERROR_CONTEXT_CHARS,
     REFLECTION_REPAIRS,
@@ -570,15 +567,6 @@ class TestInTheLoop:
             None,
         )
 
-    async def test_utility_reads_and_retries_as_it_did(self) -> None:
-        stub = _stub(STRAY_CLOSER, GOOD)
-        events = await _run(stub, steps_per_attempt=2, reflection_gate="utility")
-        data = _reflection_event(events)
-        # No repair under utility: the reply holds no JSON object, so it is
-        # asked again, with the note alone.
-        assert (data["requests"], data["repaired"]) == (2, None)
-        assert _asked(stub.bodies[3]).endswith(f"\n\n{REFLECTION_RETRY_NOTE}")
-
     async def test_the_retry_quotes_the_decoder_after_the_note(self) -> None:
         stub = _stub(TWO_SLIPS, GOOD)
         events = await _run(stub, steps_per_attempt=2)
@@ -589,17 +577,16 @@ class TestInTheLoop:
             2,
         )
         retry = _asked(stub.bodies[3])
-        assert retry.endswith(f"\n\n{REFLECTION_RETRY_NOTE}\n{TWO_SLIPS_LINE}")
-        assert retry.count(REFLECTION_RETRY_NOTE) == 1
+        assert retry == f"{REFLECTION_RETRY_GUARD_NOTE}\n{TWO_SLIPS_LINE}"
 
     async def test_the_retry_quotes_the_decoder_for_an_invalid_reply_too(self) -> None:
         reply = f'{{"summary": "no action"}} {TWO_SLIPS}'
         stub = _stub(reply, GOOD)
         events = await _run(stub, steps_per_attempt=2)
         assert _reflection_event(events)["unreadable_reason"] == "invalid"
-        assert _asked(stub.bodies[3]).endswith(
-            f"{REFLECTION_RETRY_NOTE}\nYour reply was not valid JSON (Expecting ',' "
-            f"delimiter at character {reply.index(']')}: "
+        assert _asked(stub.bodies[3]) == (
+            f"{REFLECTION_RETRY_GUARD_NOTE}\nYour reply was not valid JSON (Expecting "
+            f"',' delimiter at character {reply.index(']')}: "
             '...: "continue", "rationale": "r"]). Reply again with one JSON object.'
         )
 
@@ -608,40 +595,31 @@ class TestInTheLoop:
         ["I would rather say it in words.", '{"summary": "x"}', '{"a": {"b": 1}}'],
         ids=["prose", "no_action", "nested"],
     )
-    async def test_a_reply_with_nothing_to_quote_is_asked_as_before(
+    async def test_a_reply_with_nothing_to_quote_is_asked_with_the_note_alone(
         self, first: str
     ) -> None:
         stub = _stub(first, GOOD)
         await _run(stub, steps_per_attempt=2)
-        assert _asked(stub.bodies[3]).endswith(f"\n\n{REFLECTION_RETRY_NOTE}")
-        assert "not valid JSON" not in _asked(stub.bodies[3])
+        assert _asked(stub.bodies[3]) == REFLECTION_RETRY_GUARD_NOTE
 
-    async def test_a_tool_call_is_asked_as_before_whatever_its_text_holds(self) -> None:
+    async def test_a_tool_call_is_asked_with_the_note_alone_whatever_its_text_holds(
+        self,
+    ) -> None:
         call = _call_reply(PLAIN)
         call["choices"][0]["message"]["content"] = TWO_SLIPS
         stub = _stub(call, GOOD)
         events = await _run(stub, steps_per_attempt=2)
         assert _reflection_event(events)["unreadable_reason"] == "tool_call"
-        assert _asked(stub.bodies[3]).endswith(f"\n\n{REFLECTION_RETRY_NOTE}")
-        assert "not valid JSON" not in _asked(stub.bodies[3])
+        assert _asked(stub.bodies[3]) == REFLECTION_RETRY_GUARD_NOTE
 
-    async def test_the_retry_on_the_same_prefix_quotes_it_after_its_note(self) -> None:
-        options: dict[str, Any] = {
-            "steps_per_attempt": 2,
-            "fixed_prefix": True,
-            "reflect_tool_guard": True,
-            "cache_layout": "v3",
-        }
+    async def test_the_retry_continues_the_request_with_the_unread_reply(self) -> None:
         stub = _stub(TWO_SLIPS, GOOD)
-        await _run(stub, **options)
+        await _run(stub, steps_per_attempt=2)
         reflect, retry = stub.bodies[2], stub.bodies[3]
+        assert retry["messages"][: len(reflect["messages"])] == reflect["messages"]
         unread, note = retry["messages"][len(reflect["messages"]) :]
         assert unread == {"role": "assistant", "content": TWO_SLIPS}
         assert note["content"] == f"{REFLECTION_RETRY_GUARD_NOTE}\n{TWO_SLIPS_LINE}"
-        # Without a line to quote the note is the one it always was.
-        prose = _stub("I would rather say it in words.", GOOD)
-        await _run(prose, **options)
-        assert _asked(prose.bodies[3]) == REFLECTION_RETRY_GUARD_NOTE
 
     async def test_a_reflection_that_reads_asks_nothing_new(self) -> None:
         stub = _stub(GOOD)
@@ -657,6 +635,4 @@ class TestWhereTheReaderIsUsed:
 
     def test_the_notes_that_a_repaired_reply_cites_are_read(self) -> None:
         text = '{"recommended_action": "done", "used_notes": ["n1", 2, ""],}'
-        assert Agent._used_notes(text, True) == ["n1"]
-        # Under utility the reply is read as before: no JSON object, no notes.
-        assert Agent._used_notes(text, False) == []
+        assert Agent._used_notes(text) == ["n1"]

@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.schema import SESSION_TEXT_CHARS
+from localmelo.support.browser import desktop
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.routes_settings import BODY_BYTES_LIMIT
 from localmelo.support.sessions.store import SessionStoreError
+from localmelo.tests.browser.fakes import forget_helper_status
 
 from .conftest import FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
 
@@ -37,6 +43,7 @@ async def test_health_shape(client: TestClient) -> None:
     assert body["model"] == {
         "backend": "mlc",
         "backend_label": "MLC-LLM",
+        "local": True,
         "name": "stub-model",
         "embedding": "none",
     }
@@ -154,3 +161,78 @@ async def test_health_open_error_and_recovery(
     assert sessions["store"] == "ok"
     assert sessions["store_reason"] is None
     assert sessions["store_error"] == ""
+
+
+# ── The desktop control helper ──
+
+FAKE_HELPER = Path(__file__).parents[2] / "browser" / "fake_desktop_server.py"
+
+
+@pytest.fixture
+def fake_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """The fake helper as the installed one; its screen file holds the permissions it reports."""
+    screen = tmp_path / "screen.json"
+    log = tmp_path / "calls.jsonl"
+    log.write_text("")
+    screen.write_text(json.dumps({"windows": []}))
+    monkeypatch.setenv(
+        desktop.HELPER_ENV, f"{sys.executable} -I {FAKE_HELPER} {screen} {log}"
+    )
+    forget_helper_status()
+    yield screen
+    forget_helper_status()
+
+
+async def test_health_says_the_desktop_helper_is_missing(client: TestClient) -> None:
+    body = client.get("/api/health").json()
+    assert body["desktop_helper"] == {
+        "state": "missing",
+        "app": "Cua Driver",
+        "pictures": None,
+        "problem": "",
+    }
+
+
+async def test_health_reports_the_helper_only_when_asked_to_look(
+    client: TestClient, console: Console, fake_helper: Path
+) -> None:
+    log = fake_helper.with_name("calls.jsonl")
+    console.cfg.browser.driver = "safari-automation"
+    assert client.get("/api/health").json()["desktop_helper"]["state"] == "installed"
+    looked = client.get("/api/health?helper=check").json()["desktop_helper"]
+    assert looked == {
+        "state": "granted",
+        "app": "Cua Driver",
+        "pictures": True,
+        "problem": "",
+    }
+    # What it found stays, without starting the helper again.
+    assert client.get("/api/health").json()["desktop_helper"]["state"] == "granted"
+    assert log.read_text().count("check_permissions") == 1
+
+
+async def test_health_names_a_missing_grant(
+    client: TestClient, console: Console, fake_helper: Path
+) -> None:
+    console.cfg.browser.driver = "safari-automation"
+    fake_helper.write_text(
+        json.dumps({"windows": [], "grants": {"accessibility": False}})
+    )
+    body = client.get("/api/health?helper=check").json()["desktop_helper"]
+    assert body["state"] == "no_grant" and body["app"] == "Cua Driver"
+    assert "Accessibility" in body["problem"]
+
+
+async def test_health_does_not_start_the_helper_while_melo_does_not_watch(
+    client: TestClient, console: Console, fake_helper: Path
+) -> None:
+    log = fake_helper.with_name("calls.jsonl")
+    off = client.get("/api/health?helper=check").json()["desktop_helper"]
+    assert off["state"] == "installed"  # browsing is off
+    console.cfg.browser.driver = "safari-automation"
+    console.cfg.browser.app_windows = False
+    assert (
+        client.get("/api/health?helper=check").json()["desktop_helper"]["state"]
+        == "installed"
+    )
+    assert log.read_text() == ""

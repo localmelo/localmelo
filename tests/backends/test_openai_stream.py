@@ -318,6 +318,29 @@ async def test_transport_failure_closes_stream(error: httpx.TransportError) -> N
 
 
 @pytest.mark.asyncio
+async def test_a_streamed_http_error_keeps_the_servers_reason_apart_from_its_words() -> (
+    None
+):
+    """The message stays as it was; the start of the body is there for whoever must tell why."""
+    reason = b'{"error":{"message":"image input is not supported"}}'
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(400, stream=Bytes([reason]))
+        ),
+    )
+    try:
+        with pytest.raises(ProviderError) as failure:
+            _ = [part async for part in provider.stream_chat([])]
+        assert str(failure.value) == "POST /chat/completions failed with HTTP 400"
+        assert "image input is not supported" in failure.value.detail
+        assert len(failure.value.detail) <= 500
+    finally:
+        await provider.close()
+
+
+@pytest.mark.asyncio
 async def test_http_errors_and_invalid_utf8() -> None:
     body = Bytes([b'{"error":{"code":"context_length_exceeded"}}'])
     provider = OpenAICompatLLM(

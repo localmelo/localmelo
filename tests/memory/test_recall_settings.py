@@ -142,7 +142,9 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         False,
         True,  # followup: a message with no content recalls from the recent turns
         True,  # excerpt_open: a cut excerpt can be opened, by default
-        False,  # premise: the list form's guide line is as it was
+        "guide",  # gather: recall looks wider for a question that counts
+        0.40,  # gather_floor: used only with gather on
+        True,  # premise: the list form's guide line ends with the no-record sentence
     )
     assert cfg.followup_query == "recent"
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
@@ -161,7 +163,7 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         cfg.premise_check,
         cfg.compress_at_chars,
         cfg.compress_cache,
-    ) == ("turns", "off", "off", 12000, "")
+    ) == ("turns", "off", "on", 12000, "")
     assert cfg.excerpt_open == "on"
     # The head of a turn is a floor, not a default: it stays what it was.
     assert TURN_CHARS == 234

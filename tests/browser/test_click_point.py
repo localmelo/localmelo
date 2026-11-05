@@ -106,6 +106,14 @@ async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused()
     out = await run(tools, "browser_click_point", x=500, y=300)
     assert out.is_error and "nothing to click at that point" in out.text
     assert not driver.acts
+    # A model often writes pixels: the error says the scale and, when the point fits the
+    # 1000x500 picture as pixels, where it is on the 0-1000 scale; it clicks nothing.
+    scale = "x and y run 0-1000 across and down the picture, not in pixels."
+    assert out.text.endswith(
+        f"{scale} As pixels of the 1000x500 picture, (500, 300) is (500, 600) on that scale."
+    )
+    below = await run(tools, "browser_click_point", x=250, y=800)
+    assert below.text.endswith(scale), below.text  # 800 is below a 500-high picture
 
 
 @pytest.mark.parametrize(

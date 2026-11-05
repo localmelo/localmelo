@@ -1,4 +1,4 @@
-"""Fixtures for the gateway tests: a temporary HOME.
+"""Fixtures for the gateway tests: a temporary HOME, and a process-row seeder.
 
 The console opens ``~/.cache/localmelo/gateway/sessions.db`` when the
 gateway starts, and the web workspace's call log and history also live
@@ -83,3 +83,24 @@ def _no_explanation_requests(monkeypatch: pytest.MonkeyPatch) -> None:
             start(self, task_id, request)
 
     monkeypatch.setattr(Explanations, "start", explained_by_test)
+
+
+async def seed_process(
+    store: SessionStore,
+    task_id: str,
+    *,
+    execution_id: str,
+    pgid: int,
+    leader_pid: int,
+    boot_id: str,
+    start_token: str,
+    host_id: str = "",
+) -> None:
+    """Write one captured process-group row, as a worker's gated launch would."""
+    async with store.component_transaction("seed_process") as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO recovery_processes "
+            "(task_id, execution_id, pgid, leader_pid, host_id, boot_id, start_token) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, execution_id, pgid, leader_pid, host_id, boot_id, start_token),
+        )

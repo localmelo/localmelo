@@ -1,9 +1,7 @@
-"""reflection_gate="patient", answer_on_stop and the reflection list caps.
+"""The patient gate, answer_on_stop and the reflection list caps.
 
 The gate table, the once-per-run allowance, the extra request for an answer when a
-run stops without one, and the caps on a reflection's lists. ``patient`` and
-``answer_on_stop`` are the defaults now; these tests build their agents with the
-earlier values (``tests/legacy_options.py``) and turn each on by name. No real model.
+run stops without one, and the caps on a reflection's lists. No real model.
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ from localmelo.melo.agent import AgentOptions
 from localmelo.melo.agent._chat import (
     ANSWER_EVIDENCE_CHARS,
     ANSWER_ON_STOP_NOTE,
-    LEAN_REFLECTION_PROMPT,
     REFLECTION_PROMPT,
 )
 from localmelo.melo.agent.agent import (
@@ -26,7 +23,6 @@ from localmelo.melo.agent.agent import (
     REFLECTION_LIST_ITEMS,
     _cap_reflection_lists,
     _gate_stop_reason,
-    _should_continue,
     _stop_reason,
 )
 from localmelo.melo.contracts.events import AgentEvent
@@ -39,6 +35,7 @@ from localmelo.tests.agent.test_reflection_gate import (
     _answer,
     _echo_call,
     _passing_decision,
+    _planning_texts,
     _reflection,
 )
 
@@ -49,14 +46,6 @@ TASK = (
 # test_answer_format.py) asks nothing about it.
 PLAIN_TASK = "Use echo to find the person."
 STALE = {"next_step_is_novel": False}  # a continue that is only not novel
-# The cache options of a plain run today (the shared helpers send the earlier ones).
-DEFAULT_CACHE: dict[str, Any] = {
-    "fixed_prefix": True,
-    "window_eviction": "chunk",
-    "reflect_tool_guard": True,
-    "cache_layout": "v3",
-    "window_messages": 64,
-}
 
 
 def _is_answer_request(call: dict[str, Any]) -> bool:
@@ -76,7 +65,7 @@ class TestGateTable:
         list(itertools.product([True, False], repeat=3)),
     )
     @pytest.mark.parametrize("allowance", [True, False])
-    def test_patient_differs_from_flags_only_on_a_not_novel_continue(
+    def test_the_allowance_changes_only_a_not_novel_continue(
         self, feasible: bool, concrete: bool, novel: bool, allowance: bool
     ) -> None:
         decision = _passing_decision(
@@ -84,41 +73,33 @@ class TestGateTable:
             next_step_is_concrete=concrete,
             next_step_is_novel=novel,
         )
-        flags = _gate_stop_reason(decision, "flags")
-        patient = _gate_stop_reason(decision, "patient", patient=allowance)
+        without = _gate_stop_reason(decision)
+        patient = _gate_stop_reason(decision, patient=allowance)
         if feasible and concrete and not novel and allowance:
-            assert (flags, patient) == ("not_novel", None)
+            assert (without, patient) == ("not_novel", None)
         else:
-            assert patient == flags
+            assert patient == without
 
-    def test_without_an_allowance_patient_is_flags(self) -> None:
+    def test_without_an_allowance_a_not_novel_continue_stops(self) -> None:
         decision = _passing_decision(next_step_is_novel=False)
-        assert _should_continue(decision, "patient") is False
-        assert _gate_stop_reason(decision, "patient") == "not_novel"
-
-    def test_the_allowance_does_not_help_the_other_gates(self) -> None:
-        decision = _passing_decision(next_step_is_novel=False)
-        assert _gate_stop_reason(decision, "flags", patient=True) == "not_novel"
-        assert _gate_stop_reason(decision, "utility", patient=True) == "not_novel"
+        assert _gate_stop_reason(decision) == "not_novel"
 
     @pytest.mark.parametrize("action", ["stop", "decompose", "done"])
     def test_only_a_continue_is_helped(self, action: str) -> None:
         decision = _passing_decision(
             recommended_action=action, next_step_is_novel=False
         )
-        assert _gate_stop_reason(decision, "patient", patient=True) == (
-            "action_not_continue"
-        )
+        assert _gate_stop_reason(decision, patient=True) == ("action_not_continue")
 
     def test_the_stop_reason_follows_the_allowance(self) -> None:
         decision = _passing_decision(next_step_is_novel=False)
-        assert _stop_reason(decision, "patient", "", patient=True) is None
-        assert _stop_reason(decision, "patient", "") == "not_novel"
+        assert _stop_reason(decision, "", patient=True) is None
+        assert _stop_reason(decision, "") == "not_novel"
         # A budget boundary and an unreadable reply stop whatever the allowance.
-        assert _stop_reason(decision, "patient", "Max steps reached", patient=True) == (
+        assert _stop_reason(decision, "Max steps reached", patient=True) == (
             "step_budget_used"
         )
-        assert _stop_reason(None, "patient", "Max steps reached", patient=True) == (
+        assert _stop_reason(None, "Max steps reached", patient=True) == (
             "unreadable_reply"
         )
 
@@ -135,41 +116,30 @@ class TestOncePerRun:
         return result, [e.data for e in events if e.type == "reflection"], llm
 
     @pytest.mark.asyncio
-    async def test_flags_stop_at_the_first_not_novel_continue(self) -> None:
-        result, [event], _ = await self._run(
-            [_echo_call("a"), _reflection("continue", rationale="again", **STALE)]
-        )
-        assert (result.status, result.attempts) == ("gate_stopped", 1)
-        assert event["stop_reason"] == "not_novel"
-
-    @pytest.mark.asyncio
-    async def test_patient_starts_one_more_attempt_with_the_avoids(self) -> None:
+    async def test_a_not_novel_continue_starts_one_more_attempt_with_the_avoids(
+        self,
+    ) -> None:
         reflection = _reflection(
             "continue", recommended_avoids=["do not click the banner"], **STALE
         )
         result, [event], llm = await self._run(
-            [_echo_call("a"), reflection, _answer("42")], reflection_gate="patient"
+            [_echo_call("a"), reflection, _answer("42")]
         )
         assert (result.status, result.result, result.attempts) == ("completed", "42", 2)
-        assert (event["gate"], event["continue_run"], event["stop_reason"]) == (
-            "patient",
-            True,
-            None,
-        )
+        assert (event["continue_run"], event["stop_reason"]) == (True, None)
         assert event["flags"]["next_step_is_novel"] is False
-        # The next attempt's planning request carries the avoids, as under flags.
-        assert "do not click the banner" in llm.calls[-1]["messages"][0].content
+        # The next attempt's planning request carries the avoids.
+        assert "do not click the banner" in _planning_texts(llm)[-1]
 
     @pytest.mark.asyncio
-    async def test_a_second_not_novel_continue_stops_as_flags_do(self) -> None:
+    async def test_a_second_not_novel_continue_stops(self) -> None:
         result, events, _ = await self._run(
             [
                 _echo_call("a"),
                 _reflection("continue", **STALE),
                 _echo_call("b"),
                 _reflection("continue", rationale="still stuck", **STALE),
-            ],
-            reflection_gate="patient",
+            ]
         )
         assert (result.status, result.attempts, result.error) == (
             "gate_stopped",
@@ -191,8 +161,7 @@ class TestOncePerRun:
                 _reflection("continue", **STALE),
                 _echo_call("c"),
                 _reflection("continue", **STALE),
-            ],
-            reflection_gate="patient",
+            ]
         )
         assert (result.status, result.attempts) == ("gate_stopped", 3)
         assert [e["continue_run"] for e in events] == [True, True, False]
@@ -201,35 +170,10 @@ class TestOncePerRun:
     @pytest.mark.parametrize("check", ["task_still_feasible", "next_step_is_concrete"])
     async def test_the_allowance_covers_only_novelty(self, check: str) -> None:
         result, [event], _ = await self._run(
-            [_echo_call("a"), _reflection("continue", **{check: False, **STALE})],
-            reflection_gate="patient",
+            [_echo_call("a"), _reflection("continue", **{check: False, **STALE})]
         )
         assert result.status == "gate_stopped"
         assert event["stop_reason"] != "not_novel"
-
-    @pytest.mark.asyncio
-    async def test_patient_reads_a_reflection_as_flags_do(self) -> None:
-        # No estimates are needed: a low utility does not stop it.
-        reply = _reflection(
-            "continue", estimated_info_gain=0.0, estimated_cost=1.0, repeat_risk=1.0
-        )
-        result, _, _ = await self._run(
-            [_echo_call("a"), reply, _answer("42")], reflection_gate="patient"
-        )
-        assert (result.status, result.attempts) == ("completed", 2)
-
-
-class TestPatientReadsLikeFlags:
-    @pytest.mark.parametrize(
-        ("gate", "lean"),
-        [("flags", True), ("patient", True), ("utility", False)],
-    )
-    def test_the_lean_reflection_prompt_goes_with_the_flag_style_gates(
-        self, gate: Any, lean: bool
-    ) -> None:
-        agent = _agent(FakeLLM([]), lean_output=True, reflection_gate=gate)
-        expected = LEAN_REFLECTION_PROMPT if lean else REFLECTION_PROMPT
-        assert agent.chat.reflection_prompt == expected
 
 
 # ── An answer when a run stops ──────────────────────────────────────────────
@@ -240,8 +184,7 @@ async def _stopped(
 ) -> tuple[Any, FakeLLM]:
     """A run whose first reflection stops it without an answer."""
     llm = FakeLLM(
-        [_echo_call("page text about Lovelace"), _reflection("continue", **STALE)]
-        + list(replies)
+        [_echo_call("page text about Lovelace"), _reflection("stop")] + list(replies)
     )
     agent = _agent(llm, steps_per_attempt=1, max_attempts=3, **options)
     return await agent.run_task(query), llm
@@ -276,10 +219,10 @@ class TestAnswerOnStop:
         assert "unknown" in ANSWER_ON_STOP_NOTE
 
     @pytest.mark.asyncio
-    async def test_the_default_layout_shows_the_reflection_once(self) -> None:
-        # fixed prefix, cache layout v3: the reflection is already in the window.
-        llm = FakeLLM([_echo_call("a"), _reflection("continue", **STALE), _answer("7")])
-        agent = _agent(llm, steps_per_attempt=1, answer_on_stop=True, **DEFAULT_CACHE)
+    async def test_the_reflection_shows_once(self) -> None:
+        # The reflection is already in the window.
+        llm = FakeLLM([_echo_call("a"), _reflection("stop"), _answer("7")])
+        agent = _agent(llm, steps_per_attempt=1, answer_on_stop=True)
         result = await agent.run_task("echo")
         assert (result.status, result.result) == ("gate_stopped", "7")
         [call] = _answer_requests(llm)
@@ -335,7 +278,7 @@ class TestAnswerOnStop:
         llm = FakeLLM(
             [
                 _echo_call("a"),
-                _reflection("continue", best_effort_result="7", **STALE),
+                _reflection("stop", best_effort_result="7"),
             ]
         )
         agent = _agent(llm, steps_per_attempt=1, answer_on_stop=True)
@@ -364,7 +307,7 @@ class TestAnswerOnStop:
     @pytest.mark.asyncio
     async def test_a_request_that_raises_leaves_the_run_as_it_was(self) -> None:
         failing = FakeLLM(
-            [_echo_call("a"), _reflection("continue", **STALE)]  # then: nothing queued
+            [_echo_call("a"), _reflection("stop")]  # then: nothing queued
         )
         agent = _agent(failing, steps_per_attempt=1, answer_on_stop=True)
         result = await agent.run_task(TASK)
@@ -383,7 +326,7 @@ class TestAnswerOnStop:
                     raise ProviderError("server gone", status_code=400)
                 return await super().chat(messages, tools)
 
-        llm = Failing([_echo_call("a"), _reflection("continue", **STALE)])
+        llm = Failing([_echo_call("a"), _reflection("stop")])
         agent = _agent(llm, steps_per_attempt=1, answer_on_stop=True)
         result = await agent.run_task(TASK)
         assert (result.status, result.result) == ("gate_stopped", "")
@@ -401,7 +344,7 @@ class TestAnswerOnStop:
             [
                 _echo_call(big),
                 _echo_call("newest evidence"),
-                _reflection("continue", **STALE),
+                _reflection("stop"),
                 _answer("FINAL ANSWER: 3"),
             ]
         )
@@ -462,16 +405,13 @@ class TestCaps:
         }
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "options", [{"reflection_gate": "patient"}, {"answer_on_stop": True}]
-    )
-    async def test_a_stored_reflection_is_capped_when_an_option_is_on(
-        self, options: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    async def test_a_stored_reflection_is_capped(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm = FakeLLM(
             [_echo_call("a"), _reflection("continue", **self._dump(), **STALE)]
         )
-        agent = _agent(llm, steps_per_attempt=1, max_attempts=2, **options)
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
         added = _added_reflections(agent, monkeypatch)
         await agent.run_task("echo")
         [entry] = added
@@ -483,39 +423,26 @@ class TestCaps:
         assert entry.recommended_avoids[0].startswith("a")
 
     @pytest.mark.asyncio
-    async def test_the_default_keeps_a_reflection_as_before(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        dump = {"failed_hypotheses": [f"h{n}" for n in range(12)]}
-        llm = FakeLLM([_echo_call("a"), _reflection("continue", **dump, **STALE)])
-        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
-        added = _added_reflections(agent, monkeypatch)
-        await agent.run_task("echo")
-        assert added[0].failed_hypotheses == dump["failed_hypotheses"]  # 12 items
-
-    @pytest.mark.asyncio
     async def test_the_model_sees_only_the_capped_lists(self) -> None:
         dump = {"failed_hypotheses": [f"hypothesis-{n}" for n in range(12)]}
         replies = [_echo_call("a"), _reflection("continue", **dump), _answer("42")]
         llm = FakeLLM(replies)
-        agent = _agent(
-            llm, steps_per_attempt=1, max_attempts=2, reflection_gate="patient"
-        )
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
         await agent.run_task("echo")
-        system = llm.calls[-1]["messages"][0].content
-        assert "hypothesis-7" in system
-        assert "hypothesis-8" not in system
+        # The model's own reply, with all twelve, is in the window too; the
+        # reflection block the next attempt reads has the first eight.
+        [block] = [
+            m.content
+            for m in llm.calls[-1]["messages"]
+            if m.content.startswith("[Reflections; data")
+        ]
+        assert "hypothesis-7" in block
+        assert "hypothesis-8" not in block
 
 
 class TestOptionValues:
-    def test_the_gate_names_are_validated(self) -> None:
-        assert AgentOptions(reflection_gate="patient").reflection_gate == "patient"
-        with pytest.raises(ValueError, match="reflection_gate"):
-            AgentOptions(reflection_gate="impatient")  # type: ignore[arg-type]
-
-    def test_the_defaults_are_the_patient_gate_and_the_answer_request(self) -> None:
-        options = AgentOptions()
-        assert (options.reflection_gate, options.answer_on_stop) == ("patient", True)
+    def test_the_default_asks_for_an_answer_on_stop(self) -> None:
+        assert AgentOptions().answer_on_stop is True
 
     def test_answer_on_stop_must_be_a_bool(self) -> None:
         with pytest.raises(ValueError, match="answer_on_stop"):

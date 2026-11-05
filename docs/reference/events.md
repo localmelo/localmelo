@@ -11,8 +11,7 @@ function that receives them.
 > enabled; the `melo ""` loop runs without a sink. The interactive UI and
 > the gateway's `/api` console run turns with event sinks and save events in
 > sessions; the console exposes them over SSE and shows them in the web
-> workspace. The legacy `/v1/playground` sink keeps only the `run.finished`
-> outcome for Stop and does not show live events.
+> workspace.
 
 ## Follow a run
 
@@ -170,7 +169,7 @@ asyncio.run(main())
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
-| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
+| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | Last. | `result`, `reviews` |
@@ -390,8 +389,11 @@ The number of `tool.started` events is `RunResult.n_tool`.
   a site, `ask:site:<host>` among them), so a task its chat continues never
   asks it, or anything else about that host however its address is written,
   again; a refusal of such a repeat has `earlier` (who refused it
-  first) and no `call_key`. Every other call, and an event stored before this
-  key, has no `tool_asks`.
+  first) and no `call_key`. A question that got no decision is there too, as
+  `{request_id, tool, allowed: false, origin, reason}` with no `call_key`:
+  `origin` is `error` when the policy failed (`reason` is the failure) or
+  `withdrawn` when the run was cancelled while it decided. Every other call,
+  and an event stored before this key, has no `tool_asks`.
 - `allowed_local`: `true`, and only for a `web_fetch` call that read a test server on this
   computer which the developer setting `[tools] web_fetch_allow_local` lists (see
   [Tools](tools.md#test-servers-on-this-computer)); it is there even when the page then
@@ -480,17 +482,12 @@ is in `memory_stats.recall_log` and, with its item text, in
 
 - `attempt`: as on `reflection.started`.
 - `action`: the reflection's choice: `continue`, `stop`, `decompose` or
-  `done`. With `reflection_gate="utility"` it is `decompose` for a
-  reflection over the size limit that did not choose `done`; with the
-  default `"patient"` or `"flags"`, such a reflection is trimmed and keeps its choice.
+  `done`. A reflection over the size limit is trimmed and keeps its choice.
 - `continue_run`: `true` only when another attempt starts. It is `false`
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
 - `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
   `next_step_is_novel`, as booleans; `null` when the reply was not readable.
-- `gate`: the `reflection_gate` in force, `patient` (the default), `flags` or `utility`.
-- `utility`: with `"utility"`, the decision's utility (see the option); else
-  `null`.
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
   first of these that applies, in this order:
   `unreadable_reply` (no decision, and no attempt could start),
@@ -498,8 +495,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   `no_attempt_left` (`max_attempts` used; the run ends with `Max attempts
   reached`), `step_budget_used` (`max_steps` used; `Max steps reached`),
   then the gate's checks: `action_not_continue` (the action is `stop` or
-  `decompose`), `not_feasible`, `not_concrete`, `not_novel`, and with
-  `"utility"` only `utility_below_threshold`. It is derived by the
+  `decompose`), `not_feasible`, `not_concrete`, `not_novel`. It is derived by the
   code that decides, so it never disagrees with `continue_run`. A
   `gate_stopped` run whose rationale is blank reports it in `error`:
   `Stopped after attempt <n> (stop reason: <code>)`; with a rationale, the
@@ -513,7 +509,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
-  gets no event of its own. With the default `reflection_gate="patient"` or `"flags"`, a
+  gets no event of its own. A
   first reply that has JSON the decoder rejected, and is not a tool call, puts
   one more line after the retry note: the decoder's error and up to 60
   characters around it, for example `Your reply was not valid JSON (Expecting
@@ -521,19 +517,15 @@ is in `memory_stats.recall_log` and, with its item text, in
   again with one JSON object.` In the compress modes the prompt fit can
   refuse a request before it is sent, which reads as an unreadable reply:
   `requests` is then 0, or 1 when only the retry was refused.
-- `readable`: `false` when, with the default `reflection_gate="patient"` or `"flags"`, the
+- `readable`: `false` when the
   second reply still held no reflection. `requests` is then 2; `action`,
   `rationale`, `summary` and `best_effort_result` are `null`; and
   `continue_run` is `true`, unless no attempt could start, in which case the
-  run ends as `budget_exhausted`. With `"utility"` it is always `true`: such
-  a reply counts as `stop`, with the rationale
-  `Could not parse reflection response`, or
-  `Reflection response was not a JSON object` when it was valid JSON that
-  is not an object.
+  run ends as `budget_exhausted`.
 - `unreadable_reason`: why the first reply held no reflection: `tool_call` (it has
   tool calls and no reflection in its text; the usual case when the window
   ends in tool turns), `invalid` (its text has a JSON object that
-  `"flags"` does not accept) or `no_json`; `null` when it read. The retry
+  no reflection can be read from) or `no_json`; `null` when it read. The retry
   follows either way, so `readable` can be `true` with a reason.
 - `repaired`: the one slip in the JSON of the reply that gave the reflection
   that was mended so that it reads: `unmatched_closer` (a `]` or `}` that no
@@ -543,8 +535,8 @@ is in `memory_stats.recall_log` and, with its item text, in
   an escape that JSON does not have, such as `\;`, was doubled, so that it
   reads as a backslash and the character after it) or `unclosed_array` (an
   array that the next key broke off was closed: a `]` was inserted before the
-  comma that precedes that key); `null` when the reply read as it was, when no
-  reflection was read, and with `"utility"`. A repair is tried only when the
+  comma that precedes that key); `null` when the reply read as it was and when no
+  reflection was read. A repair is tried only when the
   reply holds no reflection as it stands, only on a `{...}` that the decoder
   rejects (the first eight of a reply), and counts only when the result is an
   object with a valid `recommended_action`. A reply that needs two repairs
@@ -740,11 +732,12 @@ and `"run_id": ""`.
 
 | Type | When | `data` keys |
 |---|---|---|
-| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id`; `origin` (`ask_owner`) only on a turn the person did not begin |
+| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id`; `origin` (`ask_owner`) only on a turn the person did not begin; `images` (`[{sha256, mime_type, size_bytes}]`, references into the session's blobs) only on a turn with pictures the person added |
+| `turn.note` | The person added words to the turn while it ran ([`POST /api/turns/{turn_id}/notes`](api-v2.md#post-apiturnsturn_idnotes)): stored with the turn's events. `inbox.accepted` says when the run read it, its `offset` being `note`. | `turn`, `turn_id`, `note`, `text`; `images` (`[{sha256, mime_type, size_bytes}]`, references into the session's blobs) only on a note with pictures |
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
 | `turn.pictures` | A console turn made pictures: after its run's last event, before `turn.finished`. Absent when it made none, and in the terminal's file. | `turn`, `turn_id`, `pictures` |
-| `turn.memory` | What [memory across chats](../concepts/memory.md#memory-across-chats) did for a console turn, before its run's first event, on every turn with memory on, and again, whole and the same shape, each time the chat's model keeps a note with `remember`, tries to keep a secret, its `search_memory` finds something new, it opens a chat turn with `open_memory`, or a reply that claimed a save is kept or flagged (the newest one counts): `used` (`[{kind: record\|chat\|item, id, text, source, session_id, turn, at, shown}]`, what was recalled into the message; `text` is the stored text (a chat turn's, cut to 240 characters) and `shown` is the exact line the model read in the recall block, as the recall settings made it (by default, with `[memory] excerpt_open = "on"`, a cut turn's line starts with its id, `[t123] …`) and without a list number; an item left out of the block for room has no entry; an `item` entry, a memory item with developer setting `[memory] recall_source = "items"`, also has `item` (its id, the same as `id`) and `sources`, `[[chat id, turn], …]` for the turns it was written from), `searched` (`[{kind, id, text, source, session_id, turn, at, shown}]`, what the model's own `search_memory` calls found in the turn, first found first, no repeats; `shown` is the exact line the model read in the search result, without its number, from the first search that found the item; absent until a search finds something), `opened` (`[{session_id, turn, id}]`, the chat turns the model opened in the turn with `open_memory`, first opened first, one entry for each turn, `id` the number of the list id (`t123`) it gave; the text it read is in the `open_memory` tool result, not in the event; `[memory] excerpt_open = "on"` (the default) or the developer setting `recall_form = "list"`; with `recall_source = "items"` an entry for a memory item is `{item, sources}`, `item` the number of the list id (`m12`) it gave, one entry for each item; absent until a turn or item is opened), `remembered` (`[{id, text, topic}]`, the notes the turn kept: those the typed text asked for, then the model's; with the developer setting `[memory] note_gate` above `typed`, an entry the model's note made also has `source`: `typed`, `pointed`, `result` or `inferred`), `refused` (why something was not kept, or `""`), `unsaved_claim` (`true` when the reply said it noted something and no note was kept, even after melo tried to keep what it named, when what it named was not written to you, or when it named nothing ("Saved."); else `false`) and `recall` (how the search went: `{retriever: bm25\|embedding\|llm, fallback: none\|timeout\|error\|unreadable\|no-embedding, embed_ms, search_ms, select_ms, select_tokens: {prompt, completion}, candidates, used, block_chars, query_from: message\|recent\|none}` (`block_chars`: the length of the block memory added to the message, 0 when none; `query_from`: what the search was for, `message` (the message's own words), `recent` (a message with no content of its own, searched with the user's words of the chat's last turns) or `none` (no search: such a message in a chat with no earlier turn); absent from turns recorded before it existed), the numbers `[memory] retriever` is compared by; the stored turn's `result` repeats it as `memory_recall`). `search_hint` (`true`, present only when the block carried the one line that tells the model to call the memory search tool because nothing was recalled: developer setting `[memory] search_when_empty = "hint"`). `digest` (`{minutes, items: [{session_id, turn, line}]}`, present only on a chat's first turn whose message carried the digest of the user's other chats (`[chat] recent_digest_minutes`; never the main chat): the window in minutes and, oldest first, each turn's chat id and number and `line`, the exact line the model read, without the block's leading `- `; it comes in the second, refreshed event of that turn, after the recall's own). Absent with memory off, and in the terminal's file. | `turn`, `turn_id`, `used`, `searched`, `opened`, `remembered`, `refused`, `recall`, `unsaved_claim` |
+| `turn.memory` | What [memory across chats](../concepts/memory.md#memory-across-chats) did for a console turn, before its run's first event, on every turn with memory on, and again, whole and the same shape, each time the chat's model keeps a note with `remember`, tries to keep a secret, its `search_memory` finds something new, it opens a chat turn with `open_memory`, or a reply that claimed a save is kept or flagged (the newest one counts): `used` (`[{kind: record\|chat\|item, id, text, source, session_id, turn, at, shown}]`, what was recalled into the message; `text` is the stored text (a chat turn's, cut to 240 characters) and `shown` is the exact line the model read in the recall block, as the recall settings made it (by default, with `[memory] excerpt_open = "on"`, a cut turn's line starts with its id, `[t123] …`) and without a list number; an item left out of the block for room has no entry; an `item` entry, a memory item with developer setting `[memory] recall_source = "items"`, also has `item` (its id, the same as `id`) and `sources`, `[[chat id, turn], …]` for the turns it was written from), `searched` (`[{kind, id, text, source, session_id, turn, at, shown}]`, what the model's own `search_memory` calls found in the turn, first found first, no repeats; `shown` is the exact line the model read in the search result, without its number, from the first search that found the item; absent until a search finds something), `opened` (`[{session_id, turn, id}]`, the chat turns the model opened in the turn with `open_memory`, first opened first, one entry for each turn, `id` the number of the list id (`t123`) it gave; the text it read is in the `open_memory` tool result, not in the event; `[memory] excerpt_open = "on"` (the default) or the developer setting `recall_form = "list"`; with `recall_source = "items"` an entry for a memory item is `{item, sources}`, `item` the number of the list id (`m12`) it gave, one entry for each item; absent until a turn or item is opened), `remembered` (`[{id, text, topic}]`, the notes the turn kept: those the typed text asked for, then the model's; with the developer setting `[memory] note_gate` above `typed`, an entry the model's note made also has `source`: `typed`, `pointed`, `result` or `inferred`), `refused` (why something was not kept, or `""`), `unsaved_claim` (`true` when the reply said it noted something and no note was kept, even after melo tried to keep what it named, when what it named was not written to you, or when it named nothing ("Saved."); else `false`) and `recall` (how the search went: `{retriever: bm25\|embedding\|llm, fallback: none\|timeout\|error\|unreadable\|no-embedding, embed_ms, search_ms, select_ms, select_tokens: {prompt, completion}, candidates, used, block_chars, query_from: message\|recent\|none}` (`block_chars`: the length of the block memory added to the message, 0 when none; `query_from`: what the search was for, `message` (the message's own words), `recent` (a message with no content of its own, searched with the user's words of the chat's last turns) or `none` (no search: such a message in a chat with no earlier turn); absent from turns recorded before it existed; `gather` (`true` when the message asks to count, total or compare about the speaker) and `floor` (the vector bar the search used) are there on every turn unless the developer setting `[memory] gather` is `off`), the numbers `[memory] retriever` is compared by; the stored turn's `result` repeats it as `memory_recall`). `search_hint` (`true`, present only when the block carried the one line that tells the model to call the memory search tool because nothing was recalled: developer setting `[memory] search_when_empty = "hint"`). `digest` (`{minutes, items: [{session_id, turn, line}]}`, present only on a chat's first turn whose message carried the digest of the user's other chats (`[chat] recent_digest_minutes`; never the main chat): the window in minutes and, oldest first, each turn's chat id and number and `line`, the exact line the model read, without the block's leading `- `; it comes in the second, refreshed event of that turn, after the recall's own). Absent with memory off, and in the terminal's file. | `turn`, `turn_id`, `used`, `searched`, `opened`, `remembered`, `refused`, `recall`, `unsaved_claim` |
 | `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
 | `session.updated` | The session's model, workspace or `meta` changes (a console chat's mode is `meta.approvals`, `ask` or `auto`). | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
@@ -830,4 +823,4 @@ keys, and a session store accepts events without them).
 `EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and
 `SESSION_EVENT_FIELDS` in `localmelo.support.sessions.store` each session
 type; `OPTIONAL_SESSION_EVENT_FIELDS` there lists the session keys an event
-may lack (`turn.started`'s `origin`).
+may lack (`turn.started`'s `origin` and `images`).

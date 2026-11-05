@@ -133,7 +133,7 @@ melo-retrieve: error: queries.jsonl:1: relevant id 'demo:d9' is not in the corpu
 |---|---|---|
 | `task_id` | 必需 | 任务的 id：不能为空，且不含空白字符。 |
 | `seq` | 必需 | 调用在其任务中的编号：0 或更大的整数，每个任务内唯一。 |
-| `kind` | `plan` | `plan`（规划调用）、`reflect`（反思调用），或 `retrieve` 和 `estimate`（其他调用，不产生文档）。 |
+| `kind` | `plan` | `plan`（规划调用）、`reflect`（反思调用），或 `retrieve`（另一种调用，不产生文档）。 |
 | `step` | `0` | 运行的步骤。 |
 | `attempt` | `1` | 运行的尝试。 |
 | `content` | `""` | 回复的文本。 |
@@ -331,17 +331,14 @@ melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
 > [!NOTE]
 > 检索器的 Python 接口是实验性的，可能会在 v0.1.0 之前变化。
 
-`localmelo.melo.memory.retrieval` 包含检索器、评估以及文件格式。下面的脚本会搜索并评估[第一次评估](../guides/offline-retrieval.md#run-a-first-evaluation)中的文件：
+`localmelo.melo.memory.retrieval` 包含检索器，`localmelo.support.memory.retrieval_eval` 包含评估，`localmelo.support.memory.retrieval_corpus` 包含文件格式。下面的脚本会搜索并评估[第一次评估](../guides/offline-retrieval.md#run-a-first-evaluation)中的文件：
 
 ```python
 import asyncio
 
-from localmelo.melo.memory.retrieval import (
-    build_retriever,
-    evaluate,
-    load_corpus,
-    load_queries,
-)
+from localmelo.melo.memory.retrieval import build_retriever
+from localmelo.support.memory.retrieval_corpus import load_corpus, load_queries
+from localmelo.support.memory.retrieval_eval import evaluate
 
 
 async def main() -> None:
@@ -399,11 +396,8 @@ asyncio.run(main())
 ```python
 import asyncio
 
-from localmelo.melo.memory.retrieval import (
-    build_retriever,
-    load_corpus,
-    send_from_provider,
-)
+from localmelo.melo.memory.retrieval import build_retriever, send_from_provider
+from localmelo.support.memory.retrieval_corpus import load_corpus
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 

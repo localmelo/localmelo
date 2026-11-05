@@ -12,8 +12,10 @@ refuses the requests before they reach any route, and forbids framing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
+import sys
 from http.cookies import CookieError, SimpleCookie
 
 from starlette.responses import JSONResponse
@@ -51,6 +53,24 @@ _WS_POLICY_VIOLATION = 1008
 BODY_BYTES_LIMIT = 1_048_576
 _TOO_LARGE_ERROR = f"Request body too large (max {BODY_BYTES_LIMIT} bytes)."
 _UNSUPPORTED_MEDIA_TYPE_ERROR = "Content-Type must be application/json."
+
+# The one route that takes raw bytes: a picture for the composer. It has its
+# own limit and its own Content-Types; every other API route is unchanged.
+UPLOAD_PATH = "/api/uploads"
+UPLOAD_BYTES_LIMIT = 20 * 1024 * 1024
+UPLOAD_CONTENT_TYPES = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+        "application/octet-stream",
+    }
+)
+_UPLOAD_TOO_LARGE_ERROR = f"Picture too large (max {UPLOAD_BYTES_LIMIT} bytes)."
+_UPLOAD_MEDIA_TYPE_ERROR = "Content-Type must be an image type."
 
 # The headers of an API v2 refusal: the console's middleware never sees it,
 # because the guard is outermost, so it sets no-store itself.
@@ -116,10 +136,26 @@ def _forbid_framing(send: Send, *, is_api: bool = False) -> Send:
     return send_forbidding_framing
 
 
-def _is_api_path(scope: Scope) -> bool:
-    """Whether the request is ``/api`` or below it, also with leading slashes."""
-    path = "/" + str(scope.get("path", "")).lstrip("/")
+def is_api_path(path: str) -> bool:
+    """Whether *path* is ``/api`` or below it, also with leading slashes."""
+    path = "/" + path.lstrip("/")
     return path == "/api" or path.startswith("/api/")
+
+
+def is_upload_request(scope: Scope) -> bool:
+    """Whether the request is ``POST /api/uploads``, which takes a picture's bytes."""
+    path = "/" + str(scope.get("path", "")).lstrip("/")
+    return (
+        str(scope.get("method", "")).upper() == "POST"
+        and path.rstrip("/") == UPLOAD_PATH
+    )
+
+
+def is_upload_content_type(values: list[str]) -> bool:
+    """Whether *values* is a single image Content-Type the upload route takes."""
+    return len(values) == 1 and (
+        values[0].split(";", 1)[0].strip().lower() in UPLOAD_CONTENT_TYPES
+    )
 
 
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
@@ -148,15 +184,23 @@ def is_json_content_type(values: list[str]) -> bool:
     return True
 
 
-def _content_length_too_large(values: list[str]) -> bool:
-    """Whether any ``Content-Length`` header exceeds :data:`BODY_BYTES_LIMIT`."""
-    for raw in values:
-        text = raw.strip()
-        if not text.isdigit():
-            continue
-        if int(text) > BODY_BYTES_LIMIT:
-            return True
-    return False
+def _declared_length(raw: str) -> int | None:
+    """The size a ``Content-Length`` header says, or ``None`` when it is not plain digits.
+
+    ``str.isdigit`` accepts ``"²"`` and other digits ``int`` refuses, so the
+    text must be ASCII too. More digits than any limit is as large as it gets,
+    and ``int`` is not asked to read it.
+    """
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()):
+        return None
+    digits = text.lstrip("0")
+    return int(digits or "0") if len(digits) <= 18 else sys.maxsize
+
+
+def _content_length_too_large(values: list[str], limit: int = BODY_BYTES_LIMIT) -> bool:
+    """Whether any ``Content-Length`` header exceeds *limit* (:data:`BODY_BYTES_LIMIT`)."""
+    return any((n := _declared_length(raw)) is not None and n > limit for raw in values)
 
 
 class LoopbackGuard:
@@ -225,10 +269,9 @@ class LoopbackGuard:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        api = is_api_path(str(scope.get("path", "")))
         if scope["type"] == "http":
-            send = _forbid_framing(
-                send, is_api=_is_api_path(scope) or scope.get("path") == "/"
-            )
+            send = _forbid_framing(send, is_api=api or scope.get("path") == "/")
 
         refusal = self._refusal(scope)
         generation = (
@@ -240,16 +283,19 @@ class LoopbackGuard:
             refusal = self._auth_refusal(scope)
         rotation = self.auth.rotation if self.auth is not None else None
         if refusal is None and scope["type"] == "http":
-            refusal = self._header_refusal(scope)
+            refusal = self._header_refusal(scope, api)
         if refusal is None and scope["type"] == "http":
-            receive, refusal = await self._read_body(scope, receive)
+            receive, refusal = await self._read_body(scope, receive, api)
         if refusal is None and self.auth is not None:
             refusal = self._auth_refusal(scope)
         if refusal is None:
             if (
                 rotation is not None
                 and generation is not None
-                and str(scope.get("path", "")).endswith("/events")
+                and (
+                    scope["type"] == "websocket"
+                    or str(scope.get("path", "")).endswith("/events")
+                )
             ):
                 await self._serve_stream(scope, receive, send, rotation, generation)
             else:
@@ -267,7 +313,7 @@ class LoopbackGuard:
                 }
             )
             return
-        if _is_api_path(scope):
+        if api:
             # API v2 has one error shape; the legacy routes keep theirs.
             content: dict[str, object] = {
                 "error": {"code": code, "message": error, "details": {}}
@@ -392,14 +438,26 @@ class LoopbackGuard:
             if not app_task.done():
                 app_task.cancel()
             await asyncio.gather(app_task, rotated, return_exceptions=True)
+            if revoked and scope["type"] == "websocket":
+                # A socket whose token was revoked is closed, not left to the server's own end.
+                with contextlib.suppress(Exception):
+                    await send(
+                        {
+                            "type": "websocket.close",
+                            "code": _WS_POLICY_VIOLATION,
+                            "reason": "token_rotated",
+                        }
+                    )
 
     async def _read_body(
-        self, scope: Scope, receive: Receive
+        self, scope: Scope, receive: Receive, api: bool
     ) -> tuple[Receive, tuple[int, str, str] | None]:
         """Read up to :data:`BODY_BYTES_LIMIT` bytes and check ``/api`` Content-Type."""
         chunks: list[bytes] = []
         total = 0
         disconnected = False
+        upload = is_upload_request(scope)
+        limit = UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
@@ -408,19 +466,30 @@ class LoopbackGuard:
             chunk = message.get("body", b"")
             if chunk:
                 total += len(chunk)
-                if total > BODY_BYTES_LIMIT:
-                    return receive, (413, "too_large", _TOO_LARGE_ERROR)
+                if total > limit:
+                    return receive, (
+                        413,
+                        "too_large",
+                        _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR,
+                    )
                 chunks.append(chunk)
             if not message.get("more_body", False):
                 break
 
-        if total > 0 and _is_api_path(scope):
+        if total > 0 and api:
             content_types = [
                 value.decode("latin-1")
                 for name, value in scope.get("headers", ())
                 if name.lower() == b"content-type"
             ]
-            if not is_json_content_type(content_types):
+            if upload:
+                if not is_upload_content_type(content_types):
+                    return receive, (
+                        415,
+                        "unsupported_media_type",
+                        _UPLOAD_MEDIA_TYPE_ERROR,
+                    )
+            elif not is_json_content_type(content_types):
                 return receive, (
                     415,
                     "unsupported_media_type",
@@ -469,34 +538,49 @@ class LoopbackGuard:
 
         # A path may start with several slashes, as in //v1/health.
         path = "/" + str(scope.get("path", "")).lstrip("/")
-        if path.startswith("/v1/") or path == "/api" or path.startswith("/api/"):
+        if path.startswith("/v1/") or is_api_path(path):
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
 
         return None
 
-    def _header_refusal(self, scope: Scope) -> tuple[int, str, str] | None:
+    def _header_refusal(self, scope: Scope, api: bool) -> tuple[int, str, str] | None:
         headers: dict[bytes, list[str]] = {}
         for name, value in scope.get("headers", ()):
             headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
 
         if scope["type"] == "http":
             content_lengths = headers.get(b"content-length", [])
-            if _content_length_too_large(content_lengths):
-                return 413, "too_large", _TOO_LARGE_ERROR
+            upload = is_upload_request(scope)
+            if _content_length_too_large(
+                content_lengths, UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
+            ):
+                return (
+                    413,
+                    "too_large",
+                    _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR,
+                )
             if (
-                _is_api_path(scope)
+                api
                 and any(
-                    raw.strip().isdigit() and int(raw.strip()) > 0
+                    (n := _declared_length(raw)) is not None and n > 0
                     for raw in content_lengths
                 )
-                and not is_json_content_type(headers.get(b"content-type", []))
+                and not (
+                    is_upload_content_type(headers.get(b"content-type", []))
+                    if upload
+                    else is_json_content_type(headers.get(b"content-type", []))
+                )
             ):
                 return (
                     415,
                     "unsupported_media_type",
-                    _UNSUPPORTED_MEDIA_TYPE_ERROR,
+                    (
+                        _UPLOAD_MEDIA_TYPE_ERROR
+                        if upload
+                        else _UNSUPPORTED_MEDIA_TYPE_ERROR
+                    ),
                 )
 
         return None

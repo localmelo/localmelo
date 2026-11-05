@@ -269,10 +269,9 @@ async def test_the_last_evidence_bearing_attempt_digest_is_admitted(
             attempt_policy="reflect",
             steps_per_attempt=1,
             max_attempts=2,
-            admit_on_outcome=True,
         ),
     )
-    result = await agent.run_task("write helper")
+    result = await agent.run_task("write helper. Remember how you did it.")
     await agent.close()
     assert result.memory_stats is not None
     # Attempt 1 wrote a file; attempt 2 answered without evidence. The
@@ -589,74 +588,3 @@ async def test_a_legacy_run_continues_without_a_newer_long_store(
     ]
     assert len(warnings) == 1
     assert "schema version 2" in warnings[0].getMessage()
-
-
-@pytest.mark.asyncio
-async def test_typed_assertion_order_keeps_a_same_task_digest_first(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from localmelo.melo.agent import agent as agent_module
-    from localmelo.melo.agent.agent import _RunState
-
-    monkeypatch.setattr(agent_module, "RECALL_LONG_K", 3)
-
-    server = FakeLLM(_answer("done"))
-    agent = _agent(
-        server,
-        _options(
-            reasoning="compress",
-            memory_dir=str(tmp_path / "memory"),
-            workspace_root=str(tmp_path),
-            retriever="bm25",
-            recall_kinds=frozenset({"long"}),
-            max_steps=1,
-            typed_assertions=True,
-        ),
-    )
-    key = digest_task_key("door", str(tmp_path))
-    rows: tuple[tuple[str, str, str, dict[str, Any], float], ...] = (
-        ("door time same task", "episodic", "digest", {"task_key": key}, 3.0),
-        (
-            "door door door early",
-            "semantic",
-            "user",
-            {"assertion": {"observed_at": 10.0}},
-            1.0,
-        ),
-        (
-            "door late",
-            "semantic",
-            "user",
-            {"assertion": {"observed_at": 20.0}},
-            2.0,
-        ),
-    )
-    for index, (text, kind, source, provenance, created) in enumerate(rows, 1):
-        await agent.hippo.long.apply(
-            text=text,
-            kind=kind,
-            source=source,
-            admitted_by="outcome",
-            provenance=provenance,
-            task_id=f"t-{index}",
-            session_id="",
-            created_at=created,
-            embedding=None,
-            action="NEW",
-            target_id=None,
-            reason="seed",
-            source_ids=[],
-            keep_text=False,
-            candidate_id=f"seed-{index}",
-        )
-    run = _RunState(task_id="reader", task_text="door", place=str(tmp_path))
-    docs = await agent._long_docs("door", run)
-    await agent.close()
-    # Same-task gating wins over #162's assertion order, which still orders
-    # the general facts after it (the newer fact first).
-    assert [doc.text for doc in docs] == [
-        "door time same task",
-        "door late",
-        "door door door early",
-    ]
-    assert [doc.meta["alias"] for doc in docs] == ["m1", "m2", "m3"]

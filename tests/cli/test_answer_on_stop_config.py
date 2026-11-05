@@ -1,9 +1,7 @@
-"""``[agent] answer_on_stop`` (a key with no option) and ``--reflection-gate``.
+"""``[agent] answer_on_stop`` (a key with no option).
 
 A direct run reads the key; the interactive UI, the console and the gateway do not.
-Both are on by default: ``answer_on_stop`` is ``true`` and the gate is ``patient``;
-``-X agent.answer_on_stop=off`` and ``--reflection-gate flags`` give the earlier
-behavior.
+It is on by default; ``-X agent.answer_on_stop=off`` gives the earlier behavior.
 """
 
 from __future__ import annotations
@@ -20,22 +18,6 @@ from localmelo.support.sessions.agents import (
 )
 
 BASE = ["--base-url", "http://127.0.0.1:1/v1", "--chat-model", "m"]
-
-
-def test_the_key_is_written_only_when_off_and_must_be_a_boolean() -> None:
-    config.save(config.Config())
-    path = Path(config.config_path())
-    assert "answer_on_stop" not in path.read_text()
-    assert config.AgentConfig().answer_on_stop is True
-    config.save(config.Config(agent=config.AgentConfig(answer_on_stop=False)))
-    assert "answer_on_stop = false" in path.read_text()
-    assert config.load().agent.answer_on_stop is False
-    config.save(config.Config(agent=config.AgentConfig(answer_on_stop=True)))
-    assert "answer_on_stop" not in path.read_text()
-    assert config.load().agent.answer_on_stop is True
-    bad = config.Config()
-    bad.agent.answer_on_stop = "yes"  # type: ignore[assignment]
-    assert any("answer_on_stop must be a boolean" in e for e in bad.validate())
 
 
 def test_x_sets_it_for_one_run_and_config_keys_lists_it(
@@ -86,20 +68,3 @@ async def test_the_interactive_ui_and_the_gateway_ignore_it(tmp_path: Path) -> N
         assert agent.options.answer_on_stop is True
     finally:
         await agent.close()
-
-
-@pytest.mark.parametrize("spelling", ["flag", "x"])
-def test_the_flags_gate_reaches_the_options(spelling: str) -> None:
-    given = (
-        ["--reflection-gate", "flags"]
-        if spelling == "flag"
-        else ["-X", "agent.reflection_gate=flags"]
-    )
-    parser, args = cli._parse([*given, *BASE, "fix it"])
-    assert cli._direct_options(parser, args).reflection_gate == "flags"
-
-
-def test_the_gate_defaults_are_patient_and_the_answer_request() -> None:
-    parser, args = cli._parse([*BASE, "fix it"])
-    options = cli._direct_options(parser, args)
-    assert (options.reflection_gate, options.answer_on_stop) == ("patient", True)

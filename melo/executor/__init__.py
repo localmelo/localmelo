@@ -11,10 +11,9 @@ from localmelo.melo.executor.builtins import (
     BUILTINS,
     MAX_FILE_READ_BYTES,
     TOOL_EXIT_CODE,
+    builtin_callables,
     builtin_names,
-    builtins_with_env,
     edit_precheck,
-    rooted_builtins,
 )
 from localmelo.melo.executor.executor import ApprovalGate, Executor
 from localmelo.melo.executor.models import (
@@ -65,21 +64,20 @@ def register_builtins(
     approval gate that :meth:`Executor.execute_structured` is given, if
     any, before it runs.
 
-    Without *workspace_root*, the functions of :data:`BUILTINS` themselves
-    are registered, and a *tool_timeout_s* raises ``ValueError``. Its
-    ``python_exec`` is a child process too, in this process's directory,
-    within the executor's default timeout. With a
-    root, the tools that :func:`rooted_builtins` gives for it take their
-    place, with the timeouts it gives them: ``file_read`` and ``file_write``
-    refuse a symlink that takes the checked file's place and anything but a
-    regular file, and ``file_read`` caps what it reads; ``list_files`` lists
-    one folder, never entering a link and never reading a file;
-    ``shell_exec`` and ``python_exec`` run in the root, in a child process,
-    within *tool_timeout_s* seconds when it is set, and the rooted ``shell_exec``
-    starts the text of a non-zero exit with ``[exit code <n>]``. The
-    executor fences the file tools' paths with its own root, so an executor
-    built with the same ``workspace_root`` goes with them. ``shell_exec``
-    and ``python_exec`` can still reach any path: approval is their control.
+    The tools are those of :func:`builtin_callables` for *workspace_root*,
+    with the timeouts it gives them; without a root, a *tool_timeout_s*
+    raises ``ValueError``. Without a root ``python_exec`` is a child process
+    too, in this process's directory, within the executor's default timeout.
+    With a root, ``file_read`` and ``file_write`` refuse a symlink that takes
+    the checked file's place and anything but a regular file, and
+    ``file_read`` caps what it reads; ``list_files`` lists one folder, never
+    entering a link and never reading a file; ``shell_exec`` and
+    ``python_exec`` run in the root, in a child process, within
+    *tool_timeout_s* seconds when it is set, and ``shell_exec`` starts the
+    text of a non-zero exit with ``[exit code <n>]``. The executor fences the
+    file tools' paths with its own root, so an executor built with the same
+    ``workspace_root`` goes with them. ``shell_exec`` and ``python_exec`` can
+    still reach any path: approval is their control.
 
     *tool_env* adds variables to the environment of the ``shell_exec`` and
     ``python_exec`` children, with or without a root. The child does not
@@ -107,30 +105,16 @@ def register_builtins(
             f"Unknown built-in tools: {', '.join(sorted(unknown))} "
             f"(known: {', '.join(sorted(known))})"
         )
-    if tool_timeout_s is not None and not workspace_root:
-        raise ValueError("tool_timeout_s needs a workspace_root")
-    rooted = (
-        rooted_builtins(
-            workspace_root,
-            tool_timeout_s=tool_timeout_s,
-            tool_env=tool_env,
-            confinement=confinement,
-        )
-        if workspace_root
-        else {}
+    callables = builtin_callables(
+        workspace_root or None,
+        tool_timeout_s=tool_timeout_s,
+        tool_env=tool_env,
+        confinement=confinement,
     )
-    with_env = (
-        builtins_with_env(tool_env or {}, confinement)
-        if tool_env or confinement
-        else {}
-    )
-    for tool_def, phase1a_fn in BUILTINS:
+    for tool_def, _ in BUILTINS:
         if tool_def.name not in selected and tool_def.name not in harness_only:
             continue
-        if tool_def.name in rooted:
-            fn, timeout_ms = rooted[tool_def.name]
-        else:
-            fn, timeout_ms = with_env.get(tool_def.name, phase1a_fn), None
+        fn, timeout_ms = callables[tool_def.name]
         if tool_def.name not in selected:
             executor.register_harness_tool(tool_def, fn, timeout_ms=timeout_ms)
             continue
@@ -172,10 +156,10 @@ __all__ = [
     "ToolOutput",
     "WorkspacePolicy",
     "WriteConfinement",
+    "builtin_callables",
     "builtin_names",
     "call_preview",
     "confine",
     "platform_note",
     "register_builtins",
-    "rooted_builtins",
 ]

@@ -279,22 +279,6 @@ async def test_a_newer_scheduler_component_is_refused(
     assert await one(store, "SELECT name FROM sqlite_master WHERE name='tasks'") is None
 
 
-async def test_a_failed_migration_writes_no_table_and_no_version(
-    store: SessionStore,
-) -> None:
-    with pytest.raises(sqlite3.OperationalError):
-        await store.ensure_component(
-            "broken",
-            1,
-            ("CREATE TABLE broken_ok (id INTEGER)", "THIS IS NOT SQL"),
-        )
-    assert (
-        await one(store, "SELECT name FROM sqlite_master WHERE name='broken_ok'")
-        is None
-    )
-    assert await component_version(store, "broken") is None
-
-
 async def test_an_older_component_is_refused_without_migrating(
     store: SessionStore, clock: Clock
 ) -> None:
@@ -479,9 +463,9 @@ async def test_pending_receipt_retry_and_supersession(tasks: TaskStore) -> None:
     )
     first = await tasks.request_pending_pause(record.task_id, **args)
     assert await tasks.request_pending_pause(record.task_id, **args) == first
-    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    receipt = await tasks.operation_receipt(record.task_id, "pause-id")
     assert receipt is not None and receipt[1]
-    assert await tasks.reconcile_pause_operation(record.task_id, "unknown") is None
+    assert await tasks.operation_receipt(record.task_id, "unknown") is None
     with pytest.raises(TaskConflictError):
         await tasks.request_pending_pause(record.task_id, **{**args, "actor": "other"})
     with pytest.raises(TaskConflictError):
@@ -504,7 +488,7 @@ async def test_pending_receipt_retry_and_supersession(tasks: TaskStore) -> None:
         )
         == cancelled
     )
-    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    receipt = await tasks.operation_receipt(record.task_id, "pause-id")
     assert receipt is not None and not receipt[1]
     with pytest.raises(TaskConflictError):
         await tasks.request_pending_pause(record.task_id, **args)
@@ -548,7 +532,7 @@ async def test_stale_guarded_terminal_write_cannot_stop_resumed_task(
         )
         == events_before
     )
-    assert await tasks.reconcile_pause_operation(record.task_id, "stale-stop") is None
+    assert await tasks.operation_receipt(record.task_id, "stale-stop") is None
     finished = await tasks.change(
         record.task_id,
         state="done",
@@ -564,7 +548,7 @@ async def test_stale_guarded_terminal_write_cannot_stop_resumed_task(
     ) == ("sched.finished",)
 
 
-async def test_snapshot_identity_fenced_on_patch_and_restart(tasks: TaskStore) -> None:
+async def test_snapshot_identity_fenced_on_patch(tasks: TaskStore) -> None:
     record, _ = await create_task(
         tasks, spec(level=1, level_source="user"), origin="user"
     )
@@ -572,9 +556,6 @@ async def test_snapshot_identity_fenced_on_patch_and_restart(tasks: TaskStore) -
     assert await tasks.park_identity(record.task_id) == (1, None)
     await tasks.change(record.task_id, priority="first")
     assert await tasks.park_identity(record.task_id) == (2, None)
-    assert await tasks.fail_nonterminal_on_restart() == 1
-    assert await tasks.park_identity(record.task_id) == (3, None)
-    assert (await tasks.get_task(record.task_id)).state == "failed"
 
 
 @pytest.mark.parametrize("operation", ["pause", "cancel", "stop"])
@@ -634,7 +615,7 @@ async def test_t82r2_committed_then_cancelled_retry(
         await execute()
     monkeypatch.undo()
     committed = await tasks.get_task(record.task_id)
-    receipt = await tasks.reconcile_pause_operation(record.task_id, operation)
+    receipt = await tasks.operation_receipt(record.task_id, operation)
     assert receipt is not None
     assert receipt[1] is (operation != "stop")
     assert await execute() == committed
@@ -757,14 +738,14 @@ async def test_t82r2_receipt_current_checks_state_and_terminal(
         expected_operation_id=None,
         operation_id="p",
     )
-    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    receipt = await tasks.operation_receipt(record.task_id, "p")
     assert receipt is not None and receipt[1] is True
     async with store.component_transaction("test_state_without_bump") as conn:
         await conn.execute(
             "UPDATE tasks SET state = 'held' WHERE task_id = ?", (record.task_id,)
         )
     assert await tasks.park_identity(record.task_id) == (1, "p")
-    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    receipt = await tasks.operation_receipt(record.task_id, "p")
     assert receipt is not None and receipt[1] is False
     await tasks.change(
         record.task_id,
@@ -773,7 +754,7 @@ async def test_t82r2_receipt_current_checks_state_and_terminal(
         expected_operation_id="p",
         operation_id="stop",
     )
-    receipt = await tasks.reconcile_pause_operation(record.task_id, "stop")
+    receipt = await tasks.operation_receipt(record.task_id, "stop")
     assert (
         receipt is not None
         and receipt[0]["state"] == "cancelled"
@@ -849,8 +830,6 @@ async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
     try:
         with pytest.raises(ValueError, match="gateway"):
             TaskStore(cli)
-        with pytest.raises(SessionStoreError, match="gateway"):
-            await cli.ensure_component(COMPONENT, SCHEDULER_VERSION, ("SELECT 1",))
         assert await component_version(cli, COMPONENT) is None
     finally:
         await cli.aclose()
@@ -1286,26 +1265,6 @@ async def test_resume_without_pause_and_restore_p0(tasks: TaskStore) -> None:
     )
     with pytest.raises(TaskNotPausedError, match="not paused"):
         await tasks.resume(no_pause.task_id)
-
-
-async def test_restart_fails_only_nonterminal_tasks(
-    tasks: TaskStore, clock: Clock
-) -> None:
-    queued, _ = await create_task(tasks, spec("queued"), origin="user")
-    running, _ = await create_task(tasks, spec("running"), origin="user")
-    parked, _ = await create_task(tasks, spec("parked"), origin="user")
-    done, _ = await create_task(tasks, spec("done"), origin="user")
-    await tasks.change(running.task_id, state="running")
-    await tasks.pause(parked.task_id)
-    terminal = await tasks.change(done.task_id, state="done")
-    clock.advance(1)
-    assert await tasks.fail_nonterminal_on_restart() == 3
-    for record in (queued, running, parked):
-        failed = await tasks.get_task(record.task_id)
-        assert failed.state == "failed" and failed.finished_at == clock.now
-        assert failed.wait_reason == "gateway restarted; recovery arrives in S3b"
-    assert await tasks.get_task(done.task_id) == terminal
-    assert await tasks.fail_nonterminal_on_restart() == 0
 
 
 async def test_deferred_input_is_rejected_before_request_key_lookup(

@@ -41,7 +41,6 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `attempt_policy` | `"reflect"` | `"reflect"`: attempts with a reflection after each. `"none"`: one attempt. |
 | `steps_per_attempt` | `50` | The most steps per attempt, with `"reflect"`: a run reflects once it has used them without an answer. |
 | `max_attempts` | `5` | The most attempts per run, with `"reflect"`. |
-| `reflection_gate` | `"patient"` | `"patient"`, `"flags"` or `"utility"`, with `"reflect"`; see [Reflection](../concepts/how-it-works.md#reflection). |
 | `answer_on_stop` | `True` | `True`: a run that ends `gate_stopped` or `budget_exhausted` with no answer makes one more request, without tools, for the answer from the evidence gathered, and an answer that lacks the closing line the task asks for gets it from one more; `False` sends neither. See [Run results](run-results.md#statuses). |
 | `empty_reply_fallback` | `"on"` | `"on"`: a turn that a model that did think ends with no answer and no tool call is asked once more with thinking off (where the provider sets `thinking_off_body`) and, if still empty, answered with the marked end of its thinking; `RunResult.empty_reply` and the `thinking_off_retry` and `answer_from_thinking` notices say so. `"off"`: the run ends `failed`, as before. See [Run results](run-results.md#statuses). |
 | `max_calls` | `None` | An int >= 2: the most model requests a run sends; before the one that would pass it the run ends `budget_exhausted` (with `answer_on_stop`, the last call is kept for the answer). `None`: no limit. See [Run results](run-results.md#statuses). |
@@ -224,9 +223,9 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   the remaining tails. For each completed channel, concatenate its deltas in
   order, including the tail. Thinking is held until finish.
   Redaction rules are snapshotted at stream start; changes apply to the next
-  stream. At commit, apply `redact_for_storage()` separately to each concatenated
-  display channel: it applies the snapshot and then the current rules, so newer
-  rules can add masking. Redaction is pattern-based and does not guarantee secret
+  stream. At commit, pass each concatenated display channel separately through
+  `redact_secrets()` (`localmelo.melo.checker.redaction`), so newer rules can add
+  masking. Redaction is pattern-based and does not guarantee secret
   removal. The interactive terminal UI is the only consumer (`[cli] stream =
   true`): it streams planning requests only, draws released text in its live
   area and stores the completed reply, never the deltas; existing `chat()`

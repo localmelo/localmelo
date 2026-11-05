@@ -18,23 +18,21 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS, BaseLLMProvider
-from localmelo.melo.memory.retrieval import (
+from localmelo.melo.memory.retrieval import Doc
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.memory.retrieval_corpus import (
+    CALL_KINDS,
     CorpusError,
-    Doc,
-    LabelledQuery,
+    NoCallsTableError,
     RawCall,
-    corpus,
     doc_to_dict,
     docs_from_calls,
     load_corpus,
+    load_history_calls,
     load_queries,
     load_raw_calls,
 )
-from localmelo.melo.memory.retrieval.corpus import (
-    NoCallsTableError,
-    load_history_calls,
-)
-from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.memory.retrieval_eval import LabelledQuery
 from localmelo.support.retrieve import main as retrieve_main
 from localmelo.tests.memory.history_fixture import write_history_sync
 
@@ -658,7 +656,6 @@ def test_a_minimal_raw_call_takes_every_default() -> None:
         ({"content": "<note>plan: x</note>"}, "answer"),
         ({"kind": "reflect", "content": "Continue."}, "aux"),
         ({"kind": "retrieve"}, "aux"),
-        ({"kind": "estimate"}, "aux"),
         # A given outcome is kept.
         ({"content": "Done.", "outcome": "empty"}, "empty"),
         ({"kind": "reflect", "outcome": "answer"}, "answer"),
@@ -739,7 +736,7 @@ def _call(**fields: Any) -> dict[str, Any]:
         (_call(seq=True), "seq must be an integer >= 0"),
         (
             _call(kind="chat"),
-            "kind must be one of plan, reflect, retrieve, estimate, review, got 'chat'",
+            "kind must be one of plan, reflect, retrieve, review, got 'chat'",
         ),
         (_call(step=-1), "step must be an integer >= 0"),
         (_call(step="2"), "step must be an integer >= 0"),
@@ -985,11 +982,6 @@ def test_a_reflect_reply_with_a_reflection_gives_it() -> None:
     ]
 
 
-def _reflect_replies() -> list[str]:
-    calls = load_raw_calls(_lines("raw_calls.jsonl"))
-    return [call.content for call in calls if call.kind == "reflect"]
-
-
 # A number the decoder cannot convert: more digits than int() takes.
 HUGE_NUMBER = "1" * 4_301
 
@@ -1033,38 +1025,41 @@ REFLECTION_EDGE_CASES = [
 ]
 
 
-@pytest.mark.parametrize("reply", [*_reflect_replies(), *REFLECTION_EDGE_CASES])
-def test_the_reflection_test_agrees_with_the_agents(reply: str) -> None:
-    # corpus.py keeps a copy of the agent's test, since melo/memory does not
-    # import melo.agent (R3 spec, Requirement 13); tests may.
-    from localmelo.melo.agent.agent import _find_reflection as agent_test
-    from localmelo.melo.memory.retrieval.corpus import _find_reflection
-
-    assert _find_reflection(reply) == agent_test(reply)
-
-
-def test_the_reflection_test_on_the_edge_cases() -> None:
-    from localmelo.melo.memory.retrieval.corpus import _find_reflection
-
-    held = [reply for reply in REFLECTION_EDGE_CASES if _find_reflection(reply)]
-    assert held == [
-        '{"recommended_action": "continue"}',
-        'Done. {"recommended_action": "stop", "summary": "s"} trailing prose',
-        '{"tool_name": "file_read", "arguments": {"path": "a.py"}}'
-        '{"recommended_action": "done"}',
-        '```json\n{"recommended_action": "decompose"}\n```',
-        '```\n{"recommended_action": "continue"}\n```',
-        'a { b {"recommended_action": "done"}',
-    ]
-    assert [_find_reflection(reply) is not None for reply in _reflect_replies()] == [
-        True
-    ]
+# The replies of REFLECTION_EDGE_CASES that hold a reflection the run reads.
+HELD_REFLECTIONS = [
+    '{"recommended_action": "continue"}',
+    'Done. {"recommended_action": "stop", "summary": "s"} trailing prose',
+    '{"tool_name": "file_read", "arguments": {"path": "a.py"}}'
+    '{"recommended_action": "done"}',
+    '```json\n{"recommended_action": "decompose"}\n```',
+    '```\n{"recommended_action": "continue"}\n```',
+    'a { b {"recommended_action": "done"}',
+]
 
 
-def test_retrieve_and_estimate_calls_give_nothing() -> None:
+@pytest.mark.parametrize("reply", REFLECTION_EDGE_CASES)
+def test_a_reflect_reply_gives_a_reflection_only_when_a_run_reads_one(
+    reply: str,
+) -> None:
+    call = RawCall("t", 1, kind="reflect", content=reply)
+    held = [doc.doc_id for doc in docs_from_calls([call])]
+    assert held == (["t:r1"] if reply in HELD_REFLECTIONS else [])
+
+
+def test_a_reflect_reply_with_a_json_slip_gives_the_reflection_the_run_acted_on() -> (
+    None
+):
+    # A trailing comma: the run repairs it and acts on the reflection.
+    content = '{"summary": "tried x", "recommended_action": "continue",}'
+    call = RawCall("t", 1, kind="reflect", content=content)
+    docs = docs_from_calls([call])
+    assert [(doc.doc_id, doc.kind) for doc in docs] == [("t:r1", "reflection")]
+    assert "continue: tried x" in docs[0].text
+
+
+def test_a_retrieve_call_gives_nothing() -> None:
     calls = [
         RawCall("t", 0, kind="retrieve", thinking="Let me read a.py now."),
-        RawCall("t", 1, kind="estimate", content="Let me read a.py now."),
     ]
     assert docs_from_calls(calls) == []
 
@@ -1391,7 +1386,7 @@ def test_a_missing_column_is_named(tmp_path: Path) -> None:
         (
             "UPDATE llm_calls SET kind = 'chat' WHERE task_id = 't-en' AND seq = 1",
             "llm_calls row t-en/1: kind must be one of plan, reflect, retrieve, "
-            "estimate, review, got 'chat'",
+            "review, got 'chat'",
         ),
         (
             "UPDATE llm_calls SET tool_calls_json = '[{' WHERE task_id = 't-zh' "
@@ -1461,7 +1456,7 @@ def test_a_file_that_is_no_database_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_reader_and_the_agent_share_one_vocabulary_of_kinds() -> None:
-    assert corpus.CALL_KINDS is LLM_REQUEST_KINDS
+    assert CALL_KINDS is LLM_REQUEST_KINDS
 
 
 class _ScriptedLLM(BaseLLMProvider):

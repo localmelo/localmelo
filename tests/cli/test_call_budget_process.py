@@ -9,15 +9,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import threading
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from localmelo.tests.cli.test_direct_mode_process import _env, _tool_call
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX processes")
 
@@ -38,7 +38,7 @@ BUDGET_BODY = {
 }
 
 
-class CountingServer:
+class CountingServer(HttpStub):
     """A chat server that answers request n with ``script[n]``, else a tool call.
 
     An entry is a message (HTTP 200) or ``(status, body)`` for an error answer. Past
@@ -70,21 +70,7 @@ class CountingServer:
                 self.end_headers()
                 self.wfile.write(data)
 
-            def log_message(self, format: str, *args: Any) -> None:
-                pass
-
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._httpd.server_port}/v1"
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
-        self._thread.join(timeout=5)
+        super().__init__(Handler, path="/v1")
 
 
 @pytest.fixture

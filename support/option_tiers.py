@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple
 
+from localmelo.support.backends.openai_family import USUAL_URL
+
 USER = "user"
 ADVANCED = "advanced"
 EXPERIMENTAL = "experimental"
@@ -71,7 +73,6 @@ _ADVANCED = (
     "--context-window",
     "--output-reserve",
     "--safety-margin",
-    "--cache-layout",
     "--window-messages",
     "--memory-dir",
     "--request-timeout",
@@ -96,11 +97,8 @@ EVERYDAY_OLD = (
 # decides it.
 EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--attempt-policy": "#185",
-    "--reflection-gate": "#185",
     "--brief-items": "#185",
-    "--fixed-prefix": "#183",
     "--window-eviction": "#183",
-    "--reflect-tool-guard": "#183",
     "--reasoning": "#183",
     "--reasoning-field": "#183",
     "--replay-turns": "#183",
@@ -113,7 +111,6 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--recall-kinds": "#4",
     "--recall-placement": "#4",
     "--recall-min-score": "#4",
-    "--admit-on-outcome": "#4",
     "--keep-decision-text": "#4",
     "--retrieval-extra-body": "#4",
 }
@@ -155,6 +152,8 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.note_gate": "#442",
     "memory.note_min_cosine": "#442",
     "memory.followup_query": "#452",
+    "memory.gather": "#428",
+    "memory.gather_min_cosine": "#428",
     "approvals.auto_asks": "#465",
 }
 
@@ -177,11 +176,7 @@ class Setting(NamedTuple):
 
 SETTINGS = (
     Setting("agent.attempt_policy", "--attempt-policy", False, "reflect"),
-    Setting("agent.reflection_gate", "--reflection-gate", False, "patient"),
-    Setting("agent.fixed_prefix", "--fixed-prefix"),
     Setting("agent.window_eviction", "--window-eviction"),
-    Setting("agent.reflect_tool_guard", "--reflect-tool-guard"),
-    Setting("agent.cache_layout", "--cache-layout"),
     Setting("agent.window_messages", "--window-messages"),
     Setting("agent.brief_items", "--brief-items"),
     Setting("agent.reasoning", "--reasoning"),
@@ -199,7 +194,6 @@ SETTINGS = (
     Setting("retrieval.placement", "--recall-placement"),
     Setting("retrieval.min_score", "--recall-min-score"),
     Setting("retrieval.extra_body", "--retrieval-extra-body", False, "none"),
-    Setting("memory.admit_on_outcome", "--admit-on-outcome"),
     Setting("memory.keep_decision_text", "--keep-decision-text", False, "false"),
     Setting("memory.dir", "--memory-dir", False, "built in"),
     Setting("request_timeout_s", "--request-timeout"),
@@ -208,6 +202,20 @@ SETTINGS = (
     Setting("endpoint.embedding_model", "--embedding-model", False, "none"),
     Setting("endpoint.reasoning_field", "--reasoning-field", False, "auto"),
 )
+
+# Settings that no longer exist, each with what holds now. A config file that still has
+# one loads (the line is ignored and ``melo config`` names it); ``-X KEY=VALUE`` and the
+# key's option (``--fixed-prefix``) exit 2 and say it was removed.
+REMOVED_SETTINGS: dict[str, str] = {
+    "agent.fixed_prefix": "every request keeps the fixed prefix",
+    "agent.reflect_tool_guard": (
+        "a reflection request always offers the plan's tools and asks for the "
+        "JSON object"
+    ),
+    "agent.cache_layout": "the reflection always stays in the window (layout v3)",
+    "agent.reflection_gate": "a reflection always uses the patient gate",
+    "memory.admit_on_outcome": "a run's final attempt is no longer admitted on its outcome",
+}
 
 # The two settings whose option takes no value: the option means the key has this one.
 _SWITCH_VALUES = {
@@ -229,7 +237,7 @@ OLD_SPELLINGS: dict[str, str] = {
     "--daemon": "melo serve install|uninstall|status|stop",
     "--host": "melo serve --host",
     "--port": "melo serve -p",
-    "--enable-playground": "melo serve --playground",
+    "--enable-playground": "melo serve",
     "--allow-unconfigured": "melo serve --force",
     "--gateway-login": "melo console",
     "--gateway-rotate-token": "melo console --reset",
@@ -249,7 +257,7 @@ OLD_SPELLINGS: dict[str, str] = {
 # ``SHORT_ROWS`` are the rows of ``melo -h``.
 OPTION_ROWS = (
     ("-m, --model", "NAME", "chat model for this run"),
-    ("-u, --url", "URL", "model server for this run (http://127.0.0.1:8000/v1)"),
+    ("-u, --url", "URL", f"model server for this run ({USUAL_URL})"),
     ("-w, --workspace", "DIR", "folder to work in (default: this one)"),
     ("-c, --continue", "", "continue the newest chat here"),
     ("-r, --resume", "[ID]", "resume a chat, or pick one from a list"),

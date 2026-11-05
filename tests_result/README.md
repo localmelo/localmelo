@@ -3,10 +3,9 @@
 This directory stores curated, reviewable test evidence that should survive
 past an individual local run.
 
-The archive is intentionally separate from runner output directories such as
-`tests/smoke/output/`. Runner output is scratch space; `tests_result/` is the
-place for results that are referenced by issues, releases, docs, or later
-regression comparisons.
+The archive is intentionally separate from a runner's own output directory.
+Runner output is scratch space; `tests_result/` is the place for results that
+are referenced by issues, releases, docs, or later regression comparisons.
 
 ## Layout
 
@@ -34,10 +33,8 @@ overwrite old evidence unless the old files were committed by mistake.
 
 ## Add a run
 
-1. Produce the results. For memory scenarios against real model servers, run
-   `tests/smoke/core_loop_test.py` as described in
-   [tests/smoke/README.md](../tests/smoke/README.md). It writes to
-   `tests/smoke/output/`, which git ignores.
+1. Produce the results with your runner, and keep its output in a scratch
+   folder outside the repository.
 2. Create `<test-family>/<yyyy-mm-dd>-<short-scope>/` and copy the runner's
    output into its `raw/` folder.
 3. Write `summary.md`: what was run, the results, and how to read them.

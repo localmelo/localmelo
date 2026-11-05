@@ -50,6 +50,7 @@ def core_event(
             "approval": False,
         },
         "step.started": {"step": 1, "attempt": 1},
+        "inbox.accepted": {"offset": 1, "text": "a note", "step": 1, "attempt": 1},
         "assistant.message": {
             "step": 1,
             "content": "",
@@ -89,8 +90,6 @@ def core_event(
                 "next_step_is_concrete": True,
                 "next_step_is_novel": True,
             },
-            "gate": "flags",
-            "utility": None,
             "stop_reason": None,
             "rationale": "",
             "summary": "",

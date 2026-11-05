@@ -8,17 +8,15 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
-    MAX_AGENT_STEPS,
-    MIN_AGENT_STEPS,
     Message,
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -71,22 +69,6 @@ def _make_agent(
     """Build an Agent wired to fake providers."""
     llm = FakeLLM(responses)
     return Agent(llm=llm, embedding=embedding)
-
-
-# ── Estimation fixture ─────────────────────────────────────────────────────
-
-# Save the real method before any patching so estimation tests can restore it.
-_orig_estimate_max_steps = Agent._estimate_max_steps
-
-
-@pytest.fixture(autouse=True)
-def _skip_estimation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip LLM step estimation in tests — always use MAX_AGENT_STEPS."""
-
-    async def _use_max(self: Agent, query: str) -> int:
-        return MAX_AGENT_STEPS
-
-    monkeypatch.setattr(Agent, "_estimate_max_steps", _use_max)
 
 
 # ── Tests ───────────────────────────────────────────────────────────────────
@@ -319,7 +301,7 @@ class TestNoEmbeddingProvider:
     async def test_hippo_retrieve_returns_empty(self) -> None:
         """retrieve_context() returns no long-term results without embedding."""
         hippo = Hippo(embedding=None)
-        hippo.short.append(Message(role="user", content="hello"))
+        hippo.working.append(Message(role="user", content="hello"))
         long_ctx = await hippo.retrieve_context("hello")
         assert long_ctx == []
 
@@ -393,7 +375,7 @@ class TestRetrievalSeparation:
         hippo = Hippo(embedding=emb)
 
         # Populate short-term
-        hippo.short.append(Message(role="user", content="short term msg"))
+        hippo.working.append(Message(role="user", content="short term msg"))
 
         # Populate long-term
         await hippo.long.add("long term entry", [1.0, 0.0, 0.0, 0.0])
@@ -530,7 +512,7 @@ class TestNoEmbeddingToolLoop:
 
         # Short-term holds the real turn: the echo call and its result,
         # paired by tool_call_id.
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         results = [m for m in window if m.role == "tool"]
         assert [tc.tool_name for tc in calls] == ["echo"]
@@ -643,7 +625,7 @@ class TestSanitizedOutputInMemory:
         assert tool_msgs[0].content.startswith("b" * 49_000)
         assert tool_msgs[0].content.endswith(" more characters]")
 
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
         # History keeps the real call, which the executor ran as sent.
@@ -700,7 +682,7 @@ class TestSanitizedOutputInMemory:
         assert tool_msgs[0].content.startswith("b" * 49_000)
         assert tool_msgs[0].content.endswith(" more characters]")
 
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
 
@@ -743,7 +725,7 @@ class TestToolResultMemoryWriteBlocked:
         # chars). The memory-write check passes it cut to that length, and
         # the turn budget cuts it to the room the turn has left, so
         # short-term memory keeps its start, bound to the same tool_call_id.
-        window = agent.hippo.short.get_window()
+        window = agent.hippo.working.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         tool_msgs = [m for m in window if m.role == "tool"]
         assert len(calls) == 1 and len(tool_msgs) == 1
@@ -863,58 +845,11 @@ class TestPostPlanCheckFailure:
         assert tasks[0].status == "failed"
 
 
-class TestStepEstimation:
-    """Dynamic step-budget estimation before the agent loop."""
-
-    @pytest.fixture(autouse=True)
-    def _restore_estimation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Use real estimation for tests in this class."""
-        monkeypatch.setattr(Agent, "_estimate_max_steps", _orig_estimate_max_steps)
+class TestStepBudget:
+    """The attempt budget bounds the agent loop."""
 
     @pytest.mark.asyncio
-    async def test_parse_step_estimate(self) -> None:
-        """_parse_step_estimate extracts integers correctly."""
-        from localmelo.melo.agent._chat import _parse_step_estimate
-
-        assert _parse_step_estimate("5") == 5
-        assert _parse_step_estimate("I think 12 steps") == 12
-        assert _parse_step_estimate("no number") == -1
-        assert _parse_step_estimate("") == -1
-
-    @pytest.mark.asyncio
-    async def test_clamps_to_min(self) -> None:
-        """Estimate below MIN_AGENT_STEPS is clamped up."""
-        llm = FakeLLM([Message(role="assistant", content="1")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent._estimate_max_steps("tiny")
-        assert result == MIN_AGENT_STEPS
-
-    @pytest.mark.asyncio
-    async def test_clamps_to_max(self) -> None:
-        """Estimate above MAX_AGENT_STEPS is clamped down."""
-        llm = FakeLLM([Message(role="assistant", content="100")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent._estimate_max_steps("huge")
-        assert result == MAX_AGENT_STEPS
-
-    @pytest.mark.asyncio
-    async def test_within_bounds(self) -> None:
-        """Estimate within bounds is used as-is."""
-        llm = FakeLLM([Message(role="assistant", content="10")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent._estimate_max_steps("medium")
-        assert result == 10
-
-    @pytest.mark.asyncio
-    async def test_unparseable_falls_back(self) -> None:
-        """Non-numeric LLM response falls back to MAX_AGENT_STEPS."""
-        llm = FakeLLM([Message(role="assistant", content="I don't know")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent._estimate_max_steps("query")
-        assert result == MAX_AGENT_STEPS
-
-    @pytest.mark.asyncio
-    async def test_estimated_budget_limits_loop(self) -> None:
+    async def test_attempt_budget_limits_loop(self) -> None:
         """Attempt budget limits the agent loop iterations."""
         options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
@@ -1021,9 +956,9 @@ class TestBuildSystemPrompt:
 
     @pytest.mark.asyncio
     async def test_plan_step_single_system_message(self) -> None:
-        """plan_step must produce exactly one system message even with memory."""
+        """plan_step produces exactly one system message even with memory."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
-        chat = Chat(llm)
+        chat = _scoped_chat(llm)
         context = [
             Message(role="system", content="[memory] mem0"),
             Message(role="system", content="[memory] mem1"),
@@ -1034,9 +969,11 @@ class TestBuildSystemPrompt:
         sent = llm.calls[0]["messages"]
         sys_msgs = [m for m in sent if m.role == "system"]
         assert len(sys_msgs) == 1, f"Expected 1 system message, got {len(sys_msgs)}"
-        assert "[RECALL]" in sys_msgs[0].content
-        assert "mem0" in sys_msgs[0].content
-        assert "mem1" in sys_msgs[0].content
+        # The recalled memory is data in a user message, so the system prompt
+        # stays the same from step to step.
+        assert "mem0" not in sys_msgs[0].content
+        [data] = [m for m in sent if m.role == "user" and "[RECALL]" in m.content]
+        assert "mem0" in data.content and "mem1" in data.content
 
 
 class TestProvidersFromConfig:

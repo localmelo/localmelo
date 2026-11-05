@@ -334,11 +334,16 @@ export function serverAddress(url) {
 export const UNFINISHED_ANSWER = "melo did not finish an answer";
 // The error of a run whose replies wrote a tool call as text (`TOOL_CALL_TEXT_ERROR` in `melo/schema.py`).
 export const TOOL_CALL_TEXT = "tool call written as text";
+// The error of a run whose model server refused the request's pictures (`PICTURES_REFUSED_ERROR` in `melo/schema.py`).
+export const PICTURES_REFUSED = "This model can't see pictures; choose one that can in Settings → Model";
 
 /** `status_text`: the word, severity and title of a run's end. `error` tells an unreachable server apart. */
 export function statusText(status, cause = "", error = "") {
   if (serverUnreachable(status, error)) {
     return {...statusWords(STATUS_TEXT.provider_error), title: t("turns.status.unreachable")};
+  }
+  if (status === "provider_error" && error === PICTURES_REFUSED) {
+    return {...statusWords(STATUS_TEXT.provider_error), title: t("turns.status.pictures")};
   }
   if (status === "failed" && error === UNFINISHED_ANSWER) {
     return {...statusWords(STATUS_TEXT.failed), title: t("turns.status.unfinished")};
@@ -503,6 +508,98 @@ export function approvalTag(status, errorCategory, approval) {
   return null;
 }
 
+// ── Words added to a turn that runs ──
+
+/**
+ * The person's words added to a turn while melo works. Each is an item of the turn's work:
+ * `{kind: "note", key, note, text, pictures, images, sending, seen, step, returned}`. `note` is the
+ * number the gateway gave it (the run's `inbox.accepted` names it as `offset`); it is null until the
+ * gateway answers or its `turn.note` event arrives, whichever is first. A note is shown as
+ * sending, sent (the run reads it at its next step), seen, or, when its turn ended first,
+ * as the next message, or, after a Stop, as given back to the box. A note may carry pictures:
+ * `pictures` are the ones the person added, `{name, url, bytes}`, shown until the gateway lists
+ * them as `images` (the references a turn's events carry, served by the chat's blobs).
+ */
+export function startNote(turn, text, key, pictures = []) {
+  const item = {kind: "note", key, note: null, text, pictures, images: [], sending: true, seen: false, step: 0, returned: false};
+  turn.items.push(item);
+  return item;
+}
+
+/** The note numbered *number* of *turn*, or null. */
+function findNote(turn, number) {
+  return number === null ? null : turn.items.find((item) => item.kind === "note" && item.note === number) ?? null;
+}
+
+/** The gateway answered a send: *item* has its number (and its pictures, *images*), unless its event came first and made another item. */
+export function acknowledgeNote(turn, item, number, images = []) {
+  const heard = findNote(turn, number);
+  if (heard !== null && heard !== item) {
+    const at = turn.items.indexOf(item);
+    if (at >= 0) turn.items.splice(at, 1);
+    heard.sending = false;
+    return heard;
+  }
+  item.note = number;
+  item.sending = false;
+  if (item.images.length === 0) item.images = pictureRefs(images);
+  return item;
+}
+
+/** A `turn.note` event: a note of this turn, shown once however it came. */
+function noteHeard(turn, number, text, images) {
+  if (number === null || findNote(turn, number) !== null) return;
+  const refs = pictureRefs(images);
+  const local = turn.items.find(
+    (item) => item.kind === "note" && item.note === null && item.text === text && item.pictures.length === refs.length,
+  );
+  if (local) {
+    local.note = number;
+    local.sending = false;
+    local.images = refs;
+    return;
+  }
+  turn.items.push({kind: "note", key: "", note: number, text, pictures: [], images: refs, sending: false, seen: false, step: 0, returned: false});
+}
+
+/** An `inbox.accepted` event: the run read note *offset*. False when the turn has no such note. */
+function noteRead(turn, offset, step) {
+  const item = findNote(turn, offset);
+  if (item === null) return false;
+  item.seen = true;
+  item.step = step ?? 0;
+  return true;
+}
+
+/** Take a note that was not sent off the turn's work. */
+export function dropNote(turn, item) {
+  const at = turn.items.indexOf(item);
+  if (at >= 0) turn.items.splice(at, 1);
+}
+
+/** After a Stop: the notes the gateway gave back (`[{note, text}]`) are in the box again. */
+export function returnNotes(turn, given) {
+  for (const back of given) {
+    const item = findNote(turn, int(back.note));
+    if (item !== null) item.returned = true;
+  }
+}
+
+/** `sending`, `sent`, `seen`, `returned` (stopped and given back), or `next` (its turn ended before another step). */
+export function noteState(turn, item) {
+  if (item.seen) return "seen";
+  if (item.returned) return "returned";
+  if (item.sending) return "sending";
+  return turn.finishedAt ? "next" : "sent";
+}
+
+/** The muted line under a note. */
+export function noteLine(turn, item) {
+  const state = noteState(turn, item);
+  if (state === "seen") return item.step > 0 ? t("turns.note.seenAt", {n: item.step}) : t("turns.note.seen");
+  return t(`turns.note.${state}`);
+}
+
 // ── The view ──
 
 /** A view of one session before its detail and turns arrive. */
@@ -523,6 +620,14 @@ export function newView(id) {
   };
 }
 
+/** The picture references of a turn's event or row, keeping the ones that name a blob. */
+function pictureRefs(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((image) => isObject(image) && /^[0-9a-f]{64}$/.test(String(image.sha256 ?? "")))
+    .map((image) => ({sha256: String(image.sha256), mime_type: String(image.mime_type ?? ""), size_bytes: num(image.size_bytes) ?? 0}));
+}
+
 /** One turn from a `turn_json` row (`GET /api/sessions/{id}/turns`). */
 export function newTurn(row) {
   const source = objectOf(row);
@@ -533,6 +638,8 @@ export function newTurn(row) {
     turn: int(source.turn) ?? 0,
     runId: String(source.run_id ?? ""),
     userText: String(source.user_text ?? ""),
+    // The pictures the person added (`turn.started`'s `images`): `{sha256, mime_type, size_bytes}`, served by the chat's blobs.
+    images: pictureRefs(source.images),
     // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
     origin: String(source.origin ?? ""),
     status: String(source.status ?? ""),
@@ -586,6 +693,7 @@ function ensureTurn(view, number, fields = {}) {
       id: fields.id ?? "",
       turn: number,
       user_text: fields.userText ?? "",
+      images: fields.images,
       client_request_id: fields.clientRequestId ?? "",
       origin: fields.origin ?? "",
       status: "running",
@@ -596,6 +704,7 @@ function ensureTurn(view, number, fields = {}) {
   if (fields.id && !turn.id) turn.id = fields.id;
   if (fields.origin && !turn.origin) turn.origin = fields.origin;
   if (fields.userText && !turn.userText) turn.userText = fields.userText;
+  if (turn.images.length === 0) turn.images = pictureRefs(fields.images);
   if (fields.clientRequestId && !turn.clientRequestId) {
     turn.clientRequestId = fields.clientRequestId;
   }
@@ -708,6 +817,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     type === "turn.started" ? ensureTurn(view, number, {
       id: data.turn_id,
       userText: data.user_text,
+      images: data.images,
       clientRequestId: data.client_request_id,
       origin: data.origin,
     }) : findTurn(view, number);
@@ -937,8 +1047,22 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     case "context_budget":
       // The status row shows the numbers; a line per request would bury the work.
       break;
+    case "turn.note": {
+      noteHeard(turn, int(data.note), String(data.text ?? ""), data.images);
+      break;
+    }
+    case "inbox.accepted": {
+      // Words the person added to a chat's turn: the note shows it was read. A task's inbox has none of these.
+      if (noteRead(turn, int(data.offset), int(data.step))) break;
+      turn.items.push({
+        kind: "fact",
+        factKind: type,
+        step: int(data.step) ?? turn.step,
+        message: factLine(type, data),
+      });
+      break;
+    }
     case "note":
-    case "inbox.accepted":
     case "memory":
     case "recall": {
       turn.items.push({
@@ -1001,6 +1125,118 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       break;
   }
   return {};
+}
+
+// ── Following a session's events ──
+
+// New frames are drawn together, at most this often.
+const DRAW_MS = 150;
+// Seconds to wait before each new try after a stream ends; the last wait repeats.
+const RECONNECT_S = [1, 2, 4, 8, 16, 30];
+
+function openEventSource(url) {
+  return typeof EventSource === "function" ? new EventSource(url) : null;
+}
+
+/**
+ * Follow `GET /api/sessions/{id}/events` from `view.lastEventId`. Every frame
+ * newer than the view is folded into it with `applyEvent` and handed to
+ * `onFrame(frame, outcome)` (`outcome` is what `applyEvent` returns); with
+ * `onDraw`, it is called once per `DRAW_MS` after new frames, so a view is
+ * redrawn once for a burst. `watch` tells the gateway that this page shows the
+ * session to a person, so a step Auto stops asks on its card (#465).
+ *
+ * The chat, the task card and the worker view all follow through this, by
+ * the same two rules:
+ *
+ * - A hidden page keeps following; nothing here reads the page's visibility.
+ *   A page that shows a session is watching it, and a card Auto shows can be
+ *   answered when the person comes back within its wait.
+ * - A stream that ends is opened again after the last id folded, following
+ *   1, 2, 4, 8, 16 and then 30 s; a stream that opens starts the count over.
+ *   `onEnd()` is asked at each end, and `false` (or a promise of it) stops the
+ *   follow: a worker run that finished, a chat that is gone. The new stream
+ *   waits for the answer, and an `onEnd` that fails does not stop the follow.
+ *
+ * Returns `{status, retryAt, retryNow(), close()}`: `status` is `live`, or
+ * `paused` while it waits to open again (`retryAt`, in seconds, says when);
+ * `onStatus()` is called when it changes; `retryNow()` skips the wait. Returns
+ * null where there is no EventSource, so the caller reads the session instead.
+ * `open(url)` makes the EventSource; `schedule`, `cancel` and `now` are the
+ * clock.
+ */
+export function followEvents({
+  id, view, watch = false, onFrame, onDraw = null, onStatus = null, onEnd = null,
+  open = openEventSource, schedule = setTimeout, cancel = clearTimeout, now = () => Date.now() / 1000,
+}) {
+  const follower = {status: "live", retryAt: 0, retryNow, close};
+  let source = null;
+  let wait = null;
+  let draw = null;
+  let verdict = null;
+  let attempt = 0;
+  let closed = false;
+
+  function connect() {
+    const next = open(`/api/sessions/${encodeURIComponent(id)}/events?after=${view.lastEventId}${watch ? "&watch=true" : ""}`);
+    if (next === null) return false;
+    source = next;
+    next.onopen = () => {
+      if (source !== next) return;
+      attempt = 0;
+      setStatus("live");
+    };
+    next.onmessage = (message) => {
+      if (source === next) frame(message.data);
+    };
+    next.onerror = () => {
+      if (source === next) ended();
+    };
+    return true;
+  }
+  function setStatus(status) {
+    follower.status = status;
+    onStatus?.();
+  }
+  function frame(data) {
+    let event;
+    try { event = JSON.parse(data); } catch { return; }
+    if (!isObject(event) || (typeof event.id === "number" && event.id <= view.lastEventId)) return;
+    onFrame(event, applyEvent(view, event));
+    if (onDraw !== null) draw ??= schedule(() => { draw = null; onDraw(); }, DRAW_MS);
+  }
+  function ended() {
+    source.close();
+    source = null;
+    const seconds = RECONNECT_S[Math.min(attempt, RECONNECT_S.length - 1)];
+    attempt += 1;
+    follower.retryAt = now() + seconds;
+    setStatus("paused");
+    verdict = (async () => onEnd?.())().catch(() => true);
+    verdict.then((more) => { if (more === false) close(); });
+    if (!closed) wait = schedule(reopen, seconds * 1000);
+  }
+  async function reopen() {
+    wait = null;
+    if ((await verdict) === false || closed) return;
+    setStatus("live");
+    connect();
+  }
+  async function retryNow() {
+    if (wait === null) return;
+    cancel(wait);
+    await reopen();
+  }
+  function close() {
+    if (closed) return;
+    closed = true;
+    source?.close();
+    source = null;
+    for (const timer of [wait, draw]) if (timer !== null) cancel(timer);
+    wait = draw = null;
+  }
+
+  return connect() ? follower : null;
 }
 
 // ── What a turn says ──

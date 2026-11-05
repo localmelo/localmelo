@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,6 @@ from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import Message, ReasoningTags, ToolCall, ToolDef
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 ECHO = ToolDef(
     name="echo",
@@ -115,7 +114,6 @@ async def _run(
     extra_body: dict[str, Any] | None = None,
     on_echo: Callable[[Agent], None] | None = None,
     stream: bool = False,
-    base: Mapping[str, Any] = LEGACY_CACHE_OPTIONS,
     **options: Any,
 ) -> list[AgentEvent]:
     llm = OpenAICompatLLM(
@@ -126,9 +124,7 @@ async def _run(
     )
     agent = Agent(
         llm=llm,
-        options=AgentOptions(
-            builtins=frozenset(), tool_exposure="all", **{**base, **options}
-        ),
+        options=AgentOptions(builtins=frozenset(), tool_exposure="all", **options),
     )
     agent.hippo.register_tool(ECHO)
 
@@ -349,15 +345,16 @@ async def test_a_reflection_between_attempts_carries_usage_and_prefix() -> None:
     [reflection] = [e for e in events if e.type == "reflection"]
     assert reflection.data["requests"] == 1
     assert reflection.data["usage"]["cached_tokens"] == 10
-    # The reflection prompt differs from the plan's at byte 0 and offers no tools.
+    # The reflection request repeats the plan's messages and tools: the plan is
+    # its whole prefix, and nothing in it changed.
     prefix = reflection.data["prefix"]
     assert prefix["against"] == {"kind": "plan", "request": 1}
-    assert (prefix["messages"], prefix["first_changed"]) == (0, "system")
-    assert prefix["tools_changed"] is True
-    # The plan after it matches the earlier plan (the same leading system text
-    # and the same tools), not the reflection.
+    assert prefix["messages"] == prefix["previous_messages"]
+    assert (prefix["first_changed"], prefix["tools_changed"]) == (None, False)
+    # The plan after it extends the reflection request the same way.
     after = plans[1].data["prefix"]
-    assert after["against"] == {"kind": "plan", "request": 1}
+    assert after["against"] == {"kind": "reflect", "request": 2}
+    assert after["messages"] == after["previous_messages"]
     assert after["tools_changed"] is False
     assert after["chars"] > prefix["chars"]
 
@@ -376,8 +373,9 @@ async def test_a_reflection_asked_twice_sums_its_usage_and_takes_two_numbers() -
     assert reflection.data["requests"] == 2
     assert reflection.data["usage"]["cached_tokens"] == 30
     assert reflection.data["prefix"]["against"] == {"kind": "plan", "request": 1}
+    # The plan after it extends the retry, which continued the request.
     last = [e for e in events if e.type == "assistant.message"][-1]
-    assert last.data["prefix"]["against"] == {"kind": "plan", "request": 1}
+    assert last.data["prefix"]["against"] == {"kind": "reflect", "request": 3}
 
 
 def test_best_match_takes_the_most_leading_messages_then_characters() -> None:

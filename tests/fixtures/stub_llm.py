@@ -12,7 +12,8 @@ A scenario is a JSON file ``<name>.json``::
     {"models": [...], "match": [...], "replies": [...], "sequential": false}
 
 Every key is optional but ``replies``. ``GET /v1/models`` lists the
-scenario's models (``["stub-model"]`` by default). With ``"omlx": [{"id",
+scenario's models (``["stub-model"]`` by default); a model may be an object
+(``{"id": "m", "vision": true}``), listed as it is. With ``"omlx": [{"id",
 "model_alias", "loaded"}, ...]`` the server answers as oMLX does: the listing
 names each model by its alias (else its id) with ``owned_by`` ``omlx``, and
 ``GET /v1/models/status`` reports the ids, aliases and loaded flags. A
@@ -104,7 +105,13 @@ class StubServer:
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
         self._httpd.daemon_threads = True
-        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        # The poll is short so close() returns at once (the default is 0.5 s).
+        # This file also runs as a script, so it does not use http_stub.
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
 
     @property
     def base_url(self) -> str:
@@ -194,7 +201,10 @@ class StubServer:
                         for m in omlx
                     ]
                 else:
-                    data = [{"id": m} for m in scenario.get("models", ["stub-model"])]
+                    data = [
+                        m if isinstance(m, dict) else {"id": m}
+                        for m in scenario.get("models", ["stub-model"])
+                    ]
                 self._json(200, {"object": "list", "data": data})
 
             def do_POST(self) -> None:  # noqa: N802

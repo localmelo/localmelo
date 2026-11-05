@@ -32,12 +32,10 @@ from localmelo.support import config, gateway_endpoint, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.browser import configured_driver
 from localmelo.support.cli.views import BackendInfo
+from localmelo.support.flag_options import flag_options
 from localmelo.support.sessions.agents import (
-    configured_attempt_options,
-    configured_cache_options,
+    CONTEXT_SETTINGS,
     configured_context_options,
-    configured_fallback_options,
-    configured_image_options,
     configured_session_options,
 )
 
@@ -123,14 +121,11 @@ def _configured(
     cfg: config.Config, model: str | None, args: argparse.Namespace | None = None
 ) -> Choice | int:
     if args is not None:
-        for name in ("context_window", "output_reserve", "safety_margin"):
+        for name in CONTEXT_SETTINGS:
             value = getattr(args, name, None)
             if value is not None:
                 setattr(cfg.agent, name, value)
-        if any(
-            getattr(args, name, None) is not None
-            for name in ("context_window", "output_reserve", "safety_margin")
-        ):
+        if any(getattr(args, name, None) is not None for name in CONTEXT_SETTINGS):
             try:
                 configured_context_options(cfg, AgentOptions(), {})
             except ValueError as exc:
@@ -211,8 +206,7 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     cfg = config.load()
     if cfg.is_configured:
         return _configured(cfg, args.chat_model, args)
-    developer = bool(getattr(args, "developer", False)) or cfg.ui.mode == "developer"
-    setup = onboard.run_first_setup(developer=developer)
+    setup = onboard.run_first_setup()
     if setup is None:
         return 0
     if setup.saved:
@@ -280,6 +274,12 @@ def configure_logging() -> str:
     return path
 
 
+def _cancelled(exc: BaseException) -> int:
+    """Say a question ended without an answer; the exit code (0 for end of input, 130 for Ctrl+C)."""
+    print("\nSetup cancelled.")
+    return 130 if isinstance(exc, KeyboardInterrupt) else 0
+
+
 def run_interactive(
     args: argparse.Namespace,
     *,
@@ -299,11 +299,8 @@ def run_interactive(
             except onboard.ModelChoiceError as exc:
                 print(f"melo: error: {exc}", file=sys.stderr)
                 return 2
-            except EOFError:
-                print("\nSetup cancelled.")
-            except KeyboardInterrupt:
-                print("\nSetup cancelled.")
-                return 130
+            except (EOFError, KeyboardInterrupt) as exc:
+                return _cancelled(exc)
             return 0
         print(NO_TERMINAL, file=sys.stderr)
         return 2
@@ -316,12 +313,8 @@ def run_interactive(
     except onboard.ModelChoiceError as exc:
         print(f"melo: error: {exc}", file=sys.stderr)
         return 2
-    except EOFError:
-        print("\nSetup cancelled.")
-        return 0
-    except KeyboardInterrupt:
-        print("\nSetup cancelled.")
-        return 130
+    except (EOFError, KeyboardInterrupt) as exc:
+        return _cancelled(exc)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         path = os.path.expanduser(config.CONFIG_PATH)
         print(f"melo: cannot read {path}: {exc}", file=sys.stderr)
@@ -333,61 +326,21 @@ def run_interactive(
 
     try:
         memory_import.first_run()
-    except EOFError:
-        print("\nSetup cancelled.")
-        return 0
-    except KeyboardInterrupt:
-        print("\nSetup cancelled.")
-        return 130
-    explicit = {
-        name
-        for name in (
-            "fixed_prefix",
-            "window_eviction",
-            "reflect_tool_guard",
-            "cache_layout",
-            "window_messages",
-            "captured_history",
-            "reasoning",
-            "replay_turns",
-            "note_writer",
-            "retriever",
-            "recall_at",
-            "recall_k",
-            "recall_kinds",
-            "recall_placement",
-            "recall_min_score",
-            "attempt_policy",
-        )
-        if getattr(args, name, None) is not None
-    }
+    except (EOFError, KeyboardInterrupt) as exc:
+        return _cancelled(exc)
     try:
-        if choice.cfg is None:
-            loaded = config.load()
-            options = configured_cache_options(
-                loaded, options, keep=explicit, backend=choice.backend.key
-            )
-            if "captured_history" not in explicit and loaded.agent.captured_history:
-                options = replace(options, captured_history=True)
-            options = configured_image_options(loaded, options)
-            options = configured_fallback_options(loaded, options)
-            options = configured_attempt_options(loaded, options, explicit)
-            options = configured_context_options(
-                loaded,
-                options,
-                {
-                    name: getattr(args, name, None)
-                    for name in ("context_window", "output_reserve", "safety_margin")
-                },
-            )
+        # A --base-url session has no backend section of its own; the file's
+        # settings apply to it as they do to a configured one, and an unset
+        # window is the URL's default, not the configured backend's.
+        cfg = config.load() if choice.cfg is None else choice.cfg
         options = configured_session_options(
-            choice.cfg,
+            cfg,
             options,
-            explicit=explicit,
+            explicit=flag_options(args),
             budget_overrides={
-                name: getattr(args, name, None)
-                for name in ("context_window", "output_reserve", "safety_margin")
+                name: getattr(args, name, None) for name in CONTEXT_SETTINGS
             },
+            backend=choice.backend.key,
         )
     except (ValueError, config.ConfigError) as exc:
         parser.error(str(exc))
@@ -425,7 +378,7 @@ def run_interactive(
             parser.error("argument --retriever: embedding needs --memory on")
     # Step 4: the MCP config, --mcp-config first, else the config file's key.
     requested = getattr(args, "mcp_config", None)
-    mcp_config = requested or config.load().mcp_config or None
+    mcp_config = requested or cfg.mcp_config or None
     mcp_source = "--mcp" if requested else ("mcp_config" if mcp_config else "")
     mcp_servers: list[Any] = []
     if mcp_config is not None:
@@ -549,8 +502,8 @@ async def main_async(
 
     store = SessionStore(writer="cli")
     factory: AgentFactory | None = None
-    loaded = config.load()
-    browser_driver = configured_driver(loaded)
+    session_config = config.load()
+    browser_driver = configured_driver(session_config)
     try:
         try:
             await store.open()
@@ -572,8 +525,8 @@ async def main_async(
             mcp_servers=mcp_servers,
             saves=choice.saves,
             browser_driver=browser_driver,
-            web_fetch=loaded.tools.web_fetch is True,
-            web_search=loaded.web.search is True,
+            web_fetch=session_config.tools.web_fetch is True,
+            web_search=session_config.web.search is True,
         )
         try:
             agent = await factory.build()
@@ -582,7 +535,6 @@ async def main_async(
             return 1, None
 
         approver = TerminalApprover()
-        session_config = config.load()
         expect_gateway(session_config)
         # Config validation never fails on [cli] (a display preference), and a
         # --base-url session validates nothing at all, so both paths land here:

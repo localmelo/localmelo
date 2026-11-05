@@ -31,16 +31,6 @@ melo "What is 6*7?"
 - 在显式模式下，必须启用召回并包含 `long` 类型；`drop` 和 `replay` 默认关闭 `auto` 召回。
 - 尝试摘要只有在包含已确认的文件写入或符合条件的通过检查时才会写入长期记忆；召回优先使用同一任务、同一工作区的摘要，新任务在同任务摘要匹配之前不会获得跨任务摘要（见[摘要召回](../../reference/memory.md#digest-recall)（英文））。
 
-<a id="experimental-typed-facts"></a>
-
-## 实验性的类型化事实
-
-Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_assertions=True)`。
-
-- 它会保留受支持的简短事实；当一个经过验证、有先后顺序的变更取代旧断言时，旧断言可以作为带标签的历史保留下来。
-- 有歧义或未关联的事实不会被悄悄关联；解析器和来源检查都是保守且不完整的，召回受相关性限制。
-- 参见[类型化断言参考](../../reference/memory.md#experimental-typed-assertions)（英文）。
-
 <a id="notes-melo-keeps-about-you"></a>
 
 ## melo 记下的关于你的笔记
@@ -141,7 +131,7 @@ asyncio.run(main())
 
 - **`forget(task_id)` 删除的内容。** 历史记录的 `tasks`、`steps` 和 `llm_calls` 表中属于该任务的行，以及长期记忆中元数据指明该任务的条目：它的反思（`"task_id"`），而不是各步摘要（只有 `"step_id"`）。
 - **`forget_all()` 删除的内容。** 所有长期记忆条目以及历史记录中这三张表的所有行。
-- **不涉及的内容。** 工作记忆（当前对话）、程序性记忆（由 `melo-procedures forget` 清除）、会话存储（控制台的聊天记录位于 `~/.cache/localmelo/gateway/sessions.db`），以及旧版 playground 保存在 `~/.cache/localmelo/playground/` 中的记忆。
+- **不涉及的内容。** 工作记忆（当前对话）、程序性记忆（由 `melo-procedures forget` 清除），以及会话存储（控制台的聊天记录位于 `~/.cache/localmelo/gateway/sessions.db`）。
 - **实现方式。** 在存储的写锁下执行一次 `BEGIN IMMEDIATE` 事务；删除操作会覆盖释放的空间（`PRAGMA secure_delete=ON`），检查点会截断 WAL，因此文本不会留在数据库文件或其 `-wal` 文件中；如果另一个连接阻止 WAL 截断，检查点会跳过并在日志中记录 WARNING，之后的检查点会将其清除。
 - localmelo 运行时可以安全地遗忘，但不能安全地删除文件。
 
@@ -165,9 +155,6 @@ asyncio.run(main())
 
    # The console's session store (including chats)
    rm -f ~/.cache/localmelo/gateway/sessions.db*
-
-   # The legacy playground's memory, if it was enabled
-   rm -rf ~/.cache/localmelo/playground
    ```
 
 3. 重新启动 localmelo。它会在需要时创建新文件。
@@ -199,7 +186,6 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 | `~/.cache/localmelo/memory/procedures.db` | 每个任务经规范化的查询、运行目录以及工具调用的标签（文件名和程序名，不保存其内容或输出）。 |
 | `~/.cache/localmelo/cli/sessions.db` 和 `~/.cache/localmelo/cli_history` | 终端的每个轮次及其工具调用和输出；你的消息（两者均为 `0600`）。 |
 | `~/.cache/localmelo/gateway/sessions.db` | 控制台的会话行和轮次。 |
-| `~/.cache/localmelo/playground/` | 仅在使用 `melo serve --playground` 时（默认禁用）：聊天的历史记录和程序性记忆；选择了嵌入模型时还有长期记忆。 |
 
 - 这些文件没有加密；它们的私密程度取决于你的主目录。
 - `procedures.db` 中的查询和标签经过最基本的脱敏：先处理[模型调用](../../reference/memory.md#model-calls)（英文）所述的密钥格式、bearer token 和一次性验证码，再处理 URL 中的密码（`postgres://app:<redacted>@host`，保留用户名），以及 NAME 包含 `key`、`token`、`secret`、`password`、`passwd` 或 `pwd` 时 `NAME=value` 或 `NAME: value` 中的值（`API_KEY=<redacted>`）；其他内容均原样保留，例如主机名、路径和其他值。

@@ -39,14 +39,3 @@ def test_live_area_reports_the_runs_progress_facts(page: str) -> None:
     text = (ROOT / page).read_text()
     assert "本次运行的进度事实" in text
     assert "本轮的进度事实" not in text
-
-
-def test_web_console_twin_follows_the_playground_move() -> None:
-    en = (ROOT / "docs/guides/web-console.md").read_text()
-    zh = (ROOT / "docs/zh-CN/guides/web-console.md").read_text()
-    assert "disabled-by-default [legacy playground routes]" in en
-    assert "旧版 playground 路由" in zh
-    # The reference page has a Chinese twin since the reference batch.
-    assert "../reference/http-v1.md#legacy-playground" in zh
-    assert "security-1b" not in zh
-    assert "_test_webapp" not in zh

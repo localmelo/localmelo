@@ -20,15 +20,9 @@ from localmelo.support.sessions.agents import (
 BASE = ["--base-url", "http://127.0.0.1:1/v1", "--chat-model", "m"]
 
 
-def test_the_key_is_written_only_when_set_and_must_be_an_int_of_two_or_more() -> None:
-    config.save(config.Config())
-    path = Path(config.config_path())
-    assert "max_calls" not in path.read_text()
+def test_the_key_must_be_two_or_more() -> None:
     assert config.AgentConfig().max_calls is None
-    config.save(config.Config(agent=config.AgentConfig(max_calls=30)))
-    assert "max_calls = 30" in path.read_text()
-    assert config.load().agent.max_calls == 30
-    for bad in (1, 0, True, "30", 2.5):
+    for bad in (1, 0):
         cfg = config.Config()
         cfg.agent.max_calls = bad  # type: ignore[assignment]
         assert any("max_calls must be an int >= 2" in e for e in cfg.validate()), bad

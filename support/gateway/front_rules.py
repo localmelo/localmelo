@@ -32,6 +32,12 @@ from datetime import datetime
 from typing import Final, Literal
 
 from localmelo.support.gateway.reminder_time import parse_reminder
+from localmelo.support.sessions.display import (
+    EASY_WORDS,
+    GREETING,
+    URGENT_WORDS,
+    short_title,
+)
 
 # Levels P0 to P5. People read the P-code, with its meaning where there is room
 # (``P1 · today``). The words stay what people may type and what the API's
@@ -388,17 +394,9 @@ def brief_question(typed: str) -> bool:
 
 # ── Delegation and its level ──
 
-_URGENT: Final = _words(
-    "as soon as possible|right away|right now|immediately|urgently|urgent|asap|"
-    "end of day|end of the day|紧急|尽快|马上|立刻|立即|很急|着急|急用|今天之内|今晚之前|下班前"
-)
 _DEADLINE: Final = re.compile(
     r"\b(?:by|before|due)\s+(?:today|tonight|noon|eod|\d{1,2}(?::\d{2}\s*(?:am|pm)?|\s*(?:am|pm)))\b"
     r"|今[天晚][^。.!！?？]{0,8}前|\d{1,2}\s*点前"
-)
-_EASY: Final = _words(
-    "no rush|not urgent|no hurry|whenever|low priority|when you have time|"
-    "不急|不着急|不紧急|有空|慢慢来"
 )
 
 # The bare word for today, anywhere in the request, is a deadline of itself. A
@@ -442,10 +440,10 @@ def triage(typed: str) -> tuple[int, str]:
     S5's full table later).
     """
     text = norm(typed)
-    for phrase in _EASY:
+    for phrase in EASY_WORDS:
         if _find(phrase, text):
             return 3, f'you said "{phrase}"'
-    for phrase in _URGENT:
+    for phrase in URGENT_WORDS:
         found = _find(phrase, text)
         if found and not _NEGATION.search(text[: found.start()]):
             return 1, f'you said "{phrase}"'
@@ -537,6 +535,28 @@ def acts(typed: str) -> bool:
         text = text[: tells.start()] + " " + (text[end.start() :] if end else "")
     text = _HANDS_OFF.sub(" ", text)
     for found in _DOES.finditer(text):
+        if not _NEGATION.search(text[: found.start()]):
+            return True
+    return False
+
+
+# The go-ahead for work the chat has talked about: "I authorize you to submit
+# them", "我授权你去提交". Such words carry no verb that acts, yet they ask for
+# the work, so a chat starts it (a negated one, "I do not authorize it", does not).
+_AUTHORIZES: Final = re.compile(
+    r"\bI\s+(?:hereby\s+)?authori[sz]e\s+(?:you|melo|it|this|that|them)\b"
+    r"|\byou\s+(?:are|['’]re)\s+authori[sz]ed\b"
+    r"|\b(?:you\s+)?have\s+my\s+(?:permission|approval)\b|\bI\s+(?:allow|permit)\s+you\b"
+    r"|授权(?:你|给你|melo)|我授权|我(?:允许|准许|同意)你",
+    re.IGNORECASE,
+)
+
+
+def authorizes(typed: str) -> bool:
+    """Whether *typed* gives melo the go-ahead for work: "I authorize you to apply",
+    "我授权你去投", not under a negation ("I don't authorize it", "我没授权")."""
+    text = norm(_QUOTED.sub(" ", typed or ""))
+    for found in _AUTHORIZES.finditer(text):
         if not _NEGATION.search(text[: found.start()]):
             return True
     return False
@@ -715,6 +735,9 @@ def hands_off(typed: str) -> bool:
     return bool(_HANDS_OFF.search(norm(_QUOTED.sub(" ", typed or ""))))
 
 
+# The rules read a long text by its opening: the person's intent is in the first
+# few thousand characters, and a long paste behind it is for the task to read.
+OPENING_CHARS: Final = 4_000
 # The routes a model's task_create starts at once: the person asked for work.
 START_ROUTES: Final = frozenset({"delegate", "work", "plan"})
 StartRule = Literal["start", "answer", "offer"]
@@ -736,7 +759,8 @@ def start_rule(typed: str) -> StartRule:
       names a file or a link;
     - ``offer`` for words that say not to act (:func:`hands_off`) and ask for
       nothing else (:func:`acts`): "fix the bug without changing anything
-      else" asks for the fix;
+      else" asks for the fix; words that authorize work (:func:`authorizes`:
+      "I authorize you to apply") ask for it too;
     - ``answer`` for a polite opening, or one that asks to be told, with no
       verb that acts ("please explain …", "帮我看看 …"), and for what
       :func:`route` answers (a greeting, a brief or short plain question),
@@ -747,9 +771,12 @@ def start_rule(typed: str) -> StartRule:
     - ``answer`` for a short message with no verb that acts ("ok", "thanks",
       "谢谢你", "今天天气不错");
     - else ``start``: a request starts at once, the person's message its objective.
+
+    Only the first :data:`OPENING_CHARS` characters are read.
     """
     if not typed.strip():
         return "offer"
+    typed = typed.lstrip()[:OPENING_CHARS]
     text = norm(typed)
     if _STEERS.match(text):
         return "offer"
@@ -760,7 +787,7 @@ def start_rule(typed: str) -> StartRule:
         return "answer"
     # A request in steps acts too, unless the words say not to act.
     steps = steps_request(typed) and not hands_off(typed)
-    doing = acts(typed) or steps
+    doing = acts(typed) or steps or (authorizes(typed) and not hands_off(typed))
     if hands_off(typed) and not doing:
         return "offer"
     if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
@@ -830,12 +857,15 @@ _EXTENSIONS: Final = (
     "py|pyi|js|mjs|cjs|ts|tsx|jsx|md|rst|txt|json|toml|ya?ml|html?|css|scss|sh|zsh|"
     "rs|go|java|kt|swift|c|cc|cpp|h|hpp|rb|php|sql|cfg|ini|csv|ipynb|xml|lock"
 )
-_FILE_NAME: Final = re.compile(rf"\b[\w.-]*\w\.(?:{_EXTENSIONS})\b")
+# A part of a name or a path is read up to 200 characters, so a scan that starts
+# at each character of one long token stays linear in the text.
+_FILE_NAME: Final = re.compile(rf"\b[\w.-]{{0,200}}\w\.(?:{_EXTENSIONS})\b")
 _PATH: Final = re.compile(
     r"(?:^|[\s`'\"(（：:，,])(?:~/|\.\.?/|/)[\w.-]"  # ~/x, ./x, ../x, /x
-    r"|[\w.-]+/[\w.-]+/[\w./-]*"  # a/b/c
-    r"|\b[\w.-]*[_.][\w.-]*/[\w.-]+|\b[\w.-]+/[\w.-]*[_.][\w.-]*"  # one slash, a _ or .
-    r"|\b[\w.-]+/(?:\s|$)"  # a folder: name/
+    r"|[\w.-]{1,200}/[\w.-]{1,200}/[\w./-]{0,200}"  # a/b/c
+    r"|\b(?=[\w.-]{0,200}[_.])[\w.-]{1,200}/[\w.-]{1,200}"  # one slash, a _ or .
+    r"|\b[\w.-]{1,200}/(?=[\w.-]{0,200}[_.])[\w.-]{1,200}"
+    r"|\b[\w.-]{1,200}/(?:\s|$)"  # a folder: name/
 )
 # Verbs that change what is there; making something new ("make slides from
 # notes.md") is left to the front's step.
@@ -1028,7 +1058,9 @@ def work_request(typed: str) -> bool:
     after a leading "in <path>:"), names a file or a path, and is not a
     question. With no file named, the same happens when the message asks for
     the whole pipeline at once (`_pipeline`: change it, run the tests, commit).
+    Only the first :data:`OPENING_CHARS` characters are read.
     """
+    typed = typed.lstrip()[:OPENING_CHARS]
     text = norm(typed)
     if not text or is_question(typed):
         return False
@@ -1046,31 +1078,6 @@ def work_request(typed: str) -> bool:
     return _pipeline(bare)
 
 
-_TITLE_LEAD: Final = re.compile(
-    r"^(?:(?:/task|please|pls|kindly|could you|can you|would you|请|麻烦你?|帮我|帮忙)[\s,，]*)+",
-    re.IGNORECASE,
-)
-# A level word that opens a title and is followed by a colon or comma ("no rush: tidy
-# the photos", "today, fix the pill", "今天：修小药丸"): the words triage reads as
-# urgency, ease or today. Spaces may stand around the colon or comma. A word followed
-# by a bare space or by Chinese text stays, as in "Whenever possible, update the docs"
-# and "今天修一下".
-_TODAY_CUE: Final = _words("今天|today|tonight|今晚")
-_LEVEL_CUE: Final = re.compile(
-    "^(?:"
-    + "|".join(
-        re.escape(word)
-        for word in sorted((*_URGENT, *_EASY, *_TODAY_CUE), key=len, reverse=True)
-    )
-    + r")\s*[：:，,]\s*",
-    re.IGNORECASE,
-)
-_TITLE_TAIL: Final = frozenset(
-    _words("the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so")
-)
-_IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
-TITLE_CHARS: Final = 48
-TITLE_CHARS_ZH: Final = 24
 # What a chat's turn answers when it hands the work to a task (the front's
 # ``handoff_text``): started, or asked whether to start; English and Chinese.
 STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
@@ -1080,52 +1087,6 @@ ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任�
 HANDOFF_TEXTS: Final = frozenset({STARTED_TEXT, ASK_TEXT, STARTED_TEXT_ZH, ASK_TEXT_ZH})
 
 
-def _without_level_cue(text: str) -> str:
-    """*text* without the level cue that opens it, if more text follows."""
-    cue = _LEVEL_CUE.match(text)
-    rest = text[cue.end() :] if cue else text
-    return rest if rest.strip() else text
-
-
-def short_title(text: str) -> str:
-    """A task's short title: the request's first sentence, paths as file names, cut at a word.
-
-    The person's own words, without "please" and the like or a level word that
-    opens the request and a colon or comma follows; never cut mid-word: at most
-    :data:`TITLE_CHARS` characters (24 for Chinese), without a trailing "the",
-    "in" or punctuation.
-    """
-    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    first = _TITLE_LEAD.sub("", lines[0] if lines else "").strip()
-    first = _without_level_cue(first)
-    first = re.split(r"(?<=[^\d][.!?])\s|[。！？；;]", first, maxsplit=1)[0]
-    # A path reads as its file's name; a link and "and/or" stay as they are.
-    first = " ".join(
-        word if "://" in word else _IN_FOLDER.sub(r"\1", word) for word in first.split()
-    ).strip(" ,.:;，。：；")
-    if _has_cjk(first):
-        title = first[:TITLE_CHARS_ZH]
-        if re.match(r"\w\w", first[TITLE_CHARS_ZH - 1 : TITLE_CHARS_ZH + 1], re.ASCII):
-            title = re.sub(r"[\w.-]+$", "", title, flags=re.ASCII)  # never mid-word
-        title = title.rstrip(" ,，、：:")
-    else:
-        words: list[str] = []
-        for word in first.split():
-            if len(" ".join([*words, word])) > TITLE_CHARS:
-                break
-            words.append(word)
-        while len(words) > 1 and words[-1].casefold().strip(",:;") in _TITLE_TAIL:
-            words.pop()
-        title = " ".join(words).rstrip(" ,.:;")
-        if not title:
-            title = first[:TITLE_CHARS]
-    return title or "Task"
-
-
-_GREETING: Final = re.compile(
-    r"^(?:hi|hello|hey|yo|thanks|thank you|thx|good (?:morning|afternoon|evening|night)|"
-    r"你好|您好|嗨|哈喽|谢谢|早上好|早安|晚安|晚上好)(?:\s+(?:there|melo|all))?[\s!.,！。~]*$"
-)
 _NAMES_THING: Final = re.compile(
     r"https?://|www\.|[~/][\w.-]|\b[\w-]+\.[a-z0-9]{1,5}\b|\b(?:file|folder|directory)\b|文件|目录"
 )
@@ -1172,12 +1133,15 @@ def route(
     *tasks* are the chat's own tasks; *fallback* are the other chats' ones,
     which the words reach only when they name none of the chat's own. Words
     that name more than one task are a ``choose`` route: the chat asks which.
+    The rules read the first :data:`OPENING_CHARS` characters; a ``work`` or
+    ``delegate`` route carries all of the text.
     """
-    stripped = typed.strip()
-    command = re.match(r"^/task(?:\s+|$)", stripped)
+    whole = typed.strip()
+    command = re.match(r"^/task(?:\s+|$)", whole)
     if as_task or command:
-        work = stripped[command.end() :] if command else stripped
+        work = whole[command.end() :] if command else whole
         return Routed("delegate", text=work.strip())
+    stripped = whole[:OPENING_CHARS]
     text = norm(stripped)
     everyone = [*tasks, *fallback]
     if len(text) <= CONTROL_CHARS:
@@ -1210,7 +1174,7 @@ def route(
             return Routed("follow", task=named[0])
         if named:
             return Routed("choose", pick="send", matches=tuple(named))
-    if _GREETING.match(text) or brief_question(stripped):
+    if GREETING.match(text) or brief_question(stripped):
         return Routed("answer")
     if work_request(stripped) and not (
         cue is not None
@@ -1221,7 +1185,7 @@ def route(
     ):
         # A follow-up word with a task's name may continue that task: the
         # front's step decides.
-        return Routed("work", text=stripped, title=short_title(stripped))
+        return Routed("work", text=whole, title=short_title(stripped))
     if (
         len(text) <= SHORT_CHARS
         and is_question(text)
@@ -1271,7 +1235,6 @@ __all__ = [
     "polite_request",
     "reply_language",
     "route",
-    "short_title",
     "start_rule",
     "status_question",
     "steps_request",

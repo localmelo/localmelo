@@ -4,14 +4,14 @@ These are the drawer's three tabs. `tools` opens the session, because the
 list is the Agent's and a provider's tools appear only once it started;
 `memory` never opens it, so a paused session shows the conversation the
 gateway kept, every text redacted; `runs` reads the turns it has, with each
-`RunResult` but its answer text. Two `DELETE` routes take back a session grant, which lives
-in the registry's `RememberingPolicy` and never in the store; a third takes back one approval
-the chat recorded for its tasks (#369), which lives in memory too.
+`RunResult` but its answer text. Two `DELETE` routes take back a grant that holds in the chat
+(the grants live in the store's table, see `routes_grants`); a third takes back one approval
+the chat recorded for its tasks (#369), which lives in memory only.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import display
-from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
+from localmelo.support.sessions.store import TurnInfo
 
 from .errors import ApiError
 from .registry import OpenSession
@@ -41,42 +41,10 @@ _TURN_MAX = 2**63 - 1
 # ── Helpers ──
 
 
-async def _store_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await one store call, mapping a store failure as 2.2 says."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _sessions_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await a registry call, mapping the failures it can raise."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    info: SessionInfo | None = await _store_call(
-        console, console.store.get_session(session_id), session_id
-    )
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
-
-
 async def _open_session(console: Console, session_id: str) -> OpenSession:
     """The session opened, under its own lock, as the turn routes do."""
     async with console.sessions.lock(session_id):
-        entry: OpenSession = await _sessions_call(
-            console, console.sessions.open(session_id), session_id
-        )
-    return entry
+        return await console.sessions.open(session_id)
 
 
 # MCP in the console is deferred (U3 decision 5B): no MCP tools load, and
@@ -94,7 +62,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/tools")
     async def session_tools(session_id: str) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         entry = await _open_session(console, session_id)
         assert entry.agent is not None
         granted = entry.policy.allowed_tools
@@ -118,41 +86,70 @@ def add_routes(app: FastAPI, console: Console) -> None:
     # A site's grant is named after its address (``browser-act:https://…``,
     # #465): the name may hold slashes.
     @app.delete("/api/sessions/{session_id}/grants/{tool:path}")
-    async def forget_grant(session_id: str, tool: str) -> Response:
+    async def forget_grant(session_id: str, tool: str) -> JSONResponse:
+        """Take back the grant of *tool* that holds in the chat, open or not.
+
+        A grant from the main chat holds everywhere, so taking it back here
+        takes it back everywhere: ``everywhere`` says so. A write that fails
+        is 503 (the checks stopped using it already).
+        """
         console.require_store()
-        await _require_session(console, session_id)
-        entry = console.sessions.get(session_id)
-        if entry is None or tool not in entry.policy.allowed_tools:
+        await console.require_session(session_id)
+        if tool not in console.sessions.grants(session_id):
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        console.sessions.forget_grant(session_id, tool)
-        return Response(status_code=204)
+        gone = await console.sessions.forget_grant(session_id, tool)
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
 
     @app.delete("/api/sessions/{session_id}/grants")
-    async def forget_grants(session_id: str) -> Response:
+    async def forget_grants(session_id: str) -> JSONResponse:
+        """Take back every grant the chat gave (the main chat's: every global one).
+
+        A side chat's clear leaves the main chat's grants, which still hold
+        here: ``still_everywhere`` counts them.
+        """
         console.require_store()
-        await _require_session(console, session_id)
-        console.sessions.forget_grant(session_id)
-        return Response(status_code=204)
+        await console.require_session(session_id)
+        gone = await console.sessions.forget_grant(session_id)
+        still = {
+            g.key
+            for g in console.sessions.book.visible(session_id)
+            if g.scope == "global"
+        }
+        return JSONResponse(
+            content={"revoked": len(gone), "still_everywhere": len(still)}
+        )
 
     @app.delete("/api/sessions/{session_id}/folders")
-    async def forget_folder(session_id: str, path: str = "") -> Response:
+    async def forget_folder(session_id: str, path: str = "") -> JSONResponse:
         """Take back the chat's grant of one folder outside the workspace (#405).
 
         The folder is the ``path`` query parameter; without one, or for a
-        folder the chat was not granted, the answer is 404.
+        folder the chat was not granted, the answer is 404. The answer is a
+        named revoke's: a folder the main chat allowed goes everywhere, and
+        ``everywhere`` says so.
         """
         console.require_store()
-        await _require_session(console, session_id)
-        entry = console.sessions.get(session_id)
-        if entry is None or not entry.policy.forget_folder(path):
+        await console.require_session(session_id)
+        gone = await console.sessions.forget_folder(session_id, path) if path else []
+        if not gone:
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        return Response(status_code=204)
+        return JSONResponse(
+            content={
+                "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
+                "everywhere": any(g.scope == "global" for g in gone),
+            }
+        )
 
     @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
     async def revoke_approval(session_id: str, entry_id: str) -> Response:
         """Take back one recorded approval: the step asks again; what ran stays run."""
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         if not console.approvals.revoke(session_id, entry_id):
             raise ApiError(404, "not_found", t("errors.noApproval"))
         return Response(status_code=204)
@@ -160,7 +157,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/memory")
     async def session_memory(session_id: str) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
         # Open sessions show their agent's cap; closed ones, the setting's cap.
@@ -194,20 +191,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
         limit: int = Query(RUN_LIMIT, ge=1, le=_RUNS_MAX),
     ) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
-        turns: list[TurnInfo] = await _store_call(
-            console,
-            console.store.list_turns(session_id, limit=limit, before=before),
-            session_id,
+        await console.require_session(session_id)
+        turns: list[TurnInfo] = await console.store.list_turns(
+            session_id, limit=limit, before=before
         )
         # A running turn has no RunResult yet; it is the transcript's row.
         runs = [run_json(turn) for turn in turns if turn.status != "running"]
         has_earlier = False
         if turns:
-            older = await _store_call(
-                console,
-                console.store.list_turns(session_id, limit=1, before=turns[0].turn),
-                session_id,
+            older = await console.store.list_turns(
+                session_id, limit=1, before=turns[0].turn
             )
             has_earlier = bool(older)
         return JSONResponse(content={"runs": runs, "has_earlier": has_earlier})

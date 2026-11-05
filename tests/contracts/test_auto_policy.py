@@ -26,6 +26,8 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_grant,
     wait_words,
+    window_grant,
+    window_question,
 )
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
@@ -574,6 +576,55 @@ def test_what_a_chat_may_keep(
 ) -> None:
     assert site_grant(request_) is site
     assert grant_offered(request_) is offered
+
+
+def _window(
+    review: ActionReview | None = None, name: str = "window-read:com.example.chat"
+) -> ApprovalRequest:
+    return ApprovalRequest(
+        request_id="r3",
+        run_id="run-1",
+        call_id="call_3",
+        tool_name=name,
+        arguments={"app": "Chat", "window": "Sign in", "access": "window-read"},
+        preview="Chat opened a window right after melo's click: let melo see it?",
+        workspace_root="/ws",
+        review=review,
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_", "kept"),
+    [
+        # As Ask asks it, and as Auto shows it to the person (the one category opaque).
+        (_window(), True),
+        (_window(ActionReview("high", ("opaque",), ("Another app.",))), True),
+        # Any other review of it, or another tool's name, is never kept by this grant.
+        (_window(ActionReview("high", ("send_out",), ("Sends.",))), False),
+        (_window(ActionReview("high", ("opaque", "send_out"), ("x",))), False),
+        (_window(name="desktop-act:Chat"), False),
+    ],
+)
+def test_a_chat_may_keep_the_window_question_of_an_app(
+    request_: ApprovalRequest, kept: bool
+) -> None:
+    assert window_grant(request_) is kept
+    assert grant_offered(request_) is kept
+    assert window_question(request_) is request_.tool_name.startswith("window-read:")
+
+
+def test_a_routine_review_of_the_window_question_is_not_this_grants_to_give() -> None:
+    # The question is never reviewed, so no routine review is attached to it; if one were, the
+    # general grant rule (not this one) would decide.
+    routine = _window(ActionReview("routine"))
+    assert not window_grant(routine)
+
+
+def test_the_window_question_outside_the_workspace_is_never_kept() -> None:
+    outside = dataclasses.replace(
+        _window(), outside=OutsideAccess("/x/a.txt", "/x", "read", True)
+    )
+    assert not window_question(outside) and not window_grant(outside)
 
 
 def test_a_site_question_without_a_site_or_outside_the_workspace_is_never_kept() -> (

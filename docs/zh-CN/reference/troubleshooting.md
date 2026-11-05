@@ -59,8 +59,8 @@ error: externally-managed-environment
 FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smoke/data/scenarios.json'
 ```
 
-- **原因：** 旧版本的构建没有把这个必需的数据文件打包进 wheel。当前版本会把它与网页工作区的资源一起打包。
-- **修复：** 按[更新 localmelo](../guides/configure.md#update-localmelo)中的说明更新并重新安装 localmelo。使用 `pip install -e ".[gateway]"` 进行的可编辑源码安装也包含该文件。
+- **原因：** 旧版本的构建需要这个数据文件，却没有把它打包进 wheel。当前版本不再使用它。
+- **修复：** 按[更新 localmelo](../guides/configure.md#update-localmelo)中的说明更新并重新安装 localmelo。
 
 <a id="setup-and-configuration"></a>
 
@@ -140,6 +140,7 @@ No model server is running yet.
 | `api_key: … is not a keychain reference` | 写成 `api_key = "keychain:localmelo.<name>"`，或留空。 |
 | `embedding_url is empty`, `embedding_model is empty` | 在后端的表中添加这两项，或设置 `embedding_backend = "none"`。 |
 | `request_timeout_s must be a finite number of seconds > 0` | 写成不带引号的数字，例如 `request_timeout_s = 600`。 |
+| `[gateway] port must be a whole number, got '8401'` | 值的类型不对（这里是数字加了引号）。按消息写：整数不带引号，开关用 `true` 或 `false`，文本加引号。 |
 | `extra_body must not set 'model'` | 从 `extra_body` 中删除该键。 |
 
 ### LOCALMELO_THINKING_RETENTION_DAYS must be a number of days
@@ -280,7 +281,7 @@ melo: run ended with status stuck: Stuck: the same tool calls or errors repeated
 melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: not_novel)
 ```
 
-- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。使用 `--reflection-gate utility` 时，它还可能显示为 `Could not parse reflection response`：模型两次回复时都没有反思所需的 JSON 对象。
+- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。
 - **修复：** 阅读其理由。如果模型无法写出反思，请换一个模型，或使用 `--attempt-policy none`。
 
 ### Tool not offered in this step

@@ -21,19 +21,22 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { allowState, blockCard, blockFacts, gistWords, reviewWords } from "./blocked.mjs";
-import { picturesNode, setupPictureBox } from "./pictures.mjs";
+import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
+import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
 import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
+  acknowledgeNote,
   activity,
   applyEvent,
   approvalTag,
@@ -42,6 +45,8 @@ import {
   cleanOutput,
   declinedLine,
   declinedStep,
+  dropNote,
+  followEvents,
   formatBytes,
   formatDuration,
   formatPast,
@@ -52,11 +57,16 @@ import {
   newTurn,
   newView,
   nextAction,
+  noteLine,
+  noteState,
+  PICTURES_REFUSED,
   printable,
   reflectionLine,
+  returnNotes,
   serverAddress,
   serverUnreachable,
   shownItems,
+  startNote,
   statusLine,
   statusMark,
   statusText,
@@ -71,9 +81,9 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const KEY = "localmelo-console";
-const STREAM_DELAYS_S = [1, 2, 4, 8, 16, 30];
 const PRESENCE_MS = 2500;
 const LIST_POLL_MS = 4000;
+const BROWSER_HIDDEN_MS = 20000;
 
 const S = {
   health: null,
@@ -93,8 +103,9 @@ const S = {
   cardAllows: {},
   drafts: {},
   outbox: {},
+  media: {}, // The pictures and files waiting in the composer of each chat that is not open, by slot.
   cancelling: new Set(),
-  stream: { source: null, sessionId: null, status: "idle", attempt: 0, retryAt: 0, timer: null },
+  stream: null, // The follower of the open chat's events (`followEvents`), while there is one.
   view: null,
   online: true,
   levelsOpen: false,
@@ -235,6 +246,7 @@ function lock(message = "") {
   if (S.authenticated) saveDraft();
   S.authenticated = false;
   closeStream();
+  browser.release();
   $("settings-dialog")?.close?.();
   $("app").inert = true;
   $("app").hidden = true;
@@ -494,7 +506,9 @@ function syncUI() {
   importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
   input.disabled = setup;
-  input.placeholder = setup ? t("header.connectToStart") : COMPOSER_PLACEHOLDER;
+  input.placeholder = setup ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
+  // While melo works, Enter adds the words to the work; Stop is still its own button.
+  setTextIfChanged($("composer-hint-text"), t(busy ? "composer.hintWorking" : "html.enterToSend"));
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
   const fresh = S.ready && !S.activeId && !setup && !workerMode;
   folderPicker.update(fresh);
@@ -523,19 +537,24 @@ function syncUI() {
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
   $("model-btn").textContent = `${model?.name || t("header.chooseModel")}  ⌄`;
-  $("send-btn").hidden = !!busy;
+  $("send-btn").hidden = false;
+  $("send-btn").title = busy ? t("composer.addTitle") : "";
   $("stop-btn").hidden = !busy;
   $("stop-btn").disabled = !busy || S.cancelling.has(busy.id);
   $("stop-btn").textContent = `■ ${t(busy && S.cancelling.has(busy.id) ? "header.stopping" : "common.stop")}`;
   const sending = pendingOutbox();
+  // Words, or pictures and files that have arrived at the gateway, can be sent.
+  const hasMedia = media.has();
+  $("attach-btn").hidden = workerMode;
+  $("attach-btn").disabled = setup || !S.online;
   $("send-btn").disabled =
     setup ||
     !S.online ||
-    !!busy ||
     (sending !== null && sending.state !== "failed") ||
-    !input.value.trim();
+    media.busy() ||
+    !(input.value.trim() || hasMedia);
   // Run as a task: a chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !S.activeId || !!busy;
+  $("task-btn").hidden = !S.activeId || !!busy || media.hasPictures();
   $("task-btn").disabled = $("send-btn").disabled;
   $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
@@ -754,6 +773,8 @@ async function loadSession(id) {
   view.session = detail.session ?? view.session;
   view.tokens = detail.tokens ?? 0;
   view.grants = detail.grants ?? [];
+  // The grants that hold here because the main chat allowed them: taking one back takes it away everywhere.
+  view.grantsEverywhere = detail.grants_everywhere ?? [];
   view.grantedAt = detail.granted_at ?? {};
   view.pending = new Map();
   for (const approval of detail.pending_approvals ?? []) {
@@ -789,7 +810,9 @@ async function openSession(id, { saveCurrent = true, scroll = true, route = true
   }
   if (saveCurrent) saveDraft();
   if (S.activeId !== id) approvalStates.clear();
+  shiftMedia(S.activeId ?? "new", id, { keep: saveCurrent });
   closeStream();
+  browser.release(id);
   S.activeId = id;
   drawer.sessionChanged();
   S.view = newView(id);
@@ -818,6 +841,7 @@ function forgetSession(id) {
   S.sessions = S.sessions.filter((session) => session.id !== id);
   if (S.activeId === id) {
     closeStream();
+    browser.release();
     S.activeId = null;
     drawer.sessionChanged();
     S.view = null;
@@ -839,7 +863,9 @@ function newChat({ saveCurrent = true } = {}) {
   if (saveCurrent) saveDraft();
   S.pendingTitle = "";
   if (S.activeId !== null) approvalStates.clear();
+  shiftMedia(S.activeId ?? "new", "new", { keep: saveCurrent });
   closeStream();
+  browser.release();
   S.activeId = null;
   drawer.sessionChanged();
   S.view = null;
@@ -854,57 +880,56 @@ function newChat({ saveCurrent = true } = {}) {
 
 // ── The event stream ──
 
-// `watch=true`: this page shows the chat to the person, so a step Auto stops
-// asks on the card while it is open (#465).
-function eventsUrl(id) {
-  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}&watch=true`;
-}
+// How every view of this page follows events (`followEvents`): its EventSource and its timers.
+const followOptions = {
+  open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
+  schedule: (fn, ms) => setTimeout(fn, ms),
+  cancel: (id) => clearTimeout(id),
+};
 
 function startStream(id) {
   // A chat opened and then left before its load finished keeps no stream:
   // one bound to this id would ignore every frame of the chat now open.
-  if (!S.authenticated || S.activeId !== id || workerMode) return;
+  if (!S.authenticated || S.activeId !== id || workerMode || !S.view) return;
   closeStream();
   chatStatus.follow(id);
-  if (typeof EventSource !== "function") return;
-  S.stream.sessionId = id;
-  const source = new EventSource(eventsUrl(id));
-  S.stream.source = source;
-  S.stream.status = "live";
-  source.onmessage = (message) => {
-    if (S.activeId !== id || !S.view) return;
-    let frame;
-    try {
-      frame = JSON.parse(message.data);
-    } catch {
-      return;
-    }
-    applyOutcome(applyEvent(S.view, frame));
-    if (frame.type === "attention.card") holdOrShow(S.view, frame);
-    if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
-    if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
-    if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
-    noteFrame(frame);
-    chatStatus.bump();
-    renderMessages(false);
-    syncUI();
-  };
-  source.onopen = () => {
-    S.stream.status = "live";
-    S.stream.attempt = 0;
-    S.stream.retryAt = 0;
-    if (S.noticeKind === "stream") notify("");
-    syncUI();
-  };
-  source.onerror = () => {
-    if (!S.authenticated || S.stream.source !== source || S.activeId !== id || S.view === null) return;
-    // EventSource cannot expose a 401. Stop its automatic retry and check
-    // authentication before opening another stream.
-    source.close();
-    S.stream.status = "paused";
-    scheduleReconnect();
-    refreshStreamNotice();
-  };
+  browser.follow(id);
+  S.stream = followEvents({
+    ...followOptions,
+    id,
+    view: S.view,
+    // This page shows the chat to the person, so a step Auto stops asks on the card while it is open (#465).
+    watch: true,
+    onFrame: (frame, outcome) => {
+      applyOutcome(outcome);
+      // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
+      if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
+      if (frame.type === "attention.card") holdOrShow(S.view, frame);
+      if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
+      if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
+      if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
+      noteFrame(frame);
+      browser.note(frame);
+      chatStatus.bump();
+      renderMessages(false);
+      syncUI();
+    },
+    onStatus: refreshStreamNotice,
+    // The chat may be gone (closed in another tab, or the gateway restarted):
+    // a stream reopened on it would only 404 for ever. A 401 locks the page
+    // (`api`), which closes the stream.
+    onEnd: async () => {
+      try {
+        await api(`/sessions/${encodeURIComponent(id)}`);
+      } catch (error) {
+        if (error.status === 404 && S.activeId === id) {
+          forgetSession(id);
+          notify(t("chat.expired"), { sticky: true });
+          return false;
+        }
+      }
+    },
+  });
 }
 
 async function refreshApproval(id, requestId) {
@@ -923,47 +948,8 @@ async function refreshApproval(id, requestId) {
 
 function closeStream() {
   chatStatus.clear();
-  if (S.stream.source) {
-    try {
-      S.stream.source.close();
-    } catch {
-      /* A closed source is fine. */
-    }
-  }
-  S.stream.source = null;
-  S.stream.sessionId = null;
-  S.stream.status = "idle";
-  S.stream.retryAt = 0;
-  if (S.stream.timer !== null) {
-    clearTimeout(S.stream.timer);
-    S.stream.timer = null;
-  }
-  if (S.noticeKind === "stream") notify("");
-}
-
-function scheduleReconnect() {
-  const id = S.activeId;
-  if (!S.authenticated || !id || S.stream.timer !== null) return;
-  const delay = STREAM_DELAYS_S[Math.min(S.stream.attempt, STREAM_DELAYS_S.length - 1)];
-  S.stream.attempt += 1;
-  S.stream.retryAt = nowSeconds() + delay;
-  S.stream.timer = setTimeout(async () => {
-    S.stream.timer = null;
-    if (S.activeId !== id) return;
-    // The chat may be gone (closed in another tab, or the gateway
-    // restarted): a stream reopened on it would only 404 for ever.
-    try {
-      await api(`/sessions/${encodeURIComponent(id)}`);
-    } catch (error) {
-      if (error.status === 404) {
-        forgetSession(id);
-        notify(t("chat.expired"), { sticky: true });
-        return;
-      }
-    }
-    if (!S.authenticated || S.activeId !== id) return;
-    startStream(id);
-  }, delay * 1000);
+  S.stream?.close();
+  S.stream = null;
 }
 
 /** Mirror what a frame changed outside the view: title, model, the outbox. */
@@ -1019,7 +1005,7 @@ function noteFrame(frame) {
 /** Keep the stream's banner honest while it is down. */
 function refreshStreamNotice() {
   const banner = $("stream-banner");
-  banner.hidden = S.stream.status !== "paused";
+  banner.hidden = S.stream?.status !== "paused";
   if (banner.hidden) return;
   const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
   setTextIfChanged($("stream-banner-text"), t("chat.reconnecting", { n: seconds }));
@@ -1404,9 +1390,53 @@ function turnNode(turn, newest = false, asked = askTurn(turn)) {
   return section;
 }
 
+/**
+ * What a message carries, as the bubble draws it: its pictures (a row of thumbnails that open at full
+ * size) and its text files (chips). *pictures* are `{name, url, bytes}`, *files* `{name}`.
+ */
+function mediaRow(pictures, files) {
+  if (pictures.length === 0 && files.length === 0) return null;
+  const row = el("div", "bubble-media");
+  for (const picture of pictures) {
+    const tile = el("button", "bubble-picture");
+    tile.type = "button";
+    tile.setAttribute("aria-label", t("composer.openPicture", { name: picture.name }));
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.src = picture.url;
+    tile.append(image);
+    tile.addEventListener("click", () => pictureBox({ path: picture.name, size: picture.bytes, mtime: 0, state: "" }, picture.url));
+    row.append(tile);
+  }
+  for (const file of files) row.append(el("span", "bubble-file", file.name));
+  return row;
+}
+
+/** The bubble's content: media above the words. A message sent with no words shows its pictures alone. */
+function fillBubble(bubble, words, { pictures, files }) {
+  const row = mediaRow(pictures, files);
+  if (row !== null) bubble.append(row);
+  if (words) bubble.append(el("div", "bubble-words", words));
+  if (row !== null) bubble.classList.add("has-media");
+}
+
+/** An outbox entry's media (the items taken from the strip) as the bubble draws them. */
+function entryMedia(items) {
+  return {
+    pictures: items.filter((item) => item.kind === "picture").map((item) => ({ name: item.name, url: item.url, bytes: item.bytes })),
+    files: items.filter((item) => item.kind === "file").map((item) => ({ name: item.name })),
+  };
+}
+
 function userNode(turn, newest = false) {
   const article = el("article", "msg user");
-  article.append(el("div", "user-bubble", turn.userText), ...memoryOf(turn));
+  // The gateway writes the text files after the words, and stands in `[2 pictures]` for no words.
+  const { words, files } = splitAttachments(turn.userText);
+  const pictures = turnPictures(S.view?.id ?? S.activeId, turn.images);
+  const bubble = el("div", "user-bubble");
+  fillBubble(bubble, (pictures.length > 0 || files.length > 0) && isStandIn(words) ? "" : words, { pictures, files });
+  article.append(bubble, ...memoryOf(turn));
   if (turn.undone) {
     // Nothing follows an undo (/undo); a retry is followed by the turn that ran again.
     article.append(el("p", "turn-caption", t(newest ? "chat.undoneNote" : "chat.retriedBelow")));
@@ -1431,6 +1461,8 @@ function assistantNode(turn, newest = false) {
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
+  // The pictures melo took (a page it looked at, another app's window) show under the steps, also when they are folded.
+  article.append(...shotsOf(turn));
   article.append(...blockedCards(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
@@ -1534,6 +1566,21 @@ function picturesOf(turn) {
   return row ? [row] : [];
 }
 
+function shotsOf(turn) {
+  const row = shotsNode({
+    doc: document,
+    shots: takenPictures(turn),
+    sessionId: S.activeId ?? "",
+    expanded: turn.shotsOpen === true,
+    open: (picture, url) => pictureBox(picture, url),
+    toggle: () => {
+      turn.shotsOpen = !turn.shotsOpen;
+      renderMessages(false, true);
+    },
+  });
+  return row ? [row] : [];
+}
+
 function answerNode(answer) {
   const node = el("div", "answer");
   node.innerHTML = renderMarkdown(answer);
@@ -1571,7 +1618,7 @@ function statusMarkNode(severity, stopped = false) {
 }
 
 // Whether the model runs on a server of the user's own (the settings have an address to change).
-const localBackend = () => ["mlc", "ollama", "vllm", "sglang"].includes(S.health?.model?.backend);
+const localBackend = () => S.health?.model?.local === true;
 
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
 function failureHint(turn, can, error) {
@@ -1582,6 +1629,8 @@ function failureHint(turn, can, error) {
   const sentences = (first) => [first, ...own].join(t("common.sentenceGap"));
   switch (turn.status) {
     case "provider_error": {
+      // The title says all there is to say, and the actions offer the settings.
+      if (error === PICTURES_REFUSED) return "";
       if (serverUnreachable(turn.status, error)) {
         if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
@@ -1648,7 +1697,7 @@ function statusNode(turn) {
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
   // So does the title of a tool call written as text.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT) {
+  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -1760,6 +1809,17 @@ function itemNode(item, turn, context = {}) {
     }
     case "fact":
       return el("div", "fact-item", item.message);
+    case "note": {
+      // The person's words added while melo worked: a small bubble, and whether melo has read it.
+      const node = el("div", "note-item");
+      node.dataset.state = noteState(turn, item);
+      const bubble = el("div", "user-bubble note-bubble");
+      // Its pictures come from the chat's blobs once the gateway lists them; until then, as added.
+      const pictures = item.images.length > 0 ? turnPictures(S.view?.id ?? S.activeId, item.images) : item.pictures;
+      fillBubble(bubble, item.text, { pictures, files: [] });
+      node.append(bubble, el("p", "note-state", noteLine(turn, item)));
+      return node;
+    }
     case "reflection": {
       const card = el("details", "reflection");
       card.open = item.expanded === true;
@@ -1787,6 +1847,8 @@ function approvalNow() {
 // How the card talks to its view: the chat view redraws its messages and
 // answers a session's approval; the Tasks view passes its own (tasks.mjs).
 const chatApproval = {
+  // True when the chat shown is the main chat: its own questions are answered for every chat.
+  get main() { return mainActive(); },
   rerender: () => { messageSnapshot = ""; renderMessages(false); },
   answer: (request, state, choice) => answerApproval(request, state, choice),
   reload: (id) => refreshApproval(S.activeId, id),
@@ -1839,11 +1901,14 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const workspace = request.workspace_label || view.workspace || S.view?.session?.workspace_label || t("approval.theWorkspace");
   const folder = workspace.replace(/\/+$/, "").split("/").pop() || workspace;
   const scope = t(`approval.scope.${view.scope === "task" ? "task" : "chat"}`);
+  // The main chat's own question (a task's card keeps "this task"): what the person allows in the main
+  // chat counts in every chat, the tasks they start and the terminal, so each answer that is kept says so.
+  const everywhere = view.scope !== "task" && view.main === true;
   // A plain question, with the tool id in a caption and what "Allow for this chat" covers.
   let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let rule = t("approval.rule.tool", { tool, scope });
+  let rule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
@@ -1863,7 +1928,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
     what = t("approval.fileContent");
-    rule = t("approval.rule.write", { scope });
+    rule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
     if (diff) what = t("approval.changesTo", { path });
@@ -1878,8 +1943,10 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
-    content = t(reading ? "approval.readContent" : "approval.siteContent", { site });
+    rule = everywhere ? t(reading ? "approval.rule.readMain" : "approval.rule.openMain", { site })
+      : t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
+    // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front.
+    content = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
     if (reading && args.url) {
       // The whole address reaches the site, path and query too: the card shows it.
       why = content;
@@ -1896,8 +1963,12 @@ function approvalCard(request, view = chatApproval, asked = "") {
     what = t("approval.willDo");
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
-    rule = t(sending ? "approval.rule.submitOnce" : typing ? "approval.rule.typeOnce" : "approval.rule.act", { site, scope });
-    content = t(sending ? "approval.submitContent" : typing ? "approval.typeContent" : "approval.actContent", { site });
+    rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
+      : everywhere ? t("approval.rule.actMain", { site }) : t("approval.rule.act", { site, scope });
+    const chrome = args.browser === "chrome";
+    content = t(sending ? "approval.submitContent"
+      : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
+      : chrome ? "approval.actContentChrome" : "approval.actContent", { site });
     if (sending) {
       // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
       why = content;
@@ -1910,6 +1981,38 @@ function approvalCard(request, view = chatApproval, asked = "") {
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("handoff:")) {
+    // A page asked to open an address of another app's kind, which the browser in the background does not
+    // open itself: melo opens it on a yes, and a kept answer covers that kind of address where it is kept
+    // (in the main chat, every chat). In Auto the step is high impact: no kept answer is offered.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    const site = String(args.site || "");
+    what = t("approval.handoffAddress");
+    title = t("approval.handoffTitle", { app });
+    caption = t("approval.handoffCaption");
+    rule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
+    why = t("approval.handoffContent", { app, site });
+    content = String(args.url || "");
+  } else if (tool.startsWith("browser-dialog:")) {
+    // A confirm box the page put up while melo acted: OK is asked every time; Cancel otherwise.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.dialogText");
+    title = t("approval.dialogTitle", { site });
+    caption = t("approval.dialogCaption");
+    rule = t("approval.rule.dialogOnce");
+    why = t("approval.dialogContent", { site });
+    content = String(args.text ?? "");
+  } else if (tool.startsWith("browser-point:")) {
+    // A click (or a text) at a point melo cannot check: a secret field, a consent control, or a control inside a
+    // box from another site that melo knows nothing of. Asked every time; the card says where it lands, in
+    // the engine's words (English), and the same in Ask and in Auto.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.pointOn");
+    title = t(String(args.how || "click").startsWith("type") ? "approval.pointTypeSite" : "approval.pointSite", { site });
+    caption = t("approval.pointCaption");
+    rule = t("approval.rule.pointOnce");
+    why = t(args.browser === "chrome" ? "approval.pointContentChrome" : "approval.pointContent", { site });
+    content = `${String(args.how || "click")} ${String(args.on || "a point of the page")}`;
   } else if (tool.startsWith("desktop-act:")) {
     // A button in another app's window that appeared after melo's own step in the browser: asked every
     // time, and the card names the app, the window and what is pressed.
@@ -1919,12 +2022,43 @@ function approvalCard(request, view = chatApproval, asked = "") {
     caption = t("approval.desktopCaption");
     rule = t("approval.rule.desktopOnce");
     content = t("approval.desktopContent", { app, on: String(args.on || ""), window: String(args.window || "") });
+    // A click at a point is asked once for both tries: if the background one does not reach the window, the
+    // second moves the pointer and brings the app forward.
+    if (args.delivery === "foreground_retry") why = t("approval.desktopForeground", { app });
+  } else if (tool.startsWith("takeover:")) {
+    // melo reached something only the person can do on a page (a sign-in, a code, a QR code, a human check): the
+    // card offers them the page in the Browser panel. Their yes is "Take over"; nothing of it is kept for the chat.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    const need = ["sign-in", "password", "code", "card", "qr", "captcha"].includes(args.need) ? args.need : "sign-in";
+    what = t("approval.willDo");
+    title = t(`approval.takeover.${need}`, { site });
+    caption = t("approval.takeoverCaption");
+    rule = t("approval.rule.takeover");
+    why = t("approval.takeoverContent");
+    content = "";
+    noBox = true;
+  } else if (tool.startsWith("window-read:")) {
+    // A window another app put up right after melo's own step: nothing about it goes to the model unless
+    // the person allows it here, in Ask and in Auto alike. The window's title is for the person only.
+    const app = String(args.app || tool.slice(tool.indexOf(":") + 1));
+    what = t("approval.seeWindow");
+    title = t("approval.seeTitle", { app });
+    caption = t("approval.seeCaption");
+    rule = everywhere ? t("approval.rule.seeMain", { app })
+      : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
+    content = String(args.window || "");
   }
   // A high-impact call (installs, downloads, changes outside the folder) asks every time: the
   // card says why, offers no chat-wide allow, and starts on Deny. A site Auto stopped only because the
   // request did not ask for it (#465) says why too, but may be allowed for the chat: the server says so.
   const review = request.review;
-  const stopped = review?.verdict === "high";
+  // A take-over, a window another app opened, a press in one and a click at a point melo cannot check are asked
+  // of the person every time: Auto's fixed "opaque" review does not reword them or add reasons (its title is
+  // about code, and its sentence is English), so the card keeps its own words in Ask and in Auto.
+  const takeover = tool.startsWith("takeover:");
+  const pointing = tool.startsWith("browser-point:");
+  const personOnly = takeover || pointing || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
+  const stopped = review?.verdict === "high" && !personOnly;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
   const reviewed = stopped ? reviewWords({ ...review, gist: request.gist }, folder) : { title: "", reasons: [] };
@@ -2002,19 +2136,34 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
-  const once = button(high ? "outline-button" : "primary-button", t("common.allowOnce"), () => view.answer(request, state, "once"));
+  const once = button(high ? "outline-button" : "primary-button", takeover ? t("approval.takeoverYes") : t("common.allowOnce"), () => {
+    view.answer(request, state, "once");
+    // The panel opens and the keys go to the page as soon as the gateway hands it over.
+    if (takeover && view === chatApproval) browser.takeOver();
+  });
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
-  const session = button("outline-button", outside ? t("approval.outside.chat", { scope }) : t("approval.allowFor", { scope }),
-    () => view.answer(request, state, "session"));
+  const seeing = tool.startsWith("window-read:");
+  const seeApp = String(args.app || "");
+  const sessionWords = outside ? (everywhere ? t("approval.outside.everywhere") : t("approval.outside.chat", { scope }))
+    : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp })
+      : t(view.scope === "task" ? "approval.seeTask" : "approval.seeChat", { app: seeApp }))
+      : everywhere ? t("approval.allowEverywhere") : t("approval.allowFor", { scope });
+  const session = button("outline-button", sessionWords, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
   always.dataset.approvalFocus = "always";
   always.dataset.approvalAlways = "";
-  const deny = button(high ? "primary-button" : "quiet-button", t("common.deny"), () => {
+  const deny = button(high ? "primary-button" : "quiet-button", takeover ? t("approval.takeoverNo") : t("common.deny"), () => {
+    if (takeover) {
+      // "Not now" needs no reason: melo carries on without the page.
+      view.answer(request, state, "deny");
+      return;
+    }
     state.deny = true;
     actions.hidden = true;
     grant.hidden = true;
+    if (wide) wide.hidden = true;
     if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
@@ -2023,7 +2172,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   deny.dataset.approvalFocus = "deny";
   // The answers offered: a folder outside the workspace that may be kept has four.
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
+  const everyTime = high || takeover || pointing || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
     || tool.startsWith("desktop-act:");
   const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
@@ -2031,17 +2180,32 @@ function approvalCard(request, view = chatApproval, asked = "") {
   const command = tool === "shell_exec" || tool === "python_exec";
   if (outside) {
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
-      : grantable ? t("approval.rule.outsideRead", { scope, folder: outsideFolder }) : t("approval.rule.outsideOnce");
-  } else if (high) rule = t("approval.rule.high", { scope, workspace });
-  else if (command) rule = t(tool === "shell_exec" ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+      : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
+        : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
+  } else if (high) rule = everywhere ? t("approval.rule.highMain", { workspace }) : t("approval.rule.high", { scope, workspace });
+  else if (command) {
+    const shell = tool === "shell_exec";
+    rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
+      : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
+  }
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
   if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
   card.append(grant);
+  // In the main chat a kept answer counts everywhere: one line says so, where, and how to take it back.
+  const wide = everywhere && offered.includes(session)
+    ? el("p", "approval-warning approval-everywhere", t("approval.everywhere"))
+    : null;
+  if (wide) {
+    wide.id = `approval-wide-${id}`;
+    session.setAttribute("aria-describedby", `${grant.id} ${wide.id}`);
+    card.append(wide);
+  }
   // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
+  const rememberedKey = view.scope === "task" ? "task" : everywhere ? "everywhere" : "chat";
   const kept = !high && request.remembered === true
-    ? el("p", "approval-remembered", t(`approval.remembered.${view.scope === "task" ? "task" : "chat"}`))
+    ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
     : null;
   if (kept) card.append(kept);
   const note = t("approval.instead");
@@ -2069,6 +2233,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
     denyView.hidden = true;
     actions.hidden = false;
     grant.hidden = false;
+    if (wide) wide.hidden = false;
     if (kept) kept.hidden = false;
     deny.focus();
   });
@@ -2089,6 +2254,7 @@ function approvalCard(request, view = chatApproval, asked = "") {
   denyView.hidden = !state.deny;
   actions.hidden = state.deny;
   grant.hidden = state.deny;
+  if (wide) wide.hidden = state.deny;
   if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
@@ -2342,7 +2508,8 @@ function pastNode(turn) {
 
 function outboxNode(entry, slot) {
   const article = el("article", "msg user");
-  const bubble = el("div", "user-bubble", entry.text);
+  const bubble = el("div", "user-bubble");
+  fillBubble(bubble, entry.text, entryMedia(entry.media ?? []));
   article.append(bubble);
   const status = el("p", "outbox-state");
   if (entry.state === "sending") status.textContent = t("outbox.sending");
@@ -2392,18 +2559,43 @@ async function send({ asTask = false } = {}) {
   return queueMessage(draft.trim(), { clearInput: true, asTask });
 }
 
-async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
+async function queueMessage(text, {clearInput = false, asTask = false, carry = null} = {}) {
   if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
-  if (!text || composerTurn() !== null) return;
+  if (composerTurn() !== null) {
+    // Text files cannot join a running turn; they stay where they are.
+    if (clearInput && media.hasFiles()) {
+      notify(t("composer.filesWhileWorking"));
+      return;
+    }
+    if (clearInput && media.busy()) return;
+    // While melo works, the words and pictures join the work: its run reads them at its next step.
+    if (text || (clearInput && media.has())) return addNote(text, { clearInput });
+  }
+  if (!text && !carry?.length && !(clearInput && media.has())) return;
+  if (clearInput && media.busy()) return;
+  if (asTask && media.hasPictures()) {
+    notify(t("composer.picturesNoTask"));
+    return;
+  }
   if (previous && (previous.state !== "failed" || !clearInput)) return;
-  // The same text, failed after a check of unknown outcome, keeps its key:
+  // The same text, failed after a check of unknown outcome, keeps its key and its media:
   // the store answers `repeated` instead of running it twice.
   const again = previous && previous.state === "failed" && previous.text === text;
   const key = again ? previous.clientRequestId : newClientRequestId();
   slash.clearRows(slot);
-  S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "", ...(asTask ? { asTask } : {}) };
+  // A failed message that is replaced gives its pictures and files back to the strip first, so they go with the new one.
+  if (previous && !again && previous.media?.length) media.restore(previous.media);
+  const carried = again ? previous.media ?? [] : carry ?? (clearInput ? media.take() : []);
+  S.outbox[slot] = {
+    clientRequestId: key,
+    text,
+    state: "sending",
+    error: "",
+    ...(carried.length ? { media: carried } : {}),
+    ...(asTask ? { asTask } : {}),
+  };
   if (clearInput) {
     input.value = "";
     saveDraft();
@@ -2415,6 +2607,75 @@ async function queueMessage(text, {clearInput = false, asTask = false} = {}) {
   await submit(slot, key, text);
 }
 
+/**
+ * Add *text*, and the pictures in the strip, to the turn that runs. The gateway keeps them for the
+ * run's next step, or, when the turn ends first, sends them as the next message. A turn that ended
+ * while the words were typed makes them a message; a refusal gives the words and pictures back.
+ */
+async function addNote(text, { clearInput = false } = {}) {
+  const turn = composerTurn();
+  const sessionId = S.activeId;
+  if (workerMode || !turn?.id || !sessionId) return;
+  // The strip's pictures go with the words; they come back to it if the note is not accepted.
+  const carried = clearInput ? media.take() : [];
+  const shown = entryMedia(carried).pictures;
+  const images = requestOf(carried).images ?? [];
+  const item = startNote(turn, text, newClientRequestId(), shown);
+  if (clearInput) {
+    input.value = "";
+    saveDraft();
+    resizeInput();
+  }
+  renderMessages(true);
+  syncUI();
+  const post = () =>
+    api(`/turns/${encodeURIComponent(turn.id)}/notes`, {
+      body: { text, ...(images.length ? { images } : {}), client_request_id: item.key },
+    });
+  let body;
+  try {
+    try {
+      body = await post();
+    } catch (error) {
+      // The answer may have been lost on the way: the same key makes the repeat safe.
+      if (typeof error.status === "number") throw error;
+      body = await post();
+    }
+    acknowledgeNote(turn, item, body.note.note, body.note.images);
+    renderMessages(false);
+    syncUI();
+    return;
+  } catch (error) {
+    dropNote(turn, item);
+    if (error.code === "turn_not_running" && S.activeId === sessionId) {
+      // The turn ended first: these words and pictures are a message now.
+      await reloadSession(sessionId);
+      // A message still on its way (the outbox holds one) cannot take them: they go back to the box.
+      if (composerTurn() === null && pendingOutbox() === null) return queueMessage(text, { carry: carried });
+    }
+    if (carried.length) returnMedia(sessionId, carried);
+    if (text) giveBack(text);
+    notify(t("composer.noteFailed", { problem: error.message }), { sticky: true });
+  }
+  renderMessages(false);
+  syncUI();
+}
+
+/** Put the pictures and files of a message that was not sent back in the composer of its chat. */
+function returnMedia(slot, items) {
+  if (items.length === 0) return;
+  if ((S.activeId ?? "new") === slot) media.restore(items);
+  else S.media[slot] = [...items, ...(S.media[slot] ?? [])];
+}
+
+/** Put words back in the box, before what is typed there now. */
+function giveBack(text) {
+  input.value = [text, input.value.trim()].filter(Boolean).join("\n\n");
+  saveDraft();
+  resizeInput();
+  syncUI();
+}
+
 async function submit(slot, key, text) {
   // The slot is where the message was sent from: "new" or its chat.
   const sessionId = slot === "new" ? null : slot;
@@ -2422,7 +2683,7 @@ async function submit(slot, key, text) {
     if (!sessionId) {
       const body = await api("/sessions", {
         body: {
-          turn: { text, client_request_id: key },
+          turn: { text, client_request_id: key, ...requestOf(S.outbox[slot]?.media ?? []) },
           ...(S.newWorkspace ? { workspace: S.newWorkspace } : {}),
           ...(S.newMode ? { approvals: S.newMode } : {}),
         },
@@ -2454,7 +2715,7 @@ async function submit(slot, key, text) {
     }
     const asTask = S.outbox[slot]?.asTask === true;
     const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
-      body: { text, client_request_id: key, ...(asTask ? { as_task: true } : {}) },
+      body: { text, client_request_id: key, ...requestOf(S.outbox[slot]?.media ?? []), ...(asTask ? { as_task: true } : {}) },
     });
     // A repeat is accepted too, so either way the text is not a draft now.
     if (S.outbox[slot]?.clientRequestId !== key) return;
@@ -2557,10 +2818,11 @@ async function cancelSend(slot, entry) {
     ? `/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`
     : `/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`;
   try {
-    await api(path, { body: { text: entry.text } });
+    await api(path, { body: { text: entry.text, ...requestOf(entry.media ?? []) } });
     if (S.outbox[slot] !== entry) return;
     delete S.outbox[slot];
     keepDraft(slot, entry.text);
+    returnMedia(slot, entry.media ?? []);
     renderMessages(false);
     syncUI();
   } catch (error) {
@@ -2569,6 +2831,7 @@ async function cancelSend(slot, entry) {
       // The store never took it, so the text comes back to the composer.
       delete S.outbox[slot];
       keepDraft(slot, entry.text);
+      returnMedia(slot, entry.media ?? []);
       renderMessages(false);
       syncUI();
       return;
@@ -2587,7 +2850,17 @@ async function stop() {
   S.cancelling.add(turn.id);
   syncUI();
   try {
-    await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    const stopped = await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    // Words the run never read do not start another turn after a Stop: they are in the box again.
+    const unread = stopped.unread_notes ?? [];
+    if (unread.length > 0) {
+      returnNotes(turn, unread);
+      renderMessages(false);
+      const pictures = unread.flatMap((note) => note.images ?? []);
+      if (pictures.length > 0) returnMedia(S.activeId ?? "new", pictureItems(pictures));
+      const words = unread.map((note) => note.text).filter(Boolean).join("\n\n");
+      if (words) giveBack(words);
+    }
   } catch (error) {
     if (error.status !== 409 && error.status !== 404) {
       notify(t("chat.stopFailed", { problem: error.message }), { sticky: true });
@@ -2752,10 +3025,7 @@ const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); }, (
   return () => globalThis.clearInterval?.(timer);
 }, {
   statusRow: workerStatus,
-  doc: document,
-  open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-  schedule: (fn, ms) => setTimeout(fn, ms),
-  cancel: (id) => clearTimeout(id),
+  ...followOptions,
 });
 /** Where the panel's link back goes: the chat that is open. */
 function homeHash() {
@@ -2796,9 +3066,7 @@ const tasks = setupTasks({
   live: {
     nodes: taskLiveNodes,
     result: taskResultNodes,
-    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-    schedule: (fn, ms) => setTimeout(fn, ms),
-    cancel: (id) => clearTimeout(id),
+    ...followOptions,
   },
   approvalCard,
   // The task is shown in the panel beside the chat; its link back is the chat's own address.
@@ -2838,6 +3106,7 @@ async function showTask(id) {
     if (S.activeId) await openSession(S.activeId, { route: false });
   }
   drawer.close();
+  giveWayToPanel();
   panel.openTask(id);
   // A waiting task's approval is the panel's now, not the chat card's.
   renderMessages(false, true);
@@ -3058,9 +3327,15 @@ async function showScheduled() {
   const id = S.activeId || S.main?.id || "";
   if (id && S.activeId !== id) await openSession(id);
   else if (id) setRoute(id); // the address names the chat again
+  giveWayToPanel();
   panel.select("scheduled");
   // Below 900 px the panel is a sheet; wider, it already sits beside the chat.
   if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
+}
+
+/** Where Melo's panel and the Browser panel do not both fit, a task or the schedule shown in Melo's panel takes the place. */
+function giveWayToPanel() {
+  if (!matchMedia("(min-width: 1480px)").matches) browser.hide();
 }
 
 function hashId() {
@@ -3108,17 +3383,174 @@ const panel = setupPanel({
   home: homeHash,
   navigate: leaveTask,
   hasTasks: () => sections.tasks,
-  live: {
-    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-    schedule: (fn, ms) => setTimeout(fn, ms),
-    cancel: (id) => clearTimeout(id),
-  },
+  live: followOptions,
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
+
+// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). Pop out
+// shows it alone and large: the macOS app in a window of its own (it offers the `localmeloBrowser` message handler), a
+// browser in a window of the page's own `#/live/<id>`.
+const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
+const browser = setupBrowser({
+  api,
+  els: {
+    root: $("browser-panel"),
+    chip: $("browser-chip"),
+    chipText: $("browser-chip-text"),
+    title: $("bp-title"),
+    host: $("bp-host"),
+    rest: $("bp-rest"),
+    status: $("bp-status"),
+    viewport: $("bp-viewport"),
+    canvas: $("bp-canvas"),
+    note: $("bp-note"),
+    hide: $("bp-hide"),
+    pop: $("bp-pop"),
+    take: $("bp-take"),
+    give: $("bp-give"),
+    viewOnly: $("bp-view-only"),
+    hint: $("bp-hint"),
+    keys: $("bp-keys"),
+    dialog: $("bp-dialog"),
+    dialogTitle: $("bp-dialog-title"),
+    dialogText: $("bp-dialog-text"),
+    dialogInput: $("bp-dialog-input"),
+    dialogOk: $("bp-dialog-ok"),
+    dialogCancel: $("bp-dialog-cancel"),
+  },
+  openSocket: (url) => new WebSocket(url),
+  decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
+  observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
+  wide: () => matchMedia("(min-width: 900px)").matches,
+  popOut: browserBridge
+    ? (session) => browserBridge.postMessage({ action: "popOut", session })
+    : (session) => globalThis.open?.(liveUrl(globalThis.location, session), `melo-live-${session}`, "popup,width=1000,height=680"),
+  // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
+  denied: () => { api("/health").catch(() => {}); },
+});
+$("browser-chip").addEventListener("click", () => browser.toggle());
+$("bp-hide").addEventListener("click", () => browser.hide());
+$("bp-pop").addEventListener("click", () => browser.popOut());
+
+// ── Pictures and files in the composer ──
+
+/** Send a picture's bytes to the gateway, which reads, converts and scales it (`POST /api/uploads`). */
+async function uploadPicture(file) {
+  if (!S.authenticated) {
+    const error = new Error(t("chat.locked"));
+    error.status = 401;
+    throw error;
+  }
+  const response = await fetch(`/api/uploads?name=${encodeURIComponent(file.name || "")}`, {
+    method: "POST",
+    headers: { "Content-Type": uploadType(file) },
+    body: file,
+  });
+  if (response.status === 401) {
+    lock();
+    const error = new Error(t("chat.locked"));
+    error.status = 401;
+    throw error;
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || t("chat.requestFailed", { status: response.status }));
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+const media = setupMedia({
+  doc: document,
+  tray: $("media-tray"),
+  warning: $("media-warning"),
+  fileInput: $("media-input"),
+  upload: uploadPicture,
+  // A picture taken out of the strip, or sent, is forgotten by the gateway (it forgets by itself in time too).
+  discard: (id) => { api(`/uploads/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {}); },
+  notify: (message) => notify(message),
+  changed: () => syncUI(),
+  openSettings: () => openSettings("model"),
+  open: (name, url, bytes) => pictureBox({ path: name, size: bytes, mtime: 0, state: "" }, url),
+  // A text file cannot join the turn that runs; a picture can, as a note.
+  refuse: (file, kind) => (kind === "text" && composerTurn() !== null ? t("composer.filesWhileWorking") : null),
+});
+
+/** Whether the composer takes pictures and files now. */
+function takesMedia() {
+  return S.authenticated && !workerMode && !input.disabled;
+}
+
+/** Add files from a drop or a paste. While melo works, pictures join the turn as a note; the strip refuses text files then. */
+function addMedia(files) {
+  if (!takesMedia() || files.length === 0) return;
+  return media.add(files);
+}
+
+/** Keep each chat's pictures and files with it, as its draft is kept: the strip shows the chat that is open. */
+function shiftMedia(from, to, { keep = true } = {}) {
+  // The same chat keeps its strip; a closed one gives up what it held.
+  if (from === to && keep) return;
+  const incoming = S.media[to] ?? [];
+  delete S.media[to];
+  const outgoing = media.swap(incoming, { discard: !keep });
+  if (outgoing.length > 0) S.media[from] = outgoing;
+}
+
+// A drop anywhere on the page is for the composer. A file the page did not take must never be opened
+// by the browser (which would leave the page), so every drag that carries files is answered here.
+const carriesFiles = (event) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+let dragDepth = 0;
+function showDrop(on) {
+  $("drop-hint").hidden = !on || !takesMedia();
+}
+document.addEventListener("dragenter", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  showDrop(true);
+});
+document.addEventListener("dragover", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = takesMedia() ? "copy" : "none";
+});
+document.addEventListener("dragleave", (event) => {
+  if (!carriesFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) showDrop(false);
+});
+document.addEventListener("drop", (event) => {
+  if (!carriesFiles(event)) {
+    // A link or text dropped outside the box must not take the page away either.
+    if (!["TEXTAREA", "INPUT"].includes(event.target?.tagName)) event.preventDefault();
+    return;
+  }
+  event.preventDefault();
+  dragDepth = 0;
+  showDrop(false);
+  addMedia(Array.from(event.dataTransfer.files ?? []));
+});
+// A picture on the clipboard (a screenshot, a copied image) is added; text pastes as text.
+input.addEventListener("paste", (event) => {
+  const files = Array.from(event.clipboardData?.files ?? []);
+  if (files.length === 0 || event.clipboardData?.getData?.("text/plain")) return;
+  event.preventDefault();
+  addMedia(files);
+});
+/** Open the file picker (the paperclip, `/attach`). */
+function addMediaFromPicker() {
+  if (!takesMedia()) return;
+  media.pick();
+}
+$("attach-btn").addEventListener("click", addMediaFromPicker);
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger"), developer: () => developerMode });
 /** The page after Settings (or a slash command) saved: the mode, the status row and the model chip follow. */
 async function settingsSaved(saved) {
   await refreshMode(saved);
+  // The browser may be another now: the open chat's Browser panel asks again whether it can be watched.
+  browser.recheck();
   drawer.modeChanged();
   chatStatus.bump();
   if (!developerMode) await findSections();
@@ -3191,15 +3623,20 @@ const modeChip = setupModeChip({
       busy: S.modeSaving,
       // The chat's grants: the menu lists the sites it allowed for its rest (#465).
       grants: S.activeId && S.view?.id === S.activeId ? S.view.grants ?? [] : [],
+      everywhere: S.activeId && S.view?.id === S.activeId ? S.view.grantsEverywhere ?? [] : [],
     };
   },
   remove: async (name) => {
     const id = S.activeId;
     if (!id) return;
     try {
-      await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (S.view?.id === id) S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
-      notify(t("auto.menu.removed"));
+      const taken = await api(`/sessions/${encodeURIComponent(id)}/grants/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (S.view?.id === id) {
+        S.view.grants = (S.view.grants ?? []).filter((grant) => grant !== name);
+        S.view.grantsEverywhere = (S.view.grantsEverywhere ?? []).filter((grant) => grant !== name);
+      }
+      // A grant of the main chat is gone from every chat, not only this one.
+      notify(t(taken?.everywhere === true ? "auto.menu.removedEverywhere" : "auto.menu.removed"));
     } catch (error) {
       notify(t("auto.menu.removeFailed", { problem: error.message }), { sticky: true });
     }
@@ -3270,6 +3707,13 @@ const slash = setupSlash({
     };
   },
   submit: send,
+  // The composer's pictures and files (`/attach`, `/attachments`, `/detach`).
+  media: {
+    pick: () => addMediaFromPicker(),
+    list: () => media.items(),
+    remove: (id) => media.remove(id),
+    clear: () => media.swap([], { discard: true }),
+  },
   sync: () => {
     saveDraft();
     resizeInput();
@@ -3426,6 +3870,14 @@ async function init() {
   delete document.documentElement.dataset.locked;
   $("app").hidden = false;
   $("app").inert = false;
+  // `#/live/<chat>`: the macOS app's pop-out window shows the chat's Browser panel and nothing else.
+  const livePopOut = liveRoute(globalThis.location?.hash);
+  if (livePopOut) {
+    document.documentElement.dataset.view = "live";
+    await browser.follow(livePopOut, { liveOnly: true });
+    document.documentElement.dataset.ready = "1";
+    return;
+  }
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
   const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
   S.outbox = {};
@@ -3433,6 +3885,7 @@ async function init() {
     if (!entry || typeof entry !== "object" || typeof entry.clientRequestId !== "string" || typeof entry.text !== "string") continue;
     if (!["sending", "checking", "failed"].includes(entry.state)) continue;
     S.outbox[slot] = {...entry, state: entry.state === "failed" ? "failed" : "checking"};
+    if (!Array.isArray(entry.media)) delete S.outbox[slot].media;
   }
   input.value = S.drafts.new || "";
   resizeInput();
@@ -3543,22 +3996,7 @@ $("offline-retry").addEventListener("click", async () => {
   syncUI();
   if (S.online && document.activeElement === retry) input.focus();
 });
-$("reconnect-btn").addEventListener("click", async () => {
-  const id = S.activeId;
-  if (!id || S.stream.status !== "paused") return;
-  if (S.stream.timer !== null) clearTimeout(S.stream.timer);
-  S.stream.timer = null;
-  try {
-    await api(`/sessions/${encodeURIComponent(id)}`);
-  } catch (error) {
-    if (S.activeId === id && error.status === 404) {
-      forgetSession(id);
-      notify(t("chat.expired"), {sticky: true});
-      return;
-    }
-  }
-  if (S.activeId === id && S.stream.status === "paused") startStream(id);
-});
+$("reconnect-btn").addEventListener("click", () => S.stream?.retryNow());
 $("approval-go").addEventListener("click", goToApproval);
 $("header-parent").addEventListener("click", () => {
   if (S.main) openSession(S.main.id);
@@ -3597,6 +4035,8 @@ matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(fals
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async (event) => {
   if (!S.authenticated) return;
+  // The pop-out window is the Browser panel alone: it has no chats to follow.
+  if (document.documentElement.dataset.view === "live") return;
   const task = taskRoute();
   if (task !== null) { stampArrival(event); await showTask(task); return; }
   closeTaskPage();
@@ -3666,6 +4106,7 @@ document.addEventListener("keydown", (event) => {
   // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
   if (panel.stepBack()) return;
   if (panel.closeSheet()) return;
+  if (browser.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);
     return;
@@ -3685,5 +4126,17 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();
 });
+// The Browser panel's picture stream stops while a page is hidden for a while or kept for Back, and starts when
+// it returns. The chat's event stream does not: a hidden page still shows its chat, so a card Auto shows can be
+// answered when the person comes back within its wait.
+let hiddenTimer = null;
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(hiddenTimer);
+  hiddenTimer = null;
+  if (document.hidden) hiddenTimer = setTimeout(() => browser.suspend(), BROWSER_HIDDEN_MS);
+  else browser.resume();
+});
+globalThis.addEventListener?.("pagehide", () => browser.suspend());
+globalThis.addEventListener?.("pageshow", () => browser.resume());
 
 init();

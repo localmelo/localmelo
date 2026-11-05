@@ -24,6 +24,8 @@ chat_model = "qwen3:8b"
 
 向导会为每个后端写一张表，但 localmelo 只读取所选后端的表。
 
+localmelo 只保存与默认值不同的设置，所以保存的文件很短：默认值的键不写出，没有设置任何项的后端表也不写出。两个后端键总会写出。后端表中文本（URL 或模型名）两端的空格，会在读取文件和在设置中保存时去掉；`api_key` 永远不改动。类型不对的值，例如应为整数的 `port = "8401"`，会让 `melo` 在运行之前停止并给出一句清楚的消息（见 [Configuration errors](troubleshooting.md#configuration-errors)）。
+
 | 键 | 表 | 默认值 | 说明 |
 |---|---|---|---|
 | `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。必需。 |
@@ -41,10 +43,8 @@ chat_model = "qwen3:8b"
 | `replay_turns` | `[agent]` | 未设置 | 使用 `replay` 或 `compress+replay` 时，发送多少条最近助手轮次的推理；省略则发送范围内的每一轮。 |
 | `note_writer` | `[agent]` | `"auto"` | 压缩模式下，`auto`（模型的 `<note>`，否则用启发式）或 `heuristic`。 |
 | `tool_env` | `[agent]` | `[]` | 配置支持的直接运行和会话中，shell/Python 工具额外继承的环境变量名称。值从不保存；见[工具环境](#tool-environment)。 |
-| `fixed_prefix` | `[agent]` | `true` | `false` 会发送稳定前缀成为默认值之前的请求。见[上下文统计](#context-accounting)。 |
-| `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk` 或 `boundary`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
 | `brief_items` | `[agent]` | `false` | 实验性。`true` 让 `--brief` 运行指出简报中尚未被任何编辑触及的编号条目；见 [`--brief-items`](cli.md#brief-items)。 |
-| `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行只限制 Auto 决定的调用（`[approvals] mode`）。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `reflection` | `[agent]` | `true` | 设置（应用和网页控制台）中的**多步仍没做完时先反思**。`true`：任务做了 `steps_per_attempt`（50）步仍没完成时，会反思一次，由反思决定是否继续，最多到运行的 100 步；反思多花一个模型请求。`false`：从不反思，运行是一次直接做到总步数的尝试（等同于 `attempt_policy = "none"`）。只保存 `false`。`-X agent.reflection=off` 只对一次运行生效，没有这个键的配置读作 `true`，`--attempt-policy` 优先于它。对话、侧边对话、任务、worker、直接运行和网关都会读取它；主对话自己的回合从不反思。见[评测](../project/evaluations.md#long-attempts-and-reflection-as-an-option)。 |
@@ -53,9 +53,8 @@ chat_model = "qwen3:8b"
 | `max_calls` | `[agent]` | 未设置 | 开发者设置。不小于 2 的整数：直接运行最多发出的模型请求数（规划、反思及其他请求；重试的请求每次尝试各算一次）。在会超出它的那个请求之前，运行以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。开启 `answer_on_stop` 时，最后一次调用留给答案：运行在发出 `N - 1` 个请求后停止，答案请求是第 `N` 次调用。未设置时没有上限。没有对应的标志，`-X agent.max_calls=N` 仅对一次运行设置它。交互式界面、控制台、应用和网关会忽略它。见[运行结果](run-results.md#statuses)。 |
 | `empty_reply_fallback` | `[agent]` | `"on"` | 开发者设置。`"on"` 让一个回合在会思考的模型没有给出答案、也没有工具调用就结束时，在服务提供关闭思考的开关时（托管服务都有；见[会思考的模型](../guides/hosted-models.md#thinking-models)）关闭思考再问一次，回复仍为空时就以思考的最后几行作为答案，末尾带有 `(from melo's thinking)`，运行因此完成。`"off"` 两者都不做：这样的运行像以前一样以 `failed` 结束，错误为 `melo did not finish an answer`。只有 `"off"` 会被保存；没有对应的标志，`-X agent.empty_reply_fallback=off` 仅对一次运行设置它。直接运行、交互式界面、控制台、应用和网关都读取它。每一步都是一条 `thinking_off_retry` 或 `answer_from_thinking` [通知](events.md#notice)，并在结果的 `empty_reply` 中设置一个标志（见[运行结果](run-results.md#fields)）。 |
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
-| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时（oMLX 的 `model_type` 为 `vlm`，Ollama 的 `vision` 能力），或对云端服务，在其预设把该模型列为能读图时（见[云端模型](../guides/hosted-models.md#pictures)）等同于 `on`。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
+| `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时，或对云端服务，在其预设把该模型列为能读图时（见[云端模型](../guides/hosted-models.md#pictures)）等同于 `on`。服务器的表明方式依次是：`GET /v1/models` 中该模型自己的条目（`vision` 为 true、`input_modalities` 含 `image`，或 `capabilities` 含 `vision` 表示能读；`vision` 为 false，或 `input_modalities` 不含 `image` 表示不能读），然后是 oMLX 的 `model_type` 为 `vlm`，最后是 Ollama 的 `vision` 能力。图片没有发送时（`off`，或服务器没有表明），它的工具消息以一行结尾，告诉模型它看不到这张图片。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
 | `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
-| `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
 | `recall_at` | `[retrieval]` | 未设置 | 一个由 `start`、`attempt`、`step` 和 `tool` 组成的列表。省略则为 `start`、`attempt` 和 `step`；除非点名，`tool` 从不开启。 |
@@ -86,15 +85,16 @@ chat_model = "qwen3:8b"
 | `excerpt_open` | `[memory]` | `"on"` | 用于以前对话轮次的节选形式（`recall_form = "excerpt"`，`recall_source = "turns"`）。`"on"`（默认）：显示内容少于整轮的一行以这一轮的编号开头，如 `[t123] the user said “…”; melo replied “…” (chat “Garden”, Oct 30)`，召回块和记忆搜索工具的结果都是如此。节选截断了你说的话或 melo 的回复（或省略了回复），或者这一行只是一轮长对话的一个片段（索引把它存成多个分块），就算显示得少；显示整轮的一行和所有笔记照旧，没有编号。编号计入这一行的字符数，所以带编号的一行少用相应的字符（`[t123] ` 是 7 个），召回块仍不超过 `recall_chars`。至少有一行带编号时，节选下面会有一行 `A line that starts with an id such as [t123] is cut; open it with open_memory when the answer may be in the rest.`，它同样计入 `recall_chars`。对话的模型还会有只读的 `open_memory` 工具，与 `recall_form = "list"` 给出的是同一个，最多返回 `recall_open_chars` 个字符的整轮对话；`search_memory` 的描述里也有同一句话。`turn.memory` 把打开的轮次列在 `opened` 中，某一项的 `shown` 保留模型读到的原样那一行，包括编号。`"off"` 是用于比较的开发者设置：召回块、搜索结果和工具列表与有编号之前一样，被截断的行没有编号，也没有 `open_memory`。与 `recall_form = "list"`（它总是提供 `open_memory`）或 `recall_source = "items"` 一起用没有效果。只有取值为 `"off"` 时才会保存。`-X memory.excerpt_open=off` 只对一次运行生效。 |
 | `recall_source` | `[memory]` | `"turns"` | 用于比较的开发者设置。除笔记外，召回取材于什么。`"turns"` 是以前的对话轮次，一如既往。`"items"` 是 `melo memory ingest FILE -X ingest=compress` 根据你的对话写出的记忆条目（见[记忆条目](../concepts/memory.md#memory-across-chats)）：它们按两个召回门槛排序、过滤，在召回块和 `search_memory` 中的显示方式与轮次一样，即 `“title”: text (chat, date)`；设置 `recall_form = "list"` 时每条是一行 `[m12] …`，`open_memory` 接收 `m12` 这样的编号。此时不再召回对话轮次，所以没有条目的索引完全不会召回对话。`turn.memory` 事件中条目的 `used`、`searched` 和 `opened` 项的类型为 `item`，条目编号写在 `item` 中，并带有 `sources`。`-X memory.recall_source=items` 只对一次运行生效。 |
 | `open_sources` | `[memory]` | `"off"` | 用于比较的开发者设置，只在 `recall_source = "items"` 且 `recall_form = "list"` 时使用。`"on"`：`open_memory` 在条目的标题和正文之后，按从旧到新的顺序返回它所来自的整轮对话，放在 `Source turns:` 下；条目和这些轮次合计不超过 `recall_open_chars`。`"off"` 只打开条目本身。`-X memory.open_sources=on` 只对一次运行生效。 |
-| `premise_check` | `[memory]` | `"off"` | 用于比较的开发者设置，只在 `recall_form = "list"` 时使用。`"on"`：列表上方的那一行（召回块和记忆搜索结果中都是）末尾多一句话，告诉模型：如果问题提到的人、事物、地点或角色在列出的各行中都没有出现，就先说明自己没有这方面的记录，不要用相似的内容来回答。`"off"` 保持那一行原样。节选形式不受影响。`-X memory.premise_check=on` 只对一次运行生效。 |
+| `premise_check` | `[memory]` | `"on"` | 用于比较的开发者设置，只在 `recall_form = "list"` 时使用。`"on"`（默认）：列表上方的那一行（召回块和记忆搜索结果中都是）末尾多一句话（有 `gather` 的那句话时，排在它之后），告诉模型：如果问题提到的人、事物、地点或角色在列出的各行中都没有出现，就先说明自己没有这方面的记录，不要用相似的内容来回答。`"off"` 保持那一行原样。节选形式不受影响。`-X memory.premise_check=off` 只对一次运行生效。只有不是 `"on"` 时才会保存。 |
 | `compress_at_chars` | `[memory]` | `12000` | 用于比较的开发者设置，只被 `melo memory ingest FILE -X ingest=compress` 使用。聊天模型一次请求读取多少对话文本，单位为字符，4000 到 60000：一个对话被切成这么长的、由完整轮次组成的窗口（比窗口还长的一轮会按窗口大小分成最多四个部分来读，第一部分之后的每个部分以 `[n] (continued)` 开头，只有第四部分之后的文字会被舍去）。回答放不下的窗口会被一分为二、分别读取，最多再分两次（共四个部分）。`-X memory.compress_at_chars=20000` 只对一次运行生效。 |
 | `compress_parallel` | `[memory]` | `1` | 开发者设置，只被 `melo memory ingest FILE -X ingest=compress` 使用。一次运行中同时让聊天模型读取多少个窗口（见 `compress_at_chars`），1 到 8：所有对话的窗口一起发出。得到的条目、报告和计数与取 `1` 时相同，只有耗时不同，而且只在能同时处理多个请求的服务器上才会变快。`-X memory.compress_parallel=4` 只对一次运行生效。 |
 | `compress_cache` | `[memory]` | `""` | 用于比较的开发者设置，只被 `melo memory ingest FILE -X ingest=compress` 使用。保存聊天模型对每个窗口的回复的文件，这样相同的窗口、模型和提示不会发起第二次请求。空值表示记忆文件夹（`~/.cache/localmelo/memory/`）里的 `compress_cache.jsonl`。该文件创建时只有你能读取，里面有对话文本，所以不要把它放进你要分享的东西里。 |
 | `note_gate` | `[memory]` | `"typed"` | 用于比较的开发者设置。聊天模型用 `remember` 记的笔记可以来自哪里，分四级，每一级都包含前面的。`"typed"` 是一直以来的规则：笔记里的词出现在你在这个对话中输入的内容里，或出现在其中展示的已完成任务的结果里。`"pointed"` 还接受你在对话中指给 melo 的网页或文件（它的主机名或文件名出现在你输入的内容里，或者读取它的那一轮里你称它是你的：“我的网站”“我的简历”“my CV”），内容取自对话已保存的工具结果；你没有指过的网页，或你说是别人的网页，永远不能支持一条关于你的笔记。`"meaning"` 还接受用别的词或别的语言说同一件事的笔记：它的关键词（数字、日期、网址、电子邮箱、拉丁字母的名字）必须在某个来源里找到，其余部分的嵌入向量要与某个来源的一个窗口至少达到 `note_min_cosine` 的相似度；没有嵌入模型时，其余的词按 `"typed"` 的词检查。`"model"` 还会把没有任何来源支持的、关于你的笔记记为 `inferred`，条件是它的关键词都找到了，并且含义与你输入的内容的相似度不低于该门槛减 0.15；同时在 `remember` 工具的说明里加一句，请模型记下对话所显示的你的目标、处境和偏好。高于 `"typed"` 时，是给 melo 的指令的笔记会被拒绝，工具说明会写明你指过的网页或文件可以支持笔记。网页或文件只能凭它所陈述的内容支持笔记：读者看不到的文字（注释、隐藏的元素、标签属性、不可见字符）和每个对助手下达命令的段落都会去掉。文件由一次宁严勿松的白名单扫描来读（文字只有在普通元素里才算数，不读任何样式，带有样式表的文件不支持笔记）；用 `web_fetch` 取得的网页仍由网页阅读器读取，所以其中白色、极小或由类名隐藏的文字不会被去掉。已完成任务的结果只检查针对助手的明显注入形式（让助手忽略规则的命令、要求写入它的记忆的命令、点名一个 AI 的开头）；“you must always …”这类建议不算注入。在浏览器里读的网页不能支持笔记；你自己输入的内容从不清理。笔记会连同来源（`typed`、`pointed`、`result` 或 `inferred`，以及网页或文件）一起保存，回复、`turn.memory` 条目、笔记页和召回都会写明。`-X memory.note_gate=pointed` 只对一次运行生效。 |
 | `note_min_cosine` | `[memory]` | `0.55` | 用于比较的开发者设置，用于 `note_gate = "meaning"` 和 `"model"`。笔记与来源中最接近的约 300 个字符的窗口之间，含义相似度至少要多高来源才算支持它，0.20 到 0.95；推断出的笔记的门槛低 0.15。`-X memory.note_min_cosine=0.5` 只对一次运行生效。 |
 | `followup_query` | `[memory]` | `"recent"` | 开发者设置。没有自己内容的消息（"go look it up"、"continue"、"do that"、"去查一下"、"那个呢"）用什么来搜索。`"recent"`：这条消息，加上你在这个对话中最近两个仍显示给模型的轮次里输入的内容，最新的在前，总共不超过 2,000 个字符（melo 的回复、已撤销的轮次、任务的提问，以及没有自己内容的轮次（例如更早的 "continue"）都不算；取的是最近两个有实际内容的轮次）；新对话的第一条消息没有这样的轮次，什么也不召回，模型仍可调用 `search_memory`。`"message"`：只按它自己的词搜索，这些词会匹配到任何含有它们的内容，召回以前就是这样。去掉小词、提问词和接话词（"go"、"look"、"up"、"continue"、"that"、"继续"、"去查一下"）之后还剩下词，或者消息里有数字、网址或引用的文字，或者说到了你（"I"、"me"、"my"、"我"、"我的"；"tell me more"、"do it for me"、"帮我查一下" 这样的请求不算），这条消息就有内容；"what is my name?"、"what do you know about me?"、"我是谁" 和 "我朋友叫什么名字" 有内容，两种设置下都照原样搜索。两个召回门槛、排序、数量上限和召回块都不变。`turn.memory` 事件的 `recall.query_from` 说明这一轮用的是哪一种：`"message"`、`"recent"` 或 `"none"`。只有 `"message"` 时才会保存；`-X memory.followup_query=message` 只对一次运行生效。见[简短的接话](../concepts/memory.md#memory-across-chats)。 |
+| `gather` | `[memory]` | `"guide"` | 用于比较的开发者设置，与 `recall_form = "list"` 一起使用。召回如何对待要求计数、合计、列举或比较的消息（"how many"、"how much"、"in total"、"altogether"、"each"、"every"、"both"、"compared"、"list"、"一共"、"多少"、"哪些" 等；英文词必须单独成词，所以 "account" 不是 "count"），并且消息里说到了你自己（"I"、"my"、"me"、"mine"、"we"、"our"、"us"、"我"）；像 "how many seconds are in a day" 这样的通用问题不受影响。`"guide"`（默认）：对这样的消息，召回块的语义门槛取 `recall_min_cosine` 和 `gather_min_cosine` 中较低的一个，所以回答需要的每个对话里的条目都会列出来（字词门槛和 `recall_list_max` 不变）；在这条消息所在的一轮里，列表形式的每次 `search_memory` 都用这个较低的门槛，不管它搜的是什么词；并且在这条消息的召回块和搜索结果里，列表上方那一行之后多一句话，告诉模型打开每个可能相关的列出条目，对还没有列出的每一类换别的词再搜一次，并且只数条目里说的。`"wide"`：同上，但没有那一句话。`"off"`：不变。不要求计数、合计或比较的消息，在任何取值下得到的召回块、搜索结果和给模型的文字都完全相同，在一轮之外进行的搜索也一样。节选形式不变。设为 `"guide"` 或 `"wide"` 时，`turn.memory` 事件的 `recall` 对象在每一轮都有 `gather`（消息是否在说你自己的事时要求计数、合计或比较）和 `floor`（这次搜索用的语义门槛），消息不要求时为 `false` 和通常的门槛；设为 `"off"` 时两者都没有。`-X memory.gather=off` 只对一次运行生效。只有不是 `"guide"` 时才会保存。 |
+| `gather_min_cosine` | `[memory]` | `0.40` | 用于比较的开发者设置，与 `gather = "wide"` 和 `"guide"` 一起使用。对要求计数、合计或比较的消息，以及对列表形式在这条消息所在的一轮里的每次搜索使用的语义门槛，0.20 到 0.55；它不会抬高 `recall_min_cosine`。`-X memory.gather_min_cosine=0.35` 只对一次运行生效。 |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
-| `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。变量有值时，先于 `api_key` 使用。 |
 | `api_key` | 云端后端 | 未设置 | 指向 macOS 钥匙串中密钥的引用，形如 `keychain:localmelo.<name>`（例如 `keychain:localmelo.deepseek`）。由设置和 `melo setup` 写入；它保存的是引用，不是密钥。其他任何值都是配置错误。 |
 | `thinking` | 云端后端 | 未设置 | 对有思考开关的云端服务（DeepSeek），取 `"on"` 或 `"off"`。留空则跟随服务的默认：`deepseek-flash` 默认关闭思考，`deepseek-v4-pro` 用它自己的默认。该表 `extra_body` 里的同名字段优先。见[云端模型](../guides/hosted-models.md#thinking-models)。 |
@@ -116,9 +116,11 @@ chat_model = "qwen3:8b"
 | `resume_mode` | `[sessions]` | `"pairs"` | 终端对话恢复：`pairs` 加载最近的用户/答案对；`window` 加载保存的工作窗口加上之后的问答对，没有可用的检查点时回退。无效值只在界面中警告或回退；直接运行不读取此设置。 |
 | `record_direct` | `[sessions]` | `true` | 把每次直接运行（`melo "<task>"`、`melo --brief FILE`）记录为 `~/.cache/localmelo/cli/sessions.db` 中的 worker 会话，网页控制台的 Workers 视图和 macOS 应用会读取它。只有 `false` 会关闭；`--no-save-session` 对单次运行起同样作用，`--save-session` 或 `--parent-run` 仍会记录。只在为 `false` 时写入。见 [Worker 历史记录](cli.md#worker-历史记录)。 |
 | `policy` | `[scheduler]` | `"off"` | 网页工作区的调用如何到达模型服务器：`off` 只记录，`fcfs` 先到先得，`class` 让 P1 先于 P2 得到准入（依此类推）；见[调度器](../guides/scheduler.md#the-gate-on-chats-s2)。 |
-| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页：`off` 不提供浏览工具；`safari-automation` 为终端对话以及网页控制台和 App 的每个对话提供十二个工具，在 Safari 的自动化窗口中打开、读取、点击、输入和选择网页内容，全部发生在 melo 自己的浏览器窗口里（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。终端中用 `/browser` 切换；`-X browser.driver=safari-automation` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
+| `driver` | `[browser]` | `"off"` | melo 是否可以在浏览器中读取网页，以及用哪个浏览器：`off` 不提供浏览工具；`safari-automation` 和 `chrome` 为终端对话以及网页控制台和 App 的每个对话提供十二个工具，用来打开、读取、点击、输入和选择网页内容（每个网站每次对话询问一次，点击、输入和选择会再询问，发送表单每次都会单独询问；见[用 melo 浏览网页](../guides/browsing.md)）。`safari-automation` 使用会来到最前面的 Safari 自动化窗口；`chrome` 使用后台的 Google Chrome，没有窗口，使用 melo 自己位于 `~/.cache/localmelo/browser/chrome` 的配置（见[后台的 Chrome](../guides/browsing.md#chrome-in-the-background)），需要已安装 Google Chrome。终端和控制台中用 `/browser`、`/browser chrome` 和 `/browser safari` 切换，也可以在设置 → 对话和文件夹 → **浏览器** 中切换；`-X browser.driver=chrome` 仅用于一次运行。直接运行、worker 运行和已保存的任务从不获得这些工具。其他任何值都是配置错误。 |
 | `keep_tabs` | `[browser]` | `false` | melo 打开的标签页是否保持打开。默认情况下 melo 每个对话复用一个标签页，并在对话结束时、以及十分钟没有浏览调用后关闭它打开的标签页（最后一个保留为空白页）。`true` 让它们全部保持打开。不是 melo 打开的标签页从不触碰。见[用 melo 浏览网页](../guides/browsing.md#tabs)。 |
 | `app_windows` | `[browser]` | `true` | melo 在浏览器中操作之后，其他应用打开的窗口（比如聊天应用的登录授权窗口）melo 是否能看到，并在你同意后按下其中的按钮。读取和按按钮需要桌面控制助手；没有它时，melo 只会说明是哪个应用到了最前面。设置 → 对话和文件夹 → **其他应用的窗口**。见[其他应用的窗口](../guides/browsing.md#windows-from-other-apps)。 |
+| `live` | `[browser]` | `true` | 网页控制台和 App 是否可以在**浏览器**面板里实时显示 melo 在后台 Chrome 中打开的页面（仅查看，见[观看 melo 的浏览器](../guides/browsing.md#watching-melos-browser)）。`false` 会拒绝实时画面。Safari 窗口从不推送画面。不是布尔值的值属于配置错误。 |
+| `live_fps` | `[browser]` | `15` | 实时画面每秒最多传送的画面数，1 到 60 的整数。不变的页面只发一张画面，之后不再发送；没有人观看时什么也不发送。其他值属于配置错误。 |
 | `web_fetch` | `[tools]` | `true` | 对话和任务是否可以用 `web_fetch` 工具读取公开网页（只读；从不访问这台电脑或它所在的局域网；你自己最近的消息没有提到的网站每个对话问一次，与浏览器共用；见[工具](tools.md#reading-a-public-web-page)）。`false` 移除这个工具；设置 → 对话和文件夹 → **读取网页** 是同一个开关；`-X tools.web_fetch=off` 仅用于一次运行。直接运行从不获得它。不是布尔值的任何值都是配置错误。 |
 | `web_fetch_allow_local` | `[tools]` | `[]` | 开发者设置，默认为空（关闭），用于需要 `web_fetch` 读取这台电脑上一个测试页面的测试。一个由精确条目组成的列表：`"127.0.0.1:PORT"` 或 `"[::1]:PORT"`（端口 1 到 65535）；`web_fetch` 随后会读取这些地址，不会读取其他任何本机地址。其他任何条目都是配置错误，且永远不会被使用：名字（`localhost`）、其他地址（私有或局域网地址段、`127.0.0.2`、`0.0.0.0`）、端口范围、通配符、没有端口。melo 自己的网关和控制台的端口（它真正监听的端口，包括 `melo serve --port` 设置的，以及正在运行的网关的端口），以及配置里写明的或这次运行的 `-u` URL 指向的任何模型服务器的端口，即使列出也会被拒绝；两者都没有写明的模型服务器不受保护。对话或任务在开始时读取这份列表，已列出的服务器会先问人（自动模式下单独审查；没有人可问时，例如 `--yolo`，会直接读取）。只有 `web_fetch` 读取它，浏览工具从不读取。在文件中设置，或用 `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` 仅用于一次运行：模型、控制台的设置和 API 都不能设置它，运行 `melo config set` 或对它使用 `-X` 的 shell 或 Python 调用算作改动 localmelo 本身（每次都要问，自动模式会拦下）。它放行的读取会在该调用的 `tool.finished` 事件和调用显示的内容中标出。`melo config keys` 会带着警告列出它；规则见[工具](tools.md#test-servers-on-this-computer)。 |
 | `search` | `[web]` | `false` | 对话和任务是否可以用 `web_search` 工具搜索网页（只读；搜索的关键词会离开这台电脑；关键词看起来像机密或粘贴来的文字时会先询问；见[工具](tools.md#searching-the-web)和[用 melo 搜索网页](../guides/web-search.md)）。设置 → 对话和文件夹 → **网页搜索** 是同一个开关，`-X web.search=true` 只在这一次运行中开启，`melo config set web.search true` 会保存它。直接运行从不获得它。 |
@@ -136,9 +138,9 @@ chat_model = "qwen3:8b"
 | `recent_digest_minutes` | `[chat]` | `30` | 新对话的第一条消息（旁支对话或终端对话，从不是主对话）还会带上一段简短摘要，来自你最近这么多分钟里的其他对话：最多五行，每行一轮，说明那一轮在聊什么、在哪个对话里，总共最多 600 个字符，放在你自己的话后面。它读取记忆里的对话索引，所以 `[memory] across_chats = false` 也会关掉它。`0` 关掉它；`-X chat.recent_digest_minutes=0` 仅用于一次运行。取值为 0 到 1440 的整数；其他任何值都是配置错误。 |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` 从不改变请求；`wait` 在存在外部锁时扣住每一次工作区调用，包括嵌入。见[调度器](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)。 |
 
-全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 和 `admit_on_outcome` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
+全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
 
-`admit_on_outcome` 在 `legacy` 中被接受但不生效。`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
+`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
 
 全是默认值的 `[scheduler]` 表不会被写入，未知的调度器键会被丢弃，因此没有这张表的配置文件保持其确切字节；向导会保留非默认的策略。
 
@@ -184,7 +186,7 @@ cross_task_cold = 0       # 0 or 1
 
 `save` 只在某个值与其默认值不同时才写入这张表，因此现有的配置文件保持不变。
 
-在直接模式和交互式界面中，显式旗标优先于 `[agent]`。`--base-url` 会话或运行使用旗标，而不使用这些保存的默认值。
+在直接模式和交互式界面中，显式旗标优先于 `[agent]`。`--base-url` 的直接运行使用旗标，而不使用这些保存的默认值；`--base-url` 的交互式界面与已配置的后端一样读取它们。
 
 API v2 控制台会话使用保存的模式，未设置时默认为 `legacy`；它们保留网关的工具策略。旧版 `/v1` API 不变，也不继承推理/检索两张表。
 
@@ -224,7 +226,7 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 基于配置的直接运行、交互式界面和控制台会话在启动时解析存在的值。只有名称会写入 TOML；选项值不会出现在运行的配置记录中。
 
-`--base-url` 运行或会话不读取此设置。Python 调用方可以改为传入显式的 `AgentOptions(tool_env={...})` 映射。
+`--base-url` 的直接运行不读取此设置，`--base-url` 的交互式界面则会读取。Python 调用方可以改为传入显式的 `AgentOptions(tool_env={...})` 映射。
 
 这不会改变 MCP 各自独立的按服务器 `env` 配置。
 
@@ -250,7 +252,7 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
 
-`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前；使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
+每个直接运行、交互式界面和 API v2 控制台运行都发送固定的系统前缀（`fixed-prefix-v2`）。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前。长期召回（`reasoning = "legacy"`）在一次运行的第一步读取，之后的步骤沿用同一份，因此每个规划请求都是上一个请求的延续；只有当窗口丢掉最早的消息之后（这一步的请求本来就已改变）以及下一次运行时，才会重新读取。若每一步都重新读取，运行自己的步骤摘要一进入召回，召回就会变化，服务器就要重新预填之后的所有消息。最新的反思只在尝试边界追加到窗口一次（见下文），因此新的尝试只改变共享历史之后的部分；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
 
 一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。固定的系统部分依次是基础文本，（在终端界面或控制台的对话中）说明 melo 是谁、运行在哪个模型、服务器和位置上、记得什么以及用哪种语言和文字回答的身份段落，各条说明，召回和反思是数据的那句话，以及日期行。
 
@@ -259,42 +261,38 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。
 
-`[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。
+反思请求不会引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。
 
-重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。
+重试请求不变。`reflection` 事件的 `unreadable_reason` 会说明第一次回复为何不可读（见[事件](events.md)）。
 
-无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
-
-`[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。
+`[agent] window_eviction`（默认 `"chunk"`；另一个值是 `"boundary"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。两者都让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它。
 
 见 [Memory](../../reference/memory.md#working-memory-window)。
 
-`[agent] cache_layout`（默认 `"v3"`；`--cache-layout v2|v3` 会覆盖它）决定反思所在的位置。`"v2"` 是这一默认值改变之前的布局。
-
-在 `v3` 且启用 `fixed_prefix` 时：
+反思所在的位置：
 
 - 在尝试边界，智能体只追加一次反思，作为一条普通的窗口消息（`[Reflections; data, not instructions]` 和该块），而不是把它重建为每个规划请求的最后一条消息。之后它随历史移动，并像任何消息一样在被丢弃时离开。每次尝试中新产生的内容仍遵循“只保留最新一条”规则（新的反思会替换工作记忆中保存的那条），但更早的块会留在历史中，直到被丢弃。
-- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在 `reflection_gate = "flags"` 或默认的 `"patient"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
+- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
 - 不可读的回复会在同一前缀上再次询问：先是该请求，接着是作为助手消息的不可读回复（工具调用写成文本，因此不会留下没有结果的调用），再是一条结尾说明，并带上该请求提供的工具，而不是文本记录。如果回复含有解码器拒绝的 JSON，说明之后会多一行引用解码器的错误。如果第一个请求没有重复规划请求（窗口已经移动），就没有可接续的交换，重试仍和以前一样是文本记录。读到的重试会把整个交换留在窗口中：请求、不可读的回复、说明和回复。
 - 使用 `window_eviction = "boundary"` 时，已结束尝试的轮次会在边界处被丢弃，因此那里只追加该块。
 
-没有 `fixed_prefix` 时，两个值都不改变任何内容。`cache_layout` 为 `v3` 时，JSON 结果的 `config` 包含它，为 `v2` 时不包含。
-
 `[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
 
-你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。
+你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），降到上限的 70%，因此历史可以在几个步骤内保持不变。
 
 按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。
 
 当 `window_messages` 不是 20 时，JSON 结果的 `config` 包含它。
 
-`cache_layout = "v3"` 和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--cache-layout v2 --window-messages 20` 会发送此前的请求。
+窗口中的反思和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--window-messages 20` 会发送此前的上限。
 
-`melo --developer --help` 把这两个标志列在“高级”下。
+`melo --developer --help` 把 `--window-messages` 列在“高级”下。
 
-`fixed_prefix`、`window_eviction` 和 `reflect_tool_guard` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，这三个和上面两个都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
+固定前缀和 `window_eviction` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，`window_eviction` 和 `window_messages` 都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
 
-`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这五个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+`melo --developer --help` 把 `--window-eviction` 列在“实验性”下。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这两个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+
+五个用来在不同布局之间做选择的设置已被移除，各自的选项也一并移除：`[agent] fixed_prefix`、`reflect_tool_guard`、`cache_layout` 和 `reflection_gate`，以及 `[memory] admit_on_outcome`。每一项的行为都与它的默认值相同，`window_eviction = "slide"` 读作 `"chunk"`；仍含有其中某个键的配置文件照常加载，该行被忽略，`melo config` 会点名它（见[命令行](cli.md#settings)）。
 
 用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。
 
@@ -308,7 +306,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。
 
-在 `reflection_gate = "patient"`（默认）或 `"flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
+此时反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（没有任何代码读取它们），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
 
 交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
 
@@ -390,7 +388,7 @@ enable_thinking = false
 - 对 `ollama` 后端，这些字段进入 Ollama `/api/chat` 的请求体。localmelo 默认向 Ollama 请求模型的思考；`extra_body = { think = false }` 会关闭它。
 - `--base-url` 不读取配置文件，因此 `extra_body` 在那里不适用。
 
-驱动为 `off`、`keep_tabs` 为 `false` 且 `app_windows` 为 `true` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入，`app_windows` 仅在为 `false` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`search` 为 `false`、`search_order` 为空且 `search_count` 为 `6` 的 `[web]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
+驱动为 `off`、`keep_tabs` 为 `false`、`app_windows` 为 `true`、`live` 为 `true` 且 `live_fps` 为 `15` 的 `[browser]` 表不会写入（`keep_tabs` 仅在为 `true` 时写入，`app_windows` 和 `live` 仅在为 `false` 时写入，`live_fps` 仅在不是 `15` 时写入），`web_fetch` 为 `true` 且 `web_fetch_allow_local` 为空的 `[tools]` 表、`search` 为 `false`、`search_order` 为空且 `search_count` 为 `6` 的 `[web]` 表、`follow_up` 为 `true` 的 `[tasks]` 表和 `recent_digest_minutes` 为 `30` 的 `[chat]` 表也不会。
 
 <a id="mcp-servers"></a>
 
@@ -446,22 +444,21 @@ chat_model = "Qwen/Qwen3-8B"
 | `~/.cache/localmelo/config.toml` | 配置。 | 由设置向导创建。 |
 | `~/.cache/localmelo/memory/` | `history.db`、`procedures.db`（程序性记忆，每次运行结束时写入），以及使用嵌入后端时的 `long_term.db`。 | 智能体在设置了 `LOCALMELO_PERSIST_MEMORY` 时启动，权限为 0700。已存在且允许组或其他用户读写的目录会被设为 0700。 |
 | `--memory-dir` 指定的目录 | 同上的文件，供那次运行使用。 | 运行开始时创建；新目录的权限为 0700。 |
-| `~/.cache/localmelo/playground/` | 旧版 playground 的记忆。 | 默认关闭的 playground 启动时（security-1b 进行中）。 |
+| `~/.cache/localmelo/gateway/sessions.db` | 控制台的对话和任务，以及你在其中允许过的事（`grants` 表；见[你允许过的事](#what-you-allowed)）。 | 由网关创建。 |
+| `~/.cache/localmelo/cli/sessions.db` | 终端自己的对话，以及终端自己的对话的授权。 | 终端收到第一条消息时。 |
 | `~/.localmelo/logs/` | 后台服务的日志。 | 由 `melo --daemon install` 创建。 |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | 后台服务的定义。 | 由 `melo --daemon install` 创建。 |
 
-<a id="upgrading-from-an-older-config"></a>
+<a id="what-you-allowed"></a>
 
-## 从旧版配置升级
+## 你允许过的事
 
-较旧的配置文件仍然能加载。localmelo 会读取：
+“为这个对话允许”的回答就是授权。它们放在会话文件的同一张表 `grants` 里（组件 `grants`，版本 1）；没有配置键控制它们。
 
-- 单个 `backend` 键，最旧的格式；
-- 后端名称 `mlc-llm`，现在是 `mlc`；
-- `[cloud_api]` 和 `[online]` 表，现在每个厂商一张表；
-- `[mlc]` 中的 `chat_port`，现在是 `chat_url`；
-- 扁平的 `chat_template_kwargs`，现在位于 `extra_body` 之内。
+- **列：** `id`、`session_id`、`session_kind`、`scope`、`kind`、`key`、`label`、`target`、`decided_by`、`granted_at`、`request_id`、`revoked_at`。
+- **收回与保留：** 收回会设置 `revoked_at`。已收回的行在存储的思考保留期之后删除（默认 30 天；见 `LOCALMELO_THINKING_RETENTION_DAYS`）。
+- **随会话：** 会话的行随会话一起删除（`ON DELETE CASCADE`）。
+- **失败时关闭：** 违反规则的行在读取时被忽略，所以改过的文件无法扩大权限：不是本人在主对话里给出的 `global` 行、超过读取网站的 Auto 行、必须每次都询问的键，或从不提供的文件夹。
+- **不是授权：** **总是允许这个文件夹** 记在 `[workspace] extra_folders` 里。
 
-没有 `[agent] reflection` 或 `steps_per_attempt` 的文件读取默认值：反思开启、尝试 50 步、运行 100 步。需要以前长度的运行设置 `-X agent.steps_per_attempt=10 -s 30`。
-
-再次运行向导会以当前格式写入该文件。
+面向读者的规则见[你允许过的事](../guides/terminal.md#what-you-allowed)和[授权](../guides/web-console.md#permissions)；路由见 [API v2](api-v2.md#get-apigrants)。

@@ -56,6 +56,10 @@ from localmelo.melo.memory.notes import split_sentences
 RRF_K: Final = 60
 MIN_COVERAGE: Final = 0.6
 MIN_COSINE: Final = 0.55
+# The vector bar of a question that counts, totals or compares, when ``[memory]
+# gather`` is ``wide`` or ``guide`` (``gather_min_cosine``, 0.20-0.55): a category
+# question sits further from each item that answers it than a single-fact one does.
+GATHER_COSINE: Final = 0.40
 HALF_LIFE_DAYS: Final = 30.0
 PER_SESSION: Final = 2
 # What one turn recalls by itself, and the room its block may take. The last two are
@@ -113,8 +117,16 @@ ITEM_LIST_GUIDE: Final = (
     "Memory items that may hold the answer, closest first. Open the ones you "
     "need with open_memory before you answer from them; a title is not the content."
 )
-# With ``[memory] premise_check = "on"`` and the list form, the sentence that follows
-# either guide (after one space): check what the question names against the lines.
+# With ``[memory] gather = "guide"``: the sentence that follows the list's guide line
+# when the message asks to count, total or compare (:func:`asks_to_gather`).
+GATHER_GUIDE: Final = (
+    "This asks for a count, total or comparison: open every listed item that may "
+    "belong, search again with other words for each kind not listed yet, and count "
+    "only what the items say."
+)
+# With ``[memory] premise_check = "on"`` (the default): the sentence that ends the
+# list's guide line, after the gather sentence when there is one: check what the
+# question names against the lines.
 PREMISE_GUIDE: Final = (
     "If the question names a person, thing, place or role that none of these "
     "mention, say first that you have no record of it, and do not answer it from "
@@ -144,6 +156,19 @@ _PAST: Final = re.compile(
     r"|formerly|originally"
     r"|(?<!how )old(?:er)?)\b|以前|之前|原来|过去|曾经",
     re.IGNORECASE,
+)
+# A message that asks to count, total, list or compare across things (the English
+# words stand alone: "account" is not "count"; the Chinese ones are plain text).
+_GATHER: Final = re.compile(
+    r"\b(?:how\s+(?:many|much)|totals?|altogether|combined|in\s+all|number\s+of"
+    r"|counts?|counted|counting|all\s+(?:the|my)|lists?|different|differences?"
+    r"|each|every|both|compar(?:e|es|ed|ing|ison)|(?:more|less|fewer)\s+than"
+    r"|longer|faster)\b|多少|几个|几次|一共|总共|合计|所有|每个|哪些|都有",
+    re.IGNORECASE | re.ASCII,
+)
+# A message that speaks of its own speaker: "I", "my", "we", "our", "我" …
+_SPEAKER: Final = re.compile(
+    r"\b(?:i|i'm|i've|i'd|my|me|mine|myself|we|our|us)\b|我", re.IGNORECASE
 )
 
 
@@ -956,6 +981,15 @@ def asks_about_past(message: str) -> bool:
     return _PAST.search(message) is not None
 
 
+def asks_to_gather(message: str) -> bool:
+    """Whether *message* asks to count, total, list or compare across things ("how
+    many", "in total", "each", "compared", "一共", "哪些" …) **and** speaks of its
+    own speaker ("I", "my", "we", "我" …): an answer about the person's own life
+    then needs every item of a kind, not the one that matches best. A generic
+    prompt ("how many seconds are in a day", "list the planets") does not."""
+    return bool(_GATHER.search(message)) and bool(_SPEAKER.search(message))
+
+
 def current_only(items: Sequence[Item], message: str) -> list[Item]:
     """*items* for the recall block: without a turn a newer note or message
     replaced (:attr:`Item.older`), unless *message* asks about the past.
@@ -1119,14 +1153,6 @@ def kept_lines(quotes: Sequence[str], *, refused: bool = False) -> list[str]:
             shown.append(f"and {len(quotes) - KEPT_NOTES} more")
         lines.append(KEPT_LINE.format(notes=" ".join(shown)))
     return lines + ([NOT_KEPT_LINE] if refused else [])
-
-
-def list_guide(items: bool, premise: bool = False) -> str:
-    """The line above the list form's lines: :data:`ITEM_LIST_GUIDE` for memory items
-    (*items*) or :data:`LIST_GUIDE` for chat turns, and with *premise*
-    (``[memory] premise_check = "on"``) :data:`PREMISE_GUIDE` after one space."""
-    guide = ITEM_LIST_GUIDE if items else LIST_GUIDE
-    return f"{guide} {PREMISE_GUIDE}" if premise else guide
 
 
 def block(

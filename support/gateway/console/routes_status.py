@@ -18,11 +18,11 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
 from localmelo.support.sessions.store import SessionStore
 from localmelo.support.usage_snapshot import UsageSnapshot
 
-from .probe import LOCAL_BACKENDS
-from .routes_sessions import _read_session, _store_call
+from .routes_sessions import _read_session
 from .running import live_tasks, task_counts
 
 if TYPE_CHECKING:
@@ -38,20 +38,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
     lock = asyncio.Lock()
 
     async def fold(session_id: str, store: SessionStore) -> UsageSnapshot:
-        scope = None if store is console.worker_history else session_id
         async with lock:
-            latest = await _store_call(
-                console, store.latest_event_id(session_id), scope
-            )
+            latest = await store.latest_event_id(session_id)
             last, snap = folds.pop(session_id, (0, UsageSnapshot()))
             if latest < last:
                 last, snap = 0, UsageSnapshot()
             while last < latest:
-                page = await _store_call(
-                    console,
-                    store.list_events(session_id, after_id=last, limit=_PAGE),
-                    scope,
-                )
+                page = await store.list_events(session_id, after_id=last, limit=_PAGE)
                 for stored in page:
                     snap.observe(stored.event)
                 if not page or page[-1].id is None:

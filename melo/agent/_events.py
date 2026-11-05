@@ -12,7 +12,7 @@ import inspect
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
@@ -96,14 +96,6 @@ def check_sink(on_event: object, name: str = "on_event") -> None:
             f"{name} must be synchronous: put events on a queue and consume "
             "them in a task"
         )
-
-
-class GateVerdict(NamedTuple):
-    """The gate in force after a reflection, and why the run stopped."""
-
-    gate: str
-    stop_reason: str | None
-    utility: float | None
 
 
 class _Emitter:
@@ -630,7 +622,7 @@ class _Emitter:
         reflected: tuple[ReflectionEntry, ReflectionDecision] | None,
         *,
         continue_run: bool,
-        verdict: GateVerdict,
+        stop_reason: str | None,
     ) -> None:
         """The outcome of the reflection under way.
 
@@ -640,8 +632,8 @@ class _Emitter:
         ``duration_s`` cover the replies in :attr:`replies`, from
         ``reflection.started`` on; the extra usage fields of the requests
         (see :meth:`reflection_call`) are summed into ``usage`` and the first
-        request's prefix diagnostics are ``prefix``. *verdict* is the gate in
-        force and why the run stopped, if it did. ``unreadable_reason`` is why
+        request's prefix diagnostics are ``prefix``. *stop_reason* is the check
+        that stopped the run, if one did. ``unreadable_reason`` is why
         the first reply held no reflection: ``tool_call`` (it has tool calls
         and no reflection), ``no_json`` or ``invalid``; ``None`` when it
         read. The retry that follows can still make ``readable`` true.
@@ -694,9 +686,7 @@ class _Emitter:
                     "action": action,
                     "continue_run": continue_run,
                     "flags": flags,
-                    "gate": verdict.gate,
-                    "utility": verdict.utility,
-                    "stop_reason": verdict.stop_reason,
+                    "stop_reason": stop_reason,
                     "rationale": _redacted(rationale),
                     "summary": _redacted(summary),
                     "best_effort_result": _redacted(best_effort),

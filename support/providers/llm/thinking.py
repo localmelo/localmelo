@@ -12,14 +12,23 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS, LOCAL_SERVERS
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 
 # The backends whose OpenAI-compatible servers take chat_template_kwargs
 # (None: a --base-url server, a local one).
-TEMPLATE_KWARGS_BACKENDS: Final = frozenset({"vllm", "sglang", None})
-# The local backends: every other one is a cloud backend, whose models answer
-# fast and some of which refuse these fields.
-LOCAL_BACKENDS: Final = frozenset({"vllm", "sglang", "mlc", "ollama", None})
+TEMPLATE_KWARGS_BACKENDS: Final = frozenset(
+    {None, *(server.key for server in LOCAL_SERVERS if server.template_kwargs)}
+)
+
+
+def is_local(backend: str | None) -> bool:
+    """Whether *backend* runs on a local server (None: a ``--base-url`` server).
+
+    Every other backend is a cloud backend, whose models answer fast and some of
+    which refuse the fields these helpers add.
+    """
+    return backend is None or backend in LOCAL_BACKENDS
 
 
 def thinking_off_fields(
@@ -35,7 +44,7 @@ def thinking_off_fields(
     of *own*, the provider's own request body (``llm.extra_body`` when not given),
     whose other keys stay. Nothing for mlc and for a cloud backend.
     """
-    if backend not in LOCAL_BACKENDS:
+    if not is_local(backend):
         return {}
     if isinstance(llm, OllamaNativeChat):
         return {"think": False}

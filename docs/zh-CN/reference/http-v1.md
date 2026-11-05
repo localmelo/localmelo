@@ -2,7 +2,7 @@
 
 # 参考：HTTP v1
 
-本页列出网关的 HTTP v1 端点，并说明与之并列的 API v2 和旧版 playground 路由。你自己的程序通过 HTTP 调用网关时请使用本页；启动和保护网关的方法见[网关指南](../guides/gateway.md)。
+本页列出网关的 HTTP v1 端点，并说明与之并列的 API v2 路由。你自己的程序通过 HTTP 调用网关时请使用本页；启动和保护网关的方法见[网关指南](../guides/gateway.md)。
 
 <a id="http-api"></a>
 
@@ -26,9 +26,9 @@
 
 控制台会话在网关进程中运行它的轮次，一次一个：一轮运行时再来第二轮会得到 409 `session_busy`。它的智能体在会话第一次使用时构建并保留；当第九个智能体将要打开时，最久未使用的空闲智能体会被关闭，并保留其对话。
 
-审批在网关内存中等待，没有超时，直到客户端回答或轮次停止；停止网关会让正在等待的轮次以 `cancelled` 结束，原因为 `shutdown`。控制台轮次像工作区聊天一样经过调度器的门：网关根据 `[scheduler]` 表构建一个门，两个界面共用它，因此它们的调用共享一份 `n_srv` 预算和一个调用日志，工作区页面运行的监视器为两者提供输入（外部 GPU 锁在 `lock_gate = "wait"` 下扣住控制台轮次；电池只为页面的状态胶囊读取，从不扣住调用）。
+审批在网关内存中等待，没有超时，直到客户端回答或轮次停止；停止网关会让正在等待的轮次以 `cancelled` 结束，原因为 `shutdown`。控制台轮次经过调度器的门：控制台根据 `[scheduler]` 表构建一个门，因此每个聊天的调用共享一份 `n_srv` 预算和一个调用日志，控制台的机器监视器为它提供输入（外部 GPU 锁在 `lock_gate = "wait"` 下扣住控制台轮次；电池只为页面的状态胶囊读取，从不扣住调用）。
 
-网关在关闭时最后关闭这个门，在关闭两个界面的会话之后，因此等待槽位的轮次以 `cancelled` 结束，原因为 `shutdown`。
+控制台在关闭时先关闭会话、再关闭这个门，因此等待槽位的轮次以 `cancelled` 结束，原因为 `shutdown`。
 
 任务 worker 对模型和嵌入调用使用同一个门，记忆关闭，工具是网关的工具（没有 `shell_exec`）。最多可以有四个 worker 驻留；已暂停的运行中 worker 仍可能占用一个槽位。
 
@@ -37,28 +37,6 @@
 工作区校验也在 worker 开始或恢复之前运行；不再有效的文件夹会让任务失败，而不是运行它。暂停要等到下一次模型调用：正在运行的工具会完成，已回答的待处理审批会等到恢复。
 
 恢复时还原暂停前的优先级；如果保留机制清除了暂停日志，则使用计算出的 P2；未暂停的任务返回 409 `not_paused`。任务 PATCH 拒绝 `first`（400）；它被推迟到 S6b。
-
-<a id="legacy-playground"></a>
-
-### 旧版 playground
-
-内部的 `/v1/playground/` 路由默认关闭（404），它们的管理器也不会启动。用 `melo --serve --enable-playground` 显式启用；认证和 Host/Origin 检查仍然适用。
-
-发现和会话使用已保存的本地对话后端和模型，而不是请求中的覆盖设置。这些路由包括：
-
-- `GET /v1/playground/sessions`，用于摘要；
-- `GET /v1/playground/session/{id}`，用于对话记录；
-- `POST /v1/playground/session/{id}/cancel`，用于取消一次聊天；
-- `POST /v1/playground/session/{id}/level`，请求体为 `{"level": 1..4}`，用于设置级别；
-- `POST /v1/playground/presence`，请求体为 `{"session_id": ...}`，用于输入心跳。
-
-单独的 `/v1/agent/` API 也要求认证，但它的调用不经过 playground 和控制台共享的调度器门。
-
-开发时，下面的命令用已保存的配置和配置好的回环地址，启动启用 playground 的已认证网关：
-
-```bash
-uv run python -m localmelo.support.gateway._test_webapp
-```
 
 <a id="get-v1health"></a>
 
@@ -150,6 +128,6 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 [GET /v1/sessions](#get-v1sessions)中的 `is_busy` 显示哪些会话正忙。
 
-`/v1/agent` API 没有停止运行的路由，所以请等它结束之后再关闭会话。启用后，`POST /v1/playground/session/{id}/cancel` 停止的是旧版 playground 聊天，不是 `/v1/agent` 运行。
+`/v1/agent` API 没有停止运行的路由，所以请等它结束之后再关闭会话。
 
 当前的[网页工作区](../guides/web-console.md#web-workspace)则用 [`POST /api/turns/{turn_id}/cancel`](../../reference/api-v2.md#post-apiturnsturn_idcancel)（英文）停止它的轮次。停止网关仍会关闭每个会话，包括正忙的会话；见[停止网关](../guides/gateway.md#stop-the-gateway)。

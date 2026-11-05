@@ -626,12 +626,6 @@ class TaskStore:
             },
         )
 
-    async def reconcile_pause_operation(
-        self, task_id: str, operation_id: str
-    ) -> tuple[dict[str, Any], bool] | None:
-        """Read a receipt after the writer settles; None means unknown, not rollback."""
-        return await self.operation_receipt(task_id, operation_id)
-
     async def operation_receipt(
         self, task_id: str, operation_id: str
     ) -> tuple[dict[str, Any], bool] | None:
@@ -2080,44 +2074,6 @@ class TaskStore:
             result = await self._get(conn, task_id)
         assert result is not None
         return result
-
-    async def fail_nonterminal_on_restart(self) -> int:
-        """Fail unrecovered tasks together when a new gateway starts."""
-        now = self._clock()
-        reason = "gateway restarted; recovery arrives in S3b"
-        async with self._store.component_event_transaction("task_restart") as (
-            conn,
-            events,
-        ):
-            rows = await _rows(
-                conn,
-                "SELECT task_id, state FROM tasks WHERE state NOT IN (?, ?, ?, ?)",
-                tuple(sorted(_TERMINAL_STATES)),
-            )
-            for task_id, state in rows:
-                await self._identity_transition(
-                    conn, events, task_id, "sched.finished", bump=True, state="failed"
-                )
-                await self._clear_snapshot(conn, task_id)
-                await conn.execute(
-                    "UPDATE tasks SET state = 'failed', wait_reason = ?, hold_site = '', "
-                    "finished_at = ?, updated_at = ? WHERE task_id = ?",
-                    (reason, now, now, task_id),
-                )
-                await self._touch_session(conn, task_id, now)
-                await self._log(
-                    conn,
-                    "task.state",
-                    task_id,
-                    {
-                        "from": state,
-                        "to": "failed",
-                        "actor": "scheduler",
-                        "reason": reason,
-                    },
-                    ts=now,
-                )
-        return len(rows)
 
     # ── Retention ──
 

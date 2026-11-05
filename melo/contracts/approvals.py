@@ -17,6 +17,8 @@ Rules for a policy's :meth:`ApprovalPolicy.decide`:
   exception, raises a ``CancelledError`` while the run is not being
   cancelled, or returns something other than an :class:`ApprovalDecision`.
 
+The agent asks every policy through :func:`ask`, which applies these rules.
+
 A file tool's call on a path outside the workspace (#405) carries an
 :class:`~localmelo.melo.contracts.folders.OutsideAccess`; only a policy
 layer with ``decide_folder`` and ``asks_folders`` (see
@@ -30,11 +32,20 @@ module, so the executor can use it without an import cycle.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
+from typing import (
+    Any,
+    Final,
+    Literal,
+    Protocol,
+    TypeGuard,
+    get_args,
+    runtime_checkable,
+)
 
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
@@ -266,18 +277,86 @@ class ApprovalPolicy(Protocol):
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision: ...
 
 
+def is_cancellation(exc: BaseException) -> TypeGuard[asyncio.CancelledError]:
+    """Whether *exc* is a cancellation of the current task.
+
+    That is a ``CancelledError`` while something cancels the task: its
+    ``cancelling()`` count is above 0, as after ``task.cancel()``, a
+    scope such as ``asyncio.timeout`` that cancels it, or the run's own
+    ``timeout_s`` until the deadline turns the cancellation into a
+    ``TimeoutError``. A ``CancelledError`` that a component raises while
+    nothing cancels the task, for example a tool function's, is that
+    component's failure.
+    """
+    if not isinstance(exc, asyncio.CancelledError):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+async def ask(
+    decide: Callable[[ApprovalRequest], Awaitable[object]],
+    request: ApprovalRequest,
+    *,
+    record: Callable[[str, BaseException | None], None],
+) -> ApprovalDecision:
+    """``await decide(request)``, which must give an :class:`ApprovalDecision`.
+
+    The one place a policy is asked, so that every site fails the same way,
+    by the rules of the module docstring. *record* is told what came of a
+    question that got no decision, and the caller refuses the call:
+
+    - ``("withdrawn", None)``: the run was cancelled while it decided; the
+      ``CancelledError`` propagates.
+    - ``("error", exc)``: *exc* is raised. That is the exception *decide*
+      raised, a ``RuntimeError`` for a ``CancelledError`` while nothing
+      cancels the run, or a ``TypeError`` for a return that is no decision.
+    """
+    try:
+        decided: object = await decide(request)
+    except asyncio.CancelledError as exc:
+        if is_cancellation(exc):
+            record("withdrawn", None)
+            raise
+        spurious = RuntimeError(
+            "the approval policy raised CancelledError while the run was not "
+            "cancelled"
+        )
+        record("error", spurious)
+        raise spurious from None
+    except BaseException as exc:
+        record("error", exc)
+        raise
+    if not isinstance(decided, ApprovalDecision):
+        no_decision = TypeError(
+            f"the approval policy returned {type(decided).__name__}, "
+            "not an ApprovalDecision"
+        )
+        record("error", no_decision)
+        raise no_decision
+    return decided
+
+
+# The question the browser provider asks before it presses a button in a window of
+# another app (``desktop-act:<app>``). Like the window question below, only the person
+# answers it, in Ask and in Auto: no model sees the window or the press.
+DESKTOP_ACT: Final = "desktop-act:"
+
 # Questions a tool asks itself whose answer is never kept for the chat, whatever a
 # client sends: each call asks again. Sending a form is one (``browser-submit:<site>``)
 # and so is typing (``browser-type:<site>``): a grant would cover every later form
 # or text, whatever it holds and wherever it goes. A click at a point on a secret
 # field, a consent or terms control, or inside a box from another site
 # (``browser-point:<site>``) is one too, and so is a press in another app's window
-# that appeared after melo's own act (``desktop-act:<app>``).
+# that appeared after melo's own act (``desktop-act:<app>``), and OK to a
+# ``confirm`` box a page put up while melo acted (``browser-dialog:<site>``).
 NEVER_GRANTED: Final = (
     "browser-submit:",
     "browser-type:",
     "browser-point:",
-    "desktop-act:",
+    DESKTOP_ACT,
+    "browser-dialog:",
+    "takeover:",
 )
 
 # The tools melo ships that ask their own questions (per site, and for every text they
@@ -296,6 +375,34 @@ SELF_ASKING_TOOLS: Final = frozenset(
         "window_press",
     }
 )
+
+
+# The question the browser provider asks when another app puts up a window right after
+# melo's own act and the page did not ask for that app (``window-read:<bundle id>``). Only
+# the person answers it, in Ask and in Auto: no model sees the window, so none reviews it.
+# "Allow <App> in this chat" grants this name for the chat (the per-chat grant of
+# :class:`~localmelo.support.sessions.approvals.RememberingPolicy`).
+WINDOW_READ: Final = "window-read:"
+# The card that asks the person to take over a page of melo's browser (a sign-in,
+# a code, a QR code, a human check): only the person answers it, never a review.
+TAKEOVER: Final = "takeover:"
+
+
+def window_question(request: ApprovalRequest) -> bool:
+    """Whether *request* is the question whether melo may see another app's window."""
+    return request.tool_name.startswith(WINDOW_READ) and request.outside is None
+
+
+def window_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's grant of the app's window question lets its later windows through unasked.
+
+    Only for that question, as asked in Ask (no review) or as Auto shows it to the person
+    (a ``high`` review of the one category ``opaque``): nothing else is covered.
+    """
+    review = request.review
+    return window_question(request) and (
+        review is None or review.categories == ("opaque",)
+    )
 
 
 def never_granted(tool_name: str) -> bool:
@@ -384,18 +491,21 @@ def grant_offered(request: ApprovalRequest) -> bool:
     """
     if request.outside is not None or never_granted(request.tool_name):
         return False
-    return offers_grant(request.review) or site_grant(request)
+    return offers_grant(request.review) or site_grant(request) or window_grant(request)
 
 
 # Set around each tool call of a run that has a policy: asks that policy about
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run
-# covers that name), the arguments to show and a one-line preview. It raises
-# like the policy does; unset (no policy) means nobody is asked. The agent's
-# also answers ``names_host(host)``: whether the user's own words name a site,
-# and ``refused_earlier(name, arguments, preview)``: the refusal of a question
-# blocked earlier in the task (#431), which a tool checks before it lets a
-# named site through.
+# covers that name), the arguments to show and a one-line preview. It fails
+# as a call's approval does (:func:`ask`): the policy's exception is raised, a
+# ``CancelledError`` while the run is not cancelled and a return that is no
+# decision are raised as an error; unset (no policy) means nobody is asked.
+# The agent's also answers ``names_host(host)``: whether the user's own words
+# name a site, and ``refused_earlier(name, arguments, preview)``: the refusal
+# of a question blocked earlier in the task (#431), which a tool checks before
+# it lets a named site through; and ``granted(name)``: whether the run's chat
+# holds a grant of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -438,6 +548,30 @@ def find_folder_asker(policy: object) -> Any:
             return layer
         layer, depth = getattr(layer, "inner", None), depth + 1
     return None
+
+
+def holds_grant(policy: object, name: str) -> bool:
+    """Whether *policy* holds a grant of the question *name* for the chat.
+
+    The first layer with a ``granted(name)`` method answers: *policy*, or a
+    layer behind its ``inner`` wrappers or an Auto policy's ``asking``. A
+    tool that keeps no question of its own asks this before it uses
+    something the person allowed for the chat, such as another app's
+    window (``window-read:<app>``). A question of :data:`NEVER_GRANTED`
+    is never held.
+    """
+    if never_granted(name):
+        return False
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        check = getattr(layer, "granted", None)
+        if callable(check):
+            return check(name) is True
+        found = getattr(layer, "inner", None)
+        layer, depth = (
+            found if found is not None else getattr(layer, "asking", None)
+        ), depth + 1
+    return False
 
 
 def find_auto(policy: object) -> AutoPolicy | None:
@@ -901,6 +1035,20 @@ ALLOW_WHEN_OPEN: Final = (
     "that this step needs them and nobody could be asked now: they can allow "
     "this step once from the chat, switch the chat to Ask, or keep the chat open "
     "so that melo asks them on a card the next time."
+)
+# A question only the person can answer (another app's window, a press in one, a page to
+# take over) that Auto refused because nobody has the chat open: the model reads the
+# truth, so it does not make up a reason.
+NOBODY_TO_ASK: Final = (
+    "Auto mode did not run this step: only the user can answer it, and nobody has "
+    "the chat open to ask.\n"
+    "In your answer, tell the user in plain words:\n"
+    "- what you wanted to do, and that only they can answer it;\n"
+    "- that they can keep the chat open so that melo asks them on a card the "
+    "next time, or switch the chat to Ask.\n"
+    "That is the only reason. Do not give any other reason (a network problem, a "
+    "fault, a limit) and do not guess one.\n"
+    "Do not try to reach the same result another way."
 )
 ALLOW_IN_TASK: Final = (
     "that they can allow it once from the task's page; the task goes on " "without it."

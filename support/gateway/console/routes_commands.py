@@ -41,6 +41,7 @@ PAGE_ACTIONS: Final[dict[str, str]] = {
     "title": "title",
     "memory": "memory",
     "approvals": "approvals",
+    "grants": "grants",
     "browser": "browser",
     "attach": "attach",
     "attachments": "attachments",

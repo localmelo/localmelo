@@ -12,16 +12,14 @@ from collections.abc import Set as AbstractSet
 
 import pytest
 
-from localmelo.melo.memory.retrieval import (
-    Doc,
-    Hit,
+from localmelo.melo.memory.retrieval import Doc, Hit, RetrievalResult
+from localmelo.melo.memory.retrieval.bm25 import BM25Retriever
+from localmelo.support.memory.retrieval_eval import (
     LabelledQuery,
     QueryResult,
-    RetrievalResult,
     evaluate,
+    nearest_rank,
 )
-from localmelo.melo.memory.retrieval.bm25 import BM25Retriever
-from localmelo.melo.memory.retrieval.evaluate import nearest_rank
 
 # What a scripted call returns: hit ids, fallback and usage.
 Answer = tuple[list[str], str, dict[str, int]]

@@ -12,7 +12,6 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -47,17 +46,6 @@ async def _build(argv: list[str]) -> Agent:
 
 
 class TestConfig:
-    def test_the_key_is_off_by_default_written_only_when_on_and_a_boolean(self) -> None:
-        assert config.AgentConfig().confine_direct_runs is False
-        config.save(config.Config())
-        path = Path(config.config_path())
-        assert "confine_direct_runs" not in path.read_text()
-        config.save(config.Config(agent=config.AgentConfig(confine_direct_runs=True)))
-        assert "confine_direct_runs = true" in path.read_text()
-        assert config.load().agent.confine_direct_runs is True
-        bad = config.Config()
-        bad.agent.confine_direct_runs = "yes"  # type: ignore[assignment]
-        assert any("confine_direct_runs must be a boolean" in e for e in bad.validate())
 
     def test_x_sets_it_for_one_run_and_the_developer_listings_show_it(
         self, capsys: pytest.CaptureFixture[str]
@@ -239,21 +227,3 @@ class TestRuns:
             "to false to run without it (-X agent.confine_direct_runs=false for "
             "one run)\n"
         )
-
-    def test_a_bad_value_in_the_file_is_a_usage_error(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        bad: Any = "no"
-        monkeypatch.setattr(
-            config,
-            "load",
-            lambda: config.Config(agent=config.AgentConfig(confine_direct_runs=bad)),
-        )
-        code, out, err = self._main(
-            tmp_path, monkeypatch, capsys, self._argv(tmp_path), []
-        )
-        assert code == 2 and out == ""
-        assert "[agent] confine_direct_runs must be a boolean" in err

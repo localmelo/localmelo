@@ -14,6 +14,7 @@ from localmelo.melo.agent._request_accounting import (
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 
 class FakeLLM(BaseLLMProvider):
@@ -78,7 +79,7 @@ async def test_opt_in_calibration_kind_model_and_reset() -> None:
             None,
         ]
     )
-    chat = Chat(llm, context_budget=ContextBudget(100000, 10, 10))
+    chat = _scoped_chat(llm, context_budget=ContextBudget(100000, 10, 10))
 
     async def plan() -> None:
         await chat.plan_step(
@@ -122,7 +123,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
             {"prompt_tokens": 100},
         ]
     )
-    chat = Chat(
+    chat = _scoped_chat(
         llm,
         retry_delays=(0,),
         sleep=no_sleep,
@@ -131,7 +132,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
     emitted: list[dict[str, Any]] = []
     chat.on_context_budget = emitted.append
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
-    await chat.estimate_steps("q")
+    await chat.retrieve([Message(role="user", content="q")])
     records = chat.stats.context_budget
     assert records is not None
     assert emitted == records
@@ -143,7 +144,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
 
 
 async def test_default_disabled() -> None:
-    chat = Chat(FakeLLM([None]))
+    chat = _scoped_chat(FakeLLM([None]))
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
     assert chat.stats.context_budget is None
 
@@ -173,7 +174,7 @@ async def test_agent_reports_budget_in_result_and_event() -> None:
 
 async def test_nested_chat_does_not_use_outer_accounting_or_sink() -> None:
     outer = Chat(FakeLLM([]), context_budget=ContextBudget(1000, 100, 100))
-    inner = Chat(FakeLLM([None]), context_budget=ContextBudget(300, 10, 10))
+    inner = _scoped_chat(FakeLLM([None]), context_budget=ContextBudget(300, 10, 10))
     emitted: list[dict[str, Any]] = []
     token = BUDGET_ACCOUNTING.set((outer, outer._accounting))
     hook = BUDGET_HOOK.set((outer, emitted.append))

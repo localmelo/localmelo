@@ -129,8 +129,7 @@ process identity records. Recovery prepare and commit both advance the shared
 park generation; interrupted recovery preserves a pending pause until explicit
 resume or a terminal outcome. Missing provenance and missing process records
 are unknown, not proof that a task never ran or that its processes are gone.
-The internal legacy-adoption seam records explicit orphan-risk confirmation but
-does not itself queue or launch a task. Version 4 adds per-execution
+Version 4 adds per-execution
 capture state, process identity checks and a gated subprocess primitive. Workers
 record a launch's process group through that gate before releasing the child and
 mark capture incomplete before the first tool provider starts (an MCP provider

@@ -67,7 +67,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
 - 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
 - 任务向对话求助时，会有一行灰色文字 `Task “Fix tests” asks: <problem>`（中文目录里是「任务「Fix tests」在问：…」），随后是 melo 的回答，上面没有你的消息。接着是 `→ melo answered “Fix tests” · <answer>`，或者 `! “Fix tests” needs your answer: <question>`：只有这一个任务在等时，在这里发一条消息回答（`→ Sent to “Fix tests” as your answer`；10 秒内可在 `melo console` 里撤销）；有几个在等时，这一行会写 `several wait: /answer Fix tests …`。
-- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用；`/approvals ask` 和 `/approvals auto` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
+- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用；`/approvals ask`、`/approvals auto` 和 `/grants` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>
 
@@ -96,7 +96,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 ### melo 如何介绍自己
 
-- 每个对话都会先告诉模型它是谁，这样问“你是谁？”时，回答的是 melo：localmelo 的 melo，一个开源智能体，在你的文件夹里用工具工作，改动任何东西之前先询问你。
+- 每个对话都会先告诉模型它是谁，这样问“你是谁？”时，回答的是 melo：localmelo 的 melo，一个开源智能体，在你的文件夹里用工具工作，并替你行事；步骤改动任何东西之前由它的批准卡片询问你，而不是由模型自己来问。
 - 被问到时，它说出自己运行在哪个模型上；不把自己说成该模型原本的助手；并用你书写的语言和文字回答。
 - 它像横幅那样写出服务器的名称（`oMLX`、`Ollama`、`OpenAI-compatible server`，或云服务商的名称），并说明服务器是否在本机；`/model` 和 `/backend` 会让下一轮用新的选择开始。
 - 它还会写明对话记得什么：默认只记得本次对话最近的消息，不记得其他对话；如果记忆会在多次运行之间保留（见[记忆](memory.md#keep-memory-between-runs)），还会有 localmelo 在本机保存、并与你的问题相符的简短笔记。你文件夹里的文件不是记忆。
@@ -156,7 +156,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/help [command]` | 三组常用命令；`/help all`（开发者模式下直接 `/help`）列出所有命令和按键；`/help NAME` 给出某个命令的详情。 |
 | `/model [name\|number]` | 单独使用：列出服务器的对话模型，当前模型标 `✓`，已加载的标 `(loaded)`；Enter 切换并把该模型保存为默认值，Esc 保留当前模型。带列出的 ID 或编号：从下一条消息起切换。服务器没有列出的名称会被拒绝。 |
 | `/backend [url]` | 切换到另一个模型服务器：询问它的 URL 和列表中的一个模型，用 `GET /models` 检查，切换并把两者保存为默认值。 |
-| `/new` | 开始新对话：模型忘记之前的对话，本对话的授权结束；一条 `── New chat ──` 分隔线标出开始位置。 |
+| `/new` | 开始新对话：模型忘记之前的对话；在终端自己的对话里，新对话不带上一个对话的授权（你在主对话里允许的仍然有效）。一条 `── New chat ──` 分隔线标出开始位置。 |
 | `/clear` | 在空屏上执行 `/new`：屏幕及其滚动缓冲区被清空，欢迎信息重新绘制。 |
 | `/sessions [filter]` | 选择本文件夹中保存的对话；输入可筛选，Tab 切换全部文件夹，Enter 恢复，Esc 关闭。 |
 | `/resume [id\|title]` | 按 ID、ID 前缀（至少四个字符）或完整标题恢复；不带参数则打开选择器。 |
@@ -173,7 +173,8 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | `/stream [on\|off]` | 对之后的轮次打开或关闭实时流式回复；见[流式回复](#streamed-replies)。 |
 | `/expand [turn.call]` | 工具调用的完整输出或错误：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用。 |
 | `/progress` | 本轮最新的进度事实：级别、步骤、尝试、阶段、测试和过去的运行。 |
-| `/approvals [ask\|auto\|deny\|forget [tool]]` | 审批模式和本会话的授权；切换它，或忘掉某个工具的授权（用 `forget` 忘掉全部）。 |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | 审批模式和本对话的授权；切换它，或忘掉某个工具的授权（用 `forget` 忘掉全部）。 |
+| `/grants [revoke N]` | 你允许过的事，编号列表：先是在所有对话里都算的，再是各个对话。`/grants revoke N` 收回第 N 项。见[你允许过的事](#what-you-allowed)。 |
 | `/browser [on\|off]` | melo 是否可以在 Safari 中读取网页（见[用 melo 浏览网页](browsing.md)）。 |
 | `/mcp` | MCP 服务器、它们的工具和来源文件，以及失败后 MCP 为何关闭。 |
 | `/chats` | 在主对话中：以列表列出主对话和它的侧边对话；按 Enter 打开，`New side chat` 新开一个。 |
@@ -413,15 +414,28 @@ from-the-child
 - **会运行什么：** 在文件夹内、不安装、不下载、不发送、不删除任何东西的步骤；melo 无法判断的步骤先交给你的模型。它的 `shell_exec` 和 `python_exec` 调用在写入沙箱中运行，所以即使没有规则发现，写入文件夹之外也会失败，而且它们既读不到 melo 的登录令牌，也连不上 melo 自己的 API。自动模式是审查，不是围墙：把工作交给另一个应用或程序的步骤由审查来判断（拦下，或交给你的模型检查），而不是由沙箱隔离。
 - **由目标决定：** 在对话所针对的网站或应用上，任务明显需要的步骤不经询问直接运行，不管你有没有点名：打开并阅读、按你说过的方式登录、选择选项、填写并提交任务本身的表单、查看结果。melo 按每一步点的或输入的对象，对照你在这个对话里的全部消息来判断；你提到之前的做法时（“按我之前说的方法做”），也对照它召回的笔记。
 - **你的话只会多放行：** 你的消息要求的步骤，或点名了它要操作的对象（软件包、文件、网站、页面上的输入框或按钮）的步骤，也不经询问直接运行；没有点名某一步的话，绝不会拦住任务需要的步骤。只有你自己打的字算你的话，melo 的回答和网页内容都不算。
-- **会询问什么：** 偏离目标的步骤，以及安装、下载、更改文件夹外的文件、删除、向外发送数据或在任务表单之外给其他人发消息、开启网络服务、melo 无法检查的代码，或在另一个网站的框里 melo 看不清目标的点击，会打开审批列表并等待（付款，以及更改账号的邮箱、密码或登录方式，即使是你要求的也总会询问；melo 会自己问你，从不要你打字授权）：`Yes`、`No, and tell melo why`（melo 会读到你的说明，并且在你发下一条消息之前不再问同一步），对于你没要求的网站还有 `Yes, and allow … for the rest of this chat`，它让同一网站上的同类步骤在本对话余下时间内直接运行。在页面上输入文字和发送表单每次都会询问，高影响步骤永远不会沿用这种允许。自动模式在本对话里打开过的网站，在本对话余下时间内仍可直接阅读它的页面，询问模式下也一样；在询问模式下点击它仍会询问。`/approvals` 列出已允许的网站（`news.example (clicking and choosing)`），`/approvals forget news.example` 收回，`/new` 从空白开始。列表等待 1 分钟：没有回答就算 `No`，这一行显示为 `⊘ … · No answer in time`，下面一行是 `Not run: no answer within 1 minute`（选 `No` 时显示 `Not allowed`，下面是 `Not run: you declined it` 和你的说明；都不算失败）。输入是管道传入时没有人能回答，所以这一步会像以前一样立即被拦下。
+- **会询问什么：** 偏离目标的步骤，以及安装、下载、更改文件夹外的文件、删除、向外发送数据或在任务表单之外给其他人发消息、开启网络服务、melo 无法检查的代码，或在另一个网站的框里 melo 看不清目标的点击，会打开审批列表并等待（付款，以及更改账号的邮箱、密码或登录方式，即使是你要求的也总会询问；melo 会自己问你，从不要你打字授权）：`Yes`、`No, and tell melo why`（melo 会读到你的说明，并且在你发下一条消息之前不再问同一步），对于你没要求的网站还有 `Yes, and allow … for the rest of this chat`，它让同一网站上的同类步骤在本对话余下时间内直接运行。在页面上输入文字和发送表单每次都会询问，高影响步骤永远不会沿用这种允许。自动模式在本对话里打开过的网站，在本对话里仍可直接阅读它的页面，询问模式下也一样；在询问模式下点击它仍会询问。`/grants` 列出已允许的网站；在终端自己的对话里，`/approvals` 也列出它们（`news.example (clicking and choosing)`），`/approvals forget news.example` 收回。列表等待 1 分钟：没有回答就算 `No`，这一行显示为 `⊘ … · No answer in time`，下面一行是 `Not run: no answer within 1 minute`（选 `No` 时显示 `Not allowed`，下面是 `Not run: you declined it` 和你的说明；都不算失败）。输入是管道传入时没有人能回答，所以这一步会像以前一样立即被拦下。
 - **会拦下什么：** 输入或读取机密（密码、一次性验证码、密钥；点击登录按钮不算）、系统设置、操作另一个应用的脚本、以后自动运行的东西以及来自网络的代码；更改 localmelo 本身的步骤永远不会运行。那一行会写明原因（`⊘ … · blocked: uses passwords or keys`），melo 会在回答里说明它想做什么，以及还有哪些别的办法。这样的步骤只能用控制台的 **Allow once** 运行，或在你把对话切换到询问模式之后运行。
+
+<a id="what-you-allowed"></a>
+
+### 你允许过的事
+
+你回答的每个“为这个对话允许”都是一项授权：一个工具、一个网站、工作区之外的一个文件夹、另一个应用的窗口，或网页可以打开的一个应用。授权会被保存在文件里，重启后仍然有效。
+
+- **规则：** 你在主对话里允许的，在所有对话里都算；在旁支对话里允许的，只在那里算。在终端里，主对话就是网关的主对话，终端自己的对话（`melo -X cli.chat=local`）也读取它的授权，而且每一步都重新读取：在主对话里收回的授权会立即失效，回合进行到一半也一样。
+- **列表会说明：** 在主对话里，保留授权的回答写作 `Yes, and allow … in every chat`（另一个应用的窗口写作 `Yes, and allow Chat everywhere`），下面还有一行：`In the main chat this counts in every chat, the tasks you start and the terminal, until you take it back with /grants.` 旁支对话和终端自己的对话里写作 `for this chat`。
+- **只在那里：** 旁支对话的授权只在那个对话里算，终端自己的对话的也只在那个对话里算，任务的 **Allow for this task** 只在那个任务里算。自动模式让对话读的网站只在那个对话里算，主对话也一样。
+- **`/grants`** 按控制台 **设置 › 授权** 的顺序编号：先是在所有对话里都算的，从新到旧，再是各个对话。`/grants revoke 2` 立即收回第二项。终端自己的对话列出自己的授权和主对话的；主对话的授权要在主对话里或在控制台里收回。在那里用 `/approvals forget NAME` 时会这样说明（`… was allowed in the main chat, so it counts everywhere and still holds here.`），`/approvals forget` 会列出仍然有效的主对话授权。
+- **总是询问，从不保留：** **Allow once**、在页面上输入文字、发送表单、点击密码、验证码或银行卡字段、同意控件或来自其他网站的框、在另一个应用的窗口里按键、付款、更改账号设置，以及每一个高影响步骤（在“自动”模式下也包括网页要求打开的应用）。
+- **何时结束：** 删除对话会删除它的授权。在终端自己的对话里，`/new` 和 `/clear` 开始时不带上一个对话的授权（主对话的仍然有效），恢复一个对话会带回它的授权。
 
 <a id="the-workspace"></a>
 
 ### 工作区
 
 - melo 在当前文件夹中工作，或在 `--workspace DIR` 指定的文件夹中工作。
-- 文件工具（`file_read`、`file_write`、`list_files`）只能在这个文件夹内，要打开它之外的文件夹时会先询问；密钥文件夹、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供。`/approvals` 会列出这个对话可以读取的文件夹。
+- 文件工具（`file_read`、`file_write`、`list_files`）只能在这个文件夹内，要打开它之外的文件夹时会先询问；密钥文件夹、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供。`/grants` 会列出这个对话可以读取的文件夹。
 - 命令和 Python 可以访问其他文件。在 Ask 中 melo 会先询问；在 Auto 中，只在这个文件夹之外读取的常规命令或脚本不询问就会运行，而涉及密钥或密码的会算作高影响。
 - 工作区是你的主目录或 `/` 时，横幅会发出警告。
 - `shell_exec` 和 `python_exec` 在界面中 10 分钟后停止（任务中分别为 30 秒和 60 秒）。
@@ -475,12 +489,12 @@ from-the-child
 - 单独运行 `melo` 会开始新对话；只有第一条消息才会保存它。`melo -c`（`--continue`）恢复当前工作区中最近一个有已完成轮次的对话，`melo -r`（`--resume`）则让你选择一个。
 - `melo -r REF` 按 ID、至少四个字符的前缀或不区分大小写的完整标题解析；多个匹配会打开选择器，未知引用以退出码 2 退出。`-c` 和 `-r` 不能同时使用，也不能与任务或 `melo serve` 一起使用。
 - 选择器最多列出 50 个有已完成、未被撤销轮次的对话，最新的在前；Tab 切换本文件夹和全部文件夹，Enter 恢复，Esc 关闭。`/sessions FILTER` 和 `/resume REF` 使用同一个选择器。
-- 恢复会沿用当前的模型和工作区并清除审批授权；回顾部分以纯文本显示最近三轮。`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息和回答配对，`"window"` 恢复保存的工作记忆检查点加之后的配对。
+- 恢复会沿用当前的模型和工作区，并带回那个对话的授权；回顾部分以纯文本显示最近三轮。`[sessions] resume_mode = "pairs"`（默认）恢复最近的用户消息和回答配对，`"window"` 恢复保存的工作记忆检查点加之后的配对。
 - 退出时，有轮次的对话会说明如何回到它：`◆ Saved "What is this project?". Continue it with: melo -c`，或 `Resume it with: melo -r ID`。
 
 文件放在哪里：
 
-- 会话保存在 `~/.cache/localmelo/cli/sessions.db`：每个轮次，包括你的消息、回答和每次工具调用及其输出；`~/.cache/localmelo/cli_history` 保存你的消息。两者都是明文（权限 0600），未加密。
+- 会话保存在 `~/.cache/localmelo/cli/sessions.db`：每个轮次，包括你的消息、回答和每次工具调用及其输出，以及终端自己的对话的授权；`~/.cache/localmelo/cli_history` 保存你的消息。两者都是明文（权限 0600），未加密。
 - 网页控制台的 Workers 视图在 **Terminal chats** 下以只读方式显示你的对话，读取时会脱敏；它不能修改这些对话，也不能向它们发送内容。
 - 界面把日志写入 `~/.cache/localmelo/logs/cli.log`，从不打印回溯；不是有效 TOML 的配置文件会让 `melo` 以一行 `melo: …` 和退出码 1 停止。
 - 程序性记忆遵循[记忆持久化](memory.md#keep-memory-between-runs)，与任务相同。
@@ -502,7 +516,7 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo 通过 `GET /v1/models` 在 `127.0.0.1` 的端口 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）上查找本机服务器，并提供第一个列出模型的服务器（有对话模型的排在最前）；不会发送任何对话请求，所以服务器不会加载任何东西。
 - 在第二行和第三行之间，melo 以列表询问 `Use this model server?`；有多个模型时会显示选择器，有嵌入模型时还会有一个列表询问 `Remember across chats with nomic-embed-text?`（`Yes, with it`、`No, by words only`）。
-- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：用简短摘要显示推荐项、下载量、已缓存量和可用空间，仅在需要时添加警告。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的简明编号步骤（下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后输入它的地址）；自动设置即将推出，不会安装、下载、启动或保存。开发者模式保留 `Review setup plan` 菜单，其中有生命周期选项、手动步骤和 `Details`。仍可重新检查、输入地址或退出；管道输入保留原有提示，并显示手动指南链接而不是列表操作。其他系统保留手动服务器指南，不估算缓存。
+- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：用简短摘要显示推荐项和下载量，仅在需要时添加警告。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的简明编号步骤（下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后输入它的地址）；自动设置即将推出，不会安装、下载、启动或保存。仍可重新检查、输入地址或退出；管道输入保留原有提示，并显示手动指南链接而不是列表操作。其他系统保留手动服务器指南。
 - 无法使用的服务器会连同原因一起指出（`connection refused`、`no answer in 5 s`、`HTTP 401` 或 `HTTP 403` 并附 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`、`it lists no models`），你可以重试、不保存直接启动或退出。
 - Ollama 服务器保存为 `chat_backend = "ollama"`，oMLX 服务器保存为 `chat_backend = "omlx"`，其他保存为 `"vllm"`；嵌入模型的选择见[配置嵌入模型](embedding.md)。
 - `LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL；空值会关闭查找。

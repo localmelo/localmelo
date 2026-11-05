@@ -32,6 +32,8 @@ from typing import Any, Final, Literal
 
 from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.contracts.approvals import (
+    DESKTOP_ACT,
+    WINDOW_READ,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -51,6 +53,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
 )
 from localmelo.support.sessions.display import display_path, folder_name, home_label
+from localmelo.support.sessions.grants import SessionGrants
 from localmelo.support.words import gist_note, gist_text
 
 # Keys other than Esc and Ctrl+C do nothing this long after the panel opens,
@@ -103,6 +106,8 @@ class PendingApproval:
     target: edits.Target | None = None
     selected: int = 0
     reason: bool = False  # the reason field is open
+    # The main chat's own request: what it allows for the chat counts in every chat.
+    everywhere: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,7 +201,13 @@ def panel_text(
     text = _says(request, _tool_panel(request, target, width, minus, show_tier))
     review = request.review
     title = review_title(review, folder_name(request.workspace_root))
-    if review is None or not title:
+    if (
+        review is None
+        or not title
+        or request.tool_name.startswith((WINDOW_READ, DESKTOP_ACT, "browser-point:"))
+    ):
+        # Another app's window, a press in one and a click melo cannot check are asked the
+        # same way in Ask and in Auto: their own words, never a review's title.
         return text
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
@@ -307,6 +318,12 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    background = arguments.get("browser") == "chrome"
+    window = (
+        "in melo's browser, which runs in the background"
+        if background
+        else "in Safari's automation window"
+    )
     if tool.startswith(
         ("browser-act:", "browser-type:", "browser-submit:", "browser-point:")
     ):
@@ -325,22 +342,17 @@ def _tool_panel(
         elif pointing:
             on = shown(str(arguments.get("on") or "a point of the page"))
             how = shown(str(arguments.get("how") or "click"))
-            said = f"melo wants to {how} {on} on {site} in Safari's automation window."
+            said = f"melo wants to {how} {on} on {site} {window}."
             note = "melo cannot check this one itself, so it asks every time."
         elif typing:
-            said = (
-                f"melo wants to type this text on {site} in Safari's automation window:"
-            )
+            said = f"melo wants to type this text on {site} {window}:"
             note = (
                 "It never types passwords, card numbers or one-time codes. Once the "
                 "text is in the page, the page may send it on its own; melo asks "
                 "before it presses send, but cannot stop every send the page makes."
             )
         else:
-            said = (
-                f"melo wants to click and choose on {site} in Safari's "
-                "automation window, as you would."
-            )
+            said = f"melo wants to click and choose on {site} {window}, as you would."
             note = "Each text it types is asked about apart, every time."
         body = [("", row) for row in _wrapped([said], width)]
         if sending and goes:
@@ -385,6 +397,15 @@ def _tool_panel(
             "types into other apps, and asks every time it presses."
         )
         body = [("", row) for row in _wrapped([said], width)]
+        if arguments.get("delivery") == "foreground_retry":
+            # A click at a point is asked once for both tries: the second one moves the
+            # pointer and brings the app to the front.
+            front = (
+                "If a click in the background does not reach it, melo clicks once "
+                f"more in the foreground: the pointer moves there and {app} comes to "
+                "the front for a moment."
+            )
+            body += [("", row) for row in _wrapped([front], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
             "Press a button in another app?",
@@ -392,12 +413,75 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith(("handoff:", "browser-dialog:")):
+        site = shown(str(arguments.get("site") or "a page"))
+        if tool.startswith("handoff:"):
+            # A page asked to open an address of another app's kind, which the
+            # browser in the background does not open by itself.
+            app = shown(str(arguments.get("app") or "an app"))
+            said = f"A page on {site} wants to open {app}. melo would open this address with it:"
+            note = (
+                # The kept answer below says where it holds (this chat, every chat).
+                f"{app} comes to the front. A kept answer lets pages open such addresses again."
+            )
+            body = [("", row) for row in _wrapped([said], width)]
+            body += [
+                ("", row)
+                for row in _wrapped([shown(str(arguments.get("url") or ""))], width)
+            ]
+            body += [("muted", row) for row in _wrapped([note], width)]
+            return PanelText(
+                f"Open {app}?",
+                f"{site}{mark} · a page asks for an app",
+                body,
+                escaped_any,
+            )
+        said = f"The page on {site} asks this question. Answer OK?"
+        note = "Cancel is melo's answer when you say no. Asked every time."
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [
+            ("", row)
+            for row in _wrapped([shown(str(arguments.get("text") or ""))], width)
+        ]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Answer OK on a website?",
+            f"{site}{mark} · the page asks",
+            body,
+            escaped_any,
+        )
+    if tool.startswith("window-read:"):
+        # A window another app put up right after melo's own step in the browser: nothing
+        # about it goes to the model unless the person allows it here. The title is for the
+        # person only.
+        app = shown(str(arguments.get("app") or tool[len("window-read:") :]))
+        window = shown(str(arguments.get("window") or ""))
+        said = f"{app} opened a window right after melo's click: let melo see it?"
+        body = [("", row) for row in _wrapped([said], width)]
+        if window:
+            body += [("", row) for row in _wrapped([f"The window: “{window}”."], width)]
+        note = (
+            "Only you see its name. If you allow it, melo reads the window's text and "
+            "buttons and can press one only with your say. melo never types into other apps."
+        )
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Let melo see another app's window?",
+            f"{app}{mark} · another app's window",
+            body,
+            escaped_any,
+        )
     if tool.startswith("browser:"):
         site = shown(str(arguments.get("site") or tool[len("browser:") :]))
-        said = f"melo wants to open {site} in Safari and read it."
-        note = (
-            "Safari opens it in its own automation window; your sign-ins are not used."
-        )
+        if background:
+            said = f"melo wants to open {site} in Chrome and read it."
+            note = (
+                "Chrome runs in the background with melo's own profile: no window "
+                "comes to the front, and your own sign-ins are not used."
+            )
+        else:
+            said = f"melo wants to open {site} in Safari and read it."
+            note = "Safari opens it in its own automation window; your sign-ins are not used."
         body = [("", row) for row in _wrapped([said], width)]
         body += [("muted", row) for row in _wrapped([note], width)]
         return PanelText(
@@ -455,15 +539,28 @@ def _outside_panel(
     return PanelText(title, header, body, escaped)
 
 
-def folder_options(request: ApprovalRequest) -> tuple[str, str]:
-    """The labels of "this folder for this chat" and "always this folder" (#405)."""
+def folder_options(
+    request: ApprovalRequest, *, everywhere: bool = False
+) -> tuple[str, str]:
+    """The labels of "this folder for this chat" and "always this folder" (#405).
+
+    In the main chat (*everywhere*) the first says it counts in every chat.
+    """
     outside = request.outside
     folder = home_label(outside.folder) if outside is not None else "this folder"
     shown, _ = escape_arguments(folder)
     return (
-        f"Yes, and allow {shown} for this chat",
+        f"Yes, and allow {shown} {'in every chat' if everywhere else 'for this chat'}",
         f"Yes, and always allow {shown} (kept in Settings)",
     )
+
+
+# Under the options of the main chat's own question that may be kept: its
+# "allow" counts in every chat.
+EVERYWHERE_RULE: Final = (
+    "In the main chat this counts in every chat, the tasks you start and the "
+    "terminal, until you take it back with /grants."
+)
 
 
 # Under the options of a read outside the workspace that may be granted.
@@ -473,19 +570,28 @@ FOLDER_RULE: Final = (
 )
 
 
-def session_option(request: ApprovalRequest) -> str:
-    """The label of the answer that allows *request* for the rest of the session."""
+def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str:
+    """The label of the answer that allows *request* for the rest of the session.
+
+    In the main chat (*everywhere*) it says the answer counts in every chat.
+    """
     if request.outside is not None:
-        return folder_options(request)[0]
+        return folder_options(request, everywhere=everywhere)[0]
+    rest = "in every chat" if everywhere else "for the rest of this chat"
     if request.tool_name.startswith("browser:"):
         site = str(request.arguments.get("site") or "this site")
-        return f"Yes, and allow {site} for the rest of this chat"
+        return f"Yes, and allow {site} {rest}"
     if request.tool_name.startswith("browser-act:"):
         site = str(request.arguments.get("site") or "this site")
-        return (
-            f"Yes, and allow clicking and choosing on {site} for the rest of this chat"
-        )
-    return f"Yes, and allow every {request.tool_name} call in this session"
+        return f"Yes, and allow clicking and choosing on {site} {rest}"
+    if request.tool_name.startswith("handoff:"):
+        app = str(request.arguments.get("app") or "that app")
+        return f"Yes, and let pages open {app} {rest}"
+    if request.tool_name.startswith("window-read:"):
+        app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
+        return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
+    where = "in every chat" if everywhere else "in this session"
+    return f"Yes, and allow every {request.tool_name} call {where}"
 
 
 def session_warning(tool: str, workspace: str) -> list[str]:
@@ -525,14 +631,20 @@ class TerminalApprover:
         self.pending: PendingApproval | None = None
 
     async def ask(
-        self, request: ApprovalRequest, *, offer_session: bool | None = None
+        self,
+        request: ApprovalRequest,
+        *,
+        offer_session: bool | None = None,
+        everywhere: bool = False,
     ) -> ApprovalDecision:
         """Show the panel for *request* and wait for the answer.
 
         The session choice is offered unless *offer_session* says no or the
         request is a high-impact call, which a grant never covers; that
-        panel starts on No. A cancellation (a stop, a shutdown) withdraws
-        the panel and propagates: a withdrawn prompt is not a denial.
+        panel starts on No. *everywhere* is the main chat's own request,
+        whose session choice says it counts in every chat. A cancellation (a
+        stop, a shutdown) withdraws the panel and propagates: a withdrawn
+        prompt is not a denial.
         """
         target: edits.Target | None = None
         if request.tool_name == "file_write":
@@ -557,6 +669,7 @@ class TerminalApprover:
             target=target,
             selected=2 if outside is not None and outside.access == "write" else 0,
             offer_always=outside is not None and offered,
+            everywhere=everywhere,
         )
         if outside is None and not offered:
             self.pending.selected = 2
@@ -741,6 +854,8 @@ def grant_words(name: str) -> str:
     """A grant in words: ``shell commands``, ``clicking and choosing on example.com``."""
     if name in _GRANT_WORDS:
         return _GRANT_WORDS[name]
+    if name.startswith("handoff:"):
+        return f"opening {name[len('handoff:') :]}: addresses in their app"
     for prefix, words in _SITE_GRANT_WORDS:
         if name.startswith(prefix):
             return words.format(site=grant_site(name))
@@ -804,7 +919,13 @@ def terminal_watch(
 
 
 class Approvals:
-    """The session's approval mode and policy, which keeps the grants."""
+    """The session's approval mode and policy, which keeps the grants.
+
+    With *grants* (the terminal's own chat), the grants live in the table
+    of the terminal's sessions file and hold in the session that gave them,
+    beside what the person allowed in the main chat; without, in this
+    object only.
+    """
 
     def __init__(
         self,
@@ -813,9 +934,11 @@ class Approvals:
         *,
         snapshots: EditSnapshots | None = None,
         watch: AskWatch | None = None,
+        grants: SessionGrants | None = None,
     ) -> None:
         self.mode: Mode = mode
         self._ask = ask
+        self.grants = grants
         self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = self._asking()
         # Auto mode's policy, kept across turns for its allowances; a step it
@@ -826,7 +949,9 @@ class Approvals:
 
     def _asking(self) -> RememberingPolicy:
         # It also asks about a folder outside the workspace (#405).
-        return RememberingPolicy(self._ask, folders=True, saved=SavedFolders())
+        return RememberingPolicy(
+            self._ask, folders=True, saved=SavedFolders(), grants=self.grants
+        )
 
     def policy(self) -> ApprovalPolicy | None:
         """The policy for a turn: None with ``--yolo``, so nothing asks.
@@ -870,7 +995,11 @@ class Approvals:
         return self._policy.allowed_folders
 
     def reset(self) -> None:
-        """Forget every grant: a new session starts with none."""
+        """Start the next session without this one's grants.
+
+        Kept grants stay with the session that gave them (a resumed session
+        has its own again); grants kept in this object only are forgotten.
+        """
         self._policy = self._asking()
         self._auto = AutoPolicy(asking=self._policy, watch=self._watch)
         self.snapshots.clear()

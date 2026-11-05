@@ -17,7 +17,6 @@ import http.server
 import json
 import os
 import socket
-import threading
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
@@ -37,6 +36,7 @@ from localmelo.support.cli.main_chat import (
     echo_line,
 )
 from localmelo.support.cli.theme import UNICODE
+from localmelo.tests.fixtures.http_stub import HttpStub
 
 from .test_session import Setup, _until
 from .test_session import setup as setup
@@ -372,6 +372,8 @@ async def test_an_approval_is_the_terminals_list_answered_through_the_gateway(
     pending = session.approver.pending
     assert pending is not None and pending.request.tool_name == "shell_exec"
     assert pending.request.arguments == {"command": "ls"} and pending.offer_session
+    # The main chat's own "allow" counts in every chat: the list says so.
+    assert pending.everywhere
     session.approver.answer("session")
     await setup.idle()
     answered = [r for r in gateway.requests if r[1] == "/api/approvals/r1"]
@@ -925,22 +927,13 @@ class _Gateway(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def log_message(self, format: str, *args: Any) -> None:
-        pass
-
 
 @contextlib.contextmanager
 def _serving(
     handler: type[http.server.BaseHTTPRequestHandler], port: int = 0
 ) -> Iterator[int]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield int(server.server_address[1])
-    finally:
-        server.shutdown()
-        server.server_close()
+    with HttpStub(handler, port=port) as stub:
+        yield stub.port
 
 
 def _free_port() -> int:

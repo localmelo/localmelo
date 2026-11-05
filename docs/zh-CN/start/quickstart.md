@@ -81,7 +81,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7
 输出示例（数值会有所不同）：
 
 ```json
-{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
+{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
 ```
 
 stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码才是 0。
@@ -149,7 +149,7 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
-尚未保存后端且没有模型服务器在运行时，首次运行的 `melo` 和 `melo setup` 会显示简短的只读预览：推荐项、下载量上限、已缓存量和可用空间。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的编号步骤：下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出，目前不会安装、下载、启动或保存。开发者模式保留详细视图和带 `Details` 的检查菜单，可查看确切版本、路径和校验和。管道输入保留 `Press Enter to check again, type an address, or q to quit:`；其他系统保留对应平台的手动说明。自行启动服务器后输入该地址：建议的高位端口不在默认发现范围内。手动路径见[模型服务器指南](../guides/model-servers.md#setup-preview)。已有连接和直接任务不变。
+尚未保存后端且没有模型服务器在运行时，首次运行的 `melo` 和 `melo setup` 会显示简短的只读预览：推荐项和下载量上限。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的编号步骤：下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出，目前不会安装、下载、启动或保存。管道输入保留 `Press Enter to check again, type an address, or q to quit:`；其他系统保留对应平台的手动说明。自行启动服务器后输入该地址：步骤中的高位端口不在默认发现范围内。手动路径见[模型服务器指南](../guides/model-servers.md#setup-preview)。已有连接和直接任务不变。
 
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Remember across chats with <model>?`；选择默认选中的 `Yes, with it` 后，会在一次嵌入探测通过后保存。
 

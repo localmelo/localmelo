@@ -24,12 +24,11 @@ from localmelo.melo.memory.notes import (
     DRAFT_SHOWN_CHARS,
     RECALL_END,
     RECALL_START,
-    _shorten,
     path_spans,
 )
 from localmelo.melo.memory.retrieval.base import DOC_KINDS, Doc
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message, ToolDef, shorten
 
 RetrieverMode = Literal["auto", "off", "bm25", "llm", "embedding"]
 RecallPlacement = Literal["tool", "message"]
@@ -311,20 +310,20 @@ def build_step_query(
             if name not in names:
                 names.append(name)
     if not names:
-        return _shorten(head, RECALL_QUERY_CHARS)
+        return shorten(head, RECALL_QUERY_CHARS)
     # Reserve at most half the query for the names, so a long command cannot
     # shrink the note's head to nothing.
-    name_text = _shorten(" ".join(names), RECALL_QUERY_CHARS // 2)
+    name_text = shorten(" ".join(names), RECALL_QUERY_CHARS // 2)
     if not head:
         return name_text
     room = max(RECALL_QUERY_CHARS - len(name_text) - 1, 1)
-    head = _shorten(head, room)
+    head = shorten(head, room)
     return f"{head} {name_text}"[:RECALL_QUERY_CHARS]
 
 
 def build_start_query(query: str) -> str:
     """The start trigger's query: the task text, cut to the cap."""
-    return _shorten(" ".join(query.split()), RECALL_QUERY_CHARS)
+    return shorten(" ".join(query.split()), RECALL_QUERY_CHARS)
 
 
 def build_attempt_query(
@@ -353,7 +352,7 @@ def build_attempt_query(
     if not parts:
         head = " ".join(part for part in (failure_type, fallback) if part).strip()
         parts.append(head or failure_type or fallback)
-    return _shorten(" · ".join(part for part in parts if part), RECALL_QUERY_CHARS)
+    return shorten(" · ".join(part for part in parts if part), RECALL_QUERY_CHARS)
 
 
 # ── Documents from the stores ──
@@ -379,7 +378,6 @@ def docs_from_entries(
     *,
     exclude_task_ids: Iterable[str] = (),
     min_score: float = 0.0,
-    include_history: bool = False,
 ) -> list[Doc]:
     """Docs for typed long-term rows ``(text, score, metadata)``, aliased m1, m2, ….
 
@@ -397,9 +395,7 @@ def docs_from_entries(
     for text, score, meta in rows:
         if not isinstance(text, str) or not text.strip():
             continue
-        if meta.get("status") not in (
-            (None, "active", "superseded") if include_history else (None, "active")
-        ):
+        if meta.get("status") not in (None, "active"):
             continue
         task_id = meta.get("task_id")
         if isinstance(task_id, str) and task_id in excluded:
@@ -423,39 +419,12 @@ def docs_from_entries(
         origin = _origin_task_ids(meta)
         created = _number(meta.get("created_at"))
         entry_id = int(meta.get("id") or 0)
-        title = _long_title(created)
-        order_time = created
-        if include_history:
-            provenance = meta.get("provenance")
-            assertion = (
-                provenance.get("assertion") if isinstance(provenance, dict) else None
-            )
-            labels = []
-            if meta.get("status") == "superseded":
-                labels.append("superseded")
-            if isinstance(assertion, dict):
-                observed = _number(assertion.get("observed_at"))
-                if observed > 0:
-                    order_time = observed
-                    source_date = assertion.get("observed_date")
-                    if isinstance(source_date, str) and source_date:
-                        title = source_date
-                    elif meta.get("source") != "user":
-                        title = _long_title(observed)
-                if not assertion.get("subject_key"):
-                    labels.append("unlinked assertion")
-                effective = assertion.get("effective_date")
-                if isinstance(effective, str) and effective:
-                    labels.append(f"effective {effective}")
-            else:
-                labels.append("polarity unknown")
-            title = " · ".join(part for part in (title, *labels) if part)
         docs.append(
             Doc(
                 doc_id=f"long:{entry_id}",
                 kind="long",
                 text=text,
-                title=title,
+                title=_long_title(created),
                 meta={
                     **meta,
                     "alias": _long_alias(index),
@@ -464,7 +433,6 @@ def docs_from_entries(
                     "entry_id": entry_id,
                     "origin_task_ids": origin,
                     "created_at": created,
-                    **({"assertion_order_time": order_time} if include_history else {}),
                     "origin": _long_origin(meta),
                 },
             )
@@ -698,7 +666,7 @@ def _cap_text(kind: str, text: str) -> str:
         return text
     if kind == "draft":
         return _cut_lines(text, limit)
-    return _shorten(text, limit)
+    return shorten(text, limit)
 
 
 def _cut_lines(text: str, limit: int) -> str:

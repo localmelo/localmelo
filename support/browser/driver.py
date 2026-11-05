@@ -203,6 +203,20 @@ class Changes:
 
 
 @dataclass(frozen=True)
+class Dialog:
+    """A box the page put up while melo acted, and how melo answered it.
+
+    ``kind`` is ``alert``, ``confirm``, ``prompt`` or ``beforeunload``;
+    ``message`` is the page's own words (data, cut short); ``accepted`` is
+    whether melo answered OK (or Leave), as against Cancel.
+    """
+
+    kind: str
+    message: str
+    accepted: bool
+
+
+@dataclass(frozen=True)
 class ActResult:
     """What :meth:`BrowserDriver.act` did.
 
@@ -212,6 +226,11 @@ class ActResult:
     passed over); ``changes`` what it saw change, or None when the page became
     another document. ``native_failed`` says the browser's own input did not
     work there, so the site starts with the page script next time.
+    ``handoff`` is an address of another app's kind (``chat://...``) the page
+    asked the browser to open meanwhile, which the browser did not open
+    (``""``: none); melo asks the person before it opens it itself.
+    ``dialogs`` are the boxes the page put up meanwhile and how they were
+    answered.
     """
 
     note: str = ""
@@ -219,6 +238,8 @@ class ActResult:
     why: str = ""
     changes: Changes | None = None
     native_failed: bool = False
+    handoff: str = ""
+    dialogs: tuple[Dialog, ...] = ()
 
 
 ActionKind = Literal["click", "type", "select"]
@@ -274,6 +295,18 @@ class StaleElementError(BrowserError):
         self.why = why
 
 
+class CoveredError(StaleElementError):
+    """A real click or key press would land on another element, so melo stopped it.
+
+    Nothing was done and the page is as it was read, so the readings stay (the
+    refs work as before). The message says what stands over the element when
+    the page said so. ``why`` is ``covered``.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, "covered")
+
+
 class BrowserDriver(Protocol):
     """A browser melo reads pages in. ``tab`` None means the current tab."""
 
@@ -321,6 +354,11 @@ class BrowserDriver(Protocol):
         origin (``location.origin``), read in the same step as the condition,
         so a page that goes elsewhere for a moment answers nothing about it.
         """
+
+    async def holds(
+        self, tab: str | None, until: str, text: str, *, origin: str = ""
+    ) -> bool:
+        """Whether the condition of :meth:`wait` holds right now: one look, no waiting."""
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None

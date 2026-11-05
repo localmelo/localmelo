@@ -39,6 +39,7 @@ from localmelo.melo.schema import (
     WINDOW_MESSAGES_MIN,
     RunResult,
 )
+from localmelo.support.flag_options import FLAG_OPTIONS, flag_options
 
 if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import BaseEmbeddingProvider
@@ -72,49 +73,32 @@ EXIT_SIGNALS = tuple(
 # Characters of the error that the text-mode status line shows at most.
 STATUS_LINE_ERROR_CHARS = 500
 
+# Direct-mode flags that FLAG_OPTIONS has no row for: those _direct_options reads
+# by hand (--workspace names a folder to check, --builtins a list to parse) and
+# those that set no option of their own.
+_OTHER_DIRECT_FLAGS = (
+    "workspace",
+    "context_window",
+    "output_reserve",
+    "safety_margin",
+    "builtins",
+    "mcp_config",
+    "mcp_only",
+    "request_timeout",
+    "output_format",
+    "embedding_base_url",
+    "embedding_model",
+    "progress",
+    "routine",
+    "reasoning_field",
+    "retrieval_extra_body",
+)
+
 # Flags that apply to direct mode (a query without --serve), by dest. The
 # interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
-    "workspace": "--workspace",
-    "fixed_prefix": "--fixed-prefix",
-    "window_eviction": "--window-eviction",
-    "reflect_tool_guard": "--reflect-tool-guard",
-    "cache_layout": "--cache-layout",
-    "window_messages": "--window-messages",
-    "captured_history": "--captured-history",
-    "brief_items": "--brief-items",
-    "context_window": "--context-window",
-    "output_reserve": "--output-reserve",
-    "safety_margin": "--safety-margin",
-    "max_steps": "--max-steps",
-    "attempt_policy": "--attempt-policy",
-    "reflection_gate": "--reflection-gate",
-    "tool_exposure": "--tool-exposure",
-    "builtins": "--builtins",
-    "mcp_config": "--mcp-config",
-    "mcp_only": "--mcp-only",
-    "memory": "--memory",
-    "memory_dir": "--memory-dir",
-    "timeout": "--timeout",
-    "request_timeout": "--request-timeout",
-    "output_format": "--output-format",
-    "embedding_base_url": "--embedding-base-url",
-    "embedding_model": "--embedding-model",
-    "progress": "--progress",
-    "routine": "--routine",
-    "reasoning": "--reasoning",
-    "reasoning_field": "--reasoning-field",
-    "replay_turns": "--replay-turns",
-    "note_writer": "--note-writer",
-    "retriever": "--retriever",
-    "recall_at": "--recall-at",
-    "recall_k": "--recall-k",
-    "recall_kinds": "--recall-kinds",
-    "recall_placement": "--recall-placement",
-    "recall_min_score": "--recall-min-score",
-    "retrieval_extra_body": "--retrieval-extra-body",
-    "admit_on_outcome": "--admit-on-outcome",
-    "keep_decision_text": "--keep-decision-text",
+    dest: "--" + dest.replace("_", "-")
+    for dest in (*(row.dest for row in FLAG_OPTIONS), *_OTHER_DIRECT_FLAGS)
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -1230,10 +1214,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
-    if getattr(args, "enable_playground", False) and (
-        not args.serve or args.daemon or args.query
-    ):
-        parser.error("--enable-playground is only for --serve")
+    if getattr(args, "enable_playground", False):
+        print(
+            "melo: --enable-playground was removed; the web console replaces it",
+            file=sys.stderr,
+        )
     if getattr(args, "allow_unconfigured", False):
         if not args.serve:
             parser.error("--allow-unconfigured is only for --serve")
@@ -1300,7 +1285,7 @@ def _direct_options(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> AgentOptions:
     """The AgentOptions the direct-mode flags ask for; defaults otherwise."""
-    fields: dict[str, Any] = {}
+    fields = flag_options(args)
     if args.workspace is not None and args.query:
         # Direct mode only: bare melo resolves the folder itself (launch.py),
         # and `melo ""` refuses the flag in _check_args.
@@ -1311,71 +1296,11 @@ def _direct_options(
                 f"{parser.prog}: --workspace: not a directory: {args.workspace}\n",
             )
         fields["workspace_root"] = root
-    if args.max_steps is not None:
-        fields["max_steps"] = args.max_steps
-    if args.attempt_policy is not None:
-        fields["attempt_policy"] = args.attempt_policy
-    if args.reflection_gate is not None:
-        fields["reflection_gate"] = args.reflection_gate
-    if args.tool_exposure is not None:
-        fields["tool_exposure"] = args.tool_exposure
     if args.builtins is not None:
         fields["builtins"] = _parse_builtins(parser, args.builtins)
     if args.mcp_only:
         fields["builtins"] = frozenset()
         fields["tool_exposure"] = "all"
-    if args.memory is not None:
-        fields["memory"] = args.memory == "on"
-    if args.memory_dir is not None:
-        fields["memory_dir"] = args.memory_dir
-    if args.timeout is not None:
-        fields["timeout_s"] = args.timeout
-    if getattr(args, "fixed_prefix", None) is not None:
-        fields["fixed_prefix"] = args.fixed_prefix == "on"
-    if getattr(args, "window_eviction", None) is not None:
-        fields["window_eviction"] = args.window_eviction
-    if getattr(args, "reflect_tool_guard", None) is not None:
-        fields["reflect_tool_guard"] = args.reflect_tool_guard == "on"
-    if getattr(args, "cache_layout", None) is not None:
-        fields["cache_layout"] = args.cache_layout
-    if getattr(args, "window_messages", None) is not None:
-        fields["window_messages"] = args.window_messages
-    if getattr(args, "captured_history", None) is not None:
-        fields["captured_history"] = args.captured_history == "on"
-    if getattr(args, "brief_items", None) is not None:
-        fields["brief_items"] = args.brief_items == "on"
-    reasoning = getattr(args, "reasoning", None)
-    if reasoning is not None:
-        fields["reasoning"] = reasoning
-    replay_turns = getattr(args, "replay_turns", None)
-    if replay_turns is not None:
-        fields["replay_turns"] = replay_turns
-    note_writer = getattr(args, "note_writer", None)
-    if note_writer is not None:
-        fields["note_writer"] = note_writer
-    retriever = getattr(args, "retriever", None)
-    if retriever is not None:
-        fields["retriever"] = retriever
-    recall_at = getattr(args, "recall_at", None)
-    if recall_at is not None:
-        fields["recall_at"] = recall_at
-    recall_k = getattr(args, "recall_k", None)
-    if recall_k is not None:
-        fields["recall_k"] = recall_k
-    recall_kinds = getattr(args, "recall_kinds", None)
-    if recall_kinds is not None:
-        fields["recall_kinds"] = recall_kinds
-    recall_placement = getattr(args, "recall_placement", None)
-    if recall_placement is not None:
-        fields["recall_placement"] = recall_placement
-    recall_min_score = getattr(args, "recall_min_score", None)
-    if recall_min_score is not None:
-        fields["recall_min_score"] = recall_min_score
-    admit_on_outcome = getattr(args, "admit_on_outcome", None)
-    if admit_on_outcome is not None:
-        fields["admit_on_outcome"] = admit_on_outcome == "on"
-    if getattr(args, "keep_decision_text", False):
-        fields["keep_decision_text"] = True
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -1501,10 +1426,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--parent-run",
             "--import-session",
             "--title",
-            "--fixed-prefix",
             "--window-eviction",
-            "--reflect-tool-guard",
-            "--cache-layout",
             "--window-messages",
             "--developer",
             "--captured-history",
@@ -1586,6 +1508,8 @@ _NEW_LETTERS = frozenset(
 def _build_parser(
     *, direct_only: bool = False, developer: bool | None = None
 ) -> argparse.ArgumentParser:
+    from localmelo.support.backends.openai_family import USUAL_URL
+
     parser_type = _DirectParser if direct_only else _InteractiveParser
     parser = parser_type(
         prog="melo", description="localmelo agent", add_help=not direct_only
@@ -1595,7 +1519,7 @@ def _build_parser(
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Your model server, e.g. http://127.0.0.1:8000/v1",
+        help=f"Your model server, e.g. {USUAL_URL}",
     )
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 
@@ -1652,15 +1576,6 @@ def _build_parser(
         help="Reflect between attempts (default), or run one attempt",
     )
     direct.add_argument(
-        "--reflection-gate",
-        choices=["flags", "utility", "patient"],
-        help="After a reflection, start the next attempt when it chooses continue "
-        "and its three checks hold (flags), or also require its utility "
-        "score to reach 0.1 (utility, the behavior before this option), or as "
-        "flags, but once per run also when the next step is not novel (patient, "
-        "default)",
-    )
-    direct.add_argument(
         "--captured-history",
         choices=["on", "off"],
         help="Store bounded, redacted captured tool results (default off)",
@@ -1673,30 +1588,10 @@ def _build_parser(
         "(default off)",
     )
     direct.add_argument(
-        "--fixed-prefix",
-        choices=["on", "off"],
-        help="Use a versioned run-frozen system prefix and local date (default on); "
-        "off sends the earlier requests",
-    )
-    direct.add_argument(
         "--window-eviction",
-        choices=["slide", "chunk", "boundary"],
+        choices=["chunk", "boundary"],
         help="How working memory drops old turns: chunk eight messages at a "
-        "time (default), slide one unit per step once full, or boundary, which "
-        "also drops at the end of an attempt",
-    )
-    direct.add_argument(
-        "--reflect-tool-guard",
-        choices=["on", "off"],
-        help="Reflection requests offer the plan's tools and end with a sentence "
-        "that asks for the JSON object, not a tool call (default on)",
-    )
-    direct.add_argument(
-        "--cache-layout",
-        choices=["v2", "v3"],
-        help="With the fixed prefix, v3 (default) appends a reflection once at the "
-        "attempt boundary, keeps the reflection request in the window and retries "
-        "an unreadable reflection on the same prefix; v2 sends the earlier requests",
+        "time (default), or boundary, which also drops at the end of an attempt",
     )
     direct.add_argument(
         "--window-messages",
@@ -1851,13 +1746,6 @@ def _build_parser(
         "(default 0.35; inert only for the task-local bm25/llm ranking)",
     )
     direct.add_argument(
-        "--admit-on-outcome",
-        choices=["on", "off"],
-        help="R6-lite: with a reasoning mode other than legacy, admit the final "
-        "attempt digest to long-term memory at the end of the run (default off); "
-        "inert in legacy",
-    )
-    direct.add_argument(
         "--keep-decision-text",
         action="store_true",
         help="R6-lite: also store the checked text of each admission decision "
@@ -1876,7 +1764,7 @@ def _build_parser(
             "interactive mode",
             "Options for bare melo, which opens the interactive UI on a terminal. "
             "It also takes --base-url, --chat-model, --workspace, --max-steps, "
-            "--attempt-policy, --reflection-gate, --builtins, --memory, "
+            "--attempt-policy, --builtins, --memory, "
             "--memory-dir, --request-timeout, --reasoning, --reasoning-field, "
             "--replay-turns, --note-writer, --retriever, --recall-*, "
             "--retrieval-extra-body and the --embedding-* options.",
@@ -1920,7 +1808,7 @@ def _build_parser(
             "--enable-playground",
             action="store_true",
             default=argparse.SUPPRESS,
-            help="Enable authenticated development playground routes",
+            help=argparse.SUPPRESS,
         )
         parser.add_argument(
             "--developer",
@@ -2302,8 +2190,6 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
-    if getattr(args, "enable_playground", False):
-        cfg._enable_playground = True
     _start_gateway(cfg)
 
 
@@ -2454,7 +2340,7 @@ def _build_direct_mode_agent(
     from localmelo.support import config
     from localmelo.support.backends.discovery import OPENAI_COMPATIBLE
     from localmelo.support.sessions.agents import (
-        CACHE_SETTINGS,
+        CONTEXT_SETTINGS,
         configured_attempt_options,
         configured_cache_options,
         configured_context_options,
@@ -2483,93 +2369,47 @@ def _build_direct_mode_agent(
         options = configured_context_options(
             budget_cfg,
             options or AgentOptions(),
-            {
-                name: getattr(args, name, None)
-                for name in ("context_window", "output_reserve", "safety_margin")
-            },
+            {name: getattr(args, name, None) for name in CONTEXT_SETTINGS},
         )
     except ValueError as exc:
         config_value_error(str(exc))
-    if not isinstance(budget_cfg.agent.fixed_prefix, bool):
-        config_value_error("[agent] fixed_prefix must be a boolean")
-    if not isinstance(budget_cfg.agent.reflect_tool_guard, bool):
-        config_value_error("[agent] reflect_tool_guard must be a boolean")
-    if budget_cfg.agent.window_eviction not in config.WINDOW_EVICTIONS:
-        config_value_error(
-            f"[agent] window_eviction {budget_cfg.agent.window_eviction!r} is not "
-            f"recognised. Must be one of {config.WINDOW_EVICTIONS}."
-        )
-    if budget_cfg.agent.cache_layout not in config.CACHE_LAYOUTS:
-        config_value_error(
-            f"[agent] cache_layout {budget_cfg.agent.cache_layout!r} is not "
-            f"recognised. Must be one of {config.CACHE_LAYOUTS}."
-        )
-    window = budget_cfg.agent.window_messages
-    if window is not None and (
-        isinstance(window, bool)
-        or not isinstance(window, int)
-        or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
-    ):
-        config_value_error(
-            f"[agent] window_messages must be an int from {WINDOW_MESSAGES_MIN} "
-            f"to {WINDOW_MESSAGES_MAX}, got {window!r}"
-        )
+    # The budget the run uses is the file's with the flags over it; the check
+    # of [agent] below, and the Agent's config, read it so.
+    for name in CONTEXT_SETTINGS:
+        setattr(budget_cfg.agent, name, getattr(options, name))
+    # --base-url skips validate_or_raise() below, so [agent] is checked here,
+    # once, for both cases.
+    if errors := budget_cfg.agent_errors():
+        config_value_error(errors[0])
     # A flag keeps its value; the others come from the config file, whose
     # absent keys are the defaults.
-    flagged = {name for name in CACHE_SETTINGS if getattr(args, name, None) is not None}
+    flagged = flag_options(args)
     options = configured_cache_options(
         budget_cfg,
         options,
         keep=flagged,
         backend=OPENAI_COMPATIBLE if base_url else None,
     )
-
-    if not isinstance(budget_cfg.agent.captured_history, bool):
-        config_value_error("[agent] captured_history must be a boolean")
-    if (
-        getattr(args, "captured_history", None) is None
-        and budget_cfg.agent.captured_history
-    ):
+    if "captured_history" not in flagged and budget_cfg.agent.captured_history:
         options = dataclasses.replace(options, captured_history=True)
-
-    if not isinstance(budget_cfg.agent.brief_items, bool):
-        config_value_error("[agent] brief_items must be a boolean")
-    if getattr(args, "brief_items", None) is None and budget_cfg.agent.brief_items:
+    if "brief_items" not in flagged and budget_cfg.agent.brief_items:
         options = dataclasses.replace(options, brief_items=True)
-
-    if not isinstance(budget_cfg.agent.lean_output, bool):
-        config_value_error("[agent] lean_output must be a boolean")
     # A task given on the command line (--brief included), not the `melo ""` loop.
     if budget_cfg.agent.lean_output and "".join(args.query):
         options = dataclasses.replace(options, lean_output=True)
-
-    if not isinstance(budget_cfg.agent.answer_on_stop, bool):
-        config_value_error("[agent] answer_on_stop must be a boolean")
     if options.answer_on_stop != budget_cfg.agent.answer_on_stop:
         options = dataclasses.replace(
             options, answer_on_stop=budget_cfg.agent.answer_on_stop
         )
-    calls = budget_cfg.agent.max_calls
-    if calls is not None and (
-        isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
-    ):
-        config_value_error(f"[agent] max_calls must be an int >= 2, got {calls!r}")
-    if calls is not None:
-        options = dataclasses.replace(options, max_calls=calls)
-
-    if not isinstance(budget_cfg.agent.confine_direct_runs, bool):
-        config_value_error("[agent] confine_direct_runs must be a boolean")
+    if budget_cfg.agent.max_calls is not None:
+        options = dataclasses.replace(options, max_calls=budget_cfg.agent.max_calls)
     # A plain direct run (a task or the `melo ""` loop); --brief follows confine_writes.
     if budget_cfg.agent.confine_direct_runs and getattr(args, "brief", None) is None:
         options = dataclasses.replace(options, confine_writes=True)
     try:
         options = configured_image_options(budget_cfg, options)
         options = configured_fallback_options(budget_cfg, options)
-        options = configured_attempt_options(
-            budget_cfg,
-            options,
-            {"attempt_policy"} if getattr(args, "attempt_policy", None) else set(),
-        )
+        options = configured_attempt_options(budget_cfg, options, flagged)
     except ValueError as exc:
         config_value_error(str(exc))
 
@@ -2616,8 +2456,6 @@ def _build_direct_mode_agent(
     from localmelo.support import config
 
     cfg = budget_cfg
-    for name in ("context_window", "output_reserve", "safety_margin"):
-        setattr(cfg.agent, name, getattr(options, name))
     if not cfg.is_configured:
         if getattr(args, "brief", None) is not None:
             raise _StartupConfigError(
@@ -2678,8 +2516,6 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
-    if getattr(args, "admit_on_outcome", None) is None and cfg.memory.admit_on_outcome:
-        options = dataclasses.replace(options, admit_on_outcome=True)
 
     # R5's [retrieval]: a value applies only when its flag is absent, and
     # the table is inert in legacy (decision 10).

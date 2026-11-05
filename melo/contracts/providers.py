@@ -36,11 +36,11 @@ LLM_REQUEST_EXTRA_BODY: contextvars.ContextVar[Mapping[str, Any]] = (
     contextvars.ContextVar("LLM_REQUEST_EXTRA_BODY", default=MappingProxyType({}))
 )
 
-# The call kinds: runs send "plan" and "reflect", Chat.estimate_steps sends
-# "estimate", melo-retrieve's retrieval requests "retrieve", and the review
-# of a step the rules left open "review" (#339). History's llm_calls rows and
-# melo-retrieve's reader of them share this vocabulary.
-LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate", "review")
+# The call kinds: runs send "plan" and "reflect", melo-retrieve's retrieval
+# requests "retrieve", and the review of a step the rules left open "review"
+# (#339). History's llm_calls rows and melo-retrieve's reader of them share
+# this vocabulary.
+LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "review")
 
 
 def thinking_disabled(body: Mapping[str, Any]) -> bool:
@@ -73,6 +73,8 @@ class ProviderError(Exception):
     ``retryable`` says whether sending the same request again may succeed:
     true for timeouts, transport errors and HTTP 429, 502, 503 and 504;
     false for every other error status and for a malformed response body.
+    ``detail`` is what the server said when the message does not carry it (a
+    streamed error names only the status); it is for reading, not for showing.
     """
 
     def __init__(
@@ -82,11 +84,13 @@ class ProviderError(Exception):
         status_code: int | None = None,
         retryable: bool = False,
         context_overflow: bool = False,
+        detail: str = "",
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
         self.context_overflow = context_overflow
+        self.detail = detail
 
 
 @dataclass(frozen=True)

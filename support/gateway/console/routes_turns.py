@@ -18,20 +18,26 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
+from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
     block_to_allow,
     go_ahead_text,
 )
-from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import TaskPolicyError
 from localmelo.support.gateway.task_store import TaskStoreError
+from localmelo.support.sessions.attachments import (
+    MAX_ATTACHMENTS,
+    MAX_TOTAL_BYTES,
+    TextAttachment,
+    compose_user_text,
+    snapshot,
+)
+from localmelo.support.sessions.display import short_title
+from localmelo.support.sessions.picture_input import MAX_PICTURES
 from localmelo.support.sessions.store import (
-    SessionBusyError,
-    SessionInfo,
-    SessionStoreError,
     TurnInfo,
     check_title,
 )
@@ -43,9 +49,10 @@ from localmelo.support.sessions.submissions import (
     check_submission,
 )
 
+from .asks import MAX_NOTE_CHARS
 from .bodies import Body
 from .errors import ApiError
-from .registry import STOP_REASON
+from .registry import STOP_REASON, TurnExtras
 from .shapes import submission_json, turn_json
 from .task_submissions import (
     conflict,
@@ -54,6 +61,7 @@ from .task_submissions import (
     started_echo,
     submission_of,
 )
+from .uploads import Staged, images_of
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -75,7 +83,10 @@ class _Attachment(Body):
 
 class TurnRequest(Body):
     text: str
+    # Text files the person added, read by the page (at most 8).
     attachments: list[_Attachment] = []
+    # Pictures the person added: ids from ``POST /api/uploads`` (at most 4).
+    images: list[str] = []
     client_request_id: str | None = None
     # The composer's Run as a task: the chat starts it as a task.
     as_task: bool = False
@@ -92,6 +103,15 @@ class RetryRequest(Body):
     turn_id: str
 
 
+class NoteRequest(Body):
+    """Words the person adds to a turn that runs, and the pictures that go with them."""
+
+    text: str
+    # Pictures the person added: ids from ``POST /api/uploads`` (at most 4).
+    images: list[str] = []
+    client_request_id: str | None = None
+
+
 class PatchRequest(Body):
     title: str | None = None
     workspace: str | None = None
@@ -100,8 +120,12 @@ class PatchRequest(Body):
 
 
 class CancelRequest(Body):
+    """A message to withdraw: what its send carried, so the same text is judged."""
+
     text: str
     attachments: list[_Attachment] = []
+    # The staged pictures the send named; only how many is read (the stand-in words of a message with no words).
+    images: list[str] = []
 
 
 class ApprovalAnswer(Body):
@@ -124,22 +148,51 @@ def _key(value: str | None) -> str | None:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-def _compose(request: TurnRequest | CancelRequest) -> str:
-    """The user text of a turn: the typed text, trimmed as the checker trims it.
-
-    The trim happens here, so the text the store judges by length, keeps in
-    a submission and gives the Agent is the one the checker approved.
-    """
-    text = request.text.strip()
-    if not text:
-        raise ApiError(400, "invalid_request", t("errors.blankMessage"))
-    if request.attachments:
+def _files(items: list[_Attachment]) -> list[TextAttachment]:
+    """The text files of a send, cleaned and checked; 400 for one the checker would refuse."""
+    attached: list[TextAttachment] = []
+    total = 0
+    if len(items) > MAX_ATTACHMENTS:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyFiles", n=MAX_ATTACHMENTS)
+        )
+    for item in items:
+        try:
+            file = snapshot(item.name, item.text)
+        except ValueError as exc:
+            raise ApiError(
+                400,
+                "invalid_request",
+                t("errors.fileRefused", name=item.name[:80], why=str(exc)),
+            ) from exc
+        total += len(file.text.encode("utf-8"))
+        attached.append(file)
+    if total > MAX_TOTAL_BYTES:
         raise ApiError(
             400,
             "invalid_request",
-            t("errors.noAttachments"),
+            t("errors.filesTooLarge", kb=MAX_TOTAL_BYTES // 1024),
         )
-    return text
+    return attached
+
+
+def _compose(request: CancelRequest) -> str:
+    """The user text a withdrawn send had: its words (or the stand-in for none) and its files.
+
+    The store compares this with what the send kept, so it is built as the
+    send builds it.
+    """
+    attached = _files(request.attachments)
+    if len(request.images) > MAX_PICTURES:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
+        )
+    words = request.text.strip()
+    if not words:
+        if not request.images and not attached:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        words = _marker(len(request.images), [file.name for file in attached])
+    return compose_user_text(words, attached)
 
 
 def _check_text(console: Console, text: str, session_id: str | None) -> str:
@@ -157,40 +210,66 @@ def _check_text(console: Console, text: str, session_id: str | None) -> str:
     return str(sanitized.query)
 
 
-def _turn_text(console: Console, request: TurnRequest, session_id: str | None) -> str:
-    """The composed text of a turn: checked, and trimmed by the checker."""
-    return _check_text(console, _compose(request), session_id)
+async def _staged(console: Console, ids: list[str]) -> list[Staged]:
+    """The staged pictures a message or a note names, checked.
+
+    400 for more than the limit, one named twice, or one gone from the stage;
+    409 ``model_text_only`` when the chat model is known not to read pictures.
+    """
+    if len(ids) > MAX_PICTURES:
+        raise ApiError(
+            400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
+        )
+    if len(set(ids)) != len(ids):
+        raise ApiError(400, "invalid_request", t("errors.pictureTwice"))
+    staged = console.pictures.resolve(ids)
+    if staged and await console.vision.reads() is False:
+        raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
+    return staged
 
 
-async def _store_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await one store call, mapping a store failure as 2.2 says."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
+class _Sent:
+    """A checked send: its words, the whole text a code rule reads, and what it carries."""
+
+    def __init__(self, words: str, whole: str, extras: TurnExtras) -> None:
+        self.words = words
+        self.whole = whole
+        self.extras = extras
 
 
-async def _sessions_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await a registry call, mapping the failures a turn can raise."""
-    try:
-        return await coro
-    except SessionBusyError as exc:
-        raise ApiError(409, "session_busy", t("errors.turnRunning")) from exc
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
+def _marker(pictures: int, files: list[str]) -> str:
+    """The words of a message sent with a picture or a file and no words."""
+    parts = []
+    if pictures:
+        parts.append(f"[{pictures} picture{'' if pictures == 1 else 's'}]")
+    if files:
+        parts.append(f"[attached: {', '.join(files)}]")
+    return " ".join(parts)
 
 
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    info: SessionInfo | None = await _store_call(
-        console, console.store.get_session(session_id), session_id
-    )
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
+async def _sent(
+    console: Console, request: TurnRequest, session_id: str | None
+) -> _Sent:
+    """The checked send for a turn request: its text, files and pictures.
+
+    400 for a file that is binary, too large or too many, a picture that is
+    gone from the stage or too many, and a text over the checker's limit; 409
+    ``model_text_only`` when the chat model is known not to read pictures.
+    """
+    attached = _files(request.attachments)
+    staged = await _staged(console, request.images)
+    words = request.text.strip()
+    if not words:
+        if not staged and not attached:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        words = _marker(len(staged), [file.name for file in attached])
+    words = _check_text(console, words, session_id)
+    whole = compose_user_text(words, attached)
+    if len(whole) > MAX_QUERY_LEN:
+        raise ApiError(
+            400, "invalid_request", t("errors.filesTooLong", n=MAX_QUERY_LEN)
+        )
+    return _Sent(words, whole, TurnExtras(tuple(attached), tuple(images_of(staged))))
 
 
 def _submission_error(exc: SubmissionError) -> ApiError:
@@ -247,7 +326,7 @@ async def _create_for_task(
     # a cancel may still overtake a create of a message while it builds.
     async with console.sessions.keyed(key), console.sessions.keyed(lock_name(key)):
         if key is not None:
-            found = await _store_call(console, console.store.get_submission(None, key))
+            found = await console.store.get_submission(None, key)
             try:
                 check_submission(found, composed)
             except SubmissionRepeated:
@@ -257,43 +336,33 @@ async def _create_for_task(
             made = await created(console, key, composed)
             if made is not None:
                 record, info = made
-                echo = await started_echo(console, record, info, text)
                 return JSONResponse(
                     content={
                         "session": console.session_body(info),
-                        "echo": echo,
+                        "echo": await started_echo(console, record, info, text),
                         "repeated": True,
                     }
                 )
-        entry, _ = await _sessions_call(
-            console,
-            console.sessions.create(body.workspace, None, mode=body.approvals),
+        entry, _ = await console.sessions.create(
+            body.workspace, None, mode=body.approvals
         )
         chat = entry.session_id
         try:
-            echo = await _store_call(
-                console,
-                console.front_for(chat).route(
-                    text, composed, as_task=True, key=None, create_key=key
-                ),
-                chat,
+            echo = await console.front_for(chat).route(
+                text, composed, as_task=True, key=None, create_key=key
             )
             if echo is None or echo.get("echo") != "started":
                 # The task did not start: its echo says why, and the chat has nothing.
                 raise ApiError(
                     400, "invalid_request", str((echo or {}).get("line") or "")
                 )
-            await _store_call(
-                console,
-                console.store.rename_session(chat, short_title(composed)),
-                chat,
-            )
+            await console.store.rename_session(chat, short_title(composed))
         except BaseException:
             if not await _admitted(console, chat, key):
                 with contextlib.suppress(Exception):
                     await console.sessions.delete(chat)
             raise
-        info = await _require_session(console, chat)
+        info = await console.require_session(chat)
         return JSONResponse(
             status_code=201,
             content={"session": console.session_body(info), "echo": echo},
@@ -327,26 +396,28 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def create_session(body: CreateRequest) -> JSONResponse:
         console.require_store()
         first: tuple[str, str] | None = None
+        sent: _Sent | None = None
         if body.turn is not None:
-            composed = _turn_text(console, body.turn, None)
-            first = (body.turn.text, composed)
+            sent = await _sent(console, body.turn, None)
+            first = (body.turn.text, sent.words)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
         if body.turn is not None and body.turn.as_task:
-            return await _create_for_task(console, body, composed, key)
+            assert sent is not None
+            if sent.extras.images:
+                raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
+            return await _create_for_task(console, body, sent.whole, key)
         try:
-            entry, turn = await _sessions_call(
-                console,
-                console.sessions.create(
-                    body.workspace,
-                    first,
-                    client_request_id=key,
-                    mode=body.approvals,
-                    admit=lambda: _refuse_task_key(console, key),
-                ),
+            entry, turn = await console.sessions.create(
+                body.workspace,
+                first,
+                client_request_id=key,
+                mode=body.approvals,
+                admit=lambda: _refuse_task_key(console, key),
+                extras=None if sent is None else sent.extras,
             )
         except SubmissionRepeated as exc:
-            info = await _require_session(console, exc.turn.session_id)
+            info = await console.require_session(exc.turn.session_id)
             return JSONResponse(
                 status_code=200,
                 content={
@@ -357,7 +428,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
-        info = await _require_session(console, entry.session_id)
+        info = await console.require_session(entry.session_id)
         content: dict[str, Any] = {"session": console.session_body(info)}
         if turn is not None:
             content.update(_turn_body(turn, None))
@@ -368,44 +439,45 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         # The session is judged first: a malformed id is 404, as it is on
         # every read of the same path, not the checker's 400.
-        info = await _require_session(console, session_id)
-        composed = _turn_text(console, body, session_id)
+        info = await console.require_session(session_id)
+        sent = await _sent(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
         if info.kind in ("front", "chat"):
+            pictured = bool(sent.extras.images)
+            if pictured and body.as_task:
+                raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
             # Code's rules first: a task to start or to change takes no model
             # call. A side chat has the same rules as the main chat, and its
-            # tasks are its own.
-            echo = await _store_call(
-                console,
-                console.front_for(session_id).route(
-                    body.text, composed, as_task=body.as_task, key=key
-                ),
-                session_id,
+            # tasks are its own. A message with a picture is a message to the
+            # model: no rule reads it, so none can swallow the picture.
+            echo = (
+                None
+                if pictured
+                else await console.front_for(session_id).route(
+                    body.text, sent.whole, as_task=body.as_task, key=key
+                )
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
             if console.asks.holds(session_id):
+                if pictured:
+                    raise ApiError(
+                        409, "chat_answering", t("errors.picturesWhileAnswering")
+                    )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
-                echo = await _store_call(
-                    console,
-                    console.asks.queue(session_id, body.text, composed, key),
-                    session_id,
-                )
+                echo = await console.asks.queue(session_id, body.text, sent.whole, key)
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:
-            turn, resumed = await _sessions_call(
-                console,
-                console.sessions.start_turn(
-                    session_id,
-                    body.text,
-                    composed,
-                    client_request_id=key,
-                ),
+            turn, resumed = await console.sessions.start_turn(
                 session_id,
+                body.text,
+                sent.words,
+                client_request_id=key,
+                extras=sent.extras,
             )
         except SubmissionRepeated as exc:
             return JSONResponse(
@@ -419,21 +491,25 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/sessions/{session_id}/retry")
     async def retry_turn(session_id: str, body: RetryRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
-        turn, resumed = await _sessions_call(
-            console,
-            console.sessions.retry(session_id, body.turn_id),
-            session_id,
-        )
+        await console.require_session(session_id)
+        # A turn that carried pictures is not sent again to a model known not to
+        # read them (the turn that was refused for them, for one): nothing is undone.
+        newest = await console.store.list_turns(session_id, limit=1)
+        if (
+            newest
+            and newest[-1].id == body.turn_id
+            and await console.store.turn_images(session_id, newest[-1].turn)
+            and await console.vision.reads() is False
+        ):
+            raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
+        turn, resumed = await console.sessions.retry(session_id, body.turn_id)
         return JSONResponse(status_code=202, content=_turn_body(turn, resumed))
 
     @app.post("/api/sessions/{session_id}/undo")
     async def undo_turn(session_id: str, body: RetryRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
-        undone = await _sessions_call(
-            console, console.sessions.undo(session_id, body.turn_id), session_id
-        )
+        await console.require_session(session_id)
+        undone = await console.sessions.undo(session_id, body.turn_id)
         return JSONResponse(content={"turn_id": undone.id, "undone": True})
 
     @app.post("/api/turns/{turn_id}/cancel")
@@ -448,9 +524,53 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "turn_not_running",
                 t("errors.turnNotRunning"),
             )
-        return JSONResponse(
-            status_code=202, content={"turn_id": turn_id, "cancelling": True}
+        # Words added to the turn that its run never read do not start another
+        # turn after a Stop: they go back to the composer.
+        unread = await console.asks.drop_notes(entry.session_id, turn_id)
+        content: dict[str, Any] = {"turn_id": turn_id, "cancelling": True}
+        if unread:
+            content["unread_notes"] = unread
+        return JSONResponse(status_code=202, content=content)
+
+    @app.post("/api/turns/{turn_id}/notes")
+    async def add_note(turn_id: str, body: NoteRequest) -> JSONResponse:
+        """Add words, and pictures, to a turn that runs: its run reads them at its next step (202).
+
+        If the turn ends before another step, they run as the chat's next turn.
+        A note may carry pictures on the terms of a message: the same kinds and
+        limits, and no words are needed with a picture. 409 ``turn_not_running``
+        when the turn is not running, or is being stopped; a client then sends
+        the words as a message.
+        """
+        console.require_store()
+        key = _key(body.client_request_id)
+        repeated = console.asks.noted(turn_id, key)
+        if repeated is not None:
+            return JSONResponse(status_code=202, content={"note": repeated})
+        entry = console.sessions.find_turn(turn_id)
+        if entry is None:
+            raise ApiError(409, "turn_not_running", t("errors.turnNotRunning"))
+        info = await console.require_session(entry.session_id)
+        current = entry.runner.current_turn
+        if info.kind not in ("front", "chat") or (
+            current is not None and current.origin
+        ):
+            raise ApiError(409, "not_your_turn", t("errors.noteInternalTurn"))
+        staged = await _staged(console, body.images)
+        text = body.text.strip()
+        if not text and not staged:
+            raise ApiError(400, "invalid_request", t("errors.blankMessage"))
+        if len(text) > MAX_NOTE_CHARS:
+            raise ApiError(
+                400, "invalid_request", t("errors.noteTooLong", n=MAX_NOTE_CHARS)
+            )
+        # The words a picture stands in for when there are none, as a message has.
+        words = text or _marker(len(staged), [])
+        composed = _check_text(console, words, entry.session_id)
+        note = await console.asks.add_note(
+            entry.session_id, turn_id, text, composed, key, staged
         )
+        return JSONResponse(status_code=202, content={"note": note})
 
     async def _cancel_by_key(
         scope: str | None, client_request_id: str, body: CancelRequest
@@ -460,7 +580,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         assert key is not None
         composed = _compose(body)
         if scope is not None:
-            await _require_session(console, scope)
+            await console.require_session(scope)
         # A key that made a chat for a task is stopped with the task, and a cancel
         # waits for a create of the same key that is under way.
         async with console.sessions.keyed(lock_name(key) if scope is None else None):
@@ -490,10 +610,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console: Console, scope: str | None, key: str, composed: str
     ) -> JSONResponse:
         try:
-            submission = await _store_call(
-                console,
-                console.store.withdraw_submission(scope, key, user_text=composed),
-                scope,
+            submission = await console.store.withdraw_submission(
+                scope, key, user_text=composed
             )
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
@@ -582,7 +700,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.patch("/api/sessions/{session_id}")
     async def patch_session(session_id: str, body: PatchRequest) -> JSONResponse:
         console.require_store()
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         if info.kind == "task":
             raise ApiError(
                 409,
@@ -600,17 +718,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             except ValueError as exc:
                 raise ApiError(400, "invalid_request", str(exc)) from exc
         if body.workspace is not None:
-            await _sessions_call(
-                console,
-                console.sessions.change_workspace(session_id, body.workspace),
-                session_id,
-            )
+            await console.sessions.change_workspace(session_id, body.workspace)
         if body.approvals is not None:
-            await _sessions_call(
-                console,
-                console.sessions.set_mode(session_id, body.approvals),
-                session_id,
-            )
+            await console.sessions.set_mode(session_id, body.approvals)
         if title is not None:
             # 2.10 lists PATCH among the lock holders; the workspace change
             # takes the lock itself, so a title alone takes it here.
@@ -620,41 +730,31 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 else contextlib.nullcontext()
             )
             async with locked:
-                renamed = await _store_call(
-                    console,
-                    console.store.rename_session(session_id, title),
-                    session_id,
-                )
+                renamed = await console.store.rename_session(session_id, title)
             if not renamed:
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         return JSONResponse(content={"session": console.session_body(info)})
 
     @app.post("/api/sessions/{session_id}/blocks/{request_id}/allow")
     async def allow_block(session_id: str, request_id: str) -> JSONResponse:
         """Allow once a step auto mode blocked, and ask melo to go ahead (#339)."""
         console.require_store()
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         if info.kind == "task":
             raise ApiError(409, "task_session_read_only", t("errors.taskChange"))
         if info.kind not in ("chat", "front"):
             raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         try:
-            key, categories, tool = await _store_call(
-                console,
-                block_to_allow(
-                    console.store,
-                    session_id,
-                    request_id,
-                    lambda key: console.sessions.allowance_live(session_id, key),
-                ),
+            key, categories, tool = await block_to_allow(
+                console.store,
                 session_id,
+                request_id,
+                lambda key: console.sessions.allowance_live(session_id, key),
             )
             text = _check_text(console, go_ahead_text(categories), session_id)
-            turn, until = await _sessions_call(
-                console,
-                console.sessions.allow_once(session_id, key, categories, text, tool),
-                session_id,
+            turn, until = await console.sessions.allow_once(
+                session_id, key, categories, text, tool
             )
         except BlockError as exc:
             raise ApiError(exc.status, exc.code, exc.message) from exc
@@ -671,11 +771,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         # One transition: its unfinished tasks, chores and waiting cards are the
         # main chat's when it is gone.
-        await _sessions_call(
-            console,
-            console.delete_chat(session_id, forget_notes=notes == "forget"),
-            session_id,
-        )
+        await console.delete_chat(session_id, forget_notes=notes == "forget")
         return Response(status_code=204)
 
 

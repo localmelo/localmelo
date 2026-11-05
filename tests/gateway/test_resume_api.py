@@ -32,6 +32,7 @@ from localmelo.support.gateway.workers import (
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
+from localmelo.tests.gateway.conftest import seed_process
 
 OLD_BOOT = "11111111-1111-1111-1111-111111111111"
 NEW_BOOT = "22222222-2222-2222-2222-222222222222"
@@ -104,7 +105,8 @@ async def _started(
         _capture=capture,
     )
     for pgid, leader, boot, token in processes:
-        await recovery.record_process(
+        await seed_process(
+            workers.store,
             task.task_id,
             execution_id="exec-1",
             pgid=pgid,
@@ -832,7 +834,8 @@ async def test_stale_generation_or_evidence_refuses_the_token(
     token = preview.value.token
     # A changed evidence identity (a newly recorded group) bumps the CAS and
     # must invalidate the token rather than silently re-authorize it.
-    await RecoveryStore(workers.store).record_process(
+    await seed_process(
+        workers.store,
         task_id,
         execution_id="exec-1",
         pgid=8765,

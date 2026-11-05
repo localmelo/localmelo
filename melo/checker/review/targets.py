@@ -236,11 +236,6 @@ def named_hosts(words: str) -> list[str]:
     return found
 
 
-def bare_words(words: str) -> set[str]:
-    """The words of *words* as written, lower case, without the punctuation around them."""
-    return {w.casefold() for w in (_strip(w) for w in _norm(words).split()) if w}
-
-
 # A word that says where a thing is, not what it is: "old.txt in Documents".
 _PLACE_BEFORE: Final = (
     r"(?:in|inside|within|from|under|beneath|below|of|at|on|into)\s+"

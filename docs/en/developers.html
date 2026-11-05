@@ -112,7 +112,7 @@
         <ul>
           <li><code>uv</code> builds <code>.venv/</code> from <code>uv.lock</code>, with Python 3.13 from <code>.python-version</code>; localmelo supports 3.11 or later.</li>
           <li><code>--extra dev</code> adds pytest, ruff, black, mypy and pre-commit; <code>--extra gateway</code> adds FastAPI and uvicorn.</li>
-          <li><code>uv run pre-commit install</code> adds hooks that run ruff, black, mypy and the whole suite on every commit.</li>
+          <li><code>uv run pre-commit install</code> adds hooks that run ruff, black, mypy and the tests a change affects (<code>pytest --testmon</code>) on every commit.</li>
         </ul>
       </section>
 
@@ -158,7 +158,7 @@
               <tr><td><code>tests/sessions</code></td><td>Conversations in SQLite: the store, the runner, resume, restarts, approvals and the event window</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/gateway</code></td><td>Sessions, the HTTP API, the <code>Host</code> and <code>Origin</code> checks and the web workspace; the <code>.mjs</code> files test the workspace's JavaScript</td><td><code>dev</code> and <code>gateway</code>; Node for the <code>.mjs</code> files</td></tr>
               <tr><td><code>tests/integration</code></td><td>Several parts together</td><td><code>dev</code> and <code>gateway</code></td></tr>
-              <tr><td><code>tests/smoke</code></td><td>Offline tests of the smoke tools (parsing, metrics, logging), plus the opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server for that file</td></tr>
+              <tr><td><code>tests/smoke</code></td><td>The opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server</td></tr>
             </tbody>
           </table>
         </div>
@@ -168,7 +168,6 @@
         <!-- usage:dev-smoke --><figure class="usage" aria-label="Real-backend smoke tests" data-copy="LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q"><div class="usage-bar"><span class="usage-title">Real-backend smoke tests</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="f">LOCALMELO_SMOKE</span><span class="x">=</span><span class="a">1</span> <span class="c">uv</span> <span class="s">run</span> <span class="c">pytest</span> <span class="f">-m</span> <span class="a">smoke_backend</span> <span class="a">tests/<wbr>smoke/<wbr>test_backend_smoke.py</span> <span class="f">-q</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>They ask Ollama on <code>127.0.0.1:11434</code> and MLC LLM on <code>127.0.0.1:8400</code>, and skip a server that does not answer.</li>
-          <li><code class="wrap">tests/smoke/core_loop_test.py</code> runs longer memory scenarios; see its <a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">README</a>.</li>
         </ul>
       </section>
 
@@ -196,40 +195,37 @@
         </p>
         <ol>
           <li>
-            Write a class in <code>support/backends/local/</code> or
-            <code>support/backends/cloud/</code> that implements
-            <code>BaseBackend</code> (<code>support/backends/base.py</code>):
-            <code>key</code>, <code>display_name</code>, <code>validate</code>,
-            <code>validate_embedding</code>, <code>has_embedding</code>,
-            <code>build_chat_provider</code> and <code>build_embedding_provider</code>.
-            Most servers share the OpenAI-compatible code in
-            <code>support/backends/openai_compat.py</code>.
-          </li>
-          <li>
-            Register it in <code>ensure_defaults_registered()</code> in
+            Add its row. A model server on this computer is a
+            <code>LocalBackend(...)</code> row in <code>LOCAL_SERVERS</code> in
+            <code>support/backends/openai_family.py</code>: its key, name, line
+            in the setup lists, default address and suggested models. A hosted
+            service is a <code>Preset</code> in <code>support/hosted.py</code>
+            whose id is its backend: address, key variable and suggested
+            models. A server that needs its own behaviour subclasses
+            <code>LocalBackend</code> (Ollama's native chat, oMLX's label). A
+            backend that does not speak the OpenAI API implements
+            <code>BaseBackend</code> (<code>support/backends/base.py</code>) and
+            is registered in <code>ensure_defaults_registered()</code> in
             <code>support/backends/registry.py</code>.
           </li>
           <li>
-            Add its key to <code>VALID_CHAT_BACKENDS</code> in
-            <code>support/config.py</code>, and to
-            <code>VALID_EMBEDDING_BACKENDS</code> if it serves embeddings.
+            Give it a config table: a field on <code>Config</code> named by its
+            key (<code>LocalBackendConfig</code> or <code>CloudVendorConfig</code>).
+            The valid backends, the setup lists, the Settings page, the
+            banner, the model-server probe and the failure hints all derive
+            from the row. When you change the schema, add a migration in
+            <code>load()</code> rather than break existing config files.
           </li>
           <li>
-            Give it a config table: a field on <code>Config</code> and its name
-            in <code>_LOCAL_SECTIONS</code> or <code>_CLOUD_SECTIONS</code>, so
-            that <code>load()</code> and <code>save()</code> handle it. When
-            you change the schema, add a migration in <code>load()</code>
-            rather than break existing config files.
+            Optionally, give the Settings list its words in
+            <code>settings.backend.&lt;key&gt;</code> in both catalogs under
+            <code>support/gateway/static/i18n/</code>; without them it shows
+            the setup list's line.
           </li>
           <li>
-            Add it to the setup wizard in <code>support/onboard.py</code>:
-            <code>CHAT_BACKENDS</code>, <code>EMBEDDING_BACKENDS</code>, the
-            defaults (<code>_LOCAL_DEFAULTS</code>, <code>_CLOUD_DEFAULTS</code>
-            or <code>_EMBEDDING_DEFAULTS</code>) and <code>_CHAT_SETUP</code>.
-          </li>
-          <li>
-            Add tests in <code>tests/backends/</code>. Mock the connectivity
-            probes: never let a test contact a real server.
+            Add tests only for what is new: every row already runs through
+            <code>tests/backends/test_openai_family.py</code>. Mock the
+            connectivity probes: never let a test contact a real server.
           </li>
           <li>
             Document it: the backend table and an example in
@@ -243,7 +239,8 @@
         <p>
           A built-in is a <code>ToolDef</code> (a name, a description, JSON
           parameters and semantic tags) and an async function that returns
-          text. Both live in <code>melo/executor/builtins.py</code>, and the
+          text and takes the workspace root first. Both live in
+          <code>melo/executor/builtins.py</code>, and the
           <code>_builtin()</code> decorator adds the pair to
           <code>BUILTINS</code>. <code>register_builtins()</code> in
           <code>melo/executor/__init__.py</code> registers every one with the
@@ -271,10 +268,13 @@
             from the table.
           </li>
           <li>
-            If it needs a workspace root, add its rooted variant to
-            <code>rooted_builtins()</code> in the same file. A tool that starts
-            a child process appends its status to <code>TOOL_EXIT_CODE</code>,
-            so <code>tool.finished</code> carries <code>exit_code</code>.
+            The function's first parameter is the workspace root, or
+            <code>None</code> for a run without a workspace (a tool that does
+            not use it ignores it), and the function is written once for both:
+            <code>builtin_callables()</code> binds the root before the
+            model's arguments. A tool that starts a child process appends its
+            status to <code>TOOL_EXIT_CODE</code>, so
+            <code>tool.finished</code> carries <code>exit_code</code>.
           </li>
           <li>
             Add tests in <code>tests/executor/</code>.

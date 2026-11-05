@@ -59,16 +59,6 @@ def test_web_search_is_off_by_default_and_a_default_config_says_nothing_of_it() 
     assert (key.default, key.file, key.section) == (False, True, "web")
 
 
-def test_turning_it_on_is_saved_loaded_and_checked() -> None:
-    cfg = _cfg(search=True)
-    config.save(cfg)
-    assert "[web]\nsearch = true" in Path(config.config_path()).read_text()
-    assert config.load().web.search is True
-    cfg.web.search = "yes"  # type: ignore[assignment]
-    assert any("[web] search must be a bool" in e for e in cfg.setting_errors())
-    assert any("[web] search must be a bool" in e for e in cfg.validate())
-
-
 def test_the_developer_settings_round_trip_and_are_checked() -> None:
     cfg = _cfg(search_order=["baidu", "browser"], search_count=3)
     config.save(cfg)
@@ -195,7 +185,7 @@ async def test_the_terminal_passes_the_setting(
         factory._live.clear()
         await factory.build()
     assert seen == [True, False]
-    assert "web_search=loaded.web.search is True" in inspect.getsource(launch)
+    assert "web_search=session_config.web.search is True" in inspect.getsource(launch)
 
 
 async def test_with_the_switch_off_nothing_is_built_and_no_request_goes_out(

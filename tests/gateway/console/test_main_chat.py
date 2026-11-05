@@ -466,7 +466,7 @@ async def test_a_card_title_is_short_and_a_failed_card_gives_the_reason(
         record, _ = await console.workers.create(
             {"objective": long, "request_key": "k"}
         )
-        assert record["title"] == "Fix this today: in tests/cli/test_e2e_pty.py…"
+        assert record["title"] == "Fix this today: in test_e2e_pty.py…"
         # A title stored long before (cut mid-word at 60) is cut at a word on the card.
         await store.rename_session(record["task_id"], long[:60])
         started = await store.begin_turn(record["task_id"], long, holder=HOLDER)
@@ -484,7 +484,7 @@ async def test_a_card_title_is_short_and_a_failed_card_gives_the_reason(
         )
         card = (await client.get("/api/sessions")).json()["main"]["last_card"]
         assert card["state"] == "failed"
-        assert card["title"] == "Fix this today: in tests/cli/test_e2e_pty.py…"
+        assert card["title"] == "Fix this today: in test_e2e_pty.py…"
         assert card["line"] == (
             "Could not get an answer from the model server: connection refused"
         )

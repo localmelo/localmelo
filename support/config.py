@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import json
 import math
 import os
@@ -11,7 +12,9 @@ import re
 import stat
 import tempfile
 import tomllib
-from collections.abc import Mapping
+import types
+import typing
+from collections.abc import Callable, Container, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -27,6 +30,7 @@ from localmelo.melo.schema import (
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
 )
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 
 
 class ConfigError(Exception):
@@ -51,23 +55,15 @@ def config_path() -> str:
     return os.path.expanduser(CONFIG_PATH)
 
 
-VALID_CHAT_BACKENDS = (
-    "mlc",
-    "ollama",
-    "vllm",
-    "sglang",
-    "openai",
-    "gemini",
-    "anthropic",
-    "nvidia",
-)
-VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
+# The backends, from the rows of support/backends/openai_family.py: each is also a
+# ``[<key>]`` section of Config.
+VALID_CHAT_BACKENDS = (*LOCAL_BACKENDS, *CLOUD_BACKENDS)
+VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
 # Another spelling of "vllm" that a config file may use for either backend.
 OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
-WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
-CACHE_LAYOUTS = ("v2", "v3")
+WINDOW_EVICTIONS = ("chunk", "boundary")
 TOOL_IMAGES = ("auto", "on", "off")
 EMPTY_REPLY_FALLBACKS = ("on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
@@ -99,8 +95,8 @@ MEMORY_EXCERPT_OPEN = ("off", "on")
 MEMORY_RECALL_SOURCE = ("turns", "items")
 MEMORY_OPEN_SOURCES = ("off", "on")
 # Whether the list form's guide line also tells the model to say it has no record of
-# what a question names that none of the listed lines mention: see
-# MemoryConfig.premise_check.
+# what a question names that none of the listed lines mention (on, the default; off
+# is the developer comparison): see MemoryConfig.premise_check.
 MEMORY_PREMISE_CHECK = ("off", "on")
 MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # How many windows of one ingest the encoder is asked for at once: see
@@ -110,6 +106,11 @@ MEMORY_COMPRESS_PARALLEL = (1, 8)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
+# How recall looks wider for a question that counts, totals or compares, and the
+# vector bar it uses then: see MemoryConfig.gather and gather_min_cosine.
+MEMORY_GATHER = ("off", "wide", "guide")
+MEMORY_GATHER_DEFAULT = "guide"
+MEMORY_GATHER_MIN_COSINE = (0.20, 0.55)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
 CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
@@ -127,30 +128,6 @@ MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
 MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
-RECALL_KEYS = (
-    "recall_records",
-    "recall_docs",
-    "recall_chars",
-    "recall_notes",
-    "search_when_empty",
-    "recall_min_cosine",
-    "recall_min_coverage",
-    "recall_item_chars",
-    "recall_excerpt",
-    "recall_form",
-    "recall_list_max",
-    "recall_open_chars",
-    "excerpt_open",
-    "recall_source",
-    "open_sources",
-    "premise_check",
-    "compress_at_chars",
-    "compress_parallel",
-    "compress_cache",
-    "note_gate",
-    "note_min_cosine",
-    "followup_query",
-)
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
 RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
 RECALL_PLACEMENTS = ("tool", "message")
@@ -293,10 +270,7 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
-    fixed_prefix: bool = True  # stable prompt prefix; false is the old request
-    window_eviction: str = "chunk"  # slide | chunk | boundary
-    reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
-    cache_layout: str = "v3"  # v2 | v3 (the reflection layout; needs fixed_prefix)
+    window_eviction: str = "chunk"  # chunk | boundary
     # Working window cap, 8-256; None: default_window_messages() of the backend.
     window_messages: int | None = None
     context_window: int | None = None
@@ -348,9 +322,6 @@ class AgentConfig:
         return default_window_messages(backend)
 
 
-IMAGE_KEYS = ("tool_images", "tool_images_keep", "tool_images_retire")
-
-
 def tool_images_errors(agent: AgentConfig) -> list[str]:
     """What is wrong with ``[agent] tool_images`` and its two counts."""
     errors: list[str] = []
@@ -359,9 +330,9 @@ def tool_images_errors(agent: AgentConfig) -> list[str]:
             f"[agent] tool_images {agent.tool_images!r} is not recognised. "
             f"Must be one of {TOOL_IMAGES}."
         )
-    for name in IMAGE_KEYS[1:]:
+    for name in ("tool_images_keep", "tool_images_retire"):
         value = getattr(agent, name)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        if value < 1:
             errors.append(f"[agent] {name} must be an int >= 1, got {value!r}")
     return errors
 
@@ -387,12 +358,12 @@ def default_window_messages(backend: str) -> int:
     window is measured there. An explicit ``[agent] window_messages`` or
     ``--window-messages`` always wins.
     """
-    return SHORT_TERM_MAX if backend in _CLOUD_SECTIONS else LOCAL_WINDOW_MESSAGES
+    return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else LOCAL_WINDOW_MESSAGES
 
 
 def window_reason(backend: str) -> str:
     """Why the default window of *backend* is what it is: ``cloud`` or ``local server``."""
-    return "cloud" if backend in _CLOUD_SECTIONS else "local server"
+    return "cloud" if backend in CLOUD_BACKENDS else "local server"
 
 
 def window_default_label(backend: str) -> str:
@@ -471,9 +442,9 @@ class MemoryConfig:
     ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
-    ``premise_check``, ``off`` (the default) or ``on``, adds one sentence to the
-    line above the list form's lines that tells the model to say first that it has
-    no record of a person, thing, place or role the question names when none of the
+    ``premise_check``, ``on`` (the default) or ``off``, ends the line above the list
+    form's lines with one sentence that tells the model to say first that it has no
+    record of a person, thing, place or role the question names when none of the
     lines mention it, and not to answer from something similar (it has no effect
     on the excerpt form);
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
@@ -495,12 +466,22 @@ class MemoryConfig:
     with: ``recent`` (the default) the message and the user's words of the chat's
     last two turns that the model still shows, or ``message`` the message's own
     words, as recall did before; with ``recent`` the first message of a new chat
-    that has no content recalls nothing. ``project_instructions = "off"`` stops a
+    that has no content recalls nothing. Two more are for questions about the person's
+    own life that count, total or compare across things (#428), and apply to
+    ``recall_form = "list"``.
+    ``gather``, ``guide`` (the default: for such a question the block's vector bar is
+    the lower of ``recall_min_cosine`` and ``gather_min_cosine``, every list-form
+    ``search_memory`` uses that lower bar, and one more sentence under the list says to
+    open every item that may belong and to search again for each kind not listed yet),
+    ``wide`` (the lower bar without the sentence) or ``off`` (recall as before; a
+    message that does not ask to count, total or compare is recalled for the same way
+    under every value); ``gather_min_cosine`` (0.20-0.55, 0.40 by default) is that
+    lower bar.
+    ``project_instructions = "off"`` stops a
     task that the person made from reading the instruction file of its folder (``AGENTS.md``,
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
-    admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
@@ -521,7 +502,7 @@ class MemoryConfig:
     excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
-    premise_check: str = "off"  # off | on: the list guide asks for "no record" first.
+    premise_check: str = "on"  # on | off: the list guide asks for "no record" first.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
     compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
@@ -530,6 +511,8 @@ class MemoryConfig:
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
     followup_query: str = "recent"  # recent | message: what "continue" searches with.
+    gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
+    gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -561,26 +544,34 @@ class SchedulerConfig:
     lock_gate: str = "record"  # record | wait
 
 
-BROWSER_DRIVERS = ("off", "safari-automation")
+BROWSER_DRIVERS = ("off", "safari-automation", "chrome")
 
 
 @dataclass
 class BrowserConfig:
     """The ``[browser]`` table: whether melo may read web pages in a browser.
 
-    ``driver`` is ``off`` (the default, no browser tools) or ``safari-automation``
-    (Safari's automation windows). Only the terminal chat and the console offer it.
+    ``driver`` is ``off`` (the default, no browser tools), ``safari-automation``
+    (Safari's automation windows, which come to the front) or ``chrome`` (Google
+    Chrome in the background, with no window and a profile of melo's own). Only
+    the terminal chat and the console offer it.
     ``keep_tabs`` leaves the tabs melo opened in the window when a chat ends or
     sits idle; by default melo closes them. ``app_windows`` (on by default) lets
     melo see a window another app opens after its own act in the browser, such
     as a chat app's sign-in window, and answer it with the person's say, when the
     desktop control helper is installed; without the helper melo still says which
     app came to the front (:mod:`localmelo.support.browser.desktop`).
+    ``live`` (on by default) lets the console and the app show the Chrome browser
+    to the person while melo works (a developer option; off refuses the view),
+    and ``live_fps`` (1 to 60, default 15) holds the pictures of that view to that
+    many a second.
     """
 
-    driver: str = "off"  # off | safari-automation
+    driver: str = "off"  # off | safari-automation | chrome
     keep_tabs: bool = False
     app_windows: bool = True
+    live: bool = True
+    live_fps: int = 15
 
 
 # The most folders ``[workspace] extra_folders`` keeps.
@@ -724,7 +715,6 @@ class Config:
     # Configuration only: no price is bundled.
     pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
-    _enable_playground: bool = field(default=False, repr=False, compare=False)
     # ``-X`` values applied by ``load()``: key -> (what the file had, what is set).
     _overridden: dict[str, tuple[Any, Any]] = field(
         default_factory=dict, repr=False, compare=False
@@ -755,9 +745,45 @@ class Config:
         except KeyError:
             return False
 
+    def use_chat_server(
+        self,
+        url: str,
+        model: str,
+        *,
+        ollama: bool = False,
+        embedding_model: str | None = None,
+    ) -> None:
+        """Put the chat on the server at *url*, as the first run and ``/backend`` save it.
+
+        *ollama* (the server answered like Ollama) makes the chat backend
+        ``ollama``, which chats on Ollama's native API; otherwise it is
+        ``vllm``, the key for any OpenAI-compatible server. With
+        *embedding_model*, the same table's embedding URL and model are set too.
+        A file's ``omlx`` spelling stays while the chat server is the same. The
+        other values stay. Nothing is written to disk.
+        """
+        if ollama or self.chat_backend != "vllm" or self.vllm.chat_url != url:
+            self.chat_alias = ""  # the file's "omlx" named another server
+        self.chat_backend = "ollama" if ollama else "vllm"
+        section = getattr(self, self.chat_backend)
+        section.chat_url, section.chat_model = url, model
+        if embedding_model is not None:
+            self.embedding_alias = ""
+            self.embedding_backend = self.chat_backend
+            section.embedding_url, section.embedding_model = url, embedding_model
+
     def validate(self) -> list[str]:
-        """Return a list of validation errors. Empty list means valid."""
-        errors: list[str] = []
+        """Return a list of validation errors. Empty list means valid.
+
+        A value of the wrong kind is reported alone, first: the checks below
+        compare values and would otherwise stop on it.
+        """
+        # [cli] is a display preference: like [sessions] resume_mode, a bad
+        # value warns and falls back in the interactive UI (cli_errors()), so
+        # direct mode and the gateway never fail on it.
+        if errors := self._type_errors(skip=_FALLBACK_SECTIONS):
+            return errors
+        errors = []
         errors.extend(self._validate_agent())
         errors.extend(self._validate_retrieval())
         errors.extend(self._validate_memory())
@@ -765,11 +791,7 @@ class Config:
         errors.extend(self._validate_browser())
         errors.extend(self._validate_tools())
         errors.extend(self._validate_web())
-        errors.extend(self._validate_tasks())
         errors.extend(self._validate_chat())
-        # [cli] is a display preference: like [sessions] resume_mode, a bad
-        # value warns and falls back in the interactive UI (cli_errors()), so
-        # direct mode and the gateway never fail on it.
         errors.extend(self._validate_gateway_workspace())
 
         # -- chat_backend validation --
@@ -816,7 +838,7 @@ class Config:
             )
 
         # -- Chat request timeout --
-        errors.extend(self._validate_request_timeout())
+        errors.extend(self.validate_request_timeout())
 
         # -- Gateway validation --
         if not self.gateway_port_ok:
@@ -832,12 +854,8 @@ class Config:
         return [] if problem is None else [f"[gateway] workspace: {problem}"]
 
     def _validate_memory(self) -> list[str]:
-        """``[memory]`` holds bools and a known retriever."""
-        errors = [
-            f"[memory] {name} must be a bool, got {value!r}"
-            for name in ("admit_on_outcome", "across_chats", "keep_statements")
-            if not isinstance(value := getattr(self.memory, name), bool)
-        ]
+        """``[memory]`` holds known values inside their documented ranges."""
+        errors: list[str] = []
         if self.memory.retriever not in MEMORY_RETRIEVERS:
             errors.append(
                 f"[memory] retriever {self.memory.retriever!r} is not "
@@ -848,16 +866,9 @@ class Config:
                 f"[memory] sleep {self.memory.sleep!r} is not recognised. "
                 f"Must be one of {MEMORY_SLEEP}."
             )
-        if (
-            not isinstance(self.memory.sleep_lock, str)
-            or "\x00" in self.memory.sleep_lock
-        ):
-            errors.append("[memory] sleep_lock must be a path string without NUL")
-        if (
-            not isinstance(self.memory.compress_cache, str)
-            or "\x00" in self.memory.compress_cache
-        ):
-            errors.append("[memory] compress_cache must be a path string without NUL")
+        for name in ("sleep_lock", "compress_cache"):
+            if "\x00" in getattr(self.memory, name):
+                errors.append(f"[memory] {name} must be a path string without NUL")
         for name, (low, high) in (
             ("recall_records", MEMORY_RECALL_RECORDS),
             ("recall_docs", MEMORY_RECALL_DOCS),
@@ -869,9 +880,7 @@ class Config:
             ("compress_parallel", MEMORY_COMPRESS_PARALLEL),
         ):
             value = getattr(self.memory, name)
-            if not isinstance(value, int) or isinstance(value, bool):
-                errors.append(f"[memory] {name} must be a whole number, got {value!r}")
-            elif not low <= value <= high:
+            if not low <= value <= high:
                 errors.append(
                     f"[memory] {name} must be from {low} to {high}, got {value}"
                 )
@@ -879,11 +888,10 @@ class Config:
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
             ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
+            ("gather_min_cosine", MEMORY_GATHER_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
-            if not isinstance(value, int | float) or isinstance(value, bool):
-                errors.append(f"[memory] {name} must be a number, got {value!r}")
-            elif not floor <= value <= ceiling:
+            if not floor <= value <= ceiling:
                 errors.append(
                     f"[memory] {name} must be from {floor} to {ceiling}, got {value}"
                 )
@@ -895,6 +903,7 @@ class Config:
             ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
             ("followup_query", MEMORY_FOLLOWUP_QUERY),
+            ("gather", MEMORY_GATHER),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
             ("premise_check", MEMORY_PREMISE_CHECK),
@@ -909,40 +918,32 @@ class Config:
         return errors
 
     def _validate_browser(self) -> list[str]:
-        """``[browser] driver`` names a driver; ``keep_tabs`` and ``app_windows`` are true or false."""
+        """``[browser] driver`` names a driver; ``live_fps`` is from 1 to 60."""
         errors = []
         if self.browser.driver not in BROWSER_DRIVERS:
             errors.append(
                 f"[browser] driver={self.browser.driver!r} is not one of {BROWSER_DRIVERS}"
             )
-        for name in ("keep_tabs", "app_windows"):
-            value = getattr(self.browser, name)
-            if not isinstance(value, bool):
-                errors.append(f"[browser] {name}={value!r} must be true or false")
+        fps = self.browser.live_fps
+        if not 1 <= fps <= 60:
+            errors.append(
+                f"[browser] live_fps={fps!r} must be a whole number from 1 to 60"
+            )
         return errors
 
     def _validate_tools(self) -> list[str]:
-        """``[tools]`` holds a bool and a list of exact local test server entries."""
+        """``[tools] web_fetch_allow_local`` is a list of exact local test server entries."""
         from localmelo.support import web_local
 
-        return [
-            *(
-                f"[tools] {name} must be a bool, got {value!r}"
-                for name in ("web_fetch",)
-                if not isinstance(value := getattr(self.tools, name), bool)
-            ),
-            *web_local.problems(self),
-        ]
+        return web_local.problems(self)
 
     def _validate_web(self) -> list[str]:
-        """``[web]``: ``search`` is a bool, the order names known ways, the count is in range."""
+        """``[web]``: the order names known ways, the count is in range."""
         from localmelo.support.web.search import way_names
 
         errors: list[str] = []
-        if not isinstance(self.web.search, bool):
-            errors.append(f"[web] search must be a bool, got {self.web.search!r}")
         order = self.web.search_order
-        if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+        if not all(isinstance(x, str) for x in order):
             errors.append(f"[web] search_order must be a list of names, got {order!r}")
         else:
             known = way_names()
@@ -954,34 +955,18 @@ class Config:
             if len(set(order)) != len(order):
                 errors.append("[web] search_order names a way twice")
         count, (low, high) = self.web.search_count, WEB_SEARCH_COUNT
-        if (
-            not isinstance(count, int)
-            or isinstance(count, bool)
-            or not low <= count <= high
-        ):
+        if not low <= count <= high:
             errors.append(
                 f"[web] search_count must be a whole number from {low} to {high}, "
                 f"got {count!r}"
             )
         return errors
 
-    def _validate_tasks(self) -> list[str]:
-        """``[tasks]`` holds bools."""
-        return [
-            f"[tasks] {name} must be a bool, got {value!r}"
-            for name in ("follow_up",)
-            if not isinstance(value := getattr(self.tasks, name), bool)
-        ]
-
     def _validate_chat(self) -> list[str]:
         """``[chat] recent_digest_minutes`` is a whole number of minutes, 0-1440."""
         value = self.chat.recent_digest_minutes
         low, high = CHAT_RECENT_DIGEST_MINUTES
-        if (
-            isinstance(value, int)
-            and not isinstance(value, bool)
-            and low <= value <= high
-        ):
+        if low <= value <= high:
             return []
         return [
             f"[chat] recent_digest_minutes must be an integer from {low} to {high}, "
@@ -998,29 +983,16 @@ class Config:
                 "('off', 'fcfs', 'class')"
             )
         for name, minimum in (("n_srv", 1), ("r_f", 0), ("n_fg", 0)):
-            value: object = getattr(scheduler, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            value = getattr(scheduler, name)
+            if value < minimum:
                 errors.append(
                     f"[scheduler] {name} must be an integer >= {minimum}, "
                     f"got {value!r}"
                 )
-        focus: object = scheduler.focus_s
-        if (
-            isinstance(focus, bool)
-            or not isinstance(focus, int | float)
-            or not 0 < focus < float("inf")
-        ):
+        focus = scheduler.focus_s
+        if not 0 < focus < float("inf"):
             errors.append(
                 f"[scheduler] focus_s must be a number of seconds > 0, got {focus!r}"
-            )
-        if not isinstance(scheduler.call_log, bool):
-            errors.append(
-                f"[scheduler] call_log must be a boolean, got {scheduler.call_log!r}"
-            )
-        if not isinstance(scheduler.call_log_dir, str):
-            errors.append(
-                "[scheduler] call_log_dir must be a string, "
-                f"got {scheduler.call_log_dir!r}"
             )
         if scheduler.lock_gate not in ("record", "wait"):
             errors.append(
@@ -1028,19 +1000,14 @@ class Config:
                 "('record', 'wait')"
             )
         for name in ("gpu_lock_file", "lock_self"):
-            value = getattr(scheduler, name)
-            if not isinstance(value, str):
-                errors.append(f"[scheduler] {name} must be a string, got {value!r}")
-            elif "\x00" in value:
+            if "\x00" in getattr(scheduler, name):
                 errors.append(f"[scheduler] {name} must not contain a NUL byte")
         return errors
 
     def _validate_cli(self) -> list[str]:
-        """``[cli]`` holds a bool and a model-to-hint table of known values."""
+        """``[cli]`` holds known values and a model-to-hint table of known hints."""
         errors: list[str] = []
         cli = self.cli
-        if not isinstance(cli.stream, bool):
-            errors.append(f"[cli] stream must be a boolean, got {cli.stream!r}")
         if cli.status_line not in STATUS_LINES:
             errors.append(
                 f"[cli] status_line {cli.status_line!r} is not one of {STATUS_LINES}"
@@ -1054,10 +1021,7 @@ class Config:
                 errors.append(
                     f"[cli] {key} {getattr(cli, key)!r} is not one of {allowed}"
                 )
-        tags = cli.reasoning_tags
-        if not isinstance(tags, dict):
-            return [*errors, f"[cli] reasoning_tags must be a table, got {tags!r}"]
-        for model, hint in tags.items():
+        for model, hint in cli.reasoning_tags.items():
             if (
                 not isinstance(model, str)
                 or not model.strip()
@@ -1091,19 +1055,14 @@ class Config:
         return extra_folders_errors(self.workspace.extra_folders)
 
     def _validate_approvals(self) -> list[str]:
-        """``[approvals] mode`` is ``ask`` or ``auto``; ``auto_asks`` is a boolean."""
-        errors: list[str] = []
-        if self.approvals.mode not in APPROVAL_MODES:
-            errors.append(
-                f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
-            )
-        if not isinstance(self.approvals.auto_asks, bool):
-            errors.append(
-                f"[approvals] auto_asks={self.approvals.auto_asks!r} must be true or false"
-            )
-        return errors
+        """``[approvals] mode`` is ``ask`` or ``auto``."""
+        if self.approvals.mode in APPROVAL_MODES:
+            return []
+        return [
+            f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
+        ]
 
-    def _validate_request_timeout(self) -> list[str]:
+    def validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
         value: object = self.request_timeout_s
         if value is None or _is_positive_seconds(value):
@@ -1123,126 +1082,77 @@ class Config:
             return [f"chat_backend {self.chat_backend!r}: no registered adapter found."]
 
     def _validate_agent(self) -> list[str]:
-        """``[agent]`` holds known values for its mode and note writer."""
+        """``[agent]`` holds known values inside their documented ranges."""
+        agent = self.agent
         errors: list[str] = []
-        if not isinstance(self.agent.fixed_prefix, bool):
-            errors.append("[agent] fixed_prefix must be a boolean")
-        if not isinstance(self.agent.reflect_tool_guard, bool):
-            errors.append("[agent] reflect_tool_guard must be a boolean")
-        if not isinstance(self.agent.captured_history, bool):
-            errors.append("[agent] captured_history must be a boolean")
-        if not isinstance(self.agent.brief_items, bool):
-            errors.append("[agent] brief_items must be a boolean")
-        if not isinstance(self.agent.lean_output, bool):
-            errors.append("[agent] lean_output must be a boolean")
-        if not isinstance(self.agent.confine_writes, bool):
-            errors.append("[agent] confine_writes must be a boolean")
-        if not isinstance(self.agent.confine_direct_runs, bool):
-            errors.append("[agent] confine_direct_runs must be a boolean")
-        if not isinstance(self.agent.answer_on_stop, bool):
-            errors.append("[agent] answer_on_stop must be a boolean")
-        if not isinstance(self.agent.reflection, bool):
-            errors.append("[agent] reflection must be a boolean")
-        attempt: object = self.agent.steps_per_attempt
-        if attempt is not None and (
-            isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1
-        ):
+        attempt = agent.steps_per_attempt
+        if attempt is not None and attempt < 1:
             errors.append(
                 f"[agent] steps_per_attempt must be an int >= 1, got {attempt!r}"
             )
-        calls: object = self.agent.max_calls
-        if calls is not None and (
-            isinstance(calls, bool) or not isinstance(calls, int) or calls < 2
-        ):
+        calls = agent.max_calls
+        if calls is not None and calls < 2:
             errors.append(f"[agent] max_calls must be an int >= 2, got {calls!r}")
-        errors.extend(tool_images_errors(self.agent))
-        errors.extend(empty_reply_fallback_errors(self.agent))
-        if self.agent.reasoning not in REASONING_MODES:
-            errors.append(
-                f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
-                f"Must be one of {REASONING_MODES}."
-            )
-        if self.agent.note_writer not in NOTE_WRITERS:
-            errors.append(
-                f"[agent] note_writer {self.agent.note_writer!r} is not "
-                f"recognised. Must be one of {NOTE_WRITERS}."
-            )
-        if self.agent.window_eviction not in WINDOW_EVICTIONS:
-            errors.append(
-                f"[agent] window_eviction {self.agent.window_eviction!r} is not "
-                f"recognised. Must be one of {WINDOW_EVICTIONS}."
-            )
-        if self.agent.cache_layout not in CACHE_LAYOUTS:
-            errors.append(
-                f"[agent] cache_layout {self.agent.cache_layout!r} is not "
-                f"recognised. Must be one of {CACHE_LAYOUTS}."
-            )
-        window: object = self.agent.window_messages
-        if window is not None and (
-            isinstance(window, bool)
-            or not isinstance(window, int)
-            or not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
+        errors.extend(tool_images_errors(agent))
+        errors.extend(empty_reply_fallback_errors(agent))
+        for name, allowed in (
+            ("reasoning", REASONING_MODES),
+            ("note_writer", NOTE_WRITERS),
+            ("window_eviction", WINDOW_EVICTIONS),
+        ):
+            value = getattr(agent, name)
+            if value not in allowed:
+                errors.append(
+                    f"[agent] {name} {value!r} is not recognised. "
+                    f"Must be one of {allowed}."
+                )
+        window = agent.window_messages
+        if (
+            window is not None
+            and not WINDOW_MESSAGES_MIN <= window <= WINDOW_MESSAGES_MAX
         ):
             errors.append(
                 f"[agent] window_messages must be an int from "
                 f"{WINDOW_MESSAGES_MIN} to {WINDOW_MESSAGES_MAX}, got {window!r}"
             )
-        turns: object = self.agent.replay_turns
-        if turns is not None and (
-            isinstance(turns, bool) or not isinstance(turns, int) or turns < 1
-        ):
+        turns = agent.replay_turns
+        if turns is not None and turns < 1:
             errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
-        budget = (
-            self.agent.context_window,
-            self.agent.output_reserve,
-            self.agent.safety_margin,
+        names = ("context_window", "output_reserve", "safety_margin")
+        budget = [getattr(agent, name) for name in names]
+        errors.extend(
+            f"[agent] {name} must be a positive integer, got {value!r}"
+            for name, value in zip(names, budget, strict=True)
+            if value is not None and value < 1
         )
-        for name, value in zip(
-            ("context_window", "output_reserve", "safety_margin"), budget, strict=True
-        ):
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 1
-            ):
-                errors.append(
-                    f"[agent] {name} must be a positive integer, got {value!r}"
-                )
-        if any(value is not None for value in budget) and any(
-            value is None for value in budget
-        ):
-            missing = [
-                name
-                for name, value in zip(
-                    ("context_window", "output_reserve", "safety_margin"),
-                    budget,
-                    strict=True,
-                )
-                if value is None
-            ]
+        if any(value is not None for value in budget) and None in budget:
+            missing = [n for n, v in zip(names, budget, strict=True) if v is None]
             errors.append("[agent] context budget is missing " + ", ".join(missing))
-        if all(
-            isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in budget
-        ):
-            window, reserve, margin = budget
-            assert window is not None and reserve is not None and margin is not None
-            if window - reserve - margin <= 0:
+        elif None not in budget and all(value > 0 for value in budget):
+            size, reserve, margin = budget
+            if size - reserve - margin <= 0:
                 errors.append(
                     "[agent] context_window - output_reserve - safety_margin "
                     "must be positive"
                 )
-        names: object = self.agent.tool_env
-        if not isinstance(names, list) or any(
-            not isinstance(name, str)
-            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None
+        errors.extend(self._tool_env_errors())
+        return errors
+
+    def _tool_env_errors(self) -> list[str]:
+        """``[agent] tool_env`` is a list of valid environment variable names."""
+        from localmelo.support import hosted
+
+        names = self.agent.tool_env
+        if isinstance(names, list) and all(
+            isinstance(name, str) and hosted.ENV_NAME_RE.fullmatch(name)
             for name in names
         ):
-            errors.append(
-                "[agent] tool_env must be a list of valid environment variable names"
-            )
-        return errors
+            return []
+        return ["[agent] tool_env must be a list of valid environment variable names"]
 
     def tool_environment(self) -> dict[str, str]:
         """Present variables explicitly named by the config; never persist their values."""
-        if errors := self._validate_agent():
+        if errors := self._tool_env_errors():
             raise ConfigError("; ".join(errors))
         return {
             name: os.environ[name] for name in self.agent.tool_env if name in os.environ
@@ -1262,41 +1172,25 @@ class Config:
                 f"[retrieval] placement {retrieval.placement!r} is not "
                 f"recognised. Must be one of {RECALL_PLACEMENTS}."
             )
-        k: object = retrieval.k
-        if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= 10:
+        k = retrieval.k
+        if not 1 <= k <= 10:
             errors.append(f"[retrieval] k must be an int from 1 to 10, got {k!r}")
-        score: object = retrieval.min_score
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, int | float)
-            or not 0 <= score <= 1
-        ):
+        score = retrieval.min_score
+        if not 0 <= score <= 1:
             errors.append(
                 f"[retrieval] min_score must be a number from 0 to 1, got {score!r}"
             )
-        ratio: object = retrieval.cross_task_ratio
-        if (
-            isinstance(ratio, bool)
-            or not isinstance(ratio, int | float)
-            or not 1 <= ratio <= 10
-        ):
+        if not 1 <= retrieval.cross_task_ratio <= 10:
             errors.append("[retrieval] cross_task_ratio must be a number from 1 to 10")
         for name, maximum in (("cross_task_cap", 2), ("cross_task_cold", 1)):
-            value = getattr(retrieval, name)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 0 <= value <= maximum
-            ):
+            if not 0 <= getattr(retrieval, name) <= maximum:
                 errors.append(f"[retrieval] {name} must be an int from 0 to {maximum}")
         for name, allowed in (
             ("recall_at", RECALL_TRIGGERS),
             ("kinds", RECALL_KINDS),
         ):
             values = getattr(retrieval, name)
-            if not isinstance(values, list) or any(
-                not isinstance(item, str) or item not in allowed for item in values
-            ):
+            if any(item not in allowed for item in values):
                 errors.append(
                     f"[retrieval] {name} must be a list of "
                     f"{', '.join(allowed)}, got {values!r}"
@@ -1304,25 +1198,19 @@ class Config:
         return errors
 
     def _validate_reasoning_fields(self) -> list[str]:
-        """Each backend's reasoning keys are known and its flags are bools."""
+        """Each backend's ``reasoning_field`` is a known key."""
         errors: list[str] = []
-        for section_name in _LOCAL_SECTIONS + _CLOUD_SECTIONS:
-            section = getattr(self, section_name)
-            value = section.reasoning_field
+        for section_name in VALID_CHAT_BACKENDS:
+            value = getattr(self, section_name).reasoning_field
             allowed = (
                 ("", "thinking", "auto")
                 if section_name == "ollama"
                 else ("",) + REASONING_FIELDS
             )
-            if not isinstance(value, str) or value not in allowed:
+            if value not in allowed:
                 errors.append(
                     f"[{section_name}] reasoning_field {value!r} is not recognised. "
                     f"Must be one of {allowed}."
-                )
-            if not isinstance(section.requires_reasoning_replay, bool):
-                errors.append(
-                    f"[{section_name}] requires_reasoning_replay must be a bool, "
-                    f"got {section.requires_reasoning_replay!r}"
                 )
         return errors
 
@@ -1331,7 +1219,7 @@ class Config:
         from localmelo.support import hosted
 
         errors: list[str] = []
-        for section_name in _CLOUD_SECTIONS:
+        for section_name in CLOUD_BACKENDS:
             errors.extend(
                 hosted.hosted_fields_errors(section_name, getattr(self, section_name))
             )
@@ -1360,6 +1248,19 @@ class Config:
                 f"no registered adapter found."
             ]
 
+    def _type_errors(
+        self, *, only: Container[str] | None = None, skip: Container[str] = ()
+    ) -> list[str]:
+        """Each table field that holds the wrong kind of value (of the tables in *only*, else all but *skip*)."""
+        errors = []
+        for key, value in flat(self).items():
+            section, dot, name = key.rpartition(".")
+            if dot and (only is None or section in only) and section not in skip:
+                hint = hints(type(getattr(self, section)))[name]
+                if problem := type_problem(value, hint):
+                    errors.append(f"[{section}] {name} {problem}")
+        return errors
+
     def validate_or_raise(self) -> None:
         """Validate and raise ConfigError if any issues are found."""
         errors = self.validate()
@@ -1369,6 +1270,8 @@ class Config:
 
     def setting_errors(self) -> list[str]:
         """The errors of the settings alone, which need no backend (``-X``, ``melo config``)."""
+        if errors := self._type_errors(skip=VALID_CHAT_BACKENDS):
+            return errors
         return [
             *self._validate_agent(),
             *self._validate_retrieval(),
@@ -1377,7 +1280,6 @@ class Config:
             *self._validate_browser(),
             *self._validate_tools(),
             *self._validate_web(),
-            *self._validate_tasks(),
             *self._validate_chat(),
             *self._validate_gateway_workspace(),
             *self._validate_cli(),
@@ -1385,12 +1287,21 @@ class Config:
             *self._validate_console(),
             *self._validate_approvals(),
             *self._validate_workspace(),
-            *self._validate_request_timeout(),
+            *self.validate_request_timeout(),
         ]
+
+    def agent_errors(self) -> list[str]:
+        """The ``[agent]`` errors alone: a wrong kind of value, else a value out of range.
+
+        A path that reads the file without validating the rest (a direct run
+        on ``--base-url``) refuses a bad ``[agent]`` with the sentence
+        :meth:`validate` gives.
+        """
+        return self._type_errors(only=("agent",)) or self._validate_agent()
 
     def cli_errors(self) -> list[str]:
         """The ``[cli]`` errors alone, for a path that does not read the rest."""
-        return self._validate_cli()
+        return self._type_errors(only=("cli",)) or self._validate_cli()
 
     def ui_errors(self) -> list[str]:
         """The ``[ui]`` errors alone: the mode is display only, so a bad one warns."""
@@ -1424,6 +1335,89 @@ class Config:
 
 
 PRICE_KEYS: Final = ("input", "output", "cache_read")
+
+# What a field of each kind must hold, as the sentence that reports it says.
+KIND_WORDS: Final = {
+    bool: "true or false",
+    int: "a whole number",
+    float: "a number",
+    str: "text",
+    list: "a list",
+    dict: "a table",
+}
+
+
+def flat(obj: object, prefix: str = "") -> dict[str, Any]:
+    """Every field of a config as ``section.name`` -> value (top-level names have no dot).
+
+    The one walk over the config's fields: ``save``, the type check, ``melo config``
+    and the ``-X`` catalog all read the settings through it.
+    """
+    out: dict[str, Any] = {}
+    for item in dataclasses.fields(obj):  # type: ignore[arg-type]
+        if not item.compare:
+            continue  # bookkeeping (a private flag, the spelling of a backend), not a setting
+        value = getattr(obj, item.name)
+        if dataclasses.is_dataclass(value):
+            out.update(flat(value, f"{prefix}{item.name}."))
+        else:
+            out[prefix + item.name] = value
+    return out
+
+
+def changed(cfg: Config) -> dict[str, Any]:
+    """The settings of *cfg* that differ from the defaults, as ``section.name`` -> value."""
+    defaults = flat(Config())
+    return {key: value for key, value in flat(cfg).items() if value != defaults[key]}
+
+
+_HINTS: dict[type, dict[str, Any]] = {}
+
+
+def hints(table: type) -> dict[str, Any]:
+    """The type hints of the dataclass *table*, read once."""
+    if table not in _HINTS:
+        _HINTS[table] = typing.get_type_hints(table)
+    return _HINTS[table]
+
+
+def hint_base(hint: Any) -> tuple[Any, bool]:
+    """The plain type of a field's type hint, and whether ``None`` (unset) is allowed.
+
+    ``int | None`` is ``(int, True)`` and ``list[str]`` is ``(list, False)``.
+    """
+    if typing.get_origin(hint) in (typing.Union, types.UnionType):
+        args = typing.get_args(hint)
+        inner = [arg for arg in args if arg is not type(None)]
+        return hint_base(inner[0])[0], len(inner) != len(args)
+    return typing.get_origin(hint) or hint, False
+
+
+def type_problem(value: Any, hint: Any) -> str | None:
+    """Why *value* is not the kind *hint* names (``must be a whole number, got '8401'``), or None.
+
+    A bool is not a number here, and a whole number is a number. A hint of a kind
+    not in :data:`KIND_WORDS` is not checked.
+    """
+    base, optional = hint_base(hint)
+    if base not in KIND_WORDS or (value is None and optional):
+        return None
+    accepted: Any = int | float if base is float else base
+    if isinstance(value, accepted) and (base is bool or not isinstance(value, bool)):
+        return None
+    return f"must be {KIND_WORDS[base]}, got {value!r}"
+
+
+def trim_text(section: LocalBackendConfig | CloudVendorConfig) -> None:
+    """Strip the blanks around each text field of a backend table, but never the key.
+
+    A model name or an address with a space after it reads the same to a person and
+    is another name to the server.
+    """
+    for item in dataclasses.fields(section):
+        value = getattr(section, item.name)
+        if isinstance(value, str) and item.name != "api_key":
+            setattr(section, item.name, value.strip())
 
 
 def has_control_or_surrogate(text: str) -> bool:
@@ -1580,26 +1574,12 @@ def _is_positive_seconds(value: object) -> bool:
     return math.isfinite(seconds) and seconds > 0
 
 
-# -- Compatibility aliases (temporary, reduces churn in files not yet migrated) --
-MlcConfig = LocalBackendConfig
-OllamaConfig = LocalBackendConfig
-VllmConfig = LocalBackendConfig
-SglangConfig = LocalBackendConfig
+# -- Section names for iteration (the backend sections are VALID_CHAT_BACKENDS) --
 
-# -- Section names for iteration --
-
-_LOCAL_SECTIONS = ("mlc", "ollama", "vllm", "sglang")
-_CLOUD_SECTIONS = ("openai", "gemini", "anthropic", "nvidia")
-
-# -- Migration helpers --
-
-_CLOUD_API_PROVIDER_MIGRATION: dict[str, str] = {
-    "openai": "openai",
-    "gemini": "gemini",
-    "anthropic": "anthropic",
-    "nvidia": "nvidia",
-}
-
+# The tables of display preferences: a bad value warns and falls back (see
+# ``cli_errors()`` and the like) instead of stopping a run, so ``validate()`` leaves
+# them alone. ``[approvals]`` is not one: it changes what runs without asking.
+_FALLBACK_SECTIONS = ("sessions", "cli", "ui", "console", "workspace")
 
 # Settings ``-X KEY=VALUE`` gives this process: ``load()`` applies them, and ``save()``
 # never writes them. A key is ``section.name``, or a top-level name without a dot.
@@ -1638,6 +1618,8 @@ def set_key(cfg: Config, key: str, value: Any) -> bool:
 
 def load() -> Config:
     cfg = _load_file()
+    for name in VALID_CHAT_BACKENDS:
+        trim_text(getattr(cfg, name))
     for key, value in _OVERRIDES.items():
         original = get_key(cfg, key)
         if set_key(cfg, key, value):
@@ -1660,6 +1642,40 @@ def _as_in_file(cfg: Config) -> Config:
     return saved
 
 
+def _digits_as_text(value: Any) -> Any:
+    """A bare number as its text (``colors = 256`` is ``"256"``); anything else as it is."""
+    return (
+        str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+    )
+
+
+# The few fields the file spells loosely: key -> what the file's value stands for.
+# Every other field is read as the file has it.
+_SPELLINGS: dict[str, Callable[[Any], Any]] = {
+    # "slide" was removed (settings.removed_in says so); it reads as the default.
+    "agent.window_eviction": lambda value: "chunk" if value == "slide" else value,
+    "cli.colors": _digits_as_text,
+    "cli.background": _digits_as_text,
+    "sessions.record_direct": lambda value: value
+    is not False,  # only false turns it off
+}
+
+
+def _read(cfg: Config, data: Mapping[str, Any]) -> None:
+    """Set each field that a table of *data* holds.
+
+    A value is not checked or changed here: a wrong one is kept for ``validate()``
+    to report. A key that is no field, and a table that is not one, are ignored.
+    """
+    fields = flat(cfg)
+    for table, values in data.items():
+        if isinstance(values, dict):
+            for name, value in values.items():
+                key = f"{table}.{name}"
+                if key in fields:
+                    set_key(cfg, key, _SPELLINGS.get(key, lambda v: v)(value))
+
+
 def _load_file() -> Config:
     path = config_path()
     if not os.path.isfile(path):
@@ -1670,181 +1686,31 @@ def _load_file() -> Config:
 
     cfg = Config()
 
-    # -- Migration: old single `backend` field --
-    if "backend" in data and "chat_backend" not in data:
-        cfg = _migrate_legacy(data)
-        return cfg
-
-    # -- Migration: old `mlc-llm` / `cloud_api` keys in chat_backend/embedding_backend --
-    raw_chat = data.get("chat_backend", "")
-    raw_emb = data.get("embedding_backend", "")
-    cfg.chat_backend = _migrate_backend_key(raw_chat, data)
-    cfg.embedding_backend = _migrate_embedding_key(raw_emb)
     # "omlx" is another spelling of "vllm" (one backend, one [vllm] table):
     # everything reads "vllm", and save() writes the spelling back.
+    raw_chat = data.get("chat_backend", "")
+    raw_emb = data.get("embedding_backend", "")
+    cfg.chat_backend = _backend_key(raw_chat)
+    cfg.embedding_backend = _backend_key(raw_emb)
     cfg.chat_alias = raw_chat if raw_chat == OMLX_ALIAS else ""
     cfg.embedding_alias = raw_emb if raw_emb == OMLX_ALIAS else ""
 
-    # -- Load local backend sections --
-    for section in _LOCAL_SECTIONS:
-        if section in data:
-            target = getattr(cfg, section)
-            for k, v in data[section].items():
-                if hasattr(target, k):
-                    setattr(target, k, v)
-            # Migration: flat chat_template_kwargs -> extra_body
-            _migrate_extra_body(target, data[section])
-        # Migration: old [mlc] section with chat_port -> chat_url
-        if section == "mlc" and "mlc" in data:
-            _migrate_mlc_section(cfg.mlc, data["mlc"])
-
-    # -- Load cloud vendor sections --
-    for section in _CLOUD_SECTIONS:
-        if section in data:
-            target = getattr(cfg, section)
-            for k, v in data[section].items():
-                if hasattr(target, k):
-                    setattr(target, k, v)
-            # Migration: flat chat_template_kwargs -> extra_body
-            _migrate_extra_body(target, data[section])
-
-    # Migration: old [cloud_api] section -> vendor-specific section
-    if "cloud_api" in data and cfg.chat_backend in _CLOUD_SECTIONS:
-        _migrate_cloud_api_section(cfg, data["cloud_api"])
-    elif "online" in data and cfg.chat_backend in _CLOUD_SECTIONS:
-        _migrate_cloud_api_section(cfg, data["online"])
-
-    if "gateway" in data:
-        for k, v in data["gateway"].items():
-            if hasattr(cfg.gateway, k):
-                setattr(cfg.gateway, k, v)
-
-    if isinstance(data.get("agent"), dict):
-        for k, v in data["agent"].items():
-            if hasattr(cfg.agent, k):
-                setattr(cfg.agent, k, v)
-
-    # A [scheduler] that is not a table is ignored, like an unknown key; a
-    # malformed value inside a real table is left for Config.validate.
-    if isinstance(data.get("retrieval"), dict):
-        for k, v in data["retrieval"].items():
-            if hasattr(cfg.retrieval, k):
-                setattr(cfg.retrieval, k, v)
-
-    if isinstance(data.get("memory"), dict):
-        for k, v in data["memory"].items():
-            if hasattr(cfg.memory, k):
-                setattr(cfg.memory, k, v)
-
-    if isinstance(data.get("scheduler"), dict):
-        for k, v in data["scheduler"].items():
-            if hasattr(cfg.scheduler, k):
-                setattr(cfg.scheduler, k, v)
-
-    if isinstance(data.get("browser"), dict):
-        for k, v in data["browser"].items():
-            if hasattr(cfg.browser, k):
-                setattr(cfg.browser, k, v)
-
-    if isinstance(data.get("tools"), dict):
-        for k, v in data["tools"].items():
-            if hasattr(cfg.tools, k):
-                # A bad value is kept for Config.validate; a list is the file's own copy.
-                setattr(cfg.tools, k, list(v) if isinstance(v, list) else v)
-
-    if isinstance(data.get("web"), dict):
-        for k, v in data["web"].items():
-            if hasattr(cfg.web, k):
-                # A bad value is kept for Config.validate; a list is the file's own copy.
-                setattr(cfg.web, k, list(v) if isinstance(v, list) else v)
-
-    if isinstance(data.get("tasks"), dict):
-        for k, v in data["tasks"].items():
-            if hasattr(cfg.tasks, k):
-                setattr(cfg.tasks, k, v)
-
-    if isinstance(data.get("chat"), dict):
-        for k, v in data["chat"].items():
-            if hasattr(cfg.chat, k):
-                setattr(cfg.chat, k, v)  # a bad value is left for Config.validate
-
-    # A bad value is left for Config.validate to report.
-    if isinstance(data.get("sessions"), dict):
-        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
-        if data["sessions"].get("record_direct") is False:
-            cfg.sessions.record_direct = False
-
-    if isinstance(data.get("cli"), dict):
-        section = data["cli"]
-        if "stream" in section:
-            cfg.cli.stream = section["stream"]
-        if "status_line" in section:
-            # A bad value is kept so Config.validate can report it.
-            cfg.cli.status_line = section["status_line"]
-        for key in ("colors", "background"):
-            if key in section:  # a bad value is kept for Config.validate
-                value = section[key]
-                plain_int = isinstance(value, int) and not isinstance(value, bool)
-                setattr(cfg.cli, key, str(value) if plain_int else value)
-        if "reasoning_tags" in section:
-            tags = section["reasoning_tags"]
-            # Keep a malformed value so Config.validate can report it.
-            cfg.cli.reasoning_tags = dict(tags) if isinstance(tags, dict) else tags
-
-    if "pricing" in data:  # a bad table is kept for Config.pricing_errors
-        pricing = data["pricing"]
-        cfg.pricing = dict(pricing) if isinstance(pricing, dict) else pricing
-
-    # A bad mode is kept so Config.ui_errors can report it.
-    if isinstance(data.get("ui"), dict):
-        cfg.ui.mode = data["ui"].get("mode", cfg.ui.mode)
-    # A bad language is kept for Config.console_errors; the console reads it as auto.
-    if isinstance(data.get("console"), dict):
-        cfg.console.language = data["console"].get("language", cfg.console.language)
-    if isinstance(data.get("approvals"), dict):
-        cfg.approvals.mode = data["approvals"].get("mode", cfg.approvals.mode)
-        cfg.approvals.auto_asks = data["approvals"].get(
-            "auto_asks", cfg.approvals.auto_asks
-        )
-    # A bad value is kept for Config.setting_errors; extra_folders() ignores it.
-    if isinstance(data.get("workspace"), dict):
-        found = data["workspace"].get("extra_folders", [])
-        cfg.workspace.extra_folders = list(found) if isinstance(found, list) else found
+    _read(cfg, data)
+    for section in VALID_CHAT_BACKENDS:
+        if isinstance(data.get(section), dict):
+            _migrate_extra_body(getattr(cfg, section), data[section])
 
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
+    if "pricing" in data:  # a bad table is kept for Config.pricing_errors
+        cfg.pricing = data["pricing"]
 
     return cfg
 
 
-def _migrate_backend_key(raw: str, data: dict) -> str:
-    """Migrate old chat_backend keys to new ones."""
-    if raw == "mlc-llm":
-        return "mlc"
-    if raw == OMLX_ALIAS:
-        return "vllm"
-    if raw == "cloud_api":
-        provider = data.get("cloud_api", {}).get("provider", "")
-        return _CLOUD_API_PROVIDER_MIGRATION.get(provider, raw)
-    return raw
-
-
-def _migrate_embedding_key(raw: str) -> str:
-    """Migrate old embedding_backend keys to new ones."""
-    if raw == "mlc-llm":
-        return "mlc"
-    if raw == OMLX_ALIAS:
-        return "vllm"
-    return raw
-
-
-def _migrate_mlc_section(mlc: LocalBackendConfig, section: dict) -> None:
-    """Migrate old [mlc] with chat_port/gpu_memory_gb to URL-based config."""
-    if "chat_port" in section and not mlc.chat_url:
-        port = section["chat_port"]
-        mlc.chat_url = f"http://127.0.0.1:{port}/v1"
-        if not mlc.embedding_url:
-            mlc.embedding_url = mlc.chat_url
+def _backend_key(raw: Any) -> Any:
+    """The backend a config file names; the ``omlx`` spelling reads as ``vllm``."""
+    return "vllm" if raw == OMLX_ALIAS else raw
 
 
 def _migrate_extra_body(
@@ -1863,76 +1729,6 @@ def _migrate_extra_body(
         return
     if "chat_template_kwargs" not in target.extra_body:
         target.extra_body = {**target.extra_body, "chat_template_kwargs": flat}
-
-
-def _migrate_cloud_api_section(cfg: Config, section: dict) -> None:
-    """Migrate old [cloud_api] or [online] section to vendor-specific config."""
-    vendor = cfg.chat_backend
-    target = getattr(cfg, vendor, None)
-    if target is None:
-        return
-    for k, v in section.items():
-        if k in ("provider", "local_embedding"):
-            continue
-        if hasattr(target, k):
-            setattr(target, k, v)
-    _migrate_extra_body(target, section)
-
-
-def _migrate_legacy(data: dict) -> Config:
-    """Migrate the oldest format with a single `backend` field."""
-    cfg = Config()
-    old = data["backend"]
-
-    if old == "mlc-llm":
-        cfg.chat_backend = "mlc"
-        cfg.embedding_backend = "mlc"
-        if "mlc" in data:
-            for k, v in data["mlc"].items():
-                if hasattr(cfg.mlc, k):
-                    setattr(cfg.mlc, k, v)
-            _migrate_mlc_section(cfg.mlc, data["mlc"])
-            _migrate_extra_body(cfg.mlc, data["mlc"])
-    elif old == "online":
-        online_sec = data.get("online", {})
-        provider = online_sec.get("provider", "")
-        cfg.chat_backend = _CLOUD_API_PROVIDER_MIGRATION.get(provider, "")
-        if online_sec.get("local_embedding", False):
-            cfg.embedding_backend = "mlc"
-        else:
-            cfg.embedding_backend = "none"
-        if cfg.chat_backend in _CLOUD_SECTIONS:
-            _migrate_cloud_api_section(cfg, online_sec)
-    elif old == "ollama":
-        cfg.chat_backend = "ollama"
-        ollama_sec = data.get("ollama", {})
-        cfg.embedding_backend = (
-            "ollama" if ollama_sec.get("embedding_model", "") else "none"
-        )
-        if "ollama" in data:
-            for k, v in data["ollama"].items():
-                if hasattr(cfg.ollama, k):
-                    setattr(cfg.ollama, k, v)
-            _migrate_extra_body(cfg.ollama, data["ollama"])
-
-    if "gateway" in data:
-        for k, v in data["gateway"].items():
-            if hasattr(cfg.gateway, k):
-                setattr(cfg.gateway, k, v)
-
-    if isinstance(data.get("agent"), dict):
-        for k, v in data["agent"].items():
-            if hasattr(cfg.agent, k):
-                setattr(cfg.agent, k, v)
-
-    if isinstance(data.get("sessions"), dict):
-        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
-        if data["sessions"].get("record_direct") is False:
-            cfg.sessions.record_direct = False
-
-    cfg.request_timeout_s = data.get("request_timeout_s")
-
-    return cfg
 
 
 _BARE_TOML_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -1982,265 +1778,25 @@ def save(cfg: Config) -> None:
     cfg = _as_in_file(cfg)
     os.makedirs(config_dir(), exist_ok=True)
 
-    lines: list[str] = []
+    # The two backends are always written, the other top-level keys before the
+    # first table, and a setting only when it is not at its default.
     chat = _spelling(cfg.chat_backend, cfg.chat_alias)
     embedding = _spelling(cfg.embedding_backend, cfg.embedding_alias)
-    lines.append(f"chat_backend = {_toml_string(chat)}")
-    lines.append(f"embedding_backend = {_toml_string(embedding)}")
-    # Top-level keys go before the first table. Only a value that is set
-    # is written, so a config without one is saved as it was before.
-    if cfg.request_timeout_s is not None:
-        lines.append(f"request_timeout_s = {_toml_value(cfg.request_timeout_s)}")
-    if cfg.mcp_config:
-        lines.append(f"mcp_config = {_toml_string(cfg.mcp_config)}")
-    lines.append("")
-
-    # Local backend sections
-    for section in _LOCAL_SECTIONS:
-        sec = getattr(cfg, section)
-        lines.append(f"[{section}]")
-        lines.append(f"chat_url = {_toml_string(sec.chat_url)}")
-        lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
-        lines.append(f"embedding_url = {_toml_string(sec.embedding_url)}")
-        lines.append(f"embedding_model = {_toml_string(sec.embedding_model)}")
-        if sec.extra_body:
-            lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
-        if sec.reasoning_field:
-            lines.append(f"reasoning_field = {_toml_string(sec.reasoning_field)}")
-        if sec.requires_reasoning_replay:
-            lines.append("requires_reasoning_replay = true")
-        lines.append("")
-
-    # Cloud vendor sections
-    for section in _CLOUD_SECTIONS:
-        sec = getattr(cfg, section)
-        lines.append(f"[{section}]")
-        lines.append(f"api_key_env = {_toml_string(sec.api_key_env)}")
-        if sec.api_key:
-            lines.append(f"api_key = {_toml_string(sec.api_key)}")
-        lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
-        lines.append(f"base_url = {_toml_string(sec.base_url)}")
-        if sec.thinking:
-            lines.append(f"thinking = {_toml_string(sec.thinking)}")
-        if sec.extra_body:
-            lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
-        if sec.reasoning_field:
-            lines.append(f"reasoning_field = {_toml_string(sec.reasoning_field)}")
-        if sec.requires_reasoning_replay:
-            lines.append("requires_reasoning_replay = true")
-        lines.append("")
-
-    lines.append("[gateway]")
-    lines.append(f"port = {cfg.gateway.port}")
-    lines.append(f"host = {_toml_string(cfg.gateway.host)}")
-    if cfg.gateway.workspace:
-        lines.append(f"workspace = {_toml_string(cfg.gateway.workspace)}")
-    lines.append("")
-
-    defaults = AgentConfig()
-    if (
-        cfg.agent.reasoning != "legacy"
-        or cfg.agent.replay_turns is not None
-        or cfg.agent.note_writer != "auto"
-        or cfg.agent.tool_env
-        or cfg.agent.fixed_prefix != defaults.fixed_prefix
-        or cfg.agent.window_eviction != defaults.window_eviction
-        or cfg.agent.reflect_tool_guard != defaults.reflect_tool_guard
-        or cfg.agent.cache_layout != defaults.cache_layout
-        or cfg.agent.window_messages != defaults.window_messages
-        or cfg.agent.captured_history
-        or cfg.agent.brief_items
-        or cfg.agent.lean_output
-        or cfg.agent.confine_writes != defaults.confine_writes
-        or cfg.agent.confine_direct_runs
-        or cfg.agent.answer_on_stop != defaults.answer_on_stop
-        or cfg.agent.max_calls is not None
-        or cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback
-        or cfg.agent.reflection != defaults.reflection
-        or cfg.agent.steps_per_attempt is not None
-        or any(
-            getattr(cfg.agent, name) != getattr(defaults, name) for name in IMAGE_KEYS
-        )
-        or cfg.agent.context_window is not None
-        or cfg.agent.output_reserve is not None
-        or cfg.agent.safety_margin is not None
-    ):
-        lines.append("[agent]")
-        lines.append(f"reasoning = {_toml_string(cfg.agent.reasoning)}")
-        if cfg.agent.replay_turns is not None:
-            lines.append(f"replay_turns = {cfg.agent.replay_turns}")
-        if cfg.agent.note_writer != "auto":
-            lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
-        if cfg.agent.fixed_prefix != defaults.fixed_prefix:
-            lines.append(f"fixed_prefix = {_toml_value(cfg.agent.fixed_prefix)}")
-        if cfg.agent.window_eviction != defaults.window_eviction:
-            lines.append(f"window_eviction = {_toml_string(cfg.agent.window_eviction)}")
-        if cfg.agent.reflect_tool_guard != defaults.reflect_tool_guard:
-            lines.append(
-                f"reflect_tool_guard = {_toml_value(cfg.agent.reflect_tool_guard)}"
-            )
-        if cfg.agent.cache_layout != defaults.cache_layout:
-            lines.append(f"cache_layout = {_toml_string(cfg.agent.cache_layout)}")
-        if cfg.agent.window_messages != defaults.window_messages:
-            lines.append(f"window_messages = {_toml_value(cfg.agent.window_messages)}")
-        if cfg.agent.captured_history:
-            lines.append("captured_history = true")
-        if cfg.agent.brief_items:
-            lines.append("brief_items = true")
-        if cfg.agent.lean_output:
-            lines.append("lean_output = true")
-        if cfg.agent.confine_writes != defaults.confine_writes:
-            lines.append(f"confine_writes = {_toml_value(cfg.agent.confine_writes)}")
-        if cfg.agent.confine_direct_runs:
-            lines.append("confine_direct_runs = true")
-        if cfg.agent.answer_on_stop != defaults.answer_on_stop:
-            lines.append(f"answer_on_stop = {_toml_value(cfg.agent.answer_on_stop)}")
-        if cfg.agent.max_calls is not None:
-            lines.append(f"max_calls = {_toml_value(cfg.agent.max_calls)}")
-        for name in IMAGE_KEYS:
-            if getattr(cfg.agent, name) != getattr(defaults, name):
-                lines.append(f"{name} = {_toml_value(getattr(cfg.agent, name))}")
-        if cfg.agent.empty_reply_fallback != defaults.empty_reply_fallback:
-            lines.append(
-                "empty_reply_fallback = "
-                f"{_toml_string(cfg.agent.empty_reply_fallback)}"
-            )
-        if cfg.agent.reflection != defaults.reflection:
-            lines.append(f"reflection = {_toml_value(cfg.agent.reflection)}")
-        if cfg.agent.steps_per_attempt is not None:
-            lines.append(
-                f"steps_per_attempt = {_toml_value(cfg.agent.steps_per_attempt)}"
-            )
-        if cfg.agent.tool_env:
-            lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
-        for name in ("context_window", "output_reserve", "safety_margin"):
-            value = getattr(cfg.agent, name)
-            if value is not None:
-                lines.append(f"{name} = {_toml_value(value)}")
-        lines.append("")
-
-    if cfg.memory != MemoryConfig():
-        lines.append("[memory]")
-        if cfg.memory.admit_on_outcome:
-            lines.append("admit_on_outcome = true")
-        if not cfg.memory.across_chats:
-            lines.append("across_chats = false")
-        if cfg.memory.retriever != "auto":
-            lines.append(f"retriever = {_toml_string(cfg.memory.retriever)}")
-        if cfg.memory.keep_statements:
-            lines.append("keep_statements = true")
-        if cfg.memory.sleep != "off":
-            lines.append(f"sleep = {_toml_string(cfg.memory.sleep)}")
-        if cfg.memory.sleep_lock:
-            lines.append(f"sleep_lock = {_toml_string(cfg.memory.sleep_lock)}")
-        for name in RECALL_KEYS:
-            if getattr(cfg.memory, name) != getattr(MemoryConfig(), name):
-                lines.append(f"{name} = {_toml_value(getattr(cfg.memory, name))}")
-        if cfg.memory.project_instructions != "on":
-            lines.append(
-                f"project_instructions = {_toml_string(cfg.memory.project_instructions)}"
-            )
-        lines.append("")
-
-    if cfg.browser != BrowserConfig():
-        lines.extend(["[browser]", f"driver = {_toml_string(cfg.browser.driver)}"])
-        if cfg.browser.keep_tabs is not False:
-            lines.append(f"keep_tabs = {_toml_value(cfg.browser.keep_tabs)}")
-        if cfg.browser.app_windows is not True:
-            lines.append(f"app_windows = {_toml_value(cfg.browser.app_windows)}")
-        lines.append("")
-
-    if cfg.tools != ToolsConfig():
-        lines.extend(["[tools]", f"web_fetch = {_toml_value(cfg.tools.web_fetch)}"])
-        if cfg.tools.web_fetch_allow_local:
-            allowed = _toml_value(cfg.tools.web_fetch_allow_local)
-            lines.append(f"web_fetch_allow_local = {allowed}")
-        lines.append("")
-
-    if cfg.web != WebConfig():
-        lines.append("[web]")
-        if cfg.web.search is not False:
-            lines.append(f"search = {_toml_value(cfg.web.search)}")
-        if cfg.web.search_order:
-            lines.append(f"search_order = {_toml_value(cfg.web.search_order)}")
-        if cfg.web.search_count != WebConfig().search_count:
-            lines.append(f"search_count = {_toml_value(cfg.web.search_count)}")
-        lines.append("")
-
-    if cfg.tasks != TasksConfig():
-        lines.extend(["[tasks]", f"follow_up = {_toml_value(cfg.tasks.follow_up)}", ""])
-
-    if cfg.chat != ChatConfig():
-        minutes = _toml_value(cfg.chat.recent_digest_minutes)
-        lines.extend(["[chat]", f"recent_digest_minutes = {minutes}", ""])
-
-    if cfg.sessions != SessionsConfig():
-        lines.append("[sessions]")
-        if cfg.sessions.resume_mode != "pairs":
-            lines.append(f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}")
-        if not cfg.sessions.record_direct:
-            lines.append("record_direct = false")
-        lines.append("")
-    if cfg.cli != CliConfig():
-        lines.append("[cli]")
-        if cfg.cli.stream != CliConfig().stream:  # the default is not pinned
-            lines.append(f"stream = {'true' if cfg.cli.stream else 'false'}")
-        if cfg.cli.status_line != CliConfig().status_line:
-            lines.append(f"status_line = {_toml_value(cfg.cli.status_line)}")
-        for key in ("colors", "background"):
-            if getattr(cfg.cli, key) != "auto":
-                lines.append(f"{key} = {_toml_value(getattr(cfg.cli, key))}")
-        if cfg.cli.reasoning_tags:
-            lines.append(f"reasoning_tags = {_toml_value(cfg.cli.reasoning_tags)}")
-        lines.append("")
-    if cfg.ui != UiConfig():
-        lines.extend(["[ui]", f"mode = {_toml_value(cfg.ui.mode)}", ""])
-    if cfg.console != ConsoleConfig():
-        lines.extend(
-            ["[console]", f"language = {_toml_value(cfg.console.language)}", ""]
-        )
-    if cfg.approvals != ApprovalsConfig():
-        lines.extend(["[approvals]", f"mode = {_toml_value(cfg.approvals.mode)}"])
-        if cfg.approvals.auto_asks is not True:
-            lines.append(f"auto_asks = {_toml_value(cfg.approvals.auto_asks)}")
-        lines.append("")
-    # Only a list that holds a folder is written; a bad value is kept as it is.
-    if cfg.workspace.extra_folders:
-        folders = cfg.workspace.extra_folders
-        lines.extend(["[workspace]", f"extra_folders = {_toml_value(folders)}", ""])
-    retrieval = cfg.retrieval
-    if retrieval != RetrievalConfig():
-        lines.append("[retrieval]")
-        lines.append(f"retriever = {_toml_string(retrieval.retriever)}")
-        if retrieval.recall_at:
-            lines.append(f"recall_at = {_toml_value(retrieval.recall_at)}")
-        lines.append(f"k = {retrieval.k}")
-        if retrieval.kinds:
-            lines.append(f"kinds = {_toml_value(retrieval.kinds)}")
-        lines.append(f"placement = {_toml_string(retrieval.placement)}")
-        lines.append(f"min_score = {_toml_value(retrieval.min_score)}")
-        lines.append(f"cross_task_ratio = {_toml_value(retrieval.cross_task_ratio)}")
-        lines.append(f"cross_task_cap = {retrieval.cross_task_cap}")
-        lines.append(f"cross_task_cold = {retrieval.cross_task_cold}")
-        lines.append("")
-
-    # Only a settings section that differs from the defaults is written, so
-    # an existing config is saved exactly as before and a reconfigure keeps
-    # a non-default scheduler (decision D7).
-    scheduler = cfg.scheduler
-    if scheduler != SchedulerConfig():
-        lines.append("[scheduler]")
-        lines.append(f"policy = {_toml_string(scheduler.policy)}")
-        lines.append(f"n_srv = {scheduler.n_srv}")
-        lines.append(f"r_f = {scheduler.r_f}")
-        lines.append(f"n_fg = {scheduler.n_fg}")
-        lines.append(f"focus_s = {_toml_value(scheduler.focus_s)}")
-        lines.append(f"call_log = {'true' if scheduler.call_log else 'false'}")
-        lines.append(f"call_log_dir = {_toml_string(scheduler.call_log_dir)}")
-        lines.append(f"gpu_lock_file = {_toml_string(scheduler.gpu_lock_file)}")
-        lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
-        lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
-        lines.append("")
+    top: list[str] = []
+    tables: dict[str, list[str]] = {}
+    for key, value in changed(cfg).items():
+        section, _, name = key.rpartition(".")
+        if key not in ("chat_backend", "embedding_backend", "pricing"):
+            line = f"{name} = {_toml_value(value)}"
+            (tables.setdefault(section, []) if section else top).append(line)
+    lines = [
+        f"chat_backend = {_toml_string(chat)}",
+        f"embedding_backend = {_toml_string(embedding)}",
+        *top,
+        "",
+    ]
+    for section, body in tables.items():
+        lines.extend([f"[{section}]", *body, ""])
 
     # Kept as written, even when invalid (it only warns), so a save loses nothing.
     for model, price in (cfg.pricing if isinstance(cfg.pricing, dict) else {}).items():

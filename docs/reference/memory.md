@@ -34,23 +34,18 @@ In the web console and the app, a turn of the chat that has left the window is n
 next message that matches, as `this chat`, and `search_memory` finds it too. A turn whose
 question the window still shows is not recalled.
 
-`--window-eviction slide` (or `[agent] window_eviction = "slide"`) is the
-earlier behavior: the oldest unit leaves at every step once the window is
-full, so from about the eleventh step each request starts its history one unit
-later than the one before, and a server's prompt cache can reuse only the
-system prompt, the tools and the task. The window is also cut by the prompt
-cap (100,000 characters) and, with `--context-window`, by the request fit.
+`--window-eviction` (or `[agent] window_eviction`) picks the mode. The window is
+also cut by the prompt cap (100,000 characters) and, with `--context-window`,
+by the request fit.
 
 | Mode | The window drops |
 |---|---|
-| `slide` | The oldest unit, at every step once full. |
 | `chunk` (default) | Whole units down to the cap less 8 messages (56 of 64, 12 of 20) when it would pass the cap, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
 | `boundary` | `chunk` within an attempt, and the finished attempt's turns when the next attempt starts after a reflection (the reflection carries them); the task and inbox messages stay. |
 
 With the default of 64 messages the count rarely drops anything: the prompt-size fit is the
 evictor. When the planning prompt would pass the 100,000-character cap,
-it drops whole units, a tool call with its results never split, down to 70% of the cap under `chunk`
-and `boundary` (just under it under `slide`, so every step drops one unit again).
+it drops whole units, a tool call with its results never split, down to 70% of the cap.
 
 A window that reaches the message cap first still drops by count, as the mode says; a drop takes at most half the
 window, so below a cap of 16 a chunk is fewer than eight messages. The value appears as
@@ -60,9 +55,8 @@ window, so below a cap of 16 a chunk is fewer than eight messages. The value app
 `[agent] window_messages = 20`) is the earlier cap, which a cloud vendor's backend keeps by
 default: without prompt caching, a longer window costs input tokens on every request.
 
-A mode other than `slide` appears as `window_eviction` in the JSON result's
-`config`; `slide` adds nothing. The request fit (`--context-window`) also
-holds its cut under `chunk` and `boundary`: when a request would pass the
+The mode appears as `window_eviction` in the JSON result's `config`. The
+request fit (`--context-window`) also holds its cut: when a request would pass the
 input limit it drops whole units down to 70% of the limit and remembers the
 oldest unit it kept, and the next requests start from that unit and drop again
 only when they would pass the limit.
@@ -199,54 +193,8 @@ items. A completion or self-work claim with no fact beyond its frame is
 comes from a note or from a digest.
 
 A `task:` line, a file, path or function
-name makes the text content instead. A final digest admitted by `outcome`
-for a completed run is exempt from this filter entirely, but still needs a
-nonempty file or verification line for admission.
-
-## Experimental typed assertions
-
-Python callers can opt in with `AgentOptions(typed_assertions=True)`; there is
-no CLI or config switch. The default remains off.
-
-In explicit reasoning modes,
-recognized short user assertions and supported sourced notes can carry versioned
-assertion metadata in `provenance`, alongside their original checked text.
-Recognition is deliberately narrow, not a general fact extractor.
-
-A sourced note needs an exact matching text field and record ID; an unsupported or unverified
-assertion is not automatically superseded. Source records and assertions still
-pass pattern-based redaction, which can miss secrets.
-
-Within the same task, an explicitly marked change to a verified typed key can
-supersede one older active assertion when its verified source time (`timestamp`
-or `date`) is later; a user statement is ordered by message and sentence
-position within its task. A user counter and a source timestamp are different
-clocks, and a restarted task does not link to earlier user statements (they stay
-conflicts).
-
-Missing or naive source times do not order; markers include Chinese
-`取消` and trailing `now`/`instead`. Multiple active candidates, missing ordering
-or a different value without a change marker retain conflicts.
-
-This does not link entities across tasks or sessions. An unlinked assertion is kept
-without claiming it names the same entity; a relative `tonight` gets an
-effective date only from a matching record's timezone-aware timestamp.
-
-Old rows have no inferred polarity.
-
-With the option on, BM25 long-term search can include superseded entries; recall
-labels those entries and unlinked assertions, dates their titles from a record's
-source date rather than the machine timezone, orders selected long-term hits
-newest first by source observation or the user entry's wall-clock time, and
-ignores only an exact normalized duplicate; a near-duplicate with different
-content is kept (`NEW`, unlinked). Search still has
-relevance and item limits and does not guarantee
-that every related fact will appear.
-
-`history_entries(task_id)` on the long-term
-store returns that task's active and superseded entries newest first; forget
-removes both. In a nonpersistent explicit-mode agent the option enables a RAM
-store; persistence requires `memory_dir` or the persistence environment.
+name makes the text content instead. A digest still needs a nonempty
+file or verification line for admission.
 
 Nothing is written without a signal:
 
@@ -255,7 +203,7 @@ Nothing is written without a signal:
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
 | `user_request` | The user's message asks to remember (`remember that …`, `记住…`). | The fact the request carries after its marker, this run's `remember` notes and its final digest at the run's end; never the final reflection. The fact is classified by `classify_kind`, so it is `semantic` unless it is first-person (`profile`), and the meta-noun and question rules below apply to it. |
 | `user_statement` | A declarative sentence of the user's message states a stable fact without a remember request, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
-| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. For a completed run the digest is exempt from the meta-claim filter. |
+| `outcome` | A console or app chat keeps a note whose source is not the user's own typed words (the note gate's `pointed` or `inferred`). | That note, at once. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 
 Only the user's own text gives a user signal: a tool result, a note, a recall
@@ -345,12 +293,6 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
   persistence on, the first run that ends creates it, and every run adds
   its record at its end, `--memory off` included. With persistence off,
   procedural memory stays in RAM, and nothing is written.
-- The legacy playground is disabled by default; `melo --serve
-  --enable-playground` enables it and creates `~/.cache/localmelo/playground/`.
-  Its `history.db` keeps the model's
-  reasoning for the same number of days, and clears older reasoning when a
-  new chat first uses it: each chat opens its own connection to the shared
-  file. Its chats share a `procedures.db` there too.
 
 ## Task records
 
@@ -368,9 +310,8 @@ Every run saves one row in the `tasks` table of history:
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
 - An interactive run that is cancelled is saved as `cancelled`, with the
   reason as its result: a run started in the Python API with `on_event` or
-  `approval`, or a legacy playground chat stopped with Stop or by its 600-second
-  limit (when enabled, its history is in `~/.cache/localmelo/playground/`). Its
-  interrupted step gets one row per tool call in `steps` (see
+  `approval`, or a console turn stopped with Stop or by its 600-second limit.
+  Its interrupted step gets one row per tool call in `steps` (see
   [Stop a run](../guides/python.md#stop-a-run)). Other cancelled runs are saved as
   `crashed`.
 - A row that still reads `running` belongs to a run in progress, or to a

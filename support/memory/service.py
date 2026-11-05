@@ -73,6 +73,9 @@ from localmelo.support.config import (
     CHAT_RECENT_DIGEST_MINUTES,
     MEMORY_COMPRESS_AT_CHARS,
     MEMORY_COMPRESS_PARALLEL,
+    MEMORY_GATHER,
+    MEMORY_GATHER_DEFAULT,
+    MEMORY_GATHER_MIN_COSINE,
     MEMORY_NOTE_GATE,
     MEMORY_NOTE_MIN_COSINE,
     MEMORY_RECALL_CHARS,
@@ -84,7 +87,7 @@ from localmelo.support.config import (
     MEMORY_RECALL_OPEN_CHARS,
     MEMORY_RECALL_RECORDS,
 )
-from localmelo.support.memory import hippo_encode, note_gate, records
+from localmelo.support.memory import blocked, hippo_encode, note_gate, records
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.digest import (
     DIGEST_KINDS,
@@ -118,17 +121,23 @@ from localmelo.support.memory.recall import (
     AUTO_RECORDS,
     BLOCK_CHARS,
     CUT_GUIDE,
+    GATHER_COSINE,
+    GATHER_GUIDE,
     ITEM_CHARS,
+    ITEM_LIST_GUIDE,
+    LIST_GUIDE,
     LIST_MAX,
     MIN_COSINE,
     MIN_COVERAGE,
     OPEN_CHARS,
     PER_SESSION,
+    PREMISE_GUIDE,
     SIDE_SUMMARY,
     WHOLE,
     Corpus,
     Item,
     Shown,
+    asks_to_gather,
     block,
     chat_label,
     current_only,
@@ -137,7 +146,6 @@ from localmelo.support.memory.recall import (
     in_view,
     is_contentless,
     kept_lines,
-    list_guide,
     meaning_of,
     newer_first,
     pick,
@@ -183,6 +191,20 @@ PACK_HEADER: Final = (
 _PACK_RECALL: Final = 12
 # The turn origin of a task's question to its owner chat (``TurnInfo.origin``).
 ASK_OWNER: Final = "ask_owner"
+# The line before each note the person added while melo worked, in the words a
+# turn's document holds (:func:`with_read_notes`).
+ADDED_MARK: Final = "(added while melo worked)"
+# The line a console chat puts before a note in the request the run reads (so also
+# in the ``inbox.accepted`` text); memory leaves it out, :data:`ADDED_MARK` says it.
+_NOTE_LEAD: Final = "[The user added this while you were working]"
+# What the console adds to a note that carries pictures and no words (a stand-in,
+# ``[2 pictures]``), and after the words of a note whose pictures a text-only
+# model was not sent (a line to the model). Neither is the person's.
+_PICTURE_STANDIN: Final = re.compile(r"\[\d+ pictures?\]")
+_PICTURES_WITHHELD: Final = re.compile(
+    r"\s*\[You cannot see (?:this picture|these pictures) "
+    r"\(this model is not sent pictures\); [^\]]*\]\s*$"
+)
 NOT_THE_USER: Final = (
     "Not remembered: this turn is a task's question, not the user's words."
 )
@@ -233,6 +255,12 @@ class Recall:
     search was for: ``message`` (the message's own words), ``recent`` (a message
     with no content of its own, searched with the user's words of the chat's last
     turns, :func:`follow_up_query`) or ``none`` (nothing: no recall ran).
+    With ``[memory] gather`` on (``guide``, the default, or ``wide``), *gather* says
+    the message asks to count, total or compare and speaks of its speaker
+    (:func:`~.recall.asks_to_gather`) and *floor*
+    is the vector bar the search used, on every turn (``False`` and the recall bar
+    for a message that does not ask); both are ``None``, and left out of
+    :meth:`to_json`, with it off.
     """
 
     retriever: str = "bm25"
@@ -247,9 +275,16 @@ class Recall:
     used: int = 0
     block_chars: int = 0
     query_from: str = "message"
+    gather: bool | None = None
+    floor: float | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.gather is None:
+            del data["gather"]
+        if self.floor is None:
+            del data["floor"]
+        return data
 
 
 def _resolve(mode: str, failure: str) -> tuple[str, str]:
@@ -279,11 +314,15 @@ class RecallSettings(NamedTuple):
     its own is searched with the user's words of the chat's last turns (``[memory]
     followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
-    may open it (:attr:`opens_excerpts`). The defaults are the shipped ones: a block
-    of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349), *followup* and
-    *excerpt_open* on, and what recall did before these were settings for the rest.
-    *premise* (``[memory] premise_check = "on"``) adds one sentence to the list
-    form's guide line (:attr:`guide`); it changes nothing without *listing*.
+    may open it (:attr:`opens_excerpts`). *gather* is ``[memory] gather`` (``off``,
+    ``wide`` or ``guide``) and *gather_floor* ``gather_min_cosine``: the vector bar
+    of a question that counts, totals or compares. *premise* (``[memory]
+    premise_check``, on by default) ends the list form's guide line with
+    :data:`PREMISE_GUIDE`; the excerpt form never shows a guide line. The defaults
+    are the shipped ones: a block of :data:`BLOCK_CHARS` and a turn of
+    :data:`ITEM_CHARS` (#349), *followup*, *excerpt_open* and *premise* on, *gather*
+    ``guide`` (:data:`MEMORY_GATHER_DEFAULT`), and what recall did before these were
+    settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -302,14 +341,9 @@ class RecallSettings(NamedTuple):
     open_sources: bool = False
     followup: bool = True
     excerpt_open: bool = True
-    premise: bool = False
-
-    @property
-    def guide(self) -> str:
-        """The line above the list form's lines (:func:`.recall.list_guide`): the
-        items' or the turns', and with ``premise_check = "on"`` and the list form
-        one sentence more. The excerpt form never carries it."""
-        return list_guide(self.items, self.premise and self.listing)
+    gather: str = MEMORY_GATHER_DEFAULT
+    gather_floor: float = GATHER_COSINE
+    premise: bool = True
 
     @property
     def opens_excerpts(self) -> bool:
@@ -323,6 +357,33 @@ class RecallSettings(NamedTuple):
         return Shown.of(
             self.item_chars, question if self.match else None, self.opens_excerpts
         )
+
+    @property
+    def gathers(self) -> bool:
+        """Whether recall looks wider for a question that counts or compares
+        (``[memory] gather`` is ``wide`` or ``guide``)."""
+        return self.gather != "off"
+
+    @property
+    def wide_floor(self) -> float:
+        """The vector bar of a list-form search that looks wider: the lower of the
+        recall bar and ``gather_min_cosine``."""
+        return min(self.min_cosine, self.gather_floor)
+
+
+def _guide(settings: RecallSettings, gathers: bool) -> str:
+    """The line above a list of turns or items: :data:`LIST_GUIDE` (or
+    :data:`ITEM_LIST_GUIDE`), then :data:`GATHER_GUIDE` with ``[memory] gather =
+    "guide"`` on a turn that asks to count, total or compare (*gathers*), then
+    :data:`PREMISE_GUIDE` with ``[memory] premise_check = "on"``, each after one
+    space. Only the list form shows it (:func:`.recall.block` ignores it without
+    ``listing``)."""
+    parts = [ITEM_LIST_GUIDE if settings.items else LIST_GUIDE]
+    if gathers and settings.gather == "guide":
+        parts.append(GATHER_GUIDE)
+    if settings.premise:
+        parts.append(PREMISE_GUIDE)
+    return " ".join(parts)
 
 
 class NoteSettings(NamedTuple):
@@ -684,6 +745,71 @@ def _typed_words(turn: TurnInfo) -> str:
     return turn.typed_text if turn.attachments else turn.user_text
 
 
+def with_read_notes(typed: str, notes: Sequence[str]) -> str:
+    """*typed* and then each of *notes*, the words the person added while melo
+    worked, on a paragraph of its own: :data:`ADDED_MARK`, a line break, the note.
+
+    The mark is a line of its own so a statement in the note reads as one (a
+    sentence that starts with a mark is no statement). A note that holds nothing
+    after the console's own lead (:data:`_NOTE_LEAD`) is left out, so is one that
+    is only the stand-in for its pictures, and the console's line about pictures
+    a model was not sent never counts as words. Without notes, *typed* exactly.
+    """
+    marked = []
+    for note in notes:
+        words = note.strip().removeprefix(_NOTE_LEAD).strip()
+        words = _PICTURES_WITHHELD.sub("", words).strip()
+        if _PICTURE_STANDIN.fullmatch(words):
+            words = ""
+        if words:
+            marked.append(f"{ADDED_MARK}\n{words}")
+    if not marked:
+        return typed
+    return "\n\n".join([typed.rstrip(), *marked] if typed.strip() else marked)
+
+
+async def turn_words(store: SessionStore, info: TurnInfo, typed: str) -> str:
+    """The person's words of a finished turn, as its document holds them: *typed*,
+    then each note the run read (:meth:`SessionStore.read_notes`).
+
+    The same rule as the typed words: a turn the person did not begin
+    (:func:`is_owner_question`) holds no words of theirs, so none of its notes
+    count; *typed* comes back as it is. A note the run never read is not here:
+    it is the typed text of the chat's next turn.
+    """
+    if is_owner_question(info):
+        return typed
+    return with_read_notes(typed, await store.read_notes(info.session_id, info.turn))
+
+
+async def ended_on_block(store: SessionStore, info: TurnInfo) -> bool:
+    """Whether turn *info* ended on a blocked step (:func:`blocked.ended_on_block`),
+    from the last result of its tool calls in the store: one read."""
+    results = await store.turn_tool_results(
+        info.session_id, info.turn, head=blocked.HEAD_CHARS, last=1
+    )
+    return blocked.ended_on_block(results)
+
+
+async def turn_document(
+    store: SessionStore, info: TurnInfo, typed: str, answer: str
+) -> tuple[str, str | None] | None:
+    """What a finished turn's document holds: ``(the person's words, melo's answer)``,
+    or ``None`` when the turn holds nothing to remember.
+
+    The words are :func:`turn_words`. A turn that ended on a blocked step
+    (:func:`ended_on_block`) holds the words only, its answer ``None`` (no
+    ``melo:`` line): melo's reply about a step it was not allowed to take reports the
+    rules of that time, which no longer say anything about the person. A blocked turn
+    with no words has nothing left. Any other turn is as it was: the words and the
+    answer. The live index and a rebuild both call this, so they agree.
+    """
+    words = await turn_words(store, info, typed)
+    if not await ended_on_block(store, info):
+        return words, answer
+    return (words, None) if words.strip() else None
+
+
 async def recent_said(
     store: SessionStore,
     info: TurnInfo,
@@ -873,6 +999,7 @@ class ChatMemory:
         if cfg is None:
             return RecallSettings()
         memory = cfg.memory
+        gathering = getattr(memory, "gather", MEMORY_GATHER_DEFAULT)
 
         def bounded(name: str, default: int, bounds: tuple[int, int]) -> int:
             value = getattr(memory, name, default)
@@ -901,7 +1028,9 @@ class ChatMemory:
             getattr(memory, "open_sources", "off") == "on",
             getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
-            getattr(memory, "premise_check", "off") == "on",
+            gathering if gathering in MEMORY_GATHER else MEMORY_GATHER_DEFAULT,
+            bar("gather_min_cosine", GATHER_COSINE, MEMORY_GATHER_MIN_COSINE),
+            getattr(memory, "premise_check", "on") != "off",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -1072,13 +1201,15 @@ class ChatMemory:
         keep_from_turn: int | None = None,
         recall: Recall | None = None,
         listing: bool = False,
+        min_cosine: float | None = None,
     ) -> list[Item]:
         """The items that match *query*; embeds it when the retriever uses vectors.
 
         The turns of *exclude_session* from *keep_from_turn* on (all of them
         without one) are left out: the chat shows them. *recall*, when given,
         is filled in with how the search went. With *listing* (the list form)
-        a chat's turns are not capped and each carries its similarity.
+        a chat's turns are not capped and each carries its similarity. With
+        *min_cosine* the vector bar is that, not ``recall_min_cosine``.
         """
         query = query[:_QUERY_CHARS]
         recall = recall if recall is not None else Recall()
@@ -1094,7 +1225,7 @@ class ChatMemory:
             docs_k=docs_k,
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
-            min_cosine=bars.min_cosine,
+            min_cosine=bars.min_cosine if min_cosine is None else min_cosine,
             min_coverage=bars.min_coverage,
             listing=listing,
         )
@@ -1423,6 +1554,8 @@ class ChatMemory:
         query = (info.user_text if asked else typed)[:_QUERY_CHARS]
         recall = Recall()
         budget = self.recall_settings()
+        if budget.gathers:
+            recall.gather, recall.floor = False, budget.min_cosine
         # A message with no content of its own ("go look it up", "continue") is
         # searched with what the person said last in this chat, not with its own
         # words, which match whatever holds them. With no earlier turn to follow
@@ -1453,6 +1586,13 @@ class ChatMemory:
             [query, *(cand.text for cand in found)], EMBED_TIMEOUT_S, query=True
         )
         recall.embed_ms = elapsed_ms(started)
+        # A question that counts, totals or compares needs every item of a kind,
+        # which sit further from it than one answer to a single fact does: the list
+        # form looks wider for it (``[memory] gather``). Nothing else changes.
+        gathers = budget.gathers and asks_to_gather(query)
+        floor = budget.wide_floor if gathers and budget.listing else budget.min_cosine
+        if budget.gathers:
+            recall.gather, recall.floor = gathers, floor
         used = await self._find(
             query,
             embedded,
@@ -1462,7 +1602,7 @@ class ChatMemory:
             exclude_session=info.session_id,
             keep_from_turn=keep_from,
             notes=budget.notes,
-            min_cosine=budget.min_cosine,
+            min_cosine=floor,
             min_coverage=budget.min_coverage,
             listing=budget.listing,
         )
@@ -1475,7 +1615,7 @@ class ChatMemory:
             budget.chars,
             budget.shown(query),
             listing=budget.listing,
-            guide=budget.guide,
+            guide=_guide(budget, gathers),
         )
         hinted = budget.hint and not used
         if hinted:
@@ -1934,21 +2074,25 @@ class ChatMemory:
     ) -> None:
         try:
             source = await self._source(store, info)
+            held = await turn_document(store, info, typed, answer)
+            if held is None:
+                return
             await self._add_documents(
-                [(source, info.turn, typed, answer, time.time())], INDEX_EMBED_TIMEOUT_S
+                [(source, info.turn, *held, time.time())], INDEX_EMBED_TIMEOUT_S
             )
         except Exception:
             logger.warning("Could not add a turn to the memory index", exc_info=True)
 
     async def _add_documents(
         self,
-        turns: Sequence[tuple[dict[str, Any], int, str, str, float]],
+        turns: Sequence[tuple[dict[str, Any], int, str, str | None, float]],
         timeout: float,
     ) -> tuple[int, int]:
         """Index turns of ``(source, turn, typed, answer, at)``: a document for each
-        chunk of each turn (:func:`document_chunks`), embedded _BATCH at a time, and
-        a turn's stored in place of the ones it had. Returns the documents stored
-        and the characters embedded (0 without a vector)."""
+        chunk of each turn (:func:`document_chunks`; an answer of ``None`` is no
+        reply line), embedded _BATCH at a time, and a turn's stored in place of the
+        ones it had. Returns the documents stored and the characters embedded (0
+        without a vector)."""
         chunked = [
             document_chunks(
                 typed, answer, title=src["title"] if src["kind"] == "task" else ""
@@ -2205,7 +2349,7 @@ class ChatMemory:
                 async with self._lock:
                     await records_store.set_vector(entry.id, vectors[0], model)
                 notes += 1
-        found: list[tuple[dict[str, Any], int, str, str, float]] = []
+        found: list[tuple[dict[str, Any], int, str, str | None, float]] = []
         if chats is not None:
             since = await index.forgotten_at()
             for session in await chats.list_sessions(limit=100_000, kinds=None):
@@ -2226,10 +2370,16 @@ class ChatMemory:
                         and (turn.finished_at or 0) > since
                     ):
                         # What was typed: the composed text holds attachments too.
-                        typed = turn.typed_text if turn.attachments else turn.user_text
-                        found.append(
-                            (source, turn.turn, typed, answer, turn.finished_at or 0)
+                        # Then the words the person added while melo worked, and no
+                        # answer for a turn that ended on a blocked step, as the
+                        # live index has them (:func:`turn_document`).
+                        held = await turn_document(
+                            chats, turn, _typed_words(turn), answer
                         )
+                        if held is not None:
+                            found.append(
+                                (source, turn.turn, *held, turn.finished_at or 0)
+                            )
             async with self._lock:
                 # Summaries and exchanges are no turns of a session file: keep them.
                 extra = [
@@ -3185,11 +3335,19 @@ class MemoryTools(BaseToolProvider):
         chat: ChatTurn | None,
     ) -> str:
         """The search result of the list form: the notes found as before, numbered,
-        then, under the list guide (:attr:`RecallSettings.guide`), a line for each chat turn (up to ``k``,
-        which may reach ``recall_list_max``, and ``recall_list_max`` without it)."""
+        then, under the list guide (:func:`_guide`), a line for each chat turn (up to
+        ``k``, which may reach ``recall_list_max``, or that many with no ``k``)."""
         notes_k = max(1, min(int(5 if k is None else k), 8))
         turns_k = (
             settings.list_max if k is None else max(1, min(int(k), settings.list_max))
+        )
+        # Only a turn whose message asks to count, total or compare looks wider; a
+        # search under any other turn, or outside a turn, reads as it does with
+        # ``[memory] gather = "off"``.
+        gathers = settings.gathers and bool(
+            chat is not None
+            and chat.memory.recall is not None
+            and chat.memory.recall.gather
         )
         items = await self._memory.search(
             query,
@@ -3198,6 +3356,7 @@ class MemoryTools(BaseToolProvider):
             exclude_session=own.info.session_id if own else "",
             keep_from_turn=own.keep_from_turn if own else None,
             listing=True,
+            min_cosine=settings.wide_floor if gathers else None,
         )
         notes = [item for item in items if item.is_record][:notes_k]
         turns = [item for item in items if not item.is_record][:turns_k]
@@ -3213,7 +3372,7 @@ class MemoryTools(BaseToolProvider):
             chat.add_searched([*notes, *turns])
         lines = [f"{n}. {item.shown}" for n, item in enumerate(notes, 1)]
         if turns:
-            lines.append(settings.guide)
+            lines.append(_guide(settings, gathers))
             lines.extend(item.shown for item in turns)
         return "\n".join(lines)
 

@@ -19,7 +19,6 @@ from localmelo.support.sessions.store import (
     SESSION_KINDS,
     SessionInfo,
     SessionStore,
-    SessionStoreError,
     StoredEvent,
     TurnInfo,
 )
@@ -51,33 +50,14 @@ _EVENT_ID_MAX = 2**63 - 1
 # ── Helpers ──
 
 
-async def _store_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await one store call, mapping a store failure as 2.2 says."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    info: SessionInfo | None = await _store_call(
-        console, console.store.get_session(session_id), session_id
-    )
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
-
-
 async def _read_session(
     console: Console, session_id: str
 ) -> tuple[SessionInfo, SessionStore]:
     """Resolve a gateway session first, then a read-only worker session."""
-    info = await _store_call(console, console.store.get_session(session_id), session_id)
+    info = await console.store.get_session(session_id)
     if info is not None:
         return info, console.store
-    info = await _store_call(console, console.worker_history.get_session(session_id))
+    info = await console.worker_history.get_session(session_id)
     if info is None:
         raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info, console.worker_history
@@ -90,12 +70,8 @@ async def _turn_events(
     events: list[StoredEvent] = []
     after = 0
     while True:
-        page = await _store_call(
-            console,
-            store.list_events(
-                session_id, after_id=after, limit=1000, turns=(turn, turn)
-            ),
-            session_id if store is console.store else None,
+        page = await store.list_events(
+            session_id, after_id=after, limit=1000, turns=(turn, turn)
         )
         events.extend(page)
         if len(page) < 1000:
@@ -183,17 +159,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 after = decode_cursor(cursor)
             except ValueError as exc:
                 raise ApiError(400, "invalid_request", str(exc)) from None
-            records = await _store_call(
-                console,
-                console.worker_history.workers(
-                    limit=limit + 1,
-                    query=query,
-                    status=status,
-                    source=source,
-                    parent_run=parent_run,
-                    after=after,
-                    kind="chat" if kind == "terminal" else "worker",
-                ),
+            records = await console.worker_history.workers(
+                limit=limit + 1,
+                query=query,
+                status=status,
+                source=source,
+                parent_run=parent_run,
+                after=after,
+                kind="chat" if kind == "terminal" else "worker",
             )
             has_more = len(records) > limit
             return JSONResponse(
@@ -218,16 +191,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         # shutdown in the middle of one); the list starts at one turn, a
         # running one included, so a session appears as it is created. The
         # main chat is there before its first message.
-        sessions = await _store_call(
-            console,
-            console.store.list_sessions(
-                limit=limit + 1,
-                query=query,
-                kinds=(kind,),
-                min_turns=0 if kind == "front" else 1,
-                # A chat that took a task by code has an echo and no turn.
-                or_events=(ECHO_EVENT, CARD_EVENT),
-            ),
+        sessions = await console.store.list_sessions(
+            limit=limit + 1,
+            query=query,
+            kinds=(kind,),
+            min_turns=0 if kind == "front" else 1,
+            # A chat that took a task by code has an echo and no turn.
+            or_events=(ECHO_EVENT, CARD_EVENT),
         )
         has_more = len(sessions) > limit
         bodies = [console.session_body(info) for info in sessions[:limit]]
@@ -245,7 +215,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         }
         if kind == "chat":
             # The chats are the main chat's side chats; the list names it.
-            main = await _store_call(console, console.main_body())
+            main = await console.main_body()
             asking = sum(n for owner, n in waiting.items() if owner != console.main_id)
             if main is not None and asking:
                 main["waiting_in_side"] = asking  # tasks waiting in side chats
@@ -258,15 +228,20 @@ def add_routes(app: FastAPI, console: Console) -> None:
         info, store = await _read_session(console, session_id)
         worker = store is console.worker_history
         entry = None if worker else console.sessions.get(session_id)
-        grants = sorted(entry.policy.allowed_tools) if entry is not None else []
+        # The grants that hold in the chat, open or not: its own and the main chat's.
+        view = None if worker else console.sessions.grants_view(info)
+        grants = sorted(view.names() | view.passed()) if view is not None else []
         granted_at = (
-            {tool: entry.granted_at.get(tool, 0.0) for tool in grants}
-            if entry is not None
-            else {}
+            {tool: view.granted_at(tool) for tool in grants} if view is not None else {}
         )
-        turns = await _store_call(
-            console, store.list_turns(session_id), None if worker else session_id
+        # In a side chat, the grants that hold because the main chat allowed
+        # them: taking one back here takes it back everywhere.
+        everywhere = (
+            sorted(view.everywhere())
+            if view is not None and info.kind not in ("front", "task", "front_bg")
+            else []
         )
+        turns = await store.list_turns(session_id)
         tokens: int | None = sum(_completion_tokens(turn) for turn in turns)
         if worker and not any(
             isinstance(turn.result, dict)
@@ -277,11 +252,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         ):
             tokens = None
         records = (
-            await _store_call(
-                console,
-                console.worker_history.workers(
-                    limit=1, query="", session_id=session_id, kind=info.kind
-                ),
+            await console.worker_history.workers(
+                limit=1, query="", session_id=session_id, kind=info.kind
             )
             if worker
             else []
@@ -298,15 +270,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 ),
                 "grants": grants,
                 "granted_at": granted_at,
+                "grants_everywhere": everywhere,
                 "mcp_error": "" if entry is None else entry.mcp_error,
                 "agent": "not_loaded" if worker else agent_state(console, session_id),
                 "tokens": tokens,
                 # Where a client's stream starts to hear only what comes next.
-                "last_event_id": await _store_call(
-                    console,
-                    store.latest_event_id(session_id),
-                    None if worker else session_id,
-                ),
+                "last_event_id": await store.latest_event_id(session_id),
             }
         )
 
@@ -320,18 +289,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         info, store = await _read_session(console, session_id)
         worker = store is console.worker_history
-        turns = await _store_call(
-            console,
-            store.list_turns(session_id, limit=limit, before=before),
-            None if worker else session_id,
-        )
+        turns = await store.list_turns(session_id, limit=limit, before=before)
         has_earlier = False
         if turns:
-            older = await _store_call(
-                console,
-                store.list_turns(session_id, limit=1, before=turns[0].turn),
-                None if worker else session_id,
-            )
+            older = await store.list_turns(session_id, limit=1, before=turns[0].turn)
             has_earlier = bool(older)
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
@@ -378,7 +339,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         _, store = await _read_session(console, session_id)
         worker = store is console.worker_history
-        scope = None if worker else session_id
         # The header wins over ?after, so ?after is judged only without one.
         if last_event_id is not None:
             start = _event_id(last_event_id, "Last-Event-ID")
@@ -388,9 +348,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             start = 0
         high_water: int | None = None
         if not follow:
-            high_water = await _store_call(
-                console, store.latest_event_id(session_id), scope
-            )
+            high_water = await store.latest_event_id(session_id)
 
         async def run_is_live() -> bool:
             info = await store.get_session(session_id)
@@ -427,11 +385,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if _SHA256_RE.fullmatch(sha256) is None:
             raise ApiError(404, "not_found", t("errors.blobNotFound"))
         _, store = await _read_session(console, session_id)
-        blob = await _store_call(
-            console,
-            store.get_blob(session_id, sha256),
-            None if store is console.worker_history else session_id,
-        )
+        blob = await store.get_blob(session_id, sha256)
         if blob is None:
             raise ApiError(404, "not_found", t("errors.blobNotFound"))
         mime_type, data = blob
@@ -456,16 +410,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
         # An unknown session is 404 on every /api/sessions/{id}/... path,
         # before any parameter of the path is judged.
         if session_id is not None:
-            await _require_session(console, session_id)
+            await console.require_session(session_id)
         try:
             check_client_request_id(client_request_id)
         except ValueError as exc:
             raise ApiError(400, "invalid_request", str(exc)) from None
-        submission = await _store_call(
-            console,
-            console.store.get_submission(session_id, client_request_id),
-            session_id,
-        )
+        submission = await console.store.get_submission(session_id, client_request_id)
         if submission is None and session_id is None:
             # A create that made a chat for a task is accepted, with the chat and the task.
             made = await created(console, client_request_id)
@@ -519,10 +469,8 @@ def _event_id(value: str, name: str) -> int:
 
 async def _turn_start(console: Console, session_id: str, turn: int) -> int | None:
     """The id of a turn's first event, or ``None``."""
-    events: list[StoredEvent] = await _store_call(
-        console,
-        console.store.list_events(session_id, limit=1, turns=(turn, turn)),
-        session_id,
+    events: list[StoredEvent] = await console.store.list_events(
+        session_id, limit=1, turns=(turn, turn)
     )
     return events[0].id if events else None
 
@@ -541,21 +489,15 @@ async def _page_cards(
     """
     low = 0
     if turns:
-        older = await _store_call(
-            console,
-            console.store.list_turns(session_id, limit=1, before=turns[0].turn),
-            session_id,
+        older = await console.store.list_turns(
+            session_id, limit=1, before=turns[0].turn
         )
         if older:
             low = (await _turn_start(console, session_id, turns[0].turn) or 1) - 1
     high = None if before is None else await _turn_start(console, session_id, before)
     return list(
-        await _store_call(
-            console,
-            console.store.events_of_type(
-                session_id, type_, after_id=low, before_id=high, limit=CARD_PAGE
-            ),
-            session_id,
+        await console.store.events_of_type(
+            session_id, type_, after_id=low, before_id=high, limit=CARD_PAGE
         )
     )
 
@@ -567,10 +509,8 @@ async def _replay_from(
     if not turns:
         return 0
     first = turns[0].turn
-    events: list[StoredEvent] = await _store_call(
-        console,
-        store.list_events(session_id, limit=1, turns=(first, first)),
-        session_id if store is console.store else None,
+    events: list[StoredEvent] = await store.list_events(
+        session_id, limit=1, turns=(first, first)
     )
     if events and events[0].id is not None:
         return max(events[0].id - 1, 0)

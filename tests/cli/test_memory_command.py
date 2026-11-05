@@ -11,9 +11,8 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import threading
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +24,7 @@ from localmelo.support.backends import discovery
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.cli.test_choice_lists import DOWN, ENTER, ESC, seen, typed
+from localmelo.tests.fixtures.http_stub import HttpStub
 from localmelo.tests.memory.chat_memory_helpers import teach, vector
 
 HOLDER = "test-host:1:command"
@@ -76,7 +76,7 @@ def test_list_prints_the_notes_newest_first_and_status_counts_them(
     assert memory_cli.main(["list"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].endswith("About you    Your dentist is Lee Park.")
-    assert lines[1].strip().startswith("from chat “My dentist is Lee Park.”, ")
+    assert lines[1].strip().startswith("from chat “My dentist is Lee Park”, ")
     assert "You prefer short answers." in lines[2]
     assert memory_cli.main(["list", "-n", "1"]) == 0
     assert len(capsys.readouterr().out.splitlines()) == 2
@@ -178,7 +178,7 @@ def test_the_command_word_has_help_and_refuses_a_stray_word(
 # ── Setup: "Remember across chats with <model>?" against a server that lists an embedding model ──
 
 
-class _Server:
+class _Server(HttpStub):
     """``GET /v1/models`` lists a chat and an embedding model; ``POST /v1/embeddings`` serves vectors."""
 
     def __init__(self) -> None:
@@ -186,9 +186,6 @@ class _Server:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args: Any) -> None:
-                return None
-
             def _send(self, code: int, body: dict[str, Any]) -> None:
                 raw = json.dumps(body).encode()
                 self.send_response(code)
@@ -215,14 +212,7 @@ class _Server:
                 ]
                 self._send(200, {"data": data, "model": body["model"]})
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._httpd.daemon_threads = True
-        threading.Thread(target=self._httpd.serve_forever, daemon=True).start()
-        self.url = f"http://127.0.0.1:{self._httpd.server_port}/v1"
-
-    def close(self) -> None:
-        self._httpd.shutdown()
-        self._httpd.server_close()
+        super().__init__(Handler, path="/v1")
 
 
 @pytest.mark.parametrize(
@@ -236,13 +226,13 @@ def test_setup_offers_the_embedding_model_a_server_lists_and_probes_it(
         # A real transport: the folder's guard refuses a listing without one, and this server is ours.
         models = asyncio.run(
             discovery.list_models(
-                "vllm", server.url, transport=httpx.AsyncHTTPTransport()
+                "vllm", server.base_url, transport=httpx.AsyncHTTPTransport()
             )
         )
         assert discovery.embedding_models(models) == ["Qwen3-Embedding-0.6B"]
         with typed(monkeypatch, keys) as drawn:
             chosen = onboard._offer_embedding(
-                server.url, "chat-8b", models, ollama=False
+                server.base_url, "chat-8b", models, ollama=False
             )
         assert chosen == (offered, False)
         text = seen(drawn)

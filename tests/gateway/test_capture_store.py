@@ -13,6 +13,7 @@ from localmelo.support.gateway.task_store import (
     TaskStoreError,
 )
 from localmelo.support.sessions.store import SessionStore
+from localmelo.tests.gateway.conftest import seed_process
 
 
 async def test_v3_capture_migration_rolls_back(
@@ -139,7 +140,8 @@ async def test_v3_store_gains_the_host_column_and_records_a_host(
             expected_operation_id=previous,
             _capture=True,
         )
-        await recovery.record_process(
+        await seed_process(
+            store,
             task.task_id,
             execution_id="run",
             pgid=11,
@@ -198,7 +200,8 @@ async def test_process_host_is_unknown_unless_every_group_shares_it(
         assert await recovery.process_host(task.task_id, execution_id="run") == ""
 
         async def record(pgid: int, host: str) -> None:
-            await recovery.record_process(
+            await seed_process(
+                store,
                 task.task_id,
                 execution_id="run",
                 pgid=pgid,

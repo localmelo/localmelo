@@ -1,32 +1,25 @@
 import {t} from './i18n.mjs';
-import {applyEvent} from './turns.mjs';
+import {followEvents} from './turns.mjs';
 import {foldWorkerTurns, readTurns} from './worker-history.mjs';
 
-// New frames are drawn together, at most this often.
-const DRAW_MS = 150;
 // A task's process writes events only in these states; any other state ends the stream.
 const STREAMING = new Set(['running', 'held']);
-
-function defaultOpen(url) {
-  return typeof EventSource === 'function' ? new EventSource(url) : null;
-}
 
 /**
  * The live part of a task card: the task's session, folded like a chat. The
  * card calls `sync(task)` with every read of the task. A started task is read
  * once (`/sessions/{id}/turns?events=true`); while it runs or waits for an
- * approval its events are followed on `/events?after=<last id>`, drawn together
- * via `changed()`. A hidden tab closes the stream and a shown one resumes after
- * the last id; a stream that failed is opened again by the next `sync`. When the
- * task stops (done, failed, cancelled, interrupted, parked) the stream closes
- * and the session is read once more, so no frame is lost. A task that never
- * started shows nothing. `open(url)` makes the EventSource (null where there is
- * none, and a running task is then read again on each `sync`); `statusRow` is
- * told about every frame.
+ * approval its events are followed by `followEvents` (turns.mjs), drawn
+ * together via `changed()`; that follower keeps going in a hidden tab and opens
+ * a failed stream again. When the task stops (done, failed, cancelled,
+ * interrupted, parked) the stream closes and the session is read once more, so
+ * no frame is lost. A task that never started shows nothing. `open(url)` makes
+ * the EventSource (null where there is none, and a running task is then read
+ * again on each `sync`); `statusRow` is told about every frame.
  */
-export function taskLive({api, changed, open = defaultOpen, schedule = setTimeout, cancel = clearTimeout, statusRow = null, doc = globalThis.document}) {
+export function taskLive({api, changed, open, schedule, cancel, statusRow = null}) {
   const state = {id: null, view: null, loading: false, error: ''};
-  const follow = {on: false, source: null, draw: null};
+  let follower = null;
   let wants = false;
   let reads = 0;
 
@@ -43,47 +36,21 @@ export function taskLive({api, changed, open = defaultOpen, schedule = setTimeou
       state.error = error?.status === 404 ? '' : t('taskLive.loadFailed');
     }
     state.loading = false;
-    if (wants && state.view) { startFollow(); connect(); }
+    if (wants && state.view) connect();
     changed();
   }
-  // True when a stream is open or is waiting for the tab; false where there is no EventSource.
+  // True when the task is followed; false where there is no EventSource.
   function connect() {
-    if (follow.source || !wants || doc?.visibilityState === 'hidden') return true;
-    // `watch=true`: the person sees the task here, so its card may ask (#465).
-    const source = open(`/api/sessions/${encodeURIComponent(state.id)}/events?after=${state.view.lastEventId}&watch=true`);
-    if (!source) return false;
-    follow.source = source;
-    source.onmessage = (message) => frame(source, message);
-    source.onerror = () => { if (follow.source === source) closeStream(); };
-    return true;
-  }
-  function frame(source, message) {
-    if (follow.source !== source) return;
-    let event;
-    try { event = JSON.parse(message.data); } catch { return; }
-    if (!event || typeof event !== 'object' || event.id <= state.view.lastEventId) return;
-    applyEvent(state.view, event);
-    statusRow?.bump();
-    follow.draw ??= schedule(() => { follow.draw = null; changed(); }, DRAW_MS);
-  }
-  function onVisibility() {
-    if (doc.visibilityState === 'hidden') closeStream();
-    else connect();
-  }
-  function startFollow() {
-    if (follow.on) return;
-    follow.on = true;
-    doc?.addEventListener?.('visibilitychange', onVisibility);
-  }
-  function closeStream() {
-    follow.source?.close();
-    follow.source = null;
+    // `watch`: the person sees the task here, so its card may ask (#465).
+    follower ??= followEvents({
+      id: state.id, view: state.view, watch: true, open, schedule, cancel,
+      onFrame: () => statusRow?.bump(), onDraw: changed,
+    });
+    return follower !== null;
   }
   function stopFollow() {
-    closeStream();
-    if (follow.draw !== null) cancel(follow.draw);
-    follow.draw = null; follow.on = false;
-    doc?.removeEventListener?.('visibilitychange', onVisibility);
+    follower?.close();
+    follower = null;
   }
   function reset(id) {
     reads++;
@@ -100,9 +67,8 @@ export function taskLive({api, changed, open = defaultOpen, schedule = setTimeou
     if (!state.view) {
       if (!state.loading) load();
     } else if (wants) {
-      startFollow();
       if (!connect()) load();
-    } else if (was || follow.on) {
+    } else if (was || follower !== null) {
       stopFollow();
       load();
     }

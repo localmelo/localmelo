@@ -25,6 +25,15 @@ chat_model = "qwen3:8b"
 The wizard writes a table for every backend, but localmelo reads only the
 tables of the chosen backends.
 
+localmelo saves only the settings that differ from their defaults, so a saved
+file stays short: a key at its default is left out, and a backend table with
+nothing set is left out too. The two backend keys are always written. Spaces
+around the text of a backend table (a URL or a model name) are removed when the
+file is read and when Settings saves; `api_key` is never changed. A value of the
+wrong kind, such as `port = "8401"` where a whole number belongs, stops `melo`
+before the run with a plain message (see
+[Configuration errors](troubleshooting.md#configuration-errors)).
+
 | Key | Table | Default | Description |
 |---|---|---|---|
 | `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. Required. |
@@ -42,10 +51,8 @@ tables of the chosen backends.
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
 | `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
-| `fixed_prefix` | `[agent]` | `true` | `false` sends the requests from before the stable prefix became the default. See [Context accounting](#context-accounting). |
-| `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk` or `boundary`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
 | `brief_items` | `[agent]` | `false` | Experimental. `true` makes a `--brief` run name the brief's numbered items that no edit has touched yet; see [`--brief-items`](cli.md#brief-items). |
-| `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
 | `confine_writes` | `[agent]` | `true` | On macOS, `--brief` worker runs and saved tasks start `shell_exec` and `python_exec` in a sandbox that refuses file writes outside the workspace; `false` turns it off (`-X agent.confine_writes=false` for one run). Other runs confine only the calls Auto decides (`[approvals] mode`). See [Writes stay in the workspace](cli.md#confined-writes). |
 | `confine_direct_runs` | `[agent]` | `false` | Developer setting. `true` confines plain direct runs too, as `confine_writes` confines `--brief` runs: on macOS a task given on the command line and the `melo ""` loop start `shell_exec` and `python_exec` in a sandbox that refuses file writes outside the workspace (`--workspace`, else the current folder), and the result carries `confinement`. There is no flag; `-X agent.confine_direct_runs=true` sets it for one run. `--brief` runs follow `confine_writes`; the interactive UI, the console, the app and the gateway ignore it. See [Writes stay in the workspace](cli.md#confined-writes). |
 | `reflection` | `[agent]` | `true` | **Reflect when stuck after many steps** in Settings (the app and the web console). `true`: a task still not done after `steps_per_attempt` steps (50) is followed by one reflection, which decides whether it goes on, up to the run's 100 steps; the reflection costs one more model request. `false`: never reflects; the run is one attempt that goes straight to its total (the same as `attempt_policy = "none"`). Only `false` is saved. `-X agent.reflection=off` sets it for one run, a config without the key reads `true`, and `--attempt-policy` keeps its say over it. Chats, side chats, tasks, workers, direct runs and the gateway all read it; the main chat's own turns never reflect. See [Evaluations](../project/evaluations.md#long-attempts-and-reflection-as-an-option). |
@@ -54,9 +61,8 @@ tables of the chosen backends.
 | `max_calls` | `[agent]` | not set | Developer setting. A whole number of 2 or more: the most model requests a direct run sends (planning, reflection and the rest; each attempt of a retried request counts). Before the request that would pass it, the run ends `budget_exhausted` with the error `Call budget reached: ...`. With `answer_on_stop` on, the last call is kept for the answer: the run stops after `N - 1` requests and the answer request is call `N`. Not set, there is no limit. There is no flag; `-X agent.max_calls=N` sets it for one run. The interactive UI, the console, the app and the gateway ignore it. See [Run results](run-results.md#statuses). |
 | `empty_reply_fallback` | `[agent]` | `"on"` | Developer setting. `"on"` makes a turn that ends with no answer and no tool call, from a model that did think, ask once more with thinking off where the service has a switch for it (the hosted services do; see [Thinking models](../guides/hosted-models.md#thinking-models)) and, if the reply is still empty, answer with the last lines of the thinking, ending with `(from melo's thinking)`, so the run completes. `"off"` gives both up: such a run ends `failed` with `melo did not finish an answer`, as before. Only `"off"` is saved; there is no flag, and `-X agent.empty_reply_fallback=off` sets it for one run. A direct run, the interactive UI, the console, the app and the gateway all read it. Each step is a `thinking_off_retry` or `answer_from_thinking` [notice](events.md#notice) and sets a flag in the result's `empty_reply` (see [Run results](run-results.md#fields)). |
 | `lean_output` | `[agent]` | `false` | Experimental. `true` makes a task given on the command line ask for fewer output tokens; there is no flag, and `-X agent.lean_output=true` sets it for one run. The interactive UI and the gateway ignore it. See [Context accounting](#context-accounting). |
-| `tool_images` | `[agent]` | `"auto"` | Whether the pictures tools return reach the model: `on` sends the newest ones as `image_url` parts in each planning request, `off` names them only, and `auto` is `on` when the server says the model reads images (oMLX's `model_type` `vlm`, Ollama's `vision` capability) or, for a hosted service, when its preset names the model as reading images (see [Hosted models](../guides/hosted-models.md#pictures)). There is no flag; `-X agent.tool_images=on` sets it for one run. See [Pictures that tools return](../guides/tools-mcp.md#pictures-that-tools-return). |
+| `tool_images` | `[agent]` | `"auto"` | Whether the pictures tools return reach the model: `on` sends the newest ones as `image_url` parts in each planning request, `off` names them only, and `auto` is `on` when the server says the model reads images or, for a hosted service, when its preset names the model as reading images (see [Hosted models](../guides/hosted-models.md#pictures)). A server says it in the model's own entry of `GET /v1/models` (`vision` true, `image` among `input_modalities` or `vision` among `capabilities`; `vision` false, or `input_modalities` without `image`, says no), else in oMLX's `model_type` `vlm`, else in Ollama's `vision` capability. When a picture is not sent (`off`, or a server that does not say), its tool message ends with a line that tells the model it cannot see the picture. There is no flag; `-X agent.tool_images=on` sets it for one run. See [Pictures that tools return](../guides/tools-mcp.md#pictures-that-tools-return). |
 | `tool_images_keep`, `tool_images_retire` | `[agent]` | `3`, `2` | With `tool_images` on: the newest `tool_images_keep` pictures keep their pixels, and the oldest `tool_images_retire` lose them together once more arrive, so a request carries 3 to 4 pictures by default. |
-| `cache_layout` | `[agent]` | `"v3"` | `"v2"` sends the earlier requests, with a reflection rebuilt as the last message of every planning request; `"v3"`, with `fixed_prefix`, appends it once instead. See [Context accounting](#context-accounting). |
 | `window_messages` | `[agent]` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
@@ -87,15 +93,16 @@ tables of the chosen backends.
 | `excerpt_open` | `[memory]` | `"on"` | For the excerpt form of earlier chat turns (`recall_form = "excerpt"`, `recall_source = "turns"`). `"on"` (the default): a line that shows less than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…” (chat “Garden”, Oct 30)`, in the recall block and in the memory search tool's result. A line shows less when the excerpt cut what you said or what melo replied (or left the reply out), or when the line is a piece of a longer turn, which the index stores as several chunks; a line that shows the whole turn, and every note, reads as before and has no id. The id counts toward the line's room, so a line with an id has that many characters less text (`[t123] `: 7), and the block stays within `recall_chars`. One line under the excerpts, `A line that starts with an id such as [t123] is cut; open it with open_memory when the answer may be in the rest.`, appears when at least one line has an id, and counts toward `recall_chars` too. The chat's model also has the read-only `open_memory` tool, the one `recall_form = "list"` gives, which returns the whole turn up to `recall_open_chars`, and `search_memory`'s description carries the same sentence. `turn.memory` lists the turns opened as `opened`, and an entry's `shown` keeps the exact line read, id included. `"off"` is a developer setting for comparison: the recall block, the search result and the tool list are as they were before ids, with no id on a cut line and no `open_memory`. It has no effect with `recall_form = "list"` (which always offers `open_memory`) or `recall_source = "items"`. Saved only when it is `"off"`. `-X memory.excerpt_open=off` for one run. |
 | `recall_source` | `[memory]` | `"turns"` | A developer setting for comparison. What recall draws on besides notes. `"turns"` is the earlier chat turns, as always. `"items"` is the memory items that `melo memory ingest FILE -X ingest=compress` wrote from your chats (see [Memory items](../concepts/memory.md#memory-across-chats)): they are ranked, filtered by the two recall bars and shown in the block and in `search_memory` as a turn is, as `“title”: text (chat, date)`; with `recall_form = "list"` each is a line `[m12] …`, and `open_memory` takes ids such as `m12`. The turns are then not recalled, so an index with no items recalls no chat at all. The `turn.memory` event's `used`, `searched` and `opened` entries for an item have kind `item`, the item's id as `item` and its `sources`. `-X memory.recall_source=items` for one run. |
 | `open_sources` | `[memory]` | `"off"` | A developer setting for comparison, used only with `recall_source = "items"` and `recall_form = "list"`. `"on"`: `open_memory` returns, after an item's title and text, the whole turns it came from, oldest first, under `Source turns:`; the item and its turns together stay within `recall_open_chars`. `"off"` opens the item alone. `-X memory.open_sources=on` for one run. |
-| `premise_check` | `[memory]` | `"off"` | A developer setting for comparison, used only with `recall_form = "list"`. `"on"`: the line above the list, in the recall block and in the memory search result, ends with one more sentence. It tells the model that when the question names a person, thing, place or role that none of the listed lines mention, it says first that it has no record of it and does not answer from something similar. `"off"` leaves the line as it is. The excerpt form is never changed. `-X memory.premise_check=on` for one run. |
+| `premise_check` | `[memory]` | `"on"` | A developer setting for comparison, used only with `recall_form = "list"`. `"on"` (the default): the line above the list, in the recall block and in the memory search result, ends with one more sentence (after the `gather` sentence when there is one). It tells the model that when the question names a person, thing, place or role that none of the listed lines mention, it says first that it has no record of it and does not answer from something similar. `"off"` leaves the line as it is. The excerpt form is never changed. `-X memory.premise_check=off` for one run. Saved only when not `"on"`. |
 | `compress_at_chars` | `[memory]` | `12000` | A developer setting for comparison, used only by `melo memory ingest FILE -X ingest=compress`. How much chat text, in characters, 4000 to 60000, the chat model reads in one request: a chat is cut into windows of whole exchanges that long (an exchange longer than the window is read in up to four parts of that size, each part after the first starting with `[n] (continued)`; only text after the fourth is left out). A window whose reply runs out of room is split in two and read in halves, at most twice (four parts). `-X memory.compress_at_chars=20000` for one run. |
 | `compress_parallel` | `[memory]` | `1` | A developer setting, used only by `melo memory ingest FILE -X ingest=compress`. How many windows (see `compress_at_chars`) of the run the chat model is asked to read at once, 1 to 8; the windows of all the chats go out together. The items, reports and counts are the same as with `1`, only the time changes, and only on a server that answers several requests at once. `-X memory.compress_parallel=4` for one run. |
 | `compress_cache` | `[memory]` | `""` | A developer setting for comparison, used only by `melo memory ingest FILE -X ingest=compress`. The file that keeps the chat model's reply to each window, so the same window, model and prompt makes no second request. An empty value is `compress_cache.jsonl` in the memory folder (`~/.cache/localmelo/memory/`). The file is created readable by you only and holds chat text, so keep it out of anything you share. |
 | `note_gate` | `[memory]` | `"typed"` | A developer setting for comparison. Where a note the chat's model keeps with `remember` may come from, in four levels, each including the ones before it. `"typed"` is the rule as always: the note's words are in what you typed in the chat or in a finished task's result shown in it. `"pointed"` also accepts a page or file you pointed to in the chat (its host or file name is in what you typed, or the turn that read it calls it yours: "my website", "my résumé", "my CV"), read from the chat's stored tool results; a page you did not point to, or called someone else's, never supports a note about you. `"meaning"` also accepts a note that says the same in other words or another language: its key tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a source, and the embedding of the rest must be at least `note_min_cosine` close to a window of one; without an embedding model the words check of `"typed"` applies. `"model"` also keeps a note about you that no source supports as `inferred`, when its key tokens are found and its meaning is within 0.15 of that bar of what you typed, and adds one sentence to the `remember` tool text asking the model to keep what the conversation shows about your goals, situation and preferences. Above `"typed"` a note that is an instruction to melo is refused, and the tool text says a page or file you pointed to may support a note. A page or file supports a note only by what it states: text a reader would not see (comments, hidden elements, tag attributes, invisible characters) and every paragraph that orders the assistant are left out. A file is read by an allow-list scan that fails closed (text counts only inside plain elements, no style is read, and a file with a style sheet supports no note); a page fetched with `web_fetch` is read by the page reader as before, so white, tiny or class-hidden text on a fetched page is not left out. A finished task's result is read only for plain injection forms aimed at the assistant (an order to ignore the rules, an order to save to its memory, a lead that names an AI); advice such as "you must always …" is no injection. A page read in the browser supports no note; what you typed is never cleaned. The note is stored with its source (`typed`, `pointed`, `result` or `inferred`, and the page or file), and the reply, the `turn.memory` entry, the notes page and recall say so. `-X memory.note_gate=pointed` for one run. |
 | `note_min_cosine` | `[memory]` | `0.55` | A developer setting for comparison, used with `note_gate = "meaning"` and `"model"`. The least similarity of meaning, 0.20 to 0.95, between a note and the closest window of about 300 characters of a source for the source to support it; an inferred note's bar is 0.15 lower. `-X memory.note_min_cosine=0.5` for one run. |
 | `followup_query` | `[memory]` | `"recent"` | A developer setting. What a message with no content of its own ("go look it up", "continue", "do that", "去查一下", "那个呢") is searched with. `"recent"`: the message and what you typed in the last two turns of the chat that the model still shows, newest first, within 2,000 characters (melo's replies, an undone turn, a task's question and a turn with no content of its own, such as an earlier "continue", are left out; the two turns are the last two that say something); the first message of a new chat, with no such turn, recalls nothing, and the model can still call `search_memory`. `"message"`: its own words, which match whatever holds them, as recall did before. A message has content when a word is left after small words, asking words and follow-up words ("go", "look", "up", "continue", "that", "继续", "去查一下"), or when it holds a number, a URL or quoted text, or speaks of you ("I", "me", "my", "我", "我的"; a request such as "tell me more", "do it for me" or "帮我查一下" does not); "what is my name?", "what do you know about me?", "我是谁" and "我朋友叫什么名字" have content and are searched as typed either way. The two recall bars, the ranking, the limits and the block do not change. The `turn.memory` event's `recall.query_from` says which one a turn used: `"message"`, `"recent"` or `"none"`. Saved only when `"message"`; `-X memory.followup_query=message` for one run. See [A short follow-up](../concepts/memory.md#memory-across-chats). |
+| `gather` | `[memory]` | `"guide"` | A developer setting for comparison, used with `recall_form = "list"`. How recall treats a message that asks to count, total, list or compare ("how many", "how much", "in total", "altogether", "each", "every", "both", "compared", "list", "一共", "多少", "哪些" and similar; English words must stand alone, so "account" is not "count") and also speaks of you ("I", "my", "me", "mine", "we", "our", "us", "我"); a generic prompt such as "how many seconds are in a day" is left alone. `"guide"` (the default): for such a message the recall block's vector bar is the lower of `recall_min_cosine` and `gather_min_cosine`, so items from every chat the answer needs are listed (the word bar and `recall_list_max` are unchanged), every list-form `search_memory` during the turn of such a message uses that lower bar, whatever its words, and one sentence follows the line above the list, in the block and in the search result, that tells the model to open every listed item that may belong, to search again with other words for each kind not listed yet, and to count only what the items say. `"wide"`: the same without the sentence. `"off"`: nothing changes. A message that does not ask to count, total or compare gets the same recall block, the same search results and the same text for the model under every value, and so does a search made outside a turn. The excerpt form is unchanged. Under `"guide"` and `"wide"` the `turn.memory` event's `recall` object has `gather` (the message asks to count, total or compare about you) and `floor` (the vector bar the search used) on every turn, `false` and the usual bar when it does not; with `"off"` it has neither. `-X memory.gather=off` for one run. Saved only when not `"guide"`. |
+| `gather_min_cosine` | `[memory]` | `0.40` | A developer setting for comparison, used with `gather = "wide"` and `"guide"`. The vector bar, 0.20 to 0.55, for a message that asks to count, total or compare and for every list-form search during its turn; it never raises `recall_min_cosine`. `-X memory.gather_min_cosine=0.35` for one run. |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`: a task you start, or a saved chore, reads the project's own instruction file when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in its folder and in each folder above it up to your home folder, nearest first, at most three files and 6,000 characters, read-only, with secrets removed. They go after the context pack under their own heading, and never outrank your words, melo's rules or an approval. `"off"` reads nothing. Saved only when `"off"`; `-X memory.project_instructions=off` for one run. See [A task reads its project's own instruction file](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file). |
-| `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. When the variable has a value, it is used before `api_key`. |
 | `api_key` | cloud backend | not set | A reference to the key in the macOS keychain, `keychain:localmelo.<name>` (for example `keychain:localmelo.deepseek`). Settings and `melo setup` write it; it holds the reference, never the key. Anything else is a configuration error. |
 | `thinking` | cloud backend | not set | `"on"` or `"off"` for a hosted service that has a switch for the model's thinking (DeepSeek). Empty follows the service's default: `deepseek-flash` starts with thinking off, `deepseek-v4-pro` with its own default. A field of the section's `extra_body` wins. See [Hosted models](../guides/hosted-models.md#thinking-models). |
@@ -125,9 +132,11 @@ tables of the chosen backends.
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader (and idle sleep does not look for a lock). The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
-| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser: `off` gives it no browser tools; `safari-automation` gives the terminal chat and every chat of the web console and the app twelve tools that open, read, click, type into and choose on pages in Safari's automation windows, inside melo's own browser window (asks once per site per chat, again for clicking, typing and choosing, and every time for sending a form; see [Browsing with melo](../guides/browsing.md)). `/browser` switches it in the terminal; `-X browser.driver=safari-automation` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
+| `driver` | `[browser]` | `"off"` | Whether melo may read web pages in a browser, and which: `off` gives it no browser tools; `safari-automation` and `chrome` give the terminal chat and every chat of the web console and the app twelve tools that open, read, click, type into and choose on pages (asks once per site per chat, again for clicking, typing and choosing, and every time for sending a form; see [Browsing with melo](../guides/browsing.md)). `safari-automation` uses Safari's automation windows, which come to the front; `chrome` uses Google Chrome in the background, with no window and a profile of melo's own in `~/.cache/localmelo/browser/chrome` (see [Chrome in the background](../guides/browsing.md#chrome-in-the-background)), and needs Google Chrome installed. `/browser`, `/browser chrome` and `/browser safari` switch it in the terminal and the console, as does Settings → Chats and folders → **Browser**; `-X browser.driver=chrome` for one run. Direct runs, worker runs and saved tasks never get the tools. Any other value is a configuration error. |
 | `keep_tabs` | `[browser]` | `false` | Whether the tabs melo opened stay open. By default melo reuses one tab per chat and closes the tabs it opened when the chat ends and after ten minutes without a browser call (the last one is kept, empty). `true` leaves them all open. Tabs melo did not open are never touched. See [Browsing with melo](../guides/browsing.md#tabs). |
-| `app_windows` | `[browser]` | `true` | Whether melo sees a window another app opens after its own step in the browser, such as a chat app's sign-in window, and can press its buttons with your say. Needs the desktop control helper to read and press; without it melo only says which app came to the front. Settings → Chats and folders → **Other apps' windows**. See [Windows from other apps](../guides/browsing.md#windows-from-other-apps). |
+| `app_windows` | `[browser]` | `true` | Whether melo sees a window another app opens after its own step in the browser, such as a chat app's sign-in window, and can press its buttons with your say. Needs the desktop control helper to read and press; without it melo only says which app came to the front. A window that opens a moment after the step is still seen. Settings → Chats and folders → **Other apps' windows**. See [Windows from other apps](../guides/browsing.md#windows-from-other-apps). |
+| `live` | `[browser]` | `true` | Whether the web console and the app may show the page melo has open in Chrome in the background, live and view only, in their Browser panel (see [Watching melo's browser](../guides/browsing.md#watching-melos-browser)). `false` refuses the live view. Safari's windows are never streamed. Any value that is not a bool is a configuration error. |
+| `live_fps` | `[browser]` | `15` | The most pictures a second the live view carries, a whole number from 1 to 60. A page that does not change sends one picture and then none; nothing is sent while nobody watches. Any other value is a configuration error. |
 | `web_fetch` | `[tools]` | `true` | Whether chats and tasks may read public web pages with the `web_fetch` tool (read-only; never this computer or its local network; a site your own recent messages do not name asks once per chat, shared with the browser; see [Tools](tools.md#reading-a-public-web-page)). `false` takes the tool away; Settings → Chats and folders → **Read web pages** is the same switch; `-X tools.web_fetch=off` for one run. Direct runs never have it. Any value that is not a bool is a configuration error. |
 | `web_fetch_allow_local` | `[tools]` | `[]` | Developer setting, empty (off) by default, for a test that needs `web_fetch` to read a fixture page served on this computer. A list of exact entries, `"127.0.0.1:PORT"` or `"[::1]:PORT"` (a port from 1 to 65535); `web_fetch` then reads those addresses and no other local one. Any other entry is a configuration error and is never used: a name (`localhost`), another address (a private or local-network range, `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard, no port. The port of melo's own gateway and console (the one it really listens on, `melo serve --port` included, and a running gateway's), and of any model server the config names or the run's `-u` URL names, is refused even when listed; a model server in neither is not protected. A chat or task reads the list when it starts, and a listed server asks the person first (in Auto it is reviewed by itself; it is read where nobody can be asked, such as `--yolo`). Only `web_fetch` reads it; the browser tools never do. Set it in the file or with `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` for one run: the model, the console's Settings and the API cannot, and a shell or Python call that runs `melo config set` or `-X` on it counts as a change to localmelo itself (it asks every time, and Auto mode blocks it). A fetch it allows is marked in its `tool.finished` event and in what the call shows. `melo config keys` lists it with a warning; the rules are in [Tools](tools.md#test-servers-on-this-computer). |
 | `search` | `[web]` | `false` | Whether chats and tasks may search the web with the `web_search` tool (read-only; the words of a search leave this computer; a search whose words look like a secret or like pasted text asks first; see [Tools](tools.md#searching-the-web) and [Searching the web with melo](../guides/web-search.md)). Settings → Chats and folders → **Web search** is the same switch, `-X web.search=true` turns it on for one run, and `melo config set web.search true` saves it. Direct runs never have it. |
@@ -137,12 +146,11 @@ tables of the chosen backends.
 | `recent_digest_minutes` | `[chat]` | `30` | A new chat's first message (a side chat's or a terminal chat's, never the main chat's) also reads a short digest of your other chats from the last that many minutes: up to five lines, one per recent turn, saying what it was about and where, at most 600 characters, after your own words. It is read from memory's index of your chats, so `[memory] across_chats = false` turns it off too. `0` turns it off; `-X chat.recent_digest_minutes=0` for one run. A whole number from 0 to 1440; anything else is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
-A `[memory]` table that is all defaults is not written. Its keys,
-`across_chats` and `admit_on_outcome`, must be bools, and `retriever` one of
+A `[memory]` table that is all defaults is not written. Its key
+`across_chats` must be a bool, and `retriever` one of
 the four values above; any other value is a configuration error (exit 1).
 
-`admit_on_outcome` is accepted and inert in
-`legacy`. The `--keep-decision-text`
+The `--keep-decision-text`
 switch is flag-only, because it writes potentially personal text to the
 store and a saved default would be a privacy footgun.
 
@@ -209,7 +217,8 @@ cross_task_cold = 0       # 0 or 1
 existing config file is unchanged.
 
 An explicit flag wins over `[agent]` in direct mode and the interactive UI.
-A `--base-url` session or run uses flags, not these saved defaults.
+A direct run on `--base-url` uses flags, not these saved defaults; the interactive UI on
+`--base-url` reads them as it does for a configured backend.
 
 API v2 console sessions use the saved mode, defaulting to `legacy` when none is set;
 they keep the gateway's tool policy. The legacy `/v1` API is unchanged and
@@ -269,8 +278,8 @@ runs, the interactive UI and console sessions resolve the present values at
 startup. Only names are written to TOML; the option values are omitted from
 run configuration records.
 
-A `--base-url` run or session does not read this
-setting. Python callers can instead pass an explicit
+A direct run on `--base-url` does not read this
+setting; the interactive UI on `--base-url` does. Python callers can instead pass an explicit
 `AgentOptions(tool_env={...})` mapping.
 
 This does not change MCP's separate
@@ -316,15 +325,18 @@ Events and JSON results report the estimate, actual prompt count if available, a
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
-`[agent] fixed_prefix` (default `true`) gives direct, interactive and API v2 console runs
-`fixed-prefix-v2`; `--fixed-prefix on|off` overrides it for a direct or interactive
-run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests from before
-it became the default. It snapshots the local date and UTC offset at each run's start, including across
+Every direct, interactive and API v2 console run sends a fixed system prefix
+(`fixed-prefix-v2`). It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 
-Recall goes before the task. With `cache_layout = "v2"` the latest reflection goes last, in a
-final user message after the window, so a new attempt changes only what follows the shared
-history; the default, `v3`, appends the reflection to the window once (see below).
+Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
+step and kept for its later steps, so each planning request extends the one before it. It is read
+again only at a step after the window dropped its oldest messages, where the request has changed
+already, and at the next run. Read on every step, it changed whenever the run's own step summaries
+entered it, and the server prefilled every later message again.
+
+The latest reflection joins the window once, at the attempt boundary (see below), so a new
+attempt changes only what follows the shared history.
 
 A reflection request repeats the latest planning request (same system text, same
 `tools`, same turns, then the turns since) and adds one final user message with the
@@ -348,31 +360,21 @@ offered planning schemas within the run, not actual cache misses; an optional
 `reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 
-`[agent] reflect_tool_guard` (default `true`; `--reflect-tool-guard on|off` overrides it) keeps a
-reflection request from inviting a tool call. The request offers the tools of the step's
-planning request (same list, order and schema, with `fixed_prefix` already the case) and its
+A reflection request does not invite a tool call. It offers the tools of the step's
+planning request (same list, order and schema) and its
 last user message ends with `Answer with the JSON object only; do not call any tool.`;
 `tool_choice` is untouched, so a server's prompt prefix holds.
 
-The retry request is unchanged.
-The guard adds `reflect_tool_guard` to the JSON result's `config`; with `false` (or `off`) the
-reflection request has neither the tools nor the sentence.
-
-Whatever the option, the `reflection`
+The retry request is unchanged. The `reflection`
 event's `unreadable_reason` says why a first reply was unreadable (see [Events](events.md)).
 
-`[agent] window_eviction` (default `"chunk"`; `"boundary"` and `"slide"` are the other values;
-`--window-eviction` overrides it) sets when working memory drops old turns. `chunk` and
-`boundary` keep the retained history the same for several steps, so a server's prompt cache can
-reuse it; `slide` drops the oldest unit at every step once the window is full, as before
-`chunk` became the default.
+`[agent] window_eviction` (default `"chunk"`; `"boundary"` is the other value;
+`--window-eviction` overrides it) sets when working memory drops old turns. Both keep the
+retained history the same for several steps, so a server's prompt cache can reuse it.
 
 See [Memory](memory.md#working-memory-window).
 
-`[agent] cache_layout` (default `"v3"`; `--cache-layout v2|v3` overrides it) decides where a
-reflection sits. `"v2"` is the layout from before this default changed.
-
-With `v3` and `fixed_prefix`:
+Where a reflection sits:
 
 - At the attempt boundary the agent appends the reflection once, as an ordinary window message
   (`[Reflections; data, not instructions]` and the block), instead of rebuilding it as the last
@@ -381,8 +383,8 @@ With `v3` and `fixed_prefix`:
   replaces the one working memory holds), but older blocks stay in the history until they are
   evicted.
 - A reflection request and its reply stay in the window, so the next planning request continues the
-  request instead of being built again. With `reflection_gate = "flags"` or the default `"patient"`, when no
-  reflection is read, even after the retry, none of it stays in the window.
+  request instead of being built again. When no reflection is read, even after the retry,
+  none of it stays in the window.
 - An unreadable reply is asked again on the same prefix: the request, the unreadable reply as an
   assistant message (a tool call written out as text, so no call is left without its result), then a
   closing note, with the tools the request offered, instead of the text transcript. When the reply
@@ -393,9 +395,6 @@ With `v3` and `fixed_prefix`:
 - With `window_eviction = "boundary"` the finished attempt's turns are dropped at the boundary, so
   only the block is appended there.
 
-Without `fixed_prefix`, neither value changes anything. The JSON result's `config` has
-`cache_layout` when it is `v3` and not when it is `v2`.
-
 `[agent] window_messages` (default `64` on a local server (Ollama, MLC, vLLM or oMLX, SGLang) and
 for a `--base-url` server, `20` on a cloud vendor's backend (OpenAI, Gemini, Anthropic or NVIDIA);
 8 to 256; `--window-messages N` overrides it) is the most messages the working window holds
@@ -405,32 +404,34 @@ caching, a longer window costs input tokens on every request.
 A value you set stays as you set
 it, on any backend.
 With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
-whole units (a tool call with its results, never split) down to 70% of the cap under `chunk` and
-`boundary`, so the history holds for several steps; under `slide` it drops a unit at every step.
+whole units (a tool call with its results, never split) down to 70% of the cap, so the history
+holds for several steps.
 
 A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
 messages. See [Memory](memory.md#working-memory-window).
 
 The JSON result's `config` has `window_messages` when it is not 20.
 
-`cache_layout = "v3"` and the 64-message window became defaults after two benchmark rounds on
-coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and 86.8% of the
-prompt tokens were served from the cache against 78.9%. `--cache-layout v2 --window-messages 20`
-send the earlier requests.
+The reflection in the window and the 64-message window became defaults after two benchmark
+rounds on coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and
+86.8% of the prompt tokens were served from the cache against 78.9%. `--window-messages 20`
+sends the earlier cap.
 
-`melo --developer --help` lists both flags under Advanced.
+`melo --developer --help` lists `--window-messages` under Advanced.
 
-`fixed_prefix`, `window_eviction` and `reflect_tool_guard` became defaults after a same-build A/B
-on the benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set
-it, for these three and for the two above; a file without the key has the default, and saving
-writes a key only when it differs from the default (`window_messages` is written whenever it is
-set).
+The fixed prefix and `window_eviction` became defaults after a same-build A/B on the
+benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set it,
+for `window_eviction` and for `window_messages`; a file without the key has the default, and
+saving writes a key only when it differs from the default (`window_messages` is written
+whenever it is set). `melo --developer --help` lists `--window-eviction` under Experimental.
+API v2 console sessions, console workers and the legacy `/v1` sessions read these two keys
+from the config; the legacy `/v1` API does not read the other `[agent]` keys or `[retrieval]`.
 
-`melo --developer --help` lists the three flags under Experimental, and
-`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` send the requests of the
-earlier defaults. API v2 console sessions, console workers and the legacy `/v1` sessions read
-these five keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
-`[retrieval]`.
+Five settings that decided between layouts were removed, each with its option: `[agent]
+fixed_prefix`, `reflect_tool_guard`, `cache_layout` and `reflection_gate`, and `[memory]
+admit_on_outcome`. Each behaves as its default did, `window_eviction = "slide"` reads as
+`"chunk"`, and a config file that still holds one of these loads, the line ignored; `melo
+config` names it (see [Command line](cli.md#settings)).
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
@@ -459,12 +460,12 @@ calls, a final answer of at most three lines, relative paths without a `sys.path
 reading the files a task names before listing folders.
 
 With
-`reflection_gate = "patient"` (the default) or `"flags"` the reflection prompt also leaves out the five estimates,
-`progress_made` and `new_information_gained` (only `utility` reads the estimates, and nothing
-reads the other two) and asks for `best_effort_result` only with `done` or `stop`; the action and
+it the reflection prompt also leaves out the five estimates,
+`progress_made` and `new_information_gained` (nothing reads them) and asks for
+`best_effort_result` only with `done` or `stop`; the action and
 the three flags the gate reads are still asked for, and a reply in the long form is read as
-before. `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep
-the system prompt's last line, because their notes are text between tool calls.
+before. The compress modes keep the system prompt's last line, because their notes are text
+between tool calls.
 
 The interactive
 UI, the `melo ""` loop and the gateway ignore the key. Off, the default, every request is the one
@@ -562,7 +563,7 @@ enable_thinking = false
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
 
-A `[browser]` table whose driver is `off`, whose `keep_tabs` is `false` and whose `app_windows` is `true` is not written (`keep_tabs` is written only when `true`, `app_windows` only when `false`), nor a `[tools]` table whose `web_fetch` is `true` and whose `web_fetch_allow_local` is empty, nor a `[web]` table whose `search` is `false`, whose `search_order` is empty and whose `search_count` is `6`, nor a `[tasks]` table whose `follow_up` is `true`, nor a `[chat]` table whose `recent_digest_minutes` is `30`.
+A `[browser]` table whose driver is `off`, whose `keep_tabs` is `false`, whose `app_windows` is `true`, whose `live` is `true` and whose `live_fps` is `15` is not written (`keep_tabs` is written only when `true`, `app_windows` and `live` only when `false`, `live_fps` only when it is not `15`), nor a `[tools]` table whose `web_fetch` is `true` and whose `web_fetch_allow_local` is empty, nor a `[web]` table whose `search` is `false`, whose `search_order` is empty and whose `search_count` is `6`, nor a `[tasks]` table whose `follow_up` is `true`, nor a `[chat]` table whose `recent_digest_minutes` is `30`.
 
 ## MCP servers
 
@@ -625,20 +626,19 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
-| `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
+| `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
+| `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 
-## Upgrading from an older config
+## What you allowed
 
-Older config files still load. localmelo reads:
+"Allow for this chat" answers are grants. They live in one table, `grants`, in the sessions file (component `grants`, version 1); no config key controls them.
 
-- a single `backend` key, the oldest format;
-- the backend name `mlc-llm`, now `mlc`;
-- `[cloud_api]` and `[online]` tables, now one table per vendor;
-- `chat_port` in `[mlc]`, now `chat_url`;
-- a flat `chat_template_kwargs`, now inside `extra_body`.
+- **Columns:** `id`, `session_id`, `session_kind`, `scope`, `kind`, `key`, `label`, `target`, `decided_by`, `granted_at`, `request_id`, `revoked_at`.
+- **Revoke and retention:** a revoke sets `revoked_at`. Revoked rows are deleted after the store's thinking retention (30 days by default; see `LOCALMELO_THINKING_RETENTION_DAYS`).
+- **With the session:** a session's rows go with it (`ON DELETE CASCADE`).
+- **Fails closed:** a row that breaks a rule is ignored when read, so an edited file cannot widen access: a `global` row that is not the person's in the main chat, an Auto row that is more than a site read, a key that must ask every time, or a folder that is never offered.
+- **Not a grant:** **Always allow this folder** is kept in `[workspace] extra_folders`.
 
-A file without `[agent] reflection` or `steps_per_attempt` reads the defaults: reflection on, attempts of 50 steps and runs of 100. Runs that need the earlier lengths set `-X agent.steps_per_attempt=10 -s 30`.
-
-Running the wizard again writes the file in the current format.
+The people-facing rules are in [What you allowed](../guides/terminal.md#what-you-allowed) and [Permissions](../guides/web-console.md#permissions); the routes are in [API v2](api-v2.md#get-apigrants).

@@ -387,7 +387,7 @@ test('cloud candidate includes key environment name but never key status or revi
   assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
 
-const SECTION_IDS = ['model', 'memory', 'chats', 'scheduled', 'appearance', 'developer'];
+const SECTION_IDS = ['model', 'memory', 'chats', 'permissions', 'scheduled', 'appearance', 'developer'];
 
 test('developer mode lists the Developer section, and the layout is chosen before the settings load', async () => {
   const slow = deferred();
@@ -577,6 +577,61 @@ test('Web search: hidden for a gateway that does not report it, else a switch th
   assert.equal(h.element('s-web-search').checked, false);
 });
 
+test('Browser: a choice of Chrome, Safari or off that saves browser_driver, and says when Chrome is missing', async () => {
+  const older = harness({'GET /settings': full()});
+  await older.open('chats');
+  assert.equal(older.element('s-browser-row').hidden, true, 'a gateway that does not report it has no choice');
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({browser: false, browser_driver: 'off', chrome_installed: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, browser: body.browser_driver !== 'off',
+      browser_driver: body.browser_driver ?? 'off', chrome_installed: true}),
+  });
+  await h.open('chats');
+  assert.equal(h.element('s-browser-row').hidden, false);
+  assert.equal(h.element('s-browser-off').checked, true);
+  assert.equal(h.element('s-browser-chrome-missing').hidden, true);
+  h.element('s-browser-chrome').checked = true;
+  await h.element('s-browser-chrome').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'chrome');
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Browser: Chrome');
+  assert.equal(h.element('s-browser-chrome').checked, true);
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'off');
+  const missing = harness({'GET /settings': full({browser: false, browser_driver: 'off', chrome_installed: false})});
+  await missing.open('chats');
+  assert.equal(missing.element('s-browser-chrome-missing').hidden, false, 'the line says to install Chrome');
+  missing.element('s-browser-chrome').checked = true;
+  await missing.element('s-browser-chrome').emit('change');
+  await flush();
+  assert.equal(missing.puts().length, 0, 'nothing is saved without Chrome');
+});
+
+test('Browser: moving between Chrome and Safari says each keeps its own sign-ins, and when open chats switch', async () => {
+  let revision = 1;
+  const h = harness({
+    'GET /settings': full({browser: true, browser_driver: 'safari-automation', chrome_installed: true}),
+    'PUT /settings': (body) => full({revision: `rev${++revision}`, browser: body.browser_driver !== 'off',
+      browser_driver: body.browser_driver ?? 'off', chrome_installed: true}),
+  });
+  await h.open('chats');
+  h.element('s-browser-chrome').checked = true;
+  await h.element('s-browser-chrome').emit('change');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'chrome');
+  assert.equal(h.element('settings-saved-text').textContent,
+    'Saved: Browser: Chrome. Each browser keeps its own sign-ins, so you may need to sign in to sites again. Open chats switch at their next message.');
+  await h.element('settings-undo').emit('click');
+  await flush();
+  assert.equal(h.puts().at(-1).options.body.browser_driver, 'safari-automation');
+  h.element('s-browser-off').checked = true;
+  await h.element('s-browser-off').emit('change');
+  await flush();
+  assert.equal(h.element('settings-saved-text').textContent, 'Saved: Browser: Off', 'turning browsing off loses no sign-in');
+});
+
 test("Other apps' windows: shown while browsing is on, saves app_windows, and says when the helper is missing", async () => {
   const off = harness({'GET /settings': full({app_windows: true, desktop_helper: true, browser: false})});
   await off.open('chats');
@@ -595,6 +650,66 @@ test("Other apps' windows: shown while browsing is on, saves app_windows, and sa
   await flush();
   assert.equal(h.puts().at(-1).options.body.app_windows, false);
   assert.equal(h.element('settings-saved-text').textContent, "Saved: melo no longer looks at other apps' windows.");
+});
+
+test("Other apps' windows: the helper's status from the health route reads under the switch", async () => {
+  const status = (state, extra = {}) => ({desktop_helper: {state, app: 'Cua Driver', pictures: true, problem: '', ...extra}});
+  const open = async (health, settings = {}) => {
+    const h = harness({
+      'GET /settings': full({app_windows: true, desktop_helper: true, browser: true, ...settings}),
+      'GET /health?helper=check': health,
+    });
+    await h.open('chats');
+    await flush();
+    return h;
+  };
+  const line = (h) => h.element('s-app-windows-status');
+  const granted = await open(status('granted'));
+  assert.equal(line(granted).hidden, false);
+  assert.equal(line(granted).textContent, "Cua Driver is installed and may read other apps' windows (Accessibility is on).");
+  assert.equal(granted.calls.filter((call) => call.path === '/health?helper=check').length, 1, 'asked once');
+
+  const noPictures = await open(status('granted', {pictures: false}));
+  assert.match(line(noPictures).textContent, /Screen Recording is off/);
+
+  const missing = await open(status('no_grant', {problem: 'the desktop control helper has no Accessibility grant'}));
+  assert.equal(line(missing).textContent,
+    'Cua Driver is installed, but Accessibility is off. Turn it on in System Settings → Privacy & Security → Accessibility.');
+
+  const failed = await open(status('failed'));
+  assert.equal(line(failed).textContent, 'Cua Driver is installed, but melo could not start it.');
+
+  const unchecked = await open(status('installed'));
+  assert.match(line(unchecked).textContent, /checks its permissions the first time/);
+
+  // Not installed, switched off, or browsing off: the health route is not asked and no status shows.
+  for (const settings of [{desktop_helper: false}, {app_windows: false}, {browser: false}]) {
+    const quiet = await open(status('granted'), settings);
+    assert.equal(line(quiet).hidden, true);
+    assert.equal(quiet.calls.some((call) => call.path.startsWith('/health')), false);
+  }
+  // A health route that cannot be read leaves the line out.
+  const broken = harness({'GET /settings': full({app_windows: true, desktop_helper: true, browser: true})});
+  await broken.open('chats');
+  await flush();
+  assert.equal(line(broken).hidden, true);
+});
+
+test("Other apps' windows: the helper's status reads in Simplified Chinese", async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    const h = harness({
+      'GET /settings': full({app_windows: true, desktop_helper: true, browser: true}),
+      'GET /health?helper=check': {desktop_helper: {state: 'no_grant', app: 'Cua Driver', pictures: null, problem: ''}},
+    });
+    await h.open('chats');
+    await flush();
+    assert.equal(h.element('s-app-windows-status').textContent,
+      '已安装 Cua Driver，但“辅助功能”权限没有打开。请在“系统设置 → 隐私与安全性 → 辅助功能”里打开它。');
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('Web search says that the words leave the computer, in English and Simplified Chinese', async () => {
@@ -879,6 +994,68 @@ test('the check-in switch shows the next time, saves with PUT /checkin and can b
   assert.equal(down.element('s-checkin-state').dataset.text, 'Could not read the schedule');
 });
 
+const grantOf = (id, extra = {}) => ({id, scope: 'global', session_id: 'main', session_kind: 'main', chat_title: '', kind: 'tool', key: 'shell_exec',
+  label: 'Run shell commands', action: 'tool', target: 'shell_exec', by: 'person', granted_at: NOW / 1000 - 300, ...extra});
+const buttonsOf = (item) => [...(item.tag === 'button' ? [item] : []), ...(item.children || []).flatMap(buttonsOf)];
+
+test('Permissions reads the grants when chosen, revokes one from the list and keeps the phone\'s note in step', async () => {
+  let grants = [grantOf('a1'), grantOf('b2', {scope: 'session', session_id: 's1', session_kind: 'side', chat_title: 'Trip', action: 'open', target: 'example.com'})];
+  const h = harness({
+    'GET /settings': full(),
+    'GET /grants': () => ({grants}),
+    'DELETE /grants/a1': () => { grants = grants.filter((item) => item.id !== 'a1'); return {}; },
+    'DELETE /grants/b2': () => { grants = []; return {}; },
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.calls.some((call) => call.path === '/grants'), false, 'nothing is read until the section is chosen');
+  assert.equal(h.element('settings-panel-permissions').hidden, true);
+  await h.element('settings-tab-permissions').emit('click');
+  await flush();
+  assert.equal(h.element('settings-panel-permissions').hidden, false);
+  assert.deepEqual(h.calls.filter((call) => call.path === '/grants').map((call) => call.options.method ?? 'GET'), ['GET']);
+  const list = words(h.element('s-permissions'));
+  assert.match(list, /Everywhere.*Run shell commands.*From the main chat · You · 5 min ago.*Per chat.*Trip.*Open example\.com/);
+  assert.equal(h.element('settings-note-permissions').textContent, '2 things allowed');
+  await buttonsOf(h.element('s-permissions'))[0].emit('click');
+  await flush();
+  assert.deepEqual(h.calls.at(-1), {path: '/grants/a1', options: {method: 'DELETE'}});
+  assert.doesNotMatch(words(h.element('s-permissions')), /Everywhere/, 'the group goes with its last row');
+  assert.match(words(h.element('s-permissions')), /^Revoked: Run shell commands\. melo asks again next time\./);
+  assert.equal(h.element('settings-note-permissions').textContent, '1 thing allowed');
+  await buttonsOf(h.element('s-permissions'))[0].emit('click');
+  await flush();
+  assert.match(words(h.element('s-permissions')), /Nothing allowed yet/);
+  assert.equal(h.element('settings-note-permissions').textContent, 'Nothing allowed');
+  // The dialog opened again starts the section over, and reads the list when it is the section in view.
+  h.element('settings-dialog').close();
+  grants = [grantOf('c3')];
+  await h.open('permissions');
+  await flush();
+  assert.equal(h.calls.filter((call) => call.path === '/grants' && !call.options.method).length, 2);
+  assert.match(words(h.element('s-permissions')), /Run shell commands/);
+});
+
+test('Permissions reads in Simplified Chinese, and a list that cannot be read says so with Retry', async () => {
+  const {useLanguage} = await import('../../support/gateway/static/i18n.mjs');
+  await useLanguage('zh-Hans');
+  try {
+    let fail = true;
+    const h = harness({'GET /settings': full(), 'GET /grants': () => { if (fail) throw new Error('boom'); return {grants: [grantOf('a1')]}; }});
+    await h.open('permissions');
+    await flush();
+    assert.equal(h.element('settings-note-permissions').textContent, '', 'no count without a list');
+    assert.match(words(h.element('s-permissions')), /boom.*重试/);
+    fail = false;
+    await buttonsOf(h.element('s-permissions')).find((item) => item.textContent === '重试').emit('click');
+    await flush();
+    assert.match(words(h.element('s-permissions')), /所有对话.*运行 shell 命令.*来自主对话 · 你 · 5 分钟前/);
+    assert.equal(h.element('settings-note-permissions').textContent, '已允许 1 项');
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('Melo on the desktop shows only in the app, mirrors its menu and saves through it', async () => {
   const browser = harness({'GET /settings': full()});
   await browser.open('appearance');
@@ -996,8 +1173,8 @@ test('the phone\'s list says the state of each section on its second line', asyn
     {health: () => ({model_server: {reachable: false, checked_s_ago: 3}})});
   await h.open();
   await flush();
-  assert.deepEqual(['model', 'memory', 'chats', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
-    ['Not reachable · old', 'On · words and meaning', 'ws', 'Check-in off', 'System theme']);
+  assert.deepEqual(['model', 'memory', 'chats', 'permissions', 'scheduled', 'appearance'].map((id) => h.element(`settings-note-${id}`).textContent),
+    ['Not reachable · old', 'On · words and meaning', 'ws', '', 'Check-in off', 'System theme'], 'Permissions says its count once the list was read');
 });
 
 test('checked words read naturally', () => {

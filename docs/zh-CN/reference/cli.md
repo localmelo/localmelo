@@ -15,7 +15,6 @@ melo -u URL [-m NAME]                        # the interactive UI on this server
 melo [-u URL] [-m NAME] ""                   # the plain conversation loop
 melo setup                                   # run setup, then the interactive UI
 melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
-melo serve --playground                      # opt in to legacy playground (in progress)
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
 melo serve stop                              # stop the gateway that is running
@@ -39,7 +38,7 @@ melo -h all                                  # every option, command and setting
 | `melo setup` | 重新选择模型服务器，然后打开对话。 | |
 | `melo config` | 显示配置文件的位置，以及哪些设置与默认值不同。 | |
 | `melo memory VERB` | 查看和修改 melo 保存的笔记：`list`、`forget`、`status`、`reindex`、`import`（开发者模式下还有 `sleep`、`ingest`）。 | `list -n N`、`forget ID`、`forget -y`、`import --undo BATCH` |
-| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--playground`, `--force` |
+| `melo serve [install\|uninstall\|status\|stop]` | 运行网关，把它作为登录服务管理（macOS），或停止正在运行的网关。 | `--host H`, `-p`/`--port N`, `--force` |
 | `melo console [--reset]` | 在浏览器中打开已登录的网页控制台；通过 SSH 或没有浏览器能启动时，改为输出一次性链接。`--reset` 轮换访问令牌。 | `--host H`, `-p`/`--port N` |
 | `melo task VERB` | `melo-task` 客户端。 | 同 `melo-task` |
 | `melo worker BRIEF` | 运行一个 worker brief。 | `--inbox FILE`, `--inbox-fd N`, `--parent ID`, `--title T`, `-o json\|stream-json` |
@@ -66,7 +65,7 @@ melo -h all                                  # every option, command and setting
 | `--daemon` | `melo serve install|uninstall|status|stop` |
 | `--host` | `melo serve --host` |
 | `--port` | `melo serve -p` |
-| `--enable-playground` | `melo serve --playground` |
+| `--enable-playground` | `melo serve` |
 | `--allow-unconfigured` | `melo serve --force` |
 | `--gateway-login` | `melo console` |
 | `--gateway-rotate-token` | `melo console --reset` |
@@ -76,11 +75,7 @@ melo -h all                                  # every option, command and setting
 | `--parent-run` | `melo worker BRIEF --parent` |
 | `--import-session` | `melo import FORMAT FILE` |
 | `--attempt-policy` | `-X agent.attempt_policy=VALUE` |
-| `--reflection-gate` | `-X agent.reflection_gate=VALUE` |
-| `--fixed-prefix` | `-X agent.fixed_prefix=VALUE` |
 | `--window-eviction` | `-X agent.window_eviction=VALUE` |
-| `--reflect-tool-guard` | `-X agent.reflect_tool_guard=VALUE` |
-| `--cache-layout` | `-X agent.cache_layout=VALUE` |
 | `--window-messages` | `-X agent.window_messages=VALUE` |
 | `--brief-items` | `-X agent.brief_items=VALUE` |
 | `--reasoning` | `-X agent.reasoning=VALUE` |
@@ -98,7 +93,6 @@ melo -h all                                  # every option, command and setting
 | `--recall-placement` | `-X retrieval.placement=VALUE` |
 | `--recall-min-score` | `-X retrieval.min_score=VALUE` |
 | `--retrieval-extra-body` | `-X retrieval.extra_body=VALUE` |
-| `--admit-on-outcome` | `-X memory.admit_on_outcome=VALUE` |
 | `--keep-decision-text` | `-X memory.keep_decision_text=true` |
 | `--memory-dir` | `-X memory.dir=VALUE` |
 | `--request-timeout` | `-X request_timeout_s=VALUE` |
@@ -114,7 +108,8 @@ melo -h all                                  # every option, command and setting
 设置是[配置文件](configuration.md#the-config-file)中的键：`retrieval.k` 就是 `[retrieval]` 表里的 `k`，`request_timeout_s` 这样的顶层键没有点号。`melo -h all` 会列出各个键及其默认值。
 
 - `-X KEY=VALUE`（长格式 `--set KEY=VALUE`，可重复）只对本次运行修改一项设置。值按 TOML 读取（`true`、`5`、`"v3"`），否则当作文本；`on` 和 `off` 也表示布尔值。`-X` 优先于配置文件，配置文件优先于默认值，并且从不写入文件。出现在 `--` 之后时，它是任务文字。
-- 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有九项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.reflection_gate`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
+- 有旧选项的键会在解析前变成那个选项（见上表）：`-X retrieval.k=5` 就是 `--recall-k 5`，检查和拒绝方式都相同。其他键（`cli.stream`、`scheduler.policy` 等）会覆盖本进程加载的配置，值有误时以退出码 2 结束，并说明该键允许的取值。有八项设置只对单次运行有效，`-X` 接受它们而配置文件不接受：`agent.attempt_policy`、`agent.tool_exposure`、`memory.dir`、`memory.keep_decision_text`、`retrieval.extra_body`、`endpoint.embedding_url`、`endpoint.embedding_model` 和 `endpoint.reasoning_field`。
+- 有五项设置连同它们的选项一起被移除：`agent.fixed_prefix`（`--fixed-prefix`）、`agent.reflect_tool_guard`（`--reflect-tool-guard`）、`agent.cache_layout`（`--cache-layout`）、`agent.reflection_gate`（`--reflection-gate`）和 `memory.admit_on_outcome`（`--admit-on-outcome`）。每一项的行为都与它们原来的默认值相同。`-X` 和选项会以退出码 2 结束并说明它已被移除。仍含有其中一项的配置文件照常加载，该行被忽略，`melo config` 会点出它。`agent.window_eviction = "slide"` 也已被移除，读作 `"chunk"`。
 - `agent.answer_on_stop` 默认开启（`-X agent.answer_on_stop=off` 关闭它），它也会为服务器因预算或速率限制拒绝了请求（HTTP 429，或错误信息说明预算已用完）的运行索要答案：运行仍以 `provider_error` 结束，但 `result` 里是这个答案。见[运行结果](run-results.md#statuses)。
 - `melo config` 显示配置文件，以及哪些设置与默认值不同。`melo config keys [FILTER]` 列出每个键的当前值、默认值和来源（默认、文件或 `-X`），`melo config get KEY` 打印一项，`melo config set KEY VALUE` 检查后保存。键名不存在时会给出最接近的几个；如果这个名字是某个选项（如 `agent.max_steps`），则会提示改用该选项（`-s N (--steps)`）。未设置的 `agent.window_messages` 在 `keys` 和 `get` 中显示它实际采用的窗口及原因（`64 (local server)`、`20 (cloud)`）。
 - 凡是写配置文件的地方（`/model`、控制台的设置页、`melo config set`）写入的都是文件原有的值，绝不会写入 `-X` 的值。
@@ -169,7 +164,7 @@ Forgot note 3.
 | `melo --base-url URL`（无任务） | 在该服务器上打开交互式界面，模型为 `--chat-model`，否则为服务器唯一的对话模型或它说明已加载的那一个。有多个对话模型且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--chat-model <id>`。 |
 | `melo --base-url URL -- "<task>"` | 在该服务器上以直接模式运行，模型为 `--chat-model`，否则在一次模型列表请求之后，按上一行的方式选定（见[通用](#general)）。读不到列表时请求模型 `default`。`--brief` 和 `melo ""` 同样如此。 |
 | `melo --reconfigure` | 运行设置向导，然后打开交互式界面；默认模式下会先提供它找到的服务器（`Use this model server?`，一个列表），只有选择 `Use another server`、使用 `--developer`（`melo --developer --reconfigure`）或处于开发者模式（`[ui] mode = "developer"`），或已保存后端但没有找到服务器时才显示完整的后端菜单（什么都没保存且没有找到服务器时，会显示[只读设置预览](../guides/model-servers.md#setup-preview)；管道和 `TERM=dumb` 会附上手动指南链接）。没有终端时，设置向导从标准输入读取答案，完成后退出。 |
-| `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。在仍在进行的 security-1b 改动中，`--enable-playground` 会启用经过认证的旧版 playground 路由，且只在 `--serve` 下有效。 |
+| `melo --serve` | 启动网关。若尚无配置，则先运行设置向导（需要终端；没有终端时以退出码 1 退出）。`--enable-playground` 仍被接受：它什么也不做，只会提示它已被移除。 |
 | `melo ""`（空任务） | 打开纯对话循环：你输入的每一行都是同一个智能体的一项任务，只打印回答。`/help` 列出它的命令；`/exit`、`/quit`、`exit`、`quit` 或 Ctrl-D 退出。 |
 | `melo --daemon …` | 管理在 macOS 上运行网关的后台服务；见[登录时运行网关](../guides/gateway.md#run-the-gateway-at-login-macos)。 |
 
@@ -187,7 +182,7 @@ Forgot note 3.
 
 每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。
 
-把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
+把任务放在 `--` 之后；任务的第一句话（最多 48 列宽）作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
 
 单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。
 
@@ -275,18 +270,14 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--context-window` | advanced |  |
 | `--output-reserve` | advanced |  |
 | `--safety-margin` | advanced |  |
-| `--cache-layout` | advanced |  |
 | `--window-messages` | advanced |  |
 | `--memory-dir` | advanced |  |
 | `--request-timeout` | advanced |  |
 | `--embedding-base-url` | advanced |  |
 | `--embedding-model` | advanced |  |
 | `--attempt-policy` | experimental | #185 |
-| `--reflection-gate` | experimental | #185 |
 | `--brief-items` | experimental | #185 |
-| `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
-| `--reflect-tool-guard` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
 | `--replay-turns` | experimental | #183 |
@@ -299,7 +290,6 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--recall-kinds` | experimental | #4 |
 | `--recall-placement` | experimental | #4 |
 | `--recall-min-score` | experimental | #4 |
-| `--admit-on-outcome` | experimental | #4 |
 | `--keep-decision-text` | experimental | #4 |
 | `--retrieval-extra-body` | experimental | #4 |
 
@@ -350,17 +340,13 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--inbox FILE` | 未设置 | 与 `--brief` 一起使用时，在规划边界接受完整的、追加写入的指令行。路径必须显式给出，相对于调用目录，并且必须解析到工作区之外。 |
 | `--inbox-fd N` | 未设置 | 与 `--brief` 一起使用时，从继承的、可读的管道文件描述符 `N` 接受同样的指令行。父进程必须保留写端；读端在工具启动前设置为 close-on-exec。不能与 `--inbox` 同时使用。 |
 | `--workspace DIR` | 当前文件夹 | 运行所在的文件夹：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动；见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)。 |
-| `--fixed-prefix on\|off` | `on` | 使用带版本号的固定系统前缀，本地日期在运行开始时冻结；`off` 会发送此前的请求。它会覆盖 `[agent] fixed_prefix`。 |
-| `--window-eviction slide\|chunk\|boundary` | `chunk` | 工作记忆如何丢弃旧轮次：`chunk` 每次丢弃八条消息；`slide`（此前的默认值）在窗口满后每步丢弃一个单元；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
-| `--reflect-tool-guard on\|off` | `on` | 为 `on` 时，每个反思请求都提供该步骤规划请求的工具（列表、顺序和 schema 相同，因此服务器的提示前缀保持不变），且其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变。使用 `--cache-layout v2` 时重试请求不变；使用默认的 `v3` 时，它会接续该请求。为 `off` 时，请求既不带工具，也没有那句话。它会覆盖 `[agent] reflect_tool_guard`；见[配置](configuration.md#context-accounting)。 |
-| `--cache-layout v2\|v3` | `v3` | 启用固定前缀时，`v3` 在尝试边界把反思作为一条窗口消息只追加一次，让反思请求及其回复留在窗口中，并在同一前缀上再次询问不可读的反思；`v2` 会发送此前的请求。没有固定前缀时两者都不改变任何内容。它会覆盖 `[agent] cache_layout`；见[配置](configuration.md#context-accounting)。 |
+| `--window-eviction chunk\|boundary` | `chunk` | 工作记忆如何丢弃旧轮次：`chunk` 每次丢弃八条消息；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--window-messages N` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。它会覆盖 `[agent] window_messages`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
 | `--brief-items on\|off` | `off` | 实验性。配合 `--brief`，在每个反思请求中，以及最后一次尝试结束前两步，指出简报中尚未被任何编辑触及的编号条目；见[运行 worker 任务](#brief-items)。它会覆盖 `[agent] brief_items`；没有 `--brief` 时不起作用。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |
 | `--max-steps N` | `100` | 整个运行最多可以使用的规划步数（也可写作 `-s N`）。 |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`：每次尝试（`agent.steps_per_attempt`，50 步）之后都进行一次反思。`none`：只做一次 `--max-steps` 步的尝试，不进行反思。`[agent] reflection = false`（设置中的 **Reflect when stuck after many steps**，或一次运行用 `-X agent.reflection=off`）让每个读取配置的运行都是 `none`；这个选项优先于它。 |
-| `--reflection-gate flags\|utility\|patient` | `patient` | 反思之后，当它选择 `continue` 且三项检查都成立时（`flags`），开始下一次尝试；或者还要求其效用分数达到 0.1（`utility`，即本选项出现之前的行为）；或者与 `flags` 相同，但每次运行中有一次，下一步不新时也开始下一次尝试（`patient`，默认）。 |
 | `--tool-exposure retrieve\|all` | `retrieve` | 每个步骤向模型提供哪些工具。 |
 | `--builtins all\|none\|NAME,...` | 所在模式的默认集合 | 要注册的内置工具。不带该旗标时，直接运行获得 `file_read`、`file_write` 和 `python_exec`；`all` 会加上 `shell_exec` 和 `list_files`（交互式界面默认保留全部五个）。 |
 | `--mcp-config PATH` | 未设置 | 添加此 JSON 文件中列出的 MCP 服务器提供的工具。 |
@@ -385,13 +371,11 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--recall-placement tool\|message` | `tool` | 步骤块放在哪里：附加到最后一个工具结果之后，或放在它自己的用户消息中。在 `replay` 和 `compress+replay` 中会拒绝 `message`。 |
 | `--recall-min-score F` | `0.35` | 嵌入命中和长期记忆余弦命中的余弦下限，范围 0 到 1。对任务内的 `bm25` 和 `llm` 排序，以及只由 BM25 打分的长期记忆行，它不起作用。 |
 | `--retrieval-extra-body JSON` | 未设置 | 仅用于 `retrieve` 请求（即 `llm` 检索器）的额外顶层字段，以 JSON 对象形式给出。在 `legacy` 之外，任务或交互式界面在 `llm`/`auto` 下可用；它从不保存到配置文件中。 |
-| `--admit-on-outcome on\|off` | `off` | R6-lite：运行结束时，只准入最后一次尝试的摘要，并在其来源中记录终态；off 时在没有信号准入任何内容的情况下不写入任何内容。在 `legacy` 中接受但不起作用，在交互式界面中可以接受。 |
 | `--keep-decision-text` | 关闭 | R6-lite：同时保存每个准入决定所检查的文本；SHA-256 始终保留。这是评估开关，在交互式界面中会被拒绝。 |
 
 - `--workspace`：不指定时，任务在当前文件夹中运行，与以前完全一致。指定后，`~` 会被展开，路径的解析方式与交互式界面相同，运行在该文件夹中：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动。它不增加任何审批（见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)）。不是文件夹的路径是用法错误（退出码 2，只输出一行）；见[用法错误](#usage-errors)。`melo ""` 和 `--serve` 拒绝该旗标。
 - 三个上下文旗标分别覆盖对应的 `[agent]` 键，在直接模式和交互式界面中均如此。超出预算的请求会在副本上做适配，否则运行以 `context_budget_exceeded` 结束；输出预留不是生成长度上限。见[上下文记账](configuration.md#context-accounting)。
 - `--max-steps`（`-s`，默认 100）：至少为 1。使用 `reflect` 时，一次运行的每次尝试最多 50 个步骤（`-X agent.steps_per_attempt=N`），最多 5 次尝试，总步骤数最多为 `--max-steps`；`-X agent.reflection=off`（或 `--attempt-policy none`）直接做到总步数。见[localmelo 如何工作](../concepts/how-it-works.md#the-run-loop)。如果要限制每一个模型请求（规划、反思及其他请求），可设置 `-X agent.max_calls=N`（开发者设置，不小于 2 的整数，没有单独的选项）：运行会在会超出 `N` 的那个请求之前自行停止，并以 `budget_exhausted` 结束，错误是 `Call budget reached: ...`。`agent.answer_on_stop` 开启（默认）时，最后一次调用留作不带工具、根据证据索要最终答案的那一次请求，因此运行发出 `N - 1` 个请求，再发这一个。两者都出现在 `melo -h all` 中，记录里有什么见[运行结果](run-results.md#statuses)。
-- `--reflection-gate`：见[反思](../concepts/how-it-works.md#reflection)。与 `--attempt-policy none` 一起使用时无效。`--reflection-gate flags` 给出 `patient` 成为默认值之前的判定（`-X agent.reflection_gate=flags` 仅对一次运行生效）。
 - `--tool-exposure`：见[工具的提供方式](tools.md#how-tools-are-offered)。
 - `--builtins`：`all`、`none`，或以逗号分隔的 `file_read`、`file_write`、`list_files`、`python_exec` 和 `shell_exec` 列表。直接运行的默认集合不包含 `shell_exec`：`--builtins all`（或点名 `shell_exec`）会重新开启它，而且由于直接模式没有策略，它会在无需审批的情况下运行。`recall` 只有与 `--recall-at tool` 同用时才被接受，后者会注册它；没有该触发点时，它是用法错误。
 - `--mcp-only` 需要 `--mcp-config`，且不能与 `--builtins` 或 `--tool-exposure` 同用。见[工具与 MCP](../guides/tools-mcp.md#add-tools-from-mcp-servers)。
@@ -410,7 +394,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
   melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
     --reasoning compress --retriever off -- "List the files"
   ```
-- `--admit-on-outcome` 和 `--keep-decision-text`：见[长期记忆](../../reference/memory.md#long-term-memory)。它们在 `legacy` 中被接受，但在那里没有任何作用。`--keep-decision-text` 会把可能涉及个人内容的文本写入存储，因此交互式界面会拒绝它（退出码 2，只输出一行）。在直接模式中，`[memory] admit_on_outcome` 是第一个开关的已保存默认值（交互式界面和网关不读取此表）；第二个开关只能作为旗标使用。
+- `--keep-decision-text`：见[长期记忆](../../reference/memory.md#long-term-memory)。它在 `legacy` 中被接受，但在那里没有任何作用。它会把可能涉及个人内容的文本写入存储，因此交互式界面会拒绝它（退出码 2，只输出一行）。它只能作为旗标使用。
 - `--note-writer`：`auto`（默认）会解析模型写出的 `<note>plan: … found: … open: … remember: …</note>` 块，没有时回退到启发式方法；`heuristic` 则忽略该块。笔记最多约 1,200 个字符，`remember: yes` 会把它标记为日后记忆的候选。这个旗标在每种模式下都被接受，但只有压缩模式会使用它。在 `config.toml` 中，它对应 `[agent]` 的 `note_writer` 键，而 `[agent] reasoning` 接受同样的五个值。在 `compress` 和 `compress+replay` 中，默认的 `--retriever auto` 也会在 `start`、`attempt` 和 `step` 召回笔记和草稿；见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。
 - `--reasoning-field`：`auto` 会解析为上一条回复的推理所来自的键，在第一条这样的回复之前不发送任何键。只有 `replay` 和 `compress+replay` 使用此旗标以及后端的 `reasoning_field`；在 `legacy`、`drop` 和 `compress` 中，线上行为与未设置任何字段相同。`ollama` 后端把该字段固定为 `thinking`，因此在那里使用此旗标是用法错误。交互式界面遵循同样的规则，包括切换后端之后。
 
@@ -426,7 +410,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `-r`, `--resume [ID\|TITLE]` | 关闭 | 恢复指定的对话；不带值则打开会话选择器。 |
 | `--yolo` | 关闭 | 运行每个工具时都不再询问审批。 |
 
-- 交互式界面同样接受 `--context-window`、`--output-reserve`、`--safety-margin`、`--workspace`、`--max-steps`、`--attempt-policy`、`--reflection-gate`、`--builtins`、`--memory`、`--memory-dir`、`--request-timeout`、`--reasoning`、`--reasoning-field`、`--replay-turns`、`--note-writer`、`--retriever`、`--recall-*`、`--retrieval-extra-body` 以及 `--embedding-*` 选项，对会话的每一轮都生效。显式旗标优先于已保存的 `[agent]` 和 `[retrieval]` 默认值；检索设置在 `legacy` 中保持不起作用，而在那里显式的检索旗标是错误。`--base-url` 会话从旗标获取这些值，而不是已保存的默认值。`--tool-exposure`（界面提供全部工具）、`--timeout`、`--output-format`、`--progress`、`--routine` 和 `--keep-decision-text` 是用法错误；`--mcp-config` 和 `--mcp-only` 被接受。
+- 交互式界面同样接受 `--context-window`、`--output-reserve`、`--safety-margin`、`--workspace`、`--max-steps`、`--attempt-policy`、`--builtins`、`--memory`、`--memory-dir`、`--request-timeout`、`--reasoning`、`--reasoning-field`、`--replay-turns`、`--note-writer`、`--retriever`、`--recall-*`、`--retrieval-extra-body` 以及 `--embedding-*` 选项，对会话的每一轮都生效。显式旗标优先于已保存的 `[agent]` 和 `[retrieval]` 默认值；检索设置在 `legacy` 中保持不起作用，而在那里显式的检索旗标是错误。`--base-url` 会话从旗标获取这些值，而不是已保存的默认值。`--tool-exposure`（界面提供全部工具）、`--timeout`、`--output-format`、`--progress`、`--routine` 和 `--keep-decision-text` 是用法错误；`--mcp-config` 和 `--mcp-only` 被接受。
 - 例如，`melo --reasoning compress --retriever bm25 --note-writer heuristic` 会启动一个带短笔记和召回的会话。没有 `/reasoning` 命令：请在启动进程时选择模式。`/model` 和 `/backend` 会保留模式、完整对话以及仅存于内存中的笔记和草稿。要求回放的提供方会拒绝 `drop` 会话，且不会改变其模型、对话或 MCP 状态；在这类提供方上，`compress` 会作为 `compress+replay` 运行。
 - 会话回放覆盖保留的对话窗口，而不只是当前任务。恢复时，`pairs` 恢复回答但不含思考；`window` 可以回放检查点中保留的、已脱敏的思考。当前进程的模式优先于旧轮次上记录的模式。两种路径都不会重建仅存于内存中的笔记存储。见[恢复](../guides/sessions.md#resume)。
 - 实时回复流式输出在交互式界面中默认开启：`/stream off` 为之后的轮次关闭，`-X cli.stream=false` 只关闭这一次运行，`melo config set cli.stream false` 则永久关闭。按模型的 `[cli.reasoning_tags]` 提示告诉界面该模型如何标记推理；没有提示的模型在回复完成后才显示。界面只在实时区域中绘制经过脱敏并已放行的文本，为未成为最终答案的临时文本加上标签，并且只打印一次最终答案。不支持流式输出的提供方会发送完整回复，忽略流式请求或在发出任何内容之前就关闭了流的服务器也是如此：melo 使用它的完整回复，必要时不带流式再问一次，并且只说明一次。直接模式和 stdin 已关闭的运行从不流式输出。见[流式回复](../guides/terminal.md#streamed-replies)。
@@ -667,7 +651,7 @@ step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | 运行以状态 `completed` 结束。 |
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
-| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
+| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者直接运行发现配置文件的 `[agent]` 表中有错误的值，无论有无 `--base-url`（`--brief` 运行把它报告为 `startup_error` 结果并以 1 退出）；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
 | 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |

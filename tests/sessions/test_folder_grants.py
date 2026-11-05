@@ -242,7 +242,7 @@ async def test_forget_takes_back_folder_grants(letters: Path) -> None:
     await policy.decide_folder(_request("file_read", letters / "cover-letter.md"))
     assert len(asker.requests) == 2
 
-    policy._folders.append(str(letters))
+    policy.grants.grant_now(str(letters), kind="folder")
     policy.forget()
     assert policy.allowed_folders == ()
 
@@ -250,7 +250,7 @@ async def test_forget_takes_back_folder_grants(letters: Path) -> None:
 async def test_a_tool_grant_never_covers_a_folder(letters: Path) -> None:
     asker = Asker(ApprovalDecision(True))
     policy = _policy(asker)
-    policy._granted.add("file_write")
+    policy.grants.grant_now("file_write")
 
     via_decide = await policy.decide(_request("file_write", letters / "x.md"))
 

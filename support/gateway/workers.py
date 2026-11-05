@@ -143,7 +143,9 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
     chat_mode,
 )
+from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.identity import ACTING_RULE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.web import WebFetchProvider
@@ -157,6 +159,8 @@ _MAKING_ROOM: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "making_room", default=False
 )
 _CAPTURE_RETRY_SECONDS = 10.0
+# How long shutdown waits for a worker that is still closing before it gives up.
+_CLOSE_AT_SHUTDOWN_SECONDS = 10.0
 # What a task's worker is told on every planning request (as its identity).
 WORKER_GUIDE = (
     "You are melo's worker for one task, in its folder. Use git_status to "
@@ -177,7 +181,7 @@ WORKER_GUIDE = (
     "just to ask the person in your report. End your report with one line, "
     "Ending: ready (done as asked), Ending: blocked: <what only the person can "
     "give> (say blocked only then), Ending: failed or Ending: dropped (made "
-    "moot); code checks it against your own test runs and commits."
+    "moot); code checks it against your own test runs and commits. " + ACTING_RULE
 )
 # The heading of a task's context pack on its first request: the notes are data.
 TASK_PACK_HEADER: Final = (
@@ -400,11 +404,6 @@ def _task_blocks(spec: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(block for block in blocks if block)
 
 
-def _task_context(spec: Mapping[str, Any]) -> str:
-    """The blocks of :func:`_task_blocks` as one text."""
-    return "\n\n".join(_task_blocks(spec))
-
-
 def _project_fields(found: project_files.ProjectInstructions | None) -> dict[str, Any]:
     """The spec fields that hold what the project's instruction files gave a task."""
     if found is None:
@@ -595,6 +594,10 @@ class TaskWorkers:
         # once that chat is gone), what a step that ran on an earlier
         # approval shows, and what starts when a task asks the person.
         self.ledger = ledger or ApprovalLedger()
+        # Every grant, in the store's table (the console sets its book): a
+        # task keeps what the person allowed for it; its chat's grants and the
+        # main chat's reach it through its chat (#369).
+        self.grants = GrantBook()
         self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
         self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
@@ -1969,7 +1972,9 @@ class TaskWorkers:
                         {closing, shutdown}, return_when=asyncio.FIRST_COMPLETED
                     )
                     if closing not in done:
-                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        done, _ = await asyncio.wait(
+                            {closing}, timeout=_CLOSE_AT_SHUTDOWN_SECONDS
+                        )
                         if not done:
                             closing.cancel()
                             log.error(
@@ -2462,6 +2467,7 @@ class TaskWorkers:
                 runner.observe(paused_ask),
                 folders=_remembers(record.origin),
                 saved=SavedFolders(),
+                grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
             if task_mode == "auto":
@@ -2604,7 +2610,9 @@ class TaskWorkers:
                     await self._shutdown.wait()
                     try:
                         closing = asyncio.create_task(self._close_worker(runner, agent))
-                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        done, _ = await asyncio.wait(
+                            {closing}, timeout=_CLOSE_AT_SHUTDOWN_SECONDS
+                        )
                         if not done:
                             closing.cancel()
                             log.error(

@@ -37,8 +37,11 @@ def test_the_driver_is_saved_loaded_and_checked() -> None:
     assert 'driver = "safari-automation"' in Path(config.config_path()).read_text()
     assert config.load().browser.driver == "safari-automation"
     cfg.browser.driver = "chrome"
-    assert any("[browser] driver='chrome'" in e for e in cfg.setting_errors())
-    assert any("[browser] driver='chrome'" in e for e in cfg.validate())
+    config.save(cfg)
+    assert config.load().browser.driver == "chrome" and cfg.setting_errors() == []
+    cfg.browser.driver = "firefox"
+    assert any("[browser] driver='firefox'" in e for e in cfg.setting_errors())
+    assert any("[browser] driver='firefox'" in e for e in cfg.validate())
 
 
 def test_x_sets_the_driver_for_one_run_and_refuses_another(
@@ -48,17 +51,23 @@ def test_x_sets_the_driver_for_one_run_and_refuses_another(
     assert config.overrides() == {"browser.driver": "safari-automation"}
     assert config.load().browser.driver == "safari-automation"
     config.set_overrides({})
+    cli._parse(["-X", "browser.driver=chrome", "q"])
+    assert config.load().browser.driver == "chrome"
+    config.set_overrides({})
     with pytest.raises(SystemExit) as exc:
-        cli._parse(["-X", "browser.driver=chrome", "q"])
+        cli._parse(["-X", "browser.driver=firefox", "q"])
     assert exc.value.code == 2
-    assert "is not one of ('off', 'safari-automation')" in capsys.readouterr().err
+    assert (
+        "is not one of ('off', 'safari-automation', 'chrome')"
+        in capsys.readouterr().err
+    )
 
 
 async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() -> None:
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
     names = {}
-    for driver in ("off", "safari-automation"):
+    for driver in ("off", "safari-automation", "chrome"):
         agent = await session_agents.build_session_agent(
             cfg=cfg,
             base_url=None,
@@ -74,6 +83,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
         finally:
             await agent.close()
     assert names["off"] == [] and len(names["safari-automation"]) == 12
+    assert names["chrome"] == names["safari-automation"]
     with pytest.raises(ValueError, match="unknown browser driver"):
         await session_agents.build_session_agent(
             cfg=cfg,
@@ -81,7 +91,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             model=None,
             workspace=str(Path.cwd()),
             options=AgentOptions(),
-            browser_driver="chrome",
+            browser_driver="firefox",
         )
 
 
@@ -126,7 +136,8 @@ class _NoTools(BaseToolProvider):
 
 
 @pytest.mark.parametrize(
-    ("driver", "count"), [("safari-automation", 12), ("off", 0), ("chrome", 0)]
+    ("driver", "count"),
+    [("safari-automation", 12), ("chrome", 12), ("off", 0), ("firefox", 0)],
 )
 async def test_every_console_chat_has_the_browser_tools_the_setting_names(
     driver: str, count: int

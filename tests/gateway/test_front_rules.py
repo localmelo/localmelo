@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
 
 from localmelo.support.gateway.front_rules import (
@@ -11,6 +13,7 @@ from localmelo.support.gateway.front_rules import (
     allows,
     allows_level,
     allows_message,
+    authorizes,
     brief_question,
     continue_name,
     intention_only,
@@ -23,11 +26,13 @@ from localmelo.support.gateway.front_rules import (
     level_word,
     reply_language,
     route,
-    short_title,
+    start_rule,
     title_matches,
     triage,
     work_request,
 )
+from localmelo.support.sessions.display import short_title
+from localmelo.tests.linear import assert_linear
 
 SLIDES = TaskRef("a1b2c3d4e5f6", "Slides for the 15:00 meeting", "running")
 CI = TaskRef("0f0f0f0f0f0f", "Fix CI", "queued")
@@ -288,28 +293,23 @@ def test_an_answer_is_not_a_preamble(reply: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("typed", "title"),
+    "typed",
     [
-        (
-            "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
-            "test only checks one word. Make it check a file name and commit.",
-            "fix this today: in test_e2e_pty.py",
-        ),
-        (
-            "add a test for the parser in tests/test_app.py",
-            "add a test for the parser in test_app.py",
-        ),
-        ("In support/x.py, rename foo to bar", "In x.py, rename foo to bar"),
-        (
-            "把 docs/guides/embedding.md 里的图片换成 webp",
-            "把 embedding.md 里的图片换成",
-        ),
-        ("commit support/gateway/console/registry.py", "commit registry.py"),
+        "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
+        "test only checks one word. Make it check a file name and commit.",
+        "add a test for the parser in tests/test_app.py",
+        "In support/x.py, rename foo to bar",
+        "把 docs/guides/embedding.md 里的图片换成 webp",
+        "commit support/gateway/console/registry.py",
     ],
 )
-def test_an_imperative_change_to_named_files_is_work(typed: str, title: str) -> None:
+def test_an_imperative_change_to_named_files_is_work(typed: str) -> None:
     routed = route(typed, TASKS)
-    assert (routed.route, routed.title, routed.text) == ("work", title, typed)
+    assert (routed.route, routed.title, routed.text) == (
+        "work",
+        short_title(typed),
+        typed,
+    )
 
 
 @pytest.mark.parametrize(
@@ -356,40 +356,6 @@ def test_a_change_test_commit_pipeline_is_work_without_a_named_file(typed: str) 
 )
 def test_a_pipeline_ask_that_is_not_work(typed: str) -> None:
     assert route(typed, ()).route != "work"
-
-
-def test_short_titles_cut_at_a_word() -> None:
-    long = "summarize every chapter of the handbook and write the findings down"
-    # At most 48 characters, at a word, without a trailing "and".
-    assert short_title(long) == "summarize every chapter of the handbook"
-    assert short_title("Fix CI. Then tell me.") == "Fix CI"
-    assert short_title("x" * 80) == "x" * 48
-    assert short_title(
-        "帮我整理一下这周的会议记录并发给团队成员们看看吧好吗谢谢你了"
-    ) == ("整理一下这周的会议记录并发给团队成员们看看吧好吗")
-    assert short_title("see https://example.com/a/b.html") == (
-        "see https://example.com/a/b.html"
-    )
-    assert short_title("   ") == "Task"
-
-
-@pytest.mark.parametrize(
-    ("typed", "title"),
-    [
-        ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
-        ("今天：修小药丸", "修小药丸"),
-        ("今天修一下：路由规则改掉", "今天修一下：路由规则改掉"),
-        ("no rush: tidy the photos", "tidy the photos"),
-        ("Please, no rush: tidy the photos", "tidy the photos"),
-        ("today, fix the pill", "fix the pill"),
-        ("Whenever possible, update the docs", "Whenever possible, update the docs"),
-        ("today", "today"),
-        ("today:", "today"),
-        ("Today's news summary", "Today's news summary"),
-    ],
-)
-def test_a_level_word_that_opens_a_title_is_dropped(typed: str, title: str) -> None:
-    assert short_title(typed) == title
 
 
 @pytest.mark.parametrize(
@@ -579,3 +545,77 @@ def test_work_is_asked_for_only_when_no_prohibition_or_quote_holds_the_verb(
 ) -> None:
     assert work_request(text) is work
     assert (route(text).route == "work") is work
+
+
+@pytest.mark.parametrize(
+    ("typed", "goes_ahead"),
+    [
+        ("I authorize you to apply to them", True),
+        ("I authorize you", True),
+        ("You are authorized to submit them", True),
+        ("Yes, you have my permission", True),
+        ("我授权你去投简历", True),
+        ("我授权你去提交 然后有问题再问我", True),
+        ("我允许你去试一下", True),
+        # Authorization as a topic, a past fact or a refusal is no go-ahead.
+        ("What does authorization mean in OAuth?", False),
+        ("how do I authorize an app on GitHub?", False),
+        ("I authorized the app yesterday", False),
+        ("请解释一下 OAuth 授权", False),
+        ("授权码是什么", False),
+        ("我没授权你删除", False),
+        ("I don't authorize you to touch my files", False),
+    ],
+)
+def test_words_that_authorize_work_are_a_go_ahead(typed: str, goes_ahead: bool) -> None:
+    assert authorizes(typed) is goes_ahead
+
+
+@pytest.mark.parametrize(
+    ("typed", "rule"),
+    [
+        # A go-ahead for work the chat talked about is a request, with no verb of its own.
+        ("我授权你去投简历", "start"),
+        ("I authorize you to apply", "start"),
+        ("You have my permission, go on", "start"),
+        # Small talk, a question about the word, and a go-ahead that says not to act are not.
+        ("谢谢", "answer"),
+        ("explain what authorization means", "answer"),
+        ("What does authorization mean in OAuth?", "answer"),
+        ("我授权你，但只解释一下", "offer"),
+        ("just explain it, I authorize nothing", "offer"),
+    ],
+)
+def test_a_go_ahead_starts_the_work_it_gives_the_go_ahead_for(
+    typed: str, rule: str
+) -> None:
+    assert start_rule(typed) == rule
+
+
+# ── A long paste is read by its opening ──
+
+LONG_PASTES: Final = {
+    "one_token": lambda size: "x" * size,
+    "dotted": lambda size: "a.b" * (size // 3),
+    "underscored": lambda size: "a_b" * (size // 3),
+    "slashes": lambda size: "a/b." * (size // 4),
+    "prose": lambda size: "Please look at this paragraph. " * (size // 31),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LONG_PASTES))
+def test_the_rules_read_a_long_paste_in_time_linear_in_its_length(shape: str) -> None:
+    assert_linear(
+        LONG_PASTES[shape], lambda text: (start_rule(text), route(text).route)
+    )
+
+
+def test_a_request_in_the_opening_of_a_long_text_is_a_task_with_all_of_the_text() -> (
+    None
+):
+    pasted = "Please fix src/app.py, the log is below.\n" + "x" * 100_000
+    found = route(pasted)
+
+    assert found.route == "work"
+    assert found.text == pasted
+    assert start_rule(pasted) == "start"

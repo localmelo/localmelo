@@ -16,12 +16,8 @@ from typing import Any
 
 from localmelo.melo.contracts.events import EVENT_SCHEMA_VERSION, json_safe_payload
 from localmelo.melo.schema import RunResult
-from localmelo.support.sessions.store import (
-    SessionStore,
-    _dumps,
-    _session_event,
-    title_from_text,
-)
+from localmelo.support.sessions.display import short_title
+from localmelo.support.sessions.store import SessionStore, _dumps, _session_event
 from localmelo.support.sessions.worker import (
     _git_metadata,
     redact_worker,
@@ -259,7 +255,7 @@ async def import_dsh(
             continue
         mapper.add(row)
     result = mapper.finish()
-    safe_title = title_from_text(_text(title) or _FALLBACK)
+    safe_title = short_title(_text(title) or _FALLBACK)
     meta: dict[str, Any] = {
         "source": "dsh",
         "tokens": mapper.usage.get("total_tokens", 0),

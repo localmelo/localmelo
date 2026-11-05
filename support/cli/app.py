@@ -68,6 +68,7 @@ from localmelo.melo.contracts.review import offers_grant
 from localmelo.support.cli.approvals import (
     BODY_LINES,
     ESCAPED_WARNING,
+    EVERYWHERE_RULE,
     FOLDER_RULE,
     NO_GRANT_RULE,
     REASON_MAX_CHARS,
@@ -1013,7 +1014,9 @@ class InteractiveApp:
     def _options(self, pending: PendingApproval) -> list[tuple[int, str]]:
         options = [(0, "Yes")]
         if pending.offer_session:
-            options.append((1, session_option(pending.request)))
+            options.append(
+                (1, session_option(pending.request, everywhere=pending.everywhere))
+            )
         if pending.offer_always:
             # A folder outside the workspace kept in the settings (#405).
             options.append((3, folder_options(pending.request)[1]))
@@ -1054,6 +1057,8 @@ class InteractiveApp:
             options += wrapped(style, f"{mark} {number}. {label}", width, "     ")
         keys: list[tuple[str, str]] = []
         if not pending.reason:
+            if pending.everywhere and (pending.offer_session or pending.offer_always):
+                options += wrapped("", "  " + EVERYWHERE_RULE, width, "  ")
             if pending.offer_always:
                 options += wrapped("", "  " + FOLDER_RULE, width, "  ")
             elif pending.offer_session:

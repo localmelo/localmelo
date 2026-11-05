@@ -10,7 +10,6 @@ where = [".."]
 include = ["localmelo", "localmelo.*"]
 
 [tool.setuptools.package-data]
-"localmelo" = ["tests/smoke/data/scenarios.json"]
 "localmelo.support.gateway" = ["static/*", "static/**/*"]
 
 [project]
@@ -31,6 +30,7 @@ dependencies = [
 gateway = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "websockets>=13",
 ]
 dev = [
     "ruff",

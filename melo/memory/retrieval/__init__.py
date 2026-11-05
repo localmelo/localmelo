@@ -1,4 +1,4 @@
-"""Switchable memory retrievers, and their offline evaluation.
+"""Switchable memory retrievers.
 
 Three retrievers rank memory documents (:class:`Doc`) for a query:
 
@@ -9,11 +9,12 @@ Three retrievers rank memory documents (:class:`Doc`) for a query:
 - ``embedding``: cosine similarity of embedding vectors, with ``bm25`` as
   its fallback (:mod:`.embedding`).
 
-:func:`build_retriever` makes one by name, and :func:`evaluate` measures
-one on labelled queries: recall@k, MRR, and cold, warm and interleaved
-latency. :mod:`.corpus` reads the corpus and the labelled queries, and
-turns a run's raw model calls into a corpus. Nothing here touches the
-agent loop.
+:func:`build_retriever` makes one by name. The offline evaluation of a
+retriever (``melo-retrieve``) lives in ``support/memory``:
+``retrieval_eval`` measures one on labelled queries (recall@k, MRR, and
+cold, warm and interleaved latency), and ``retrieval_corpus`` reads the
+corpus and the labelled queries and turns a run's raw model calls into a
+corpus.
 
 Experimental: the interface may change while memory recall is built on it.
 """
@@ -33,44 +34,18 @@ from localmelo.melo.memory.retrieval.base import (
     Send,
 )
 from localmelo.melo.memory.retrieval.bm25 import BM25Retriever
-from localmelo.melo.memory.retrieval.corpus import (
-    CorpusError,
-    RawCall,
-    doc_to_dict,
-    docs_from_calls,
-    load_corpus,
-    load_queries,
-    load_raw_calls,
-)
 from localmelo.melo.memory.retrieval.embedding import EmbeddingRetriever
-from localmelo.melo.memory.retrieval.evaluate import (
-    EvalReport,
-    LabelledQuery,
-    QueryResult,
-    evaluate,
-)
 from localmelo.melo.memory.retrieval.llm import LLMRetriever, send_from_provider
 
 __all__ = [
     "DOC_KINDS",
     "RETRIEVER_NAMES",
-    "CorpusError",
     "Doc",
-    "EvalReport",
     "Hit",
-    "LabelledQuery",
-    "QueryResult",
-    "RawCall",
     "RetrievalResult",
     "Retriever",
     "Send",
     "build_retriever",
-    "doc_to_dict",
-    "docs_from_calls",
-    "evaluate",
-    "load_corpus",
-    "load_queries",
-    "load_raw_calls",
     "send_from_provider",
 ]
 

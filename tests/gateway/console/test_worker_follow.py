@@ -249,6 +249,7 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("POST", "/api/sessions/{session_id}/level"): {"level": 2},
     ("POST", "/api/presence"): {"session_id": "{session_id}"},
     ("POST", "/api/turns/{turn_id}/cancel"): None,
+    ("POST", "/api/turns/{turn_id}/notes"): {"text": "no"},
     ("PATCH", "/api/tasks/{task_id}"): {"level": 2},
     ("POST", "/api/tasks/{task_id}/resume"): {"operation_id": "op"},
     ("POST", "/api/tasks/{task_id}/continue"): None,
@@ -295,7 +296,7 @@ async def test_every_write_route_refuses_a_worker_run(
             # ``{tool:path}`` is the route's converter, not a format spec.
             url = path.replace(":path}", "}").format(**ids)
             resp = client.request(method, url, json=payload)
-            want = 409 if "cancel" in path and "turns" in path else 404
+            want = 409 if path.startswith("/api/turns/") else 404
             assert resp.status_code == want, (method, path, resp.status_code)
         stored = await store.get_session(sid)
         assert stored is not None and stored.title != "no"
