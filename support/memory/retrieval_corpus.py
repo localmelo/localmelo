@@ -117,7 +117,7 @@ class RawCall:
 
     task_id: str
     seq: int
-    kind: str = "plan"  # plan | reflect | retrieve | estimate
+    kind: str = "plan"  # plan | reflect | retrieve
     step: int = 0
     attempt: int = 1
     content: str = ""
