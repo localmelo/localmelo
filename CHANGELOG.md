@@ -891,8 +891,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   run with a folder and one without, so a fix to a tool lands in one place; a run with no approval prompts that
   passes a tool an argument it does not have now gets an error naming the tool's own function. A streamed reply no
   longer re-reads the redaction rules' source file while it runs (any edit to that file, even a comment, used to
-  hold every streamed answer until its end); a test now fails the build when a redaction rule could match across
-  lines, which is what makes streaming line by line safe.
+  hold every streamed answer until its end); tests now fail the build when a redaction rule could match across
+  lines, when the redaction code uses a pattern they do not inspect, or when a streamed answer cut at random places
+  differs from the whole text redacted, which is what makes streaming line by line safe. A layering test pins that
+  the shared contracts never import the checker.
 - One rule names every task and chat. The same request now gets the same title wherever it starts: `melo task`, a task card, **Run as a task**, a chat's first title and a `melo "task"` run in the history. The title is the first sentence of the first line, without an opening "please", "请" or level word followed by a colon or comma (`no rush:`), a path shows as its file name, a question keeps its `?`, and a long one is cut at a word, with no "the" or "in" left hanging, and ends in `…`. A chat's first title is therefore shorter than before (at most 48 columns, 24 Chinese characters) and a first message of several lines is named by its first line, skipping a line of only a greeting (`Hi`, `你好`) and a leading code block.
 - Developer only: one adapter now serves every OpenAI-compatible backend, and one list of local and hosted backends
   feeds the config, the setup lists, Settings, the banner, the probe and the failure hints, so a new backend is one

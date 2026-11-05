@@ -10,7 +10,8 @@ inside ``_providers_from_config`` when an Agent is built from a Config.
 
 The same walk checks a table of other rules (:data:`FORBIDDEN`): the
 terminal UI's libraries stay out of the core, the sessions and the model
-listing, and the sessions and the UI stay clear of the gateway.
+listing, the contracts stay clear of the checker, and the sessions and the UI
+stay clear of the gateway.
 """
 
 from __future__ import annotations
@@ -279,6 +280,9 @@ def test_core_imports_and_text_about_support_are_not_imports_of_it() -> None:
 # above, with its two exceptions.
 FORBIDDEN: list[tuple[str, tuple[str, ...]]] = [
     ("melo", ("prompt_toolkit", "rich")),
+    # The contracts are what the checker and the agent share, so they cannot
+    # lean on the checker.
+    ("melo/contracts", ("localmelo.melo.checker",)),
     (
         "support/sessions",
         (
