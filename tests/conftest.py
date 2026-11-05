@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -119,6 +120,22 @@ def _forget_servers() -> None:
     from localmelo.support.backends import discovery
 
     discovery.forget_servers()
+
+
+@pytest.fixture(autouse=True)
+def melo_serve_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """melo_serve's home is an empty temporary folder: no test reads this Mac's own.
+
+    The state file and the control socket of the melo_serve that may run here
+    are never read or sent to. A test writes a fake ``state.json`` in the folder
+    (``tests/fixtures/melo_serve.py``).
+    """
+    home = tmp_path_factory.mktemp("melo-serve")
+    monkeypatch.setenv("MELO_SERVE_HOME", str(home))
+    monkeypatch.delenv("MELO_SERVE_SOCKET", raising=False)
+    return home
 
 
 @pytest.fixture(autouse=True)

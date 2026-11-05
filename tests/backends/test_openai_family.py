@@ -7,6 +7,7 @@ through the same checks, so a new row is covered without a new test.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest import mock
 
 import httpx
@@ -28,8 +29,10 @@ from localmelo.support.config import (
     Config,
     LocalBackendConfig,
 )
+from localmelo.support.melo_serve import MeloServeError
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.fixtures.melo_serve import role, write_state
 
 OPENAI_FORMAT_LOCAL = [key for key in LOCAL_BACKENDS if key != "ollama"]
 # melo_serve serves its own model, so its config names none (tested below).
@@ -111,6 +114,34 @@ def test_ollama_chats_on_its_native_api_without_v1() -> None:
     provider = get_backend("ollama").build_chat_provider(cfg)
     assert isinstance(provider, OllamaNativeChat)
     assert str(provider._http.base_url).rstrip("/") == "http://h:1"
+
+
+def test_melo_serve_follows_what_it_serves_now(melo_serve_home: Path) -> None:
+    backend = get_backend("melo_serve")
+    cfg = _local("melo_serve", chat_url="http://127.0.0.1:8321/v1")
+    cfg.melo_serve.embedding_url = cfg.melo_serve.chat_url
+    assert backend.validate(cfg) == []  # no model in the config is fine
+    assert backend.validate(Config(chat_backend="melo_serve"))[0].startswith(
+        "[melo_serve] chat_url is empty."
+    )
+    # Nothing served: the label is the row's, and a provider says how to fix it.
+    assert backend.label(cfg) == "melo_serve"
+    assert backend.has_embedding(cfg) is False
+    with pytest.raises(MeloServeError, match="melo-serve use <pick>"):
+        backend.build_chat_provider(cfg)
+    write_state(melo_serve_home, chat=role("Qwen3.8-27B-Q4KM-splash"))
+    assert backend.label(cfg) == "Splash via melo_serve"
+    assert backend.model_name(cfg) == "Qwen3.8-27B-Q4KM-splash"
+    provider = backend.build_chat_provider(cfg)
+    assert isinstance(provider, OpenAICompatLLM)
+    assert provider.model == "Qwen3.8-27B-Q4KM-splash"
+    # A switch made in melo-serve is followed by the next build.
+    write_state(melo_serve_home, chat=role("Qwen3-8B-4bit", "omlx", "oMLX"))
+    assert backend.label(cfg) == "oMLX via melo_serve"
+    assert backend.build_chat_provider(cfg).model == "Qwen3-8B-4bit"  # type: ignore[attr-defined]
+    # A model named in the config wins over the state.
+    cfg.melo_serve.chat_model = "pinned"
+    assert backend.model_name(cfg) == "pinned"
 
 
 def test_a_row_is_all_a_new_local_backend_needs() -> None:

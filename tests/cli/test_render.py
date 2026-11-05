@@ -1114,6 +1114,15 @@ def test_the_welcome_names_the_server_only_for_a_model_that_is_not_saved() -> No
     assert _welcome(44, source="unsaved")[2] == URL  # the longer notes give way
 
 
+def test_the_welcome_shows_a_backends_note_beside_the_model() -> None:
+    assert _welcome(note="Splash via melo_serve")[0] == (
+        "melo 0.1.0 · stub-model · Splash via melo_serve (/model to change)"
+    )
+    assert _welcome(44, note="Splash via melo_serve")[0] == (
+        "melo 0.1.0 · stub-model (/model to change)"  # the note gives way first
+    )
+
+
 def test_the_welcome_keeps_the_warnings_and_cleans_the_model_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

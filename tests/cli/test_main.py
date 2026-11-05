@@ -26,6 +26,8 @@ import pytest
 
 from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
+from localmelo.tests.fixtures.melo_serve import URL as MELO_SERVE_URL
+from localmelo.tests.fixtures.melo_serve import role, write_state
 
 # ---------------------------------------------------------------------------
 # Helper: build an args namespace that mimics argparse output
@@ -639,6 +641,83 @@ class TestGatewayMode:
         assert line in out
         assert "Chat:" not in out
         assert out.index("  Model:") < out.index("  Gateway: http://")
+
+    def test_serve_status_shows_the_gateway_and_melo_serve(
+        self, capsys: pytest.CaptureFixture[str], melo_serve_home: Path
+    ) -> None:
+        write_state(
+            melo_serve_home,
+            chat=role("Qwen3.8-27B-Q4KM-splash"),
+            embedding=role("Qwen3-Embedding-0.6B"),
+        )
+        gateway_status = {"installed": True, "running": True, "pid": 7}
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("sys.argv", ["melo", "serve", "status"]),
+            mock.patch("localmelo.support.gateway.daemon.status") as status,
+        ):
+            status.return_value = gateway_status
+            from localmelo.__main__ import main
+
+            main()
+
+        assert capsys.readouterr().out == (
+            "  installed: True\n  running: True\n  pid: 7\n\n"
+            "melo_serve:\n  running: True (ready)\n"
+            f"  address: {MELO_SERVE_URL}\n"
+            "  chat: Qwen3.8-27B-Q4KM-splash · Splash · ready\n"
+            "  embedding: Qwen3-Embedding-0.6B · Splash · ready\n"
+            "  login item: installed\n"
+        )
+
+    def test_serve_starts_melo_serve_when_the_config_uses_it(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+        melo_serve_home: Path,
+        tmp_path: Path,
+    ) -> None:
+        # A fake `melo-serve up` that writes the state of a running melo_serve.
+        ready = tmp_path / "ready"
+        ready.mkdir()
+        write_state(ready, chat=role("Qwen3.8-27B-Q4KM-splash"))
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        script = bin_dir / "melo-serve"
+        calls = tmp_path / "calls"
+        script.write_text(
+            f'#!/bin/sh\necho "$@" >> {calls}\n'
+            f'cp {ready / "state.json"} "$MELO_SERVE_HOME/state.json"\n'
+        )
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.defpath}")
+        cfg = Config(
+            chat_backend="melo_serve",
+            embedding_backend="none",
+            melo_serve=LocalBackendConfig(chat_url=MELO_SERVE_URL),
+        )
+        gateway = mock.MagicMock(start_gateway=mock.MagicMock())
+        line = f"  melo_serve: Qwen3.8-27B-Q4KM-splash on Splash ({MELO_SERVE_URL})\n"
+        from localmelo.__main__ import _start_gateway
+
+        with mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}):
+            _start_gateway(cfg)
+            out = capsys.readouterr().out
+            assert calls.read_text() == "up\n"  # not running: it was started
+            assert line in out and out.index(line) < out.index("Starting localmelo")
+            assert "  Model: Qwen3.8-27B-Q4KM-splash on Splash via melo_serve\n" in out
+
+            _start_gateway(cfg)  # now it runs: nothing is started again
+            assert line in capsys.readouterr().out
+            assert calls.read_text() == "up\n"
+
+            (melo_serve_home / "state.json").unlink()  # stopped, and not installed
+            monkeypatch.setenv("PATH", os.defpath)
+            _start_gateway(cfg)
+        assert "uv tool install git+https://github.com/localmelo/melo_serve" in (
+            capsys.readouterr().out
+        )
+        assert gateway.start_gateway.call_count == 3  # the gateway starts anyway
 
     def test_start_gateway_has_the_console_opened_when_it_listens_at_a_terminal(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

@@ -7,6 +7,7 @@ machine's model servers.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -20,6 +21,8 @@ from localmelo.support.backends.discovery import (
     parse_model_ids,
     pick_model,
 )
+from localmelo.support.config import Config
+from localmelo.tests.fixtures import melo_serve as fake_melo_serve
 
 URL = "http://127.0.0.1:8500/v1"
 
@@ -647,6 +650,47 @@ async def test_a_listing_that_names_omlx_as_owner_marks_the_server() -> None:
     await list_models("vllm", URL, transport=_replying(_OMLX_LISTING))
     assert discovery.is_omlx(URL)
     assert discovery.server_name(URL) == "oMLX"
+
+
+async def test_melo_serve_is_found_by_its_state_or_marked_by_its_listing(
+    melo_serve_home: Path,
+) -> None:
+    served = fake_melo_serve.role("Qwen3.8-27B-Q4KM-splash")
+    listing = {"data": [{"id": served["model"], "owned_by": "melo_serve"}]}
+    other = "http://127.0.0.1:8000/v1"
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, json=listing if request.url.port == 8500 else {"data": [{"id": "o"}]}
+        )
+    )
+    # Without a state, a listing that names melo_serve makes it the one offered,
+    # also when another server comes first; and it is saved to follow switches.
+    found = await detect_local_server([other, URL], transport=transport)
+    assert found is not None and found.url == URL
+    assert discovery.is_melo_serve(URL) and not discovery.is_omlx(URL)
+    cfg = Config()
+    cfg.use_chat_server(URL, served["model"], embedding_model="e")
+    assert (cfg.chat_backend, cfg.embedding_backend) == ("melo_serve", "melo_serve")
+    assert (cfg.melo_serve.chat_url, cfg.melo_serve.chat_model) == (URL, "")
+    assert (cfg.melo_serve.embedding_url, cfg.melo_serve.embedding_model) == (URL, "")
+    cfg.use_chat_server(other, "o")
+    assert (cfg.chat_backend, cfg.vllm.chat_model) == ("vllm", "o")
+
+    # A running melo_serve is read from its state, and no request is sent.
+    discovery.forget_servers()
+    fake_melo_serve.write_state(melo_serve_home, chat=served)
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"sent {request.url}")
+
+    found = await detect_local_server([other], transport=httpx.MockTransport(refuse))
+    assert found == discovery.FoundServer(fake_melo_serve.URL, [served["model"]])
+    assert discovery.is_melo_serve(fake_melo_serve.URL)
+
+    # One that stopped (a dead pid) is not preferred.
+    fake_melo_serve.write_state(melo_serve_home, chat=served, pid=2**22 + 1)
+    found = await detect_local_server([other], transport=transport)
+    assert found is not None and found.url == other
 
 
 @pytest.mark.parametrize(
