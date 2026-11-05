@@ -281,6 +281,16 @@ async def test_a_wait_goes_on_while_the_page_does_not_answer_but_not_once_chrome
         await driver.wait(tab.id, "load", "", 5)
 
 
+async def test_an_act_in_a_box_from_another_site_is_refused_without_naming_safari(
+    driver: ChromeBackgroundDriver,
+) -> None:
+    await driver.open(FORM, new_tab=True)
+    box = Element("button", "Allow", frame="x7")
+    with pytest.raises(BrowserError, match="cannot click there") as refused:
+        await driver.act(None, Act("click", FORM, box))
+    assert "Safari" not in str(refused.value)
+
+
 async def test_a_page_that_does_not_load_says_why(
     driver: ChromeBackgroundDriver, monkeypatch: pytest.MonkeyPatch, peer: Peer
 ) -> None:

@@ -70,11 +70,11 @@ STALE = {
     "frame": "melo could not set up its safe page checks on this page, so it did nothing. Use browser_read to try again.",
     "point": "What is at that point is not what melo found there a moment ago, so it did not click. Take a new browser_screenshot.",
     "scrolled": "The page scrolled since the picture, so a point on it is no longer where it was. Take a new browser_screenshot.",
-    "reach": "That point is inside a box from another site, and this Safari cannot click there for melo.",
+    "reach": "That point is inside a box from another site, and melo's browser cannot click there.",
 }
 # Why the browser's own input was passed over for the page script (the result says it).
 PASSED_OVER = {
-    "tool": "this Safari cannot act on page elements itself",
+    "tool": "melo's browser cannot act on page elements itself",
     "covered": "another element covers it, so only the page script reaches it",
     "name": "the browser could not name that element",
     "missed": "the browser's own input did not reach it",

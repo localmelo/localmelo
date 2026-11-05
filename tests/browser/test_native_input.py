@@ -119,7 +119,7 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
 
 async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) -> None:
     for mode, why, site in (
-        ("no_native", "cannot act on page elements itself", False),
+        ("no_native", "melo's browser cannot act on page elements itself", False),
         ("no_uids", "could not name that element", False),
         ("native_missed", "did not reach it", True),
         ("native_error", "did not reach it", True),
