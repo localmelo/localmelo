@@ -1235,6 +1235,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `P1` and `1` still set the same levels. The API still answers `level_word`
   beside `level` ([#343]).
 
+### Removed
+
+- Code that nothing used ([#502]). The old playground and the `--playground`
+  option (the web console replaces it; `--enable-playground` is still accepted
+  and says it was removed), the offline smoke-script tests and the core-loop
+  smoke script, the serving scaffold, the token counter and the four config
+  class aliases, the config migrations for formats that never shipped (with
+  the "Upgrading from an older config" section), the first-run setup preview's
+  developer view, disk and cache probing, the stub sleep and personalized-memory
+  packages, the step-estimate request and its `estimate` call kind, and gateway
+  and store methods that only tests called. Settings, commands and what you see
+  are otherwise unchanged.
+
 ### Security
 
 - The review rules no longer pass several kinds of step as routine (part of #456). Auto
@@ -4601,3 +4614,4 @@ earlier milestones.
 [#431]: https://github.com/localmelo/localmelo/issues/431
 [#433]: https://github.com/localmelo/localmelo/issues/433
 [#426]: https://github.com/localmelo/localmelo/issues/426
+[#502]: https://github.com/localmelo/localmelo/issues/502
