@@ -178,6 +178,17 @@ class AgentFactory:
         self._live.append(agent)
         return agent
 
+    def served_change(self) -> str:
+        """The model a session that follows would now ask for, if it is not its own.
+
+        ``""`` when the session does not follow, when nothing is served, or when
+        the Agent already asks for what is served. One read of the backend.
+        """
+        if not self.backend.follows or self._cfg is None:
+            return ""
+        served = in_use(self._cfg, self.backend.key)[1]
+        return served if served != self.backend.model else ""
+
     def _follow(self) -> None:
         """Show what the backend serves now, which the Agent about to be built asks for."""
         assert self._cfg is not None  # only a configured backend follows
