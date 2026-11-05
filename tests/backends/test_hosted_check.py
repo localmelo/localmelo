@@ -107,6 +107,15 @@ async def test_a_working_service_lists_its_models_and_answers_with_a_tool_call(
     assert seen[0].headers["authorization"] == f"Bearer {KEY}"
 
 
+async def test_a_models_prefix_is_dropped_from_the_listed_names(
+    fake_keychain: FakeSecurity,
+) -> None:
+    found = await run(
+        config(), service(["models/deepseek-flash", "models/text-embedding-3"])
+    )
+    assert (found.ok, found.models) == (True, ("deepseek-flash",))
+
+
 async def test_a_model_that_does_not_call_the_tool_is_said_so(
     fake_keychain: FakeSecurity,
 ) -> None:

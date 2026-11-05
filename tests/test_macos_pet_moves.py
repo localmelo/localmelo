@@ -7,12 +7,12 @@ seen. No window is opened.
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -22,39 +22,17 @@ darwin = pytest.mark.skipif(
 )
 
 
-def run_swift(tmp_path: Path, files: list[str], source: str) -> None:
-    """Compile `files` of the app with a test main (a raw string) and run it."""
-    main = tmp_path / "main.swift"
-    main.write_text("import AppKit\nimport QuartzCore\n" + source)
-    binary = tmp_path / "test-pet-moves"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            *[str(APP / name) for name in files],
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=180,
-    )
-    subprocess.run([str(binary)], check=True, timeout=20)
+def run_swift(files: list[str], source: str) -> None:
+    """Run the raw string `source` as the test main of `files` of the app."""
+    macos_swift.run_swift(files, "import AppKit\nimport QuartzCore\n" + source)
 
 
 POLICY = ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"]
 
 
 @darwin
-def test_each_mood_has_its_move_or_its_still(
-    tmp_path: Path,
-) -> None:
+def test_each_mood_has_its_move_or_its_still() -> None:
     run_swift(
-        tmp_path,
         POLICY,
         r"""
 precondition(petMove(.waiting, thinking: false) == .attention)
@@ -106,11 +84,8 @@ env = PetEnvironment(); env.screenAwake = false; precondition(!petMovesRun(env))
 
 
 @darwin
-def test_the_pet_wakes_up_once_and_plays_now_and_then_while_it_rests(
-    tmp_path: Path,
-) -> None:
+def test_the_pet_wakes_up_once_and_plays_now_and_then_while_it_rests() -> None:
     run_swift(
-        tmp_path,
         POLICY,
         r"""
 precondition(petPlayAfter == 20 && petPlayEvery == 300 && petSitFor == 8)
@@ -171,11 +146,8 @@ precondition(still.pick(.resting, thinking: false, still: true, now: at(1000))! 
 
 
 @darwin
-def test_the_app_reads_the_shipped_manifest_and_plays_it_on_layers_off_screen(
-    tmp_path: Path,
-) -> None:
+def test_the_app_reads_the_shipped_manifest_and_plays_it_on_layers_off_screen() -> None:
     run_swift(
-        tmp_path,
         [*POLICY, "PetMoves.swift"],
         rf"""
 let folder = URL(fileURLWithPath: "{MOVES}")

@@ -5,7 +5,7 @@
 ``recall_item_chars``, ``recall_excerpt``, ``recall_form``, ``recall_list_max``,
 ``recall_open_chars``, ``excerpt_open``, ``recall_source``, ``open_sources``,
 ``premise_check`` (``on`` by default), ``compress_at_chars``, ``compress_parallel``,
-``compress_cache``, ``note_gate``, ``note_min_cosine``, ``followup_query``, ``gather``
+``compress_cache``, ``note_gate``, ``note_min_cosine``, ``gather``
 (``guide`` by default) and ``gather_min_cosine`` are checked
 against their bounds and values, set for one run with ``-X``, and listed by the
 developer help only, each with the issue that decides it.
@@ -44,7 +44,6 @@ CHANGED = {
     "compress_cache": "cache/compress.jsonl",
     "note_gate": "model",
     "note_min_cosine": 0.65,
-    "followup_query": "message",
     "gather": "off",  # "guide" is the default
     "gather_min_cosine": 0.3,
 }
@@ -62,7 +61,6 @@ ISSUE = {name: "#349" for name in CHANGED} | {
     "compress_cache": "#428",
     "note_gate": "#442",
     "note_min_cosine": "#442",
-    "followup_query": "#452",
     "gather": "#428",
     "gather_min_cosine": "#428",
 }
@@ -104,18 +102,6 @@ def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
             4000,
             900,
         )
-
-
-def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> None:
-    path = tmp_path / "config.toml"
-    with (
-        mock.patch.object(config, "CONFIG_PATH", str(path)),
-        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
-    ):
-        path.write_text("[memory]\nrecall_records = 5\n")
-        assert config.load().memory.followup_query == "recent"
-        path.write_text('[memory]\nfollowup_query = "message"\n')
-        assert config.load().memory.followup_query == "message"
 
 
 @pytest.mark.parametrize(
@@ -172,8 +158,6 @@ def test_a_file_without_followup_query_gets_the_new_default(tmp_path: Path) -> N
         ("note_min_cosine", 0.2),
         ("note_min_cosine", 0.95),
         ("note_min_cosine", 0.55),
-        ("followup_query", "recent"),
-        ("followup_query", "message"),
         ("gather", "off"),
         ("gather", "wide"),
         ("gather", "guide"),
@@ -353,12 +337,6 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "[memory] note_min_cosine must be from 0.2 to 0.95, got 0.96",
         ),
         (
-            "followup_query",
-            "history",
-            "[memory] followup_query 'history' is not recognised. "
-            "Must be one of ('recent', 'message').",
-        ),
-        (
             "gather",
             "narrow",
             "[memory] gather 'narrow' is not recognised. "
@@ -450,8 +428,6 @@ def test_x_sets_each_for_one_run_and_only_the_developer_help_lists_them(
         "memory.note_gate=typing",
         "memory.note_min_cosine=0.1",
         "memory.note_min_cosine=high",
-        "memory.followup_query=history",
-        "memory.followup_query=on",
         "memory.gather=narrow",
         "memory.gather=true",
         "memory.gather_min_cosine=0.1",

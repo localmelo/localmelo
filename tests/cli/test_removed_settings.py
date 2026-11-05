@@ -21,6 +21,7 @@ window_messages = 32
 
 [memory]
 admit_on_outcome = true
+followup_query = "message"
 """
 
 
