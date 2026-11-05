@@ -26,6 +26,7 @@ from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.attachments import TextAttachment
+from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.identity import NOTES_TEXT, PINNED_TEXT
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStore, StoredEvent
@@ -215,7 +216,7 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
 
     stub.requests.clear()
     b = await chat(memory, store, stub, tmp_path / "b", ASKS)
-    label = chat_label("chat", SAYS, "gateway")
+    label = chat_label("chat", short_title(SAYS), "gateway")
     (asked,) = memory_events(b)
     assert asked["remembered"] == []
     assert [(u["kind"], u["text"], u["source"]) for u in asked["used"]] == [

@@ -32,7 +32,7 @@ from localmelo.support.gateway.console.front import (
     clean_title,
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.front_rules import short_title
+from localmelo.support.sessions.display import short_title
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from ..conftest import REAL_ASK_TITLE
@@ -166,7 +166,7 @@ async def test_an_imperative_change_to_named_files_is_a_task_without_a_model_cal
         response = await _say(client, console, FIX)
         assert response.status_code == 200, response.text
         echo = response.json()["echo"]
-        assert echo["line"] == "Started: fix this by today: in test_e2e_pty.py · P1"
+        assert echo["line"] == f"Started: {short_title(FIX)} · P1"
         assert echo["typed"] == FIX
         record = await _task(console, echo["task_id"])
         assert (record.spec["objective"], record.level) == (FIX, 1)

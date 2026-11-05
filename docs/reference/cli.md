@@ -233,7 +233,7 @@ requests, stdout, the JSON result and the exit code are the same, and a run
 costs about 20 ms more before its first request.
 
 Put the task after `--`; the
-first task line is the title, and `--save-session TITLE` sets another.
+title is the task's first sentence, cut at 48 columns, and `--save-session TITLE` sets another.
 `--parent-run ID` links a launcher and needs no other flag.
 
 Opt out for one run

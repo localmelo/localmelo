@@ -25,7 +25,6 @@ from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
     go_ahead_text,
 )
-from localmelo.support.gateway.front_rules import short_title
 from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import TaskPolicyError
 from localmelo.support.gateway.task_store import TaskStoreError
@@ -36,6 +35,7 @@ from localmelo.support.sessions.attachments import (
     compose_user_text,
     snapshot,
 )
+from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.picture_input import MAX_PICTURES
 from localmelo.support.sessions.store import (
     SessionBusyError,

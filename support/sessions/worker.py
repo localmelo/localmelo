@@ -213,12 +213,12 @@ async def run_worker(
     A store that cannot be opened or written never fails the run: one line on
     stderr, and the run goes on unrecorded.
     """
+    from localmelo.support.sessions.display import short_title
     from localmelo.support.sessions.runner import SessionRunner
     from localmelo.support.sessions.store import (
         NewSession,
         SessionStore,
         SessionStoreError,
-        title_from_text,
     )
 
     workspace = agent.workspace_root or os.getcwd()
@@ -266,7 +266,7 @@ async def run_worker(
         try:
             outcome = await runner.run_turn(
                 query,
-                title=title or title_from_text(query.splitlines()[0]),
+                title=title or short_title(query),
                 routine=routine,
             )
         except (SessionStoreError, OSError, sqlite3.Error) as exc:

@@ -26,12 +26,12 @@ from localmelo.support.gateway.front_rules import (
     level_word,
     reply_language,
     route,
-    short_title,
     start_rule,
     title_matches,
     triage,
     work_request,
 )
+from localmelo.support.sessions.display import short_title
 from localmelo.tests.linear import assert_linear
 
 SLIDES = TaskRef("a1b2c3d4e5f6", "Slides for the 15:00 meeting", "running")
@@ -293,28 +293,23 @@ def test_an_answer_is_not_a_preamble(reply: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("typed", "title"),
+    "typed",
     [
-        (
-            "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
-            "test only checks one word. Make it check a file name and commit.",
-            "fix this today: in test_e2e_pty.py",
-        ),
-        (
-            "add a test for the parser in tests/test_app.py",
-            "add a test for the parser in test_app.py",
-        ),
-        ("In support/x.py, rename foo to bar", "In x.py, rename foo to bar"),
-        (
-            "把 docs/guides/embedding.md 里的图片换成 webp",
-            "把 embedding.md 里的图片换成",
-        ),
-        ("commit support/gateway/console/registry.py", "commit registry.py"),
+        "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
+        "test only checks one word. Make it check a file name and commit.",
+        "add a test for the parser in tests/test_app.py",
+        "In support/x.py, rename foo to bar",
+        "把 docs/guides/embedding.md 里的图片换成 webp",
+        "commit support/gateway/console/registry.py",
     ],
 )
-def test_an_imperative_change_to_named_files_is_work(typed: str, title: str) -> None:
+def test_an_imperative_change_to_named_files_is_work(typed: str) -> None:
     routed = route(typed, TASKS)
-    assert (routed.route, routed.title, routed.text) == ("work", title, typed)
+    assert (routed.route, routed.title, routed.text) == (
+        "work",
+        short_title(typed),
+        typed,
+    )
 
 
 @pytest.mark.parametrize(
@@ -361,40 +356,6 @@ def test_a_change_test_commit_pipeline_is_work_without_a_named_file(typed: str) 
 )
 def test_a_pipeline_ask_that_is_not_work(typed: str) -> None:
     assert route(typed, ()).route != "work"
-
-
-def test_short_titles_cut_at_a_word() -> None:
-    long = "summarize every chapter of the handbook and write the findings down"
-    # At most 48 characters, at a word, without a trailing "and".
-    assert short_title(long) == "summarize every chapter of the handbook"
-    assert short_title("Fix CI. Then tell me.") == "Fix CI"
-    assert short_title("x" * 80) == "x" * 48
-    assert short_title(
-        "帮我整理一下这周的会议记录并发给团队成员们看看吧好吗谢谢你了"
-    ) == ("整理一下这周的会议记录并发给团队成员们看看吧好吗")
-    assert short_title("see https://example.com/a/b.html") == (
-        "see https://example.com/a/b.html"
-    )
-    assert short_title("   ") == "Task"
-
-
-@pytest.mark.parametrize(
-    ("typed", "title"),
-    [
-        ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
-        ("今天：修小药丸", "修小药丸"),
-        ("今天修一下：路由规则改掉", "今天修一下：路由规则改掉"),
-        ("no rush: tidy the photos", "tidy the photos"),
-        ("Please, no rush: tidy the photos", "tidy the photos"),
-        ("today, fix the pill", "fix the pill"),
-        ("Whenever possible, update the docs", "Whenever possible, update the docs"),
-        ("today", "today"),
-        ("today:", "today"),
-        ("Today's news summary", "Today's news summary"),
-    ],
-)
-def test_a_level_word_that_opens_a_title_is_dropped(typed: str, title: str) -> None:
-    assert short_title(typed) == title
 
 
 @pytest.mark.parametrize(

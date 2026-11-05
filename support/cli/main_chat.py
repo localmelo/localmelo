@@ -41,12 +41,8 @@ from localmelo.support import console_link, gateway_endpoint, task_cli
 from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
 from localmelo.support.sessions.approvals import ChatMode, chat_mode
-from localmelo.support.sessions.display import clean_output, home_label
-from localmelo.support.sessions.store import (
-    GATEWAY_SESSIONS_DB,
-    StoredEvent,
-    title_from_text,
-)
+from localmelo.support.sessions.display import clean_output, home_label, short_title
+from localmelo.support.sessions.store import GATEWAY_SESSIONS_DB, StoredEvent
 from localmelo.support.words import t_in
 
 if TYPE_CHECKING:
@@ -1135,7 +1131,7 @@ class MainChat:
                 chat.id = str(session.get("id") or "")
                 chat.mode = chat_mode(session, chat.mode)
                 if not chat.named:
-                    chat.title = str(session.get("title") or title_from_text(text))
+                    chat.title = str(session.get("title") or short_title(text))
                     self.host.title = chat.title
                 self._follow_from(chat.id, 0)
                 if chat.named:

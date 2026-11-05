@@ -186,7 +186,7 @@ Forgot note 3.
 
 每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。
 
-把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
+把任务放在 `--` 之后；任务的第一句话（最多 48 列宽）作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
 
 单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。
 

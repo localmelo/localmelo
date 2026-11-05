@@ -42,7 +42,6 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     cli_host_id,
     default_path,
-    title_from_text,
 )
 from localmelo.support.sessions.submissions import (
     SubmissionConflict,
@@ -1080,7 +1079,7 @@ async def test_the_first_title_comes_from_the_typed_text(tmp_path: Path) -> None
     assert rows(path, "SELECT typed_text FROM turns WHERE turn = 2") == [("Other",)]
     blank = await store.begin_turn(
         None,
-        "  the   user\ntext  ",
+        "  the   user  text  ",
         holder=HOLDER,
         title="  ",
         new_session=NewSession(),
@@ -1090,13 +1089,6 @@ async def test_the_first_title_comes_from_the_typed_text(tmp_path: Path) -> None
         path, "SELECT typed_text FROM turns WHERE session_id = ?", blank.session_id
     ) == [("",)]
     await store.aclose()
-
-
-def test_title_from_text_collapses_whitespace_and_keeps_60_characters() -> None:
-    assert title_from_text("  a\n\tb  c ") == "a b c"
-    long = title_from_text("word " * 30)
-    assert len(long) == 60 and long.endswith("…")
-    assert long[:59] == ("word " * 30).strip()[:59]
 
 
 async def test_turn_counts_leave_out_running_and_undone_turns(tmp_path: Path) -> None:
