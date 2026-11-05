@@ -27,11 +27,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   gateway's chats (the `melo` main chat, side chats, the web console and the app), and a local terminal chat that
   chose no model with `/model` (`[cli] chat = "local"`, `-c`, `-r`). A terminal chat says so in one muted line, `The
   model changed to <model> (via melo_serve).`, also when the gateway runs its turn; with nothing served the Agent stays
-  and the turn shows the usual hint. A melo_serve error is no longer taken for a failed MCP server. localmelo finds `melo-serve` as the first file you own on PATH (an
-  absolute path) or in the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, `$XDG_BIN_HOME`, `~/.local/bin`), so the
-  gateway login item, whose PATH lacks it, starts melo_serve. It connects to melo_serve's control socket only
-  if that is a socket (not a link) you own in a folder only you can write, and the lines `melo serve` prints about a
-  failed start show your home folder as `~` (#NNN).
+  and the turn shows the usual hint. A melo_serve error is no longer taken for a failed MCP server. localmelo finds
+  `melo-serve` as the first file you own on PATH (an absolute path) or in the folder `uv tool install` uses
+  (`$UV_TOOL_BIN_DIR`, `$XDG_BIN_HOME`, `~/.local/bin`), so the gateway login item, whose PATH lacks it, starts
+  melo_serve. It connects to melo_serve's control socket only if that is a socket (not a link) you own in a folder
+  only you can write, and the lines `melo serve` prints about a failed start show your home folder as `~` (#NNN).
 - Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.
 - Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
   alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
