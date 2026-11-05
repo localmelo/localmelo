@@ -65,6 +65,7 @@ class Person(Asks):
         super().__init__()
         self.answers = list(answers)
         self.cards: list[ApprovalRequest] = []
+        self.withdrawn: list[str] = []
         self.policy = RememberingPolicy(self._card)
         self._during = during
 
@@ -72,7 +73,11 @@ class Person(Asks):
         self.cards.append(request)
         answer = self.answers.pop(0)
         if answer is None:
-            await asyncio.Event().wait()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.withdrawn.append(request.request_id)
+                raise
         assert answer is not None
         return answer
 
@@ -419,10 +424,39 @@ async def test_cards_end_when_the_chat_is_forgotten_or_closed(screen: Screen) ->
                     provider.forget()
                 else:
                     await provider.close()
-                await asyncio.sleep(0)
+                await asyncio.wait(cards, timeout=1)
                 assert not provider._cards and all(card.done() for card in cards), how
         finally:
             await provider.close()
+
+
+async def test_a_card_about_a_window_that_closed_is_withdrawn_and_tells_nothing(
+    screen: Screen,
+) -> None:
+    person = Person(None)
+    provider, tools = await opened(
+        world(button("Quick sign-in")), watch(screen, strict=True)
+    )
+    try:
+        with asking(person):
+            screen.clock.at(1.0, lambda: screen.show(SIGN_IN))
+            click = await run(tools, "browser_click", ref="e1")
+            async with asyncio.timeout(5):
+                while not screen.pacer.waiting.is_set():
+                    await asyncio.sleep(0.01)  # the card is up, its window watched
+            assert len(person.cards) == 1 and provider._cards
+            windows = screen.load()["windows"]
+            screen.set(
+                windows=[w for w in windows if w["window_id"] != SIGN_IN["window_id"]]
+            )
+            for _ in range(2):  # the next look at the screen (the sampler may take one)
+                screen.pacer._go.put_nowait(None)
+            await settled(provider)  # gone: the card ended, long before its limit
+            read = await run(tools, "browser_read")
+    finally:
+        await provider.close()
+    assert person.withdrawn == [person.cards[0].request_id]
+    hidden(person, screen, provider, told(click, read))
 
 
 async def test_an_app_the_person_did_not_allow_is_not_named_when_it_comes_back_to_the_front(

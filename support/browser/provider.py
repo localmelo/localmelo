@@ -101,6 +101,8 @@ from localmelo.support.browser.driver import (
     BrowserError,
     Dialog,
     Element,
+    PageMovedError,
+    PointHit,
     StaleElementError,
     TabInfo,
     View,
@@ -113,6 +115,7 @@ from localmelo.support.browser.takeover import (
     Owners,
     Returned,
     held_words,
+    is_human_check,
     needs_person,
 )
 
@@ -141,9 +144,13 @@ SETTLE_TRIES = 5
 SETTLE_S = 0.3
 # While browser_wait waits, the screen is looked at this often for another app's window.
 WATCH_S = 1.0
+# How many times one wait follows its tab to another site before it gives up.
+MAX_MOVES = 5
 # How long the card "let melo see this window?" waits for the person (the time a window
 # stays readable); with no answer by then nothing is ever told about the window.
 CARD_S = KEEP_S
+# How often the window a card asks about is looked for, to withdraw the card once it is gone.
+WINDOW_POLL_S = 1.0
 
 PAGE_NOTE = (
     "Web pages: the browser_* tools return pages between a start marker "
@@ -1189,22 +1196,33 @@ class BrowserToolProvider(BaseToolProvider):
     async def _secret_field(
         self, tab: str, snap: render.Snapshot, item: Element
     ) -> str:
-        """A field melo never types into: the person is asked to take the page over and fill it in.
-
-        With nobody to ask, or no Browser panel to do it in, the field is refused
-        as before. Their answer and the time they took are told; what they typed never is.
-        """
+        """A field melo never types into: the person is asked to take the page over and fill it in."""
         kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
         refusal = (
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "passwords, payment cards or one-time codes."
         )
+        return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
+
+    async def _human_check(self, tab: str, origin: str) -> str:
+        """A box that checks the visitor is human: never melo's to pass, the person is asked to take the page over and do it."""
+        refusal = "That is a check that you are human: melo never passes one."
+        return await self._persons_step(tab, origin, "captcha", refusal, "pass it")
+
+    async def _persons_step(
+        self, tab: str, origin: str, need: str, refusal: str, to_do: str
+    ) -> str:
+        """What melo never does itself (*refusal* says what): the person is asked to take *tab* over for *need* and *to_do* it.
+
+        With nobody to ask, or no Browser panel to do it in, it is refused as
+        before. Their answer and the time they took are told; what they did never is.
+        """
         if not self._can_take():
-            raise BrowserError(f"{refusal} Ask the person to fill it in themselves.")
-        said = await self._take_over(tab, snap.origin, kind)
+            raise BrowserError(f"{refusal} Ask the person to {to_do} themselves.")
+        said = await self._take_over(tab, origin, need)
         if said is None:
             raise BrowserError(
-                f"{refusal} melo asked the user to fill it in in the Browser panel; "
+                f"{refusal} melo asked the user to {to_do} in the Browser panel; "
                 "they did not take the page over."
             )
         return f"{refusal} {said}"
@@ -1511,14 +1529,17 @@ class BrowserToolProvider(BaseToolProvider):
         """The person's say on *window*; an allow adopts it, and the next step tells it.
 
         A refusal, no answer within :data:`CARD_S` or a window gone by then tell
-        nothing, not even the app.
+        nothing, not even the app. The card is withdrawn as soon as its window
+        is gone, so it never outlives it.
         """
         watch = self._desktop
         if watch is None:
             return
         try:
             async with asyncio.timeout(CARD_S):
-                allowed = await watch.window_allowed(ask, window)
+                allowed = await self._until_gone(
+                    watch, window, watch.window_allowed(ask, window)
+                )
             seen = await watch.adopt_seen(window) if allowed else None
         except TimeoutError:
             return
@@ -1528,6 +1549,29 @@ class BrowserToolProvider(BaseToolProvider):
         if seen is not None:
             found = seen_lines([seen])
             self._held.extend(found)
+
+    async def _until_gone(
+        self, watch: DesktopWatch, window: AppWindow, asking: Awaitable[bool]
+    ) -> bool:
+        """The answer to *asking* (the card about *window*), or False once the window is gone.
+
+        The window is looked for every :data:`WINDOW_POLL_S` seconds. When it
+        is gone first, the card is cancelled, which withdraws it (the run's
+        events say so), and nothing is told.
+        """
+
+        async def gone() -> None:
+            while not await watch.window_gone(window):
+                await watch.pace(WINDOW_POLL_S)
+
+        card, closed = asyncio.ensure_future(asking), asyncio.ensure_future(gone())
+        try:
+            await asyncio.wait({card, closed}, return_when=asyncio.FIRST_COMPLETED)
+            return card.result() if card.done() else False
+        finally:
+            for task in (card, closed):
+                task.cancel()
+            await asyncio.gather(card, closed, return_exceptions=True)
 
     def _stop_cards(self) -> None:
         cards, self._cards = self._cards, set()
@@ -2045,6 +2089,8 @@ class BrowserToolProvider(BaseToolProvider):
         tab_id, snap, item = self._target(ref, tab)
         if item.sensitive:
             return await self._secret_field(tab_id, snap, item)
+        if item.site and is_human_check(item.site):
+            return await self._human_check(tab_id, snap.origin)
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
@@ -2162,8 +2208,8 @@ class BrowserToolProvider(BaseToolProvider):
         **rest: Any,
     ) -> ToolOutput:
         tab_id = self._approved(tab)
-        px, py = parse_point(x, y, rest)
         view = self._views.get(tab_id)
+        px, py = parse_point(x, y, rest, view)
         if view is None:
             raise BrowserError(
                 "Take a browser_screenshot of this tab first: a point is read on "
@@ -2175,12 +2221,11 @@ class BrowserToolProvider(BaseToolProvider):
         cx, cy = px / 1000 * view.width, py / 1000 * view.height
         hit = await self._driver.hit(self._raw[tab_id], view, cx, cy)
         item = hit.element
+        if hit.surface == "frame" and is_human_check(hit.site):
+            # A human check is the person's step: melo never clicks one.
+            return ToolOutput(text=await self._human_check(tab_id, origin))
         if hit.surface == "none" or item is None:
-            raise BrowserError(
-                "There is nothing to click at that point (text or background). "
-                "Pick a point on a button, link, field or drawing in the picture. "
-                + _scale_hint(px, py, view)
-            )
+            raise BrowserError(_nothing_there(hit))
         what = _point_words(hit.surface, item, hit.site)
         if item.sensitive:
             await sites.require_point(origin, fields.REASONS[item.sensitive])
@@ -2357,7 +2402,55 @@ class BrowserToolProvider(BaseToolProvider):
                 line += " Another app put a window on the screen.\n"
                 line += _screen_block(others)
             return line
-        return f"Timed out after {limit:g} s: {missed_words}."
+        return f"Timed out after {limit:g} s: {missed_words}.{await self._boxes_note(tab_id, until)}"
+
+    async def _boxes_note(self, tab_id: str, until: str) -> str:
+        """For a wait for text that timed out: the boxes from other sites melo cannot read on the page now, where the words may be.
+
+        Said so the model stops waiting blind: a picture shows what is in them.
+        """
+        if until != "text":
+            return ""
+        try:
+            raw = await self._driver.page(self._raw[tab_id])
+        except BrowserError:
+            return ""  # a hint only: it never fails the wait
+        hosts = [
+            render.field_text(origin.split("://", 1)[-1], 60)
+            for origin in render.boxes_of(raw, self._origins.get(tab_id, ""))
+        ]
+        if not hosts:
+            return ""
+        noun = "a box" if len(hosts) == 1 else "boxes"
+        return (
+            f" The page has {noun} from {', '.join(hosts)} that melo cannot read, "
+            "so the text may be inside: browser_screenshot shows it."
+        )
+
+    async def _wait_on(
+        self, tab_id: str, until: str, text: str, seconds: float
+    ) -> bool:
+        """The driver's wait on the tab's approved site, for the page now in the tab.
+
+        A page that goes on to another site meanwhile (a sign-in that sends the
+        browser back) ends the driver's wait: that site is checked, and asked
+        about when it is new, and the wait goes on there for what is left of
+        its time. A refusal raises, as after any wait.
+        """
+        loop = asyncio.get_running_loop()
+        end = loop.time() + seconds
+        for _ in range(MAX_MOVES):
+            try:
+                return await self._driver.wait(
+                    self._raw[tab_id],
+                    until,
+                    text,
+                    max(end - loop.time(), 0.0),
+                    origin=self._origins[tab_id],
+                )
+            except PageMovedError:
+                await self._recheck(tab_id)
+        return False
 
     async def _watched_wait(
         self, tab_id: str, until: str, text: str, limit: float
@@ -2370,9 +2463,8 @@ class BrowserToolProvider(BaseToolProvider):
         the deadline of an earlier act is open, and polls the screen no longer
         once it has closed.
         """
-        raw, origin = self._raw[tab_id], self._origins[tab_id]
         if self._desktop is None:
-            return await self._driver.wait(raw, until, text, limit, origin=origin), []
+            return await self._wait_on(tab_id, until, text, limit), []
         # A window that came since the last step is what the person has to
         # answer: it is told at once, and the wait does not start.
         first = await self._look()
@@ -2384,7 +2476,7 @@ class BrowserToolProvider(BaseToolProvider):
         while True:
             start = loop.time()
             piece = max(min(WATCH_S, end - start), 0.0)
-            if await self._driver.wait(raw, until, text, piece, origin=origin):
+            if await self._wait_on(tab_id, until, text, piece):
                 reached = await self._look()
                 return True, [*self._take_held(), *reached]
             # What a background sample admitted meanwhile ends the wait too, also
@@ -2612,14 +2704,18 @@ _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 _POINT_KEYS = ("point", "point_2d", "coordinate", "coordinates", "xy", "position")
 
 
-def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
+def parse_point(
+    x: Any, y: Any, rest: dict[str, Any], view: View | None = None
+) -> tuple[float, float]:
     """A point in the 0-1000 frame of a picture, from however a model wrote it.
 
     Accepted: ``x`` and ``y`` as numbers or number strings; a pair in one value
     (``x="[512, 300]"``, ``point=[512, 300]``, ``point_2d``, ``point={"x":..,
     "y":..}``, ``coordinate``); a reply cut off after both numbers. Two numbers
     of 1 or less are fractions of the picture. Anything else, or a number
-    outside 0-1000, is an error that says how to write it.
+    outside 0-1000, is an error that says how to write it; for numbers that
+    fit inside the picture *view* as pixels, it also says where they are on
+    the scale.
     """
     numbers: list[float] = []
 
@@ -2653,25 +2749,37 @@ def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
         px, py = px * 1000, py * 1000
     if not (0 <= px <= 1000 and 0 <= py <= 1000):
         raise BrowserError(
-            "x and y run from 0 to 1000 across and down the picture, whatever its size."
+            "x and y run from 0 to 1000 across and down the picture, whatever its "
+            "size, not in pixels." + _pixel_hint(px, py, view)
         )
     return px, py
 
 
-def _scale_hint(x: float, y: float, view: View) -> str:
-    """The scale of a point, for a click that found nothing: a model often writes pixels.
+def _pixel_hint(x: float, y: float, view: View | None) -> str:
+    """Where (*x*, *y*) is on the 0-1000 scale if it was written in pixels of *view*'s picture, for numbers that cannot be on the scale.
 
-    When (*x*, *y*) would fit inside the picture as pixels, it also says where
-    that point is on the 0-1000 scale.
+    Only for numbers beyond the scale that fit inside the picture; numbers on
+    the scale are never doubted.
     """
-    hint = "x and y run 0-1000 across and down the picture, not in pixels."
-    if x <= view.width and y <= view.height:
-        hint += (
-            f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
-            f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
-            f"{y * 1000 / view.height:.0f}) on that scale."
-        )
-    return hint
+    if view is None or x > view.width or y > view.height:
+        return ""
+    return (
+        f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
+        f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
+        f"{y * 1000 / view.height:.0f}) on that scale."
+    )
+
+
+def _nothing_there(hit: PointHit) -> str:
+    """The error for a point on nothing melo can click: what the page holds there, when it holds words."""
+    words = render.field_text(hit.text, 60)
+    there = (
+        f'what is there is the text "{words}"' if words else "it is text or background"
+    )
+    return (
+        f"There is nothing to click at that point ({there}). Pick a point on a "
+        "button, link, field or drawing in the picture."
+    )
 
 
 def _stale_ref(ref: object) -> str:

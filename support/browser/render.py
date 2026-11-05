@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from localmelo.support.browser import fields
 from localmelo.support.browser.driver import Element, RawPage
+from localmelo.support.browser.takeover import is_human_check
 
 # A part of a page's text holds this many units: a Latin character is one, a
 # CJK character three, since a Chinese character costs about as many tokens as
@@ -160,9 +161,7 @@ def make_snapshot(
     snap = Snapshot(
         sid, tab, raw.url, origin, raw.title, [""], doc=raw.doc, skipped=raw.skipped
     )
-    snap.unreached = tuple(
-        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
-    )[:MAX_UNREACHED]
+    snap.unreached = boxes_of(raw, origin)
     kept: list[Element] = []
     for item in raw.elements:
         secret = item.sensitive or (
@@ -193,6 +192,13 @@ def make_snapshot(
     return snap
 
 
+def boxes_of(raw: RawPage, origin: str) -> tuple[str, ...]:
+    """The origins of the boxes from other sites than *origin* that melo cannot read on *raw*, at most :data:`MAX_UNREACHED`."""
+    return tuple(
+        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
+    )[:MAX_UNREACHED]
+
+
 def _origin(url: str) -> str:
     """``scheme://host[:port]`` of *url*, or ``""``."""
     match = re.match(r"(https?://[^/?#\s]+)", url.strip(), re.IGNORECASE)
@@ -201,6 +207,11 @@ def _origin(url: str) -> str:
 
 def unreached_line(origin: str) -> str:
     host = field_text(origin.split("://", 1)[-1], 80)
+    if is_human_check(origin):
+        return (
+            f"[a human check from {host}: it is the user's to pass, melo never "
+            "clicks one]"
+        )
     return (
         f"[a box from {host} that melo can't reach: browser_screenshot, "
         "then browser_click_point, can click in it]"

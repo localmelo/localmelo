@@ -31,6 +31,16 @@ class BrowserSetupError(BrowserError):
     """The browser is not set up for melo; the message says what to turn on."""
 
 
+class PageMovedError(BrowserError):
+    """A wait found its tab on another site than the one it was asked for.
+
+    The tab's page went on to another origin while melo waited (a sign-in that
+    sends the browser back, say). The wait stops there, since a condition may
+    count only on a site that was approved; the caller checks the new one and
+    waits on for the rest of its time.
+    """
+
+
 @dataclass(frozen=True)
 class FieldAttrs:
     """How a page describes a text box, as the page script read it.
@@ -171,7 +181,10 @@ class PointHit:
     nothing melo can name. ``surface`` says what it is: ``control``; ``canvas``
     (a drawing, picture or video that takes clicks itself); ``frame`` (a box
     from another site, ``site`` its origin, whose inside melo cannot see); or
-    ``none`` (plain text or background). ``consent`` is set when the control's
+    ``none`` (plain text or background), with the ``text`` the page holds right
+    there when it is short. A frame the page script cannot see (one in a closed
+    shadow root, known by what the page loaded) is a ``frame`` too, with no
+    ``element`` but its ``site``. ``consent`` is set when the control's
     words agree to terms, consent or a sign-in with another account, which
     melo asks the person about. ``at`` is where to click instead (page pixels),
     when the point was on a label and its field can take the click itself.
@@ -182,6 +195,7 @@ class PointHit:
     site: str = ""
     consent: bool = False
     at: tuple[float, float] | None = None
+    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -353,6 +367,8 @@ class BrowserDriver(Protocol):
         With *origin*, the condition counts only while the page is on that
         origin (``location.origin``), read in the same step as the condition,
         so a page that goes elsewhere for a moment answers nothing about it.
+        A page found on another site (a web page, not a blank one between two
+        documents) ends the wait with :class:`PageMovedError`.
         """
 
     async def holds(

@@ -1247,6 +1247,17 @@ class DesktopWatch:
         self._held.discard(window.app.lower())
         return Seen(self._adopt(window), window.app, window.title, names)
 
+    async def window_gone(self, window: AppWindow) -> bool:
+        """Whether *window* is no longer listed (closed); False when the helper cannot say."""
+        helper = await self._helper_ready()
+        if helper is None:
+            return False
+        try:
+            listed = await helper.windows(pid=window.pid)
+        except DesktopError:
+            return False
+        return window.id not in {w.id for w in listed}
+
     async def window_allowed(self, ask: ToolAsk | None, window: AppWindow) -> bool:
         """Whether the person lets melo see *window* of another app: the one check for "is this app's window allowed for this chat".
 

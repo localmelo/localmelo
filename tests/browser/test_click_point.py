@@ -97,23 +97,38 @@ async def test_a_point_on_a_drawing_is_clicked_and_looked_at_again() -> None:
 async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused() -> (
     None
 ):
-    driver = point_world(PointHit("none"))
+    driver = point_world(PointHit("none", text="Verifying..."))
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     first = await run(tools, "browser_click_point", x=500, y=300)
     assert first.is_error and "browser_screenshot of this tab first" in first.text
     await run(tools, "browser_screenshot")
     out = await run(tools, "browser_click_point", x=500, y=300)
-    assert out.is_error and "nothing to click at that point" in out.text
-    assert not driver.acts
-    # A model often writes pixels: the error says the scale and, when the point fits the
-    # 1000x500 picture as pixels, where it is on the 0-1000 scale; it clicks nothing.
-    scale = "x and y run 0-1000 across and down the picture, not in pixels."
-    assert out.text.endswith(
-        f"{scale} As pixels of the 1000x500 picture, (500, 300) is (500, 600) on that scale."
+    assert out.is_error and not driver.acts
+    # What is there is told; a point on the 0-1000 scale is never doubted.
+    assert (
+        'nothing to click at that point (what is there is the text "Verifying...")'
+        in out.text
     )
-    below = await run(tools, "browser_click_point", x=250, y=800)
-    assert below.text.endswith(scale), below.text  # 800 is below a 500-high picture
+    assert "pixel" not in out.text
+    bare = point_world(PointHit("none"))
+    tools = await tools_of(bare)
+    await run(tools, "browser_open", url=HOME)
+    await run(tools, "browser_screenshot")
+    blank = await run(tools, "browser_click_point", x=500, y=300)
+    assert "(it is text or background)" in blank.text
+
+
+def test_a_number_beyond_the_scale_says_where_it_would_be_in_pixels() -> None:
+    view = View("", "d1", 1280.0, 713.0)
+    with pytest.raises(BrowserError) as fits:
+        parse_point(1100, 534, {}, view)
+    assert "As pixels of the 1280x713 picture, (1100, 534) is (859, 749)" in str(
+        fits.value
+    )
+    with pytest.raises(BrowserError) as far:
+        parse_point(1500, 534, {}, view)
+    assert "pixel" in str(far.value) and "As pixels" not in str(far.value)
 
 
 @pytest.mark.parametrize(

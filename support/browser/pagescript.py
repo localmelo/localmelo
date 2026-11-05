@@ -36,6 +36,7 @@ from localmelo.support.browser.driver import (
     CoveredError,
     Element,
     FieldAttrs,
+    PageMovedError,
     PointHit,
     RawPage,
     Sensitive,
@@ -43,6 +44,7 @@ from localmelo.support.browser.driver import (
     StaleElementError,
     View,
 )
+from localmelo.support.browser.takeover import is_human_check
 
 KINDS = ("link", "button", "textbox", "checkbox", "select")
 SECRETS = ("password", "code", "card")
@@ -51,14 +53,20 @@ SECRETS = ("password", "code", "card")
 SETTLE_S = 15.0
 POLL_S = 0.4
 BLANK_TRIES = 4
+# What a wait's probe answers when the tab is on another site than the one asked for.
+MOVED = "moved"
 # A page that is still settling (a bar sliding in, an ad loading) gets this long
 # before an element found covered is looked at once more.
 COVER_AGAIN_S = 0.25
 # Looking at the page after an act: a poll this often, done once nothing changed for
 # QUIET_S (a click waits up to LOOK_CAP_S for the page's first change), never longer.
+# A page that never goes quiet (a feed, a clock, an ad that keeps drawing) is waited
+# on for LOOK_BUSY_S after its first change at most, since nothing says which of its
+# changes the act made; what it shows later is in the reading that follows.
 LOOK_STEP_S = 0.1
 QUIET_S = 0.3
 LOOK_CAP_S = 2.0
+LOOK_BUSY_S = 0.8
 # What an act says when the page script refuses it (``stale`` in its answer).
 STALE = {
     "page": "The page is not the one that was read (its address changed). Use browser_read for current refs.",
@@ -206,9 +214,12 @@ var P = (function () {
     if (fresh.ga.call(probe, "lang") !== "x" || fresh.json({a: 1}) !== '{"a":1}' ||
         typeof fresh.qsa.call(document, "html").length !== "number" || typeof fresh.gcs(document.documentElement).display !== "string") throw new Error("frame");
     for (var k in fresh) if (typeof fresh[k] !== "function") throw new Error(k);
-    // Only what is at a point needs this one; without it no point is resolved.
+    // Only what is at a point needs these two; without efp no point is resolved.
     var efp = w.Document.prototype.elementFromPoint;
     fresh.efp = typeof efp === "function" ? efp : null;
+    // And the list of what the page loaded: only the boxes in a closed shadow root need it.
+    var res = w.Performance ? w.Performance.prototype.getEntriesByType : null;
+    fresh.res = typeof res === "function" ? res : null;
     return fresh;
   } catch (e) {
     return null;  // never the page's own: nothing is listed or done without the fresh ones
@@ -452,7 +463,34 @@ var hitAt = function (x, y) {
     if (/^(canvas|img|svg|video|embed|object)$/i.test(c.tagName)) return {node: c, surface: "canvas", doc: D, path: path, x: x, y: y, raw: h};
   }
   if (P.gcs(h).cursor === "pointer") return {node: h, surface: "control", doc: D, path: path, x: x, y: y, raw: h};
-  return {node: null, surface: "none", doc: D, path: path, x: x, y: y};
+  return {node: null, surface: "none", doc: D, path: path, x: x, y: y, raw: h};
+};
+// Frames the page loaded that no iframe element of the document holds: a box a third
+// party draws inside a closed shadow root, which no script of the page's reaches. What
+// the page loaded says it is there (the resource timeline); where it sits is not known.
+var hiddenFrames = function () {
+  var out = [];
+  if (!P.res) return out;
+  var held = {}, key = function (u) { return String(u).split("#")[0]; };
+  var list = P.qsa.call(document, "iframe,frame");
+  for (var i = 0; i < list.length && i < 50; i++) {
+    var src = "";
+    try { src = String(list[i].src || ""); } catch (e) { src = ""; }
+    if (src) held[key(src)] = 1;
+  }
+  var seen = P.res.call(performance, "resource");
+  for (var k = seen.length - 1; k >= 0 && out.length < 5; k--) {
+    var e = seen[k];
+    if (e.initiatorType === "iframe" && /^https?:/i.test(e.name) && !held[key(e.name)]) out.push(String(e.name).slice(0, 500));
+  }
+  return out;
+};
+// A box with nothing in it (no elements, no words) big enough to hold a widget: where a
+// box in a closed shadow root is drawn.
+var bareBox = function (n) {
+  if (n.childElementCount || cap(n.textContent, 1)) return false;
+  var r = P.rect.call(n);
+  return r.width >= 40 && r.height >= 40 && P.gcs(n).visibility !== "hidden";
 };
 // What stands over a point: where it sits (a sticky or fixed bar, a dialog, a frame) and
 // what it is, in words for the model: {what: "a sticky header", detail: "h1"}. Never a word
@@ -545,6 +583,16 @@ PAGE_JS = (
         var fr = P.rect.call(f), fs = P.gcs(f);
         if (fr.width >= 20 && fr.height >= 20 && fs.visibility !== "hidden" && fs.display !== "none") out.unreached.push(u.slice(0, 500));
       }
+    }
+  }
+  // A box a third party draws in a closed shadow root is in no document melo can list: what
+  // the page loaded (its frames no iframe element holds) is reported where a bare box could
+  // hold one, and the caller keeps the ones a human check loads.
+  var hid = hiddenFrames();
+  if (hid.length) {
+    var bare = P.qsa.call(document, "div,span,section,aside,p");
+    for (var bi = 0; bi < bare.length && bi < 600; bi++) {
+      if (bareBox(bare[bi])) { out.hidden = hid; break; }
     }
   }
   for (var di = 0; di < docs.length; di++) {
@@ -930,7 +978,10 @@ def hit_script(spec: dict[str, Any]) -> str:
     the view has not scrolled since (``sx``, ``sy``). The answer is the
     element the point resolves to, as :data:`PAGE_JS` lists elements (with its
     place ``at`` and ``frame``), or a surface known by its place only, and the
-    words around it, which melo checks for consent and terms.
+    words around it, which melo checks for consent and terms. When it is on
+    nothing melo can name, the answer has the short ``text`` held right there;
+    and on a bare box, ``hidden``: the frames the page loaded that no iframe
+    element holds (a box drawn in a closed shadow root).
     """
     return r"""(function (at) {""" + COMMON_JS + r"""
   var spec = at;
@@ -939,7 +990,18 @@ def hit_script(spec: dict[str, Any]) -> str:
   if (docId() !== spec.doc) return P.json({stale: "doc"});
   if (Math.abs(window.scrollX - spec.sx) > 2 || Math.abs(window.scrollY - spec.sy) > 2) return P.json({stale: "scrolled"});
   var h = hitAt(spec.x, spec.y), out = {surface: h.surface};
-  if (!h.node) return P.json(out);
+  if (!h.node) {
+    // Nothing melo can name: say what the page holds there. A bare box (no children, no
+    // words) may be where a box in a closed shadow root is drawn: the frames the page
+    // loaded that no iframe element holds say so.
+    var t = h.raw;
+    if (t && t.nodeType === 1) {
+      var own = Array.prototype.filter.call(t.childNodes, function (c) { return c.nodeType === 3 && cap(c.nodeValue, 1); });
+      if (own.length) out.text = cap(own.map(function (c) { return c.nodeValue; }).join(" "), 80);
+      if (bareBox(t)) out.hidden = hiddenFrames();
+    }
+    return P.json(out);
+  }
   if (h.surface === "frame") {
     var u = "";
     try { u = String(h.node.src || ""); } catch (e) { u = ""; }
@@ -1020,7 +1082,8 @@ def wait_probe(until: str, text: str, origin: str = "") -> str:
 
     A page with no body yet (a bot check or an interstitial between two
     documents) is not loaded: nothing on it counts. With *origin* the
-    condition counts only while the page is on that origin.
+    condition counts only while the page is on that origin; on another web
+    page the probe says :data:`MOVED` instead.
     """
     words = json.dumps(text)
     probe = {
@@ -1029,7 +1092,12 @@ def wait_probe(until: str, text: str, origin: str = "") -> str:
         "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
     }[until]
     if origin:
-        probe = f"location.origin === {json.dumps(origin)} && ({probe})"
+        mine = json.dumps(origin)
+        probe = (
+            f"location.origin === {mine} && ({probe}) || "
+            f"(/^https?:$/.test(location.protocol) && location.origin !== {mine} "
+            f"&& {json.dumps(MOVED)})"
+        )
     return probe
 
 
@@ -1311,6 +1379,13 @@ def observed(data: dict[str, Any], quiet: bool) -> Changes | None:
     return Changes(shown, _target_words(before, after), quiet, changed)
 
 
+def _check_boxes(hidden: Any) -> list[str]:
+    """The addresses among the *hidden* frames of a page (frames in a closed shadow root) that a human check loads."""
+    if not isinstance(hidden, list):
+        return []
+    return [str(u) for u in hidden if is_human_check(str(u))]
+
+
 def _stale(why: str) -> StaleElementError:
     """The error for a page script that found the page or the element not as they were read."""
     return StaleElementError(STALE.get(why, STALE["gone"]), why)
@@ -1388,6 +1463,8 @@ class PageScriptActs:
             if isinstance(unreached, list)
             else ()
         )
+        # A human check drawn in a closed shadow root is a box melo cannot read, like any other.
+        boxes = tuple(dict.fromkeys((*boxes, *_check_boxes(data.get("hidden")))))[:10]
         framed, boxes = await self._other_sites(boxes)
         return RawPage(
             url,
@@ -1410,7 +1487,10 @@ class PageScriptActs:
             raise _stale(str(data["stale"]))
         surface = data.get("surface")
         if surface not in ("control", "canvas", "frame"):
-            return PointHit("none")
+            box = next(iter(_check_boxes(data.get("hidden"))), "")
+            if box:
+                return PointHit("frame", Element("button", ""), site=box)
+            return PointHit("none", text=str(data.get("text") or ""))
         item = _element(data.get("el"))
         site = str(data.get("site") or "") if surface == "frame" else ""
         mx, my = data.get("x"), data.get("y")
@@ -1437,15 +1517,19 @@ class PageScriptActs:
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         while True:
-            if await self._probe(probe):
+            got = await self._probe(probe)
+            if got is True:
                 return True
+            if got == MOVED:
+                raise PageMovedError("The page moved to another site during the wait.")
             if loop.time() >= end:
                 return False
             await asyncio.sleep(POLL_S)
 
-    async def _probe(self, source: str) -> bool:
-        """Whether the wait probe *source* is true on the page now. An error ends the wait."""
-        return await self._read(source) is True
+    async def _probe(self, source: str) -> bool | str:
+        """What the wait probe *source* says of the page now: true, false or :data:`MOVED`. An error ends the wait."""
+        got = await self._read(source)
+        return got if got is True or got == MOVED else False
 
     async def screenshot(
         self, tab: str | None, mark: tuple[View, float, float] | None = None
@@ -1551,7 +1635,9 @@ class PageScriptActs:
         The page is quiet once nothing changed for :data:`QUIET_S` (and that
         long after the act); a click, or Enter, first waits for the page's
         first change, since a reply from the site may take a moment. It never
-        waits longer than :data:`LOOK_CAP_S`. A page that left for another
+        waits longer than :data:`LOOK_CAP_S`, and a page that has changed but
+        does not go quiet is left :data:`LOOK_BUSY_S` after its first change.
+        A page that left for another
         document is waited for until it has loaded. Returns the observer's
         report (``{"lost": True}`` once the page is another document) and
         whether the page was quiet.
@@ -1561,6 +1647,7 @@ class PageScriptActs:
         first = act.kind == "click" or act.enter
         probe = SETTLE_JS % _data({"key": key, "doc": doc})
         quiet = True
+        changed_at: float | None = None
         while True:
             if LOOK_STEP_S:
                 await asyncio.sleep(LOOK_STEP_S)
@@ -1578,10 +1665,15 @@ class PageScriptActs:
             if now.get("moved") is True:
                 break  # a real click or key press was stopped: nothing more will happen
             changed = bool(now.get("count")) or now.get("target") is True
+            if changed and changed_at is None:
+                changed_at = spent
             still = as_number(now.get("quiet")) >= QUIET_S * 1000
             if spent >= QUIET_S and still and (changed or not first):
                 break
-            if spent >= LOOK_CAP_S:
+            limit = LOOK_CAP_S
+            if changed_at is not None:
+                limit = min(LOOK_CAP_S, changed_at + LOOK_BUSY_S)
+            if spent >= limit:
                 quiet = still or not changed
                 break
         return await self._finish(key, doc), quiet

@@ -626,9 +626,18 @@ _HUMAN_TITLES = re.compile(
     r"security check|are you a robot|请稍候|安全验证)",
     re.IGNORECASE,
 )
-_CHECK_HOSTS = re.compile(
-    r"(^|\.)(recaptcha\.net|hcaptcha\.com|challenges\.cloudflare\.com|"
-    r"geetest\.com|arkoselabs\.com|funcaptcha\.com|captcha[a-z0-9-]*\.[a-z.]+)$"
+# The addresses a human check loads its box from: a host here, or under one of
+# these, is a box the visitor must pass in person. A box is told by what the
+# page loads, never by the words around it. Any host with a label that starts
+# with "captcha" counts too.
+CHECK_HOSTS: Final = (
+    "recaptcha.net",
+    "hcaptcha.com",
+    "challenges.cloudflare.com",
+    "geetest.com",
+    "arkoselabs.com",
+    "funcaptcha.com",
+    "captcha-delivery.com",
 )
 # A page this small that holds a password field is a sign-in form, whatever its address says.
 SMALL_PAGE: Final = 30
@@ -650,7 +659,7 @@ def needs_person(
     cannot read, *text* the page's words and *elements* how many elements the
     reading numbered. In order:
 
-    * ``captcha``: a box of a known human check, a page titled as one, or words
+    * ``captcha``: a box of a known human check (:data:`CHECK_HOSTS`), a page titled as one, or words
       that ask the visitor to prove they are human;
     * ``qr``: a QR code to scan, on a page that signs in;
     * ``sign-in``: a password field on a page whose address or title says it
@@ -659,9 +668,8 @@ def needs_person(
     * ``code``: a one-time code field on a page that says it verifies.
     """
     kinds = set(sensitive)
-    hosts = {_host(origin) for origin in frames}
     words = f"{title}\n{text}"
-    if any(_CHECK_HOSTS.search(host) for host in hosts if host) or (
+    if any(is_human_check(origin) for origin in frames) or (
         _HUMAN_TITLES.match(title.strip()) or _HUMAN_WORDS.search(words)
     ):
         return "captcha"
@@ -678,6 +686,15 @@ def needs_person(
     if "code" in kinds and _CODE_PAGE_WORDS.search(f"{_path(url)}\n{words}"):
         return "code"
     return ""
+
+
+def is_human_check(address: str) -> bool:
+    """Whether *address* (a page's, a box's or its origin) is where a human check loads its box from: the host is in :data:`CHECK_HOSTS`."""
+    host = _host(address)
+    return bool(host) and (
+        any(host == known or host.endswith(f".{known}") for known in CHECK_HOSTS)
+        or any(label.startswith("captcha") for label in host.split("."))
+    )
 
 
 def _path(url: str) -> str:

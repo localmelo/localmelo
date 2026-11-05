@@ -19,7 +19,7 @@ import pytest
 
 from localmelo.support.browser import provider as provider_mod
 from localmelo.support.browser import takeover
-from localmelo.support.browser.driver import Element
+from localmelo.support.browser.driver import Element, PointHit, View
 from localmelo.support.browser.live import TAKEN_FPS, Frame, LiveView
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.takeover import (
@@ -31,6 +31,7 @@ from localmelo.support.browser.takeover import (
     QuietFrames,
     cdp_events,
     held_words,
+    is_human_check,
     needs_person,
     quiet_frames,
 )
@@ -1029,6 +1030,69 @@ async def test_a_sign_in_page_asks_once_and_not_again_after_not_now() -> None:
     assert "they did not take it over" in first.text and "<<page " in first.text
     assert "did not take" not in again.text, "not asked again on the site"
     assert typed.is_error and "melo never types into passwords" in typed.text
+    await provider.close()
+
+
+CHECK = "https://newassets.hcaptcha.com/captcha/v1/box"
+
+
+@pytest.mark.parametrize(
+    ("address", "is_check"),
+    [
+        (CHECK, True),
+        ("https://challenges.cloudflare.com/cdn-cgi/x", True),
+        ("https://www.recaptcha.net/recaptcha/api2/anchor", True),
+        ("https://captcha.example.com/x", True),
+        ("https://www.cloudflare.com/", False),
+        ("https://example.com/hcaptcha.com", False),
+        ("https://accounts.example.org/box", False),
+        ("not an address", False),
+    ],
+)
+def test_a_human_check_is_found_by_the_address_of_what_the_page_loads(
+    address: str, is_check: bool
+) -> None:
+    assert is_human_check(address) is is_check
+
+
+async def test_a_human_check_is_the_persons_step_by_point_and_by_ref() -> None:
+    """melo never clicks one: the page is offered on the takeover card, and a refusal is told."""
+    inside = Element("button", "", fp="iframe|1")
+    driver = Takeable(
+        page(HOME, "Check in.", button("I am human", site=CHECK, fp="iframe|1"))
+    )
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK)
+    provider, tools, live = await started(driver)
+    asks = Asks()
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        viewer = await live.watch()
+        framed(driver)
+        the_person(provider, live, viewer)
+        ref = await run(tools, "browser_click", ref="e1")
+        await run(tools, "browser_screenshot")
+        point = await run(tools, "browser_click_point", x=500, y=300)
+    cards = [a for a in asks.asked if a[0].startswith("takeover:")]
+    assert [(n, a["need"]) for n, a, _ in cards] == [
+        ("takeover:https://example.com", "captcha")
+    ] * 2
+    assert not [
+        n for n in asks.names if n.startswith(("browser-point:", "browser-act:"))
+    ]
+    for out in (point, ref):
+        assert "melo never passes one" in out.text
+        assert "The user had tab t1 for 1 s and gave it back to melo." in out.text
+    assert driver.acts == [], "melo clicked nothing"
+    await provider.close()
+    # Not taken: the step says so, and still clicks nothing.
+    driver = Takeable(page(HOME, "Check in.", button("I am human", site=CHECK)))
+    provider, tools, live = await started(driver)
+    with asking(Asks(deny=("takeover:",))):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_click", ref="e1")
+    assert out.is_error and "they did not take the page over" in out.text
+    assert driver.acts == []
     await provider.close()
 
 

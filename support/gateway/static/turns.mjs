@@ -453,6 +453,9 @@ export function approvalTag(status, errorCategory, approval) {
   if (origin === "timeout") {
     return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
   }
+  if (origin === "words") {
+    return {short: t("turns.approval.words.short"), long: t("turns.approval.words.long")};
+  }
   // Auto mode (#339): a block says why in a few words; a routine call has no tag.
   if (origin === "auto" && !approval.allowed) {
     const words = blockWords(approval);
@@ -1262,9 +1265,10 @@ export function declinedStep(item) {
   }
   const asked = [item.approval, ...(item.toolAsks ?? [])].filter(isObject);
   const found = asked.find(
-    (one) => one.allowed === false && (one.origin === "user" || one.origin === "timeout"),
+    (one) => one.allowed === false && ["user", "timeout", "words"].includes(one.origin),
   );
   if (!found) return null;
+  if (found.origin === "words") return {how: "words", note: "", waitS: null};
   if (found.origin === "user") {
     const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
     return {how: "denied", note, waitS: null};
@@ -1286,6 +1290,7 @@ export function declinedLine(declined) {
       ? t("turns.declined.deniedNote", {note: declined.note})
       : t("turns.declined.denied");
   }
+  if (declined.how === "words") return t("turns.declined.words");
   if (declined.how === "unanswered") {
     return declined.waitS
       ? t("turns.declined.unanswered", {wait: waitWords(declined.waitS)})
@@ -1438,7 +1443,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
   const declined = declinedStep(item);
   if (declined) {
     // Not run, and nothing went wrong: the approval card's amber, not a failure.
-    const word = declined.how === "denied" ? t("turns.tool.declined") : t("turns.tool.unanswered");
+    const word = ["denied", "words"].includes(declined.how) ? t("turns.tool.declined") : t("turns.tool.unanswered");
     return {state: "declined", mark: "⊘", text: word};
   }
   const tag = approvalTag(item.status, item.errorCategory, item.approval);

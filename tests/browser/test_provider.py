@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -17,8 +18,9 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.browser import sites
-from localmelo.support.browser.driver import BrowserError, Element
+from localmelo.support.browser.driver import BrowserError, Element, PageMovedError
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
+from localmelo.support.browser.sites import origin_of
 from localmelo.tests.browser.fakes import FakeDriver, link, page
 
 HOME = "https://example.com/"
@@ -364,6 +366,86 @@ async def test_wait_reports_what_happened() -> None:
     assert gone.text == "Timed out after 1 s: the text did not go away."
     assert ("wait", "text:Hi:10") in driver.calls
     assert (await run(tools, "browser_wait", until="text")).is_error
+
+
+async def test_a_wait_for_text_that_never_shows_names_the_boxes_it_cannot_read() -> (
+    None
+):
+    driver = world()
+    boxes = ("https://accounts.example.org/login",)
+    driver.pages[HOME] = dataclasses.replace(
+        driver.pages[HOME], frames=boxes, unreached=boxes
+    )
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_wait", until="text", text="never", seconds=1)
+    assert out.text.startswith("Timed out after 1 s: the text did not appear.")
+    assert "a box from accounts.example.org that melo cannot read" in out.text
+    assert "browser_screenshot shows it" in out.text
+    # Only a wait for text points at a box, and a page with none says nothing more.
+    gone = await run(tools, "browser_wait", until="gone", text="never", seconds=1)
+    assert gone.text == "Timed out after 1 s: the text did not go away."
+    plain = world()
+    tools = await tools_of(plain)
+    await run(tools, "browser_open", url=HOME)
+    bare = await run(tools, "browser_wait", until="text", text="never", seconds=1)
+    assert bare.text == "Timed out after 1 s: the text did not appear."
+
+
+class Navigates(FakeDriver):
+    """A page that sends its tab to another site during the first wait, as a sign-in does."""
+
+    async def wait(
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
+    ) -> bool:
+        self.calls.append(("wait", origin))
+        history = self.tabs_["t1"]
+        if len(history) == 1:
+            history.append(OTHER)
+        if origin_of(history[-1]) != origin:
+            raise PageMovedError("The page moved to another site during the wait.")
+        return text in self.pages[history[-1]].text
+
+
+async def test_a_wait_goes_on_for_the_page_its_tab_moved_to_after_checking_the_site() -> (
+    None
+):
+    driver = Navigates(
+        page(HOME, "Signing in...", title="Home"),
+        page(OTHER, "Welcome back.", title="Other"),
+    )
+    tools = await tools_of(driver)
+    asks = Asks()
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(
+            tools, "browser_wait", until="text", text="Welcome back", seconds=5
+        )
+    assert out.text.startswith("Reached: the text appeared.")
+    # The new site was asked about, and the wait went on there on its own origin.
+    assert "browser:https://other.org" in [n for n, _, _ in asks.asked]
+    assert [c for c in driver.calls if c[0] == "wait"] == [
+        ("wait", "https://example.com"),
+        ("wait", "https://other.org"),
+    ]
+    # A site that is refused ends the wait with the refusal.
+    refusing = Navigates(
+        page(HOME, "Signing in...", title="Home"),
+        page(OTHER, "Welcome back.", title="Other"),
+    )
+    tools = await tools_of(refusing)
+    with asking(Asks(other_org=False)):
+        await run(tools, "browser_open", url=HOME)
+        denied = await run(
+            tools, "browser_wait", until="text", text="Welcome back", seconds=5
+        )
+    assert denied.is_error and "Welcome back" not in denied.text
 
 
 async def test_screenshot_returns_an_image_and_only_a_note_as_text() -> None:

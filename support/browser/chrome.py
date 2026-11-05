@@ -1411,10 +1411,10 @@ class ChromeBackgroundDriver(PageScriptActs):
         self, tab: str | None, until: str, text: str, *, origin: str = ""
     ) -> bool:
         await self._focus(tab)
-        return await self._probe(wait_probe(until, text, origin))
+        return await self._probe(wait_probe(until, text, origin)) is True
 
-    async def _probe(self, source: str) -> bool:
-        """Whether the wait probe *source* is true now; a page between two documents does not answer yet."""
+    async def _probe(self, source: str) -> bool | str:
+        """What the wait probe *source* says now; a page between two documents does not answer yet."""
         try:
             return await super()._probe(source)
         except BrowserError:

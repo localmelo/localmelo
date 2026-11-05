@@ -388,6 +388,7 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
 # A declined step's status word, by how it was declined (#465).
 _DECLINED_WORDS: Final = {
     "denied": "Not allowed",
+    "words": "Not allowed",
     "unanswered": "No answer in time",
     "closed": "No answer in time",
 }
@@ -396,7 +397,8 @@ _DECLINED_WORDS: Final = {
 class Declined(NamedTuple):
     """How a finished call was declined (#465).
 
-    ``how`` is ``denied`` (the person's Deny, in Ask or Auto), ``unanswered``
+    ``how`` is ``denied`` (the person's Deny, in Ask or Auto), ``words`` (they
+    wrote instead of answering), ``unanswered``
     (no answer in ``wait_s`` seconds) or ``closed`` (every viewer left
     first): the record's ``unanswered`` code, never its text. ``note`` is the
     person's note of a Deny.
@@ -411,8 +413,8 @@ def declined_step(data: Mapping[str, Any]) -> Declined | None:
     """How a finished call was declined, else None: no failure, nothing went wrong.
 
     The call's own approval says so, or a question its tool asked itself
-    (``tool_asks``: a site): ``allowed`` false with origin ``user`` or
-    ``timeout``.
+    (``tool_asks``: a site): ``allowed`` false with origin ``user``,
+    ``timeout`` or ``words`` (the person wrote instead of answering).
     """
     if str(data.get("status") or "") in ("success", "running"):
         return None
@@ -422,11 +424,13 @@ def declined_step(data: Mapping[str, Any]) -> Declined | None:
         if (
             not isinstance(one, Mapping)
             or one.get("allowed") is not False
-            or one.get("origin") not in ("user", "timeout")
+            or one.get("origin") not in ("user", "timeout", "words")
         ):
             continue
         if one.get("origin") == "user":
             return Declined("denied", " ".join(str(one.get("reason") or "").split()))
+        if one.get("origin") == "words":
+            return Declined("words")
         if one.get("unanswered") == "left":
             return Declined("closed")
         return Declined("unanswered", wait_s=_float(one.get("wait_s")))
@@ -438,6 +442,8 @@ def declined_line(declined: Declined) -> str:
     if declined.how == "denied":
         line = "Not run: you declined it"
         return f"{line}. Your note: {declined.note}" if declined.note else line
+    if declined.how == "words":
+        return "Not run: you wrote instead of answering"
     if declined.how == "unanswered":
         if declined.wait_s:
             return f"Not run: no answer within {wait_words(declined.wait_s)}"
