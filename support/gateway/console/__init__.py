@@ -698,14 +698,18 @@ class Console:
         """Map a store failure as API v2 says, by state and never by message text.
 
         A failure while ``store.failed`` is set is a 503 without a second
-        read. Any other failure makes the route read the row again: a
-        missing row is 404 ``This session was deleted.``, anything else 503.
+        read. Any other failure makes the route read the row again: a row
+        that is in neither the gateway's file nor the worker history is
+        404 ``This session was deleted.``, anything else 503. A worker or
+        terminal session is never in the gateway's file, so its failure is 503.
         """
         if self.store.failed is not None:
             return ApiError(503, "store_unavailable", FAILED_ERROR)
         if session_id is not None:
             try:
                 info = await self.store.get_session(session_id)
+                if info is None:
+                    info = await self.worker_history.get_session(session_id)
             except SessionStoreError:
                 return ApiError(
                     503, "store_unavailable", self._store_error or store_message(exc)

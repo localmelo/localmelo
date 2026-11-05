@@ -19,7 +19,6 @@ from localmelo.support.sessions.store import (
     SESSION_KINDS,
     SessionInfo,
     SessionStore,
-    SessionStoreError,
     StoredEvent,
     TurnInfo,
 )
@@ -58,12 +57,7 @@ async def _read_session(
     info = await console.store.get_session(session_id)
     if info is not None:
         return info, console.store
-    try:
-        info = await console.worker_history.get_session(session_id)
-    except SessionStoreError as exc:
-        # The id is no gateway chat's, so an unreadable history file is a 503
-        # and never "this session was deleted".
-        raise await console.store_api_error(exc) from exc
+    info = await console.worker_history.get_session(session_id)
     if info is None:
         raise ApiError(404, "not_found", t("errors.sessionNotFound"))
     return info, console.worker_history
