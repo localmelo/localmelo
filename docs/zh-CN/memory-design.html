@@ -332,7 +332,7 @@
         <ul>
           <li><code>working</code> 是 agent-facing active cache，使用两阶段 LRU-style refresh：<code>fresh</code> memories 只有被复用后才提升为 <code>rehearsed</code>。</li>
           <li>只有 <code>rehearsed</code> working memories 才能成为 long-term promotion candidates；<code>fresh</code> memories 不应直接持久化。</li>
-          <li><code>Hippo</code> 负责把 durable 和 specialized writes 路由到 long/profile、tools 和 personalized samples。</li>
+          <li><code>Hippo</code> 负责把 durable 和 specialized writes 路由到 long/profile 和 tools。</li>
           <li><code>history</code> 是 raw append-only record/debug layer，不参与 normal recall。</li>
           <li>Hippo v1 使用 <code>NEW</code>、<code>UPDATE</code>、<code>RELATED</code>、<code>CONFLICT</code> 和 <code>IGNORE</code>，替代单一 vector threshold。</li>
         </ul>
@@ -344,7 +344,6 @@
           <li><code>melo/memory/short/</code></li>
           <li><code>melo/memory/history/sqlite.py</code></li>
           <li><code>melo/memory/long/sqlite.py</code></li>
-          <li><code>melo/memory/personalized/</code></li>
           <li><code>melo/memory/tools/</code></li>
         </ul>
         <h4>在整体架构图中</h4>
@@ -359,14 +358,7 @@
         <h3 class="md-component" id="c-sleep" lang="en">Sleep</h3>
         <p class="md-role">计划中的 offline personalization pipeline</p>
         <p class="md-tags" lang="en"><span class="md-badge">offline</span></p>
-        <p>Sleep mode 保持 offline。Track 2 已定义它后续消费的边界：<code>PersonalizedMemory</code> 接收 filtered samples，而不是 raw history dumps。</p>
-        <h4>关键文件</h4>
-        <ul class="md-files" role="list">
-          <li><code>melo/sleep/preprocess/</code></li>
-          <li><code>melo/sleep/training/</code></li>
-          <li><code>melo/sleep/evaluation/</code></li>
-          <li><code>melo/sleep/state/</code></li>
-        </ul>
+        <p>Sleep mode 保持 offline，尚未构建。Track 2 已定义它后续消费的边界：filtered samples，而不是 raw history dumps。</p>
         <h4>在整体架构图中</h4>
         <dl class="md-facts">
           <dt>标签</dt>
@@ -425,7 +417,7 @@
               </li>
               <li class="md-card" id="personalized">
                 <strong lang="en">Personalized</strong>
-                <span class="md-text">Track 4 使用的 filtered sleep samples，不接收 raw history dump</span>
+                <span class="md-text">后续 sleep 阶段使用的 filtered sleep samples，不接收 raw history dump；尚未构建</span>
               </li>
               <li class="md-card md-history" id="history">
                 <strong lang="en">History</strong>
@@ -466,9 +458,9 @@
                 <td>Agent 不依赖 SQLite、vector search、profile tables、tool memory internals 或 sleep samples。</td>
               </tr>
               <tr id="b-history-personalized">
-                <td>History 到 PersonalizedMemory</td>
-                <td><code>PersonalizedMemory</code> 只接收 selected sleep samples；不应直接 ingest raw history。</td>
-                <td>Track 4 得到 curated training inputs，不把 audit log 默认变成在线召回或训练数据。</td>
+                <td>History 到 sleep samples</td>
+                <td>Sleep 只接收 selected samples；不应直接 ingest raw history。</td>
+                <td>后续 sleep 阶段得到 curated inputs，不把 audit log 默认变成在线召回或训练数据。</td>
               </tr>
             </tbody>
           </table>
@@ -487,7 +479,7 @@
           <div class="md-card" id="status-sleep">
             <span class="tag planned">计划中</span>
             <h3 lang="en">Sleep pipeline</h3>
-            <p>Training / evaluation 目前仍是 scaffold。下一步应该先写 design issue，而不是直接实现。</p>
+            <p>Scaffold 模块已移除。下一步应该先写 design issue，而不是直接实现。</p>
           </div>
         </div>
       </section>
@@ -504,7 +496,6 @@
               <tr><td>文档化 memory env vars、file layout、retention semantics 和 reset workflow。</td><td><span class="tag stable" lang="en">v1 done</span></td></tr>
               <tr><td>添加 multi-session SQLite stress coverage。</td><td><span class="tag stable" lang="en">v1 done</span></td></tr>
               <tr><td>针对 OMLX、Ollama 和 MLC-LLM 运行并记录 real-backend long-term retrieval smoke。</td><td><span class="tag stable" lang="en">archived</span></td></tr>
-              <tr><td>冻结并文档化 <code>PersonalizedMemory</code> selected-sample schema for v1。</td><td><span class="tag stable" lang="en">v1 done</span></td></tr>
               <tr><td>实现 working-memory <code>fresh</code> / <code>rehearsed</code> stages。</td><td><span class="tag planned" lang="en">next</span></td></tr>
               <tr><td>实现 Hippo five-action routing 和 metadata-typed long/profile memory。</td><td><span class="tag planned" lang="en">next</span></td></tr>
             </tbody>
