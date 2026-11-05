@@ -6,10 +6,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ToolDef
+
+if TYPE_CHECKING:
+    from localmelo.melo.executor.models import ToolOutput
 
 # Called with the tool-call arguments as keyword arguments.
 ToolFunction = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
