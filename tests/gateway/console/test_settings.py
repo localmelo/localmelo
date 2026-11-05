@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from localmelo.support import config, onboard
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.config import (
     CloudVendorConfig,
     Config,
@@ -52,17 +53,15 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
     assert body["workspace"] == "~/localmelo-workspace"
     assert body["revision"] == ""
     assert body["defaults"] == onboard.backend_defaults()
-    assert set(body["sections"]) == set(config._LOCAL_SECTIONS) | set(
-        config._CLOUD_SECTIONS
-    )
-    for key in config._LOCAL_SECTIONS:
+    assert set(body["sections"]) == {*LOCAL_BACKENDS, *CLOUD_BACKENDS}
+    for key in LOCAL_BACKENDS:
         assert set(body["sections"][key]) == {
             "chat_url",
             "chat_model",
             "embedding_url",
             "embedding_model",
         }
-    for key in config._CLOUD_SECTIONS:
+    for key in CLOUD_BACKENDS:
         assert set(body["sections"][key]) == {
             "api_key_env",
             "api_key_set",
@@ -77,7 +76,7 @@ def test_get_settings_shape_when_file_missing(client: TestClient) -> None:
         {
             "key": key,
             "label": label,
-            "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
+            "kind": "local" if key in LOCAL_BACKENDS else "cloud",
         }
         for key, label in onboard.CHAT_BACKENDS
     ]

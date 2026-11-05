@@ -359,19 +359,14 @@ async def loaded_models(
     )
 
 
-async def loaded_among(
-    url: str,
-    chat: Sequence[str],
-    *,
-    transport: httpx.AsyncBaseTransport | None = None,
-) -> LoadedModels:
+async def loaded_among(url: str, chat: Sequence[str], **options: Any) -> LoadedModels:
     """Which of the *chat* models of the server at *url* are in memory.
 
     Only a choice between several chat models needs to know, so with one or none
-    nothing is asked (see :func:`loaded_models`).
+    nothing is asked. *options* are those of :func:`loaded_models`.
     """
     if len(chat) > 1:
-        return await loaded_models(url, transport=transport)
+        return await loaded_models(url, **options)
     return LoadedModels()
 
 

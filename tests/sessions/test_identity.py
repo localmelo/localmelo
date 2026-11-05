@@ -237,7 +237,7 @@ def test_ollama_and_the_other_local_servers_are_named_as_they_are_labelled() -> 
         # An address of its own on [openai] is a service of its own, named by its host.
         ("openai", "x"),
         ("anthropic", "Anthropic"),
-        ("gemini", "Gemini"),
+        ("gemini", "Google Gemini"),
         ("nvidia", "NVIDIA"),
     ],
 )

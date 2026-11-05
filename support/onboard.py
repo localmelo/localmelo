@@ -89,10 +89,6 @@ EMBEDDING_BACKENDS: list[tuple[str, str]] = [
 
 # ── Chat backend handlers ──
 
-_CLOUD_DEFAULTS: dict[str, tuple[str, str]] = {
-    p.id: (p.key_env, p.models[0]) for p in hosted.PRESETS if p.id == p.backend
-}
-
 
 def _onboard_local(cfg: config.Config, key: str) -> bool:
     """Local (OpenAI-compatible) chat backend setup: URL and model name.
@@ -251,11 +247,12 @@ def backend_defaults() -> dict[str, dict[str, str]]:
             "embedding_url": server.url,
             "embedding_model": server.embedding_model,
         }
-    for key, (api_key_env, chat_model) in _CLOUD_DEFAULTS.items():
-        defaults[key] = {
-            "api_key_env": api_key_env,
-            "chat_model": chat_model,
-        }
+    for preset in hosted.PRESETS:
+        if preset.id == preset.backend:
+            defaults[preset.id] = {
+                "api_key_env": preset.key_env,
+                "chat_model": preset.models[0],
+            }
     return defaults
 
 
