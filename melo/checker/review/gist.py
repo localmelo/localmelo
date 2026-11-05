@@ -493,17 +493,22 @@ def _classify(words: list[str], text: str = "") -> _Item | None:
     """
     if not words or words[0].startswith("#") or words[0] in _CLOSERS:
         return None
-    program, rest = _program(words)
-    discard = destroys.git_discards(rest) if program == "git" else None
-    effect = _command_effect(program, rest, discard)
-    if effect:
-        places, blind = _places(effect, program, rest, discard)
-        return _Item(
-            effect,
-            places=places,
-            blind=blind,
-            git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
-        )
+    readings = [_program(words)]
+    found = shell_lexer.unwrap(words)
+    if found.unread:  # a wrapper option melo could not read: any program it may run
+        readings += [(shell_lexer.program(r[0]), r[1:]) for r in found.readings if r]
+    for program, rest in readings:
+        discard = destroys.git_discards(rest) if program == "git" else None
+        effect = _command_effect(program, rest, discard)
+        if effect:
+            places, blind = _places(effect, program, rest, discard)
+            return _Item(
+                effect,
+                places=places,
+                blind=blind,
+                git=program == "git" and _git_sub(rest)[0] in _GIT_UNREAD,
+            )
+    program, rest = readings[0]
     named = None
     if program == "osascript":
         named = app_names.osascript_app(rest)

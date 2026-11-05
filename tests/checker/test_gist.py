@@ -420,6 +420,11 @@ def test_looking_a_program_up_is_no_run_of_it() -> None:
     assert gist("shell_exec", {"command": "command -p rm x"}).id == "effect_delete"
 
 
+def test_a_wrapper_option_melo_cannot_read_leaves_the_effect_named() -> None:
+    """The option may take ``name`` as its value or not: the card says what either does."""
+    assert gist("shell_exec", {"command": "env -Z name rm x"}).id == "effect_delete"
+
+
 @pytest.mark.parametrize(
     "command",
     [
