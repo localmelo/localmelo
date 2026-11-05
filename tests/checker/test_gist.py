@@ -432,6 +432,11 @@ def test_a_wrapper_option_melo_cannot_read_leaves_the_effect_named(
     assert gist("shell_exec", {"command": command}).id == "effect_delete"
 
 
+@pytest.mark.parametrize("word", ["A=1", "A+=1", "A[1]=1"])
+def test_the_card_passes_over_every_assignment_a_shell_reads(word: str) -> None:
+    assert gist("shell_exec", {"command": f"{word} rm x"}).id == "effect_delete"
+
+
 def test_of_the_readings_of_a_command_the_card_names_the_strongest() -> None:
     """Sending comes after deleting in the card's titles."""
     found = gist("shell_exec", {"command": "env -Z scp rm x me@example.com:x"})

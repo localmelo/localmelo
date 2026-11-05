@@ -333,8 +333,18 @@ _UV_RUN = shell_lexer.Options.of(
     " --directory --project --config-file",
 )
 _RUN_OPTIONS = shell_lexer.Options.of("", "--with --python -p -P --project --from")
-# An address ``uv run`` downloads a script from.
+# An address ``uv run`` downloads a script from, and the file endings it runs
+# with Python, in either case.
 _HTTP = re.compile(r"https?://", re.I)
+_PY_FILES = (".py", ".pyc", ".pyw")
+# Runners seen to run a NAME=value word as a program. The others may hand it to
+# a shell, which reads it as an assignment: both are read, with a doubt.
+_RUN_THE_WORD = set(["uv", "poetry", "pdm"])
+# What the lines wrappers hand to a shell (watch) may hold in all, with the
+# lines in those lines: this many times the command, and this many characters
+# more, so that a short command has the line of each reading read.
+_LINES = 4
+_LINES_SHORT = 4096
 # git commands that run the repository's hooks.
 _HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
@@ -811,8 +821,13 @@ def _backticks(text: str) -> tuple[list[str], bool]:
     return found, True
 
 
-_ASSIGN = re.compile(r"([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)", re.S)
 _NAME = re.compile(r"[A-Za-z_]\w*")
+# A program word filled in when the step runs, or one with ``=``: read as a
+# program only because a wrapper's manual says so.
+_UNNAMED = re.compile(r"[$`=]")
+# An array element whose subscript holds a space: the shell's assignment, cut
+# into words here, and no program.
+_OPEN_SUBSCRIPT = re.compile(r"[A-Za-z_]\w*\[[^\]]*$", re.S)
 _DECLARERS = frozenset(
     ["export", "local", "declare", "typeset", "readonly", "builtin", "command"]
 )
@@ -883,7 +898,9 @@ def _head(words: list[str]) -> list[str]:
     """
     rest = shell_lexer.past_keywords(words)
     at = 0
-    while at < len(rest) and (_ASSIGN.fullmatch(rest[at]) or rest[at] in _PREFIXES):
+    while at < len(rest) and (
+        shell_lexer.ASSIGNMENT.fullmatch(rest[at]) or rest[at] in _PREFIXES
+    ):
         at += 1
         while rest[at - 1] in _PREFIXES and at < len(rest) and rest[at][:1] == "-":
             at += 1
@@ -1031,7 +1048,7 @@ def _bindings(
     elif head[:1] == ["let"]:
         other.update(_arith_names(" ".join(head[1:])))
     core = words[1:] if words[0] in _DECLARERS else words
-    mine = [_ASSIGN.fullmatch(w) for w in core]
+    mine = [shell_lexer.ASSIGNMENT.fullmatch(w) for w in core]
     for word, found in zip(core, mine, strict=True):
         if found is None:
             continue
@@ -1261,7 +1278,9 @@ def _step(
     )
 
 
-def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
+def _unwrap(
+    ctx: Context, f: Findings, argv: list[str], shell: bool = True
+) -> list[list[str]]:
     """Each program *argv* may run, with its words: past keywords, ``VAR=x`` and wrappers.
 
     The words before the program are read by
@@ -1271,11 +1290,12 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
     not know is a doubt, and the program of each reading of it is reviewed,
     at most ``MAX_READINGS``: past them, a doubt and the first ones. A
     command line a wrapper has a shell run (``env -S``, ``watch``) is
-    reviewed as a command, a ``watch`` in one already reviewed not again.
-    ``uv run`` with a Python file (``--script``, a name ending in ``.py``),
-    an address or ``-`` (standard input) is the Python call it makes. With
+    reviewed as a command; past :data:`_LINES` of them, a doubt. ``uv run``
+    with a Python file (``--script``, a name with a Python ending), an
+    address or ``-`` (standard input) is the Python call it makes. With
     ``PATH=.:$PATH`` (a folder named relatively first), a program named bare
     may be a file there: it is named by that path then (``./tool``).
+    *shell* says a shell reads *argv*, not a program that runs it as it is.
     """
     programs: list[list[str]] = []
     # Words, where the command starts in them, what xargs adds after them,
@@ -1283,22 +1303,22 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
     # runs them: busybox, uv run); the first reading's last, so it is read
     # first.
     todo: list[tuple[Sequence[str], int, tuple[str, ...], str, bool]] = [
-        (argv, 0, (), "", True)
+        (argv, 0, (), "", shell)
     ]
     # Each place read, with its words kept so that no other list takes their id.
     seen: dict[tuple[int, int], Sequence[str]] = {}
-    # Where in each list of words the line a watch hands to a shell starts.
-    joined: dict[int, tuple[Sequence[str], int]] = {}
+    walked = shell_lexer.Walked()
+    room = ctx.lines
     while todo:
         if len(programs) == shell_lexer.MAX_READINGS:
             f.doubt(UNREAD)
             break
-        words, at, added, local, shell = todo.pop()
+        words, at, added, local, reads = todo.pop()
         if (id(words), at) in seen:
             continue
         seen[id(words), at] = words
         # xargs adds arguments melo cannot see.
-        found = shell_lexer.unwrap(words, [UNKNOWN_ARG], at, shell)
+        found = shell_lexer.unwrap(words, [UNKNOWN_ARG], at, reads, False, walked)
         if found.unread:
             f.doubt(UNREAD)
         local = local or _note_assignments(f, found.assignments)
@@ -1309,14 +1329,15 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
                 f.add("persistence", "Keeps a program running after this call ends.")
         for code in found.codes:
             review_shell(ctx.deeper(), f, code)
-        # A line a watch hands to a shell, unless this place is in one already.
-        earlier = joined.get(id(words))
-        if earlier is None or at < earlier[1]:
+        if found.joins:
+            room = room or [_LINES * sum(map(len, argv)) + _LINES_SHORT]
             for join in found.joins:
-                earlier = joined.get(id(join[0]))
-                if earlier is None or join[1] < earlier[1]:
-                    joined[id(join[0])] = join
-                review_shell(ctx.deeper(), f, found.line(join))
+                if room[0] <= 0:
+                    f.doubt(UNREAD)
+                    break
+                line = found.line(join)
+                room[0] -= len(line)
+                review_shell(ctx.deeper(lines=room), f, line)
         added = (*found.added, *added)
         for words, at in reversed(found.starts):
             prog = os.path.basename(words[at]).lower() if at < len(words) else ""
@@ -1335,12 +1356,20 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
                 programs.append(program)
                 continue
             options = _UV_RUN if prog == "uv" else _RUN_OPTIONS
-            passed = shell_lexer.past_options(words, options, at + skip)
+            start = at + skip
+            passed = shell_lexer.past_options(words, options, start, False, walked)
             if passed.unread:
                 f.doubt(UNREAD)
-            here = local or _note_assignments(f, passed.assignments)
+            here, ends = local, passed.ends
+            if prog not in _RUN_THE_WORD and any(
+                "=" in "".join(words[end : end + 1]) for end, _ in ends
+            ):
+                f.doubt(UNREAD)
+                both = shell_lexer.past_options(words, options, start, True, walked)
+                here = here or _note_assignments(f, both.assignments)
+                ends = [*both.ends, *ends]
             named = {option for option, _ in passed.options}
-            for end, _ in reversed(passed.ends):
+            for end, _ in reversed(ends):
                 python = _uv_python(named, words[end : end + 1]) if prog == "uv" else []
                 todo.append(
                     ([*python, *words[end:]], 0, added, here, False)
@@ -1354,13 +1383,13 @@ def _uv_python(options: set[str], command: Sequence[str]) -> list[str]:
     """The Python call ``uv run`` makes of *command* with *options*, else ``[]``.
 
     ``uv help run``: ``-m`` runs a module; ``--script``, a file ending in
-    ``.py``, an http(s) address (downloaded first) or ``-`` (standard input)
-    is a script Python runs.
+    ``.py`` (or the other :data:`_PY_FILES`), an http(s) address (downloaded
+    first) or ``-`` (standard input) is a script Python runs.
     """
     if options & {"-m", "--module"}:
         return ["python", "-m"]
     word = "".join(command)
-    script = word == "-" or word.endswith(".py") or _HTTP.match(word) is not None
+    script = word == "-" or word.lower().endswith(_PY_FILES) or bool(_HTTP.match(word))
     if options & {"-s", "--script", "--gui-script"} or script:
         return ["python"]
     return []
@@ -1497,7 +1526,7 @@ def run_argv(
     """
     prog, args = os.path.basename(argv[0]).lower(), argv[1:]
     prog = _GNU_NAMES.get(prog, prog)
-    if re.search(r"[$`]", argv[0]):
+    if _UNNAMED.search(argv[0]) and not _OPEN_SUBSCRIPT.match(argv[0]):
         f.doubt("Runs a program melo could not name.")
     # Hard links: one file under two names, so the source counts as written.
     _link_sources(ctx, f, prog, args, cwd)
@@ -1555,12 +1584,13 @@ def run_argv(
         for flag in {"-exec", "-execdir", "-ok"} & set(args):
             rest = args[args.index(flag) + 1 :]
             rest = rest[: next((i for i, a in enumerate(rest) if a in ";+"), len(rest))]
-            if rest:
+            # find runs them as they are, and what a wrapper there runs.
+            programs = [rest, *_unwrap(ctx, f, rest, False)] if rest else []
+            for program in filter(None, dict.fromkeys(map(tuple, programs))):
                 # A launcher gets each file found, which melo cannot name.
-                found = (
-                    UNKNOWN_ARG if os.path.basename(rest[0]) in _ELSEWHERE else roots[0]
-                )
-                run_argv(ctx, f, [found if a == "{}" else a for a in rest], cwd)
+                base = os.path.basename(program[0])
+                found = UNKNOWN_ARG if base in _ELSEWHERE else roots[0]
+                run_argv(ctx, f, [found if a == "{}" else a for a in program], cwd)
     elif prog in _WRITERS and not re.search(r"\s[\w.-]+@?[\w.-]*:", line):
         mode = _WRITERS[prog]
         targets = words[-1:] if mode == "last" and len(words) > 1 else words

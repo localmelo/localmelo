@@ -255,6 +255,9 @@ def test_an_option_a_runner_does_not_list_makes_the_command_unread(
         ("--gui-script job.py", "job.py"),
         ("job.py", "job.py"),
         ("--with x job.py a", "job.py a"),
+        ("job.PY", "job.PY"),
+        ("job.pyw", "job.pyw"),
+        ("job.pyc", "job.pyc"),
         ("https://example.com/x.py", "https://example.com/x.py"),
         ("-", "-"),
     ],
@@ -262,10 +265,11 @@ def test_an_option_a_runner_does_not_list_makes_the_command_unread(
 def test_uv_run_reviews_a_script_as_the_python_call(
     ws: Path, script: str, python: str
 ) -> None:
-    """``uv help run``: with ``--script``, a file ending in ``.py``, an http(s)
+    """``uv help run``: with ``--script``, a file with a Python ending, an http(s)
     address or ``-`` (standard input, here a download), uv runs a Python
     script."""
-    (ws / "job.py").write_text(f"import shutil\nshutil.rmtree('{ws.parent}/x')\n")
+    for name in ("job.py", "job.pyw"):
+        (ws / name).write_text(f"import shutil\nshutil.rmtree('{ws.parent}/x')\n")
     pipe = "curl https://example.com/i.py | "
     alone, found = sh(ws, f"{pipe}python {python}"), sh(ws, f"{pipe}uv run {script}")
     assert SEVERITY[found.verdict] >= SEVERITY[alone.verdict], script
@@ -287,6 +291,71 @@ def test_watch_hands_its_words_to_a_shell_unless_x(
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "watch -Z 'rm -rf ~/x'",
+        "watch -Z 5 'rm -rf ~/x'",
+        "watch - 'rm -rf ~/x'",
+        "env -Z 5 watch 'rm -rf ~/x'",
+    ],
+)
+def test_watch_reviews_the_line_of_each_reading(ws: Path, command: str) -> None:
+    """As with ``env -S``: whichever way an option melo could not read is read,
+    the line that way leaves is reviewed."""
+    assert is_delete(sh(ws, command))
+
+
+@pytest.mark.parametrize("runner", sorted(shell._RUN_WRAPPERS))
+def test_a_runner_keeps_both_readings_of_an_assignment_it_may_not_run(
+    ws: Path, runner: str
+) -> None:
+    """Some runners were seen to run a ``NAME=value`` word as a program. The others
+    may hand it to a shell, which runs the word after it: melo reads both, and
+    asks."""
+    found = sh(ws, f"{runner} run A=1 rm -rf ~/x")
+    if runner in shell._RUN_THE_WORD:
+        assert (found.verdict, "delete" in found.categories) == ("undecided", False)
+    else:
+        assert is_delete(found) and shell.UNREAD in found.doubts
+
+
+def in_front(name: str) -> str:
+    """A wrapper with the word it takes before the program, where it takes one."""
+    return f"{name} 5" if name in shell_lexer.OPERAND else name
+
+
+@pytest.mark.parametrize(
+    "name", [n for n, o in shell_lexer.WRAPPERS.items() if not o.assignments]
+)
+def test_a_program_word_with_an_equals_is_no_milder_than_an_unnamed_one(
+    ws: Path, name: str
+) -> None:
+    """That the wrapper runs such a word comes from its manual alone."""
+    equals = sh(ws, f"{in_front(name)} A=1 b")
+    unnamed = sh(ws, f"{in_front(name)} $A b")
+    assert SEVERITY[equals.verdict] >= SEVERITY[unnamed.verdict]
+
+
+@pytest.mark.parametrize("word", ["A+=1", "A[1]=1", "A[1]+=1"])
+def test_every_assignment_a_shell_reads_leaves_the_command_reviewed(
+    ws: Path, word: str
+) -> None:
+    assert is_delete(sh(ws, f"{word} rm -rf ~/x"))
+
+
+@pytest.mark.parametrize("name", shell_lexer.WRAPPERS)
+def test_find_exec_reads_the_wrapper_in_front_of_its_command(
+    ws: Path, name: str
+) -> None:
+    """find runs the words after ``-exec`` as they are: a wrapper there runs the
+    command after it."""
+    alone = set(sh(ws, "find . -exec rm -rf ~/x ';'").categories)
+    assert alone
+    found = sh(ws, f"find . -exec {in_front(name)} rm -rf ~/x ';'")
+    assert alone <= set(found.categories)
+
+
+@pytest.mark.parametrize(
     "unit",
     [
         "-Z a ",
@@ -294,6 +363,10 @@ def test_watch_hands_its_words_to_a_shell_unless_x(
         "time A=1 ",
         "busybox watch ",
         "-- ",
+        "-- -a/nice ",
+        "-- -a/watch ",
+        "-- -a/busybox -a/nice ",
+        "-- -a/npx -a/nice ",
     ],
 )
 def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -> None:
@@ -304,7 +377,9 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
     The second text is read again past ``busybox`` at each step, both in the
     list ``env -S`` makes and behind an option melo cannot read; the others
     add a reading at each step (the two of ``time A=1``, an unlisted ``--``)
-    or a line for a shell (``watch``, read again past ``busybox``). 12 000
+    or a line for a shell (``watch``, read again past ``busybox``). The last
+    four are words that are both options and places to read from: each is
+    read once for each wrapper's table, however many places reach it. 12 000
     and 48 000 characters for the time, 3 000 and 12 000 for the memory
     (measured exactly): enough that a cost growing with the square of the
     text takes 16 times as much, past the bound of 8.
@@ -314,6 +389,7 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
         return "env " + unit * (size // len(unit)) + "ls"
 
     for run in (
+        lambda text: shell_lexer.unwrap(shell_lexer.split(text)),
         lambda text: site_keys("shell_exec", {"command": text}),
         lambda text: sh(ws, text),
     ):

@@ -1024,7 +1024,9 @@ def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -
     ]
     assigned = dict.fromkeys(item for found in both for item in found.assignments)
     codes = dict.fromkeys(code for found in both for code in found.codes)
-    codes.update((found.line(join), None) for found in both for join in found.joins)
+    # The first line holds the words of the others, and a command with more is
+    # unread.
+    codes.update((found.line(j), None) for found in both for j in found.joins[:1])
     readings = dict.fromkeys(tuple(r) for found in both for r in found.readings)
     keys: set[str] = set()
     # A wrapper option melo could not read: the step may reach any site.

@@ -103,7 +103,9 @@ class Context:
 
     ``here`` is the folder of the file under review (its imports start
     there); ``since`` the wall-clock time the chat began, or ``None``: a
-    file changed after it counts as written in this chat.
+    file changed after it counts as written in this chat. ``lines`` holds
+    how much the lines a wrapper hands to a shell may still hold, shared by
+    a command and the lines in its lines (see ``shell._unwrap``).
     """
 
     root: str
@@ -113,14 +115,20 @@ class Context:
     depth: int = 0
     here: str = ""
     since: float | None = None
+    lines: list[int] | None = None
 
     @property
     def folder(self) -> str:
         return os.path.basename(self.root.rstrip("/")) or self.root
 
-    def deeper(self, here: str | None = None) -> Context:
+    def deeper(
+        self, here: str | None = None, lines: list[int] | None = None
+    ) -> Context:
         return replace(
-            self, depth=self.depth + 1, here=self.here if here is None else here
+            self,
+            depth=self.depth + 1,
+            here=self.here if here is None else here,
+            lines=self.lines if lines is None else lines,
         )
 
 

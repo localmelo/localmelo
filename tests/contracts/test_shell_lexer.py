@@ -354,6 +354,29 @@ def test_an_unlisted_double_dash_may_end_the_options(name: str) -> None:
     assert found.unread and program in found.readings
 
 
+@pytest.mark.parametrize("word", ["A+=1", "A[1]=1", "A[1]+=1"])
+def test_every_assignment_a_shell_reads_is_read_as_a_plain_one(word: str) -> None:
+    """Appending and setting an array element are assignments too: the program
+    comes after them, and after a wrapper they are its next word all the same."""
+    for words in ([word, "b"], ["if", word, "b"]):
+        found = shell_lexer.unwrap(words)
+        assert (found.readings, found.assignments) == ([["b"]], [("A", "1")])
+    assert shell_lexer.unwrap(["nohup", word, "b"]).readings == [[word, "b"]]
+
+
+@pytest.mark.parametrize("name", shell_lexer.WRAPPERS)
+def test_lone_words_never_cut_the_reading_with_no_value(name: str) -> None:
+    """However many lone ``-`` or ``--`` a wrapper does not list, the reading where
+    none is read getopt(3)'s way and none takes a value stays, and comes first."""
+    options = shell_lexer.WRAPPERS[name]
+    operand = ["5"] if name in shell_lexer.OPERAND else []
+    for word in {"-", "--"} - options.flags:
+        for count in (1, 2, 8, 9, 20):
+            found = shell_lexer.unwrap([name, *[word] * count, *operand, "b", "c"])
+            assert found.readings[0] == ["b", "c"], (word, count)
+            assert len(found.readings) <= shell_lexer.MAX_READINGS
+
+
 def test_unwrap_keeps_the_assignments_in_order() -> None:
     found = shell_lexer.unwrap(shlex.split("A=1 env -i B=2 'x y=z' sudo C=3 rm x"))
     assert found.assignments == [("A", "1"), ("B", "2"), ("x y", "z"), ("C", "3")]
