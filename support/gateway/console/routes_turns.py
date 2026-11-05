@@ -38,9 +38,6 @@ from localmelo.support.sessions.attachments import (
 from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.picture_input import MAX_PICTURES
 from localmelo.support.sessions.store import (
-    SessionBusyError,
-    SessionInfo,
-    SessionStoreError,
     TurnInfo,
     check_title,
 )
@@ -275,37 +272,6 @@ async def _sent(
     return _Sent(words, whole, TurnExtras(tuple(attached), tuple(images_of(staged))))
 
 
-async def _store_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await one store call, mapping a store failure as 2.2 says."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _sessions_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await a registry call, mapping the failures a turn can raise."""
-    try:
-        return await coro
-    except SessionBusyError as exc:
-        raise ApiError(409, "session_busy", t("errors.turnRunning")) from exc
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    info: SessionInfo | None = await _store_call(
-        console, console.store.get_session(session_id), session_id
-    )
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
-
-
 def _submission_error(exc: SubmissionError) -> ApiError:
     """The 409 an :class:`ApiError`-free submission failure answers with."""
     if isinstance(exc, SubmissionWithdrawn):
@@ -360,7 +326,7 @@ async def _create_for_task(
     # a cancel may still overtake a create of a message while it builds.
     async with console.sessions.keyed(key), console.sessions.keyed(lock_name(key)):
         if key is not None:
-            found = await _store_call(console, console.store.get_submission(None, key))
+            found = await console.store.get_submission(None, key)
             try:
                 check_submission(found, composed)
             except SubmissionRepeated:
@@ -370,43 +336,33 @@ async def _create_for_task(
             made = await created(console, key, composed)
             if made is not None:
                 record, info = made
-                echo = await started_echo(console, record, info, text)
                 return JSONResponse(
                     content={
                         "session": console.session_body(info),
-                        "echo": echo,
+                        "echo": await started_echo(console, record, info, text),
                         "repeated": True,
                     }
                 )
-        entry, _ = await _sessions_call(
-            console,
-            console.sessions.create(body.workspace, None, mode=body.approvals),
+        entry, _ = await console.sessions.create(
+            body.workspace, None, mode=body.approvals
         )
         chat = entry.session_id
         try:
-            echo = await _store_call(
-                console,
-                console.front_for(chat).route(
-                    text, composed, as_task=True, key=None, create_key=key
-                ),
-                chat,
+            echo = await console.front_for(chat).route(
+                text, composed, as_task=True, key=None, create_key=key
             )
             if echo is None or echo.get("echo") != "started":
                 # The task did not start: its echo says why, and the chat has nothing.
                 raise ApiError(
                     400, "invalid_request", str((echo or {}).get("line") or "")
                 )
-            await _store_call(
-                console,
-                console.store.rename_session(chat, short_title(composed)),
-                chat,
-            )
+            await console.store.rename_session(chat, short_title(composed))
         except BaseException:
             if not await _admitted(console, chat, key):
                 with contextlib.suppress(Exception):
                     await console.sessions.delete(chat)
             raise
-        info = await _require_session(console, chat)
+        info = await console.require_session(chat)
         return JSONResponse(
             status_code=201,
             content={"session": console.session_body(info), "echo": echo},
@@ -452,19 +408,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
             return await _create_for_task(console, body, sent.whole, key)
         try:
-            entry, turn = await _sessions_call(
-                console,
-                console.sessions.create(
-                    body.workspace,
-                    first,
-                    client_request_id=key,
-                    mode=body.approvals,
-                    admit=lambda: _refuse_task_key(console, key),
-                    extras=None if sent is None else sent.extras,
-                ),
+            entry, turn = await console.sessions.create(
+                body.workspace,
+                first,
+                client_request_id=key,
+                mode=body.approvals,
+                admit=lambda: _refuse_task_key(console, key),
+                extras=None if sent is None else sent.extras,
             )
         except SubmissionRepeated as exc:
-            info = await _require_session(console, exc.turn.session_id)
+            info = await console.require_session(exc.turn.session_id)
             return JSONResponse(
                 status_code=200,
                 content={
@@ -475,7 +428,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
-        info = await _require_session(console, entry.session_id)
+        info = await console.require_session(entry.session_id)
         content: dict[str, Any] = {"session": console.session_body(info)}
         if turn is not None:
             content.update(_turn_body(turn, None))
@@ -486,7 +439,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         # The session is judged first: a malformed id is 404, as it is on
         # every read of the same path, not the checker's 400.
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         sent = await _sent(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
@@ -501,12 +454,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
             echo = (
                 None
                 if pictured
-                else await _store_call(
-                    console,
-                    console.front_for(session_id).route(
-                        body.text, sent.whole, as_task=body.as_task, key=key
-                    ),
-                    session_id,
+                else await console.front_for(session_id).route(
+                    body.text, sent.whole, as_task=body.as_task, key=key
                 )
             )
             if echo is not None:
@@ -518,25 +467,17 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
-                echo = await _store_call(
-                    console,
-                    console.asks.queue(session_id, body.text, sent.whole, key),
-                    session_id,
-                )
+                echo = await console.asks.queue(session_id, body.text, sent.whole, key)
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:
-            turn, resumed = await _sessions_call(
-                console,
-                console.sessions.start_turn(
-                    session_id,
-                    body.text,
-                    sent.words,
-                    client_request_id=key,
-                    extras=sent.extras,
-                ),
+            turn, resumed = await console.sessions.start_turn(
                 session_id,
+                body.text,
+                sent.words,
+                client_request_id=key,
+                extras=sent.extras,
             )
         except SubmissionRepeated as exc:
             return JSONResponse(
@@ -550,35 +491,25 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/sessions/{session_id}/retry")
     async def retry_turn(session_id: str, body: RetryRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         # A turn that carried pictures is not sent again to a model known not to
         # read them (the turn that was refused for them, for one): nothing is undone.
-        newest = await _store_call(
-            console, console.store.list_turns(session_id, limit=1), session_id
-        )
+        newest = await console.store.list_turns(session_id, limit=1)
         if (
             newest
             and newest[-1].id == body.turn_id
-            and await _store_call(
-                console, console.store.turn_images(session_id, newest[-1].turn)
-            )
+            and await console.store.turn_images(session_id, newest[-1].turn)
             and await console.vision.reads() is False
         ):
             raise ApiError(409, "model_text_only", t("errors.modelTextOnly"))
-        turn, resumed = await _sessions_call(
-            console,
-            console.sessions.retry(session_id, body.turn_id),
-            session_id,
-        )
+        turn, resumed = await console.sessions.retry(session_id, body.turn_id)
         return JSONResponse(status_code=202, content=_turn_body(turn, resumed))
 
     @app.post("/api/sessions/{session_id}/undo")
     async def undo_turn(session_id: str, body: RetryRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
-        undone = await _sessions_call(
-            console, console.sessions.undo(session_id, body.turn_id), session_id
-        )
+        await console.require_session(session_id)
+        undone = await console.sessions.undo(session_id, body.turn_id)
         return JSONResponse(content={"turn_id": undone.id, "undone": True})
 
     @app.post("/api/turns/{turn_id}/cancel")
@@ -595,9 +526,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         # Words added to the turn that its run never read do not start another
         # turn after a Stop: they go back to the composer.
-        unread = await _store_call(
-            console, console.asks.drop_notes(entry.session_id, turn_id)
-        )
+        unread = await console.asks.drop_notes(entry.session_id, turn_id)
         content: dict[str, Any] = {"turn_id": turn_id, "cancelling": True}
         if unread:
             content["unread_notes"] = unread
@@ -621,7 +550,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         entry = console.sessions.find_turn(turn_id)
         if entry is None:
             raise ApiError(409, "turn_not_running", t("errors.turnNotRunning"))
-        info = await _require_session(console, entry.session_id)
+        info = await console.require_session(entry.session_id)
         current = entry.runner.current_turn
         if info.kind not in ("front", "chat") or (
             current is not None and current.origin
@@ -638,12 +567,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         # The words a picture stands in for when there are none, as a message has.
         words = text or _marker(len(staged), [])
         composed = _check_text(console, words, entry.session_id)
-        note = await _store_call(
-            console,
-            console.asks.add_note(
-                entry.session_id, turn_id, text, composed, key, staged
-            ),
-            entry.session_id,
+        note = await console.asks.add_note(
+            entry.session_id, turn_id, text, composed, key, staged
         )
         return JSONResponse(status_code=202, content={"note": note})
 
@@ -655,7 +580,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         assert key is not None
         composed = _compose(body)
         if scope is not None:
-            await _require_session(console, scope)
+            await console.require_session(scope)
         # A key that made a chat for a task is stopped with the task, and a cancel
         # waits for a create of the same key that is under way.
         async with console.sessions.keyed(lock_name(key) if scope is None else None):
@@ -685,10 +610,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console: Console, scope: str | None, key: str, composed: str
     ) -> JSONResponse:
         try:
-            submission = await _store_call(
-                console,
-                console.store.withdraw_submission(scope, key, user_text=composed),
-                scope,
+            submission = await console.store.withdraw_submission(
+                scope, key, user_text=composed
             )
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
@@ -777,7 +700,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.patch("/api/sessions/{session_id}")
     async def patch_session(session_id: str, body: PatchRequest) -> JSONResponse:
         console.require_store()
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         if info.kind == "task":
             raise ApiError(
                 409,
@@ -795,17 +718,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             except ValueError as exc:
                 raise ApiError(400, "invalid_request", str(exc)) from exc
         if body.workspace is not None:
-            await _sessions_call(
-                console,
-                console.sessions.change_workspace(session_id, body.workspace),
-                session_id,
-            )
+            await console.sessions.change_workspace(session_id, body.workspace)
         if body.approvals is not None:
-            await _sessions_call(
-                console,
-                console.sessions.set_mode(session_id, body.approvals),
-                session_id,
-            )
+            await console.sessions.set_mode(session_id, body.approvals)
         if title is not None:
             # 2.10 lists PATCH among the lock holders; the workspace change
             # takes the lock itself, so a title alone takes it here.
@@ -815,41 +730,31 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 else contextlib.nullcontext()
             )
             async with locked:
-                renamed = await _store_call(
-                    console,
-                    console.store.rename_session(session_id, title),
-                    session_id,
-                )
+                renamed = await console.store.rename_session(session_id, title)
             if not renamed:
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         return JSONResponse(content={"session": console.session_body(info)})
 
     @app.post("/api/sessions/{session_id}/blocks/{request_id}/allow")
     async def allow_block(session_id: str, request_id: str) -> JSONResponse:
         """Allow once a step auto mode blocked, and ask melo to go ahead (#339)."""
         console.require_store()
-        info = await _require_session(console, session_id)
+        info = await console.require_session(session_id)
         if info.kind == "task":
             raise ApiError(409, "task_session_read_only", t("errors.taskChange"))
         if info.kind not in ("chat", "front"):
             raise ApiError(409, "not_a_chat", t("errors.modeNotChat"))
         try:
-            key, categories, tool = await _store_call(
-                console,
-                block_to_allow(
-                    console.store,
-                    session_id,
-                    request_id,
-                    lambda key: console.sessions.allowance_live(session_id, key),
-                ),
+            key, categories, tool = await block_to_allow(
+                console.store,
                 session_id,
+                request_id,
+                lambda key: console.sessions.allowance_live(session_id, key),
             )
             text = _check_text(console, go_ahead_text(categories), session_id)
-            turn, until = await _sessions_call(
-                console,
-                console.sessions.allow_once(session_id, key, categories, text, tool),
-                session_id,
+            turn, until = await console.sessions.allow_once(
+                session_id, key, categories, text, tool
             )
         except BlockError as exc:
             raise ApiError(exc.status, exc.code, exc.message) from exc
@@ -866,11 +771,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         # One transition: its unfinished tasks, chores and waiting cards are the
         # main chat's when it is gone.
-        await _sessions_call(
-            console,
-            console.delete_chat(session_id, forget_notes=notes == "forget"),
-            session_id,
-        )
+        await console.delete_chat(session_id, forget_notes=notes == "forget")
         return Response(status_code=204)
 
 

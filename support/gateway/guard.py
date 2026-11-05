@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import os
 import re
+import sys
 from http.cookies import CookieError, SimpleCookie
 
 from starlette.responses import JSONResponse
@@ -135,9 +136,9 @@ def _forbid_framing(send: Send, *, is_api: bool = False) -> Send:
     return send_forbidding_framing
 
 
-def _is_api_path(scope: Scope) -> bool:
-    """Whether the request is ``/api`` or below it, also with leading slashes."""
-    path = "/" + str(scope.get("path", "")).lstrip("/")
+def is_api_path(path: str) -> bool:
+    """Whether *path* is ``/api`` or below it, also with leading slashes."""
+    path = "/" + path.lstrip("/")
     return path == "/api" or path.startswith("/api/")
 
 
@@ -183,15 +184,23 @@ def is_json_content_type(values: list[str]) -> bool:
     return True
 
 
+def _declared_length(raw: str) -> int | None:
+    """The size a ``Content-Length`` header says, or ``None`` when it is not plain digits.
+
+    ``str.isdigit`` accepts ``"²"`` and other digits ``int`` refuses, so the
+    text must be ASCII too. More digits than any limit is as large as it gets,
+    and ``int`` is not asked to read it.
+    """
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()):
+        return None
+    digits = text.lstrip("0")
+    return int(digits or "0") if len(digits) <= 18 else sys.maxsize
+
+
 def _content_length_too_large(values: list[str], limit: int = BODY_BYTES_LIMIT) -> bool:
     """Whether any ``Content-Length`` header exceeds *limit* (:data:`BODY_BYTES_LIMIT`)."""
-    for raw in values:
-        text = raw.strip()
-        if not text.isdigit():
-            continue
-        if int(text) > limit:
-            return True
-    return False
+    return any((n := _declared_length(raw)) is not None and n > limit for raw in values)
 
 
 class LoopbackGuard:
@@ -260,10 +269,9 @@ class LoopbackGuard:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        api = is_api_path(str(scope.get("path", "")))
         if scope["type"] == "http":
-            send = _forbid_framing(
-                send, is_api=_is_api_path(scope) or scope.get("path") == "/"
-            )
+            send = _forbid_framing(send, is_api=api or scope.get("path") == "/")
 
         refusal = self._refusal(scope)
         generation = (
@@ -275,9 +283,9 @@ class LoopbackGuard:
             refusal = self._auth_refusal(scope)
         rotation = self.auth.rotation if self.auth is not None else None
         if refusal is None and scope["type"] == "http":
-            refusal = self._header_refusal(scope)
+            refusal = self._header_refusal(scope, api)
         if refusal is None and scope["type"] == "http":
-            receive, refusal = await self._read_body(scope, receive)
+            receive, refusal = await self._read_body(scope, receive, api)
         if refusal is None and self.auth is not None:
             refusal = self._auth_refusal(scope)
         if refusal is None:
@@ -305,7 +313,7 @@ class LoopbackGuard:
                 }
             )
             return
-        if _is_api_path(scope):
+        if api:
             # API v2 has one error shape; the legacy routes keep theirs.
             content: dict[str, object] = {
                 "error": {"code": code, "message": error, "details": {}}
@@ -442,7 +450,7 @@ class LoopbackGuard:
                     )
 
     async def _read_body(
-        self, scope: Scope, receive: Receive
+        self, scope: Scope, receive: Receive, api: bool
     ) -> tuple[Receive, tuple[int, str, str] | None]:
         """Read up to :data:`BODY_BYTES_LIMIT` bytes and check ``/api`` Content-Type."""
         chunks: list[bytes] = []
@@ -468,7 +476,7 @@ class LoopbackGuard:
             if not message.get("more_body", False):
                 break
 
-        if total > 0 and _is_api_path(scope):
+        if total > 0 and api:
             content_types = [
                 value.decode("latin-1")
                 for name, value in scope.get("headers", ())
@@ -530,14 +538,14 @@ class LoopbackGuard:
 
         # A path may start with several slashes, as in //v1/health.
         path = "/" + str(scope.get("path", "")).lstrip("/")
-        if path.startswith("/v1/") or path == "/api" or path.startswith("/api/"):
+        if path.startswith("/v1/") or is_api_path(path):
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
 
         return None
 
-    def _header_refusal(self, scope: Scope) -> tuple[int, str, str] | None:
+    def _header_refusal(self, scope: Scope, api: bool) -> tuple[int, str, str] | None:
         headers: dict[bytes, list[str]] = {}
         for name, value in scope.get("headers", ()):
             headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
@@ -554,9 +562,9 @@ class LoopbackGuard:
                     _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR,
                 )
             if (
-                _is_api_path(scope)
+                api
                 and any(
-                    raw.strip().isdigit() and int(raw.strip()) > 0
+                    (n := _declared_length(raw)) is not None and n > 0
                     for raw in content_lengths
                 )
                 and not (

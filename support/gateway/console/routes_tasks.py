@@ -20,13 +20,7 @@ from localmelo.support.gateway.resume_evidence import (
 )
 from localmelo.support.gateway.resume_tokens import TOKEN_TTL_S
 from localmelo.support.gateway.task_policy import TaskPolicyError
-from localmelo.support.gateway.task_store import (
-    TaskConflictError,
-    TaskNotFoundError,
-    TaskNotPausedError,
-    TaskStoreError,
-)
-from localmelo.support.sessions.store import SessionStoreError
+from localmelo.support.gateway.task_store import TaskConflictError
 
 from .activity import left_line
 from .bodies import Body
@@ -62,26 +56,18 @@ class ResumeTask(Body):
     confirmation_token: StrictStr | None = None
 
 
-async def _call(console: Console, operation: Awaitable[T]) -> T:
+async def _call(operation: Awaitable[T]) -> T:
     try:
         return await operation
     except TaskPolicyError as exc:
         raise ApiError(400, exc.code, str(exc)) from exc
     except TaskConflictError as exc:
         raise ApiError(409, "submission_conflict", str(exc)) from exc
-    except TaskNotFoundError as exc:
-        raise ApiError(404, "not_found", str(exc)) from exc
-    except TaskNotPausedError as exc:
-        raise ApiError(409, "not_paused", str(exc)) from exc
-    except TaskStoreError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc) from exc
     except ValueError as exc:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
+async def _resume_call(operation: Awaitable[T]) -> T:
     try:
         return await operation
     except ConfirmationRequiredError as exc:
@@ -106,14 +92,6 @@ async def _resume_call(console: Console, operation: Awaitable[T]) -> T:
         raise ApiError(
             409, "invalid_transition", str(exc), details={"reason": exc.reason}
         ) from exc
-    except TaskConflictError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
-    except TaskNotFoundError as exc:
-        raise ApiError(404, "not_found", str(exc)) from exc
-    except TaskStoreError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc) from exc
     except ValueError as exc:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
@@ -150,7 +128,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def create(body: CreateTask) -> JSONResponse:
         console.require_store()
         task, repeated = await _call(
-            console, console.workers.create(body.model_dump(exclude_unset=True))
+            console.workers.create(body.model_dump(exclude_unset=True))
         )
         content: dict[str, Any] = {"task": _approvals(console, task)}
         if repeated:
@@ -162,13 +140,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         state: str | None = None, level: int | None = None
     ) -> JSONResponse:
         console.require_store()
-        tasks = await _call(console, console.workers.list(state=state, level=level))
+        tasks = await _call(console.workers.list(state=state, level=level))
         return JSONResponse(content={"tasks": [_approvals(console, t) for t in tasks]})
 
     @app.get("/api/tasks/{task_id}")
     async def get_task(task_id: str) -> JSONResponse:
         console.require_store()
-        task = await _call(console, console.workers.get(task_id))
+        task = await _call(console.workers.get(task_id))
         if task.get("out_of_steps"):
             # What the run says is left, for the page's "What is left" row.
             turns = await console.store.list_turns(task_id, limit=1)
@@ -181,7 +159,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if body.level is None and body.state is None:
             raise ApiError(400, "invalid_request", "Choose a level or state.")
         task = await _call(
-            console, console.workers.update(task_id, level=body.level, state=body.state)
+            console.workers.update(task_id, level=body.level, state=body.state)
         )
         return JSONResponse(content={"task": _approvals(console, task)})
 
@@ -189,7 +167,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def continue_task(task_id: str) -> JSONResponse:
         """Continue a task that ran out of steps, from where it stopped (#341)."""
         console.require_store()
-        task, outcome = await _call(console, console.workers.continue_stopped(task_id))
+        task, outcome = await _call(console.workers.continue_stopped(task_id))
         return JSONResponse(
             status_code=202,
             content={"task": _approvals(console, task), "message": outcome},
@@ -215,9 +193,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         """Allow once a step auto mode blocked in a task, and ask it to go ahead (#339)."""
         console.require_store()
         try:
-            task, outcome = await _call(
-                console, console.workers.allow_once(task_id, request_id)
-            )
+            task, outcome = await _call(console.workers.allow_once(task_id, request_id))
         except BlockError as exc:
             raise ApiError(exc.status, exc.code, exc.message) from exc
         return JSONResponse(
@@ -230,7 +206,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def resume(task_id: str, body: ResumeTask) -> JSONResponse:
         console.require_store()
         task = await _resume_call(
-            console,
             console.workers.resume(
                 task_id,
                 operation_id=body.operation_id,

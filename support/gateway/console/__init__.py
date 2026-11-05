@@ -120,6 +120,18 @@ def store_message(exc: SessionStoreError) -> str:
     return display.home_label(str(exc))
 
 
+def store_unavailable(exc: SessionStoreError) -> ApiError:
+    """The 503 of a store call that failed: one fixed message, the cause in the log.
+
+    The failure's own text can name a folder or repeat the database's words, so
+    it is logged and never answered.
+    """
+    logger.warning("A session store call failed: %s", store_message(exc))
+    if isinstance(exc, StoreOwnedError):
+        return ApiError(503, "store_unavailable", STORE_OWNED_MESSAGE)
+    return ApiError(503, "store_unavailable", t("errors.storeUnavailable"))
+
+
 @dataclass(frozen=True)
 class ConsoleOptions:
     """What a test may replace; production reads every default.
@@ -682,31 +694,41 @@ class Console:
             self._store_error or t("errors.storeUnavailable"),
         )
 
+    async def require_session(self, session_id: str) -> SessionInfo:
+        """The row of *session_id*, or 404 ``not_found``.
+
+        A store failure is the exception handler's: 503, or 404 when the row is gone.
+        """
+        info = await self.store.get_session(session_id)
+        if info is None:
+            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
+        return info
+
     async def store_api_error(
         self, exc: SessionStoreError, session_id: str | None = None
     ) -> ApiError:
         """Map a store failure as API v2 says, by state and never by message text.
 
         A failure while ``store.failed`` is set is a 503 without a second
-        read. Any other failure makes the route read the row again: a
-        missing row is 404 ``This session was deleted.``, anything else 503.
+        read. Any other failure makes the route read the row again: a row
+        that is in neither the gateway's file nor the worker history is
+        404 ``This session was deleted.``, anything else 503. A worker or
+        terminal session is never in the gateway's file, so its failure is 503.
+        A 503 says one fixed thing; the failure's own text, which can name a
+        folder, goes to the log.
         """
         if self.store.failed is not None:
             return ApiError(503, "store_unavailable", FAILED_ERROR)
         if session_id is not None:
             try:
                 info = await self.store.get_session(session_id)
+                if info is None:
+                    info = await self.worker_history.get_session(session_id)
             except SessionStoreError:
-                return ApiError(
-                    503, "store_unavailable", self._store_error or store_message(exc)
-                )
+                return store_unavailable(exc)
             if info is None:
                 return ApiError(404, "not_found", t("errors.sessionDeleted"))
-        return ApiError(
-            503,
-            "store_unavailable",
-            self._store_error or store_message(exc),
-        )
+        return store_unavailable(exc)
 
     # ── Event streams ──
 
