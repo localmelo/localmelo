@@ -85,6 +85,7 @@ from localmelo.support.sessions.display import (
     format_duration,
     format_tokens,
     home_label,
+    short_title,
 )
 from localmelo.support.sessions.grants import GrantBook, MainChatGrants
 from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
@@ -97,7 +98,6 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
     UnknownSessionError,
-    title_from_text,
 )
 from localmelo.support.sessions.sync import SessionMark
 from localmelo.support.usage_snapshot import (
@@ -669,7 +669,7 @@ class CliSession:
             self._work = self.spawn(self._remote_turn(text))
             return
         if self.runner is None or self.runner.session_id is None:
-            self.title = self.session_tools.pending_title or title_from_text(text)
+            self.title = self.session_tools.pending_title or short_title(text)
         first_turn = self.runner is None or self.runner.session_id is None
         self.renderer.begin_turn(text, first_turn=first_turn)
         staged, self._attachments = self._attachments, ()

@@ -1,4 +1,4 @@
-"""short_title: a request's first clause, cut at a word, never wider than 48."""
+"""short_title: the one title for a task or a chat, from the words that asked for it."""
 
 from __future__ import annotations
 
@@ -17,23 +17,64 @@ from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_w
         # The first non-blank line, and its first sentence.
         ("\n\n  Second line here\nthird", "Second line here"),
         ("Run the tests. Then commit.", "Run the tests"),
+        ("Fix CI. Then tell me.", "Fix CI"),
+        ("1. Fix the login bug. 2. Add a test", "1. Fix the login bug"),
         ("See test_e2e_pty.py now", "See test_e2e_pty.py now"),
+        # A polite lead goes, but only as a whole word.
+        ("Please fix the login bug", "fix the login bug"),
+        ("Could you please, kindly check the log", "check the log"),
+        ("/task fix the build", "fix the build"),
+        ("请帮我整理一下会议记录", "整理一下会议记录"),
+        ("请问怎么重置密码", "怎么重置密码"),
+        ("Pleased to meet you", "Pleased to meet you"),
+        ("Can your team review this", "Can your team review this"),
+        ("请假三天怎么写", "请假三天怎么写"),
+        ("Please", "Please"),
+        # A level word that opens the request and is followed by a colon or comma
+        # goes; anywhere else, or with nothing after it, it stays.
+        ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),
+        ("今天：修小药丸", "修小药丸"),
+        ("今天修一下：路由规则改掉", "今天修一下：路由规则改掉"),
+        ("no rush: tidy the photos", "tidy the photos"),
+        ("Please, no rush: tidy the photos", "tidy the photos"),
+        ("today, fix the pill", "fix the pill"),
+        ("Whenever possible, update the docs", "Whenever possible, update the docs"),
+        ("today", "today"),
+        ("today:", "today"),
+        ("Today's news summary", "Today's news summary"),
+        # A path reads as its file's name; a link stays whole.
+        (
+            "Read /Users/alex/Documents/notes/todo.md and tell me what is left",
+            "Read todo.md and tell me what is left",
+        ),
+        ("see https://example.com/a/b.html", "see https://example.com/a/b.html"),
+        ("Tidy ~/Pictures/trip/2024/ now", "Tidy ~/Pictures/trip/2024/ now"),
         # A long sentence breaks at a clause of its own, a comma away.
         (
             "DEFAULT_WORKSPACE is defined twice, in support/gateway/task_policy.py "
             "and support/gateway/console/registry.py. Make registry.py import it.",
             "DEFAULT_WORKSPACE is defined twice",
         ),
-        # A short lead-in is no title: the cut falls at a word instead.
+        # A short lead-in is no title: the cut falls at a word instead, with no
+        # "in" or "and" left hanging.
         (
             "Fix this today: in tests/cli/test_e2e_pty.py the list_files test "
             "only checks that the word list_files appears on screen.",
-            "Fix this today: in tests/cli/test_e2e_pty.py…",
+            "Fix this today: in test_e2e_pty.py…",
         ),
         (
             "No rush, whenever you are free: docs/guides/embedding.md and "
             "docs/zh-CN/guides/embedding.md have no picture.",
-            "No rush, whenever you are free…",
+            "whenever you are free: embedding.md…",
+        ),
+        (
+            "summarize every chapter of the handbook and write the findings down",
+            "summarize every chapter of the handbook…",
+        ),
+        (
+            "Please fix the failing test in support/gateway/console/routes_turns.py "
+            "and run the suite",
+            "fix the failing test in routes_turns.py and run…",
         ),
         # Chinese counts two columns a character and breaks between characters.
         (
@@ -42,7 +83,11 @@ from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_w
         ),
         (
             "请把这个仓库里所有测试文件的名字都列出来然后统计每个文件有多少个测试函数",
-            "请把这个仓库里所有测试文件的名字都列出来然后统…",
+            "把这个仓库里所有测试文件的名字都列出来然后统计…",
+        ),
+        (
+            "帮我整理一下这周的会议记录并发给团队成员们看看吧好吗谢谢你了",
+            "整理一下这周的会议记录并发给团队成员们看看吧好…",
         ),
         # Mixed text breaks at a word or at a Chinese character.
         (

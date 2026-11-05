@@ -32,6 +32,7 @@ from datetime import datetime
 from typing import Final, Literal
 
 from localmelo.support.gateway.reminder_time import parse_reminder
+from localmelo.support.sessions.display import EASY_WORDS, URGENT_WORDS, short_title
 
 # Levels P0 to P5. People read the P-code, with its meaning where there is room
 # (``P1 · today``). The words stay what people may type and what the API's
@@ -388,17 +389,9 @@ def brief_question(typed: str) -> bool:
 
 # ── Delegation and its level ──
 
-_URGENT: Final = _words(
-    "as soon as possible|right away|right now|immediately|urgently|urgent|asap|"
-    "end of day|end of the day|紧急|尽快|马上|立刻|立即|很急|着急|急用|今天之内|今晚之前|下班前"
-)
 _DEADLINE: Final = re.compile(
     r"\b(?:by|before|due)\s+(?:today|tonight|noon|eod|\d{1,2}(?::\d{2}\s*(?:am|pm)?|\s*(?:am|pm)))\b"
     r"|今[天晚][^。.!！?？]{0,8}前|\d{1,2}\s*点前"
-)
-_EASY: Final = _words(
-    "no rush|not urgent|no hurry|whenever|low priority|when you have time|"
-    "不急|不着急|不紧急|有空|慢慢来"
 )
 
 # The bare word for today, anywhere in the request, is a deadline of itself. A
@@ -442,10 +435,10 @@ def triage(typed: str) -> tuple[int, str]:
     S5's full table later).
     """
     text = norm(typed)
-    for phrase in _EASY:
+    for phrase in EASY_WORDS:
         if _find(phrase, text):
             return 3, f'you said "{phrase}"'
-    for phrase in _URGENT:
+    for phrase in URGENT_WORDS:
         found = _find(phrase, text)
         if found and not _NEGATION.search(text[: found.start()]):
             return 1, f'you said "{phrase}"'
@@ -1080,31 +1073,6 @@ def work_request(typed: str) -> bool:
     return _pipeline(bare)
 
 
-_TITLE_LEAD: Final = re.compile(
-    r"^(?:(?:/task|please|pls|kindly|could you|can you|would you|请|麻烦你?|帮我|帮忙)[\s,，]*)+",
-    re.IGNORECASE,
-)
-# A level word that opens a title and is followed by a colon or comma ("no rush: tidy
-# the photos", "today, fix the pill", "今天：修小药丸"): the words triage reads as
-# urgency, ease or today. Spaces may stand around the colon or comma. A word followed
-# by a bare space or by Chinese text stays, as in "Whenever possible, update the docs"
-# and "今天修一下".
-_TODAY_CUE: Final = _words("今天|today|tonight|今晚")
-_LEVEL_CUE: Final = re.compile(
-    "^(?:"
-    + "|".join(
-        re.escape(word)
-        for word in sorted((*_URGENT, *_EASY, *_TODAY_CUE), key=len, reverse=True)
-    )
-    + r")\s*[：:，,]\s*",
-    re.IGNORECASE,
-)
-_TITLE_TAIL: Final = frozenset(
-    _words("the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so")
-)
-_IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
-TITLE_CHARS: Final = 48
-TITLE_CHARS_ZH: Final = 24
 # What a chat's turn answers when it hands the work to a task (the front's
 # ``handoff_text``): started, or asked whether to start; English and Chinese.
 STARTED_TEXT: Final = "This needs more than a quick answer, so I started it as a task."
@@ -1112,48 +1080,6 @@ ASK_TEXT: Final = "This needs more than a quick answer. Start this as a task?"
 STARTED_TEXT_ZH: Final = "这件事不是一句话能答完的，我已把它作为任务开始。"
 ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任务开始吗？"
 HANDOFF_TEXTS: Final = frozenset({STARTED_TEXT, ASK_TEXT, STARTED_TEXT_ZH, ASK_TEXT_ZH})
-
-
-def _without_level_cue(text: str) -> str:
-    """*text* without the level cue that opens it, if more text follows."""
-    cue = _LEVEL_CUE.match(text)
-    rest = text[cue.end() :] if cue else text
-    return rest if rest.strip() else text
-
-
-def short_title(text: str) -> str:
-    """A task's short title: the request's first sentence, paths as file names, cut at a word.
-
-    The person's own words, without "please" and the like or a level word that
-    opens the request and a colon or comma follows; never cut mid-word: at most
-    :data:`TITLE_CHARS` characters (24 for Chinese), without a trailing "the",
-    "in" or punctuation.
-    """
-    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    first = _TITLE_LEAD.sub("", lines[0] if lines else "").strip()
-    first = _without_level_cue(first)
-    first = re.split(r"(?<=[^\d][.!?])\s|[。！？；;]", first, maxsplit=1)[0]
-    # A path reads as its file's name; a link and "and/or" stay as they are.
-    first = " ".join(
-        word if "://" in word else _IN_FOLDER.sub(r"\1", word) for word in first.split()
-    ).strip(" ,.:;，。：；")
-    if _has_cjk(first):
-        title = first[:TITLE_CHARS_ZH]
-        if re.match(r"\w\w", first[TITLE_CHARS_ZH - 1 : TITLE_CHARS_ZH + 1], re.ASCII):
-            title = re.sub(r"[\w.-]+$", "", title, flags=re.ASCII)  # never mid-word
-        title = title.rstrip(" ,，、：:")
-    else:
-        words: list[str] = []
-        for word in first.split():
-            if len(" ".join([*words, word])) > TITLE_CHARS:
-                break
-            words.append(word)
-        while len(words) > 1 and words[-1].casefold().strip(",:;") in _TITLE_TAIL:
-            words.pop()
-        title = " ".join(words).rstrip(" ,.:;")
-        if not title:
-            title = first[:TITLE_CHARS]
-    return title or "Task"
 
 
 _GREETING: Final = re.compile(
@@ -1308,7 +1234,6 @@ __all__ = [
     "polite_request",
     "reply_language",
     "route",
-    "short_title",
     "start_rule",
     "status_question",
     "steps_request",

@@ -677,9 +677,89 @@ def drop_leading_ack(rows: Iterable[str]) -> list[str] | None:
 TITLE_WIDTH: Final = 48
 # A clause shorter than this is no title ("Fix this today" says nothing).
 _CLAUSE_WIDTH: Final = 16
-_SENTENCE_END: Final = re.compile(r"(?<=[.!?;])\s|(?<=[。！？；])")
+# Words that set a task's level. The gateway's triage reads them (P1 for the
+# urgent ones, P3 for the easy ones); a title leaves them out when they open it.
+URGENT_WORDS: Final = (
+    "as soon as possible",
+    "right away",
+    "right now",
+    "immediately",
+    "urgently",
+    "urgent",
+    "asap",
+    "end of day",
+    "end of the day",
+    "紧急",
+    "尽快",
+    "马上",
+    "立刻",
+    "立即",
+    "很急",
+    "着急",
+    "急用",
+    "今天之内",
+    "今晚之前",
+    "下班前",
+)
+EASY_WORDS: Final = (
+    "no rush",
+    "not urgent",
+    "no hurry",
+    "whenever",
+    "low priority",
+    "when you have time",
+    "不急",
+    "不着急",
+    "不紧急",
+    "有空",
+    "慢慢来",
+)
+_TODAY_WORDS: Final = ("今天", "today", "tonight", "今晚")
+# What opens a request and is no part of its title: a polite word ("please",
+# "请", "帮我": "请问" is a word of its own, and "请假" or "请求" are not polite),
+# "/task", or a level word followed by a colon or comma ("no rush: tidy the
+# photos", "今天：修小药丸"). A level word followed by a bare space or by Chinese
+# text stays, as in "Whenever possible, update the docs" and "今天修一下".
+_OPENING: Final = re.compile(
+    r"^(?:(?:(?:/task|please|pls|kindly|could you|can you|would you)\b|请问"
+    r"|请(?![假求客教])|麻烦你?|帮我|帮忙)[\s,，]*|(?:"
+    + "|".join(
+        re.escape(word)
+        for word in sorted(
+            (*URGENT_WORDS, *EASY_WORDS, *_TODAY_WORDS), key=len, reverse=True
+        )
+    )
+    + r")\s*[：:，,]\s*)+",
+    re.IGNORECASE,
+)
+# A sentence ends at a full stop, "!" or "?" before a space (but "1." is a list
+# number), or at a Chinese sentence end.
+_SENTENCE_END: Final = re.compile(r"(?<=[^\d][.!?])\s|[。！？；;]")
 _CLAUSE_END: Final = re.compile(r"(?<=,)\s|(?<=，)")
 _TITLE_TAIL: Final = " ,;:.!?-–—·，；：。！？"
+# A path reads as its file's name.
+_IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
+# Words a cut title does not end on: "fix the failing test in…".
+_DANGLING: Final = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "in",
+        "of",
+        "to",
+        "and",
+        "or",
+        "for",
+        "with",
+        "on",
+        "at",
+        "by",
+        "from",
+        "that",
+        "so",
+    }
+)
 
 
 def _wide(char: str) -> bool:
@@ -692,18 +772,29 @@ def title_width(text: str) -> int:
 
 
 def short_title(text: str) -> str:
-    """A short title from a request: its first clause, at most :data:`TITLE_WIDTH` wide.
+    """A short title from a request, at most :data:`TITLE_WIDTH` wide.
 
-    The first non-blank line, whitespace collapsed, ends at its first
-    sentence end, or at a comma when what comes before it is a clause
-    on its own (at least 16 wide). A clause that is still too long is cut at
-    the last word (or, in Chinese or Japanese, character) that fits and ends
-    in ``…``; one long word with no break is cut where it must be. Nothing
-    longer than the limit comes back, and an empty request reads ``Task``.
+    Every task and every chat is named by this one function, so a request reads
+    the same wherever it was typed. The title is the person's own first words,
+    from the first non-blank line with whitespace collapsed. A polite word or a
+    level word that opens it goes, and a path reads as its file's name (a link
+    stays whole). The title ends at the first sentence end, or at a comma when
+    what comes before it is a clause on its own (at least 16 wide). A clause
+    that is still too long is cut at the last word (or, in Chinese or Japanese,
+    character) that fits, without a "the" or "in" left hanging, and ends in
+    ``…``; one long word with no break is cut where it must be. An empty
+    request reads ``Task``.
     """
     line = next((row for row in text.splitlines() if row.strip()), "")
     line = " ".join(line.split())
-    clause = _SENTENCE_END.split(line, maxsplit=1)[0].rstrip(_TITLE_TAIL)
+    opening = _OPENING.match(line)
+    # A request that is nothing but its opening keeps it.
+    line = (line[opening.end() :] if opening else "") or line
+    sentence = _SENTENCE_END.split(line, maxsplit=1)[0]
+    clause = " ".join(
+        word if "://" in word else _IN_FOLDER.sub(r"\1", word)
+        for word in sentence.split()
+    ).rstrip(_TITLE_TAIL)
     if title_width(clause) <= TITLE_WIDTH:
         return clause or "Task"
     for found in _CLAUSE_END.finditer(clause):
@@ -724,7 +815,10 @@ def short_title(text: str) -> str:
         clause[cut] == " " or _wide(clause[cut]) or _wide(clause[cut - 1])
     ):
         cut -= 1
-    return clause[: cut or end].rstrip(_TITLE_TAIL) + "…"
+    head = clause[: cut or end].rstrip(_TITLE_TAIL)
+    while (split := head.rpartition(" "))[0] and split[2].casefold() in _DANGLING:
+        head = split[0].rstrip(_TITLE_TAIL)
+    return head + "…"
 
 
 def clean_output(text: str) -> str:
