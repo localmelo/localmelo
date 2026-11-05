@@ -956,13 +956,13 @@ class ChatMemory:
         if self._embedding_url:
             key = ("url", self._embedding_url, self._embedding_model or "default")
         elif cfg is not None and cfg.has_embedding:
-            from localmelo.support.backends.registry import model_in_use
+            from localmelo.support.backends.registry import in_use
 
             section = getattr(cfg, cfg.embedding_backend, None)
             key = (
                 cfg.embedding_backend,
                 str(getattr(section, "embedding_url", "")),
-                model_in_use(cfg, cfg.embedding_backend, embedding=True),
+                in_use(cfg, cfg.embedding_backend, embedding=True)[1],
             )
         if key != self._embed_key:
             old, self._embedder, self._embed_key = self._embedder, None, key
@@ -1054,13 +1054,13 @@ class ChatMemory:
         if self._chat_url:
             key = ("url", self._chat_url, self._chat_model or "default")
         elif cfg is not None and cfg.is_configured:
-            from localmelo.support.backends.registry import model_in_use
+            from localmelo.support.backends.registry import in_use
 
             section = getattr(cfg, cfg.chat_backend, None)
             key = (
                 cfg.chat_backend,
                 str(getattr(section, "chat_url", "")),
-                model_in_use(cfg, cfg.chat_backend),
+                in_use(cfg, cfg.chat_backend)[1],
             )
         if key != self._llm_key:
             old, self._llm, self._llm_key = self._llm, None, key
