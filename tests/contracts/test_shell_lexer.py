@@ -309,6 +309,51 @@ def test_unwrap_finds_the_program_past_keywords_and_wrappers(
     assert (found.readings, found.wrappers, found.unread) == ([words], wrappers, False)
 
 
+@pytest.mark.parametrize("name", shell_lexer.WRAPPERS)
+def test_an_assignment_after_a_wrapper_is_read_where_its_manual_puts_it(
+    name: str,
+) -> None:
+    """env and sudo take ``NAME=value`` words; for any other wrapper such a word
+    is its next word: the program, or timeout's duration and flock's file. A
+    shell runs ``time`` as its own keyword too, so there both ways are read
+    and the command is unread. With assignments read anywhere, the words give
+    the reading melo had before, which the keys of a step add."""
+    operand = ["5"] if name in shell_lexer.OPERAND else []
+    found = shell_lexer.unwrap([name, *operand, "A=1", "b"])
+    anywhere = shell_lexer.unwrap(
+        [name, *operand, "A=1", "b"], assignments_anywhere=True
+    )
+    if shell_lexer.WRAPPERS[name].assignments:
+        assert (found.readings, found.unread) == ([["b"]], False)
+    elif name == "time":
+        assert (found.readings, found.unread) == ([["b"], ["A=1", "b"]], True)
+    else:
+        assert (found.readings, found.unread) == ([["A=1", "b"]], False)
+    assert (anywhere.readings, anywhere.assignments) == ([["b"]], [("A", "1")])
+    if operand:  # the word is the duration, the file
+        assert shell_lexer.unwrap([name, "A=1", "b"]).readings == [["b"]]
+
+
+def test_env_reads_no_option_after_an_assignment() -> None:
+    """env(1): its options come before any ``NAME=value``; every later word with
+    ``=`` is one, and the next word is the program."""
+    found = shell_lexer.unwrap(["env", "A=1", "x/y=2", "-i", "b"])
+    assert found.readings == [["-i", "b"]]
+    assert found.assignments == [("A", "1"), ("x/y", "2")]
+
+
+@pytest.mark.parametrize(
+    "name", [name for name, o in shell_lexer.WRAPPERS.items() if "--" not in o.flags]
+)
+def test_an_unlisted_double_dash_may_end_the_options(name: str) -> None:
+    """A wrapper whose manual does not name ``--`` may still end its options
+    there, as getopt(3) does: the next word is then the program, even one
+    that starts with ``-`` (timeout's duration, flock's file before it)."""
+    found = shell_lexer.unwrap([name, "--", "-b", "c"])
+    program = ["c"] if name in shell_lexer.OPERAND else ["-b", "c"]
+    assert found.unread and program in found.readings
+
+
 def test_unwrap_keeps_the_assignments_in_order() -> None:
     found = shell_lexer.unwrap(shlex.split("A=1 env -i B=2 'x y=z' sudo C=3 rm x"))
     assert found.assignments == [("A", "1"), ("B", "2"), ("x y", "z"), ("C", "3")]

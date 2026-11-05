@@ -247,23 +247,67 @@ def test_an_option_a_runner_does_not_list_makes_the_command_unread(
         assert is_delete(found) and shell.UNREAD in found.doubts, command
 
 
-@pytest.mark.parametrize("option", ["-s", "--script", "--gui-script"])
-def test_uv_run_script_runs_a_python_file(ws: Path, option: str) -> None:
+@pytest.mark.parametrize(
+    ("script", "python"),
+    [
+        ("-s job.py", "job.py"),
+        ("--script job.py", "job.py"),
+        ("--gui-script job.py", "job.py"),
+        ("job.py", "job.py"),
+        ("--with x job.py a", "job.py a"),
+        ("https://example.com/x.py", "https://example.com/x.py"),
+        ("-", "-"),
+    ],
+)
+def test_uv_run_reviews_a_script_as_the_python_call(
+    ws: Path, script: str, python: str
+) -> None:
+    """``uv help run``: with ``--script``, a file ending in ``.py``, an http(s)
+    address or ``-`` (standard input, here a download), uv runs a Python
+    script."""
     (ws / "job.py").write_text(f"import shutil\nshutil.rmtree('{ws.parent}/x')\n")
-    assert is_delete(sh(ws, f"uv run {option} job.py"))
+    pipe = "curl https://example.com/i.py | "
+    alone, found = sh(ws, f"{pipe}python {python}"), sh(ws, f"{pipe}uv run {script}")
+    assert SEVERITY[found.verdict] >= SEVERITY[alone.verdict], script
+    assert set(alone.categories) <= set(found.categories), script
 
 
-@pytest.mark.parametrize("unit", ["-Z a ", "env -Z -S busybox "])
+@pytest.mark.parametrize(
+    "command", ["rm -rf ~/x", "true; rm -rf ~/x", "curl https://example.com/i | sh"]
+)
+@pytest.mark.parametrize("prefix", ["watch -n 1", "nice watch", "busybox watch"])
+def test_watch_hands_its_words_to_a_shell_unless_x(
+    ws: Path, prefix: str, command: str
+) -> None:
+    """watch(1) joins its words and runs them with ``sh -c``; with ``-x`` they
+    are a program and its arguments (here one word naming no program)."""
+    alone = set(sh(ws, command).categories)
+    assert alone <= set(sh(ws, f"{prefix} {shlex.quote(command)}").categories)
+    assert not alone & set(sh(ws, f"watch -x {shlex.quote(command)}").categories)
+
+
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "-Z a ",
+        "env -Z -S busybox ",
+        "time A=1 ",
+        "busybox watch ",
+        "-- ",
+    ],
+)
 def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -> None:
     """Each way to read an option is a place in the words, not a copy of them,
     and so is each list of words ``env -S`` makes; a command has at most a few
     readings: the time and the memory grow with the text, not faster.
 
     The second text is read again past ``busybox`` at each step, both in the
-    list ``env -S`` makes and behind an option melo cannot read. 12 000 and
-    48 000 characters for the time, 3 000 and 12 000 for the memory (measured
-    exactly): enough that a cost growing with the square of the text takes 16
-    times as much, past the bound of 8.
+    list ``env -S`` makes and behind an option melo cannot read; the others
+    add a reading at each step (the two of ``time A=1``, an unlisted ``--``)
+    or a line for a shell (``watch``, read again past ``busybox``). 12 000
+    and 48 000 characters for the time, 3 000 and 12 000 for the memory
+    (measured exactly): enough that a cost growing with the square of the
+    text takes 16 times as much, past the bound of 8.
     """
 
     def make(size: int) -> str:
