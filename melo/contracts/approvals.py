@@ -201,10 +201,15 @@ class ApprovalDecision:
                 f"ApprovalDecision.origin {self.origin!r} needs allow=True: "
                 "a grant or an earlier approval only allows"
             )
-        if self.origin in ("timeout", "words") and self.allow:
+        if self.origin == "timeout" and self.allow:
             raise ValueError(
-                f"ApprovalDecision.origin {self.origin!r} needs allow=False: "
-                "a timeout and the person's words only deny"
+                "ApprovalDecision.origin 'timeout' needs allow=False: "
+                "a timeout only denies"
+            )
+        if self.origin == "words" and self.allow:
+            raise ValueError(
+                "ApprovalDecision.origin 'words' needs allow=False: "
+                "the person's words only deny"
             )
 
 
