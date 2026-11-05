@@ -193,10 +193,11 @@ enable_thinking = false
 
 3. Switch the model whenever you like: `melo-serve use <pick>`.
 
-- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. melo_serve counts as running only while its control socket accepts a connection, so a state left by a crash or a stop serves nothing.
+- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. A terminal chat that chose no model with `/model` follows it too: before a turn, if melo_serve now serves another chat model, the chat moves to it and says so (`The model changed to <model> (via melo_serve).`). melo_serve counts as running only while its control socket accepts a connection, and only if that socket is your own, in a folder only you can write, so a state left by a crash or a stop serves nothing.
 - With nothing served, `melo "task"` (and `POST /v1/agent/run`, as 502 `agent_start_failed`) ends with one line that says what to run: `melo-serve up`, the install command, or `melo-serve use <pick>`. A direct run exits with code 1.
 - First-run setup prefers a running melo_serve and saves it with no model. Setup, Settings and the check at start-up never need a model to be served: that is checked when a model is asked for.
 - `melo serve` checks melo_serve when the config uses it; see [Gateway](gateway.md#start-the-gateway).
+- localmelo runs `melo-serve` from your PATH when that is an absolute path, and otherwise from the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), which a login item's PATH lacks; it runs only a file you own.
 - The melo_serve [README](https://github.com/localmelo/melo_serve#readme) covers the picks, the login item and the other commands.
 
 ### Ollama with embeddings
