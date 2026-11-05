@@ -54,7 +54,7 @@ class TestStopReasonInTheEvent:
             "next_step_is_concrete": True,
             "next_step_is_novel": True,
         }
-        assert (first["gate"], first["stop_reason"]) == ("patient", None)
+        assert first["stop_reason"] is None
         assert first["continue_run"] is True
 
     @pytest.mark.asyncio
@@ -70,7 +70,7 @@ class TestStopReasonInTheEvent:
         assert result.status == "gate_stopped"
         assert event["flags"][check] is False
         assert [v for v in event["flags"].values() if v is False] == [False]
-        assert (event["gate"], event["continue_run"]) == ("patient", False)
+        assert event["continue_run"] is False
         assert event["stop_reason"] == REASON_OF[check]
         assert result.error == "go on"
 
@@ -170,8 +170,8 @@ class TestAlwaysConsistent:
                 next_step_is_concrete=flags[1],
                 next_step_is_novel=flags[2],
             )
-            reason = _stop_reason(decision, "patient", out_of, patient=patient)
-            gate = _gate_stop_reason(decision, "patient", patient=patient)
+            reason = _stop_reason(decision, out_of, patient=patient)
+            gate = _gate_stop_reason(decision, patient=patient)
             expected = not out_of and action != "done" and gate is None
             assert (reason is None) == expected, (action, flags, out_of, patient)
             if reason is not None:

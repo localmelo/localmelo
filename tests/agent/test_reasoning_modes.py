@@ -1055,14 +1055,7 @@ async def test_agent_config_keeps_the_section_field_in_replay(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("gate", "status", "bodies"),
-    [("flags", "completed", 2), ("utility", "gate_stopped", 1)],
-)
 async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
-    gate: str,
-    status: str,
-    bodies: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def refuse(
@@ -1081,7 +1074,6 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
         server.llm(reasoning_field="auto"),
         _options(
             reasoning="replay",
-            reflection_gate=gate,  # type: ignore[arg-type]
             answer_on_stop=False,  # the request it adds is not what this counts
             max_steps=5,
             steps_per_attempt=1,
@@ -1091,15 +1083,10 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
     result = await agent.run_task("q")
     await agent.close()
 
-    assert result.status == status
-    assert len(server.bodies) == bodies
-    # The refused request is never sent: flags starts the second attempt,
-    # utility keeps the unreadable stop and ends there.
-    assert result.steps == (2 if gate == "flags" else 1)
-    if gate == "utility":
-        assert result.error == "Could not parse reflection response"
-        assert result.result == ""
-        assert result.attempts == 1
+    assert result.status == "completed"
+    assert len(server.bodies) == 2
+    # The refused request is never sent: the second attempt starts.
+    assert result.steps == 2
 
 
 @pytest.mark.asyncio

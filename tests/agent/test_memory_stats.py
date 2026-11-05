@@ -198,7 +198,7 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         },
         "ignored": 0,
     }
-    assert list(result.config)[-15:] == [
+    assert list(result.config)[-14:] == [
         "reasoning",
         "replay_turns",
         "note_writer",
@@ -212,7 +212,6 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "cross_task_ratio",
         "cross_task_cap",
         "cross_task_cold",
-        "admit_on_outcome",
         "keep_decision_text",
     ]
     assert (result.config["reasoning"], result.config["replay_turns"]) == (

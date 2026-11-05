@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
+from localmelo.melo.agent._chat import PREFIX_RUN, SYSTEM_PROMPT, Chat
 from localmelo.tests.agent.test_lean_output import OFF, _run
 from localmelo.tests.agent.test_reflection_gate import FakeLLM
 
@@ -45,18 +45,6 @@ async def test_the_identity_comes_right_after_the_base_text_in_every_request(
         assert body == before
 
 
-async def test_the_earlier_layout_carries_the_identity_in_its_planning_requests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _, bodies, _ = await _run(
-        tmp_path, monkeypatch, identity=IDENTITY, fixed_prefix=False
-    )
-    system = bodies[0]["messages"][0]["content"]
-    assert system.startswith(SYSTEM_PROMPT + "\n\n" + IDENTITY)
-    # The next attempt's request adds the reflection after the same opening.
-    assert bodies[2]["messages"][0]["content"].startswith(system)
-
-
 async def test_the_fixed_section_has_no_layout_label(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -70,12 +58,21 @@ async def test_the_fixed_section_has_no_layout_label(
 
 
 def test_the_identity_sits_between_the_base_text_and_the_notes() -> None:
-    merged, _ = _build_system_prompt(
-        [], [], None, ["a workspace note"], "the note instruction", "BASE", "WHO"
+    chat = Chat(
+        FakeLLM([]),
+        system_prompt="BASE",
+        identity="WHO",
+        note_instruction="the note instruction",
+        system_notes=["a workspace note"],
     )
-    assert merged == "BASE\n\nWHO\n\nthe note instruction\n\na workspace note"
-    merged, _ = _build_system_prompt([], [], None, (), "", "BASE")
-    assert merged == "BASE"
+    token = chat.begin_prefix()
+    try:
+        system = chat._fixed_system()
+    finally:
+        PREFIX_RUN.reset(token)
+    assert system.startswith(
+        "BASE\n\nWHO\n\nthe note instruction\n\na workspace note\n\n"
+    )
 
 
 async def test_the_chat_keeps_the_identity_of_its_options() -> None:

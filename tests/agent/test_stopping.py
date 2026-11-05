@@ -176,19 +176,13 @@ class TestDone:
         llm = FakeLLM(
             [
                 _echo_call("a", content="an earlier run's text"),
-                # The first run's reflection has no JSON, also when asked
-                # again, so under "utility" that run stops with this text
-                # as its result.
-                _answer("first"),
-                _answer("first"),
+                _reflection("done"),
                 _echo_call("b"),
                 _reflection("done"),
             ]
         )
-        agent = _agent(
-            llm, steps_per_attempt=1, max_attempts=2, reflection_gate="utility"
-        )
-        assert (await agent.run_task("echo one")).result == "first"
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        assert (await agent.run_task("echo one")).result == "an earlier run's text"
         result = await agent.run_task("echo two")
         assert (result.status, result.result) == ("completed", "")
 
@@ -200,17 +194,10 @@ class TestDone:
         assert (result.status, result.result) == ("completed", "42")
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("gate", ["flags", "utility"])
-    async def test_an_oversized_done_is_not_forced_to_decompose(
-        self, gate: str
-    ) -> None:
+    async def test_an_oversized_done_is_not_forced_to_decompose(self) -> None:
         summary = "x" * (MAX_REFLECTION_CHARS + 100)
         reply = _reflection("done", best_effort_result="42", summary=summary)
-        agent = _agent(
-            FakeLLM([_echo_call("a"), reply]),
-            steps_per_attempt=1,
-            reflection_gate=gate,
-        )
+        agent = _agent(FakeLLM([_echo_call("a"), reply]), steps_per_attempt=1)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result) == ("completed", "42")
 
@@ -510,64 +497,9 @@ class TestRenderTranscript:
 
 # ── Tolerant reflection parsing ─────────────────────────────────────────────
 
-DONE = json.dumps(_decision("done", best_effort_result="42"))
-
 
 class TestTolerantParsing:
-    @pytest.mark.parametrize(
-        "text",
-        [
-            DONE,
-            f"```json\n{DONE}\n```",
-            f"```\n{DONE}\n```",
-            f"  ```JSON\n{DONE}```  ",
-            f"```json {DONE}```",
-            f"Here is my reflection:\n{DONE}\nThat is all.",
-            f"Reflection:\n```json\n{DONE}\n```\n",
-            f"Using the format {{action}}: {DONE}",
-            f"An unclosed {{ brace, then {DONE}",
-        ],
-    )
-    def test_finds_the_decision(self, text: str) -> None:
-        _, decision = Agent._parse_reflection(text, 0, "budget")
-        assert decision.recommended_action == "done"
-        assert decision.best_effort_result == "42"
-
-    def test_braces_inside_strings_do_not_end_the_object(self) -> None:
-        data = _decision("done", best_effort_result="use {x} or } then {")
-        text = f"Sure. {json.dumps(data)} Done."
-        _, decision = Agent._parse_reflection(text, 0, "")
-        assert decision.best_effort_result == "use {x} or } then {"
-
-    def test_the_first_object_wins(self) -> None:
-        stop = json.dumps(_decision("stop"))
-        _, decision = Agent._parse_reflection(f"{DONE}\n{stop}", 0, "")
-        assert decision.recommended_action == "done"
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "no JSON here",
-            "an unclosed { brace",
-            "{not: json}",
-            "```json\n```",
-            "{" * 2_000,
-            '{"a": ' * 2_000,
-            # Nested deeper than the JSON decoder's recursion limit.
-            '{"a": ' * 50_000,
-        ],
-    )
-    def test_falls_back_to_stop(self, text: str) -> None:
-        _, decision = Agent._parse_reflection(text, 0, "")
-        assert decision.recommended_action == "stop"
-        assert decision.rationale == "Could not parse reflection response"
-        assert decision.best_effort_result == text[:500]
-
-    def test_json_that_is_not_an_object_still_stops(self) -> None:
-        _, decision = Agent._parse_reflection("```json\n[1, 2]\n```", 0, "")
-        assert decision.recommended_action == "stop"
-        assert decision.rationale == "Reflection response was not a JSON object"
-
+    # The reading itself is tested in tests/agent/test_reflection_gate.py.
     @pytest.mark.asyncio
     async def test_a_fenced_continue_starts_the_next_attempt(self) -> None:
         fenced = f"```json\n{json.dumps(_decision('continue'))}\n```"

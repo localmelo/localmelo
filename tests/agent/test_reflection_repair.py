@@ -635,4 +635,4 @@ class TestWhereTheReaderIsUsed:
 
     def test_the_notes_that_a_repaired_reply_cites_are_read(self) -> None:
         text = '{"recommended_action": "done", "used_notes": ["n1", 2, ""],}'
-        assert Agent._used_notes(text, True) == ["n1"]
+        assert Agent._used_notes(text) == ["n1"]

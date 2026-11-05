@@ -22,6 +22,7 @@ from localmelo.melo.agent._chat import (
     PREFIX_RUN,
     REFLECTION_RETRY_GUARD_NOTE,
     REFLECTION_RETRY_NOTE,
+    Chat,
 )
 from localmelo.melo.agent.agent import (
     REFLECTION_TRIM_ORDER,
@@ -165,6 +166,13 @@ def _prefix_scope(agent: Agent) -> Iterator[None]:
         yield
     finally:
         PREFIX_RUN.reset(token)
+
+
+def _scoped_chat(llm: BaseLLMProvider, **options: Any) -> Chat:
+    """A Chat that can send a request outside a run (see :func:`_prefix_scope`)."""
+    chat = Chat(llm, **options)
+    chat.begin_prefix()
+    return chat
 
 
 def _is_reflection(call: dict[str, Any]) -> bool:
@@ -638,7 +646,7 @@ def _bulky(action: str, **fields: Any) -> dict[str, Any]:
 
 def _parsed_size(data: dict[str, Any]) -> int:
     """The serialized size of the reflection that *data* gives after attempt 0."""
-    entry, _ = Agent._parse_reflection(json.dumps(data), 0, "budget")
+    entry, _ = Agent._reflection_from_object(data, 0, "budget")
     return _size(entry)
 
 

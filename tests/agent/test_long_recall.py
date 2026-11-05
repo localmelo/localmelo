@@ -269,10 +269,9 @@ async def test_the_last_evidence_bearing_attempt_digest_is_admitted(
             attempt_policy="reflect",
             steps_per_attempt=1,
             max_attempts=2,
-            admit_on_outcome=True,
         ),
     )
-    result = await agent.run_task("write helper")
+    result = await agent.run_task("write helper. Remember how you did it.")
     await agent.close()
     assert result.memory_stats is not None
     # Attempt 1 wrote a file; attempt 2 answered without evidence. The

@@ -439,12 +439,12 @@ class TestReflectionPromotion:
         assert len(agent.hippo.working.get_reflections()) == 0
 
 
-class TestParseReflection:
-    """Unit tests for _parse_reflection."""
+class TestReflectionFromObject:
+    """Unit tests for _reflection_from_object (the reading is in test_reflection_gate)."""
 
-    def test_valid_json(self) -> None:
-        entry, decision = Agent._parse_reflection(
-            _reflection_json("continue", summary="ok", progress=True),
+    def test_valid_object(self) -> None:
+        entry, decision = Agent._reflection_from_object(
+            json.loads(_reflection_json("continue", summary="ok", progress=True)),
             attempt_id=0,
             failure_type="budget",
         )
@@ -454,55 +454,29 @@ class TestParseReflection:
         assert decision.recommended_action == "continue"
         assert decision.progress_made is True
 
-    def test_invalid_json_falls_back_to_stop(self) -> None:
-        entry, decision = Agent._parse_reflection(
-            "not json at all",
-            attempt_id=1,
-            failure_type="stuck",
-        )
-        assert entry.attempt_id == 1
-        assert decision.recommended_action == "stop"
-        assert "parse" in decision.rationale.lower()
-
-    def test_empty_string(self) -> None:
-        _, decision = Agent._parse_reflection("", 0, "")
-        assert decision.recommended_action == "stop"
-
     def test_malformed_types_coerced(self) -> None:
         """Valid JSON with wrong types should not crash."""
-        raw = json.dumps(
-            {
-                "summary": 123,
-                "failed_hypotheses": "single string",
-                "progress_made": "true",
-                "confidence": "high",
-                "recommended_action": "continue",
-                "task_still_feasible": 1,
-                "next_step_is_concrete": "yes",
-                "next_step_is_novel": "yes",
-                "estimated_info_gain": "0.7",
-                "novelty": None,
-                "feasibility": "bad",
-            }
-        )
-        entry, decision = Agent._parse_reflection(raw, 0, "budget")
+        data = {
+            "summary": 123,
+            "failed_hypotheses": "single string",
+            "progress_made": "true",
+            "confidence": "high",
+            "recommended_action": "continue",
+            "task_still_feasible": 1,
+            "next_step_is_concrete": "yes",
+            "next_step_is_novel": "yes",
+        }
+        entry, decision = Agent._reflection_from_object(data, 0, "budget")
         assert entry.summary == "123"
         assert entry.failed_hypotheses == ["single string"]
         assert entry.confidence == 0.0  # "high" -> default 0.0
         assert decision.progress_made is True  # "true" -> True
         assert decision.task_still_feasible is True
-        assert decision.estimated_info_gain == 0.7
-        assert decision.novelty == 0.0  # None -> 0.0
-        assert decision.feasibility == 0.0  # "bad" -> 0.0
-
-    def test_json_array_falls_back_to_stop(self) -> None:
-        """JSON that parses to a list (not dict) should stop."""
-        _, decision = Agent._parse_reflection("[1,2,3]", 0, "")
-        assert decision.recommended_action == "stop"
 
     def test_unknown_action_coerced_to_stop(self) -> None:
-        raw = json.dumps({"recommended_action": "yolo"})
-        _, decision = Agent._parse_reflection(raw, 0, "")
+        _, decision = Agent._reflection_from_object(
+            {"recommended_action": "yolo"}, 0, ""
+        )
         assert decision.recommended_action == "stop"
 
 
@@ -756,75 +730,3 @@ class TestReflectionFailureTypeInPrompt:
         assert len(reflect_user_msgs) == 1
         content = reflect_user_msgs[0].content.lower()
         assert "budget" in content or "exhausted" in content
-
-
-class TestUnitFloatHardening:
-    """Utility score floats must be clamped to [0, 1] and handle bad inputs."""
-
-    def test_values_clamped_to_unit_range(self) -> None:
-        raw = json.dumps(
-            {
-                "recommended_action": "continue",
-                "estimated_info_gain": 2.5,
-                "estimated_cost": -1.0,
-                "repeat_risk": 3.0,
-                "novelty": -0.5,
-                "feasibility": 1.5,
-            }
-        )
-        _, decision = Agent._parse_reflection(raw, 0, "budget")
-        assert decision.estimated_info_gain == 1.0
-        assert decision.estimated_cost == 0.0
-        assert decision.repeat_risk == 1.0
-        assert decision.novelty == 0.0
-        assert decision.feasibility == 1.0
-
-    def test_nan_defaults_safely(self) -> None:
-        raw = json.dumps(
-            {
-                "recommended_action": "continue",
-                "estimated_info_gain": float("nan"),
-                "novelty": float("nan"),
-            }
-        )
-        _, decision = Agent._parse_reflection(raw, 0, "")
-        assert decision.estimated_info_gain == 0.0
-        assert decision.novelty == 0.0
-
-    def test_inf_defaults_safely(self) -> None:
-        raw = json.dumps(
-            {
-                "estimated_info_gain": float("inf"),
-                "estimated_cost": float("-inf"),
-            }
-        )
-        _, decision = Agent._parse_reflection(raw, 0, "")
-        assert decision.estimated_info_gain == 0.0
-        assert decision.estimated_cost == 0.0
-
-    def test_string_nan_defaults_safely(self) -> None:
-        raw = json.dumps(
-            {
-                "estimated_info_gain": "nan",
-                "novelty": "inf",
-            }
-        )
-        _, decision = Agent._parse_reflection(raw, 0, "")
-        # float("nan") and float("inf") are parseable but non-finite
-        assert decision.estimated_info_gain == 0.0
-        assert decision.novelty == 0.0
-
-    def test_normal_values_pass_through(self) -> None:
-        raw = json.dumps(
-            {
-                "estimated_info_gain": 0.7,
-                "estimated_cost": 0.3,
-                "repeat_risk": 0.1,
-                "novelty": 0.9,
-                "feasibility": 0.8,
-            }
-        )
-        _, decision = Agent._parse_reflection(raw, 0, "")
-        assert decision.estimated_info_gain == 0.7
-        assert decision.estimated_cost == 0.3
-        assert decision.novelty == 0.9

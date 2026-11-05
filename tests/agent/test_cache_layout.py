@@ -236,7 +236,7 @@ async def test_a_retry_without_tools_says_that_tools_are_unavailable() -> None:
             sent.append((list(messages), tools))
             return Message(role="assistant", content="no JSON here")
 
-    chat = Chat(Replying(), fixed_prefix=True, window_reflection=True)  # type: ignore[arg-type]
+    chat = Chat(Replying())  # type: ignore[arg-type]
     token = chat.begin_prefix()
     try:
         short = [Message(role="user", content="q")]
@@ -266,7 +266,7 @@ async def test_an_empty_reply_is_kept_as_the_agents_label_not_as_empty_text() ->
         async def chat(self, messages: Any, tools: Any = None, **_: Any) -> Message:
             return Message(role="assistant", content="")
 
-    chat = Chat(Empty(), fixed_prefix=True, window_reflection=True)  # type: ignore[arg-type]
+    chat = Chat(Empty())  # type: ignore[arg-type]
     token = chat.begin_prefix()
     try:
         short = [Message(role="user", content="q")]

@@ -176,13 +176,11 @@ class Hippo:
         short_term_empty_prefix: bool = False,
         short_term_evict_chunk: int = 0,
         memory: bool = True,
-        admit_on_outcome: bool = False,
         keep_decision_text: bool = False,
         typed_assertions: bool = False,
     ) -> None:
         self.embedding = embedding
         self.memory = memory
-        self.admit_on_outcome = admit_on_outcome
         self.keep_decision_text = keep_decision_text
         self.typed_assertions = typed_assertions
         # User statements have no source timestamp; sentence/message order is
@@ -606,8 +604,6 @@ class Hippo:
                 selected.append((candidate, "user_request"))
             if digest is not None:
                 selected.append((digest, "user_request"))
-        elif self.admit_on_outcome and digest is not None:
-            selected.append((digest, "outcome"))
         decisions: list[MemoryDecision] = []
         for candidate, signal in selected:
             if self.staged.get(candidate.candidate_id) is None:

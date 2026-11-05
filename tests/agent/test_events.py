@@ -580,8 +580,6 @@ class TestFields:
                 "action",
                 "continue_run",
                 "flags",
-                "gate",
-                "utility",
                 "stop_reason",
                 "rationale",
                 "summary",
@@ -1530,8 +1528,6 @@ class TestReflections:
             "action": "continue",
             "continue_run": True,
             "flags": ALL_FLAGS,
-            "gate": "patient",
-            "utility": None,
             "stop_reason": None,
             "rationale": "Echo once more.",
             "summary": "Echoed a.",
@@ -1570,8 +1566,6 @@ class TestReflections:
             "action": None,
             "continue_run": True,
             "flags": None,
-            "gate": "patient",
-            "utility": None,
             "stop_reason": None,
             "rationale": None,
             "summary": None,
@@ -1606,24 +1600,6 @@ class TestReflections:
         assert reflection.data["continue_run"] is False
         assert recorder.types[-2:] == ["reflection", "run.finished"]
         assert recorder.events[-1].data["result"]["status"] == "budget_exhausted"
-
-    @pytest.mark.asyncio
-    async def test_the_same_script_under_utility(self) -> None:
-        recorder = Recorder()
-        agent = _agent(
-            ScriptedLLM([_echo("a"), _answer(PROSE), _answer(PROSE)]),
-            steps_per_attempt=1,
-            reflection_gate="utility",
-        )
-        result = await agent.run_task("echo a", on_event=recorder)
-        assert result.status == "gate_stopped"
-        [reflection] = recorder.of("reflection")
-        assert (
-            reflection.data["readable"],
-            reflection.data["action"],
-            reflection.data["requests"],
-            reflection.data["continue_run"],
-        ) == (True, "stop", 2, False)
 
     @pytest.mark.asyncio
     async def test_a_trimmed_reflection_reports_its_entry(self) -> None:

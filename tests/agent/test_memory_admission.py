@@ -22,6 +22,9 @@ from localmelo.melo.schema import Message, ToolCall
 from .test_compress import FakeLLM, _agent, _answer, _options
 
 CALL_ID = "call_1"
+# A task that ends with it asks for the run to be remembered: the run's digest is
+# admitted by that request.
+REMEMBER = " Remember how you did it."
 
 
 def _note_reply(text: str) -> Message:
@@ -224,37 +227,7 @@ async def test_a_remember_request_redacts_the_fact_it_carries(
 
 
 @pytest.mark.asyncio
-async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
-    tmp_path: Path,
-) -> None:
-    server = FakeLLM(
-        _write_note_reply("plan: write a.py", "a.py", "x = 1\n"), _answer("done")
-    )
-    agent = _agent(
-        server,
-        _options(
-            reasoning="compress",
-            memory_dir=str(tmp_path / "memory"),
-            workspace_root=str(tmp_path),
-            builtins=frozenset({"file_write"}),
-            max_steps=2,
-            admit_on_outcome=True,
-        ),
-    )
-    result = await agent.run_task("q")
-    await agent.close()
-
-    assert result.status == "completed"
-    entries = await _entries(tmp_path)
-    assert [entry["source"] for entry in entries] == ["digest"]
-    assert entries[0]["admitted_by"] == "outcome"
-    assert entries[0]["provenance"]["final_status"] == "completed"
-    assert result.memory_stats is not None
-    assert result.memory_stats["admitted"]["outcome"] == 1
-
-
-@pytest.mark.asyncio
-async def test_an_aider_final_digest_is_admitted_on_outcome(tmp_path: Path) -> None:
+async def test_an_aider_final_digest_is_admitted_on_request(tmp_path: Path) -> None:
     # The digest has a task: line, a file name and a function name
     # but no dates or amounts; the meta filter must not drop it.
     server = FakeLLM(
@@ -273,20 +246,18 @@ async def test_an_aider_final_digest_is_admitted_on_outcome(tmp_path: Path) -> N
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_write"}),
             max_steps=2,
-            admit_on_outcome=True,
         ),
     )
     result = await agent.run_task(
         "Implement the transpose function in transpose.py so that the tests "
-        "in transpose_test.py pass"
+        "in transpose_test.py pass." + REMEMBER
     )
     await agent.close()
 
     assert result.status == "completed"
     entries = await _entries(tmp_path)
     assert [entry["source"] for entry in entries] == ["digest"]
-    assert entries[0]["admitted_by"] == "outcome"
-    assert entries[0]["provenance"]["final_status"] == "completed"
+    assert entries[0]["admitted_by"] == "user_request"
     assert entries[0]["text"].startswith(
         "task: Implement the transpose function in transpose.py"
     )
@@ -499,16 +470,16 @@ async def test_the_store_can_be_reopened_after_the_run(tmp_path: Path) -> None:
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_write"}),
             max_steps=2,
-            admit_on_outcome=True,
         ),
     )
-    await agent.run_task("q")
+    await agent.run_task("q." + REMEMBER)
     await agent.close()
 
     store = SqliteLongTerm(tmp_path / "memory" / "long_term.db")
     try:
         assert await store.count_entries() == 1
-        assert len(await store.decisions()) == 1
+        # The digest is written; a note about the agent's own work is ignored.
+        assert [d["action"] for d in await store.decisions()] == ["IGNORE", "NEW"]
     finally:
         await store.aclose()
 
@@ -612,11 +583,10 @@ async def test_an_aider_style_run_names_files_checks_and_decisions(
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_write", "shell_exec"}),
             max_steps=3,
-            admit_on_outcome=True,
         ),
     )
     result = await agent.run_task(
-        "Implement the transpose function in transpose.py so the tests pass."
+        "Implement the transpose function in transpose.py so the tests pass." + REMEMBER
     )
     await agent.close()
 
@@ -649,19 +619,17 @@ async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> Non
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_write"}),
             max_steps=2,
-            admit_on_outcome=True,
         ),
     )
-    await agent.run_task("Write a.py.")
+    task = "Write a.py." + REMEMBER
+    await agent.run_task(task)
     await agent.close()
 
     entries = await _entries(tmp_path)
     digests = [entry for entry in entries if entry["source"] == "digest"]
     assert len(digests) == 1
     assert "files: a.py" in digests[0]["text"]
-    assert digests[0]["provenance"]["task_key"] == digest_task_key(
-        "Write a.py.", str(tmp_path)
-    )
+    assert digests[0]["provenance"]["task_key"] == digest_task_key(task, str(tmp_path))
     assert "verified:" not in digests[0]["text"]
 
 
@@ -669,7 +637,7 @@ async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> Non
 async def test_a_digest_key_matches_a_sanitized_task_line(tmp_path: Path) -> None:
     # The digest's rendered task line escapes a role token, so a key read
     # from that line would not match the query recall hashes.
-    task = "Fix <|user|> parsing in a.py."
+    task = "Fix <|user|> parsing in a.py." + REMEMBER
     server = FakeLLM(
         _write_note_reply("plan: write a.py", "a.py", "x = 1\n"), _answer("done")
     )
@@ -681,7 +649,6 @@ async def test_a_digest_key_matches_a_sanitized_task_line(tmp_path: Path) -> Non
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_write"}),
             max_steps=2,
-            admit_on_outcome=True,
         ),
     )
     await agent.run_task(task)
@@ -723,10 +690,9 @@ async def test_a_trivial_observation_is_not_admitted(tmp_path: Path) -> None:
             workspace_root=str(tmp_path),
             builtins=frozenset({"python_exec", "file_write"}),
             max_steps=2,
-            admit_on_outcome=True,
         ),
     )
-    await agent.run_task("Check the value.")
+    await agent.run_task("Check the value." + REMEMBER)
     await agent.close()
 
     entries = await _entries(tmp_path)

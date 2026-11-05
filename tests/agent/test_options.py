@@ -7,12 +7,11 @@ import math
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.options import ReflectionGate
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import (
@@ -30,7 +29,6 @@ def test_defaults_equal_the_schema_constants() -> None:
     assert opts.steps_per_attempt == STEPS_PER_ATTEMPT
     assert opts.max_attempts == MAX_ATTEMPTS
     assert opts.attempt_policy == "reflect"
-    assert opts.reflection_gate == "patient"
     assert opts.answer_on_stop is True
     assert opts.tool_exposure == "retrieve"
     assert opts.builtins is None
@@ -52,7 +50,6 @@ def test_valid_values_are_kept() -> None:
         attempt_policy="none",
         steps_per_attempt=2,
         max_attempts=1,
-        reflection_gate="utility",
         tool_exposure="all",
         builtins=frozenset({"file_read"}),
         mode="gateway",
@@ -64,7 +61,6 @@ def test_valid_values_are_kept() -> None:
     assert opts.attempt_policy == "none"
     assert opts.steps_per_attempt == 2
     assert opts.max_attempts == 1
-    assert opts.reflection_gate == "utility"
     assert opts.tool_exposure == "all"
     assert opts.builtins == frozenset({"file_read"})
     assert opts.mode == "gateway"
@@ -130,10 +126,6 @@ def test_normalized_options_compare_and_hash_equal() -> None:
         ("attempt_policy", "reflection"),
         ("attempt_policy", ""),
         ("attempt_policy", None),
-        ("reflection_gate", "legacy"),
-        ("reflection_gate", "FLAGS"),
-        ("reflection_gate", ""),
-        ("reflection_gate", None),
         ("tool_exposure", "some"),
         ("tool_exposure", None),
         ("mode", "shell"),
@@ -174,15 +166,6 @@ def test_unknown_builtins_lists_unknown_and_known_names() -> None:
     assert "'nope', 'zap'" in message
     for name in builtin_names():
         assert repr(name) in message
-
-
-def test_reflection_gate_names_its_values() -> None:
-    assert get_args(ReflectionGate) == ("flags", "utility", "patient")
-    with pytest.raises(ValueError) as excinfo:
-        AgentOptions(reflection_gate="legacy")  # type: ignore[arg-type]
-    assert str(excinfo.value) == (
-        "reflection_gate must be one of 'flags', 'patient', 'utility', got 'legacy'"
-    )
 
 
 # ── workspace_root, record_answers and tool_timeout_s ───────────────────────

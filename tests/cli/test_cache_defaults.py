@@ -2,7 +2,7 @@
 
 ``[agent] window_eviction`` defaults to ``"chunk"`` and the window to 64 messages on a
 local server (20 on a cloud vendor). A direct run's config and flags are in
-``test_window_eviction_config.py`` and ``test_cache_layout_config.py``; here are the
+``test_window_eviction_config.py`` and ``test_window_messages_config.py``; here are the
 sessions that read the same settings and the flag's help.
 """
 

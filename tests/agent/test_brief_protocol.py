@@ -109,10 +109,10 @@ class TestContinueContinues:
                 if k in ReflectionDecision.__dataclass_fields__
             }
         )
-        assert _stop_reason(decision, "patient", "") == "not_concrete"
-        assert _stop_reason(decision, "patient", "", brief=True) is None
+        assert _stop_reason(decision, "") == "not_concrete"
+        assert _stop_reason(decision, "", brief=True) is None
         assert (
-            _stop_reason(decision, "patient", "Max steps reached", brief=True)
+            _stop_reason(decision, "Max steps reached", brief=True)
             == "step_budget_used"
         )
 

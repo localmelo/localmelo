@@ -38,7 +38,7 @@ def _build(argv: list[str]) -> cli.Agent:
 @pytest.mark.parametrize(
     "line",
     [
-        'fixed_prefix = "yes"',  # the wrong kind of value
+        'answer_on_stop = "yes"',  # the wrong kind of value
         'window_eviction = "sliding"',  # not one of the choices
         "window_messages = 3",  # out of range
         "max_calls = 1",

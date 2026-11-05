@@ -21,7 +21,6 @@
       "attempt_policy": "reflect",
       "steps_per_attempt": 1,
       "max_attempts": 5,
-      "reflection_gate": "patient",
       "tool_exposure": "retrieve",
       "mode": "python",
       "builtins": [
@@ -39,8 +38,6 @@
       ],
       "answer_on_stop": true,
       "window_eviction": "chunk",
-      "reflect_tool_guard": true,
-      "cache_layout": "v3",
       "window_messages": 64
     },
     "prefix_cache": {

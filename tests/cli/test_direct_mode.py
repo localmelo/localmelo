@@ -24,11 +24,10 @@ from unittest import mock
 import pytest
 
 import localmelo.__main__ as cli
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import AgentOptions
 from localmelo.melo.checker import TASK_BUILTINS
-from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import builtin_names
-from localmelo.melo.schema import Message, RunResult, ToolDef
+from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.mcp import McpToolProvider
 
@@ -147,8 +146,6 @@ class TestFlags:
             "7",
             "--attempt-policy",
             "none",
-            "--reflection-gate",
-            "utility",
             "--tool-exposure",
             "all",
             "--builtins",
@@ -166,7 +163,6 @@ class TestFlags:
             mode="direct",
             max_steps=7,
             attempt_policy="none",
-            reflection_gate="utility",
             tool_exposure="all",
             builtins=frozenset({"file_read", "shell_exec"}),
             memory=False,
@@ -195,35 +191,6 @@ class TestFlags:
 
     def test_memory_on(self) -> None:
         assert _main("--memory", "on", "q").options.memory is True
-
-    @pytest.mark.parametrize("gate", ["flags", "utility"])
-    def test_reflection_gate(self, gate: str) -> None:
-        assert _main("--reflection-gate", gate, "q").options.reflection_gate == gate
-
-    def test_reflection_gate_is_accepted_with_attempt_policy_none(self) -> None:
-        # It has no effect there: such a run makes no reflection.
-        ran = _main("--attempt-policy", "none", "--reflection-gate", "utility", "q")
-        assert ran.code == 0
-        assert ran.options == AgentOptions(
-            mode="direct", attempt_policy="none", reflection_gate="utility"
-        )
-
-    def test_reflection_gate_help(self) -> None:
-        [action] = [
-            action
-            for action in cli._build_parser()._actions
-            if action.dest == "reflection_gate"
-        ]
-        assert action.option_strings == ["--reflection-gate"]
-        assert action.choices == ["flags", "utility", "patient"]
-        assert action.default is None  # AgentOptions decides: "patient"
-        assert action.help == (
-            "After a reflection, start the next attempt when it chooses continue "
-            "and its three checks hold (flags), or also require its "
-            "utility score to reach 0.1 (utility, the behavior before this option), "
-            "or as flags, but once per run also when the next step is not novel "
-            "(patient, default)"
-        )
 
     @pytest.mark.parametrize(("value", "seconds"), [("600", 600.0), ("0.5", 0.5)])
     def test_request_timeout_goes_to_the_provider_not_the_options(
@@ -382,10 +349,6 @@ class TestUsageErrors:
                 "argument --attempt-policy: invalid choice: 'retry'",
             ),
             (
-                ["--reflection-gate", "legacy", "q"],
-                "argument --reflection-gate: invalid choice: 'legacy'",
-            ),
-            (
                 ["--tool-exposure", "some", "q"],
                 "argument --tool-exposure: invalid choice: 'some'",
             ),
@@ -428,19 +391,6 @@ class TestUsageErrors:
             (
                 ["--serve", "--request-timeout", "600", "q"],
                 "only for direct mode (a query without --serve): --request-timeout",
-            ),
-            (
-                ["--serve", "--reflection-gate", "utility"],
-                "only for direct mode (a query without --serve): --reflection-gate",
-            ),
-            (
-                ["--serve", "--reflection-gate", "flags", "q"],
-                "only for direct mode (a query without --serve): --reflection-gate",
-            ),
-            (
-                ["--serve", "--attempt-policy", "none", "--reflection-gate", "flags"],
-                "only for direct mode (a query without --serve): --attempt-policy, "
-                "--reflection-gate",
             ),
             (
                 ["--serve", "--workspace", "/tmp"],
@@ -735,50 +685,6 @@ class TestJsonOutput:
         ran = _main("--output-format", "json", "q", outcome=_outcome(status))
         assert ran.code == code
         assert self._record(capsys.readouterr().out)["status"] == status
-
-    @pytest.mark.parametrize(
-        ("argv", "gate"),
-        [
-            ([], "patient"),
-            (["--reflection-gate", "flags"], "flags"),
-            (["--reflection-gate", "utility"], "utility"),
-        ],
-    )
-    def test_the_config_names_the_reflection_gate(
-        self, argv: list[str], gate: str, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        # A real Agent, with the options the flags built and a model that
-        # answers at once.
-        def build(args: Any, *, options: AgentOptions, tool_providers: Any) -> Agent:
-            return Agent(llm=_AnswerLLM("42"), options=options)
-
-        with (
-            mock.patch.object(cli, "_register_backends"),
-            mock.patch.object(cli, "_build_direct_mode_agent", build),
-            mock.patch.object(cli, "_localmelo_version", return_value="v-test"),
-            mock.patch("sys.argv", ["melo", "--output-format", "json", *argv, "q"]),
-        ):
-            cli.main()  # completed: no SystemExit
-        record = self._record(capsys.readouterr().out)
-        assert (record["status"], record["result"]) == ("completed", "42")
-        keys = list(record["config"])
-        assert keys.index("reflection_gate") == keys.index("max_attempts") + 1
-        assert record["config"]["reflection_gate"] == gate
-
-
-class _AnswerLLM(BaseLLMProvider):
-    """A model that answers every request with *text*."""
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    async def chat(
-        self, messages: list[Message], tools: list[ToolDef] | None = None
-    ) -> Message:
-        return Message(role="assistant", content=self.text)
-
-    async def close(self) -> None:
-        pass
 
 
 # ── Stdout is for the report ────────────────────────────────────────────────

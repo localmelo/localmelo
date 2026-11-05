@@ -737,7 +737,6 @@ CONFIG_KEYS = [
     "attempt_policy",
     "steps_per_attempt",
     "max_attempts",
-    "reflection_gate",
     "tool_exposure",
     "mode",
     "builtins",
@@ -747,8 +746,6 @@ CONFIG_KEYS = [
     "tools",
     "answer_on_stop",
     "window_eviction",
-    "reflect_tool_guard",
-    "cache_layout",
     "window_messages",
 ]
 
@@ -764,7 +761,6 @@ class TestConfig:
             "attempt_policy": "reflect",
             "steps_per_attempt": 50,
             "max_attempts": MAX_ATTEMPTS,
-            "reflection_gate": "patient",
             "tool_exposure": "retrieve",
             "mode": "python",
             "builtins": sorted(DEFAULT_BUILTINS["python"]),
@@ -774,8 +770,6 @@ class TestConfig:
             "tools": sorted(DEFAULT_BUILTINS["python"]),
             "answer_on_stop": True,
             "window_eviction": "chunk",
-            "reflect_tool_guard": True,
-            "cache_layout": "v3",
             "window_messages": 64,
         }
 
@@ -806,7 +800,6 @@ class TestConfig:
             "attempt_policy": "none",
             "steps_per_attempt": 2,
             "max_attempts": 1,
-            "reflection_gate": "patient",
             "tool_exposure": "all",
             "mode": "python",
             "builtins": ["file_read", "python_exec"],
@@ -817,8 +810,6 @@ class TestConfig:
             # Built-in and other registered tools alike.
             "tools": ["echo", "file_read", "python_exec"],
             "window_eviction": "boundary",
-            "reflect_tool_guard": True,
-            "cache_layout": "v3",
             "window_messages": 30,
         }
 

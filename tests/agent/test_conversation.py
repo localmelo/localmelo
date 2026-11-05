@@ -580,17 +580,18 @@ class TestLoadConversation:
         ]
 
     def test_the_oldest_messages_are_evicted(self) -> None:
-        agent = _agent(
-            ScriptedLLM(), window_eviction="slide", window_messages=SHORT_TERM_MAX
-        )
+        agent = _agent(ScriptedLLM(), window_messages=SHORT_TERM_MAX)
         messages = [
             Message(role="user" if n % 2 == 0 else "assistant", content=str(n))
             for n in range(SHORT_TERM_MAX + 5)
         ]
 
-        assert agent.load_conversation(messages) == SHORT_TERM_MAX
+        # The window drops its oldest messages in a chunk, so it ends under the
+        # maximum, and what stays is the newest messages in order.
+        kept = agent.load_conversation(messages)
+        assert 0 < kept <= SHORT_TERM_MAX
         assert [content for _, content in _window(agent)] == [
-            str(n) for n in range(5, SHORT_TERM_MAX + 5)
+            str(n) for n in range(SHORT_TERM_MAX + 5 - kept, SHORT_TERM_MAX + 5)
         ]
 
     @pytest.mark.asyncio

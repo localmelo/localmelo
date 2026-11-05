@@ -35,7 +35,7 @@ def test_the_defaults_of_the_options_and_of_the_config() -> None:
     assert {name: getattr(options, name) for name in DEFAULTS} == DEFAULTS
     config = AgentConfig()
     # The config leaves the window unset: the backend decides it (see
-    # tests/cli/test_cache_layout_config.py).
+    # tests/cli/test_window_messages_config.py).
     assert {name: getattr(config, name) for name in DEFAULTS} == {
         **DEFAULTS,
         "window_messages": None,

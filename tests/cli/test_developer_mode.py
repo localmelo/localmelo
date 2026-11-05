@@ -153,8 +153,8 @@ def test_every_everyday_command_is_a_command_the_full_help_explains() -> None:
     "argv",
     [
         ["--reasoning", "compress", "--retriever", "bm25", "--recall-k", "2", "q"],
-        ["--window-eviction", "chunk", "--fixed-prefix", "on", "q"],
-        ["--attempt-policy", "none", "--reflection-gate", "utility", "q"],
+        ["--window-eviction", "chunk", "--window-messages", "64", "q"],
+        ["--attempt-policy", "none", "--tool-exposure", "all", "q"],
         ["--progress", "off", "--builtins", "none", "--memory-dir", "m", "q"],
     ],
 )
@@ -203,8 +203,8 @@ def test_an_experimental_setting_names_its_issue() -> None:
 
 def test_every_setting_flag_is_a_parser_option_with_a_tier() -> None:
     assert {item.flag for item in SETTINGS} <= set(OPTION_TIERS)
-    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 31
-    assert sum(not item.file for item in SETTINGS) == 9
+    assert len({item.key for item in SETTINGS}) == len(SETTINGS) == 26
+    assert sum(not item.file for item in SETTINGS) == 8
 
 
 @pytest.mark.parametrize("topic", [[], ["all"]])
@@ -364,7 +364,7 @@ def test_a_usage_error_in_developer_mode_keeps_the_long_usage(
     argv = ["--no-such-flag"] + (["--developer"] if developer == "flag" else [])
     assert _main(*argv).code == 2
     err = capsys.readouterr().err
-    assert err.startswith("usage: melo [-h]") and "--reflection-gate" in err
+    assert err.startswith("usage: melo [-h]") and "--window-eviction" in err
     assert "Run melo --help" not in err
 
 

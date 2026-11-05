@@ -752,13 +752,10 @@ async def test_the_answer_on_stop_is_never_a_tool_call_written_as_text(
 ) -> None:
     # The stopped run's extra request offers no tools, and a model can still
     # answer it with the markup of a call.
-    llm = _Scripted(
-        _remember_call(), _decision("continue", next_step_is_novel=False), final
-    )
+    llm = _Scripted(_remember_call(), _decision("stop"), final)
     agent, _ = _agent(
         llm,
         attempt_policy="reflect",
-        reflection_gate="flags",
         steps_per_attempt=1,
         max_attempts=3,
         answer_on_stop=True,

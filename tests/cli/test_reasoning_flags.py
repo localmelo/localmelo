@@ -422,7 +422,6 @@ def test_the_json_line_reports_the_mode_and_counters(
         },
         "ignored": 0,
     }
-    assert record["config"]["admit_on_outcome"] is False
     assert record["config"]["keep_decision_text"] is False
 
 

@@ -73,8 +73,8 @@ class TestGateTable:
             next_step_is_concrete=concrete,
             next_step_is_novel=novel,
         )
-        without = _gate_stop_reason(decision, "patient")
-        patient = _gate_stop_reason(decision, "patient", patient=allowance)
+        without = _gate_stop_reason(decision)
+        patient = _gate_stop_reason(decision, patient=allowance)
         if feasible and concrete and not novel and allowance:
             assert (without, patient) == ("not_novel", None)
         else:
@@ -82,26 +82,24 @@ class TestGateTable:
 
     def test_without_an_allowance_a_not_novel_continue_stops(self) -> None:
         decision = _passing_decision(next_step_is_novel=False)
-        assert _gate_stop_reason(decision, "patient") == "not_novel"
+        assert _gate_stop_reason(decision) == "not_novel"
 
     @pytest.mark.parametrize("action", ["stop", "decompose", "done"])
     def test_only_a_continue_is_helped(self, action: str) -> None:
         decision = _passing_decision(
             recommended_action=action, next_step_is_novel=False
         )
-        assert _gate_stop_reason(decision, "patient", patient=True) == (
-            "action_not_continue"
-        )
+        assert _gate_stop_reason(decision, patient=True) == ("action_not_continue")
 
     def test_the_stop_reason_follows_the_allowance(self) -> None:
         decision = _passing_decision(next_step_is_novel=False)
-        assert _stop_reason(decision, "patient", "", patient=True) is None
-        assert _stop_reason(decision, "patient", "") == "not_novel"
+        assert _stop_reason(decision, "", patient=True) is None
+        assert _stop_reason(decision, "") == "not_novel"
         # A budget boundary and an unreadable reply stop whatever the allowance.
-        assert _stop_reason(decision, "patient", "Max steps reached", patient=True) == (
+        assert _stop_reason(decision, "Max steps reached", patient=True) == (
             "step_budget_used"
         )
-        assert _stop_reason(None, "patient", "Max steps reached", patient=True) == (
+        assert _stop_reason(None, "Max steps reached", patient=True) == (
             "unreadable_reply"
         )
 
@@ -128,11 +126,7 @@ class TestOncePerRun:
             [_echo_call("a"), reflection, _answer("42")]
         )
         assert (result.status, result.result, result.attempts) == ("completed", "42", 2)
-        assert (event["gate"], event["continue_run"], event["stop_reason"]) == (
-            "patient",
-            True,
-            None,
-        )
+        assert (event["continue_run"], event["stop_reason"]) == (True, None)
         assert event["flags"]["next_step_is_novel"] is False
         # The next attempt's planning request carries the avoids.
         assert "do not click the banner" in _planning_texts(llm)[-1]
