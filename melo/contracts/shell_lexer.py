@@ -469,7 +469,9 @@ def unwrap(
     A wrapper's options are read with its table (:data:`WRAPPERS`); one it
     does not list makes the command unread (see :func:`past_options`), and
     so does a command read more ways than :data:`MAX_READINGS`. ``env -S``
-    is read as env(1) runs it: the words of its value, then the rest.
+    is read as env(1) runs it: the words of its value, then the rest; a
+    value with a form env(1) reads its own way makes the command unread
+    (see :func:`_split`).
     *added* stands for what ``xargs`` adds to the command it runs, from its
     input.
     """
@@ -511,9 +513,10 @@ def unwrap(
             unread = unread or passed.unread
             for end, split in reversed(passed.ends):
                 if split is not None:  # its words in its place, then the rest
-                    unread = unread or len(sources) > MAX_READINGS
+                    spliced, own = _split(split)
+                    unread = unread or own or len(sources) > MAX_READINGS
                     if len(sources) <= MAX_READINGS:
-                        sources.append(Spliced([words[at], *_split(split)], words, end))
+                        sources.append(Spliced([words[at], *spliced], words, end))
                         todo.append((len(sources) - 1, 0))
                     continue
                 if name in OPERAND and end < len(words):
@@ -643,9 +646,21 @@ def _keyword(words: Sequence[str]) -> int:
     return 0
 
 
-def _split(value: str) -> list[str]:
-    """The arguments ``env -S`` splits *value* into: at spaces, past quotes."""
+# What env(1) reads its own way in the value of -S ("Details of -S"): a
+# backslash (its escapes; ``\c`` ends the value, ``\_`` separates), ``$``
+# (``${NAME}`` from the environment), and a vertical tab or a form feed
+# (which separate).
+_ENV_OWN: Final = re.compile(r"[\\$\v\f]")
+
+
+def _split(value: str) -> tuple[list[str], bool]:
+    """The arguments ``env -S`` splits *value* into: at spaces, past quotes;
+    and whether env(1) may read it another way (:data:`_ENV_OWN`, or a word
+    that starts with ``#``, which ends the value), which melo does not do.
+    """
     try:
-        return split(value)
+        words = split(value)
     except ValueError:
-        return value.split()
+        words = value.split()
+    own = bool(_ENV_OWN.search(value)) or any(w.startswith("#") for w in words)
+    return words, own

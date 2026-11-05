@@ -350,6 +350,30 @@ def test_env_reads_the_words_of_s_in_its_place(
     assert (found.readings, found.unread) == (readings, False)
 
 
+# The forms env(1) reads its own way in the value of -S ("Details of -S"),
+# each in a value of placeholder words.
+ENV_OWN_FORMS = {
+    "a word starting with # ends the value": "a #b",
+    "backslash c ends the value": "a\\c b",
+    "backslash underscore separates": "a\\_b",
+    **{f"backslash {e} is an escape": f"a\\{e}b" for e in "fnrtv#$\"'\\"},
+    "a name in braces is read from the environment": "a ${B}",
+    "a vertical tab separates": "a\vb",
+    "a form feed separates": "a\fb",
+}
+
+
+@pytest.mark.parametrize("value", ENV_OWN_FORMS.values(), ids=list(ENV_OWN_FORMS))
+def test_an_env_s_value_env_reads_its_own_way_makes_the_command_unread(
+    value: str,
+) -> None:
+    """Melo does not read env(1)'s own forms: the command is unread, and still
+    read the shell's way."""
+    found = shell_lexer.unwrap(["env", "-S", value, "c"])
+    assert found.unread
+    assert found.readings == [[*shell_lexer.split(value), "c"]]
+
+
 def test_a_command_read_more_ways_than_the_cap_keeps_the_first_and_is_unread() -> None:
     """Past the cap no more ways are read: the first, each unlisted option
     without a value, stays among them."""

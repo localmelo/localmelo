@@ -38,6 +38,7 @@ from localmelo.melo.contracts.review import (
     reaches_unread_site,
     site_keys,
 )
+from localmelo.tests.contracts.test_shell_lexer import ENV_OWN_FORMS
 from localmelo.tests.linear import assert_linear, assert_memory_linear
 
 
@@ -214,6 +215,16 @@ def test_env_s_runs_its_words_before_the_words_after_it(ws: Path, command: str) 
         found = sh(ws, spelt)
         assert SEVERITY[found.verdict] >= SEVERITY[alone.verdict], spelt
         assert set(alone.categories) <= set(found.categories), spelt
+
+
+@pytest.mark.parametrize("value", ENV_OWN_FORMS.values(), ids=list(ENV_OWN_FORMS))
+def test_an_env_s_value_env_reads_its_own_way_is_a_doubt(ws: Path, value: str) -> None:
+    """Melo asks, and the keys count an unread site."""
+    command = f"env -S {shlex.quote(value)} c"
+    found = sh(ws, command)
+    assert found.verdict != "routine"
+    assert shell.UNREAD in (*found.reasons, *found.doubts)
+    assert reaches_unread_site("shell_exec", {"command": command})
 
 
 @pytest.mark.parametrize("value", ["", " 5"])
