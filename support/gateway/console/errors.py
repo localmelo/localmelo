@@ -155,16 +155,19 @@ def _utf8_problem(value: Any, path: str) -> str | None:
 
 
 def _body_problem(body: bytes) -> str | None:
-    """Why a JSON body is a 400, or ``None``: not UTF-8, not JSON, or a lone surrogate."""
+    """Why a JSON body is a 400, or ``None``: not UTF-8, not JSON, or a lone surrogate.
+
+    A body nested deeper than the stack allows (to parse or to walk) is not JSON
+    this gateway reads.
+    """
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError:
         return "Request body must be valid UTF-8."
     try:
-        parsed = json.loads(text)
-    except ValueError:
+        return _utf8_problem(json.loads(text), "")
+    except (ValueError, RecursionError):
         return "Malformed JSON request body."
-    return _utf8_problem(parsed, "")
 
 
 def _query_is_valid_utf8(scope: Scope) -> bool:

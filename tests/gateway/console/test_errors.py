@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -371,6 +372,33 @@ def test_a_query_or_body_that_is_not_utf8_json_is_a_400_before_any_route(
         "message": message,
         "details": {},
     }
+
+
+@pytest.mark.parametrize("depth", [sys.getrecursionlimit() + 10, 5_000, 100_000])
+def test_a_body_nested_past_the_recursion_limit_is_a_400(
+    console: Console, depth: int
+) -> None:
+    """The parser's or the walk's stack runs out; the answer is still the envelope."""
+    app = FastAPI()
+
+    @app.post("/api/echo")
+    async def echo() -> None:
+        raise AssertionError("the route was reached")
+
+    console.mount(app)
+    client = TestClient(
+        app, base_url="http://127.0.0.1:8401", raise_server_exceptions=False
+    )
+
+    resp = client.post(
+        "/api/echo",
+        content=b"[" * depth + b"]" * depth,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["message"] == "Malformed JSON request body."
+    assert resp.headers["cache-control"] == "no-store"
 
 
 def test_a_picture_body_and_a_query_that_is_utf8_reach_the_route(
