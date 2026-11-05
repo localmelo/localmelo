@@ -38,6 +38,7 @@ from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStore,
+    SessionStoreError,
     StoredEvent,
 )
 from localmelo.tests.sessions.helpers import (
@@ -2489,8 +2490,10 @@ async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serve
         mode="ask",
         out=out,
     )
-    session.attach(FakeApp())  # type: ignore[arg-type]
+    app = FakeApp()
+    session.attach(app)  # type: ignore[arg-type]
     line = "The model changed to model-b (via melo_serve)."
+    asks = lambda: session.agent._llm.model  # noqa: E731  # type: ignore[attr-defined]
     try:
         session.enter("same model")  # nothing changed: the same Agent answers
         await _until(lambda: session.state == "idle")
@@ -2498,30 +2501,50 @@ async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serve
         write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
         session.enter("a start that fails")
         await _until(lambda: session.state == "idle")
+        # The turn ends as failed, with its message back: the old Agent would
+        # only meet melo_serve's 409.
         assert session.agent is old and factory.backend.model == "model-a"
         assert (
-            "✗ Could not start model-b: the model is not loaded. Still using model-a."
+            "✗ The turn could not run: RuntimeError: the model is not loaded"
             in out.text()
         )
-        assert line not in out.text()
+        assert app.buffer.text == "a start that fails" and line not in out.text()
+        app.buffer.text = ""
         session.enter("after the retry")  # the next turn tries again
         await _until(lambda: session.state == "idle")
-        assert session.agent is not old
-        assert session.agent._llm.model == "model-b"  # type: ignore[attr-defined]
+        assert session.agent is not old and asks() == "model-b"
         assert factory.backend.model == "model-b" and factory.backend.follows
         assert factory.live_agents() == [session.agent]
         assert out.text().count(line) == 1
         assert "model-b here." in out.text()
-        assert [
-            t.status
-            for t in await store.list_turns((await store.list_sessions())[0].id)
-        ] == ["completed"] * 3
         assert asked[-1] == "model-b"
+        # A note switch (/browser) takes the model it is on, and keeps following.
+        write_state(melo_serve_home, chat=role("model-c"))
+        assert await session._switch(
+            factory.backend.model, url=None, note="Browsing is on."
+        )
+        assert factory.backend.model == "model-c" and factory.backend.follows
+        assert asks() == "model-c"
+        # A store failure while moving ends the turn as failed, and the session idle.
+        write_state(melo_serve_home, chat=role("model-d"))
+
+        async def refuse(*args: Any, **kwargs: Any) -> None:
+            raise SessionStoreError("the store is read-only")
+
+        with monkeypatch.context() as broken:
+            broken.setattr(store, "update_session", refuse)
+            session.enter("a store that fails")
+            await _until(lambda: session.state == "idle")
+        assert app.buffer.text == "a store that fails" and asks() == "model-d"
         write_state(melo_serve_home)  # nothing served: the Agent stays
         agent = session.agent
         session.enter("when nothing is served")
         await _until(lambda: session.state == "idle")
-        assert session.agent is agent and out.text().count(line) == 1
+        assert session.agent is agent
+        assert [
+            t.status
+            for t in await store.list_turns((await store.list_sessions())[0].id)
+        ] == ["completed"] * 3
     finally:
         await session.shutdown()
         for real in made:

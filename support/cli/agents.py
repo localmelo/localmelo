@@ -160,8 +160,10 @@ class AgentFactory:
         """
         followed: BackendInfo | None = None
         if self.backend.follows and url is None and model in (None, self.backend.model):
-            model = None  # none was chosen: the Agent asks for what is served now
+            # None was chosen: the Agent asks for what is served now, read once
+            # for the row and the Agent (nothing served: it fails with the hint).
             followed = self._served()
+            model = None if followed.model == NONE_SERVED else followed.model
         else:
             model = model or self.backend.model
         try:
@@ -197,7 +199,9 @@ class AgentFactory:
 
     def show_served(self) -> None:
         """Show what the backend serves now, for a session whose Agent is the gateway's."""
-        self.backend = self._served()
+        now = self._served()
+        if now.model != NONE_SERVED:
+            self.backend = now
 
     def _served(self) -> BackendInfo:
         """The row as it shows what the backend serves now, which the Agent about to be built asks for."""
