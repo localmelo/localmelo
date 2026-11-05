@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.grants import listed
-from localmelo.support.sessions.store import MAIN_CHAT_TITLE, SessionStoreError
+from localmelo.support.sessions.store import MAIN_CHAT_TITLE
 
 from .errors import ApiError
 
@@ -37,10 +37,7 @@ async def grants_json(console: Console) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for grant in listed(console.sessions.book.live()):
         if grant.session_id not in titles:
-            try:
-                info = await console.store.get_session(grant.session_id)
-            except SessionStoreError as exc:
-                raise await console.store_api_error(exc) from exc
+            info = await console.store.get_session(grant.session_id)
             titles[grant.session_id] = (
                 None
                 if info is None
@@ -67,10 +64,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         if not _GRANT_ID.fullmatch(grant_id):
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        try:
-            gone = await console.sessions.book.revoke(grant_id)
-        except SessionStoreError as exc:
-            raise await console.store_api_error(exc) from exc
+        gone = await console.sessions.book.revoke(grant_id)
         if gone is None:
             raise ApiError(404, "not_found", t("errors.noGrant"))
         return Response(status_code=204)

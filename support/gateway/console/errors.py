@@ -2,8 +2,11 @@
 
 Every ``/api`` failure is ``{"error": {"code", "message", "details"}}``.
 A route raises :class:`ApiError`; FastAPI's validation errors become a 400
-with the first field named, and anything unhandled becomes a 500 whose
-message says nothing about the failure. The legacy ``/v1`` routes keep
+with the first field named; a store failure a route lets through becomes a
+503 ``store_unavailable``, or a 404 when the chat in its path is gone
+(:meth:`Console.store_api_error`); a busy session becomes a 409
+``session_busy``; and anything unhandled becomes a 500 whose message says
+nothing about the failure. The legacy ``/v1`` routes keep
 FastAPI's own 404 and 422 bodies: these handlers are installed by the
 console and leave a request outside ``/api`` alone.
 
@@ -43,6 +46,8 @@ from localmelo.support.gateway.guard import (
     is_upload_content_type,
     is_upload_request,
 )
+from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions.store import SessionBusyError, SessionStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +312,22 @@ async def _api_error_handler(request: Request, exc: Exception) -> Response:
     return api_error_response(exc)
 
 
+async def _store_error_handler(request: Request, exc: Exception) -> Response:
+    """Any store failure a route lets through, as API v2 maps it.
+
+    The chat it concerns is the one in the path, if any: a route whose chat id
+    is not a path parameter maps its own with :meth:`Console.store_api_error`.
+    """
+    assert isinstance(exc, SessionStoreError)
+    console = request.app.state.console
+    error = await console.store_api_error(exc, request.path_params.get("session_id"))
+    return api_error_response(error)
+
+
+async def _busy_handler(request: Request, exc: Exception) -> Response:
+    return error_response(409, "session_busy", t("errors.turnRunning"))
+
+
 async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     assert isinstance(exc, StarletteHTTPException)
     if not is_api_path(request.url.path):
@@ -331,6 +352,8 @@ async def _validation_handler(request: Request, exc: Exception) -> Response:
 def install(app: FastAPI) -> None:
     """Install the API v2 error handlers and middleware on *app*."""
     app.add_exception_handler(ApiError, _api_error_handler)
+    app.add_exception_handler(SessionStoreError, _store_error_handler)
+    app.add_exception_handler(SessionBusyError, _busy_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
     app.add_middleware(ApiMiddleware)

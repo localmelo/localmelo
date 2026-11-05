@@ -17,14 +17,12 @@ from localmelo.support.config import Config
 from localmelo.support.gateway import workers as workers_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.errors import ApiError
-from localmelo.support.gateway.console.routes_tasks import _call
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.scheduler.model import Machine
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 
 async def wait_for(predicate: Callable[[], bool], timeout: float = 3) -> None:
@@ -436,17 +434,14 @@ async def test_finalization_store_failure_retains_runner_until_recovery(
     assert task_id in workers._runs
     assert not calls
     console = SimpleNamespace(store=workers.store, _store_error=None)
-    console.store_api_error = lambda exc: Console.store_api_error(
-        cast(Console, console), exc
-    )
     for state in ("resume", "stop"):
-        with pytest.raises(ApiError) as exc:
+        with pytest.raises(SessionStoreError) as exc:
             async with asyncio.timeout(2):
-                await _call(
-                    cast(Console, console), workers.update(task_id, state=state)
-                )
-        assert exc.value.status_code == 503
-        assert exc.value.code == "store_unavailable"
+                await workers.update(task_id, state=state)
+        # The console's handler answers a store failure like this.
+        error = await Console.store_api_error(cast(Console, console), exc.value)
+        assert error.status_code == 503
+        assert error.code == "store_unavailable"
         assert workers._runners.get(task_id) is runner
         assert (await workers.get(task_id))["state"] == "held"
     recovered = True

@@ -26,7 +26,6 @@ from localmelo.support.gateway.front_rules import level_number, triage
 from localmelo.support.gateway.i18n import said_text, t
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
 from localmelo.support.gateway.task_store import TaskStoreError
-from localmelo.support.sessions.store import SessionStoreError
 
 from .bodies import Body
 from .errors import ApiError
@@ -65,7 +64,7 @@ def _message(exc: Exception) -> str:
     return said_text(words) if words else str(exc)
 
 
-async def _call(console: Console, operation: Awaitable[T]) -> T:
+async def _call(operation: Awaitable[T]) -> T:
     try:
         return await operation
     except ChoreNotFoundError as exc:
@@ -78,8 +77,6 @@ async def _call(console: Console, operation: Awaitable[T]) -> T:
         raise ApiError(400, "invalid_request", _message(exc)) from exc
     except TaskStoreError as exc:
         raise ApiError(409, "invalid_transition", str(exc)) from exc
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc) from exc
 
 
 def _check(function: Callable[[Any], T], value: Any) -> T:
@@ -122,7 +119,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             info = await console.store.get_session(own)
             if info is None or info.kind not in ("chat", "front"):
                 raise ApiError(404, "not_found", t("errors.notFound"))
-        chores = await _call(console, runner.store.list_chores(own))
+        chores = await _call(runner.store.list_chores(own))
         return JSONResponse(
             content={
                 "chores": [await runner.chore_body(c) for c in chores],
@@ -141,7 +138,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
         schedule = _check(Schedule.from_json, body.schedule)
         level = _level(body.level)
         chore = await _call(
-            console,
             runner.store.create(
                 title=spec.title,
                 request=spec.objective,
@@ -164,7 +160,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
             None if body.schedule is None else _check(Schedule.from_json, body.schedule)
         )
         chore = await _call(
-            console,
             runner.store.update(
                 chore_id,
                 revision=body.revision,
@@ -180,15 +175,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.delete("/api/chores/{chore_id}")
     async def delete(chore_id: str, revision: int | None = None) -> JSONResponse:
         console.require_store()
-        await _call(console, runner.store.delete(chore_id, revision=revision))
+        await _call(runner.store.delete(chore_id, revision=revision))
         return JSONResponse(content={"deleted": chore_id})
 
     @app.post("/api/chores/{chore_id}/run")
     async def run_now(chore_id: str) -> JSONResponse:
         console.require_store()
-        chore = await _call(console, runner.store.get(chore_id))
-        task = await _call(console, runner.run_now(chore))
-        fresh = await _call(console, runner.store.get(chore_id))
+        chore = await _call(runner.store.get(chore_id))
+        task = await _call(runner.run_now(chore))
+        fresh = await _call(runner.store.get(chore_id))
         return JSONResponse(
             status_code=202,
             content={"chore": await runner.chore_body(fresh), "task": task},
@@ -197,7 +192,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.put("/api/checkin")
     async def switch(body: CheckinSwitch) -> JSONResponse:
         console.require_store()
-        await _call(console, runner.store.set_checkin(body.on))
+        await _call(runner.store.set_checkin(body.on))
         return JSONResponse(content={"checkin": await runner.checkin_body()})
 
 

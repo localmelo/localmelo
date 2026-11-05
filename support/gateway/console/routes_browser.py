@@ -60,8 +60,6 @@ from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.takeover import INPUT_TYPES, quiet_frames
 from localmelo.support.sessions.store import SessionStoreError
 
-from .routes_sessions import _require_session
-
 if TYPE_CHECKING:
     from . import Console
 
@@ -115,7 +113,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/browser")
     async def browser_state(session_id: str) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         live = live_of(console, session_id)
         state: dict[str, Any] = (
             await live.snapshot()

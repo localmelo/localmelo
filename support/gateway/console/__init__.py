@@ -682,6 +682,16 @@ class Console:
             self._store_error or t("errors.storeUnavailable"),
         )
 
+    async def require_session(self, session_id: str) -> SessionInfo:
+        """The row of *session_id*, or 404 ``not_found``.
+
+        A store failure is the exception handler's: 503, or 404 when the row is gone.
+        """
+        info = await self.store.get_session(session_id)
+        if info is None:
+            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
+        return info
+
     async def store_api_error(
         self, exc: SessionStoreError, session_id: str | None = None
     ) -> ApiError:

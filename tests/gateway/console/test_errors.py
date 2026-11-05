@@ -7,7 +7,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.errors import INTERNAL_ERROR
+from localmelo.support.gateway.console.errors import INTERNAL_ERROR, ApiError
+from localmelo.support.sessions.store import SessionBusyError, SessionStoreError
+
+from .conftest import seed_turn
 
 
 def test_an_unknown_api_route_is_the_envelope(client: TestClient) -> None:
@@ -140,3 +143,66 @@ async def test_every_store_route_is_503_when_the_store_failed(
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "store_unavailable"
     assert resp.json()["error"]["message"]
+
+
+def _app_raising(console: Console, exc: Exception) -> TestClient:
+    """The console's app plus two routes that raise *exc* with no wrapper of their own."""
+    app = FastAPI()
+
+    @app.get("/api/sessions/{session_id}/raises")
+    async def in_a_session(session_id: str) -> None:
+        raise exc
+
+    @app.get("/api/raises")
+    async def anywhere() -> None:
+        raise exc
+
+    console.mount(app)
+    return TestClient(app, base_url="http://127.0.0.1:8401")
+
+
+async def test_a_store_error_nobody_caught_is_the_503_envelope(
+    console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    client = _app_raising(console, SessionStoreError("disk I/O error"))
+
+    for path in (f"/api/sessions/{turn.session_id}/raises", "/api/raises"):
+        resp = client.get(path)
+        assert resp.status_code == 503, path
+        assert resp.json()["error"]["code"] == "store_unavailable"
+        assert resp.headers["cache-control"] == "no-store"
+
+
+async def test_a_store_error_in_a_session_that_is_gone_is_404(
+    console: Console,
+) -> None:
+    client = _app_raising(console, SessionStoreError("disk I/O error"))
+
+    resp = client.get("/api/sessions/0123456789ab/raises")
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["message"] == "This session was deleted."
+
+
+async def test_a_busy_session_nobody_caught_is_409(console: Console) -> None:
+    client = _app_raising(console, SessionBusyError("running"))
+
+    resp = client.get("/api/sessions/0123456789ab/raises")
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "session_busy"
+    assert (
+        resp.json()["error"]["message"] == "A turn is already running in this session."
+    )
+
+
+async def test_require_session_returns_the_row_or_404(
+    console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+
+    assert (await console.require_session(turn.session_id)).id == turn.session_id
+    with pytest.raises(ApiError) as gone:
+        await console.require_session("0123456789ab")
+    assert (gone.value.status_code, gone.value.code) == (404, "not_found")
