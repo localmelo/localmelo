@@ -1017,9 +1017,10 @@ def _code_sites(code: str, python: bool, depth: int) -> Sites:
 
 def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -> Sites:
     found = shell_lexer.unwrap(words)
-    words, assigned, codes = found.words, found.assignments, found.codes
+    assigned, codes = found.assignments, found.codes
     keys: set[str] = set()
-    unread = False
+    # A wrapper option melo could not read: the step may reach any site.
+    unread = found.unread
 
     def add(found: Sites) -> None:
         nonlocal unread
@@ -1031,40 +1032,41 @@ def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -
             add(_proxy_sites(value))
     for code in codes:
         add(_code_sites(code, False, depth))
-    if not words:
-        return keys, unread
-    program, args = _program(words[0]), list(words[1:])
-    # The first word that runs curl or wget, whatever runs it (``stdbuf``,
-    # ``watch``, ``script -q /dev/null``…).
-    fetcher = next(
-        (at for at, word in enumerate(words) if _program(word) in ("curl", "wget")),
-        None,
-    )
-    if program in _SHELLS or program == "python":
-        flag = next(
-            (
-                at
-                for at, arg in enumerate(args[:-1])
-                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg)
-            ),
+    for words in found.readings:
+        if not words:
+            continue
+        program, args = _program(words[0]), list(words[1:])
+        # The first word that runs curl or wget, whatever runs it (``stdbuf``,
+        # ``watch``, ``script -q /dev/null``…).
+        fetcher = next(
+            (at for at, word in enumerate(words) if _program(word) in ("curl", "wget")),
             None,
         )
-        if flag is not None:
-            add(_code_sites(args[flag + 1], program == "python", depth))
-        for text in here:  # bash <<< "…"
-            add(_code_sites(text, program == "python", depth))
-    elif program == "eval":
-        add(_code_sites(" ".join(args), False, depth))
-    elif fetcher is not None:
-        add(_fetcher_sites(_program(words[fetcher]), words[fetcher + 1 :]))
-        unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
-    else:
-        plain = [arg for arg in args if not arg.startswith("-")]
-        network = program in _NETWORK or (
-            program == "git" and bool(set(plain) & _GIT_NETWORK)
-        )
-        if network:
-            add((set(), any(_EXPANDS.search(arg) for arg in args)))
+        if program in _SHELLS or program == "python":
+            flag = next(
+                (
+                    at
+                    for at, arg in enumerate(args[:-1])
+                    if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg)
+                ),
+                None,
+            )
+            if flag is not None:
+                add(_code_sites(args[flag + 1], program == "python", depth))
+            for text in here:  # bash <<< "…"
+                add(_code_sites(text, program == "python", depth))
+        elif program == "eval":
+            add(_code_sites(" ".join(args), False, depth))
+        elif fetcher is not None:
+            add(_fetcher_sites(_program(words[fetcher]), words[fetcher + 1 :]))
+            unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
+        else:
+            plain = [arg for arg in args if not arg.startswith("-")]
+            network = program in _NETWORK or (
+                program == "git" and bool(set(plain) & _GIT_NETWORK)
+            )
+            if network:
+                add((set(), any(_EXPANDS.search(arg) for arg in args)))
     return keys, unread
 
 

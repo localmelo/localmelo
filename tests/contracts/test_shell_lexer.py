@@ -22,6 +22,7 @@ import ast
 import itertools
 import json
 import random
+import re
 import shlex
 import time
 from collections.abc import Callable, Iterator
@@ -277,7 +278,7 @@ def test_commands_cut_tokens_at_operators_and_set_redirections_apart(
         ("sudo -u root -E rm x", ["rm", "x"], ["sudo"]),
         ("env -C /tmp -i A=1 'x y=z' rm x", ["rm", "x"], ["env"]),
         ("env - rm x", ["rm", "x"], ["env"]),
-        ("env -u HOME --unset PATH rm x", ["rm", "x"], ["env"]),
+        ("env -u HOME -u PATH rm x", ["rm", "x"], ["env"]),
         ("timeout -s KILL 5 rm x", ["rm", "x"], ["timeout"]),
         ("gtimeout --kill-after 1 --signal=KILL 5 rm x", ["rm", "x"], ["gtimeout"]),
         ("time -p rm x", ["rm", "x"], ["time"]),
@@ -305,7 +306,7 @@ def test_unwrap_finds_the_program_past_keywords_and_wrappers(
     command: str, words: list[str], wrappers: list[str]
 ) -> None:
     found = shell_lexer.unwrap(shlex.split(command), ["?"])
-    assert (found.words, found.wrappers) == (words, wrappers)
+    assert (found.readings, found.wrappers, found.unread) == ([words], wrappers, False)
 
 
 def test_unwrap_keeps_the_assignments_in_order() -> None:
@@ -331,7 +332,14 @@ def test_unwrap_finds_the_command_line_a_wrapper_hands_to_a_shell(
     assert shell_lexer.unwrap(shlex.split(command)).codes == codes
 
 
-def test_every_wrapper_is_named_in_lower_case_and_its_options_are_options() -> None:
+# An option word: ``-x``, ``--long-name``, a single-dash name (``-arch``,
+# ``-x86_64``), ``-`` (env's) or ``--`` (the end of the options).
+OPTION_WORD = re.compile(r"--?|-[A-Za-z0-9]|--?[a-z0-9][a-z0-9_-]+")
+
+
+def test_every_wrapper_lists_option_words_each_of_one_kind() -> None:
     for name, options in shell_lexer.WRAPPERS.items():
         assert name == name.lower()
-        assert all(option.startswith("-") for option in options), name
+        listed = [*options.flags, *options.valued]
+        assert [o for o in listed if not OPTION_WORD.fullmatch(o)] == [], name
+        assert options.flags & options.valued == set(), name

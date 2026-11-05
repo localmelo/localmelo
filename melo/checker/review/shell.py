@@ -63,6 +63,8 @@ _LAUNCHABLE = (
 # files a ``find -exec`` hands over). It is not a name a shell variable can
 # have, so it is never taken for one.
 UNKNOWN_ARG = "$(?)"
+# The doubt for a command whose words melo could not read.
+UNREAD = "Runs a command melo could not read."
 _DRIVES = re.compile(
     r"\btell\s+(application|app)\b|do shell script|run script|Application\(|doShellScript"
     r"|\bdo script\b|«",
@@ -308,7 +310,9 @@ _RUNNERS |= set(["jest", "vitest", "mocha", "pre-commit", "ctest", "hatch"])
 # `<tool> run …` runs a script the project's configuration names.
 _RUN_WRAPPERS = set(["uv", "poetry", "pdm", "hatch", "pipenv"])
 # The options of ``uv run`` and of the package runners that take a value.
-_RUN_VALUED = set(["--with", "--python", "-p", "-P", "--project", "--from"])
+_RUN_OPTIONS = shell_lexer.Options(
+    frozenset(), frozenset(["--with", "--python", "-p", "-P", "--project", "--from"])
+)
 # git commands that run the repository's hooks.
 _HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
@@ -1146,69 +1150,88 @@ def _run_segments(
                     review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
-        argv = _unwrap(ctx, f, argv)
-        if not argv:
-            continue
-        prog = os.path.basename(argv[0]).lower()
-        piped = said if op in ("|", "|&") else None
-        said = _literal_output(argv, body, piped)
-        _writes_code(ctx, f, argv, said, writes, cwd)
-        if prog == "cd":
-            cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
-            continue
-        flags = all(a.startswith("-") and a not in ("-c", "-e", "-m") for a in argv[1:])
-        bare = (prog in _BARE or bool(_PY.match(prog))) and flags
-        links = [a for a in argv if "://" in a]
-        if bare and body is not None:
-            _code(ctx, f, prog, body)
-        elif (
-            bare
-            and op in ("|", "|&")
-            and before == "fetch"
-            or (op == "<(" and bare_before and prog in ("curl", "wget"))
-        ):
-            host = urlparse(url or (links + [""])[0]).netloc or "the internet"
-            # The site is the whole pipeline, its URL with it: a new address
-            # in an edit is a new finding.
-            site = f.site
-            f.site = f"{last_site} {site}"[:600]
-            f.add("remote_code", f"Runs code downloaded from {host}.")
-            if "get-pip" in url + " ".join(links):
-                f.add("install", "Installs pip with get-pip.py.")
-            f.site = site
-        elif bare and op in ("|", "|&") and before == "decode":
-            f.add("opaque", "Runs encoded text as code.")
-        elif bare and op in ("|", "|&"):
-            f.doubt(f"Runs code that another command prints, with {prog}.")
-        given = op in ("|", "|&") or any(
-            k in ("<", "<<", "<<-", "<<<") for k, _ in redirs
-        )
-        run_argv(ctx, f, argv, cwd, given)
-        decode = prog in ("base64", "xxd", "openssl") and bool(
-            {"-d", "-D", "--decode", "-r"} & set(argv)
-        )
-        fetch = prog in ("curl", "wget") and not _output(argv)[0]
-        before = "fetch" if fetch else "decode" if decode else ""
-        url, bare_before = (links + [""])[0], bare
-        last_site = f.site
-        searched = _find_roots(argv[1:]) if prog == "find" else []
+        readings = _unwrap(ctx, f, argv)
+        state = cwd, said, before, url, bare_before, last_site, searched
+        # Each reading starts from the commands before it; the first goes
+        # last, so what it leaves leads on to the next command.
+        for argv in [*readings[1:], *readings[:1]]:
+            cwd, said, before, url, bare_before, last_site, searched = state
+            if not argv:
+                continue
+            prog = os.path.basename(argv[0]).lower()
+            piped = said if op in ("|", "|&") else None
+            said = _literal_output(argv, body, piped)
+            _writes_code(ctx, f, argv, said, writes, cwd)
+            if prog == "cd":
+                cwd = resolve(ctx, (argv + ["~"])[1], cwd) or cwd
+                continue
+            flags = all(
+                a.startswith("-") and a not in ("-c", "-e", "-m") for a in argv[1:]
+            )
+            bare = (prog in _BARE or bool(_PY.match(prog))) and flags
+            links = [a for a in argv if "://" in a]
+            if bare and body is not None:
+                _code(ctx, f, prog, body)
+            elif (
+                bare
+                and op in ("|", "|&")
+                and before == "fetch"
+                or (op == "<(" and bare_before and prog in ("curl", "wget"))
+            ):
+                host = urlparse(url or (links + [""])[0]).netloc or "the internet"
+                # The site is the whole pipeline, its URL with it: a new address
+                # in an edit is a new finding.
+                site = f.site
+                f.site = f"{last_site} {site}"[:600]
+                f.add("remote_code", f"Runs code downloaded from {host}.")
+                if "get-pip" in url + " ".join(links):
+                    f.add("install", "Installs pip with get-pip.py.")
+                f.site = site
+            elif bare and op in ("|", "|&") and before == "decode":
+                f.add("opaque", "Runs encoded text as code.")
+            elif bare and op in ("|", "|&"):
+                f.doubt(f"Runs code that another command prints, with {prog}.")
+            given = op in ("|", "|&") or any(
+                k in ("<", "<<", "<<-", "<<<") for k, _ in redirs
+            )
+            run_argv(ctx, f, argv, cwd, given)
+            decode = prog in ("base64", "xxd", "openssl") and bool(
+                {"-d", "-D", "--decode", "-r"} & set(argv)
+            )
+            fetch = prog in ("curl", "wget") and not _output(argv)[0]
+            before = "fetch" if fetch else "decode" if decode else ""
+            url, bare_before = (links + [""])[0], bare
+            last_site = f.site
+            searched = _find_roots(argv[1:]) if prog == "find" else []
 
 
-def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[str]:
-    """*argv* as the program it runs: past keywords, ``VAR=x`` and wrappers.
+def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
+    """Each program *argv* may run, with its words: past keywords, ``VAR=x`` and wrappers.
 
     The words before the program are read by
     :func:`~localmelo.melo.contracts.shell_lexer.unwrap` (``sudo``, ``env``,
     ``timeout``…); here they are judged, and ``busybox``, ``uv run`` and the
-    package runners are read past too. A command line a wrapper has a shell
-    run (``env -S``) is reviewed as a command. With ``PATH=.:$PATH`` (a
-    folder named relatively first), a program named bare may be a file
-    there: it is named by that path then (``./tool``).
+    package runners are read past too. A wrapper option melo does not know
+    is a doubt, and the program of each reading of it is reviewed. A command
+    line a wrapper has a shell run (``env -S``) is reviewed as a command.
+    With ``PATH=.:$PATH`` (a folder named relatively first), a program named
+    bare may be a file there: it is named by that path then (``./tool``).
     """
-    local = ""
-    while argv:
+    programs: list[list[str]] = []
+    todo = [("", argv, False)]  # the folder PATH= names, words, a program yet
+    while todo:
+        local, argv, ready = todo.pop()
+        if ready:
+            programs.append(
+                [os.path.join(local, argv[0]), *argv[1:]]
+                if local and argv and "/" not in argv[0]
+                else argv
+            )
+            continue
         # xargs adds arguments melo cannot see.
         found = shell_lexer.unwrap(argv, [UNKNOWN_ARG])
+        if found.unread:
+            f.doubt(UNREAD)
         local = local or _note_assignments(f, found.assignments)
         for wrapper in found.wrappers:
             if wrapper in ("sudo", "doas"):
@@ -1217,22 +1240,23 @@ def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[str]:
                 f.add("persistence", "Keeps a program running after this call ends.")
         for code in found.codes:
             review_shell(ctx.deeper(), f, code)
-        argv = found.words
-        prog = os.path.basename(argv[0]).lower() if argv else ""
-        if prog == "busybox" and argv[1:]:
-            argv = argv[1:]  # busybox ln …: the applet is the program
-            continue
-        if prog in _RUN_WRAPPERS and argv[1:2] == ["run"]:
-            start = 2
-        elif _package_run(f, prog, argv):
-            start = 1 if prog in _PACKAGE_RUNNERS else 2  # past dlx / exec / x
-        else:
-            break
-        argv, _, assigned = shell_lexer.past_options(argv[start:], _RUN_VALUED)
-        local = local or _note_assignments(f, assigned)
-    if local and argv and "/" not in argv[0]:
-        argv = [os.path.join(local, argv[0]), *argv[1:]]
-    return argv
+        for argv in reversed(found.readings):
+            prog = os.path.basename(argv[0]).lower() if argv else ""
+            if prog == "busybox" and argv[1:]:
+                todo.append((local, argv[1:], False))  # the applet is the program
+                continue
+            if prog in _RUN_WRAPPERS and argv[1:2] == ["run"]:
+                start = 2
+            elif _package_run(f, prog, argv):
+                start = 1 if prog in _PACKAGE_RUNNERS else 2  # past dlx / exec / x
+            else:
+                todo.append((local, argv, True))
+                continue
+            # The runners have no table of all their options: read as before.
+            passed = shell_lexer.past_options(argv[start:], _RUN_OPTIONS)
+            here = local or _note_assignments(f, passed.assignments)
+            todo.append((here, argv[start + passed.ends[0] :], False))
+    return programs
 
 
 def _note_assignments(f: Findings, assignments: list[tuple[str, str]]) -> str:
@@ -1289,9 +1313,9 @@ def _runs_var(f: Findings, name: str) -> None:
         f.doubt(f"Sets {name}, which can make a program start another one.")
 
 
-def unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[str]:
-    """*argv* as the program it runs (see _unwrap), for a Python process call."""
-    return _unwrap(ctx, f, argv) or argv
+def unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[list[str]]:
+    """Each program *argv* may run (see _unwrap), for a Python process call."""
+    return [found for found in _unwrap(ctx, f, argv) if found] or [argv]
 
 
 def _find_roots(args: list[str]) -> list[str]:

@@ -529,7 +529,8 @@ def _program(words: list[str]) -> tuple[str, list[str]]:
                 words[at + 1 :],
             )  # command -v rm looks rm up, it does not run it
         opening = base.lstrip("({")  # a group: (rm x), { rm x; }
-        if word in shell_lexer.WRAPPERS.get(wrapper, ()):
+        options = shell_lexer.WRAPPERS.get(wrapper)
+        if options is not None and word in options.valued:
             at += 2
         elif (
             word.startswith("-")

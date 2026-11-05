@@ -31,8 +31,9 @@ import pytest
 
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
+from localmelo.melo.checker.review import shell
 from localmelo.melo.contracts import shell_lexer
-from localmelo.melo.contracts.review import ActionReview
+from localmelo.melo.contracts.review import ActionReview, reaches_unread_site
 
 
 @pytest.fixture
@@ -76,8 +77,6 @@ def is_delete(found: ActionReview) -> bool:
 
 def test_every_program_table_is_keyed_in_lower_case() -> None:
     """The program is lower-cased before the lookup, so a capital never matches."""
-    from localmelo.melo.checker.review import shell
-
     tables = [
         "_AWKS",
         "_BARE",
@@ -154,6 +153,35 @@ def test_a_wrapped_process_call_is_reviewed_as_the_command_itself(
 ) -> None:
     words = [*shlex.split(prefix), "rm", "-rf", f"{ws.parent}/x"]
     assert is_delete(py(ws, f"import subprocess\nsubprocess.run({words!r})"))
+
+
+def unlisted(options: shell_lexer.Options) -> list[str]:
+    """Option words a wrapper's table does not list: short, long, a cluster."""
+    listed = options.flags | options.valued
+    short = next(f"-{c}" for c in "ZYXWQ" if f"-{c}" not in listed)
+    flag = next((o for o in sorted(options.flags) if len(o) == 2 and o != "--"), short)
+    return [short, "--no-such-option", "--no-such-option=1", flag + short[1]]
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        f"{name} {option}"
+        for name, options in shell_lexer.WRAPPERS.items()
+        for option in unlisted(options)
+    ],
+)
+def test_an_option_a_wrapper_does_not_list_makes_the_command_unread(
+    ws: Path, prefix: str
+) -> None:
+    """Melo asks, the keys count an unread site, and no reading is dropped.
+
+    ``5`` is a value the option may take, or the duration of ``timeout``.
+    """
+    command = f"{prefix} 5 rm -rf ~/x"
+    found = sh(ws, command)
+    assert is_delete(found) and shell.UNREAD in found.doubts
+    assert reaches_unread_site("shell_exec", {"command": command})
 
 
 @pytest.mark.parametrize(

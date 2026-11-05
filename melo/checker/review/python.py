@@ -958,7 +958,7 @@ class _Review:
         a file that holds passwords or keys (:func:`secret_name`, high impact).
         """
         if node.keywords or any(isinstance(a, ast.Starred) for a in node.args):
-            return self.f.doubt("Runs a command melo could not read.")
+            return self.f.doubt(shell.UNREAD)
         base = self.helper_base(inner, fn)
         if base is None:
             return self.f.doubt("Runs a command in a folder melo could not place.")
@@ -972,7 +972,7 @@ class _Review:
             ]
         for argv in argvs:
             if not isinstance(argv, tuple) or not all(isinstance(a, str) for a in argv):
-                self.f.doubt("Runs a command melo could not read.")
+                self.f.doubt(shell.UNREAD)
                 continue
             if not read_only_argv(argv):
                 self.f.doubt(
@@ -1107,10 +1107,10 @@ class _Review:
                 # Wrappers (env, nice, xargs…) run the program they name; input
                 # given to it (input=, stdin=) is code for an interpreter.
                 given = "input" in kw or "stdin" in kw
-                ran = shell.unwrap(ctx, f, [program, *rest])
-                shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
+                for ran in shell.unwrap(ctx, f, [program, *rest]):
+                    shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
-                f.doubt("Runs a command melo could not read.")
+                f.doubt(shell.UNREAD)
 
     def browser(self, node: ast.AST | None) -> bool:
         """Whether *node* is a browser object of the ``webbrowser`` module.
