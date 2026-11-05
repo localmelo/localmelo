@@ -26,9 +26,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `409 model_switched` on its next turn after `melo-serve use <pick>`; now, before each turn, it asks what melo_serve
   serves, and if the chat model changed it moves to a new Agent on it and says so in one muted line, `The model changed
   to <model> (via melo_serve).`; with nothing served it keeps its Agent and the turn shows the usual hint. A melo_serve
-  error is no longer taken for a failed MCP server. localmelo finds `melo-serve` on PATH (an absolute path) or in the
-  folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, `$XDG_BIN_HOME`, `~/.local/bin`), so the gateway login item, whose
-  PATH lacks it, starts melo_serve, and it runs only a file you own. It connects to melo_serve's control socket only
+  error is no longer taken for a failed MCP server. localmelo finds `melo-serve` as the first file you own on PATH (an
+  absolute path) or in the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, `$XDG_BIN_HOME`, `~/.local/bin`), so the
+  gateway login item, whose PATH lacks it, starts melo_serve. It connects to melo_serve's control socket only
   if that is a socket (not a link) you own in a folder only you can write, and the lines `melo serve` prints about a
   failed start show your home folder as `~` (#NNN).
 - Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.

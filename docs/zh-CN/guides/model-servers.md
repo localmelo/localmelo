@@ -179,7 +179,7 @@ enable_thinking = false
 - 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
 - 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
 - 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
-- localmelo 先用 PATH 中的 `melo-serve`（须为绝对路径），否则用 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）；只运行属于你自己的文件。
+- localmelo 运行第一个属于你自己的 `melo-serve` 文件，依次查找 PATH（须为绝对路径）和 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）。
 - melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
 
 <a id="ollama-with-embeddings"></a>
