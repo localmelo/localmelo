@@ -317,7 +317,7 @@ _EXECUTABLE: Final = "sys.executable"
 
 
 def _program(word: str) -> str:
-    name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    name = shell_lexer.program(word)
     if name == _EXECUTABLE or _PYTHON.match(name):
         return "python"
     return "pip" if _PIP.match(name) else name
@@ -830,27 +830,11 @@ _NETWORK: Final = frozenset(
 )
 _GIT_NETWORK: Final = frozenset({"clone", "fetch", "pull", "push", "ls-remote"})
 _SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
-# Words that run the command after them; the value of each option given.
-_WRAPPERS: Final[dict[str, frozenset[str]]] = {
-    "command": frozenset(),
-    "exec": frozenset(),
-    "time": frozenset(),
-    "nohup": frozenset(),
-    "env": frozenset({"-u", "-C", "-S"}),
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"}),
-    "xargs": frozenset({"-n", "-I", "-P", "-L", "-d", "-E", "-s", "-a", "-J", "-R"}),
-    "nice": frozenset({"-n"}),
-    "timeout": frozenset({"-s", "-k"}),
-    "builtin": frozenset(),
-}
-# Shell words that open or close a compound command: the command follows.
-_KEYWORDS: Final = frozenset(
-    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{"}
-    | {"}", "time", "coproc"}
-)
-_ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
-# What separates two commands, or redirects one, in a shell's text.
-_OPERATORS: Final = ";&|()<>`\n"
+# The operators that end a command: a backquote too, as the text between two
+# is a command of its own.
+_CUTS: Final = shell_lexer.CUTS | {"`"}
+# A line that does not lex, as words and operators.
+_ROUGH: Final = re.compile(r"[^\s;&|()<>`]+|`|" + shell_lexer.OPERATOR.pattern)
 # A command substitution in a word: ``$(…)`` or ``\`…\```.
 _SUBSTITUTION: Final = re.compile(r"\$\((.*)\)|`([^`]*)`", re.S)
 # Python: calls that fetch an address, and calls that connect to a host.
@@ -907,101 +891,24 @@ def _shell_tokens(text: str) -> list[str]:
     parse is split at spaces and operators.
     """
     text = _joined_lines(text)
-
-    def split(part: str) -> list[str]:
-        lexer = shell_lexer.Lexer(part, posix=True, punctuation_chars=_OPERATORS)
-        lexer.whitespace = " \t\r"
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        return list(lexer)
-
     try:
-        return split(text)
+        return shell_lexer.tokens(text, backquotes=True)
     except ValueError:
         pass
     tokens: list[str] = []
     for line in text.split("\n"):
         try:
-            tokens += split(line)
+            tokens += shell_lexer.tokens(line, backquotes=True)
         except ValueError:
-            tokens += re.findall(r"[;&|()<>`]+|[^\s;&|()<>`]+", line)
+            tokens += _ROUGH.findall(line)
         tokens.append("\n")
     return tokens
-
-
-Command = tuple[list[str], list[str]]
-
-
-def _shell_commands_of(tokens: Sequence[str]) -> list[Command]:
-    """The simple commands in *tokens*, each with the here-strings (``<<<``) it reads.
-
-    Split at operators; a redirection's target is dropped.
-    """
-    commands: list[Command] = []
-    current: list[str] = []
-    here: list[str] = []
-    target = ""
-    for token in tokens:
-        if token and all(c in _OPERATORS for c in token):
-            if "(" in token or ")" in token or not ("<" in token or ">" in token):
-                if current or here:
-                    commands.append((current, here))
-                current, here, target = [], [], ""
-            else:
-                target = "here" if "<<<" in token else "file"
-            continue
-        if target:
-            if target == "here":
-                here.append(token)
-            target = ""
-            continue
-        current.append(token)
-    if current or here:
-        commands.append((current, here))
-    return commands
 
 
 def _shell_words(command: Any) -> list[str]:
     if isinstance(command, list):
         return [str(word) for word in command]
     return _shell_tokens(str(command or ""))
-
-
-def _unwrapped(
-    words: Sequence[str],
-) -> tuple[list[str], list[tuple[str, str]], list[str]]:
-    """*words* from the program they run, the assignments before it, and code given to ``env -S``.
-
-    Shell keywords (``if``, ``do``, ``!``, ``{``), assignments and wrappers
-    (``sudo``, ``xargs``, ``env``) are dropped.
-    """
-    rest = list(words)
-    assigned: list[tuple[str, str]] = []
-    codes: list[str] = []
-    while rest:
-        if rest[0] in _KEYWORDS:
-            rest = rest[1:]
-            continue
-        found = _ASSIGNMENT.fullmatch(rest[0])
-        if found:
-            assigned.append((found.group(1), found.group(2)))
-            rest = rest[1:]
-            continue
-        wrapper = _program(rest[0])
-        valued = _WRAPPERS.get(wrapper)
-        if valued is None:
-            break
-        rest = rest[1:]
-        while rest and rest[0].startswith("-") and rest[0] != "-":
-            option = rest[0]
-            if wrapper == "env" and option in ("-S", "--split-string") and rest[1:]:
-                codes.append(rest[1])  # a command line env splits and runs
-            elif wrapper == "env" and option.startswith(("-S", "--split-string=")):
-                codes.append(option.split("=", 1)[-1] if "=" in option else option[2:])
-            rest = rest[2:] if option in valued else rest[1:]
-        if rest and wrapper == "timeout":
-            rest = rest[1:]  # its duration
-    return rest, assigned, codes
 
 
 def _proxy_sites(value: str) -> Sites:
@@ -1109,9 +1016,11 @@ def _code_sites(code: str, python: bool, depth: int) -> Sites:
 
 
 def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -> Sites:
-    words, assigned, codes = _unwrapped(words)
+    found = shell_lexer.unwrap(words)
+    assigned, codes = found.assignments, found.codes
     keys: set[str] = set()
-    unread = False
+    # A wrapper option melo could not read: the step may reach any site.
+    unread = found.unread
 
     def add(found: Sites) -> None:
         nonlocal unread
@@ -1123,40 +1032,41 @@ def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -
             add(_proxy_sites(value))
     for code in codes:
         add(_code_sites(code, False, depth))
-    if not words:
-        return keys, unread
-    program, args = _program(words[0]), list(words[1:])
-    # The first word that runs curl or wget, whatever runs it (``stdbuf``,
-    # ``watch``, ``script -q /dev/null``…).
-    fetcher = next(
-        (at for at, word in enumerate(words) if _program(word) in ("curl", "wget")),
-        None,
-    )
-    if program in _SHELLS or program == "python":
-        flag = next(
-            (
-                at
-                for at, arg in enumerate(args[:-1])
-                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg)
-            ),
+    for words in found.readings:
+        if not words:
+            continue
+        program, args = _program(words[0]), list(words[1:])
+        # The first word that runs curl or wget, whatever runs it (``stdbuf``,
+        # ``watch``, ``script -q /dev/null``…).
+        fetcher = next(
+            (at for at, word in enumerate(words) if _program(word) in ("curl", "wget")),
             None,
         )
-        if flag is not None:
-            add(_code_sites(args[flag + 1], program == "python", depth))
-        for text in here:  # bash <<< "…"
-            add(_code_sites(text, program == "python", depth))
-    elif program == "eval":
-        add(_code_sites(" ".join(args), False, depth))
-    elif fetcher is not None:
-        add(_fetcher_sites(_program(words[fetcher]), words[fetcher + 1 :]))
-        unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
-    else:
-        plain = [arg for arg in args if not arg.startswith("-")]
-        network = program in _NETWORK or (
-            program == "git" and bool(set(plain) & _GIT_NETWORK)
-        )
-        if network:
-            add((set(), any(_EXPANDS.search(arg) for arg in args)))
+        if program in _SHELLS or program == "python":
+            flag = next(
+                (
+                    at
+                    for at, arg in enumerate(args[:-1])
+                    if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", arg)
+                ),
+                None,
+            )
+            if flag is not None:
+                add(_code_sites(args[flag + 1], program == "python", depth))
+            for text in here:  # bash <<< "…"
+                add(_code_sites(text, program == "python", depth))
+        elif program == "eval":
+            add(_code_sites(" ".join(args), False, depth))
+        elif fetcher is not None:
+            add(_fetcher_sites(_program(words[fetcher]), words[fetcher + 1 :]))
+            unread = unread or any(name in _CONFIG_HOMES for name, _ in assigned)
+        else:
+            plain = [arg for arg in args if not arg.startswith("-")]
+            network = program in _NETWORK or (
+                program == "git" and bool(set(plain) & _GIT_NETWORK)
+            )
+            if network:
+                add((set(), any(_EXPANDS.search(arg) for arg in args)))
     return keys, unread
 
 
@@ -1174,7 +1084,15 @@ def _shell_sites(command: Any, depth: int = 0) -> Sites:
             more, hidden = _code_sites(inner[0] or inner[1], False, depth)
             keys |= more
             unread = unread or hidden
-    commands = [(words, [])] if isinstance(command, list) else _shell_commands_of(words)
+    commands = (
+        [(words, [])]
+        if isinstance(command, list)
+        else [
+            # the here-strings (<<<) each reads, for bash <<< "…"
+            (argv, [target for kind, target in redirs if kind == "<<<"])
+            for _, argv, redirs in shell_lexer.commands(words, _CUTS)
+        ]
+    )
     for found, here in commands:
         more, hidden = _command_sites(found, depth, here)
         keys |= more

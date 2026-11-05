@@ -1,5 +1,8 @@
 """The linear shell lexer reads exactly what the standard library's reads.
 
+And :func:`~localmelo.melo.contracts.shell_lexer.unwrap` finds the program a
+command runs past keywords, assignments and wrappers (the end of the file).
+
 The review classifies a command from the words the lexer cuts it into, so a
 different cut could make a step look safer. :class:`Lexer` and :func:`split`
 are compared with :class:`shlex.shlex` and :func:`shlex.split` token for
@@ -19,6 +22,7 @@ import ast
 import itertools
 import json
 import random
+import re
 import shlex
 import time
 from collections.abc import Callable, Iterator
@@ -30,8 +34,8 @@ import pytest
 from localmelo.melo.contracts import shell_lexer
 
 CHECKER_TESTS = Path(__file__).parent.parent / "checker"
-OPERATORS = ";&|()<>`\n"  # melo.contracts.review: the operators of its lexer
-REVIEW_PUNCTUATION = "();<>|&\n"  # melo.checker.review.shell: its lexer's
+OPERATORS = ";&|()<>`\n"  # shell_lexer.tokens(backquotes=True): the site keys'
+REVIEW_PUNCTUATION = "();<>|&\n"  # shell_lexer.tokens(): the review's
 
 
 def configured(factory: Callable[..., Any], **options: Any) -> Callable[[str], Any]:
@@ -54,7 +58,7 @@ def configured(factory: Callable[..., Any], **options: Any) -> Callable[[str], A
 
 # name -> keyword options of shlex.shlex and the attributes the call sites set
 SETTINGS: dict[str, dict[str, Any]] = {
-    # melo.checker.review.shell._tokens
+    # melo.contracts.shell_lexer.tokens
     "review_tokens": dict(
         posix=True,
         punctuation_chars=REVIEW_PUNCTUATION,
@@ -62,7 +66,7 @@ SETTINGS: dict[str, dict[str, Any]] = {
         whitespace_split=True,
         commenters="",
     ),
-    # melo.contracts.review._shell_tokens
+    # melo.contracts.shell_lexer.tokens(backquotes=True)
     "review_operators": dict(
         posix=True,
         punctuation_chars=OPERATORS,
@@ -233,3 +237,161 @@ def test_one_long_word_costs_time_in_proportion_to_its_length() -> None:
     """Sixteen times the text takes about sixteen times as long, not 256."""
     short, long = best_cpu_time("a" * 25_000), best_cpu_time("a" * 400_000)
     assert long < 64 * short
+
+
+# ── Simple commands, and the program each runs ──
+
+
+@pytest.mark.parametrize(
+    ("text", "backquotes", "commands"),
+    [
+        (
+            "a 2>&1 | b x>>log",
+            False,
+            [("", ["a"], [(">&", "1")]), ("|", ["b", "x"], [(">>", "log")])],
+        ),
+        (
+            "bash <<< 'curl x' && c",
+            False,
+            [("", ["bash"], [("<<<", "curl x")]), ("&&", ["c"], [])],
+        ),
+        ("echo `curl x`", False, [("", ["echo", "`curl", "x`"], [])]),
+        ("echo `curl x`", True, [("", ["echo"], []), ("`", ["curl", "x"], [])]),
+        (
+            "(a)>out;b",
+            False,
+            [("(", ["a"], []), (")", [], [(">", "out")]), (";", ["b"], [])],
+        ),
+    ],
+)
+def test_commands_cut_tokens_at_operators_and_set_redirections_apart(
+    text: str, backquotes: bool, commands: list[Any]
+) -> None:
+    cuts = shell_lexer.CUTS | ({"`"} if backquotes else set())
+    found = shell_lexer.commands(shell_lexer.tokens(text, backquotes), cuts)
+    assert found == commands
+
+
+@pytest.mark.parametrize(
+    ("command", "words", "wrappers"),
+    [
+        ("sudo -u root -E rm x", ["rm", "x"], ["sudo"]),
+        ("env -C /tmp -i A=1 'x y=z' rm x", ["rm", "x"], ["env"]),
+        ("env - rm x", ["rm", "x"], ["env"]),
+        ("env -u HOME -u PATH rm x", ["rm", "x"], ["env"]),
+        ("timeout -s KILL 5 rm x", ["rm", "x"], ["timeout"]),
+        ("gtimeout --kill-after 1 --signal=KILL 5 rm x", ["rm", "x"], ["gtimeout"]),
+        ("time -p rm x", ["rm", "x"], ["time"]),
+        ("time -o out.txt rm x", ["rm", "x"], ["time"]),
+        ("flock -n /tmp/lock rm x", ["rm", "x"], ["flock"]),
+        ("flock -w 5 /tmp/lock rm x", ["rm", "x"], ["flock"]),
+        ("caffeinate -d -t 60 rm x", ["rm", "x"], ["caffeinate"]),
+        ("arch -arm64 -arch arm64 rm x", ["rm", "x"], ["arch"]),
+        ("exec -a name rm x", ["rm", "x"], ["exec"]),
+        ("stdbuf -o L -eL rm x", ["rm", "x"], ["stdbuf"]),
+        ("xcrun -n --sdk macosx rm x", ["rm", "x"], ["xcrun"]),
+        ("/usr/bin/nice -n 5 nohup rm x", ["rm", "x"], ["nice", "nohup"]),
+        ("xargs -p -n 1 rm", ["rm", "?"], ["xargs"]),
+        ("xargs", [], ["xargs"]),
+        ("A=1 B=2 sudo rm x", ["rm", "x"], ["sudo"]),
+        ("if ! time -p rm x", ["rm", "x"], ["time"]),
+        ("function f { rm x", ["rm", "x"], []),
+        ("coproc NAME { rm x", ["rm", "x"], []),
+        ("coproc rm x", ["rm", "x"], []),
+        ("done", [], []),
+        ("make all", ["make", "all"], []),
+    ],
+)
+def test_unwrap_finds_the_program_past_keywords_and_wrappers(
+    command: str, words: list[str], wrappers: list[str]
+) -> None:
+    found = shell_lexer.unwrap(shlex.split(command), ["?"])
+    assert (found.readings, found.wrappers, found.unread) == ([words], wrappers, False)
+
+
+def test_unwrap_keeps_the_assignments_in_order() -> None:
+    found = shell_lexer.unwrap(shlex.split("A=1 env -i B=2 'x y=z' sudo C=3 rm x"))
+    assert found.assignments == [("A", "1"), ("B", "2"), ("x y", "z"), ("C", "3")]
+
+
+@pytest.mark.parametrize(
+    ("command", "codes"),
+    [
+        ("env -S 'rm -rf x' y", ["rm -rf x"]),
+        ("env -S'rm -rf x'", ["rm -rf x"]),
+        ("env --split-string='a=b c'", ["a=b c"]),
+        ("env --split-string 'rm -rf x'", ["rm -rf x"]),
+        ("flock /tmp/lock -c 'rm -rf x'", ["rm -rf x"]),
+        ("flock /tmp/lock --command 'rm -rf x'", ["rm -rf x"]),
+        ("env -i rm x", []),
+    ],
+)
+def test_unwrap_finds_the_command_line_a_wrapper_hands_to_a_shell(
+    command: str, codes: list[str]
+) -> None:
+    assert shell_lexer.unwrap(shlex.split(command)).codes == codes
+
+
+@pytest.mark.parametrize(
+    ("command", "readings"),
+    [
+        ("env -S 'a b' c", [["a", "b", "c"]]),
+        ("env -S a b c", [["a", "b", "c"]]),
+        ("env -iS'a b' c", [["a", "b", "c"]]),
+        ("env -S '-i A=1 a' b", [["a", "b"]]),
+        ("env -u X -S 'a -b' -c d", [["a", "-b", "-c", "d"]]),
+    ],
+)
+def test_env_reads_the_words_of_s_in_its_place(
+    command: str, readings: list[list[str]]
+) -> None:
+    """env(1) splits the value of ``-S`` into arguments of its own, before the rest."""
+    found = shell_lexer.unwrap(shlex.split(command))
+    assert (found.readings, found.unread) == (readings, False)
+
+
+# The forms env(1) reads its own way in the value of -S ("Details of -S"),
+# each in a value of placeholder words.
+ENV_OWN_FORMS = {
+    "a word starting with # ends the value": "a #b",
+    "backslash c ends the value": "a\\c b",
+    "backslash underscore separates": "a\\_b",
+    **{f"backslash {e} is an escape": f"a\\{e}b" for e in "fnrtv#$\"'\\"},
+    "a name in braces is read from the environment": "a ${B}",
+    "a vertical tab separates": "a\vb",
+    "a form feed separates": "a\fb",
+}
+
+
+@pytest.mark.parametrize("value", ENV_OWN_FORMS.values(), ids=list(ENV_OWN_FORMS))
+def test_an_env_s_value_env_reads_its_own_way_makes_the_command_unread(
+    value: str,
+) -> None:
+    """Melo does not read env(1)'s own forms: the command is unread, and still
+    read the shell's way."""
+    found = shell_lexer.unwrap(["env", "-S", value, "c"])
+    assert found.unread
+    assert found.readings == [[*shell_lexer.split(value), "c"]]
+
+
+def test_a_command_read_more_ways_than_the_cap_keeps_the_first_and_is_unread() -> None:
+    """Past the cap no more ways are read: the first, each unlisted option
+    without a value, stays among them."""
+    words = ["env", *["-Z", "a"] * 20, "ls"]
+    found = shell_lexer.unwrap(words)
+    assert found.unread and len(found.readings) == shell_lexer.MAX_READINGS
+    assert found.readings[0] == words[2:]
+
+
+# An option word: ``-x``, ``--long-name``, a single-dash name (``-arch``,
+# ``-x86_64``), ``-`` (env's) or ``--`` (the end of the options).
+OPTION_WORD = re.compile(r"--?|-[A-Za-z0-9]|--?[a-z0-9][a-z0-9_-]+")
+
+
+def test_every_wrapper_lists_option_words_each_of_one_kind() -> None:
+    for name, options in shell_lexer.WRAPPERS.items():
+        assert name == name.lower()
+        listed = [*options.flags, *options.valued]
+        assert [o for o in listed if not OPTION_WORD.fullmatch(o)] == [], name
+        assert options.flags & options.valued == set(), name
+        assert options.splits <= options.valued, name
