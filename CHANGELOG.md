@@ -20,9 +20,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (melo_serve's, and the gateway's only when asked), loads the models with `melo-serve use` and saves melo_serve as the
   chat server. Each step ends in one plain line (`installed X into Y`, `already installed (V), skipped`, `updated
   melo_serve A → B`, `skipped (you chose to skip it)` or a failure that says why), every item can be skipped, and
-  `cancel()` ends the job with the partial downloads kept. `find_uv()` finds uv next to the running interpreter, on
-  PATH, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, with the same checked lookup as `melo-serve`
-  (#NNN).
+  `cancel()` ends the job with the partial downloads kept, and a child that does not stop on SIGTERM gets SIGKILL after
+  60 s. An error ends the job `failed` and Ctrl-C ends it `cancelled`, always with one `Finished`; `plan()` never raises.
+  A failure says what is left (`nothing was changed` only while that is true), and an update that leaves an older
+  `melo-serve` first on PATH fails. `get` is told to skip only items of its own run. `find_uv()` finds uv next to the
+  running interpreter, on PATH, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, with the same checked
+  lookup as `melo-serve`. On macOS that lookup now accepts a file or folder that the `admin` group can write (Homebrew's
+  own `/opt/homebrew/bin` is like that), for command paths only: the state file and the control socket still must be
+  writable by no one else (#NNN).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,

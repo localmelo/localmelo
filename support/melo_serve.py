@@ -26,6 +26,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,9 +40,9 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
-# The melo_serve that first-run setup installs: one commit (a tag can move) and the
-# oldest version it accepts. The commit is a placeholder until one has ``melo-serve get``.
-MELO_SERVE_REF: Final = "ec5305af3e8dd374a73ae87f6fcf18dc13319819"
+# The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.0,
+# and the oldest version it accepts.
+MELO_SERVE_REF: Final = "4936aa0668949be6d21e0744dad6cf151fefe6af"
 MIN_VERSION: Final = "0.3.0"
 ARCHIVE_URL: Final = (
     f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
@@ -251,7 +252,9 @@ class MeloServeError(Exception):
 
 
 def _admin_gid() -> int | None:
-    """The group id of macOS's ``admin`` group, looked up now; None when that fails."""
+    """The group id of macOS's ``admin`` group, looked up now; None elsewhere or when that fails."""
+    if sys.platform != "darwin":  # another system's ``admin`` group is not macOS's
+        return None
     try:
         return grp.getgrnam("admin").gr_gid
     except Exception:  # no such group, no group database: no exemption (fail closed)
@@ -277,7 +280,8 @@ def _check(path: str | None) -> str | None:
     That file, and the folders of *path* and of the file, must be the user's
     and not writable by others, as :func:`_own` says, except that the ``admin``
     group may write (:func:`_others_write`; :func:`_own` itself, which the state
-    file and the socket use, has no such exemption). Links are followed
+    file and the socket use, has no such exemption; nor has any system but
+    macOS). Links are followed
     (``uv tool install`` makes ``~/.local/bin/melo-serve`` a link into its own
     folder).
     """
@@ -334,11 +338,14 @@ def find_executable(
 
     A candidate that :func:`_check` refuses is passed over, so a stale file in a
     system folder does not hide the installed one. The path returned is the
-    file the links lead to, which is what was checked and what is run.
+    file the links lead to, which is checked once more and is what is run.
     """
     for path in _candidates(name, before, after):
-        if path is not None and _check(path) == "":
-            return os.path.realpath(path)
+        if path is None:
+            continue
+        real = os.path.realpath(path)
+        if _check(path) == _check(real) == "":
+            return real
     return None
 
 

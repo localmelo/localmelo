@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -279,6 +280,13 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     (link / "melo-serve").unlink()
     (link / "melo-serve").symlink_to(real_command / "gone")  # a dangling link
     assert melo_serve.command() is None
+
+
+def test_the_admin_group_exemption_is_macos_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")  # its ``admin`` is not macOS's
+    assert melo_serve._admin_gid() is None
 
 
 def test_a_melo_serve_found_by_a_relative_path_entry_is_refused(

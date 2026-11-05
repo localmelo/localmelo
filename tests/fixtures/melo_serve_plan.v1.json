@@ -1,9 +1,9 @@
 {
   "schema": "melo_serve.plan/1",
   "machine": {
-    "chip": "Apple M5 Max",
+    "chip": "Apple M5 Pro",
     "arch": "arm64",
-    "ram_gb": 128,
+    "ram_gb": 32,
     "macos": "27.2",
     "macos_build": "26B123",
     "free_gb": 83.0,
@@ -15,21 +15,12 @@
   "reason": "",
   "reason_hint": "",
   "pick": {
-    "id": "qwen3.8-27b-splash",
-    "name": "Qwen3.8 27B",
-    "backend": "splash",
-    "fit": "estimate"
+    "id": "qwen3-8b-omlx",
+    "name": "Qwen3 8B",
+    "backend": "omlx",
+    "fit": "fits"
   },
   "items": [
-    {
-      "id": "backend:splash",
-      "kind": "backend",
-      "name": "Splash 1.5.0",
-      "via": "homebrew",
-      "size_bytes": 264000000,
-      "dest": "/opt/homebrew",
-      "state": "todo"
-    },
     {
       "id": "backend:omlx",
       "kind": "backend",
@@ -42,14 +33,15 @@
       "file": "oMLX-0.7.3-macos26-27.dmg"
     },
     {
-      "id": "model:qwen3.8-27b-splash",
+      "id": "model:qwen3-8b-omlx",
       "kind": "model",
-      "name": "Qwen3.8 27B",
+      "name": "Qwen3 8B",
       "via": "huggingface",
-      "size_bytes": 22764000000,
+      "size_bytes": 4939212390,
       "dest": "~/models/huggingface",
       "state": "todo",
-      "role": "chat"
+      "role": "chat",
+      "backend": "omlx"
     },
     {
       "id": "model:qwen3-embedding-0.6b-omlx",
@@ -60,12 +52,17 @@
       "dest": "~/models/huggingface",
       "state": "partial",
       "role": "embedding",
+      "backend": "omlx",
       "cached_bytes": 500000000
     }
   ],
-  "download_bytes": 24897729252,
+  "download_bytes": 6608941642,
   "enough_disk": true,
   "alternatives": [
-    {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx"}
+    {
+      "id": "qwen3-4b-omlx",
+      "name": "Qwen3 4B Instruct",
+      "backend": "omlx"
+    }
   ]
 }
