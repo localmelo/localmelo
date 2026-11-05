@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent._reflection import _reflection_from_object
 from localmelo.melo.agent.agent import _providers_from_config  # noqa: F401
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import (
@@ -443,7 +444,7 @@ class TestReflectionFromObject:
     """Unit tests for _reflection_from_object (the reading is in test_reflection_gate)."""
 
     def test_valid_object(self) -> None:
-        entry, decision = Agent._reflection_from_object(
+        entry, decision = _reflection_from_object(
             json.loads(_reflection_json("continue", summary="ok", progress=True)),
             attempt_id=0,
             failure_type="budget",
@@ -466,7 +467,7 @@ class TestReflectionFromObject:
             "next_step_is_concrete": "yes",
             "next_step_is_novel": "yes",
         }
-        entry, decision = Agent._reflection_from_object(data, 0, "budget")
+        entry, decision = _reflection_from_object(data, 0, "budget")
         assert entry.summary == "123"
         assert entry.failed_hypotheses == ["single string"]
         assert entry.confidence == 0.0  # "high" -> default 0.0
@@ -474,9 +475,7 @@ class TestReflectionFromObject:
         assert decision.task_still_feasible is True
 
     def test_unknown_action_coerced_to_stop(self) -> None:
-        _, decision = Agent._reflection_from_object(
-            {"recommended_action": "yolo"}, 0, ""
-        )
+        _, decision = _reflection_from_object({"recommended_action": "yolo"}, 0, "")
         assert decision.recommended_action == "stop"
 
 

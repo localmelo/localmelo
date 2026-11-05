@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent.agent import _gate_stop_reason, _stop_reason
+from localmelo.melo.agent._reflection import _gate_stop_reason, _stop_reason
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.schema import ReflectionDecision
 from localmelo.tests.agent.test_reflection_gate import (

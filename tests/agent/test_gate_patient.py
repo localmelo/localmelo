@@ -18,7 +18,7 @@ from localmelo.melo.agent._chat import (
     ANSWER_ON_STOP_NOTE,
     REFLECTION_PROMPT,
 )
-from localmelo.melo.agent.agent import (
+from localmelo.melo.agent._reflection import (
     REFLECTION_ITEM_CHARS,
     REFLECTION_LIST_ITEMS,
     _cap_reflection_lists,

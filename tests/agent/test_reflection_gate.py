@@ -24,11 +24,12 @@ from localmelo.melo.agent._chat import (
     REFLECTION_RETRY_NOTE,
     Chat,
 )
-from localmelo.melo.agent.agent import (
+from localmelo.melo.agent._reflection import (
     REFLECTION_TRIM_ORDER,
     _find_reflection,
     _fit_reflection,
     _gate_stop_reason,
+    _reflection_from_object,
     _serialize_reflections,
 )
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
@@ -646,7 +647,7 @@ def _bulky(action: str, **fields: Any) -> dict[str, Any]:
 
 def _parsed_size(data: dict[str, Any]) -> int:
     """The serialized size of the reflection that *data* gives after attempt 0."""
-    entry, _ = Agent._reflection_from_object(data, 0, "budget")
+    entry, _ = _reflection_from_object(data, 0, "budget")
     return _size(entry)
 
 
