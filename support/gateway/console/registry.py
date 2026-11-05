@@ -75,7 +75,7 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import check_submission
 
-from .errors import ApiError
+from .errors import ApiError, store_unavailable
 
 # What a Stop from the console says, and the cause it records.
 STOP_REASON = "Stopped from the web console"
@@ -412,9 +412,7 @@ class ConsoleSessions:
         try:
             info = await self._store.get_session(session_id)
         except SessionStoreError as exc:
-            raise ApiError(
-                503, "store_unavailable", display.home_label(str(exc))
-            ) from exc
+            raise store_unavailable(exc) from exc
         if info is None:
             raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         if info.kind == "task":
@@ -429,7 +427,7 @@ class ConsoleSessions:
                 try:
                     await self._store.update_session(session_id, workspace=workspace)
                 except SessionStoreError as exc:
-                    raise ApiError(503, "store_unavailable", str(exc)) from exc
+                    raise store_unavailable(exc) from exc
         elif workspace is None:
             workspace = self._default_workspace()
             try:
@@ -439,7 +437,7 @@ class ConsoleSessions:
                 workspace = os.path.realpath(workspace)
                 await self._store.update_session(session_id, workspace=workspace)
             except SessionStoreError as exc:
-                raise ApiError(503, "store_unavailable", str(exc)) from exc
+                raise store_unavailable(exc) from exc
             except OSError as exc:
                 raise ApiError(
                     400,
@@ -527,9 +525,7 @@ class ConsoleSessions:
             if is_new:
                 self._sessions.pop(session_id, None)
             if isinstance(exc, SessionStoreError):
-                raise ApiError(
-                    503, "store_unavailable", display.home_label(str(exc))
-                ) from exc
+                raise store_unavailable(exc) from exc
             raise
         if self._closed:
             # close_all() may have run while _load() awaited. It closed this

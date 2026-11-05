@@ -1127,6 +1127,118 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
   return {};
 }
 
+// ── Following a session's events ──
+
+// New frames are drawn together, at most this often.
+const DRAW_MS = 150;
+// Seconds to wait before each new try after a stream ends; the last wait repeats.
+const RECONNECT_S = [1, 2, 4, 8, 16, 30];
+
+function openEventSource(url) {
+  return typeof EventSource === "function" ? new EventSource(url) : null;
+}
+
+/**
+ * Follow `GET /api/sessions/{id}/events` from `view.lastEventId`. Every frame
+ * newer than the view is folded into it with `applyEvent` and handed to
+ * `onFrame(frame, outcome)` (`outcome` is what `applyEvent` returns); with
+ * `onDraw`, it is called once per `DRAW_MS` after new frames, so a view is
+ * redrawn once for a burst. `watch` tells the gateway that this page shows the
+ * session to a person, so a step Auto stops asks on its card (#465).
+ *
+ * The chat, the task card and the worker view all follow through this, by
+ * the same two rules:
+ *
+ * - A hidden page keeps following; nothing here reads the page's visibility.
+ *   A page that shows a session is watching it, and a card Auto shows can be
+ *   answered when the person comes back within its wait.
+ * - A stream that ends is opened again after the last id folded, following
+ *   1, 2, 4, 8, 16 and then 30 s; a stream that opens starts the count over.
+ *   `onEnd()` is asked at each end, and `false` (or a promise of it) stops the
+ *   follow: a worker run that finished, a chat that is gone. The new stream
+ *   waits for the answer, and an `onEnd` that fails does not stop the follow.
+ *
+ * Returns `{status, retryAt, retryNow(), close()}`: `status` is `live`, or
+ * `paused` while it waits to open again (`retryAt`, in seconds, says when);
+ * `onStatus()` is called when it changes; `retryNow()` skips the wait. Returns
+ * null where there is no EventSource, so the caller reads the session instead.
+ * `open(url)` makes the EventSource; `schedule`, `cancel` and `now` are the
+ * clock.
+ */
+export function followEvents({
+  id, view, watch = false, onFrame, onDraw = null, onStatus = null, onEnd = null,
+  open = openEventSource, schedule = setTimeout, cancel = clearTimeout, now = () => Date.now() / 1000,
+}) {
+  const follower = {status: "live", retryAt: 0, retryNow, close};
+  let source = null;
+  let wait = null;
+  let draw = null;
+  let verdict = null;
+  let attempt = 0;
+  let closed = false;
+
+  function connect() {
+    const next = open(`/api/sessions/${encodeURIComponent(id)}/events?after=${view.lastEventId}${watch ? "&watch=true" : ""}`);
+    if (next === null) return false;
+    source = next;
+    next.onopen = () => {
+      if (source !== next) return;
+      attempt = 0;
+      setStatus("live");
+    };
+    next.onmessage = (message) => {
+      if (source === next) frame(message.data);
+    };
+    next.onerror = () => {
+      if (source === next) ended();
+    };
+    return true;
+  }
+  function setStatus(status) {
+    follower.status = status;
+    onStatus?.();
+  }
+  function frame(data) {
+    let event;
+    try { event = JSON.parse(data); } catch { return; }
+    if (!isObject(event) || (typeof event.id === "number" && event.id <= view.lastEventId)) return;
+    onFrame(event, applyEvent(view, event));
+    if (onDraw !== null) draw ??= schedule(() => { draw = null; onDraw(); }, DRAW_MS);
+  }
+  function ended() {
+    source.close();
+    source = null;
+    const seconds = RECONNECT_S[Math.min(attempt, RECONNECT_S.length - 1)];
+    attempt += 1;
+    follower.retryAt = now() + seconds;
+    setStatus("paused");
+    verdict = (async () => onEnd?.())().catch(() => true);
+    verdict.then((more) => { if (more === false) close(); });
+    if (!closed) wait = schedule(reopen, seconds * 1000);
+  }
+  async function reopen() {
+    wait = null;
+    if ((await verdict) === false || closed) return;
+    setStatus("live");
+    connect();
+  }
+  async function retryNow() {
+    if (wait === null) return;
+    cancel(wait);
+    await reopen();
+  }
+  function close() {
+    if (closed) return;
+    closed = true;
+    source?.close();
+    source = null;
+    for (const timer of [wait, draw]) if (timer !== null) cancel(timer);
+    wait = draw = null;
+  }
+
+  return connect() ? follower : null;
+}
+
 // ── What a turn says ──
 
 /** The tool cards of *turn*, excluding calls that never started. */

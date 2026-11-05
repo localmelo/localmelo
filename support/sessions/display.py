@@ -151,6 +151,18 @@ def home_label(path: str) -> str:
     return path
 
 
+def home_labelled(text: str) -> str:
+    """*text* with every mention of the home folder written ``~``, wherever it stands.
+
+    For a message that names a path in the middle (``Cannot open /Users/x/...``);
+    :func:`home_label` is for a value that is one path.
+    """
+    for home in sorted(_homes(), key=len, reverse=True):
+        if home != os.sep:
+            text = re.sub(re.escape(home) + r"(?=$|/|\\|[\s:;,'\")\]])", "~", text)
+    return text
+
+
 def folder_name(root: str | None) -> str:
     """The last part of the workspace *root*, for a question that names the folder."""
     name = (root or "").rstrip(os.sep).rsplit(os.sep, 1)[-1]

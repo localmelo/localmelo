@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.browser import safari
+from localmelo.support.browser import pagescript, safari
 from localmelo.support.browser.driver import (
     Act,
     BrowserError,
@@ -119,7 +119,7 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
 
 async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) -> None:
     for mode, why, site in (
-        ("no_native", "cannot act on page elements itself", False),
+        ("no_native", "melo's browser cannot act on page elements itself", False),
         ("no_uids", "could not name that element", False),
         ("native_missed", "did not reach it", True),
         ("native_error", "did not reach it", True),
@@ -296,8 +296,8 @@ def test_what_covers_an_element_is_worded_from_a_fixed_list_never_from_the_pages
     None
 ):
     good = {"what": "a sticky header", "detail": "h1"}
-    assert safari._cover_words(good) == "a sticky header (h1)"
-    assert safari._cover_words(
+    assert pagescript._cover_words(good) == "a sticky header (h1)"
+    assert pagescript._cover_words(
         {"what": "an ad", "detail": "iframe from ads.example.net"}
     ) == ("an ad (iframe from ads.example.net)")
     # Words the page wrote, in either part, in any shape: never in the answer.
@@ -310,18 +310,18 @@ def test_what_covers_an_element_is_worded_from_a_fixed_list_never_from_the_pages
         {"what": f"a sticky header ({SAYS})", "detail": ""},
     ):
         for text in (
-            safari._cover_words(hostile),
-            safari._covered_why(hostile),
-            str(safari._cover_stop(hostile, "button")),
+            pagescript._cover_words(hostile),
+            pagescript.covered_why(hostile),
+            str(pagescript.cover_stop(hostile, "button")),
         ):
             assert "nstructions" not in text and "delete" not in text, hostile
     # What the list does not know is left out, and the answer falls back to its plain words.
-    assert safari._cover_words({"what": "a sticky header", "detail": SAYS}) == (
+    assert pagescript._cover_words({"what": "a sticky header", "detail": SAYS}) == (
         "a sticky header"
     )
-    assert safari._cover_words({"what": SAYS, "detail": "h1"}) == ""
-    assert safari._covered_why({"what": SAYS}) == safari._PASSED["covered"]
-    assert str(safari._cover_stop({"what": SAYS}, "button")) == safari._MOVED
+    assert pagescript._cover_words({"what": SAYS, "detail": "h1"}) == ""
+    assert pagescript.covered_why({"what": SAYS}) == pagescript.PASSED_OVER["covered"]
+    assert str(pagescript.cover_stop({"what": SAYS}, "button")) == pagescript._MOVED
 
 
 async def test_a_stale_element_is_refused_before_the_browser_acts(
@@ -382,7 +382,7 @@ async def test_a_click_that_loads_another_page_reports_no_changes_of_the_old_one
 
 
 def test_the_elements_new_state_is_put_in_words() -> None:
-    words = safari._target_words
+    words = pagescript._target_words
     assert words({"pressed": "false"}, {"pressed": "true"}) == "now pressed"
     assert (
         words(
@@ -429,9 +429,9 @@ class Polled(SafariAutomationDriver):
 
 @pytest.fixture
 def timing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(safari, "LOOK_STEP_S", 0.01)
-    monkeypatch.setattr(safari, "QUIET_S", 0.05)
-    monkeypatch.setattr(safari, "LOOK_CAP_S", 0.3)
+    monkeypatch.setattr(pagescript, "LOOK_STEP_S", 0.01)
+    monkeypatch.setattr(pagescript, "QUIET_S", 0.05)
+    monkeypatch.setattr(pagescript, "LOOK_CAP_S", 0.3)
 
 
 def a_click(kind: str = "click", enter: bool = False) -> Act:

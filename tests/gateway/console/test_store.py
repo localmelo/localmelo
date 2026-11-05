@@ -82,11 +82,11 @@ async def test_an_owned_store_never_names_its_holder(
         await owner.aclose()
 
 
-async def test_a_store_message_labels_the_home_folder(
+async def test_a_store_failure_answer_keeps_the_home_folder_out(
     console: Console, home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The re-read after a failed store call can itself fail; that message
-    # must still write the home folder as "~" (docs/api.md).
+    # The re-read after a failed store call can itself fail; the answer is
+    # still the fixed one, and the failure's own text stays in the log.
     async def broken(session_id: str) -> None:
         raise SessionStoreError("reread failed")
 
@@ -96,8 +96,8 @@ async def test_a_store_message_labels_the_home_folder(
     )
     assert error.status_code == 503
     assert error.code == "store_unavailable"
-    assert error.message.startswith("~")
-    assert str(home) not in error.message
+    assert error.message == "The session store is not available."
+    assert "sessions.db" not in error.message and str(home) not in error.message
 
 
 async def test_aclose_releases_the_owner_lock(

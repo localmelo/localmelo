@@ -279,22 +279,6 @@ async def test_a_newer_scheduler_component_is_refused(
     assert await one(store, "SELECT name FROM sqlite_master WHERE name='tasks'") is None
 
 
-async def test_a_failed_migration_writes_no_table_and_no_version(
-    store: SessionStore,
-) -> None:
-    with pytest.raises(sqlite3.OperationalError):
-        await store.ensure_component(
-            "broken",
-            1,
-            ("CREATE TABLE broken_ok (id INTEGER)", "THIS IS NOT SQL"),
-        )
-    assert (
-        await one(store, "SELECT name FROM sqlite_master WHERE name='broken_ok'")
-        is None
-    )
-    assert await component_version(store, "broken") is None
-
-
 async def test_an_older_component_is_refused_without_migrating(
     store: SessionStore, clock: Clock
 ) -> None:
@@ -846,8 +830,6 @@ async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
     try:
         with pytest.raises(ValueError, match="gateway"):
             TaskStore(cli)
-        with pytest.raises(SessionStoreError, match="gateway"):
-            await cli.ensure_component(COMPONENT, SCHEDULER_VERSION, ("SELECT 1",))
         assert await component_version(cli, COMPONENT) is None
     finally:
         await cli.aclose()

@@ -2,7 +2,11 @@
 
 Every ``/api`` failure is ``{"error": {"code", "message", "details"}}``.
 A route raises :class:`ApiError`; FastAPI's validation errors become a 400
-with the first field named, and anything unhandled becomes a 500 whose
+with the first field named; a store error a route lets through is answered by
+its kind (a chat, task or chore that is not there is a 404, a refused change a
+409) and any other store failure is a 503 ``store_unavailable``, or a 404 when
+the chat in its path is gone (:meth:`Console.store_api_error`); a busy session
+becomes a 409 ``session_busy``; and anything unhandled becomes a 500 whose
 message says nothing about the failure. The legacy ``/v1`` routes keep
 FastAPI's own 404 and 422 bodies: these handlers are installed by the
 console and leave a request outside ``/api`` alone.
@@ -29,22 +33,60 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from localmelo.support.gateway.chore_store import (
+    ChoreLimitError,
+    ChoreNotFoundError,
+    ChoreStaleError,
+)
 from localmelo.support.gateway.guard import (
     _SECURITY_HEADERS,
-    _TOO_LARGE_ERROR,
-    _UNSUPPORTED_MEDIA_TYPE_ERROR,
-    _UPLOAD_MEDIA_TYPE_ERROR,
-    _UPLOAD_TOO_LARGE_ERROR,
     API_CSP,
-    BODY_BYTES_LIMIT,
-    UPLOAD_BYTES_LIMIT,
-    _content_length_too_large,
-    is_json_content_type,
-    is_upload_content_type,
+    is_api_path,
     is_upload_request,
+)
+from localmelo.support.gateway.i18n import said_text, t
+from localmelo.support.gateway.task_store import (
+    TaskNotFoundError,
+    TaskNotPausedError,
+    TaskStoreError,
+)
+from localmelo.support.sessions import display
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStoreError,
+    StoreOwnedError,
+    UnknownSessionError,
 )
 
 logger = logging.getLogger(__name__)
+
+# What an API v2 message says when another process holds the store's owner
+# lock. It never names the other process: spec 2.2 keeps lease holder
+# strings out of API messages. The terminal keeps the store's own text.
+STORE_OWNED_MESSAGE: Final = (
+    "Another melo gateway is using the console's session file. "
+    "Stop it to use the console here."
+)
+
+
+def store_message(exc: SessionStoreError) -> str:
+    """A store failure as an API v2 message, with the home folder written ``~``."""
+    if isinstance(exc, StoreOwnedError):
+        return STORE_OWNED_MESSAGE
+    return display.home_labelled(str(exc))
+
+
+def store_unavailable(exc: SessionStoreError) -> ApiError:
+    """The 503 of a store call that failed: one fixed message, the cause in the log.
+
+    The failure's own text can name a folder or repeat the database's words, so
+    it is logged and never answered.
+    """
+    logger.warning("A session store call failed: %s", store_message(exc))
+    if isinstance(exc, StoreOwnedError):
+        return ApiError(503, "store_unavailable", STORE_OWNED_MESSAGE)
+    return ApiError(503, "store_unavailable", t("errors.storeUnavailable"))
+
 
 # The message of a failure the gateway did not expect. It names neither the
 # traceback nor any value of the request.
@@ -101,12 +143,6 @@ def api_error_response(exc: ApiError) -> JSONResponse:
     return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
-def is_api_path(path: str) -> bool:
-    """Whether *path* is ``/api`` or below it, also with leading slashes."""
-    path = "/" + path.lstrip("/")
-    return path == "/api" or path.startswith("/api/")
-
-
 def validation_message(exc: RequestValidationError) -> str:
     """``field: problem`` for the first invalid value, without the value."""
     errors = exc.errors()
@@ -120,16 +156,23 @@ def validation_message(exc: RequestValidationError) -> str:
 
 
 def _utf8_problem(value: Any, path: str) -> str | None:
-    """``field: problem`` for the first string with a lone surrogate, else ``None``."""
+    """``field: problem`` for the first string, a key included, with a lone surrogate, else ``None``.
+
+    SQLite stores text, and a lone surrogate (``"\\ud800"``, which a JSON body
+    can carry and Python accepts) encodes to nothing: written, it fails the
+    turn after the route answered. A key is named by the object it is in.
+    """
     if isinstance(value, str):
-        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
             return f"{path or 'request'}: the text must be valid UTF-8"
         return None
     if isinstance(value, Mapping):
         for key, inner in value.items():
-            if isinstance(key, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in key):
-                return f"{path or 'request'}: the text must be valid UTF-8"
-            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
+            found = _utf8_problem(key, path) or _utf8_problem(
+                inner, f"{path}.{key}" if path else str(key)
+            )
             if found is not None:
                 return found
         return None
@@ -141,26 +184,45 @@ def _utf8_problem(value: Any, path: str) -> str | None:
     return None
 
 
+def _body_problem(body: bytes) -> str | None:
+    """Why a JSON body is a 400, or ``None``: not UTF-8, not JSON, or a lone surrogate.
+
+    A body nested deeper than the stack allows (to parse or to walk) is not JSON
+    this gateway reads.
+    """
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return "Request body must be valid UTF-8."
+    try:
+        return _utf8_problem(json.loads(text), "")
+    except (ValueError, RecursionError):
+        return "Malformed JSON request body."
+
+
 def _query_is_valid_utf8(scope: Scope) -> bool:
     """Whether the raw query string decodes as UTF-8 after percent-decoding."""
-    raw = scope.get("query_string", b"")
-    if not raw:
-        return True
     try:
-        decoded = unquote_to_bytes(raw).decode("utf-8")
+        unquote_to_bytes(scope.get("query_string", b"")).decode("utf-8")
     except UnicodeDecodeError:
         return False
-    return _utf8_problem(decoded, "query") is None
+    return True
 
 
 class ApiMiddleware:
     """Add ``no-store`` and security headers to ``/api`` responses and validate bodies.
 
-    A request outside ``/api`` passes through untouched. Inside it, body size
-    (1 MiB), ``Content-Type: application/json`` on non-empty bodies, UTF-8
-    encoding and lone surrogates are checked before any route runs, and an
-    exception that no handler caught becomes the 500 shape, unless the
-    response has already started, when it is re-raised.
+    A request outside ``/api`` passes through untouched. Inside it, the query
+    string and a JSON body (not a picture's bytes) must be UTF-8, the body must
+    parse as JSON, and none of its strings may hold a lone surrogate; all of
+    that is judged before any route runs. An exception that no handler caught
+    becomes the 500 shape, unless the response has already started, when it is
+    re-raised.
+
+    The size and the Content-Type of a body are
+    :class:`~localmelo.support.gateway.guard.LoopbackGuard`'s, which wraps the
+    console in the gateway and has refused a body that is too large or of
+    another type by now.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -195,83 +257,20 @@ class ApiMiddleware:
             await response(scope, receive, send_with_headers)
             return
 
-        req_headers: dict[bytes, list[str]] = {}
-        for name, value in scope.get("headers", ()):
-            req_headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
-
-        # A picture's bytes go to one route, with their own limit and types.
-        upload = is_upload_request(scope)
-        limit = UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
-        too_large = _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR
-        content_type_ok = (is_upload_content_type if upload else is_json_content_type)(
-            req_headers.get(b"content-type", [])
-        )
-        content_lengths = req_headers.get(b"content-length", [])
-        if _content_length_too_large(content_lengths, limit):
-            response = error_response(413, "too_large", too_large)
-            await response(scope, receive, send_with_headers)
-            return
-        if (
-            any(
-                raw.strip().isdigit() and int(raw.strip()) > 0
-                for raw in content_lengths
-            )
-            and not content_type_ok
-        ):
-            response = error_response(
-                415,
-                "unsupported_media_type",
-                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
-            )
-            await response(scope, receive, send_with_headers)
-            return
-
         chunks: list[bytes] = []
-        total = 0
         disconnected = False
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 disconnected = True
                 break
-            chunk = message.get("body", b"")
-            if chunk:
-                total += len(chunk)
-                if total > limit:
-                    response = error_response(413, "too_large", too_large)
-                    await response(scope, receive, send_with_headers)
-                    return
-                chunks.append(chunk)
+            chunks.append(message.get("body", b""))
             if not message.get("more_body", False):
                 break
-
         full_body = b"".join(chunks)
-        if total > 0 and not content_type_ok:
-            response = error_response(
-                415,
-                "unsupported_media_type",
-                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
-            )
-            await response(scope, receive, send_with_headers)
-            return
-        if total > 0 and not upload:
-            try:
-                text = full_body.decode("utf-8")
-            except UnicodeDecodeError:
-                response = error_response(
-                    400, "invalid_request", "Request body must be valid UTF-8."
-                )
-                await response(scope, receive, send_with_headers)
-                return
-            try:
-                parsed = json.loads(text)
-            except ValueError:
-                response = error_response(
-                    400, "invalid_request", "Malformed JSON request body."
-                )
-                await response(scope, receive, send_with_headers)
-                return
-            problem = _utf8_problem(parsed, "")
+        # A picture's bytes go to one route and are not JSON.
+        if full_body and not is_upload_request(scope):
+            problem = _body_problem(full_body)
             if problem is not None:
                 response = error_response(400, "invalid_request", problem)
                 await response(scope, receive, send_with_headers)
@@ -307,6 +306,61 @@ async def _api_error_handler(request: Request, exc: Exception) -> Response:
     return api_error_response(exc)
 
 
+def error_message(exc: Exception) -> str:
+    """What a refusal says: the words it keeps, in the request's language, else its English message."""
+    words = getattr(exc, "words", None)
+    return said_text(words) if words else str(exc)
+
+
+def _kind_error(exc: SessionStoreError) -> ApiError | None:
+    """The answer for a store error that is no store failure, or ``None`` for one.
+
+    A chat, task or chore that is not there, or a change the stored state does
+    not allow, is the request's doing and says so; a route that knows better
+    answers first with its own :class:`ApiError`.
+    """
+    if isinstance(exc, UnknownSessionError):
+        return ApiError(404, "not_found", t("errors.sessionDeleted"))
+    if isinstance(exc, TaskNotFoundError | ChoreNotFoundError):
+        return ApiError(404, "not_found", error_message(exc))
+    if isinstance(exc, ChoreStaleError):
+        return ApiError(409, "stale_revision", error_message(exc))
+    if isinstance(exc, ChoreLimitError):
+        return ApiError(409, "chore_limit", error_message(exc))
+    if isinstance(exc, TaskNotPausedError):
+        return ApiError(409, "not_paused", error_message(exc))
+    if isinstance(exc, TaskStoreError):
+        return ApiError(409, "invalid_transition", error_message(exc))
+    return None
+
+
+async def _store_error_handler(request: Request, exc: Exception) -> Response:
+    """Any store error a route lets through, as API v2 maps it.
+
+    A chat, task or chore that is not there, or a change the task store
+    refuses, is answered by its kind (:func:`_kind_error`). Any other failure
+    is the store's: the chat in the path, if any, decides between 404 and 503
+    (:meth:`Console.store_api_error`), and a route whose chat id is not a path
+    parameter maps its own.
+    """
+    assert isinstance(exc, SessionStoreError)
+    if not is_api_path(request.url.path):
+        raise exc
+    error = _kind_error(exc)
+    if error is None:
+        console = request.app.state.console
+        error = await console.store_api_error(
+            exc, request.path_params.get("session_id")
+        )
+    return api_error_response(error)
+
+
+async def _busy_handler(request: Request, exc: Exception) -> Response:
+    if not is_api_path(request.url.path):
+        raise exc
+    return error_response(409, "session_busy", t("errors.turnRunning"))
+
+
 async def _http_exception_handler(request: Request, exc: Exception) -> Response:
     assert isinstance(exc, StarletteHTTPException)
     if not is_api_path(request.url.path):
@@ -331,6 +385,8 @@ async def _validation_handler(request: Request, exc: Exception) -> Response:
 def install(app: FastAPI) -> None:
     """Install the API v2 error handlers and middleware on *app*."""
     app.add_exception_handler(ApiError, _api_error_handler)
+    app.add_exception_handler(SessionStoreError, _store_error_handler)
+    app.add_exception_handler(SessionBusyError, _busy_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
     app.add_middleware(ApiMiddleware)

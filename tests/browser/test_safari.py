@@ -21,12 +21,12 @@ from localmelo.support.browser.driver import (
     Element,
     StaleElementError,
 )
+from localmelo.support.browser.pagescript import same_page
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.safari import (
     SETUP_MESSAGE,
     TOOL_NAMES,
     SafariAutomationDriver,
-    same_page,
 )
 from localmelo.support.mcp import StdioMcpClient
 
@@ -106,7 +106,7 @@ async def test_a_page_with_no_body_yet_is_not_loaded_and_the_wait_goes_on(
     until: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A bot check between two documents has no body: the wait keeps looking, it does not fail."""
-    monkeypatch.setattr("localmelo.support.browser.safari.POLL_S", 0.01)
+    monkeypatch.setattr("localmelo.support.browser.pagescript.POLL_S", 0.01)
     safari = driver_for("no_body")
     await safari.start()
     try:
@@ -421,7 +421,7 @@ async def test_an_option_that_is_not_there_is_not_chosen(
 
 
 async def test_the_act_script_text_is_valid_and_carries_its_spec_as_data() -> None:
-    from localmelo.support.browser.safari import act_script
+    from localmelo.support.browser.pagescript import act_script
 
     spec = {
         "act": "type",
@@ -440,7 +440,7 @@ async def test_the_act_script_text_is_valid_and_carries_its_spec_as_data() -> No
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_the_page_scripts_are_valid_javascript(tmp_path: Path) -> None:
-    from localmelo.support.browser.safari import FOCUS_JS, PAGE_JS, act_script
+    from localmelo.support.browser.pagescript import FOCUS_JS, PAGE_JS, act_script
 
     for name, source in (
         ("page", PAGE_JS),
@@ -601,7 +601,7 @@ async def test_a_blanked_page_is_replaced_in_the_history_not_followed_by_a_blank
 async def test_a_blank_that_does_not_take_falls_back_to_the_browsers_own_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("localmelo.support.browser.safari.POLL_S", 0.0)
+    monkeypatch.setattr("localmelo.support.browser.pagescript.POLL_S", 0.0)
     safari = driver_for("replace_fails")
     await safari.start()
     try:
