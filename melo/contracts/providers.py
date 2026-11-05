@@ -75,6 +75,9 @@ class ProviderError(Exception):
     false for every other error status and for a malformed response body.
     ``detail`` is what the server said when the message does not carry it (a
     streamed error names only the status); it is for reading, not for showing.
+    ``served`` names the model the server serves now when it refused the one the
+    request named because it was switched meanwhile (a 409 ``model_switched``);
+    a provider asks again, once, for that one.
     """
 
     def __init__(
@@ -85,12 +88,14 @@ class ProviderError(Exception):
         retryable: bool = False,
         context_overflow: bool = False,
         detail: str = "",
+        served: str = "",
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
         self.context_overflow = context_overflow
         self.detail = detail
+        self.served = served
 
 
 @dataclass(frozen=True)

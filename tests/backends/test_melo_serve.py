@@ -431,3 +431,37 @@ async def test_a_switch_names_its_generation_and_a_stale_one_is_refused(
     monkeypatch.setenv("MELO_SERVE_SOCKET", "/nonexistent/control.sock")
     with pytest.raises(melo_serve.MeloServeError, match="not installed"):
         await melo_serve.picks()  # nothing connects to a socket that is not there
+
+
+async def test_a_task_mid_step_follows_a_switch_and_asks_again_once() -> None:
+    """A request naming a model melo_serve no longer serves gets 409 model_switched,
+    which names the one served now: the provider asks for it, once, from then on."""
+    import httpx
+
+    from localmelo.melo.schema import Message
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    asked: list[tuple[str, bool]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        asked.append((body["model"], bool(body.get("stream"))))
+        if body["model"] == "old":
+            error = {"type": "model_switched", "message": "switched", "current": "new"}
+            return httpx.Response(409, json={"error": error})
+        reply = {"role": "assistant", "content": f"{body['model']} here"}
+        return httpx.Response(200, json={"choices": [{"message": reply}]})
+
+    llm = OpenAICompatLLM(
+        base_url=URL, model="old", transport=httpx.MockTransport(serve)
+    )
+    try:
+        assert (await llm.chat([Message("user", "hi")])).content == "new here"
+        assert asked == [("old", False), ("new", False)] and llm.model == "new"
+        llm.model = "old"  # a stream is asked for again the same way
+        fragments = [f async for f in llm.stream_chat([Message("user", "hi")])]
+        assert fragments[-1].reply is not None
+        assert fragments[-1].reply.content == "new here"
+        assert asked[2:] == [("old", True), ("new", True)]
+    finally:
+        await llm.close()

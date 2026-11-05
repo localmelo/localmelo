@@ -80,6 +80,27 @@ def _exception_text(exc: Exception) -> str:
 UNREACHABLE_PREFIX = "cannot reach the model server at "
 
 
+def switched_to(response: httpx.Response) -> str:
+    """The model a server serves now, when it refused the one asked for as switched.
+
+    melo_serve answers a request that names a model it served before with 409
+    ``{"error": {"type": "model_switched", "current": <served name>}}``; ``""``
+    for any other response.
+    """
+    if response.status_code != 409:
+        return ""
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return ""
+    if not isinstance(error, dict) or error.get("type") != "model_switched":
+        return ""
+    current = error.get("current")
+    if not isinstance(current, str) or not 0 < len(current) <= 200:
+        return ""
+    return current if current.isprintable() else ""
+
+
 def unreachable(
     client: httpx.AsyncClient, exc: httpx.ConnectError, *, retryable: bool
 ) -> ProviderError:
@@ -153,6 +174,7 @@ async def post_json(
             status_code=status,
             retryable=status in RETRYABLE_STATUS_CODES,
             context_overflow=_context_overflow(exc.response),
+            served=switched_to(exc.response),
         ) from exc
     except httpx.ConnectError as exc:
         raise unreachable(client, exc, retryable=True) from exc

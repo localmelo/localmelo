@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import time
@@ -26,6 +27,7 @@ from localmelo.support.providers._http import (
     attempt_headers,
     malformed_body,
     post_json,
+    switched_to,
     unreachable,
 )
 from localmelo.support.providers.llm._protocol import (
@@ -554,14 +556,38 @@ class OpenAICompatLLM(BaseLLMProvider):
             finish = "tool_calls" if reply.tool_calls else "stop"
         return reply, finish
 
+    def _follow(self, exc: ProviderError) -> bool:
+        """Whether to ask again: the server switched to the model *exc* names (melo_serve).
+
+        The provider asks for that model from now on, as a chat follows a switch
+        at its next turn; a task mid-step goes on instead of failing.
+        """
+        if not exc.served or exc.served == self.model:
+            return False
+        self.model = exc.served
+        return True
+
     async def _complete(
         self, messages: list[Message], tools: list[ToolDef] | None
     ) -> tuple[Message, str]:
         """Send one request that does not ask for a stream: its reply and finish reason."""
         path = "/chat/completions"
-        resp, data = await post_json(
-            self._http, path, self._payload(messages, tools), headers=attempt_headers()
-        )
+        try:
+            resp, data = await post_json(
+                self._http,
+                path,
+                self._payload(messages, tools),
+                headers=attempt_headers(),
+            )
+        except ProviderError as exc:
+            if not self._follow(exc):
+                raise
+            resp, data = await post_json(
+                self._http,
+                path,
+                self._payload(messages, tools),
+                headers=attempt_headers(),
+            )
         self.last_limits = rate_limits(resp.headers)
         return self._completion(resp, path, data)
 
@@ -600,6 +626,26 @@ class OpenAICompatLLM(BaseLLMProvider):
 
     async def stream_chat(
         self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """Stream one response; a model switched before it opened is asked for again, once.
+
+        The refusal comes before any fragment (see :meth:`_follow`), so nothing
+        reached the caller from the first try.
+        """
+        async with contextlib.aclosing(self._stream(messages, tools)) as first:
+            try:
+                async for fragment in first:
+                    yield fragment
+                return
+            except ProviderError as exc:
+                if not self._follow(exc):
+                    raise
+        async with contextlib.aclosing(self._stream(messages, tools)) as again:
+            async for fragment in again:
+                yield fragment
+
+    async def _stream(
+        self, messages: list[Message], tools: list[ToolDef] | None
     ) -> AsyncGenerator[StreamFragment, None]:
         """Stream one OpenAI-compatible response; never retry after a delta.
 
@@ -649,6 +695,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
                         context_overflow=_context_overflow(error_response),
                         detail=_body_preview(error_response),
+                        served=switched_to(error_response),
                     )
                 opened = True
                 self.last_limits = rate_limits(response.headers)
