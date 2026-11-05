@@ -120,7 +120,6 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.lean_output": "#183",
     "agent.confine_direct_runs": "#183",
     "agent.answer_on_stop": "#185",
-    "agent.empty_reply_fallback": "#469",
     "agent.max_calls": "#185",
     "agent.steps_per_attempt": "#185",
     "agent.tool_images": "#280",
@@ -151,10 +150,8 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "memory.compress_cache": "#428",
     "memory.note_gate": "#442",
     "memory.note_min_cosine": "#442",
-    "memory.followup_query": "#452",
     "memory.gather": "#428",
     "memory.gather_min_cosine": "#428",
-    "approvals.auto_asks": "#465",
 }
 
 # Long option name -> tier, for every option the parser has.
@@ -215,6 +212,10 @@ REMOVED_SETTINGS: dict[str, str] = {
     "agent.cache_layout": "the reflection always stays in the window (layout v3)",
     "agent.reflection_gate": "a reflection always uses the patient gate",
     "memory.admit_on_outcome": "a run's final attempt is no longer admitted on its outcome",
+    "memory.followup_query": (
+        "a message with no content of its own is searched with what you typed in "
+        "the chat's last turns"
+    ),
 }
 
 # The two settings whose option takes no value: the option means the key has this one.

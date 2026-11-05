@@ -1282,6 +1282,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   codes. Typing is unchanged: "today", "no rush", "later", the old words,
   `P1` and `1` still set the same levels. The API still answers `level_word`
   beside `level` ([#343]).
+- `[approvals] auto_asks` and `[agent] empty_reply_fallback` are advanced settings now, no longer listed as
+  experimental with an issue that decides them (#465, #469). Names, values and defaults are the same, and
+  `melo config get` reads both without a config file or developer mode.
 
 ### Removed
 
@@ -1307,6 +1310,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and `AgentOptions` no longer takes the removed names. A routine learned under the patient gate keeps
   its template.
 - The experimental, Python-only typed assertions option is removed. Nothing could turn it on from the command line or settings, and it had no measured gain.
+- `[memory] followup_query` is removed (#452). A message with no content of its own is always searched with what
+  you typed in the chat's last turns, as its default `"recent"` did. A config file that still holds the key loads,
+  the line is ignored and `melo config` names it; `-X memory.followup_query=...` exits 2 and says it was removed.
 
 ### Security
 

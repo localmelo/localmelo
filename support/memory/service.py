@@ -310,9 +310,7 @@ class RecallSettings(NamedTuple):
     instead of showing excerpts of them, *list_max* is the most turns it lists
     and *open_chars* the room one opened turn takes. *items* says recall draws on
     memory items in place of the chat turns, and *open_sources* that an opened item
-    also shows the turns it came from. *followup* says a message with no content of
-    its own is searched with the user's words of the chat's last turns (``[memory]
-    followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
+    also shows the turns it came from. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
     may open it (:attr:`opens_excerpts`). *gather* is ``[memory] gather`` (``off``,
     ``wide`` or ``guide``) and *gather_floor* ``gather_min_cosine``: the vector bar
@@ -320,7 +318,7 @@ class RecallSettings(NamedTuple):
     premise_check``, on by default) ends the list form's guide line with
     :data:`PREMISE_GUIDE`; the excerpt form never shows a guide line. The defaults
     are the shipped ones: a block of :data:`BLOCK_CHARS` and a turn of
-    :data:`ITEM_CHARS` (#349), *followup*, *excerpt_open* and *premise* on, *gather*
+    :data:`ITEM_CHARS` (#349), *excerpt_open* and *premise* on, *gather*
     ``guide`` (:data:`MEMORY_GATHER_DEFAULT`), and what recall did before these were
     settings for the rest.
     """
@@ -339,7 +337,6 @@ class RecallSettings(NamedTuple):
     open_chars: int = OPEN_CHARS
     items: bool = False
     open_sources: bool = False
-    followup: bool = True
     excerpt_open: bool = True
     gather: str = MEMORY_GATHER_DEFAULT
     gather_floor: float = GATHER_COSINE
@@ -1026,7 +1023,6 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
-            getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
             gathering if gathering in MEMORY_GATHER else MEMORY_GATHER_DEFAULT,
             bar("gather_min_cosine", GATHER_COSINE, MEMORY_GATHER_MIN_COSINE),
@@ -1562,8 +1558,7 @@ class ChatMemory:
         # there is no recall. A message that asks to remember something, or
         # carries a secret, is not one: its notes are kept either way.
         if (
-            budget.followup
-            and not asked
+            not asked
             and not found
             and not refused
             and query.strip()

@@ -19,6 +19,7 @@ from urllib.parse import unquote
 
 import pytest
 
+from localmelo.tests import macos_swift
 from localmelo.tests.fixtures.http_stub import HttpStub
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -551,32 +552,11 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     source = prefix + quit_source
     assert source.count("application.run()") == 1
-    main = root / "main.swift"
-    main.write_text(
-        source.replace("application.run()", OBSERVER + "\napplication.run()")
+    return macos_swift.build_swift(
+        macos_swift.app_sources(but="main.swift"),
+        source.replace("application.run()", OBSERVER + "\napplication.run()"),
+        to=executable,
     )
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            # Every source of the app but its own main, which the test's copy above replaces.
-            *(
-                str(path)
-                for path in sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))
-                if path.name != "main.swift"
-            ),
-            str(main),
-            "-o",
-            str(executable),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=90,
-    )
-    return executable
 
 
 def wait_for(

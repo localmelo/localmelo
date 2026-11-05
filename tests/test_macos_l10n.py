@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -41,30 +41,11 @@ def swift(value: object) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
-def run_swift(tmp_path: Path, source: str, *more: str) -> str:
-    main = tmp_path / "main.swift"
-    main.write_text("import AppKit\n" + source, encoding="utf-8")
-    binary = tmp_path / "test-l10n"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            str(APP / "L10n.swift"),
-            str(APP / "GatewayPolicy.swift"),
-            *(str(APP / name) for name in more),
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=120,
+def run_swift(source: str, *more: str) -> str:
+    """The output of the raw string `source` as the test main of the language files and `more`."""
+    return macos_swift.run_swift(
+        ["L10n.swift", "GatewayPolicy.swift", *more], "import AppKit\n" + source
     )
-    done = subprocess.run([str(binary)], check=True, timeout=5, capture_output=True)
-    return done.stdout.decode()
 
 
 def test_the_strings_file_holds_the_app_keys_escaped() -> None:
@@ -94,7 +75,6 @@ def test_the_app_picks_its_language_and_reads_the_built_strings(tmp_path: Path) 
         if isinstance(case["entry"], str)
     ]
     out = run_swift(
-        tmp_path,
         "\n".join(checks) + f"""
 precondition(consoleLanguageSetting(nil) == "auto")
 precondition(consoleLanguageSetting("[ui]\\nlanguage = \\"en\\"\\n") == "auto")
@@ -138,7 +118,6 @@ def test_the_menus_write_their_titles_again_when_the_language_changes(
         (ROOT / "support/gateway/static/i18n/zh-Hans.json").read_text("utf-8")
     )
     out = run_swift(
-        tmp_path,
         f"""
 func titles(_ menu: NSMenu) -> String {{
     menu.items.map {{ item in item.submenu.map {{ "\\(item.title)[\\(titles($0))]" }} ?? item.title }}.joined(separator: "|")
