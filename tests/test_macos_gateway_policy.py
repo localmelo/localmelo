@@ -395,3 +395,28 @@ precondition(revealTarget(file, allowed: [file]) == nil && revealTarget(gone, al
 def test_real_host_typechecks() -> None:
     # The files the build compiles, as it finds them.
     macos_swift.typecheck_swift(macos_swift.app_sources())
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_model_submenu_rows_follow_the_picks_and_the_switch() -> None:
+    run_policy(
+        r"""let health = Data(#"{"model": {"backend": "melo_serve", "name": "Qwen3.8-27B"}, "switch": {"id": 3, "pick": "8b", "state": "waiting", "title": "Switching to Qwen3 8B…", "detail": "Waiting for 1 chat to finish"}}"#.utf8)
+precondition(servesModels(health) && servedModel(health) == "Qwen3.8-27B")
+precondition(!servesModels(Data(#"{"model": {"backend": "ollama"}}"#.utf8)))
+let running = serveSwitch(health)!
+precondition(running.active && running.pick == "8b")
+let list = serveList(Data(#"{"foot": "Every chat on this Mac follows the switch.", "picks": [{"id": "27b", "name": "Qwen3.8 27B", "words": "Splash · needs 21 GB · fits", "current": true, "loadable": true}, {"id": "8b", "name": "Qwen3 8B", "words": "oMLX · needs 5 GB · fits", "current": false, "loadable": true}, {"id": "70b", "name": "Qwen3 70B", "words": "Splash · needs 48 GB, 31 GB free", "current": false, "loadable": false}, {"name": "no id"}]}"#.utf8))!
+precondition(list.picks.count == 3)
+let idle = modelMenuRows(list, switching: nil)
+precondition(idle[0] == .pick(id: "27b", title: "Qwen3.8 27B", subtitle: "Splash · needs 21 GB · fits", checked: true, enabled: true))
+precondition(idle[2] == .pick(id: "70b", title: "Qwen3 70B", subtitle: "Splash · needs 48 GB, 31 GB free", checked: false, enabled: false))
+precondition(idle.last == .foot("Every chat on this Mac follows the switch."))
+precondition(modelMenuSubtitle(list, switching: nil) == "Qwen3.8 27B")
+let busy = modelMenuRows(list, switching: running)
+precondition(busy[0] == .status(title: "Switching to Qwen3 8B…", subtitle: "Waiting for 1 chat to finish"))
+precondition(busy[1] == .cancel && busy[2] == .separator)
+precondition(!busy.contains { if case .pick(_, _, _, _, true) = $0 { return true } else { return false } })
+precondition(modelMenuSubtitle(list, switching: running) == "Switching to Qwen3 8B…")
+""",
+        "ModelMenu.swift",
+    )

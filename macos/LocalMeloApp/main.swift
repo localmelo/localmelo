@@ -57,6 +57,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var logHandle: FileHandle?
     // The Browser panel in a window of its own, made when the console first asks for it.
     private var browserWindow: BrowserWindowController?
+    // melo_serve's chat models for the Model submenu (ModelMenu.swift): the last list, the last switch the health
+    // named, and what was served then; a change reads the list again.
+    private var models: ServeList?
+    private var modelSwitch: ServeSwitch?
+    private var modelServed = ""
+    private var modelsShown = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The console's language, before any word is shown: the setting, else the Mac's languages.
@@ -123,7 +129,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         root.addItem(editEntry)
         NSApp.mainMenu = root
         menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting),
-                          showPet: #selector(showPet))
+                          showPet: #selector(showPet), chooseModel: #selector(chooseModel(_:)),
+                          cancelSwitch: #selector(cancelSwitch), modelsOpened: { [weak self] in self?.fetchModels() })
         signInItems = [signIn] + (menuBar.statusItem.menu?.items.filter { $0.action == #selector(signInAgain) } ?? [])
         let quit = #selector(NSApplication.terminate(_:))
         quitItems = appMenu.items.filter { $0.action == quit }
@@ -225,6 +232,75 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     // gets no event from setting it again (a task shown in a panel the window has since narrowed past), so
     // it is told the same way.
     @objc private func openWaiting() { open(route: pendingRoute) }
+
+    // The Model submenu follows the health: hidden unless melo_serve serves the chats; its picks are read again when
+    // a switch starts or ends, or the served model changes (a switch from the console or a terminal).
+    private func updateModels(_ health: Data) {
+        modelsShown = servesModels(health)
+        guard modelsShown else {
+            models = nil
+            modelSwitch = nil
+            menuBar.showModels(nil, switching: nil)
+            return
+        }
+        let now = serveSwitch(health), served = servedModel(health)
+        let moved = now?.id != modelSwitch?.id || now?.state != modelSwitch?.state || served != modelServed
+        modelSwitch = now
+        modelServed = served
+        if models == nil || moved { fetchModels() }
+        menuBar.showModels(models ?? ServeList(picks: [], foot: ""), switching: now)
+    }
+
+    /// A request of the Model submenu to the gateway, in the app's language, on the session the health uses.
+    private func modelRequest(_ path: String, body: [String: Any]? = nil) -> URLRequest? {
+        guard port != 0, healthAuthenticated, let url = URL(string: "http://127.0.0.1:\(port)\(path)") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue(L10n.language, forHTTPHeaderField: "X-LocalMelo-Language")
+        if let body = body {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        return request
+    }
+
+    private func fetchModels() {
+        guard modelsShown, let request = modelRequest("/api/serve") else { return }
+        healthSession.dataTask(with: request) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self, (response as? HTTPURLResponse)?.statusCode == 200,
+                      let data = data, let list = serveList(data) else { return }
+                self.models = list
+                self.menuBar.showModels(list, switching: self.modelSwitch)
+            }
+        }.resume()
+    }
+
+    // A pick: the gateway switches every chat to it, after the turns that run. What it refuses (a switch already
+    // runs) the menu shows at the next health.
+    @objc private func chooseModel(_ sender: NSMenuItem) {
+        guard let pick = sender.representedObject as? String, pick != models?.current?.id,
+              let request = modelRequest("/api/serve/switch", body: ["pick": pick]) else { return }
+        sendModels(request)
+    }
+
+    @objc private func cancelSwitch() {
+        guard let request = modelRequest("/api/serve/switch/cancel", body: [:]) else { return }
+        sendModels(request)
+    }
+
+    private func sendModels(_ request: URLRequest) {
+        healthSession.dataTask(with: request) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let data = data, let started = startedSwitch(data) { self.modelSwitch = started }
+                if (response as? HTTPURLResponse)?.statusCode ?? 0 >= 400 { NSSound.beep() }
+                self.menuBar.showModels(self.models, switching: self.modelSwitch)
+            }
+        }.resume()
+    }
 
     private func open(route: String?) {
         openWindow()
@@ -626,6 +702,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.healthAuthenticated = true
                 self.signInFailures = 0
                 self.menuBar.show(menuBarState(data))
+                self.updateModels(data)
                 self.pet.update(health: data, stopped: false)
                 self.pill.update(health: data, stopped: false)
                 self.pendingRoute = waitingRoute(data)

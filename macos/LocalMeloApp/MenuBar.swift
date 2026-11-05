@@ -11,32 +11,88 @@ final class MenuBar {
     let waitingLine: NSMenuItem
     /// Brings Melo back after "Hide Melo": shown only while Melo is hidden.
     let showPetLine: NSMenuItem
+    /// melo_serve's chat models (ModelMenu.swift): shown only while melo_serve serves the chats.
+    let modelItem: NSMenuItem
+    private let models: NSMenu
+    private let modelsOpened = MenuOpened()
+    private let choose: Selector
+    private let cancel: Selector
     private let divider = NSMenuItem.separator()
     private let plain: NSImage?
     private let badged: NSImage?
     private var wasWaiting = false
     private var state = MenuBarState.unknown
 
-    /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries.
-    init(menu: NSMenu, waiting: Selector, showPet: Selector) {
+    /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries. *chooseModel* and
+    /// *cancelSwitch* are what a pick of the Model submenu and its Cancel Switch send; *modelsOpened* runs as the
+    /// submenu opens, so its picks are read again.
+    init(menu: NSMenu, waiting: Selector, showPet: Selector, chooseModel: Selector, cancelSwitch: Selector,
+         modelsOpened: @escaping () -> Void) {
         let logo = MenuBar.logo()
         waitingLine = NSMenuItem(title: "", action: waiting, keyEquivalent: "").word(.waiting)
         showPetLine = NSMenuItem(title: "", action: showPet, keyEquivalent: "").word(.showPet)
         showPetLine.isHidden = true
+        choose = chooseModel
+        cancel = cancelSwitch
+        let models = NSMenu()
+        self.models = models
+        let modelItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        modelItem.submenu = models
+        modelItem.word(.model)
+        modelItem.isHidden = true
+        self.modelItem = modelItem
         let open = MenuWord.open.rawValue
         menu.insertItem(showPetLine, at: (menu.items.firstIndex { $0.identifier?.rawValue == open } ?? -1) + 1)
+        menu.insertItem(modelItem, at: menu.index(of: showPetLine) + 1)
         plain = MenuBar.image(logo, badge: false)
         badged = MenuBar.image(logo, badge: true)
         for item in [runningLine, waitingLine, divider].reversed() { menu.insertItem(item, at: 0) }
         statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeft
+        models.autoenablesItems = false
+        self.modelsOpened.opened = modelsOpened
+        models.delegate = self.modelsOpened
         show(.unknown)
     }
 
-    /// The "On the desktop" choice, in the menu after "Show Melo".
+    /// The "On the desktop" choice, in the menu after "Model".
     func offerDesktop(_ item: NSMenuItem) {
         guard let menu = statusItem.menu else { return }
-        menu.insertItem(item, at: menu.index(of: showPetLine) + 1)
+        menu.insertItem(item, at: menu.index(of: modelItem) + 1)
+    }
+
+    /// The Model submenu for *list* (nil: melo_serve does not serve the chats, and the item hides), with the switch
+    /// under way. Each item shows its words as a visible subtitle.
+    func showModels(_ list: ServeList?, switching: ServeSwitch?) {
+        modelItem.isHidden = list == nil
+        guard let list = list else { return }
+        modelItem.subtitle = modelMenuSubtitle(list, switching: switching)
+        models.removeAllItems()
+        for row in modelMenuRows(list, switching: switching) {
+            switch row {
+            case .status(let title, let subtitle):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.subtitle = subtitle.isEmpty ? nil : subtitle
+                item.isEnabled = false
+                models.addItem(item)
+            case .cancel:
+                let item = NSMenuItem(title: "", action: cancel, keyEquivalent: "").word(.cancelSwitch)
+                models.addItem(item)
+            case .separator:
+                models.addItem(.separator())
+            case .pick(let id, let title, let subtitle, let checked, let enabled):
+                let item = NSMenuItem(title: title, action: choose, keyEquivalent: "")
+                item.subtitle = subtitle
+                item.representedObject = id
+                item.state = checked ? .on : .off
+                item.isEnabled = enabled
+                models.addItem(item)
+            case .foot(let text):
+                let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                models.addItem(item)
+            }
+        }
     }
 
     /// Writes the lines again, in the language now in use.
@@ -107,4 +163,11 @@ final class MenuBar {
         image.isTemplate = false
         return image
     }
+}
+
+/// Runs a closure as the menu it is the delegate of opens.
+final class MenuOpened: NSObject, NSMenuDelegate {
+    var opened: () -> Void = {}
+
+    func menuWillOpen(_ menu: NSMenu) { opened() }
 }

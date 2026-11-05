@@ -13,6 +13,7 @@ import glob
 import hashlib
 import json
 import os
+import platform
 import plistlib
 import shutil
 import subprocess
@@ -71,6 +72,8 @@ UNUSED = (
     f"{STDLIB}/unittest/test",
 )
 BUNDLE_ID = "org.localmelo.app"
+# The oldest macOS the app runs on.
+MINIMUM_MACOS = "15.0"
 XCODE = "/Applications/Xcode.app/Contents/Developer"
 NO_SWIFT = (
     "The app needs Apple's Swift compiler. Install it with: xcode-select --install"
@@ -383,6 +386,9 @@ def build(output: Path) -> None:
             [
                 "/usr/bin/xcrun",
                 "swiftc",
+                # The first-run plan and the menu items' subtitles need macOS 15.
+                "-target",
+                f"{platform.machine()}-apple-macos{MINIMUM_MACOS}",
                 *map(str, swift_files),
                 "-o",
                 str(binary / "LocalMelo"),
@@ -409,6 +415,7 @@ def build(output: Path) -> None:
                     "CFBundleDevelopmentRegion": "en",
                     "CFBundleLocalizations": languages,
                     "NSHighResolutionCapable": True,
+                    "LSMinimumSystemVersion": MINIMUM_MACOS,
                     "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
                 },
                 f,
