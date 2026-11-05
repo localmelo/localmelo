@@ -307,7 +307,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     """The whole ``GET /api/setup/detect`` body: the model server on this Mac.
 
     ``state`` is ``found``, ``needs_key`` or ``none``. ``backend`` is what the
-    terminal's first run would save (``ollama`` or ``vllm``) and ``name`` is
+    terminal's first run would save (``ollama``, ``melo_serve`` or ``vllm``) and ``name`` is
     ``Ollama``, ``oMLX`` or empty. ``models`` are the chat models, ``loaded``
     those the server says are in memory, and ``suggested`` the one to offer:
     null when several are served and none is known loaded, so the user picks.
@@ -341,10 +341,15 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     if not chat:
         return {**body, "problem": body["problem"] or "it lists only embedding models"}
     loaded = await discovery.loaded_among(found.url, chat, transport=transport)
+    backend = (
+        "ollama"
+        if ollama
+        else "melo_serve" if discovery.is_melo_serve(found.url) else "vllm"
+    )
     return {
         **body,
         "state": "found",
-        "backend": "ollama" if ollama else "vllm",
+        "backend": backend,
         "models": chat,
         "loaded": [model for model in chat if model in loaded.ids],
         "suggested": discovery.pick_model(chat, loaded),

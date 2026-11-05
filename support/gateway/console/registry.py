@@ -806,8 +806,11 @@ class ConsoleSessions:
         """The chat model the settings name, as ``session.model`` records it."""
         settings = self._settings()
         backend = getattr(settings, "chat_backend", "") or ""
-        section = getattr(settings, backend, None) if backend else None
-        return getattr(section, "chat_model", "") or ""
+        if not backend:
+            return ""
+        from localmelo.support.backends.registry import model_in_use
+
+        return model_in_use(settings, backend)
 
     def check_workspace(self, workspace: str) -> None:
         """400 ``invalid_workspace`` unless *workspace* is still a directory."""
