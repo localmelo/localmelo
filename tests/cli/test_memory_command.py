@@ -76,7 +76,7 @@ def test_list_prints_the_notes_newest_first_and_status_counts_them(
     assert memory_cli.main(["list"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].endswith("About you    Your dentist is Lee Park.")
-    assert lines[1].strip().startswith("from chat “My dentist is Lee Park.”, ")
+    assert lines[1].strip().startswith("from chat “My dentist is Lee Park”, ")
     assert "You prefer short answers." in lines[2]
     assert memory_cli.main(["list", "-n", "1"]) == 0
     assert len(capsys.readouterr().out.splitlines()) == 2
