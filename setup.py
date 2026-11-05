@@ -30,4 +30,9 @@ def package_list() -> list[str]:
 if __name__ == "__main__":
     from setuptools import setup  # a build has it; the tests import this file without
 
-    setup(packages=package_list(), package_dir={"localmelo": "."})
+    setup(
+        packages=package_list(),
+        package_dir={"localmelo": "."},
+        # build_py leaves out the file this names, or setup.py would ship in the package
+        script_name="setup.py",
+    )
