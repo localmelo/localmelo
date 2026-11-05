@@ -664,9 +664,8 @@ class SetupJob:
         if isinstance(event, ItemEvent):
             self.items = {**self.items, event.item: event}
         if self._on_event:
-            with contextlib.suppress(
-                Exception
-            ):  # a screen that went away stops no download
+            # A screen that went away stops no download.
+            with contextlib.suppress(Exception):
                 self._on_event(event)
 
     def _item(self, item: str, state: str, line: str = "") -> None:
@@ -879,7 +878,6 @@ class SetupJob:
         )
         if not self._embedding:  # memory goes by words only
             cfg.embedding_backend = "none"
-        config.save(
-            cfg
-        )  # not onboard's save_chat_server: a job has no screen to print on
+        # Not onboard's save_chat_server: a job has no screen to print on.
+        config.save(cfg)
         return True
