@@ -60,7 +60,9 @@ _HELP = {
     "serve": (
         "melo serve [install|uninstall|status|stop] [options]",
         "Run the gateway (web console and HTTP API). install, uninstall and status\n"
-        "manage it as a login service on macOS; stop ends the one that is running.",
+        "manage it as a login service on macOS; stop ends the one that is running.\n"
+        "With melo_serve as the model server, the gateway starts it if it is not\n"
+        "running, and status reports it too.",
         "  --host H        listen address (default 127.0.0.1)\n"
         "  -p, --port N    listen port (default 8401; 0 picks a free one)\n"
         "  --force         start even when no model server is set up yet",

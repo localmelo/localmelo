@@ -2045,6 +2045,7 @@ def main() -> None:
             info = daemon.status()
             for k, v in info.items():
                 print(f"  {k}: {v}")
+            _print_melo_serve_status()
         elif args.daemon == "stop":
             from localmelo.support import gateway_endpoint
 
@@ -2667,6 +2668,20 @@ def _set_retrieval_extra_body(
     provider.extra_body_by_kind = {"retrieve": prepare_extra_body(body)}
 
 
+def _print_melo_serve_status() -> None:
+    """The ``melo serve status`` block for melo_serve, when it is in use or installed."""
+    import shutil
+
+    from localmelo.support import config, melo_serve
+
+    state = melo_serve.read_state()
+    cfg = config.load()
+    uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
+    if state is not None or uses or shutil.which(melo_serve.COMMAND):
+        print()
+        print("\n".join(melo_serve.status_lines(state)))
+
+
 def _model_line(cfg: Config) -> str:
     """The startup line's model: ``Qwen3-8B-4bit on oMLX``, as the banner names it."""
     key = cfg.chat_backend
@@ -2675,10 +2690,10 @@ def _model_line(cfg: Config) -> str:
     from localmelo.support.backends.registry import get_backend
 
     try:
-        label = get_backend(key).label(cfg)
+        backend = get_backend(key)
+        label, model = backend.label(cfg), backend.model_name(cfg)
     except KeyError:  # a backend nothing registered: say its key
-        label = key
-    model = getattr(getattr(cfg, key, None), "chat_model", "")
+        label, model = key, getattr(getattr(cfg, key, None), "chat_model", "")
     return f"{model} on {label}" if model else label
 
 
@@ -2692,6 +2707,11 @@ def _start_gateway(cfg: Config) -> None:
     host = cfg.gateway.host
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
+    uses = (("chat", cfg.chat_backend), ("embedding", cfg.embedding_backend))
+    if role := next((role for role, key in uses if key == "melo_serve"), ""):
+        from localmelo.support import melo_serve
+
+        print(f"\n  {melo_serve.ensure_running(role)}")
     print("\n  Starting localmelo gateway ...")
     print(f"  Model: {_model_line(cfg)}")
     print(f"  Embedding: {cfg.embedding_backend}")
