@@ -27,14 +27,6 @@ What a later run recalls:
 - In explicit modes, recall must be enabled and include the `long` kind; `drop` and `replay` leave `auto` recall off by default.
 - Attempt digests enter long-term memory only with a confirmed file write or an eligible passing check; recall prefers digests from the same task and workspace, and a new task gets no cross-task digests until a same-task digest matches (see [digest recall](../reference/memory.md#digest-recall)).
 
-## Experimental typed facts
-
-Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit reasoning mode.
-
-- It retains supported short facts, and can keep an older assertion as labelled history when a verified, ordered change replaces it.
-- Ambiguous or unlinked facts are not silently linked; the parser and source check are conservative and incomplete, and recall is relevance-limited.
-- See the [typed assertions reference](../reference/memory.md#experimental-typed-assertions).
-
 ## Notes melo keeps about you
 
 ![The Memory tab: notes melo keeps about you, each with its source chat and Edit and Delete buttons.](../assets/img/memory-tab.webp)

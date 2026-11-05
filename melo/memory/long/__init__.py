@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 
-from localmelo.melo.memory.assertions import decide_assertion
 from localmelo.melo.memory.bm25 import BM25Index
 
 # The typed store's closed sets (R6-lite).
@@ -55,18 +54,6 @@ class StoredEntry:
     embed_model: str
     embed_dim: int
     vector: tuple[float, ...] | None
-
-
-def _history_order(entry: StoredEntry) -> tuple[float, int]:
-    assertion = entry.provenance.get("assertion")
-    observed = assertion.get("observed_at") if isinstance(assertion, dict) else None
-    if (
-        isinstance(observed, (int, float))
-        and not isinstance(observed, bool)
-        and observed > 0
-    ):
-        return float(observed), entry.id
-    return entry.created_at, entry.id
 
 
 @dataclass
@@ -207,8 +194,6 @@ class LongTerm:
         source_ids: Any,
         keep_text: bool,
         candidate_id: str,
-        typed_assertion: bool = False,
-        decision_details: dict[str, Any] | None = None,
         record: dict[str, str] | None = None,
     ) -> tuple[int | None, str]:
         """Write one decision in one step; returns ``(entry_id, action)``.
@@ -223,17 +208,6 @@ class LongTerm:
         ):
             if value not in allowed:
                 raise ValueError(f"Unknown long-term {name}: {value!r}")
-        assertion = provenance.get("assertion")
-        if typed_assertion and isinstance(assertion, dict) and task_id:
-            rows = [
-                (entry.id, entry.provenance["assertion"], entry.created_at)
-                for entry in self._entries
-                if entry.status == "active"
-                and entry.kind == kind
-                and entry.task_id == task_id
-                and isinstance(entry.provenance.get("assertion"), dict)
-            ]
-            action, target_id, reason = decide_assertion(assertion, rows, created_at)
         target = self._find(target_id) if target_id is not None else None
         if action == "UPDATE" and (target is None or target.status != "active"):
             # The SQLite twin clears the target on this downgrade; the two
@@ -262,8 +236,6 @@ class LongTerm:
                 )
             )
             self._index = None
-            if decision_details is not None:
-                decision_details.update(target_id=target_id, reason=reason)
             return None, action
         now = created_at or time.time()
         vector = (
@@ -324,8 +296,6 @@ class LongTerm:
             )
         )
         self._index = None
-        if decision_details is not None:
-            decision_details.update(target_id=target_id, reason=reason)
         return entry.id, action
 
     @staticmethod
@@ -427,19 +397,8 @@ class LongTerm:
         kinds: Any = None,
         exclude_task_ids: Any = (),
         task_key: str = "",
-        include_history: bool = False,
     ) -> list[tuple[str, float, dict[str, Any]]]:
-        if include_history:
-            excluded = set(exclude_task_ids)
-            rows = [
-                entry
-                for entry in self._entries
-                if entry.status in ("active", "superseded")
-                and (not kinds or entry.kind in kinds)
-                and entry.task_id not in excluded
-            ]
-        else:
-            rows = self._active(kinds, exclude_task_ids)
+        rows = self._active(kinds, exclude_task_ids)
         if not rows or not query.strip():
             return []
         index = BM25Index()
@@ -469,14 +428,6 @@ class LongTerm:
         ]
         rows.sort(key=lambda entry: (entry.created_at, entry.id))
         return [_stored(entry) for entry in rows]
-
-    async def history_entries(self, task_id: str) -> list[StoredEntry]:
-        """Return a task's entries, including superseded rows, newest first."""
-        if not task_id:
-            return []
-        rows = [_stored(entry) for entry in self._entries if entry.task_id == task_id]
-        rows.sort(key=_history_order, reverse=True)
-        return rows
 
     async def decisions(self) -> list[dict[str, Any]]:
         return list(self._decisions)

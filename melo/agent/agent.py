@@ -2736,15 +2736,6 @@ class Agent:
                 os.path.join(self._memory_dir, "procedures.db")
             )
 
-        if (
-            long_backend is None
-            and self._memory_dir is None
-            and self.options.memory
-            and self.options.reasoning != "legacy"
-            and self.options.typed_assertions
-        ):
-            long_backend = LongTerm()
-
         # memory=False runs Hippo in its no-embedding mode, which is exactly
         # the documented behavior of that option: no long-term recall, no
         # long-term writes, no reflection promotion, and reflections are
@@ -2777,7 +2768,6 @@ class Agent:
             memory=self.options.memory,
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
-            typed_assertions=self.options.typed_assertions,
         )
         self.checker = Checker(mode=self.options.mode, builtins=self.options.builtins)
         self.executor = Executor(
@@ -3189,7 +3179,6 @@ class Agent:
             rows,
             exclude_task_ids={run.task_id},
             min_score=self.options.recall_min_score,
-            include_history=self.options.typed_assertions,
         )
         key = digest_task_key(run.task_text, run.place or "")
         docs = gate_long_docs(
@@ -3213,24 +3202,14 @@ class Agent:
             )
             for doc in docs
         ]
-        # Same-task digests first; within each group keep #162's assertion
-        # order (typed mode) or the creation-time order (default).
-        if self.options.typed_assertions:
-            docs.sort(
-                key=lambda doc: (
-                    doc.meta["task_relation"] != "same",
-                    -float(doc.meta.get("assertion_order_time") or 0.0),
-                    -int(doc.meta.get("entry_id") or 0),
-                )
+        # Same-task digests first; within each group the creation-time order.
+        docs.sort(
+            key=lambda doc: (
+                doc.meta["task_relation"] != "same",
+                float(doc.meta.get("created_at") or 0.0),
+                doc.doc_id,
             )
-        else:
-            docs.sort(
-                key=lambda doc: (
-                    doc.meta["task_relation"] != "same",
-                    float(doc.meta.get("created_at") or 0.0),
-                    doc.doc_id,
-                )
-            )
+        )
         return [
             dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
             for index, doc in enumerate(docs, start=1)
@@ -3372,15 +3351,6 @@ class Agent:
                     continue
                 hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
         hits.sort(key=lambda hit: hit.task_relation != "same")
-        if self.options.typed_assertions:
-            long_order = {doc.doc_id: index for index, doc in enumerate(long_docs)}
-            ordered_long = iter(
-                sorted(
-                    (hit for hit in hits if hit.kind == "long"),
-                    key=lambda hit: long_order.get(hit.doc_id, len(long_order)),
-                )
-            )
-            hits = [next(ordered_long) if hit.kind == "long" else hit for hit in hits]
         hits = [
             dataclasses.replace(hit, rank=index) for index, hit in enumerate(hits, 1)
         ]
@@ -3746,17 +3716,7 @@ class Agent:
         for item in candidate_items(note):
             checked = self._checked_candidate_text(item.text, "reasoning_note", run)
             if checked is not None:
-                evidence = None
-                if self.options.typed_assertions and item.source_ids:
-                    evidence = next(
-                        (
-                            body
-                            for record_id, body in note.source_records
-                            if record_id in item.source_ids
-                        ),
-                        None,
-                    )
-                items.append(CandidateItem(checked, item.source_ids, evidence))
+                items.append(CandidateItem(checked, item.source_ids))
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="reasoning_note",
@@ -6827,7 +6787,6 @@ class Agent:
                         for candidate in user_candidates(
                             query,
                             task_id=run.task_id,
-                            typed_assertions=self.options.typed_assertions,
                             provenance={
                                 "task_text": run.task_text[:300],
                                 "source_ids": [],
