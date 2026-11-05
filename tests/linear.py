@@ -43,8 +43,15 @@ def linear(fast: float, slow: float) -> bool:
     return fast < 0.5 and slow < 2.0 and slow <= 8 * fast + 0.05
 
 
-def assert_linear(make: Callable[[int], T], run: Callable[[T], Any]) -> None:
-    small, large = make(SMALL), make(LARGE)
+def assert_linear(
+    make: Callable[[int], T],
+    run: Callable[[T], Any],
+    small_size: int = SMALL,
+    large_size: int = LARGE,
+) -> None:
+    """*run* on what *make* builds of *small_size* and of four times as much
+    (*large_size*) takes time in proportion: see the module's docstring."""
+    small, large = make(small_size), make(large_size)
     fast, slow = measure(small, large, run)
     if not linear(fast, slow):
         fast, slow = measure(small, large, run)

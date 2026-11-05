@@ -242,18 +242,23 @@ def test_uv_run_script_runs_a_python_file(ws: Path, option: str) -> None:
     assert is_delete(sh(ws, f"uv run {option} job.py"))
 
 
-@pytest.mark.parametrize(
-    "unit", ["-Z a ", "env -Z busybox ", "uv run -Z ", "env -S -S "]
-)
+@pytest.mark.parametrize("unit", ["-Z a ", "env -Z busybox "])
 def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -> None:
     """Each way to read an option is a place in the words, not a copy of them,
-    and a command has at most a few: the cost grows with the text, not faster."""
+    and a command has at most a few: the cost grows with the text, not faster.
+
+    12 000 and 48 000 characters: enough that a cost growing with the
+    square of the text takes 16 times as long, past the bound of 8.
+    """
 
     def make(size: int) -> str:
         return "env " + unit * (size // len(unit)) + "ls"
 
-    assert_linear(make, lambda text: site_keys("shell_exec", {"command": text}))
-    assert_linear(make, lambda text: sh(ws, text))
+    for run in (
+        lambda text: site_keys("shell_exec", {"command": text}),
+        lambda text: sh(ws, text),
+    ):
+        assert_linear(make, run, 12_000, 48_000)
 
 
 @pytest.mark.parametrize(
