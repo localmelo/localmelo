@@ -178,10 +178,9 @@ class AgentFactory:
             # A server that did not start: this session runs without MCP.
             self.mcp_error = str(exc) or type(exc).__name__
             agent = await self._build(model, url, None)
+        # Only now: a failed build leaves the row on the Agent it still has.
         if followed is not None:
-            self.backend = (
-                followed  # only now: a failed build leaves the row on its Agent
-            )
+            self.backend = followed
         self._live.append(agent)
         return agent
 
@@ -195,6 +194,10 @@ class AgentFactory:
             return ""
         served = in_use(self._cfg, self.backend.key)[1]
         return served if served != self.backend.model else ""
+
+    def show_served(self) -> None:
+        """Show what the backend serves now, for a session whose Agent is the gateway's."""
+        self.backend = self._served()
 
     def _served(self) -> BackendInfo:
         """The row as it shows what the backend serves now, which the Agent about to be built asks for."""

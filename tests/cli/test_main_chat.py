@@ -295,6 +295,8 @@ async def chat(setup: Setup) -> AsyncIterator[tuple[Setup, FakeGateway]]:
 
 async def test_a_message_in_the_main_chat_is_a_turn_of_the_gateway(
     chat: tuple[Setup, FakeGateway],
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
 ) -> None:
     setup, gateway = chat
     session = setup.session
@@ -309,6 +311,24 @@ async def test_a_message_in_the_main_chat_is_a_turn_of_the_gateway(
     # The terminal's own store holds nothing: the turn is the gateway's.
     assert await setup.store.list_sessions() == []
     assert session.status_bar().title == "Main chat"
+    # On melo_serve the gateway builds on the new model; the row and a line say so.
+    from localmelo.support.cli.agents import config_backend
+    from localmelo.support.config import Config, LocalBackendConfig
+    from localmelo.tests.fixtures.melo_serve import URL, role, write_state
+
+    cfg = Config(
+        chat_backend="melo_serve",
+        embedding_backend="none",
+        melo_serve=LocalBackendConfig(chat_url=URL),
+    )
+    write_state(melo_serve_home, chat=role("model-a"))
+    setup.factory._cfg = cfg
+    setup.factory.backend = config_backend(cfg, None)
+    write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
+    assert session.enter("again") is None
+    await setup.idle()
+    assert "The model changed to model-b (via melo_serve)." in setup.out.text()
+    assert setup.factory.backend.model == "model-b"
 
 
 async def test_retry_runs_the_newest_turn_again_through_the_gateway(

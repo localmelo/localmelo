@@ -794,6 +794,11 @@ class CliSession:
         started = self._clock()
         error: Exception | None = None
         status = ""
+        if typed and (model := self.factory.served_change()):
+            # The gateway builds its Agent on the new model at this turn; the
+            # row and the line say so here.
+            self.factory.show_served()
+            self.out.print(self._followed_line(model))
         try:
             status = await (
                 self.remote.run_turn(text, retry=retry) if typed else self.remote.wait()
@@ -1972,6 +1977,7 @@ class CliSession:
             self._state, self.activity, self._work = "idle", None, None
 
     def _start_failed(self, model: str, exc: Exception) -> None:
+        """Say that the Agent on *model* did not start and which one the chat keeps."""
         self.out.print(
             self._text(
                 f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
@@ -2008,9 +2014,11 @@ class CliSession:
             self._start_failed(model, exc)
             return
         await self._carry_over(new, model)
-        self.out.print(
-            self._text(f"The model changed to {model} (via melo_serve).", "muted")
-        )
+        self.out.print(self._followed_line(model))
+
+    def _followed_line(self, model: str) -> Text:
+        """The muted line a chat that follows melo_serve prints when its model changed."""
+        return self._text(f"The model changed to {model} (via melo_serve).", "muted")
 
     async def _report_switch(self, done: str) -> None:
         problem = await self.factory.save()
