@@ -169,7 +169,7 @@ asyncio.run(main())
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
-| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `gate`, `utility`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
+| `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | Last. | `result`, `reviews` |
@@ -479,17 +479,12 @@ is in `memory_stats.recall_log` and, with its item text, in
 
 - `attempt`: as on `reflection.started`.
 - `action`: the reflection's choice: `continue`, `stop`, `decompose` or
-  `done`. With `reflection_gate="utility"` it is `decompose` for a
-  reflection over the size limit that did not choose `done`; with the
-  default `"patient"` or `"flags"`, such a reflection is trimmed and keeps its choice.
+  `done`. A reflection over the size limit is trimmed and keeps its choice.
 - `continue_run`: `true` only when another attempt starts. It is `false`
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
 - `flags`: the decision's `task_still_feasible`, `next_step_is_concrete` and
   `next_step_is_novel`, as booleans; `null` when the reply was not readable.
-- `gate`: the `reflection_gate` in force, `patient` (the default), `flags` or `utility`.
-- `utility`: with `"utility"`, the decision's utility (see the option); else
-  `null`.
 - `stop_reason`: `null` exactly when `continue_run` is `true`; otherwise the
   first of these that applies, in this order:
   `unreadable_reply` (no decision, and no attempt could start),
@@ -497,8 +492,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   `no_attempt_left` (`max_attempts` used; the run ends with `Max attempts
   reached`), `step_budget_used` (`max_steps` used; `Max steps reached`),
   then the gate's checks: `action_not_continue` (the action is `stop` or
-  `decompose`), `not_feasible`, `not_concrete`, `not_novel`, and with
-  `"utility"` only `utility_below_threshold`. It is derived by the
+  `decompose`), `not_feasible`, `not_concrete`, `not_novel`. It is derived by the
   code that decides, so it never disagrees with `continue_run`. A
   `gate_stopped` run whose rationale is blank reports it in `error`:
   `Stopped after attempt <n> (stop reason: <code>)`; with a rationale, the
@@ -512,7 +506,7 @@ is in `memory_stats.recall_log` and, with its item text, in
   it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
-  gets no event of its own. With the default `reflection_gate="patient"` or `"flags"`, a
+  gets no event of its own. A
   first reply that has JSON the decoder rejected, and is not a tool call, puts
   one more line after the retry note: the decoder's error and up to 60
   characters around it, for example `Your reply was not valid JSON (Expecting
@@ -520,19 +514,15 @@ is in `memory_stats.recall_log` and, with its item text, in
   again with one JSON object.` In the compress modes the prompt fit can
   refuse a request before it is sent, which reads as an unreadable reply:
   `requests` is then 0, or 1 when only the retry was refused.
-- `readable`: `false` when, with the default `reflection_gate="patient"` or `"flags"`, the
+- `readable`: `false` when the
   second reply still held no reflection. `requests` is then 2; `action`,
   `rationale`, `summary` and `best_effort_result` are `null`; and
   `continue_run` is `true`, unless no attempt could start, in which case the
-  run ends as `budget_exhausted`. With `"utility"` it is always `true`: such
-  a reply counts as `stop`, with the rationale
-  `Could not parse reflection response`, or
-  `Reflection response was not a JSON object` when it was valid JSON that
-  is not an object.
+  run ends as `budget_exhausted`.
 - `unreadable_reason`: why the first reply held no reflection: `tool_call` (it has
   tool calls and no reflection in its text; the usual case when the window
   ends in tool turns), `invalid` (its text has a JSON object that
-  `"flags"` does not accept) or `no_json`; `null` when it read. The retry
+  no reflection can be read from) or `no_json`; `null` when it read. The retry
   follows either way, so `readable` can be `true` with a reason.
 - `repaired`: the one slip in the JSON of the reply that gave the reflection
   that was mended so that it reads: `unmatched_closer` (a `]` or `}` that no
@@ -542,8 +532,8 @@ is in `memory_stats.recall_log` and, with its item text, in
   an escape that JSON does not have, such as `\;`, was doubled, so that it
   reads as a backslash and the character after it) or `unclosed_array` (an
   array that the next key broke off was closed: a `]` was inserted before the
-  comma that precedes that key); `null` when the reply read as it was, when no
-  reflection was read, and with `"utility"`. A repair is tried only when the
+  comma that precedes that key); `null` when the reply read as it was and when no
+  reflection was read. A repair is tried only when the
   reply holds no reflection as it stands, only on a `{...}` that the decoder
   rejects (the first eight of a reply), and counts only when the result is an
   object with a valid `recommended_action`. A reply that needs two repairs

@@ -177,7 +177,6 @@ uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SI
 | `--chat-model NAME` | chat model | 对话模型 |
 | `--max-steps N` | step budget | 步数上限 |
 | `--attempt-policy reflect\|none` | attempt policy | 尝试策略 |
-| `--reflection-gate flags\|utility` | continuation gate | 继续判定 |
 | `--tool-exposure retrieve\|all` | tool exposure | 工具暴露方式 |
 | `--builtins all\|none\|NAME,...` | built-in tools to register | 启用的内置工具 |
 | `--mcp-config PATH` | MCP config file | MCP 配置文件 |

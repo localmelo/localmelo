@@ -281,7 +281,7 @@ melo: run ended with status stuck: Stuck: the same tool calls or errors repeated
 melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: not_novel)
 ```
 
-- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。使用 `--reflection-gate utility` 时，它还可能显示为 `Could not parse reflection response`：模型两次回复时都没有反思所需的 JSON 对象。
+- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。
 - **修复：** 阅读其理由。如果模型无法写出反思，请换一个模型，或使用 `--attempt-policy none`。
 
 ### Tool not offered in this step

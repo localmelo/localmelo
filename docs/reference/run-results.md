@@ -52,9 +52,7 @@ Details:
   best effort, if any, and `error` its reason, or
   `Stopped after attempt <n> (stop reason: <code>)` when it gave none. The
   `reflection` event always carries the stop reason and the decision's flags
-  (see [Events](events.md#reflection)). With `--reflection-gate utility`, an unreadable
-  reflection stops the run too, and so does one over the size limit unless
-  it chose `done`.
+  (see [Events](events.md#reflection)).
 - **An answer when a run stops.** By default (the developer setting `[agent]
   answer_on_stop`, `true`; `-X agent.answer_on_stop=off` turns it off), a run that ends
   `gate_stopped` or `budget_exhausted` with an empty `result` makes one more
@@ -104,14 +102,7 @@ Details:
   decoder's error. Both requests count in `n_aux`. When the second reply is
   unreadable too, nothing of it is kept and the next attempt starts. If none
   can start, the run ends as `budget_exhausted`, with the latest text the
-  model wrote in the run as `result`. With `--reflection-gate utility`, any
-  JSON object counts as readable, nothing is repaired or quoted, and a second
-  reply without one ends the
-  run as `gate_stopped`: the error is `Could not parse reflection response`
-  when the reply could not be read, or
-  `Reflection response was not a JSON object` when it was valid JSON that
-  is not an object. With no attempt left the run ends as
-  `budget_exhausted` instead.
+  model wrote in the run as `result`.
 - **`budget_exhausted`.** The error is `Max steps reached` or
   `Max attempts reached`, or `Call budget reached: ...` with `max_calls`. With `--attempt-policy reflect`, a last reflection
   can still choose `done`; otherwise its best effort becomes `result`.
@@ -189,7 +180,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |
 | `duration_s` | Wall-clock time of the run, in seconds. |
 | `config` | The options the run used (below). |
-| `prefix_cache` | With fixed prefix enabled (the default; absent with `--fixed-prefix off`): version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
+| `prefix_cache` | Version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
 | `context_budget` | When configured, a list of per-attempt planning/reflection accounting records; absent when disabled. See [context accounting](configuration.md#context-accounting). |
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 | `confinement` | Only in a run that confines its writes (a `--brief` worker or a saved task, see [Writes stay in the workspace](cli.md#confined-writes)): `{"writes": "confined", "refused_writes": N}`, N being the writes outside the workspace this run's `shell_exec` and `python_exec` reported refused, or `{"writes": "not_confined", "reason": "..."}` off macOS. Absent otherwise. |
@@ -201,22 +192,20 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 
 | Key | Meaning |
 |---|---|
-| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `reflection_gate`, `tool_exposure`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
+| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `tool_exposure`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `answer_on_stop` | `true` when the run had it on (the default); absent with `-X agent.answer_on_stop=off`. |
 | `empty_reply_fallback` | `"off"` when the run had it off; absent with the default `"on"`. |
 | `max_calls` | The run's call budget when it set one; absent otherwise. |
-| `window_eviction` | `chunk` (the default) or `boundary` when the run used one; absent for `slide`. |
-| `reflect_tool_guard` | `true` when the run used the guard (the default); absent with `--reflect-tool-guard off`. |
-| `cache_layout` | `v3` (the default) when the run used it; absent for `v2`. |
+| `window_eviction` | `chunk` (the default) or `boundary`. |
 | `window_messages` | The window's message cap when it is not 20 (64 by default on a local server or a URL); absent for 20. |
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |
 | `cross_task_ratio`, `cross_task_cap`, `cross_task_cold` | Outside `legacy`, the digest-recall gate: the same-backend multiple a cross-task digest must reach, the per-recall cap (0–2) and the cold-start allowance (0 or 1). |
-| `admit_on_outcome`, `keep_decision_text` | Outside `legacy`, the two R6-lite switches: admit only the final digest with its terminal status at the run's end, and keep a decision's text beside its hash. Both are `false` by default and absent from a `legacy` line. |
+| `keep_decision_text` | Outside `legacy`, the R6-lite switch that keeps a decision's text beside its hash. `false` by default and absent from a `legacy` line. |
 
 `memory_stats` holds, in order:
 

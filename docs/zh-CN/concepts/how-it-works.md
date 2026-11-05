@@ -61,15 +61,13 @@ an attempt that runs out of steps (50), or repeats itself ─► reflection ─�
 | `decompose` | 任务应当拆分。localmelo 不拆分任务，因此运行以 `gate_stopped` 结束。 |
 
 - 只有当反思认为任务仍可行，并提出具体的下一步时，继续判定才允许运行继续；否则运行以 `gate_stopped` 结束。
-- 默认的判定很有耐心：不新的下一步仍会继续，每次运行一次；第二次则结束运行。
-- 使用 `--reflection-gate flags` 时，不新的下一步总会结束运行。
-- 使用 `--reflection-gate utility`（该选项出现前的行为）时，反思还必须估计再次尝试的收益超过成本和重复风险：效用分数至少为 0.1（[评测](../project/evaluations.md#reflection-gate)比较了这些判定）。
-- 反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符（使用 `--reflection-gate flags -X agent.answer_on_stop=off` 时没有这个限制）。
+- 判定很有耐心：不新的下一步仍会继续，每次运行一次；第二次则结束运行（[评测](../project/evaluations.md#reflection-gate)把它与较早的判定做了比较）。
+- 反思的 `useful_evidence`、`failed_hypotheses` 和 `recommended_avoids` 各最多保留 8 项，每项最多 300 个字符。
 
 关于反思的更多说明：
 
-- 只带着最新的反思继续：每次反思替换上一条。默认情况下，它只作为一条普通消息加入对话一次；使用 `--cache-layout v2` 时，它会被重建为每个请求的最后一条消息。
-- 超过约 2,000 个字符的反思会被截短以适应预算，决定不变（先删去列表末尾的条目，再截短摘要末尾）；使用 `--reflection-gate utility` 时，超长反思会直接结束运行，除非它选择了 `done`。
+- 只带着最新的反思继续：每次反思替换上一条。它只作为一条普通消息加入对话一次。
+- 超过约 2,000 个字符的反思会被截短以适应预算，决定不变（先删去列表末尾的条目，再截短摘要末尾）。
 - 如果无法开始下一次尝试，反思会收到这一信息；它仍可选择 `done`，否则运行以 `budget_exhausted` 结束，并以反思给出的最佳答案作为结果。
 - 如果回复没有反思（没有包含四种行动之一的 JSON 对象），localmelo 会再请求一次；如果第二次回复仍没有，则不带新反思开始下一次尝试，或以 `budget_exhausted` 结束（见[运行结果](../reference/run-results.md#statuses)）。
 - 如果回复的 JSON 只有一处常见小错误，例如字符串值后多出一个 `]`、JSON 没有对应转义的字符前多出的反斜杠，或被下一个键打断而没有闭合的数组，localmelo 会先修补再读取，无需第二次请求。
@@ -98,7 +96,7 @@ an attempt that runs out of steps (50), or repeats itself ─► reflection ─�
 - 每一步的规划请求都包含工作记忆中的最近对话，每个工具调用都会记录在历史记录中。
 - 在 `legacy` 下，启用记忆并配置嵌入后端时，请求还会包含与任务最接近的长期记忆；每个工具调用会被总结并写入长期记忆，运行结束时最新反思也会写入其中。
 - 运行结束时，运行所做的事（步骤数量以及工具调用的类别和标签）也会记入[程序记忆](procedures.md)，它不会被放入任何提示。
-- 在显式模式下，回复的笔记、尝试摘要和反思是长期记忆的**候选项**：只有信号准入时才会写入（排练、用户陈述、涵盖本次运行的用户请求，或对最终摘要使用 `--admit-on-outcome`）。
+- 在显式模式下，回复的笔记、尝试摘要和反思是长期记忆的**候选项**：只有信号准入时才会写入（排练、用户陈述或涵盖本次运行的用户请求）。
 - 经过检查的写入会对事实分类，与同类活动条目比较，并在存储的决策日志中记录一个动作（`NEW`、`UPDATE`、`RELATED`、`CONFLICT` 或 `IGNORE`）；所有存储文本都会先脱敏。
 
 限制和确切行为见[记忆如何工作](memory.md#how-memory-works)和[长期记忆](../../reference/memory.md#long-term-memory)（英文）。

@@ -1268,6 +1268,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   packages, the step-estimate request and its `estimate` call kind, and gateway
   and store methods that only tests called. Settings, commands and what you see
   are otherwise unchanged.
+- Agent options whose comparison already decided against them (#510). `[agent] fixed_prefix`,
+  `reflect_tool_guard`, `cache_layout` and `reflection_gate` and `[memory] admit_on_outcome` are gone
+  with their options (`--fixed-prefix`, `--reflect-tool-guard`, `--cache-layout`, `--reflection-gate`,
+  `--admit-on-outcome`), and so is `window_eviction = "slide"`; `chunk` and `boundary` stay. A run
+  already behaved as the defaults of these settings did, so no request changes. A config file that
+  still holds a removed key loads, the line is ignored and `melo config` names it once (`"slide"` reads
+  as `"chunk"`); the options and `-X` settings exit 2 and say they were removed. The JSON result's
+  `config` no longer has `reflect_tool_guard`, `cache_layout` or `reflection_gate`, the `reflection`
+  event no longer has `gate` or `utility` (the `utility_below_threshold` stop reason went with them),
+  and `AgentOptions` no longer takes the removed names. A routine learned under the patient gate keeps
+  its template.
 
 ### Security
 
