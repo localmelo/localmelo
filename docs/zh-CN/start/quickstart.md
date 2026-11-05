@@ -27,8 +27,6 @@ source .venv/bin/activate
 
 uv 会创建虚拟环境 `.venv/`（如果没有 Python 3.13，还会安装它），并安装 localmelo 及网关依赖。
 
-请保留目录名 `localmelo`：软件包从该目录构建。重命名文件夹或下载 ZIP（`localmelo-main`）会导致 `ModuleNotFoundError: No module named 'localmelo'`。
-
 本指南余下部分直接调用 `melo`。激活只在当前终端有效：在新终端中需要再次运行 `source <clone>/.venv/bin/activate`，其中 `<clone>` 是你的 `localmelo` 目录。使用 uv 时，也可以在克隆目录中运行 `uv run melo …`，或在其他任何位置运行 `uv run --project <clone> melo …`。
 
 <a id="install-with-pip"></a>
@@ -81,7 +79,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b --output json "What is 6*7
 输出示例（数值会有所不同）：
 
 ```json
-{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
+{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}
 ```
 
 stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码才是 0。

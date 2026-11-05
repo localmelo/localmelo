@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -30,20 +31,11 @@ from .test_turn_writes import (
 BAD = "\ud800"
 
 
-async def _post(
-    client: httpx.AsyncClient, url: str, payload: dict[str, Any]
+async def _send(
+    client: httpx.AsyncClient, method: str, url: str, payload: dict[str, Any]
 ) -> httpx.Response:
-    return await client.post(
-        url,
-        content=json.dumps(payload),
-        headers={"Content-Type": "application/json"},
-    )
-
-
-async def _patch(
-    client: httpx.AsyncClient, url: str, payload: dict[str, Any]
-) -> httpx.Response:
-    return await client.patch(
+    return await client.request(
+        method,
         url,
         content=json.dumps(payload),
         headers={"Content-Type": "application/json"},
@@ -59,74 +51,76 @@ def _surrogate_error(response: httpx.Response) -> str:
     return message
 
 
-async def test_a_create_with_a_non_utf8_text_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (console, client, _):
-        response = await _post(
-            client,
-            "/api/sessions",
-            {"turn": {"text": f"Hi {BAD}"}, **_workspace(tmp_path)},
-        )
+# The check runs before the request is routed, so the route does not change the answer: one case
+# per route that takes a string a person typed (the deny reason has its own test below).
+ROUTES = [
+    pytest.param(
+        "POST",
+        "/api/sessions",
+        {"turn": {"text": f"Hi {BAD}"}},
+        "turn.text: the text must be valid UTF-8",
+        id="create-text",
+    ),
+    pytest.param(
+        "POST",
+        "/api/sessions",
+        {"workspace": f"/tmp/{BAD}"},
+        "workspace: the text must be valid UTF-8",
+        id="create-workspace",
+    ),
+    pytest.param(
+        "POST",
+        "/api/sessions/{id}/turns",
+        {"text": f"Hi {BAD}"},
+        "text: the text must be valid UTF-8",
+        id="turn-text",
+    ),
+    pytest.param(
+        "PATCH",
+        "/api/sessions/{id}",
+        {"title": f"x{BAD}"},
+        "title: the text must be valid UTF-8",
+        id="rename-title",
+    ),
+    pytest.param(
+        "PATCH",
+        "/api/sessions/{id}",
+        {"title": "Release notes", "workspace": f"/tmp/{BAD}"},
+        "workspace: the text must be valid UTF-8",
+        id="patch-workspace",
+    ),
+    pytest.param(
+        "POST",
+        "/api/sessions/{id}/retry",
+        {"turn_id": f"x{BAD}"},
+        "turn_id: the text must be valid UTF-8",
+        id="retry-turn-id",
+    ),
+    pytest.param(
+        "POST",
+        "/api/submissions/8d2f6c1e/cancel",
+        {"text": f"Hi {BAD}"},
+        "text: the text must be valid UTF-8",
+        id="cancel-text",
+    ),
+]
 
-        assert _surrogate_error(response) == "turn.text: the text must be valid UTF-8"
-        # Nothing was written: no session, so no turn went running.
-        assert await console.store.list_sessions() == []
 
-
-async def test_a_create_with_a_non_utf8_workspace_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (console, client, _):
-        response = await _post(client, "/api/sessions", {"workspace": f"/tmp/{BAD}"})
-
-        assert "workspace: the text must be valid UTF-8" in _surrogate_error(response)
-        assert await console.store.list_sessions() == []
-
-
-async def test_a_turn_with_a_non_utf8_text_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (console, client, _):
-        created = await client.post("/api/sessions", json=_workspace(tmp_path))
-        session_id = created.json()["session"]["id"]
-
-        refused = await _post(
-            client, f"/api/sessions/{session_id}/turns", {"text": f"Hi {BAD}"}
-        )
-
-        assert _surrogate_error(refused) == "text: the text must be valid UTF-8"
-        assert await console.store.list_turns(session_id) == []
-
-
-async def test_a_rename_with_a_non_utf8_title_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (console, client, _):
-        created = await client.post("/api/sessions", json=_workspace(tmp_path))
-        session_id = created.json()["session"]["id"]
-
-        refused = await _patch(
-            client, f"/api/sessions/{session_id}", {"title": f"x{BAD}"}
-        )
-
-        assert _surrogate_error(refused) == "title: the text must be valid UTF-8"
-        info = await console.store.get_session(session_id)
-        assert info is not None and info.title != f"x{BAD}"
-
-
-async def test_a_patch_with_a_non_utf8_workspace_moves_nothing(
-    tmp_path: Path,
+@pytest.mark.parametrize(("method", "url", "payload", "message"), ROUTES)
+async def test_a_request_string_that_is_not_utf8_is_invalid_and_writes_nothing(
+    tmp_path: Path, method: str, url: str, payload: dict[str, Any], message: str
 ) -> None:
     async with console_with(tmp_path) as (console, client, _):
         created = await client.post("/api/sessions", json=_workspace(tmp_path))
         session_id = created.json()["session"]["id"]
-        before = await console.store.get_session(session_id)
-        assert before is not None
+        sessions = await console.store.list_sessions()
 
-        refused = await _patch(
-            client,
-            f"/api/sessions/{session_id}",
-            {"title": "Release notes", "workspace": f"/tmp/{BAD}"},
-        )
+        refused = await _send(client, method, url.format(id=session_id), payload)
 
-        assert "workspace: the text must be valid UTF-8" in _surrogate_error(refused)
-        after = await console.store.get_session(session_id)
-        assert after is not None
-        # Both changes are judged before either is written.
-        assert (after.title, after.workspace) == (before.title, before.workspace)
+        assert _surrogate_error(refused) == message
+        # Every change of a request is judged before any is written.
+        assert await console.store.list_sessions() == sessions
+        assert await console.store.list_turns(session_id) == []
 
 
 async def test_a_deny_reason_that_is_not_utf8_leaves_the_turn_running(
@@ -142,8 +136,9 @@ async def test_a_deny_reason_that_is_not_utf8_leaves_the_turn_running(
         session_id = body["session"]["id"]
         [pending] = await _wait_pending(client, session_id)
 
-        refused = await _post(
+        refused = await _send(
             client,
+            "POST",
             f"/api/approvals/{pending['request_id']}",
             {"choice": "deny", "reason": f"no {BAD}"},
         )
@@ -157,24 +152,3 @@ async def test_a_deny_reason_that_is_not_utf8_leaves_the_turn_running(
         turn = await _wait_turn(client, session_id)
         assert turn["status"] == "completed"
         assert not target.exists()
-
-
-async def test_a_retry_turn_id_that_is_not_utf8_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (_console, client, _):
-        created = await client.post("/api/sessions", json=_workspace(tmp_path))
-        session_id = created.json()["session"]["id"]
-
-        refused = await _post(
-            client, f"/api/sessions/{session_id}/retry", {"turn_id": f"x{BAD}"}
-        )
-
-        assert _surrogate_error(refused) == "turn_id: the text must be valid UTF-8"
-
-
-async def test_a_cancel_text_that_is_not_utf8_is_invalid(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (_console, client, _):
-        refused = await _post(
-            client, "/api/submissions/8d2f6c1e/cancel", {"text": f"Hi {BAD}"}
-        )
-
-        assert _surrogate_error(refused) == "text: the text must be valid UTF-8"

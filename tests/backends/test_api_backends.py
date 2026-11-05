@@ -7,13 +7,8 @@ from __future__ import annotations
 
 import httpx
 
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.support.backends import discovery
-from localmelo.support.backends.openai_compat import (
-    build_openai_chat,
-    build_openai_embedding,
-    normalize_url,
-)
+from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.registry import get_backend
 from localmelo.support.config import Config, LocalBackendConfig
 
@@ -69,43 +64,6 @@ class TestNormalizeUrl:
         assert (
             normalize_url("http://localhost:11434/v1/") == "http://localhost:11434/v1"
         )
-
-
-# ===========================================================================
-# build_openai_chat / build_openai_embedding
-# ===========================================================================
-
-
-class TestBuildOpenaiChat:
-    def test_returns_llm_provider(self) -> None:
-        provider = build_openai_chat(
-            base_url="http://localhost:8400/v1", model="test-model"
-        )
-        assert isinstance(provider, BaseLLMProvider)
-
-    def test_passes_api_key(self) -> None:
-        provider = build_openai_chat(
-            base_url="https://api.openai.com/v1",
-            model="gpt-4o",
-            api_key="sk-test",
-        )
-        assert isinstance(provider, BaseLLMProvider)
-
-
-class TestBuildOpenaiEmbedding:
-    def test_returns_embedding_provider(self) -> None:
-        provider = build_openai_embedding(
-            base_url="http://localhost:11434/v1", model="nomic-embed"
-        )
-        assert isinstance(provider, BaseEmbeddingProvider)
-
-    def test_passes_api_key(self) -> None:
-        provider = build_openai_embedding(
-            base_url="https://api.openai.com/v1",
-            model="text-embedding-3-small",
-            api_key="sk-test",
-        )
-        assert isinstance(provider, BaseEmbeddingProvider)
 
 
 # ===========================================================================

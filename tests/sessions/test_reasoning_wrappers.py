@@ -111,7 +111,7 @@ async def test_gated_native_provider_keeps_its_fixed_thinking_field(
     cfg = Config(chat_backend="ollama", embedding_backend="none")
     try:
         with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
+            "localmelo.support.sessions.agents.providers_for",
             return_value=(provider, None),
         ):
             agent = await build_session_agent(

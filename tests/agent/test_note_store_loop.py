@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
+from localmelo.tests.agent.test_reflection_gate import _prefix_scope
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -555,11 +555,11 @@ async def test_every_document_crosses_the_boundary_once() -> None:
 
 @pytest.mark.asyncio
 async def test_the_reflection_block_keeps_twelve_notes_of_four_hundred_chars() -> None:
-    from localmelo.melo.agent.agent import (
+    from localmelo.melo.agent._notes_loop import (
         REFLECTION_MAX_NOTES,
         REFLECTION_NOTE_CHARS,
-        _RunState,
     )
+    from localmelo.melo.agent.agent import _RunState
     from localmelo.melo.memory.notes import ReasoningNote
 
     agent = _agent(FakeLLM(), _options(reasoning="compress"))
@@ -583,7 +583,7 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
     from localmelo.melo.schema import CheckResult, TaskRecord
 
     server = FakeLLM()
-    agent = _agent(server, _options(reasoning="compress", **LEGACY_CACHE_OPTIONS))
+    agent = _agent(server, _options(reasoning="compress"))
     agent.hippo.working.notes.add(
         "note",
         "found: a fact",
@@ -601,12 +601,13 @@ async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
         return await original(messages, **kwargs)
 
     agent.checker.pre_plan = pre_plan  # type: ignore[method-assign]
-    result = await agent._do_reflect(
-        TaskRecord(query="q"),
-        attempt_id=1,
-        failure_type="",
-        run=_RunState(attempts=1),
-    )
+    with _prefix_scope(agent):
+        result = await agent._do_reflect(
+            TaskRecord(query="q"),
+            attempt_id=1,
+            failure_type="",
+            run=_RunState(attempts=1),
+        )
     await agent.close()
     assert result is None
     assert seen == [True]

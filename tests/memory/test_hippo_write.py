@@ -137,40 +137,24 @@ async def test_a_run_request_admits_remembered_notes_and_the_digest_only() -> No
     assert {decision.admitted_by for decision in decisions} == {"user_request"}
 
 
-async def test_the_outcome_switch_off_writes_nothing_and_on_writes_only_the_digest() -> (
-    None
-):
+async def test_a_final_attempt_without_a_request_to_remember_writes_nothing() -> None:
     store = LongTerm()
     digest = _candidate(
         "task: migrate\nfiles: migration.py\nfacts: the migration is done",
         candidate_id="d1",
         source="digest",
     )
-    digest.provenance["final_status"] = "completed"
     reflection = _candidate(
         "Attempt 1: tried the migration", candidate_id="r1", source="reflection"
     )
-    off = Hippo(long=store)
-    off.propose(digest)
-    off.propose(reflection)
+    hippo = Hippo(long=store)
+    hippo.propose(digest)
+    hippo.propose(reflection)
     assert (
-        await off.flush(run_request=False, digest=digest, final_reflection=reflection)
+        await hippo.flush(run_request=False, digest=digest, final_reflection=reflection)
         == []
     )
     assert await store.count_entries() == 0
-
-    on = Hippo(long=LongTerm(), admit_on_outcome=True)
-    on.propose(digest)
-    on.propose(reflection)
-    decisions = await on.flush(
-        run_request=False, digest=digest, final_reflection=reflection
-    )
-    assert [decision.admitted_by for decision in decisions] == ["outcome"]
-    entries = await on.long.active_entries()
-    assert [entry.text for entry in entries] == [
-        "task: migrate\nfiles: migration.py\nfacts: the migration is done"
-    ]
-    assert entries[0].provenance["final_status"] == "completed"
 
 
 async def test_the_checked_write_refuses_a_profile_entry_from_a_note(
@@ -458,33 +442,6 @@ async def test_missing_item_sources_fall_back_to_candidate_sources() -> None:
     )
     decisions = await hippo.admit("n1", "rehearsal")
     assert decisions[0].source_ids == ("r1",)
-
-
-async def test_a_bare_meta_digest_keeps_the_policy_exemption_but_is_refused() -> None:
-    store = LongTerm()
-    hippo = Hippo(long=store, admit_on_outcome=True)
-    text = "I've read and remembered all of Jamie's records."
-    digest = _candidate(
-        text,
-        candidate_id="d1",
-        source="digest",
-        provenance={"final_status": "completed"},
-    )
-    decisions = await hippo.flush(
-        run_request=False, digest=digest, final_reflection=None
-    )
-    policy = hippo.policy.decide(
-        text,
-        kind="episodic",
-        source="digest",
-        provenance={"final_status": "completed"},
-        active=[],
-        admitted_by="outcome",
-    )
-    assert policy.action == "NEW"  # The policy exemption still exists.
-    assert len(decisions) == 1 and decisions[0].refused
-    assert "no file or verification evidence" in decisions[0].reason
-    assert await store.active_entries() == []
 
 
 async def test_each_item_keeps_its_own_source_ids_in_the_entry() -> None:

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from localmelo.melo.agent.agent import _read_reflection
+from localmelo.melo.agent._reflection import _read_reflection
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
 from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS
 from localmelo.melo.memory.notes import (
@@ -282,7 +282,7 @@ def docs_from_calls(calls: Iterable[RawCall]) -> list[Doc]:
       ``<target or "no target">, <lines> lines: <first code line>``.
     - A ``reflect`` call gives a reflection, ``<task_id>:r<seq>``, built
       as a note of kind ``reflection``, when its reply holds one as a run
-      reads it (see :func:`~localmelo.melo.agent.agent._read_reflection`,
+      reads it (see :func:`~localmelo.melo.agent._reflection._read_reflection`,
       which repairs a small JSON slip), and no draft.
     - Both then give the thought chunks of the reasoning,
       ``<task_id>:t<seq>.<i>`` with i from 1.

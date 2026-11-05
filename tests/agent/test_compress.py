@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.agent import ASSISTANT_TEXT_SHARE
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.schema import (
+    ASSISTANT_TEXT_SHARE,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     Message,
@@ -20,7 +20,6 @@ from localmelo.melo.schema import (
     ToolDef,
     ToolResult,
 )
-from localmelo.tests.legacy_options import LEGACY_CACHE_OPTIONS
 
 CALL_ID = "call_1"
 
@@ -452,7 +451,6 @@ async def test_the_reflection_request_carries_notes_and_used_notes() -> None:
             attempt_policy="reflect",
             steps_per_attempt=1,
             max_attempts=2,
-            **LEGACY_CACHE_OPTIONS,
         ),
     )
     result = await agent.run_task("q")
@@ -460,7 +458,7 @@ async def test_the_reflection_request_carries_notes_and_used_notes() -> None:
     reflection_request = server.requests[1]
     assert "[localmelo notes:" in reflection_request[-1].content
     assert "[end of localmelo notes]" in reflection_request[-1].content
-    assert "used_notes" in _system([reflection_request[0]])
+    assert "used_notes" in reflection_request[-1].content
     assert result.memory_stats is not None
     # One digest per attempt: the reflection ended attempt 1, and the
     # answer ended attempt 2.

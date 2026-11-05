@@ -52,8 +52,7 @@ source .venv/bin/activate
 ```
 <!-- /usage -->
 
-Keep the directory name `localmelo`: the package is built from it. Without
-uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.html#install-with-pip).
+Without uv, see [Install with pip](https://localmelo.github.io/localmelo/en/quickstart.html#install-with-pip).
 
 ## On a Mac: the app
 

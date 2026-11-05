@@ -15,9 +15,9 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import Iterator
+from collections.abc import Coroutine, Iterator
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -28,9 +28,15 @@ from localmelo.melo.executor import (
     ExecutionRequest,
     ExecutionStatus,
     Executor,
+    builtin_callables,
     register_builtins,
 )
 from localmelo.melo.memory.coordinator import Hippo
+
+
+def _shell_exec(command: str) -> Coroutine[Any, Any, str]:
+    """A call of shell_exec as a run without a workspace makes it."""
+    return builtin_callables(None)["shell_exec"][0](command)
 
 
 def _command(pid_file: Path) -> str:
@@ -96,14 +102,14 @@ def pid_file(tmp_path: Path) -> Iterator[Path]:
 
 @pytest.mark.asyncio
 async def test_a_command_still_returns_its_output() -> None:
-    assert await builtin_tools._shell_exec("echo out; echo err >&2") == "out\n\nerr"
+    assert await _shell_exec("echo out; echo err >&2") == "out\n\nerr"
 
 
 @pytest.mark.asyncio
 async def test_a_cancellation_kills_the_command_and_its_children(
     pid_file: Path,
 ) -> None:
-    running = asyncio.create_task(builtin_tools._shell_exec(_command(pid_file)))
+    running = asyncio.create_task(_shell_exec(_command(pid_file)))
     shell, child = await _pids(pid_file)
     assert _alive(shell) and _alive(child)
 
@@ -120,7 +126,7 @@ async def test_its_own_timeout_kills_the_command_and_its_children(
 ) -> None:
     monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 1.0)
     with pytest.raises(TimeoutError):
-        await builtin_tools._shell_exec(_command(pid_file))
+        await _shell_exec(_command(pid_file))
     shell, child = await _pids(pid_file)
     assert await _gone(shell)
     assert await _gone(child)
@@ -172,7 +178,7 @@ async def test_the_executor_timeout_kills_the_command_and_its_children(
 
 @pytest.mark.asyncio
 async def test_the_command_runs_in_its_own_process_group() -> None:
-    out = await builtin_tools._shell_exec("ps -o pgid= -p $$; echo $$")
+    out = await _shell_exec("ps -o pgid= -p $$; echo $$")
     group, shell = (int(value) for value in out.split())
     assert group == shell != os.getpgrp()
 
@@ -204,7 +210,7 @@ async def _group_gone(pgid: int, timeout_s: float = 5.0) -> bool:
 async def test_no_process_of_the_group_survives_a_cancellation(
     pid_file: Path,
 ) -> None:
-    running = asyncio.create_task(builtin_tools._shell_exec(_command(pid_file)))
+    running = asyncio.create_task(_shell_exec(_command(pid_file)))
     shell, _ = await _pids(pid_file)
     running.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -219,7 +225,7 @@ async def test_no_process_of_the_group_survives_its_own_timeout(
 ) -> None:
     monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 0.5)
     with pytest.raises(TimeoutError):
-        await builtin_tools._shell_exec(_command(pid_file))
+        await _shell_exec(_command(pid_file))
     shell, _ = await _pids(pid_file)
     assert await _group_gone(shell)
 

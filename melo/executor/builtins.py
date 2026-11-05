@@ -7,6 +7,7 @@ import codecs
 import contextlib
 import contextvars
 import errno
+import functools
 import itertools
 import os
 import re
@@ -41,6 +42,10 @@ from localmelo.melo.schema import ToolDef
 # A built-in tool's callable.
 ToolFunction = Callable[..., Coroutine[Any, Any, str]]
 
+# Every built-in: its definition and its function. The function takes the
+# workspace root (None without a workspace) before the tool's own parameters,
+# and shell_exec and python_exec some settings too (see builtin_callables,
+# which binds them).
 BUILTINS: list[tuple[ToolDef, ToolFunction]] = []
 
 # The built-ins whose tier is not read. register_builtins marks them, so a
@@ -55,8 +60,8 @@ APPROVAL_BUILTINS: frozenset[str] = frozenset(
 # each call. A tool that runs a child process may append the child's
 # returncode (negative when a signal ended it) once the child has exited by
 # itself; a tool that kills its child appends nothing. Without a list
-# (None, the default), there is nothing to record. shell_exec and
-# python_exec record their child's status, with or without a workspace root.
+# (None, the default), there is nothing to record. python_exec records its
+# child's status, with or without a workspace root; shell_exec only with one.
 TOOL_EXIT_CODE: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
     "TOOL_EXIT_CODE", default=None
 )
@@ -150,16 +155,36 @@ WHY_NOTE = "Give why for a step that changes anything."
         semantic_tags=["shell", "bash", "command", "terminal", "exec", "run"],
     )
 )
-async def _shell_exec(command: str, why: str = "") -> str:
+async def _shell_exec(
+    root: str | None,
+    tool_timeout_s: float | None,
+    tool_env: Mapping[str, str] | None,
+    confinement: Confinement | None,
+    command: str,
+    why: str = "",
+) -> str:
     # /dev/null, never this process's stdin: a shell whose stdin is a
     # terminal that is not its controlling one (the pty slave of
     # pty.openpty(), melo started with start_new_session) opens
     # ttyname(stdin) without O_NOCTTY in its start-up check and takes it as
     # its controlling terminal; when the shell exits, the pty is hung up
     # and melo's own streams return EIO, so the flush at exit turns 0 into
-    # 120.  The rooted shell_exec passes /dev/null too. The shell gets the
-    # minimal environment of _run_shell, not this process's.
-    text, _ = await _run_shell(command, stdin=subprocess.DEVNULL)
+    # 120. The shell gets the minimal environment of _run_shell, not this
+    # process's.
+    text, returncode = await _run_shell(
+        command,
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        timeout_s=tool_timeout_s,
+        tool_env=tool_env,
+        confinement=confinement,
+    )
+    if root is None:  # no workspace: the text only, as it always was
+        return text
+    _record_exit_code(returncode)
+    if returncode:
+        line = f"[exit code {returncode}]"
+        return f"{line}\n{text}" if text else line
     return text
 
 
@@ -304,32 +329,31 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
     )
 )
 async def _file_read(
-    path: str, start_line: int | None = None, end_line: int | None = None
+    root: str | None,
+    path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
 ) -> str:
+    target = _in_root(root, path)
     start = _line_range(start_line, end_line)
-    loop = asyncio.get_event_loop()
-    checked = checked_for(path)
-    if checked is not None:
-        # The executor fenced it: open the checked file only, as the
-        # rooted tool does.
-        return await loop.run_in_executor(
-            None,
-            _read_regular_file,
-            path,
+    loop = asyncio.get_running_loop()
+    checked = checked_for(target)
+    if checked is None and root is None:
+        # No workspace and no check by the executor: the path as given.
+        text = await loop.run_in_executor(None, lambda: open(path).read())
+        if start == 1 and end_line is None and len(text) <= MAX_OUTPUT_LEN:
+            return text
+        lines = _split_lines(text)
+        return _view_lines(
+            _select(lines, start, end_line),
             start,
-            end_line,
-            checked.path,
-            checked.outside,
+            len(lines),
+            size=len(text.encode()),
         )
-    text = await loop.run_in_executor(None, lambda: open(path).read())
-    if start == 1 and end_line is None and len(text) <= MAX_OUTPUT_LEN:
-        return text
-    lines = _split_lines(text)
-    return _view_lines(
-        _select(lines, start, end_line),
-        start,
-        len(lines),
-        size=len(text.encode()),
+    expect = None if checked is None else checked.path
+    outside = checked is not None and checked.outside
+    return await loop.run_in_executor(
+        None, _read_regular_file, target, start, end_line, expect, outside
     )
 
 
@@ -358,15 +382,22 @@ async def _file_read(
         semantic_tags=["list", "folder", "directory", "files", "ls", "tree"],
     )
 )
-async def _list_files(path: str = ".", depth: int = 1) -> str:
+async def _list_files(root: str | None, path: str = ".", depth: int = 1) -> str:
+    target = _in_root(root, path or ".")
+    checked = checked_for(target)
     loop = asyncio.get_running_loop()
-    checked = checked_for(path)
-    if checked is not None:  # the executor fenced it: that folder only
+    if checked is None and root is None:
+        # No workspace and no check by the executor: like file_read, a given
+        # path is followed.
         return await loop.run_in_executor(
-            None, _list_directory, path, depth, checked.path, checked.outside
+            None, _list_directory, os.path.realpath(target), depth
         )
-    target = os.path.realpath(path or ".")  # like file_read: a given path is followed
-    return await loop.run_in_executor(None, _list_directory, target, depth)
+    expect = None if checked is None else checked.path
+    # Outside the workspace, a place never offered is named, not entered.
+    fenced = checked is not None and checked.outside
+    return await loop.run_in_executor(
+        None, _list_directory, target, depth, expect, fenced
+    )
 
 
 @_builtin(
@@ -384,14 +415,17 @@ async def _list_files(path: str = ".", depth: int = 1) -> str:
         semantic_tags=["file", "write", "save", "create", "output"],
     )
 )
-async def _file_write(path: str, content: str) -> str:
-    loop = asyncio.get_event_loop()
-    expect = _expected(path)
-    if expect is not None:  # the executor fenced it: the checked folder only
-        await loop.run_in_executor(None, _write_regular_file, path, content, expect)
-    else:
+async def _file_write(root: str | None, path: str, content: str) -> str:
+    target = _in_root(root, path)
+    expect = _expected(target)
+    loop = asyncio.get_running_loop()
+    if expect is None and root is None:
+        # No workspace and no check by the executor: the path as given.
         await loop.run_in_executor(None, lambda: open(path, "w").write(content))
-    return f"Written {len(content)} bytes to {path}"
+    else:
+        await loop.run_in_executor(None, _write_regular_file, target, content, expect)
+    # The count is in characters, as Phase 1a's file_write reports it.
+    return f"Written {len(content)} bytes to {target}"
 
 
 # Bytes of the file that a file_edit changes, at most: an edit reads it whole.
@@ -422,15 +456,17 @@ MAX_EDIT_BYTES = 1_000_000
         semantic_tags=["file", "edit", "change", "replace", "modify", "fix", "patch"],
     )
 )
-async def _file_edit(path: str, old: str, new: str) -> str:
+async def _file_edit(root: str | None, path: str, old: str, new: str) -> str:
+    target = _in_root(root, path)
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        None, _edit_regular_file, path, old, new, _expected(path)
+        None, _edit_regular_file, target, old, new, _expected(target)
     )
 
 
 @_builtin(GIT_STATUS_DEF)
 async def _git_status(
+    root: str | None,
     command: str,
     paths: list[str] | None = None,
     rev: str = "",
@@ -438,8 +474,15 @@ async def _git_status(
     stat: bool = False,
     staged: bool = False,
 ) -> str:
-    return await _rooted_git_status(os.getcwd())(
-        command, paths=paths, rev=rev, count=count, stat=stat, staged=staged
+    # Without a workspace, the repository of this process's folder.
+    return await run_git_status(
+        os.getcwd() if root is None else root,
+        command,
+        paths=paths,
+        rev=rev,
+        count=count,
+        stat=stat,
+        staged=staged,
     )
 
 
@@ -458,48 +501,21 @@ async def _git_status(
         semantic_tags=["python", "code", "execute", "eval", "script", "compute"],
     )
 )
-async def _python_exec(code: str, why: str = "") -> str:
-    # A child process, as the rooted python_exec is: code that loops, sleeps
-    # or calls os._exit() must not hold or end the agent's own process, and
-    # the executor's timeout and the run's timeout_s must be able to stop it.
-    # Its directory is this process's, and the code arrives on its standard
-    # input, a pipe, which the wrapper turns into /dev/null before the code
-    # runs, so it never reads the terminal melo runs in (see _shell_exec).
-    # Its environment is the minimal one of _run_python, not this process's.
-    return await _run_python(code)
-
-
-# ── The child environment ──
-
-
-def builtins_with_env(
-    tool_env: Mapping[str, str],
-    confinement: Confinement | None = None,
-) -> dict[str, ToolFunction]:
-    """The unrooted ``shell_exec`` and ``python_exec``, with *tool_env* added.
-
-    The functions of :data:`BUILTINS` give their child the environment of
-    :func:`~localmelo.melo.executor.env.child_env` and nothing from this
-    process beyond the allowlist; these add the run's own variables, such
-    as ``AgentOptions.tool_env``, on top, and start under *confinement*
-    when it is given (see :func:`rooted_builtins`). The dict goes where
-    :func:`rooted_builtins` does (see
-    :func:`~localmelo.melo.executor.register_builtins`).
-    """
-
-    async def shell_exec(command: str, why: str = "") -> str:
-        text, _ = await _run_shell(
-            command,
-            stdin=subprocess.DEVNULL,
-            tool_env=tool_env,
-            confinement=confinement,
-        )
-        return text
-
-    async def python_exec(code: str, why: str = "") -> str:
-        return await _run_python(code, tool_env=tool_env, confinement=confinement)
-
-    return {"shell_exec": shell_exec, "python_exec": python_exec}
+async def _python_exec(
+    root: str | None,
+    tool_env: Mapping[str, str] | None,
+    confinement: Confinement | None,
+    code: str,
+    why: str = "",
+) -> str:
+    # A child process: code that loops, sleeps or calls os._exit() must not
+    # hold or end the agent's own process, and the executor's timeout and the
+    # run's timeout_s must be able to stop it. Without a workspace its
+    # directory is this process's. The code arrives on its standard input, a
+    # pipe, which the wrapper turns into /dev/null before the code runs, so it
+    # never reads the terminal melo runs in (see _shell_exec). Its environment
+    # is the minimal one of _run_python, not this process's.
+    return await _run_python(code, cwd=root, tool_env=tool_env, confinement=confinement)
 
 
 # ── The child Python ──
@@ -665,22 +681,26 @@ async def _run_python(
     return note + text
 
 
-# ── Built-ins with a workspace root ──
+# ── The built-ins of a run ──
 
 
-def rooted_builtins(
-    root: str,
+def builtin_callables(
+    root: str | None,
     *,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
     confinement: Confinement | None = None,
 ) -> dict[str, tuple[ToolFunction, float | None]]:
-    """The built-ins that work in the workspace *root*, by tool name.
+    """The built-ins for a run in the workspace *root*, by tool name.
 
     Each value is the tool's callable and its timeout in milliseconds, or
     ``None`` for the executor's default. A callable takes exactly the
     parameters of the tool's :class:`ToolDef`, so a call cannot pass more,
-    such as a ``cwd``.
+    such as a ``cwd``: the root and the settings below are bound ahead of
+    them. Without a *root* (``None``) the tools work as they did before
+    workspaces: paths are used as given, ``python_exec`` and ``git_status``
+    work in this process's folder, and a *tool_timeout_s* raises
+    ``ValueError``.
 
     - ``file_read`` and ``file_write`` open the path they get, which the
       executor has resolved against its own root and fenced (see
@@ -692,7 +712,8 @@ def rooted_builtins(
       bytes as strict UTF-8; a longer text keeps as many characters as fit
       in ``MAX_OUTPUT_LEN`` together with a note of the file's size, so the
       executor's result check never cuts the note off. ``file_write``
-      writes UTF-8 and reports the real path.
+      writes UTF-8 and reports the real path. Without a root, a call the
+      executor did not check opens the path as given, with no such limits.
     - ``list_files`` lists the folder the executor has resolved and fenced
       like a file's path (the root when it gets none), as
       :func:`_list_directory` says; it never reads a file or enters a link.
@@ -704,7 +725,7 @@ def rooted_builtins(
       and the error names it. A non-zero exit status starts the text with
       the line ``[exit code <n>]`` (``-<signal>`` for a child a signal
       ended), and the call still succeeds: every later cut keeps a text's
-      start.
+      start. Without a root, the text is all it returns.
     - ``python_exec`` runs the code in a child Python, ``sys.executable
       -c`` with a fixed wrapper, in *root*. The code arrives on the child's
       standard input, a pipe, and the wrapper points fd 0 at ``/dev/null``
@@ -713,80 +734,44 @@ def rooted_builtins(
       *tool_timeout_s* when it is set, else its default, stops it. A
       non-zero exit raises ``RuntimeError("Python exited with code
       <n>")``, followed by a colon, a line break and the last 4,000
-      characters of the output when there is any. Without a root,
-      ``python_exec`` runs the same child, in this process's directory.
+      characters of the output when there is any.
 
     Both run in a process group of their own, which a timeout or a
     cancellation kills as a whole. Once their child has exited by itself,
-    they record its status in :data:`TOOL_EXIT_CODE`. Both children get
-    the environment of :func:`~localmelo.melo.executor.env.child_env` with
-    *tool_env* on top, never this process's own: a secret in the agent's
-    environment reaches neither, unless *tool_env* names it. With
-    *confinement* (see :mod:`~localmelo.melo.executor.sandbox`), both start
-    under its profile, which refuses a file write outside the workspace,
-    with ``TMPDIR``, ``TMP`` and ``TEMP`` on its temporary folder, and the
-    text of a call that reports a refused write starts with a line that
-    says so (after ``[exit code <n>]``).
+    python_exec (and the shell_exec of a root) records its status in
+    :data:`TOOL_EXIT_CODE`. Both children get the environment of
+    :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
+    never this process's own: a secret in the agent's environment reaches
+    neither, unless *tool_env* names it. With *confinement* (see
+    :mod:`~localmelo.melo.executor.sandbox`), both start under its profile,
+    which refuses a file write outside the workspace, with ``TMPDIR``,
+    ``TMP`` and ``TEMP`` on its temporary folder, and the text of a call
+    that reports a refused write starts with a line that says so (after
+    ``[exit code <n>]``).
     """
-    root = os.path.realpath(root)
-    shell_timeout_ms = (
-        None
-        if tool_timeout_s is None
-        else (tool_timeout_s + _SHELL_TIMEOUT_MARGIN_S) * 1000
-    )
-    python_timeout_ms = None if tool_timeout_s is None else tool_timeout_s * 1000
-    return {
-        "file_read": (_rooted_file_read(root), None),
-        "list_files": (_rooted_list_files(root), None),
-        "file_write": (_rooted_file_write(root), None),
-        "file_edit": (_rooted_file_edit(root), None),
-        "git_status": (_rooted_git_status(root), None),
-        "shell_exec": (
-            _rooted_shell_exec(root, tool_timeout_s, tool_env, confinement),
-            shell_timeout_ms,
-        ),
-        "python_exec": (
-            _rooted_python_exec(root, tool_env, confinement),
-            python_timeout_ms,
-        ),
+    if root is not None:
+        root = os.path.realpath(root)
+    elif tool_timeout_s is not None:
+        raise ValueError("tool_timeout_s needs a workspace_root")
+    # What a tool takes before its own parameters: the root, and for the two
+    # that start a child process, their settings too.
+    leading: dict[str, tuple[Any, ...]] = {
+        "shell_exec": (root, tool_timeout_s, tool_env, confinement),
+        "python_exec": (root, tool_env, confinement),
     }
-
-
-def _rooted_shell_exec(
-    root: str,
-    tool_timeout_s: float | None,
-    tool_env: Mapping[str, str] | None,
-    confinement: Confinement | None = None,
-) -> ToolFunction:
-    async def shell_exec(command: str, why: str = "") -> str:
-        text, returncode = await _run_shell(
-            command,
-            cwd=root,
-            stdin=subprocess.DEVNULL,
-            timeout_s=tool_timeout_s,
-            tool_env=tool_env,
-            confinement=confinement,
+    timeouts_ms: dict[str, float | None] = {}
+    if tool_timeout_s is not None:
+        timeouts_ms = {
+            "shell_exec": (tool_timeout_s + _SHELL_TIMEOUT_MARGIN_S) * 1000,
+            "python_exec": tool_timeout_s * 1000,
+        }
+    return {
+        tool_def.name: (
+            functools.partial(fn, *leading.get(tool_def.name, (root,))),
+            timeouts_ms.get(tool_def.name),
         )
-        _record_exit_code(returncode)
-        if returncode:
-            line = f"[exit code {returncode}]"
-            return f"{line}\n{text}" if text else line
-        return text
-
-    return shell_exec
-
-
-def _rooted_python_exec(
-    root: str,
-    tool_env: Mapping[str, str] | None,
-    confinement: Confinement | None = None,
-) -> ToolFunction:
-    async def python_exec(code: str, why: str = "") -> str:
-        return await _run_python(
-            code, cwd=root, tool_env=tool_env, confinement=confinement
-        )
-
-    return python_exec
+        for tool_def, fn in BUILTINS
+    }
 
 
 def _record_exit_code(returncode: int) -> None:
@@ -796,60 +781,9 @@ def _record_exit_code(returncode: int) -> None:
         codes.append(returncode)
 
 
-def _rooted_file_read(root: str) -> ToolFunction:
-    async def file_read(
-        path: str, start_line: int | None = None, end_line: int | None = None
-    ) -> str:
-        target = os.path.join(root, path)
-        start = _line_range(start_line, end_line)
-        checked = checked_for(target)
-        expect = None if checked is None else checked.path
-        outside = checked is not None and checked.outside
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, _read_regular_file, target, start, end_line, expect, outside
-        )
-
-    return file_read
-
-
-def _rooted_list_files(root: str) -> ToolFunction:
-    async def list_files(path: str = ".", depth: int = 1) -> str:
-        target = os.path.join(root, path or ".")
-        checked = checked_for(target)
-        expect = None if checked is None else checked.path
-        # Outside the workspace, a place never offered is named, not entered.
-        fenced = checked is not None and checked.outside
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, _list_directory, target, depth, expect, fenced
-        )
-
-    return list_files
-
-
-def _rooted_file_write(root: str) -> ToolFunction:
-    async def file_write(path: str, content: str) -> str:
-        target = os.path.join(root, path)
-        expect = _expected(target)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _write_regular_file, target, content, expect)
-        # The count is in characters, as Phase 1a's file_write reports it.
-        return f"Written {len(content)} bytes to {target}"
-
-    return file_write
-
-
-def _rooted_file_edit(root: str) -> ToolFunction:
-    async def file_edit(path: str, old: str, new: str) -> str:
-        target = os.path.join(root, path)
-        expect = _expected(target)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, _edit_regular_file, target, old, new, expect
-        )
-
-    return file_edit
+def _in_root(root: str | None, path: str) -> str:
+    """*path* joined to the workspace *root*; as it is without a workspace."""
+    return path if root is None else os.path.join(root, path)
 
 
 def _expected(target: str) -> str | None:
@@ -862,28 +796,6 @@ def _expected(target: str) -> str | None:
     """
     checked = checked_for(target)
     return None if checked is None else checked.path
-
-
-def _rooted_git_status(root: str) -> ToolFunction:
-    async def git_status(
-        command: str,
-        paths: list[str] | None = None,
-        rev: str = "",
-        count: int = 10,
-        stat: bool = False,
-        staged: bool = False,
-    ) -> str:
-        return await run_git_status(
-            root,
-            command,
-            paths=paths,
-            rev=rev,
-            count=count,
-            stat=stat,
-            staged=staged,
-        )
-
-    return git_status
 
 
 def edited_text(text: str, old: str, new: str, path: str = "the file") -> str:
@@ -916,8 +828,7 @@ def edit_precheck(root: str | None = None) -> Callable[[Mapping[str, Any]], str]
     """
 
     def check(arguments: Mapping[str, Any]) -> str:
-        path = arguments["path"]
-        target = os.path.join(root, path) if root else path
+        target = _in_root(root, arguments["path"])
         try:
             text = _read_editable(target, _expected(target))
             edited_text(text, arguments["old"], "", target)
@@ -967,7 +878,7 @@ def _read_regular_file(
     expect: str | None = None,
     outside: bool = False,
 ) -> str:
-    """The text of the regular file *path*, cut as :func:`rooted_builtins` says.
+    """The text of the regular file *path*, cut as :func:`builtin_callables` says.
 
     *start* and *end* are the first and last line wanted (see
     :func:`_line_range`). With *expect*, the file opened must be that

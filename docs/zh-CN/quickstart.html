@@ -104,7 +104,6 @@
 <span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>uv 创建 <code>.venv/</code>（需要时会安装 Python 3.13），并装好网关的依赖。</li>
-          <li>请保留目录名 <code>localmelo</code>：改名的目录或 ZIP 下载会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</li>
           <li>激活只对当前终端有效；在其他地方用 <code>uv run --project &lt;clone&gt; melo …</code>。</li>
           <li>在搭载 Apple 芯片的 Mac 上，<code class="wrap">uv run python scripts/build_macos_app.py --install</code> 会把 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">App</a> 构建到 <code>~/Applications</code>。</li>
         </ul>

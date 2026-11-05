@@ -7,7 +7,6 @@ from collections.abc import AsyncGenerator, Sequence
 
 import pytest
 
-from localmelo.melo.agent._chat import Chat
 from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
@@ -21,6 +20,7 @@ from localmelo.tests.agent.procedural_helpers import (
     make_agent,
     read,
 )
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 
 class StreamLLM(BaseLLMProvider):
@@ -132,7 +132,7 @@ async def test_a_declared_stream_releases_lines_before_the_reply() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm).plan_step([], [], [], "hi")
+        reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert reply.content == "Hello\nworld\n"
@@ -156,7 +156,7 @@ async def test_an_undeclared_hint_releases_nothing_until_finish() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await Chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert seen == [""]
@@ -178,7 +178,7 @@ async def test_separate_reasoning_never_reaches_content() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await Chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert display.text() == "answer\n"
@@ -188,7 +188,7 @@ async def test_separate_reasoning_never_reaches_content() -> None:
 
 async def test_no_display_keeps_the_complete_reply_path() -> None:
     llm = StreamLLM([[Message(role="assistant", content="unused")]])
-    reply = await Chat(llm).plan_step([], [], [], "hi")
+    reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     assert reply.content == "complete"
     assert llm.chat_calls == 1 and llm.stream_calls == 0
 
@@ -198,7 +198,7 @@ async def test_a_provider_without_streaming_falls_back_silently() -> None:
     llm = ChatOnlyLLM()
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm).plan_step([], [], [], "hi")
+        reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert reply.content == "complete reply"
@@ -221,7 +221,7 @@ async def test_split_closing_tag_never_releases_reasoning() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await Chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     released = await _drain(display)
@@ -248,7 +248,7 @@ async def test_a_bearer_token_split_across_lines_is_never_released() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await Chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     released = display.text()
@@ -267,7 +267,7 @@ async def test_a_retry_after_visible_text_opens_a_new_stream() -> None:
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm, retry_delays=[0], sleep=_no_sleep).plan_step(
+        reply = await _scoped_chat(llm, retry_delays=[0], sleep=_no_sleep).plan_step(
             [], [], [], "hi"
         )
     finally:
@@ -298,7 +298,7 @@ async def test_cancel_mid_stream_closes_the_upstream_and_the_display() -> None:
     display = Display("none")
     llm = Waiting([])
     token = STREAM_DISPLAY.set(display)
-    task = asyncio.create_task(Chat(llm).plan_step([], [], [], "hi"))
+    task = asyncio.create_task(_scoped_chat(llm).plan_step([], [], [], "hi"))
     try:
         while "content" not in display.kinds():
             await asyncio.sleep(0.01)
@@ -324,7 +324,7 @@ async def test_a_tool_call_preamble_is_released_before_the_complete_reply() -> N
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm).plan_step([], [], [], "hi")
+        reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert reply.tool_calls and reply.tool_calls[0].tool_name == "echo"
@@ -356,7 +356,7 @@ async def test_a_reply_the_server_sent_whole_tells_the_display_before_it_closes(
     llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm).plan_step([], [], [], "hi")
+        reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert reply.content == "all at once"
@@ -370,7 +370,7 @@ async def test_a_display_that_does_not_listen_for_it_still_gets_the_reply() -> N
     llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
     token = STREAM_DISPLAY.set(display)
     try:
-        reply = await Chat(llm).plan_step([], [], [], "hi")
+        reply = await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert reply.content == "all at once"
@@ -382,7 +382,7 @@ async def test_a_reply_that_streamed_is_not_reported_as_whole() -> None:
     llm = StreamLLM([["Hello\n", Message(role="assistant", content="Hello\n")]])
     token = STREAM_DISPLAY.set(display)
     try:
-        await Chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert "whole" not in display.kinds()

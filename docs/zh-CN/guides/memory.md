@@ -31,16 +31,6 @@ melo "What is 6*7?"
 - 在显式模式下，必须启用召回并包含 `long` 类型；`drop` 和 `replay` 默认关闭 `auto` 召回。
 - 尝试摘要只有在包含已确认的文件写入或符合条件的通过检查时才会写入长期记忆；召回优先使用同一任务、同一工作区的摘要，新任务在同任务摘要匹配之前不会获得跨任务摘要（见[摘要召回](../../reference/memory.md#digest-recall)（英文））。
 
-<a id="experimental-typed-facts"></a>
-
-## 实验性的类型化事实
-
-Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_assertions=True)`。
-
-- 它会保留受支持的简短事实；当一个经过验证、有先后顺序的变更取代旧断言时，旧断言可以作为带标签的历史保留下来。
-- 有歧义或未关联的事实不会被悄悄关联；解析器和来源检查都是保守且不完整的，召回受相关性限制。
-- 参见[类型化断言参考](../../reference/memory.md#experimental-typed-assertions)（英文）。
-
 <a id="notes-melo-keeps-about-you"></a>
 
 ## melo 记下的关于你的笔记

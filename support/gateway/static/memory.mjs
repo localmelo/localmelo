@@ -10,6 +10,7 @@
  * fetches: `workspace.js` passes the undo and the opening of a chat.
  */
 import { language, t } from "./i18n.mjs";
+import { maker } from "./dom.mjs";
 
 function list(value) {
   return Array.isArray(value) ? value.filter((item) => item !== null && typeof item === "object") : [];
@@ -60,12 +61,7 @@ export function inline(text) {
  */
 export function memoryNodes({ doc, memory, open, toggle, undo, digestOpen = false, toggleDigest = () => {}, openChat = null }) {
   if (!memory) return [];
-  const el = (tag, className, text) => {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
+  const {node: el} = maker(doc);
   const action = (text, onClick, expanded) => {
     const node = el("button", "", text);
     node.type = "button";

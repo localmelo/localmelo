@@ -12,11 +12,13 @@
 import asyncio
 
 from localmelo import Agent, AgentOptions
+from localmelo.support.backends import providers_for
 from localmelo.support.config import load
 
 
 async def main() -> None:
-    agent = Agent(config=load(), options=AgentOptions(max_steps=10))
+    llm, embedding = providers_for(load())
+    agent = Agent(llm=llm, embedding=embedding, options=AgentOptions(max_steps=10))
     try:
         result = await agent.run_task("What is 6*7?")
         print(result.status, result.result or result.error)
@@ -27,7 +29,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-- `load()` 读取 `~/.cache/localmelo/config.toml`，因此请先保存配置（[配置](../reference/configuration.md)）。
+- `load()` 读取 `~/.cache/localmelo/config.toml`，因此请先保存配置（[配置](../reference/configuration.md)）。`providers_for` 构建它所指定的模型提供方。
 - 脚本输出状态和答案，例如 `completed 42`。
 
 <a id="follow-a-run-with-events"></a>

@@ -159,11 +159,10 @@ class TestRestoredLine:
 
     @pytest.mark.asyncio
     async def test_a_stopped_run_is_answered_and_then_given_the_line(self) -> None:
-        stale = {"next_step_is_novel": False}
         llm = FakeLLM(
             [
                 _echo_call("page text"),
-                _reflection("continue", **stale),
+                _reflection("stop"),
                 _answer("It was Marais-Viljoen."),  # the answer on stop
                 _answer("FINAL ANSWER: Marais-Viljoen"),  # the closing line
             ]
@@ -172,7 +171,6 @@ class TestRestoredLine:
             llm,
             steps_per_attempt=1,
             max_attempts=3,
-            reflection_gate="flags",
             answer_on_stop=True,
         )
         result = await agent.run_task(TASK)

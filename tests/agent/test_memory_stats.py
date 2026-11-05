@@ -11,7 +11,6 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, RunResult, ToolDef
-from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS, LEGACY_CACHE_OPTIONS
 
 
 class FakeLLM(BaseLLMProvider):
@@ -91,7 +90,7 @@ def test_both_run_result_shapes_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_usage_keeps_its_three_keys_and_config_its_eleven() -> None:
+async def test_legacy_usage_keeps_its_three_keys_and_config_no_reasoning_keys() -> None:
     llm = FakeLLM(
         [
             Message(
@@ -109,16 +108,13 @@ async def test_legacy_usage_keeps_its_three_keys_and_config_its_eleven() -> None
             "reasoning_tokens": 1,
         },
     )
-    result = await Agent(
-        llm=llm, options=_options(**LEGACY_CACHE_OPTIONS, **LEGACY_ANSWER_OPTIONS)
-    ).run_task("q")
+    result = await Agent(llm=llm, options=_options()).run_task("q")
     assert result.usage == {
         "prompt_tokens": 10,
         "completion_tokens": 2,
         "total_tokens": 12,
     }
     assert result.memory_stats is None
-    assert list(result.config)[-2:] == ["timeout_s", "tools"]
     assert "reasoning" not in result.config and "replay_turns" not in result.config
 
 
@@ -202,7 +198,7 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         },
         "ignored": 0,
     }
-    assert list(result.config)[-15:] == [
+    assert list(result.config)[-14:] == [
         "reasoning",
         "replay_turns",
         "note_writer",
@@ -216,7 +212,6 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "cross_task_ratio",
         "cross_task_cap",
         "cross_task_cold",
-        "admit_on_outcome",
         "keep_decision_text",
     ]
     assert (result.config["reasoning"], result.config["replay_turns"]) == (

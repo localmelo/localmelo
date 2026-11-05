@@ -51,21 +51,18 @@ before the run with a plain message (see
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
 | `tool_env` | `[agent]` | `[]` | Extra environment variable names inherited by shell/Python tools in config-backed runs and sessions. Values are never saved; see [Tool environment](#tool-environment). |
-| `fixed_prefix` | `[agent]` | `true` | `false` sends the requests from before the stable prefix became the default. See [Context accounting](#context-accounting). |
-| `window_eviction` | `[agent]` | `"chunk"` | `chunk`, `boundary` or `slide`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk` or `boundary`: when working memory drops old turns. See [Memory](memory.md#working-memory-window). |
 | `brief_items` | `[agent]` | `false` | Experimental. `true` makes a `--brief` run name the brief's numbered items that no edit has touched yet; see [`--brief-items`](cli.md#brief-items). |
-| `reflect_tool_guard` | `[agent]` | `true` | `false` sends reflection requests without the tools and the closing sentence. See [Context accounting](#context-accounting). |
 | `confine_writes` | `[agent]` | `true` | On macOS, `--brief` worker runs and saved tasks start `shell_exec` and `python_exec` in a sandbox that refuses file writes outside the workspace; `false` turns it off (`-X agent.confine_writes=false` for one run). Other runs confine only the calls Auto decides (`[approvals] mode`). See [Writes stay in the workspace](cli.md#confined-writes). |
 | `confine_direct_runs` | `[agent]` | `false` | Developer setting. `true` confines plain direct runs too, as `confine_writes` confines `--brief` runs: on macOS a task given on the command line and the `melo ""` loop start `shell_exec` and `python_exec` in a sandbox that refuses file writes outside the workspace (`--workspace`, else the current folder), and the result carries `confinement`. There is no flag; `-X agent.confine_direct_runs=true` sets it for one run. `--brief` runs follow `confine_writes`; the interactive UI, the console, the app and the gateway ignore it. See [Writes stay in the workspace](cli.md#confined-writes). |
 | `reflection` | `[agent]` | `true` | **Reflect when stuck after many steps** in Settings (the app and the web console). `true`: a task still not done after `steps_per_attempt` steps (50) is followed by one reflection, which decides whether it goes on, up to the run's 100 steps; the reflection costs one more model request. `false`: never reflects; the run is one attempt that goes straight to its total (the same as `attempt_policy = "none"`). Only `false` is saved. `-X agent.reflection=off` sets it for one run, a config without the key reads `true`, and `--attempt-policy` keeps its say over it. Chats, side chats, tasks, workers, direct runs and the gateway all read it; the main chat's own turns never reflect. See [Evaluations](../project/evaluations.md#long-attempts-and-reflection-as-an-option). |
 | `steps_per_attempt` | `[agent]` | not set | Developer setting. A whole number of 1 or more: the steps of one attempt before a reflection (with `reflection` on). Not set, 50. The run's total is `-s N` (`--steps`, 100). `-X agent.steps_per_attempt=10 -s 30` reproduces the lengths before the long attempts. |
 | `answer_on_stop` | `[agent]` | `true` | Developer setting. `true` makes a run that ends `gate_stopped` or `budget_exhausted` with no answer ask the model once more, without tools, for the final answer from the evidence gathered (the working window and the latest reflection), in the format the task asks for, `unknown` allowed. The run keeps its status; `result` is the answer and the JSON record has `"answered_on_stop": true`. It also adds the closing line a task asks for (such as `FINAL ANSWER:`) to an answer that lacks it, with one more request; the record then has `"format_fixed": true`. `false` sends neither request; there is no flag, and `-X agent.answer_on_stop=off` sets it for one run. A direct run reads the key; the interactive UI, the console, the app and the gateway ignore it and always ask, except the console's main chat, which hands a request that runs out of steps to a task and asks for the answer of any other such turn itself, in its own words. See [Run results](run-results.md#statuses). `--reflection-gate` is the other setting of this kind (`patient` by default): see [Reflection](../concepts/how-it-works.md#reflection). |
 | `max_calls` | `[agent]` | not set | Developer setting. A whole number of 2 or more: the most model requests a direct run sends (planning, reflection and the rest; each attempt of a retried request counts). Before the request that would pass it, the run ends `budget_exhausted` with the error `Call budget reached: ...`. With `answer_on_stop` on, the last call is kept for the answer: the run stops after `N - 1` requests and the answer request is call `N`. Not set, there is no limit. There is no flag; `-X agent.max_calls=N` sets it for one run. The interactive UI, the console, the app and the gateway ignore it. See [Run results](run-results.md#statuses). |
-| `empty_reply_fallback` | `[agent]` | `"on"` | Developer setting. `"on"` makes a turn that ends with no answer and no tool call, from a model that did think, ask once more with thinking off where the service has a switch for it (the hosted services do; see [Thinking models](../guides/hosted-models.md#thinking-models)) and, if the reply is still empty, answer with the last lines of the thinking, ending with `(from melo's thinking)`, so the run completes. `"off"` gives both up: such a run ends `failed` with `melo did not finish an answer`, as before. Only `"off"` is saved; there is no flag, and `-X agent.empty_reply_fallback=off` sets it for one run. A direct run, the interactive UI, the console, the app and the gateway all read it. Each step is a `thinking_off_retry` or `answer_from_thinking` [notice](events.md#notice) and sets a flag in the result's `empty_reply` (see [Run results](run-results.md#fields)). |
+| `empty_reply_fallback` | `[agent]` | `"on"` | An advanced setting. `"on"` makes a turn that ends with no answer and no tool call, from a model that did think, ask once more with thinking off where the service has a switch for it (the hosted services do; see [Thinking models](../guides/hosted-models.md#thinking-models)) and, if the reply is still empty, answer with the last lines of the thinking, ending with `(from melo's thinking)`, so the run completes. `"off"` gives both up: such a run ends `failed` with `melo did not finish an answer`, as before. Only `"off"` is saved; there is no flag, and `-X agent.empty_reply_fallback=off` sets it for one run. A direct run, the interactive UI, the console, the app and the gateway all read it. Each step is a `thinking_off_retry` or `answer_from_thinking` [notice](events.md#notice) and sets a flag in the result's `empty_reply` (see [Run results](run-results.md#fields)). |
 | `lean_output` | `[agent]` | `false` | Experimental. `true` makes a task given on the command line ask for fewer output tokens; there is no flag, and `-X agent.lean_output=true` sets it for one run. The interactive UI and the gateway ignore it. See [Context accounting](#context-accounting). |
 | `tool_images` | `[agent]` | `"auto"` | Whether the pictures tools return reach the model: `on` sends the newest ones as `image_url` parts in each planning request, `off` names them only, and `auto` is `on` when the server says the model reads images or, for a hosted service, when its preset names the model as reading images (see [Hosted models](../guides/hosted-models.md#pictures)). A server says it in the model's own entry of `GET /v1/models` (`vision` true, `image` among `input_modalities` or `vision` among `capabilities`; `vision` false, or `input_modalities` without `image`, says no), else in oMLX's `model_type` `vlm`, else in Ollama's `vision` capability. When a picture is not sent (`off`, or a server that does not say), its tool message ends with a line that tells the model it cannot see the picture. There is no flag; `-X agent.tool_images=on` sets it for one run. See [Pictures that tools return](../guides/tools-mcp.md#pictures-that-tools-return). |
 | `tool_images_keep`, `tool_images_retire` | `[agent]` | `3`, `2` | With `tool_images` on: the newest `tool_images_keep` pictures keep their pixels, and the oldest `tool_images_retire` lose them together once more arrive, so a request carries 3 to 4 pictures by default. |
-| `cache_layout` | `[agent]` | `"v3"` | `"v2"` sends the earlier requests, with a reflection rebuilt as the last message of every planning request; `"v3"`, with `fixed_prefix`, appends it once instead. See [Context accounting](#context-accounting). |
 | `window_messages` | `[agent]` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
@@ -96,16 +93,15 @@ before the run with a plain message (see
 | `excerpt_open` | `[memory]` | `"on"` | For the excerpt form of earlier chat turns (`recall_form = "excerpt"`, `recall_source = "turns"`). `"on"` (the default): a line that shows less than the whole turn starts with the turn's id, `[t123] the user said “…”; melo replied “…” (chat “Garden”, Oct 30)`, in the recall block and in the memory search tool's result. A line shows less when the excerpt cut what you said or what melo replied (or left the reply out), or when the line is a piece of a longer turn, which the index stores as several chunks; a line that shows the whole turn, and every note, reads as before and has no id. The id counts toward the line's room, so a line with an id has that many characters less text (`[t123] `: 7), and the block stays within `recall_chars`. One line under the excerpts, `A line that starts with an id such as [t123] is cut; open it with open_memory when the answer may be in the rest.`, appears when at least one line has an id, and counts toward `recall_chars` too. The chat's model also has the read-only `open_memory` tool, the one `recall_form = "list"` gives, which returns the whole turn up to `recall_open_chars`, and `search_memory`'s description carries the same sentence. `turn.memory` lists the turns opened as `opened`, and an entry's `shown` keeps the exact line read, id included. `"off"` is a developer setting for comparison: the recall block, the search result and the tool list are as they were before ids, with no id on a cut line and no `open_memory`. It has no effect with `recall_form = "list"` (which always offers `open_memory`) or `recall_source = "items"`. Saved only when it is `"off"`. `-X memory.excerpt_open=off` for one run. |
 | `recall_source` | `[memory]` | `"turns"` | A developer setting for comparison. What recall draws on besides notes. `"turns"` is the earlier chat turns, as always. `"items"` is the memory items that `melo memory ingest FILE -X ingest=compress` wrote from your chats (see [Memory items](../concepts/memory.md#memory-across-chats)): they are ranked, filtered by the two recall bars and shown in the block and in `search_memory` as a turn is, as `“title”: text (chat, date)`; with `recall_form = "list"` each is a line `[m12] …`, and `open_memory` takes ids such as `m12`. The turns are then not recalled, so an index with no items recalls no chat at all. The `turn.memory` event's `used`, `searched` and `opened` entries for an item have kind `item`, the item's id as `item` and its `sources`. `-X memory.recall_source=items` for one run. |
 | `open_sources` | `[memory]` | `"off"` | A developer setting for comparison, used only with `recall_source = "items"` and `recall_form = "list"`. `"on"`: `open_memory` returns, after an item's title and text, the whole turns it came from, oldest first, under `Source turns:`; the item and its turns together stay within `recall_open_chars`. `"off"` opens the item alone. `-X memory.open_sources=on` for one run. |
+| `premise_check` | `[memory]` | `"on"` | A developer setting for comparison, used only with `recall_form = "list"`. `"on"` (the default): the line above the list, in the recall block and in the memory search result, ends with one more sentence (after the `gather` sentence when there is one). It tells the model that when the question names a person, thing, place or role that none of the listed lines mention, it says first that it has no record of it and does not answer from something similar. `"off"` leaves the line as it is. The excerpt form is never changed. `-X memory.premise_check=off` for one run. Saved only when not `"on"`. |
 | `compress_at_chars` | `[memory]` | `12000` | A developer setting for comparison, used only by `melo memory ingest FILE -X ingest=compress`. How much chat text, in characters, 4000 to 60000, the chat model reads in one request: a chat is cut into windows of whole exchanges that long (an exchange longer than the window is read in up to four parts of that size, each part after the first starting with `[n] (continued)`; only text after the fourth is left out). A window whose reply runs out of room is split in two and read in halves, at most twice (four parts). `-X memory.compress_at_chars=20000` for one run. |
 | `compress_parallel` | `[memory]` | `1` | A developer setting, used only by `melo memory ingest FILE -X ingest=compress`. How many windows (see `compress_at_chars`) of the run the chat model is asked to read at once, 1 to 8; the windows of all the chats go out together. The items, reports and counts are the same as with `1`, only the time changes, and only on a server that answers several requests at once. `-X memory.compress_parallel=4` for one run. |
 | `compress_cache` | `[memory]` | `""` | A developer setting for comparison, used only by `melo memory ingest FILE -X ingest=compress`. The file that keeps the chat model's reply to each window, so the same window, model and prompt makes no second request. An empty value is `compress_cache.jsonl` in the memory folder (`~/.cache/localmelo/memory/`). The file is created readable by you only and holds chat text, so keep it out of anything you share. |
 | `note_gate` | `[memory]` | `"typed"` | A developer setting for comparison. Where a note the chat's model keeps with `remember` may come from, in four levels, each including the ones before it. `"typed"` is the rule as always: the note's words are in what you typed in the chat or in a finished task's result shown in it. `"pointed"` also accepts a page or file you pointed to in the chat (its host or file name is in what you typed, or the turn that read it calls it yours: "my website", "my résumé", "my CV"), read from the chat's stored tool results; a page you did not point to, or called someone else's, never supports a note about you. `"meaning"` also accepts a note that says the same in other words or another language: its key tokens (numbers, dates, addresses, e-mail addresses, Latin-script names) must be found in a source, and the embedding of the rest must be at least `note_min_cosine` close to a window of one; without an embedding model the words check of `"typed"` applies. `"model"` also keeps a note about you that no source supports as `inferred`, when its key tokens are found and its meaning is within 0.15 of that bar of what you typed, and adds one sentence to the `remember` tool text asking the model to keep what the conversation shows about your goals, situation and preferences. Above `"typed"` a note that is an instruction to melo is refused, and the tool text says a page or file you pointed to may support a note. A page or file supports a note only by what it states: text a reader would not see (comments, hidden elements, tag attributes, invisible characters) and every paragraph that orders the assistant are left out. A file is read by an allow-list scan that fails closed (text counts only inside plain elements, no style is read, and a file with a style sheet supports no note); a page fetched with `web_fetch` is read by the page reader as before, so white, tiny or class-hidden text on a fetched page is not left out. A finished task's result is read only for plain injection forms aimed at the assistant (an order to ignore the rules, an order to save to its memory, a lead that names an AI); advice such as "you must always …" is no injection. A page read in the browser supports no note; what you typed is never cleaned. The note is stored with its source (`typed`, `pointed`, `result` or `inferred`, and the page or file), and the reply, the `turn.memory` entry, the notes page and recall say so. `-X memory.note_gate=pointed` for one run. |
 | `note_min_cosine` | `[memory]` | `0.55` | A developer setting for comparison, used with `note_gate = "meaning"` and `"model"`. The least similarity of meaning, 0.20 to 0.95, between a note and the closest window of about 300 characters of a source for the source to support it; an inferred note's bar is 0.15 lower. `-X memory.note_min_cosine=0.5` for one run. |
-| `followup_query` | `[memory]` | `"recent"` | A developer setting. What a message with no content of its own ("go look it up", "continue", "do that", "去查一下", "那个呢") is searched with. `"recent"`: the message and what you typed in the last two turns of the chat that the model still shows, newest first, within 2,000 characters (melo's replies, an undone turn, a task's question and a turn with no content of its own, such as an earlier "continue", are left out; the two turns are the last two that say something); the first message of a new chat, with no such turn, recalls nothing, and the model can still call `search_memory`. `"message"`: its own words, which match whatever holds them, as recall did before. A message has content when a word is left after small words, asking words and follow-up words ("go", "look", "up", "continue", "that", "继续", "去查一下"), or when it holds a number, a URL or quoted text, or speaks of you ("I", "me", "my", "我", "我的"; a request such as "tell me more", "do it for me" or "帮我查一下" does not); "what is my name?", "what do you know about me?", "我是谁" and "我朋友叫什么名字" have content and are searched as typed either way. The two recall bars, the ranking, the limits and the block do not change. The `turn.memory` event's `recall.query_from` says which one a turn used: `"message"`, `"recent"` or `"none"`. Saved only when `"message"`; `-X memory.followup_query=message` for one run. See [A short follow-up](../concepts/memory.md#memory-across-chats). |
 | `gather` | `[memory]` | `"guide"` | A developer setting for comparison, used with `recall_form = "list"`. How recall treats a message that asks to count, total, list or compare ("how many", "how much", "in total", "altogether", "each", "every", "both", "compared", "list", "一共", "多少", "哪些" and similar; English words must stand alone, so "account" is not "count") and also speaks of you ("I", "my", "me", "mine", "we", "our", "us", "我"); a generic prompt such as "how many seconds are in a day" is left alone. `"guide"` (the default): for such a message the recall block's vector bar is the lower of `recall_min_cosine` and `gather_min_cosine`, so items from every chat the answer needs are listed (the word bar and `recall_list_max` are unchanged), every list-form `search_memory` during the turn of such a message uses that lower bar, whatever its words, and one sentence follows the line above the list, in the block and in the search result, that tells the model to open every listed item that may belong, to search again with other words for each kind not listed yet, and to count only what the items say. `"wide"`: the same without the sentence. `"off"`: nothing changes. A message that does not ask to count, total or compare gets the same recall block, the same search results and the same text for the model under every value, and so does a search made outside a turn. The excerpt form is unchanged. Under `"guide"` and `"wide"` the `turn.memory` event's `recall` object has `gather` (the message asks to count, total or compare about you) and `floor` (the vector bar the search used) on every turn, `false` and the usual bar when it does not; with `"off"` it has neither. `-X memory.gather=off` for one run. Saved only when not `"guide"`. |
 | `gather_min_cosine` | `[memory]` | `0.40` | A developer setting for comparison, used with `gather = "wide"` and `"guide"`. The vector bar, 0.20 to 0.55, for a message that asks to count, total or compare and for every list-form search during its turn; it never raises `recall_min_cosine`. `-X memory.gather_min_cosine=0.35` for one run. |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`: a task you start, or a saved chore, reads the project's own instruction file when it starts: the first of `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` in its folder and in each folder above it up to your home folder, nearest first, at most three files and 6,000 characters, read-only, with secrets removed. They go after the context pack under their own heading, and never outrank your words, melo's rules or an approval. `"off"` reads nothing. Saved only when `"off"`; `-X memory.project_instructions=off` for one run. See [A task reads its project's own instruction file](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file). |
-| `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. When the variable has a value, it is used before `api_key`. |
 | `api_key` | cloud backend | not set | A reference to the key in the macOS keychain, `keychain:localmelo.<name>` (for example `keychain:localmelo.deepseek`). Settings and `melo setup` write it; it holds the reference, never the key. Anything else is a configuration error. |
 | `thinking` | cloud backend | not set | `"on"` or `"off"` for a hosted service that has a switch for the model's thinking (DeepSeek). Empty follows the service's default: `deepseek-flash` starts with thinking off, `deepseek-v4-pro` with its own default. A field of the section's `extra_body` wins. See [Hosted models](../guides/hosted-models.md#thinking-models). |
@@ -123,7 +119,7 @@ before the run with a plain message (see
 | `mode` | `[ui]` | `"default"` | `"default"`: `melo --help` shows the user options. `"developer"`: it shows every option, grouped as user, advanced and experimental; `melo --developer --help` does the same for one run. The mode changes only what is shown (the help text, and the web console's developer views, which its settings toggle saves here), never what an option does. Any other value warns on stderr and shows the default help; runs and the gateway never fail on it. See [Default and developer mode](cli.md#default-and-developer-mode). |
 | `language` | `[console]` | `"auto"` | The language of the web console and the macOS app. `"auto"` follows the browser's or the Mac's preferred languages: the first that is English or Simplified Chinese (`zh`, `zh-CN`, `zh-Hans`; Traditional Chinese tags are skipped), else English. `"en"` or `"zh-Hans"` chooses one. The terminal stays English, and so does any other client of the API. Any other value is refused by `melo config set` and reads as `"auto"`. See [Web console: language](../guides/web-console.md#language). |
 | `mode` | `[approvals]` | `"ask"` | How a new chat starts (#339): `"ask"`, melo asks before it runs commands or changes files; `"auto"`, routine steps run; a step you did not ask for asks on the chat's card while a page or the terminal shows the chat (unanswered for 1 minute, it is declined), and with nobody watching, or for the riskiest steps, it is blocked and explained; its calls run in the write sandbox. Each chat keeps its own mode (the console's Ask/Auto chip); the main chat follows this until it is set, and the terminal's own chat starts in it (`-X approvals.mode=auto` for one run). Any other value is refused by `melo config set` and reads as `"ask"`. See [Web console: Auto mode](../guides/web-console.md#auto-mode). |
-| `auto_asks` | `[approvals]` | `true` | Developer setting (#465). `false`: Auto never shows a card, so every step it stops is blocked and explained, as when nobody watches the chat; for benchmarks that drive the gateway over HTTP (`-X approvals.auto_asks=false` for one run). |
+| `auto_asks` | `[approvals]` | `true` | An advanced setting. `false`: Auto never shows a card, so every step it stops is blocked and explained, as when nobody watches the chat; for benchmarks that drive the gateway over HTTP (`-X approvals.auto_asks=false` for one run). |
 | `resume_mode` | `[sessions]` | `"pairs"` | Terminal conversation restoration: `pairs` loads recent user/answer pairs; `window` loads the saved working window plus later pairs, falling back when no checkpoint is usable. Invalid values warn/fall back only in the UI; direct runs do not consume this setting. |
 | `record_direct` | `[sessions]` | `true` | Record every direct run (`melo "<task>"`, `melo --brief FILE`) as a worker session in `~/.cache/localmelo/cli/sessions.db`, which the web console's Workers view and the macOS app read. Only `false` turns it off; `--no-save-session` does the same for one run, and `--save-session` or `--parent-run` records anyway. Written only when `false`. See [Worker histories](cli.md#worker-histories). |
 | `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](../guides/scheduler.md#the-gate-on-chats-s2). |
@@ -149,12 +145,11 @@ before the run with a plain message (see
 | `recent_digest_minutes` | `[chat]` | `30` | A new chat's first message (a side chat's or a terminal chat's, never the main chat's) also reads a short digest of your other chats from the last that many minutes: up to five lines, one per recent turn, saying what it was about and where, at most 600 characters, after your own words. It is read from memory's index of your chats, so `[memory] across_chats = false` turns it off too. `0` turns it off; `-X chat.recent_digest_minutes=0` for one run. A whole number from 0 to 1440; anything else is a configuration error. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
-A `[memory]` table that is all defaults is not written. Its keys,
-`across_chats` and `admit_on_outcome`, must be bools, and `retriever` one of
+A `[memory]` table that is all defaults is not written. Its key
+`across_chats` must be a bool, and `retriever` one of
 the four values above; any other value is a configuration error (exit 1).
 
-`admit_on_outcome` is accepted and inert in
-`legacy`. The `--keep-decision-text`
+The `--keep-decision-text`
 switch is flag-only, because it writes potentially personal text to the
 store and a saved default would be a privacy footgun.
 
@@ -329,10 +324,8 @@ Events and JSON results report the estimate, actual prompt count if available, a
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
-`[agent] fixed_prefix` (default `true`) gives direct, interactive and API v2 console runs
-`fixed-prefix-v2`; `--fixed-prefix on|off` overrides it for a direct or interactive
-run, and `fixed_prefix = false` (or `--fixed-prefix off`) sends the requests from before
-it became the default. It snapshots the local date and UTC offset at each run's start, including across
+Every direct, interactive and API v2 console run sends a fixed system prefix
+(`fixed-prefix-v2`). It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 
 Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
@@ -341,9 +334,8 @@ again only at a step after the window dropped its oldest messages, where the req
 already, and at the next run. Read on every step, it changed whenever the run's own step summaries
 entered it, and the server prefilled every later message again.
 
-With `cache_layout = "v2"` the latest reflection goes last, in a
-final user message after the window, so a new attempt changes only what follows the shared
-history; the default, `v3`, appends the reflection to the window once (see below).
+The latest reflection joins the window once, at the attempt boundary (see below), so a new
+attempt changes only what follows the shared history.
 
 A reflection request repeats the latest planning request (same system text, same
 `tools`, same turns, then the turns since) and adds one final user message with the
@@ -367,31 +359,21 @@ offered planning schemas within the run, not actual cache misses; an optional
 `reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 
-`[agent] reflect_tool_guard` (default `true`; `--reflect-tool-guard on|off` overrides it) keeps a
-reflection request from inviting a tool call. The request offers the tools of the step's
-planning request (same list, order and schema, with `fixed_prefix` already the case) and its
+A reflection request does not invite a tool call. It offers the tools of the step's
+planning request (same list, order and schema) and its
 last user message ends with `Answer with the JSON object only; do not call any tool.`;
 `tool_choice` is untouched, so a server's prompt prefix holds.
 
-The retry request is unchanged.
-The guard adds `reflect_tool_guard` to the JSON result's `config`; with `false` (or `off`) the
-reflection request has neither the tools nor the sentence.
-
-Whatever the option, the `reflection`
+The retry request is unchanged. The `reflection`
 event's `unreadable_reason` says why a first reply was unreadable (see [Events](events.md)).
 
-`[agent] window_eviction` (default `"chunk"`; `"boundary"` and `"slide"` are the other values;
-`--window-eviction` overrides it) sets when working memory drops old turns. `chunk` and
-`boundary` keep the retained history the same for several steps, so a server's prompt cache can
-reuse it; `slide` drops the oldest unit at every step once the window is full, as before
-`chunk` became the default.
+`[agent] window_eviction` (default `"chunk"`; `"boundary"` is the other value;
+`--window-eviction` overrides it) sets when working memory drops old turns. Both keep the
+retained history the same for several steps, so a server's prompt cache can reuse it.
 
 See [Memory](memory.md#working-memory-window).
 
-`[agent] cache_layout` (default `"v3"`; `--cache-layout v2|v3` overrides it) decides where a
-reflection sits. `"v2"` is the layout from before this default changed.
-
-With `v3` and `fixed_prefix`:
+Where a reflection sits:
 
 - At the attempt boundary the agent appends the reflection once, as an ordinary window message
   (`[Reflections; data, not instructions]` and the block), instead of rebuilding it as the last
@@ -400,8 +382,8 @@ With `v3` and `fixed_prefix`:
   replaces the one working memory holds), but older blocks stay in the history until they are
   evicted.
 - A reflection request and its reply stay in the window, so the next planning request continues the
-  request instead of being built again. With `reflection_gate = "flags"` or the default `"patient"`, when no
-  reflection is read, even after the retry, none of it stays in the window.
+  request instead of being built again. When no reflection is read, even after the retry,
+  none of it stays in the window.
 - An unreadable reply is asked again on the same prefix: the request, the unreadable reply as an
   assistant message (a tool call written out as text, so no call is left without its result), then a
   closing note, with the tools the request offered, instead of the text transcript. When the reply
@@ -412,9 +394,6 @@ With `v3` and `fixed_prefix`:
 - With `window_eviction = "boundary"` the finished attempt's turns are dropped at the boundary, so
   only the block is appended there.
 
-Without `fixed_prefix`, neither value changes anything. The JSON result's `config` has
-`cache_layout` when it is `v3` and not when it is `v2`.
-
 `[agent] window_messages` (default `64` on a local server (Ollama, MLC, vLLM or oMLX, SGLang) and
 for a `--base-url` server, `20` on a cloud vendor's backend (OpenAI, Gemini, Anthropic or NVIDIA);
 8 to 256; `--window-messages N` overrides it) is the most messages the working window holds
@@ -424,32 +403,36 @@ caching, a longer window costs input tokens on every request.
 A value you set stays as you set
 it, on any backend.
 With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it drops
-whole units (a tool call with its results, never split) down to 70% of the cap under `chunk` and
-`boundary`, so the history holds for several steps; under `slide` it drops a unit at every step.
+whole units (a tool call with its results, never split) down to 70% of the cap, so the history
+holds for several steps.
 
 A count drop takes at most half the window at once, so a cap below 16 drops fewer than eight
 messages. See [Memory](memory.md#working-memory-window).
 
 The JSON result's `config` has `window_messages` when it is not 20.
 
-`cache_layout = "v3"` and the 64-message window became defaults after two benchmark rounds on
-coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and 86.8% of the
-prompt tokens were served from the cache against 78.9%. `--cache-layout v2 --window-messages 20`
-send the earlier requests.
+The reflection in the window and the 64-message window became defaults after two benchmark
+rounds on coding tasks with a Qwen model on oMLX: 46 of 48 runs passed against 44 of 48, and
+86.8% of the prompt tokens were served from the cache against 78.9%. `--window-messages 20`
+sends the earlier cap.
 
-`melo --developer --help` lists both flags under Advanced.
+`melo --developer --help` lists `--window-messages` under Advanced.
 
-`fixed_prefix`, `window_eviction` and `reflect_tool_guard` became defaults after a same-build A/B
-on the benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set
-it, for these three and for the two above; a file without the key has the default, and saving
-writes a key only when it differs from the default (`window_messages` is written whenever it is
-set).
+The fixed prefix and `window_eviction` became defaults after a same-build A/B on the
+benchmark's coding tasks with a local model. A key you set in `[agent]` stays as you set it,
+for `window_eviction` and for `window_messages`; a file without the key has the default, and
+saving writes a key only when it differs from the default (`window_messages` is written
+whenever it is set). `melo --developer --help` lists `--window-eviction` under Experimental.
+API v2 console sessions, console workers and the legacy `/v1` sessions read these two keys
+from the config; the legacy `/v1` API does not read the other `[agent]` keys or `[retrieval]`.
 
-`melo --developer --help` lists the three flags under Experimental, and
-`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` send the requests of the
-earlier defaults. API v2 console sessions, console workers and the legacy `/v1` sessions read
-these five keys from the config; the legacy `/v1` API does not read the other `[agent]` keys or
-`[retrieval]`.
+Five settings that decided between layouts were removed, each with its option: `[agent]
+fixed_prefix`, `reflect_tool_guard`, `cache_layout` and `reflection_gate`, and `[memory]
+admit_on_outcome`. Each behaves as its default did, `window_eviction = "slide"` reads as
+`"chunk"`, and a config file that still holds one of these loads, the line ignored; `melo
+config` names it (see [Command line](cli.md#settings)). `[memory] followup_query` was removed
+too: a message with no content of its own is always searched with what you typed in the chat's
+last turns, as its default `"recent"` did, and a file that holds the key is handled the same way.
 
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
@@ -478,12 +461,12 @@ calls, a final answer of at most three lines, relative paths without a `sys.path
 reading the files a task names before listing folders.
 
 With
-`reflection_gate = "patient"` (the default) or `"flags"` the reflection prompt also leaves out the five estimates,
-`progress_made` and `new_information_gained` (only `utility` reads the estimates, and nothing
-reads the other two) and asks for `best_effort_result` only with `done` or `stop`; the action and
+it the reflection prompt also leaves out the five estimates,
+`progress_made` and `new_information_gained` (nothing reads them) and asks for
+`best_effort_result` only with `done` or `stop`; the action and
 the three flags the gate reads are still asked for, and a reply in the long form is read as
-before. `--reflection-gate utility` keeps the full reflection prompt, and the compress modes keep
-the system prompt's last line, because their notes are text between tool calls.
+before. The compress modes keep the system prompt's last line, because their notes are text
+between tool calls.
 
 The interactive
 UI, the `melo ""` loop and the gateway ignore the key. Off, the default, every request is the one

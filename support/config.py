@@ -63,8 +63,7 @@ VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
 OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
-WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
-CACHE_LAYOUTS = ("v2", "v3")
+WINDOW_EVICTIONS = ("chunk", "boundary")
 TOOL_IMAGES = ("auto", "on", "off")
 EMPTY_REPLY_FALLBACKS = ("on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
@@ -95,6 +94,10 @@ MEMORY_EXCERPT_OPEN = ("off", "on")
 # is cut into for that encoding: see MemoryConfig.recall_source.
 MEMORY_RECALL_SOURCE = ("turns", "items")
 MEMORY_OPEN_SOURCES = ("off", "on")
+# Whether the list form's guide line also tells the model to say it has no record of
+# what a question names that none of the listed lines mention (on, the default; off
+# is the developer comparison): see MemoryConfig.premise_check.
+MEMORY_PREMISE_CHECK = ("off", "on")
 MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # How many windows of one ingest the encoder is asked for at once: see
 # MemoryConfig.compress_parallel.
@@ -119,10 +122,6 @@ MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
 # MemoryConfig.note_gate.
 MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
-# What a message with no content of its own ("go look it up") is searched with:
-# the user's words of the chat's last turns, or its own words: see
-# MemoryConfig.followup_query.
-MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -251,8 +250,8 @@ class ApprovalsConfig:
     card while someone sees the chat, and the riskiest are blocked and
     explained. Each chat keeps its own mode.
 
-    ``auto_asks`` (developer setting, #465): ``false`` never asks in Auto,
-    so every step it stops is blocked, as before #465 (for benchmarks).
+    ``auto_asks`` (advanced setting): ``false`` never asks in Auto, so every
+    step it stops is blocked, as when nobody watches (for benchmarks).
     """
 
     mode: str = "ask"  # ask | auto
@@ -267,10 +266,7 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
-    fixed_prefix: bool = True  # stable prompt prefix; false is the old request
-    window_eviction: str = "chunk"  # slide | chunk | boundary
-    reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
-    cache_layout: str = "v3"  # v2 | v3 (the reflection layout; needs fixed_prefix)
+    window_eviction: str = "chunk"  # chunk | boundary
     # Working window cap, 8-256; None: default_window_messages() of the backend.
     window_messages: int | None = None
     context_window: int | None = None
@@ -442,6 +438,11 @@ class MemoryConfig:
     ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
+    ``premise_check``, ``on`` (the default) or ``off``, ends the line above the list
+    form's lines with one sentence that tells the model to say first that it has no
+    record of a person, thing, place or role the question names when none of the
+    lines mention it, and not to answer from something similar (it has no effect
+    on the excerpt form);
     ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
     for the chat model to encode, one model call each; ``compress_parallel`` (1-8,
     default 1), how many of those windows ``melo memory ingest`` has the chat
@@ -456,12 +457,7 @@ class MemoryConfig:
     (also a note the model infers from what the user typed, kept as inferred); each
     level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
     similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). ``followup_query`` (#452) is what a message
-    with no content of its own ("go look it up", "continue", "继续") is searched
-    with: ``recent`` (the default) the message and the user's words of the chat's
-    last two turns that the model still shows, or ``message`` the message's own
-    words, as recall did before; with ``recent`` the first message of a new chat
-    that has no content recalls nothing. Two more are for questions about the person's
+    inferred note's bar is 0.15 lower). Two more are for questions about the person's
     own life that count, total or compare across things (#428), and apply to
     ``recall_form = "list"``.
     ``gather``, ``guide`` (the default: for such a question the block's vector bar is
@@ -477,7 +473,6 @@ class MemoryConfig:
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
-    admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
@@ -498,6 +493,7 @@ class MemoryConfig:
     excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
+    premise_check: str = "on"  # on | off: the list guide asks for "no record" first.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
     compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
@@ -505,7 +501,6 @@ class MemoryConfig:
     )
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
-    followup_query: str = "recent"  # recent | message: what "continue" searches with.
     gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
     gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
@@ -897,10 +892,10 @@ class Config:
             ("recall_form", MEMORY_RECALL_FORM),
             ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
-            ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("gather", MEMORY_GATHER),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
+            ("premise_check", MEMORY_PREMISE_CHECK),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)
@@ -1093,7 +1088,6 @@ class Config:
             ("reasoning", REASONING_MODES),
             ("note_writer", NOTE_WRITERS),
             ("window_eviction", WINDOW_EVICTIONS),
-            ("cache_layout", CACHE_LAYOUTS),
         ):
             value = getattr(agent, name)
             if value not in allowed:
@@ -1647,6 +1641,8 @@ def _digits_as_text(value: Any) -> Any:
 # The few fields the file spells loosely: key -> what the file's value stands for.
 # Every other field is read as the file has it.
 _SPELLINGS: dict[str, Callable[[Any], Any]] = {
+    # "slide" was removed (settings.removed_in says so); it reads as the default.
+    "agent.window_eviction": lambda value: "chunk" if value == "slide" else value,
     "cli.colors": _digits_as_text,
     "cli.background": _digits_as_text,
     "sessions.record_direct": lambda value: value

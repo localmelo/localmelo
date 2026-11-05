@@ -8,6 +8,7 @@
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
 import {formatTime, saidText, t} from './i18n.mjs';
+import {maker} from './dom.mjs';
 import {levelLabel} from './levels.mjs';
 
 // Read once, in the page's language (a new language reloads the page).
@@ -51,19 +52,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
   let scope = 0; // which chat the panel follows: rescope() moves it on
-  function node(tag, className, text) {
-    const element = doc.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = String(text);
-    return element;
-  }
-  function button(className, text, action, label) {
-    const element = node('button', className, text);
-    element.type = 'button';
-    if (label) element.setAttribute('aria-label', label);
-    element.addEventListener('click', action);
-    return element;
-  }
+  const {node, button} = maker(doc);
   function toggle(label, on, action) {
     const element = node('button', 'sched-switch');
     element.type = 'button';
@@ -183,13 +172,13 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
         button('outline-button danger', t('common.delete'), () => remove(chore)));
     } else {
       actions.append(
-        button('outline-button', t('sched.runNow'), () => runNow(chore), t('sched.runNowLabel', {title: chore.title})),
+        button('outline-button', t('sched.runNow'), () => runNow(chore), {label: t('sched.runNowLabel', {title: chore.title})}),
         button('quiet-button', t('sched.editTime'), () => {
           const at = chore.schedule.at ?? '09:00';
           state.edit = {id: chore.id, kind: chore.schedule.kind, at, every: chore.schedule.every ?? 4};
           draw();
-        }, t('sched.editTimeLabel', {title: chore.title})),
-        button('quiet-button', t('common.delete'), () => { state.ask = chore.id; draw(); }, t('sched.deleteLabel', {title: chore.title})));
+        }, {label: t('sched.editTimeLabel', {title: chore.title})}),
+        button('quiet-button', t('common.delete'), () => { state.ask = chore.id; draw(); }, {label: t('sched.deleteLabel', {title: chore.title})}));
     }
     box.append(actions);
     return box;

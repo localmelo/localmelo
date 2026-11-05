@@ -16,12 +16,11 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.tools import refuse_call
 from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
-from localmelo.tests.legacy_options import legacy_options
 
 
 class FakeLLM(BaseLLMProvider):
@@ -73,7 +72,7 @@ def _call(name: str, text: str, call_id: str) -> Message:
 def _agent(llm: BaseLLMProvider, **options: Any) -> Agent:
     agent = Agent(
         llm=llm,
-        options=legacy_options(
+        options=AgentOptions(
             builtins=frozenset(), attempt_policy="none", answer_on_stop=False, **options
         ),
     )
@@ -205,7 +204,7 @@ def test_the_same_refused_command_with_new_words_counts() -> None:
 
 
 def test_the_allowance_is_checked() -> None:
-    options = legacy_options(builtins=frozenset())
+    options = AgentOptions(builtins=frozenset())
     assert options.refused_steps == 0
     bad: Any
     for bad in (-1, True, 1.5, "2"):

@@ -8,9 +8,9 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent import agent as core
 from localmelo.melo.agent.options import ReasoningMode
 from localmelo.melo.schema import Message
+from localmelo.support.backends import providers_for
 from localmelo.support.cli.agents import AgentFactory, config_backend
 from localmelo.support.cli.approvals import TerminalApprover
 from localmelo.support.cli.output import RecordingOut
@@ -19,6 +19,7 @@ from localmelo.support.cli.session import CliSession
 from localmelo.support.cli.theme import UNICODE
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.support.sessions import agents as session_agents
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
@@ -59,15 +60,14 @@ async def test_drop_refusal_keeps_the_old_agent_backend_conversation_and_mcp(
     backend = factory.backend
     conversation = old.conversation()
     made: list[OpenAICompatLLM] = []
-    original = core._providers_from_config
 
-    def providers(config: Config) -> tuple[OpenAICompatLLM, None]:
-        llm, embedding = original(config)
+    def providers(config: Config, reasoning: str) -> tuple[OpenAICompatLLM, None]:
+        llm, embedding = providers_for(config, reasoning)
         assert isinstance(llm, OpenAICompatLLM) and embedding is None
         made.append(llm)
         return llm, None
 
-    monkeypatch.setattr(core, "_providers_from_config", providers)
+    monkeypatch.setattr(session_agents, "providers_for", providers)
     store = SessionStore(tmp_path / "sessions.db", writer="cli")
     await store.open()
     out = RecordingOut(120)

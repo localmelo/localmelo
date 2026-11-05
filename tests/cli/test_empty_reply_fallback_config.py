@@ -45,10 +45,9 @@ def test_x_sets_it_for_one_run_and_the_developer_listings_show_it(
     row = capsys.readouterr().out.splitlines()[1].split()
     assert row == [KEY, '"off"', '"on"', "-X"]
     text = cli._build_parser(developer=True).format_help()
-    assert any(
-        line.startswith("  agent.empty_reply_fallback ") and line.endswith("(#469)")
-        for line in text.splitlines()
-    ), text
+    # An advanced setting: listed, with no issue deciding it.
+    listed = next(line for line in text.splitlines() if line.startswith(f"  {KEY} "))
+    assert "(#" not in listed, listed
 
 
 @pytest.mark.parametrize("value", ["maybe", "false", "0"])

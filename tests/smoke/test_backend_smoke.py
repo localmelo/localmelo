@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 import pytest
 
 from localmelo.melo.agent import Agent
+from localmelo.support.backends import providers_for
 from localmelo.support.config import Config, LocalBackendConfig
 
 # Where each local backend listens by default, and the URL that shows it is up.
@@ -102,7 +103,8 @@ def _skip_when_unreachable(backend: str, url: str) -> None:
 async def test_smoke_ollama_chat_round_trip() -> None:
     """ollama: agent.run('What is 6*7?') returns an answer containing '42'."""
     _skip_when_unreachable("ollama", _OLLAMA_HEALTH)
-    agent = Agent(config=_build_config("ollama"))
+    llm, embedding = providers_for(_build_config("ollama"))
+    agent = Agent(llm=llm, embedding=embedding)
     try:
         answer = await agent.run("What is 6*7? Reply with just the number.")
     finally:
@@ -115,7 +117,8 @@ async def test_smoke_ollama_chat_round_trip() -> None:
 async def test_smoke_mlc_chat_round_trip() -> None:
     """mlc: agent.run('What is 6*7?') returns an answer containing '42'."""
     _skip_when_unreachable("mlc-llm", _MLC_HEALTH)
-    agent = Agent(config=_build_config("mlc"))
+    llm, embedding = providers_for(_build_config("mlc"))
+    agent = Agent(llm=llm, embedding=embedding)
     try:
         answer = await agent.run("What is 6*7? Reply with just the number.")
     finally:

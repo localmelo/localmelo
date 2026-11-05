@@ -79,13 +79,6 @@ def fake_backend() -> FakeBackend:
     return FakeBackend()
 
 
-@pytest.fixture
-def fake_cfg() -> Config:
-    from localmelo.support.config import Config
-
-    return Config(chat_backend="fake")
-
-
 # -- Registration and lookup --
 
 
@@ -234,84 +227,3 @@ class TestEnsureDefaultsRegistered:
         keys = {b.key for b in backends}
         assert keys == _EXPECTED_KEYS
         assert len(backends) == 8
-
-
-# -- Contract satisfaction --
-
-
-class TestBackendContract:
-    """Verify FakeBackend satisfies all abstract methods with correct types."""
-
-    def test_key_returns_str(self, fake_backend: FakeBackend) -> None:
-        assert isinstance(fake_backend.key, str)
-        assert fake_backend.key == "fake"
-
-    def test_display_name_returns_str(self, fake_backend: FakeBackend) -> None:
-        assert isinstance(fake_backend.display_name, str)
-        assert fake_backend.display_name == "Fake Backend"
-
-    def test_validate_returns_list_of_strings(
-        self, fake_backend: FakeBackend, fake_cfg: Config
-    ) -> None:
-        errors = fake_backend.validate(fake_cfg)
-        assert isinstance(errors, list)
-        assert all(isinstance(e, str) for e in errors)
-
-    def test_has_embedding_returns_bool(
-        self, fake_backend: FakeBackend, fake_cfg: Config
-    ) -> None:
-        result = fake_backend.has_embedding(fake_cfg)
-        assert isinstance(result, bool)
-
-    def test_build_chat_provider_callable(
-        self, fake_backend: FakeBackend, fake_cfg: Config
-    ) -> None:
-        provider = fake_backend.build_chat_provider(fake_cfg)
-        assert provider is not None
-
-    def test_build_embedding_provider_callable(
-        self, fake_backend: FakeBackend, fake_cfg: Config
-    ) -> None:
-        result = fake_backend.build_embedding_provider(fake_cfg)
-        assert result is None  # FakeBackend returns None
-
-
-# -- ABC enforcement --
-
-
-class TestABCEnforcement:
-    def test_cannot_instantiate_base_directly(self) -> None:
-        with pytest.raises(TypeError, match="abstract"):
-            BaseBackend()  # type: ignore[abstract]
-
-    def test_incomplete_subclass_raises(self) -> None:
-        class Incomplete(BaseBackend):
-            key = "incomplete"
-
-        with pytest.raises(TypeError, match="abstract"):
-            Incomplete()  # type: ignore[abstract]
-
-
-# -- Package re-exports --
-
-
-class TestPackageExports:
-    def test_base_backend_importable_from_package(self) -> None:
-        from localmelo.support.backends import BaseBackend as B
-
-        assert B is BaseBackend
-
-    def test_register_importable_from_package(self) -> None:
-        from localmelo.support.backends import register as r
-
-        assert r is register
-
-    def test_get_backend_importable_from_package(self) -> None:
-        from localmelo.support.backends import get_backend as g
-
-        assert g is get_backend
-
-    def test_list_backends_importable_from_package(self) -> None:
-        from localmelo.support.backends import list_backends as lb
-
-        assert lb is list_backends

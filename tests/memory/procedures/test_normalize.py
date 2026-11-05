@@ -10,6 +10,7 @@ import pytest
 
 from localmelo.melo.memory.procedures.normalize import (
     DATE,
+    GATE_GONE,
     LENGTH_OPTIONS,
     MAX_QUERY_TEXT,
     SIMILAR_MIN_ROUTINES,
@@ -155,19 +156,31 @@ def test_known_model(model: str, known: bool) -> None:
     assert known_model(model) is known
 
 
-def test_length_options_are_the_five_config_keys() -> None:
+def test_length_options_are_the_config_keys_and_the_gate() -> None:
     config = {
         "max_steps": 30,
         "attempt_policy": "reflect",
         "steps_per_attempt": 10,
-        "reflection_gate": "flags",
         "timeout_s": 600,
         "tools": ["shell_exec"],
     }
     options = length_options(config)
-    assert tuple(options) == LENGTH_OPTIONS
+    assert tuple(options) == (*LENGTH_OPTIONS, "reflection_gate")
     assert options["max_attempts"] is None
     assert "timeout_s" not in options
+
+
+def test_the_removed_gate_hashes_as_the_patient_default() -> None:
+    # A config of today has no gate; a template learned before the option went
+    # holds the gate of its run, the patient one for a default run.
+    config = {"max_steps": 30, "attempt_policy": "reflect"}
+    assert length_options(config)["reflection_gate"] == GATE_GONE == "patient"
+    assert length_options({**config, "reflection_gate": "patient"}) == length_options(
+        config
+    )
+    assert length_options({**config, "reflection_gate": "flags"}) != length_options(
+        config
+    )
 
 
 def test_template_id_hashes_model_and_options() -> None:

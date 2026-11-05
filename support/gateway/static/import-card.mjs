@@ -12,23 +12,10 @@
  * the card with `show(visible)`; a hidden card asks nothing. While the card shows, `hero` (the empty chat's
  * welcome) gets the class `compact`, which shrinks it to its portrait so the card's buttons stay above the composer.
  */
+import {maker} from "./dom.mjs";
 import {formatTime, t} from "./i18n.mjs";
 
 const REASONS = ["secret", "third_party", "wrong_owner", "duplicate", "mechanics", "capped"];
-
-function el(doc, tag, className, text) {
-  const node = doc.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = String(text);
-  return node;
-}
-
-function button(doc, className, text, onClick) {
-  const node = el(doc, "button", className, text);
-  node.type = "button";
-  node.addEventListener("click", onClick);
-  return node;
-}
 
 /** A path with the home folder written as `~`. */
 export function homePath(path, home) {
@@ -80,26 +67,27 @@ export const allKept = (scan) => new Set(scan.sources.filter((source) => source.
 
 /** One row per file: checkbox, path, notes; a disclosure shows the sample lines and what was left out. */
 export function sourceList({doc, scan, chosen, busy, toggle}) {
-  const list = el(doc, "ul", "import-sources");
+  const {node: el} = maker(doc);
+  const list = el("ul", "import-sources");
   for (const source of scan.sources) {
-    const row = el(doc, "li", "import-source");
-    const pick = el(doc, "label", "import-pick");
-    const box = el(doc, "input");
+    const row = el("li", "import-source");
+    const pick = el("label", "import-pick");
+    const box = el("input");
     box.type = "checkbox";
     box.checked = chosen.has(source.id);
     box.disabled = busy || source.kept === 0;
     box.addEventListener("change", () => toggle(source.id, box.checked));
-    pick.append(box, el(doc, "span", "import-path", source.path), el(doc, "span", "import-count", t("memoryTab.notes", {n: source.kept})));
+    pick.append(box, el("span", "import-path", source.path), el("span", "import-count", t("memoryTab.notes", {n: source.kept})));
     row.append(pick);
     if (source.sample.length || source.left) {
-      const more = el(doc, "details", "import-more");
-      more.append(el(doc, "summary", "", t("importCard.look")));
+      const more = el("details", "import-more");
+      more.append(el("summary", "", t("importCard.look")));
       if (source.sample.length) {
-        const samples = el(doc, "ul", "import-samples");
-        samples.append(...source.sample.map((line) => el(doc, "li", "", line)));
+        const samples = el("ul", "import-samples");
+        samples.append(...source.sample.map((line) => el("li", "", line)));
         more.append(samples);
       }
-      if (source.left) more.append(el(doc, "p", "import-left", source.left));
+      if (source.left) more.append(el("p", "import-left", source.left));
       row.append(more);
     }
     list.append(row);
@@ -111,6 +99,7 @@ const failure = (error, fallback) => error?.message || t(fallback);
 
 export function setupImportCard({root, api, hero = null}) {
   const doc = root.ownerDocument;
+  const {node: el, button} = maker(doc);
   root.hidden = true;
   let shown = false;
   let started = false; // Asked once per page load: a failure is not asked again until the page reloads.
@@ -134,29 +123,29 @@ export function setupImportCard({root, api, hero = null}) {
     const refocus = root.contains?.(doc.activeElement);
     const parts = [];
     if (phase === "offer") {
-      const bring = button(doc, "primary-button", busy ? t("importCard.working") : t("importCard.bring"), pressBring);
+      const bring = button("primary-button", busy ? t("importCard.working") : t("importCard.bring"), pressBring);
       const sync = () => { bring.disabled = busy || chosen.size === 0; };
       sync();
-      const later = button(doc, "link-button", t("importCard.later"), decline);
+      const later = button("link-button", t("importCard.later"), decline);
       later.disabled = busy;
       const list = sourceList({doc, scan, chosen, busy, toggle: (id, on) => { if (on) chosen.add(id); else chosen.delete(id); sync(); }});
-      const actions = el(doc, "div", "import-actions");
+      const actions = el("div", "import-actions");
       actions.append(bring, later);
-      parts.push(el(doc, "h2", "", t("importCard.title")), el(doc, "p", "", t("importCard.lead")), list);
-      if (scan.partial) parts.push(el(doc, "p", "import-note", t("importCard.partial")));
-      if (fault) parts.push(el(doc, "p", "import-fault", fault));
+      parts.push(el("h2", "", t("importCard.title")), el("p", "", t("importCard.lead")), list);
+      if (scan.partial) parts.push(el("p", "import-note", t("importCard.partial")));
+      if (fault) parts.push(el("p", "import-fault", fault));
       parts.push(actions);
     } else {
-      const line = el(doc, "p", "import-done");
+      const line = el("p", "import-done");
       if (phase === "undone") line.append(result.kept ? t("importCard.undoneKept", {n: result.kept}) : t("importCard.undone"));
       else if (phase === "unsaved") line.append(t("importCard.notSaved"));
       else if (result.written) {
-        const undoButton = button(doc, "link-button", t("memory.undo"), undo);
+        const undoButton = button("link-button", t("memory.undo"), undo);
         undoButton.disabled = busy;
-        line.append(el(doc, "span", "import-ok", t("importCard.done", {n: result.written})), " · ", undoButton);
+        line.append(el("span", "import-ok", t("importCard.done", {n: result.written})), " · ", undoButton);
       } else line.append(t("importCard.nothingNew"));
-      parts.push(line, button(doc, "quiet-button import-close", t("importCard.close"), () => { phase = "gone"; render(); }));
-      if (fault) parts.push(el(doc, "p", "import-fault", fault));
+      parts.push(line, button("quiet-button import-close", t("importCard.close"), () => { phase = "gone"; render(); }));
+      if (fault) parts.push(el("p", "import-fault", fault));
     }
     root.replaceChildren(...parts);
     root.setAttribute("aria-busy", String(busy));
@@ -252,7 +241,8 @@ export function batches(rows) {
  * the tab's loaded notes and `reload()` reads them again. `look()` presses "Look for notes" (`/memory import`).
  */
 export function importSection({doc, api, rows, reload, redraw}) {
-  const root = el(doc, "section", "memory-import");
+  const {node: el, button} = maker(doc);
+  const root = el("section", "memory-import");
   let phase = "idle"; // idle | found
   let busy = false;
   let scan = null;
@@ -310,33 +300,33 @@ export function importSection({doc, api, rows, reload, redraw}) {
     const now = JSON.stringify([phase, busy, line, fault, scan?.batchId, past]);
     if (now === drawn) return;
     drawn = now;
-    const parts = [el(doc, "h3", "memory-sub", t("memoryTab.import.title")), el(doc, "p", "memory-line", t("memoryTab.import.lead"))];
+    const parts = [el("h3", "memory-sub", t("memoryTab.import.title")), el("p", "memory-line", t("memoryTab.import.lead"))];
     if (phase === "found") {
-      const go = button(doc, "primary-button", busy ? t("importCard.working") : t("importCard.bring"), bring);
+      const go = button("primary-button", busy ? t("importCard.working") : t("importCard.bring"), bring);
       const sync = () => { go.disabled = busy || chosen.size === 0; };
       sync();
       parts.push(sourceList({doc, scan, chosen, busy, toggle: (id, on) => { if (on) chosen.add(id); else chosen.delete(id); sync(); }}));
-      if (scan.partial) parts.push(el(doc, "p", "import-note", t("importCard.partial")));
-      const actions = el(doc, "div", "memory-actions");
-      const cancel = button(doc, "quiet-button", t("memoryTab.cancel"), () => { phase = "idle"; redraw(); });
+      if (scan.partial) parts.push(el("p", "import-note", t("importCard.partial")));
+      const actions = el("div", "memory-actions");
+      const cancel = button("quiet-button", t("memoryTab.cancel"), () => { phase = "idle"; redraw(); });
       cancel.disabled = busy;
       actions.append(go, cancel);
       parts.push(actions);
     } else {
-      const look = button(doc, "outline-button", busy ? t("memoryTab.import.looking") : t("memoryTab.import.look"), lookFor);
+      const look = button("outline-button", busy ? t("memoryTab.import.looking") : t("memoryTab.import.look"), lookFor);
       look.disabled = busy;
       parts.push(look);
     }
-    if (line) parts.push(el(doc, "p", "import-note", line));
-    if (fault) parts.push(el(doc, "p", "memory-fault", fault));
+    if (line) parts.push(el("p", "import-note", line));
+    if (fault) parts.push(el("p", "memory-fault", fault));
     if (past.length) {
-      const list = el(doc, "ul", "import-batches");
+      const list = el("ul", "import-batches");
       for (const batch of past) {
-        const item = el(doc, "li", "import-batch");
+        const item = el("li", "import-batch");
         const words = t("memoryTab.import.batch", {notes: t("memoryTab.notes", {n: batch.count}), day: dayOf(batch.at)});
-        const undoButton = button(doc, "link-button", t("memory.undo"), () => take(batch.id));
+        const undoButton = button("link-button", t("memory.undo"), () => take(batch.id));
         undoButton.disabled = busy;
-        item.append(el(doc, "span", "", words), undoButton);
+        item.append(el("span", "", words), undoButton);
         list.append(item);
       }
       parts.push(list);

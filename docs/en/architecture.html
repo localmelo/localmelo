@@ -566,7 +566,7 @@
               <tr><th scope="col">Boundary</th><th scope="col">Rule</th><th scope="col">Why it matters</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>melo/</code> and <code>support/</code></td><td><code>melo/</code> never imports <code>support/</code> at module level; <code>Agent(config=…)</code> is the one bridge.</td><td>The agent runs with providers you build, and a new backend changes only <code>support/</code>.</td></tr>
+              <tr><td><code>melo/</code> and <code>support/</code></td><td><code>melo/</code> never imports <code>support/</code>; the callers build the providers (<code>providers_for(cfg)</code>) and hand them to the <code>Agent</code>.</td><td>The agent runs with providers you build, and a new backend changes only <code>support/</code>.</td></tr>
               <tr><td>Agent and executor</td><td>A step runs only the tools it offered, and every call passes the checks first.</td><td>A refused call never runs. In Ask, the checks are guardrails, not a sandbox; in Auto on macOS, steps also run in a write sandbox.</td></tr>
               <tr><td>Agent and memory</td><td>Memory writes pass the checker's size limits.</td><td>The prompt and the stores stay bounded.</td></tr>
               <tr><td>Backends and model servers</td><td>Backends only connect to a URL.</td><td>You keep control of your model servers.</td></tr>

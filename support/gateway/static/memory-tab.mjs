@@ -10,6 +10,7 @@
  * looks for notes other assistants keep, brings in the checked files, and takes a batch back.
  */
 import {t} from './i18n.mjs';
+import {maker} from './dom.mjs';
 import {importSection} from './import-card.mjs';
 
 export const TOPICS = ['about', 'preferences', 'people', 'projects', 'decisions'];
@@ -48,19 +49,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   const state = {loaded: false, error: '', on: true, rows: [], documents: 0, model: '', retriever: 'auto', query: '', edit: null, draft: '', fault: '',
     ask: null, forgetting: false, notice: '', busy: false, focus: false};
   let reads = 0;
-  function node(tag, className, text) {
-    const element = doc.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = String(text);
-    return element;
-  }
-  function button(className, text, action, label) {
-    const element = node('button', className, text);
-    element.type = 'button';
-    if (label) element.setAttribute('aria-label', label);
-    element.addEventListener('click', action);
-    return element;
-  }
+  const {node, button} = maker(doc);
   const root = node('div', 'memory-tab');
   const head = node('div', 'memory-head');
   const search = node('input', 'memory-search');
@@ -151,8 +140,8 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
         button('quiet-button', t('memoryTab.keepIt'), () => { state.ask = null; draw(); }),
         button('outline-button danger', t('memoryTab.forgetIt'), () => forget(row)));
     } else {
-      actions.append(button('quiet-button', t('memoryTab.edit'), () => { Object.assign(state, {edit: row.id, draft: row.text, fault: '', focus: true}); draw(); }, t('memoryTab.editNote', {note: row.text})),
-        button('quiet-button', t('memoryTab.delete'), () => { state.ask = row.id; draw(); }, t('memoryTab.deleteNote', {note: row.text})));
+      actions.append(button('quiet-button', t('memoryTab.edit'), () => { Object.assign(state, {edit: row.id, draft: row.text, fault: '', focus: true}); draw(); }, {label: t('memoryTab.editNote', {note: row.text})}),
+        button('quiet-button', t('memoryTab.delete'), () => { state.ask = row.id; draw(); }, {label: t('memoryTab.deleteNote', {note: row.text})}));
     }
     item.append(actions);
     return item;

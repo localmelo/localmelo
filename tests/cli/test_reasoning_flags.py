@@ -242,8 +242,7 @@ def test_a_config_reasoning_field_is_inert_without_replay(
     options = cli._direct_options(parser, args)
     with mock.patch.object(cli, "Agent") as agent_cls:
         cli._build_direct_mode_agent(args, options=options)
-    built_cfg = agent_cls.call_args.kwargs["config"]
-    assert built_cfg.vllm.reasoning_field == ""
+    assert agent_cls.call_args.kwargs["llm"].reasoning_field is None
 
 
 def test_replay_passes_the_section_field_to_the_provider(
@@ -422,7 +421,6 @@ def test_the_json_line_reports_the_mode_and_counters(
         },
         "ignored": 0,
     }
-    assert record["config"]["admit_on_outcome"] is False
     assert record["config"]["keep_decision_text"] is False
 
 

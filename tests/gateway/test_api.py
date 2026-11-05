@@ -9,7 +9,7 @@ pytest = __import__("pytest")
 pytest.importorskip("fastapi")
 pytest.importorskip("uvicorn")
 
-from unittest.mock import patch  # noqa: E402
+from unittest.mock import Mock, patch  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -515,6 +515,12 @@ async def test_cancelled_request_returns_session_to_idle() -> None:
 
 
 def test_a_session_agent_keeps_its_answers() -> None:
-    with patch("localmelo.support.gateway.session.Agent") as agent:
+    with (
+        patch(
+            "localmelo.support.gateway.session.providers_for",
+            return_value=(Mock(), None),
+        ),
+        patch("localmelo.support.gateway.session.Agent") as agent,
+    ):
         SessionManager(config=_test_cfg())._create_agent()
     assert agent.call_args.kwargs["options"].record_answers

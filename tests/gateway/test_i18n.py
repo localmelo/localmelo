@@ -48,6 +48,7 @@ _PARAM = re.compile(r"\{(\w+)\}")
 
 # The files whose words come from the catalog: a new English literal in one fails the scan.
 CONVERTED_JS = (
+    "approval-card.mjs",
     "blocked.mjs",
     "browser-live.mjs",
     "composer-media.mjs",

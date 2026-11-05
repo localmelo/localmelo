@@ -1,14 +1,14 @@
-"""``cache_layout`` and ``window_messages`` at the configuration and CLI boundaries.
+"""``window_messages`` at the configuration and CLI boundaries.
 
-``cache_layout`` defaults to ``"v3"`` everywhere. ``window_messages`` defaults to 64
-on a local server and on a URL, and to 20 on a cloud vendor's backend; the config
-leaves it unset (``None``) until a file sets it, and a value that is set always wins.
+It defaults to 64 on a local server and on a URL, and to 20 on a cloud vendor's
+backend; the config leaves it unset (``None``) until a file sets it, and a value that
+is set always wins.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Final
 
 import pytest
 
@@ -39,18 +39,10 @@ from localmelo.support.sessions.agents import (
 )
 
 URL = "http://127.0.0.1:1/v1"
-# name -> (the AgentOptions default, the AgentConfig default, an opt-out value, the
-# flag, its text). The config default of the window is unset: the backend decides.
-SETTINGS: dict[str, tuple[Any, Any, Any, str, str]] = {
-    "cache_layout": ("v3", "v3", "v2", "--cache-layout", "v2"),
-    "window_messages": (
-        LOCAL_WINDOW_MESSAGES,
-        None,
-        SHORT_TERM_MAX,
-        "--window-messages",
-        "20",
-    ),
-}
+# The AgentOptions default, the AgentConfig default (unset: the backend decides) and a
+# value that is not the default.
+OPTION_DEFAULT: Final = LOCAL_WINDOW_MESSAGES
+SET_VALUE: Final = SHORT_TERM_MAX
 
 
 @pytest.fixture
@@ -62,10 +54,8 @@ def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_the_defaults_are_the_measured_layout_and_window() -> None:
-    assert AgentOptions().cache_layout == "v3"
+def test_the_defaults_are_the_measured_window() -> None:
     assert AgentOptions().window_messages == LOCAL_WINDOW_MESSAGES == 64
-    assert AgentConfig().cache_layout == "v3"
     assert AgentConfig().window_messages is None  # the backend decides
     assert (WINDOW_MESSAGES_MIN, WINDOW_MESSAGES_MAX) == (8, 256)
 
@@ -96,20 +86,22 @@ def test_the_window_default_is_64_except_on_a_cloud_vendor(
     assert AgentConfig(window_messages=20).window_for(backend) == 20
 
 
-@pytest.mark.parametrize("name", SETTINGS)
 def test_the_config_roundtrip_writes_only_a_value_that_is_set(
-    name: str, config_home: Path
+    config_home: Path,
 ) -> None:
-    option_default, config_default, opt_out, _, _ = SETTINGS[name]
-    save(Config(agent=AgentConfig(**{name: opt_out})))
-    assert getattr(load().agent, name) == opt_out
-    assert getattr(configured_session_options(load()), name) == opt_out
+    save(Config())
+    assert "window_messages" not in (config_home / "config.toml").read_text()
+    save(Config(agent=AgentConfig(window_messages=SET_VALUE)))
+    assert load().agent.window_messages == SET_VALUE
+    assert configured_session_options(load()).window_messages == SET_VALUE
     explicit = configured_session_options(
-        load(), AgentOptions(**{name: option_default}), explicit={name}
+        load(),
+        AgentOptions(window_messages=OPTION_DEFAULT),
+        explicit={"window_messages"},
     )
-    assert getattr(explicit, name) == option_default
-    kept = configured_cache_options(load(), AgentOptions(), keep={name})
-    assert getattr(kept, name) == option_default
+    assert explicit.window_messages == OPTION_DEFAULT
+    kept = configured_cache_options(load(), AgentOptions(), keep={"window_messages"})
+    assert kept.window_messages == OPTION_DEFAULT
 
 
 def test_a_window_set_to_the_local_default_stays_on_a_cloud_backend(
@@ -139,9 +131,6 @@ def test_the_window_follows_the_backend_unless_the_config_sets_it() -> None:
 
 
 def test_unknown_values_in_the_config_are_refused() -> None:
-    cfg = Config()
-    cfg.agent.cache_layout = "v9"
-    assert any("cache_layout 'v9'" in e for e in cfg.validate())
     for bad in (7, 257):
         cfg = Config()
         cfg.agent.window_messages = bad  # type: ignore[assignment]
@@ -159,7 +148,6 @@ def test_the_flags_are_validated_by_the_parser(
 ) -> None:
     parser = cli._build_parser()
     for argv, text in (
-        (["--cache-layout", "v4", "t"], "--cache-layout"),
         (["--window-messages", "7", "t"], "from 8 to 256, got 7"),
         (["--window-messages", "257", "t"], "from 8 to 256, got 257"),
         (["--window-messages", "many", "t"], "not an integer"),
@@ -169,62 +157,54 @@ def test_the_flags_are_validated_by_the_parser(
         assert text in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("name", SETTINGS)
-def test_a_flag_reaches_the_options_and_none_keeps_the_default(name: str) -> None:
-    default, _, opt_out, flag, text = SETTINGS[name]
+def test_the_flag_reaches_the_options_and_none_keeps_the_default() -> None:
     parser = cli._build_parser()
-    args = parser.parse_args(["--base-url", URL, flag, text, "t"])
-    assert getattr(cli._direct_options(parser, args), name) == opt_out
+    args = parser.parse_args(["--base-url", URL, "--window-messages", "20", "t"])
+    assert cli._direct_options(parser, args).window_messages == SET_VALUE
     args = parser.parse_args(["--base-url", URL, "t"])
-    assert getattr(cli._direct_options(parser, args), name) == default
+    assert cli._direct_options(parser, args).window_messages == OPTION_DEFAULT
 
 
-def test_both_flags_are_advanced_options() -> None:
-    for flag in ("--cache-layout", "--window-messages"):
-        assert OPTION_TIERS[flag] == ADVANCED
-        assert flag not in EXPERIMENTAL_ISSUES
-        assert flag not in cli._build_parser(developer=False).format_help()
-        assert flag in cli._build_parser(developer=True).format_help()
+def test_the_flag_is_an_advanced_option() -> None:
+    flag = "--window-messages"
+    assert OPTION_TIERS[flag] == ADVANCED
+    assert flag not in EXPERIMENTAL_ISSUES
+    assert flag not in cli._build_parser(developer=False).format_help()
+    assert flag in cli._build_parser(developer=True).format_help()
 
 
-def test_the_help_names_the_defaults() -> None:
-    # `-h all` lists each setting with its default; the options keep their own help,
-    # which says what the layouts are and what an unset window means.
+def test_the_help_names_the_default() -> None:
+    # `-h all` lists each setting with its default; the option keeps its own help,
+    # which says what an unset window means.
     text = " ".join(cli._build_parser(developer=True).format_help().split())
-    assert "agent.cache_layout v3 --cache-layout" in text
     assert "agent.window_messages unset --window-messages" in text
     actions = cli._build_parser()._option_string_actions
-    layout = " ".join(str(actions["--cache-layout"].help).split())
     window = " ".join(str(actions["--window-messages"].help).split())
-    assert "v3 (default) appends a reflection" in layout
-    assert "v2 sends the earlier requests" in layout
     assert "(default 64 on a local server or a URL, 20 on a cloud vendor)" in window
 
 
-@pytest.mark.parametrize("name", SETTINGS)
 async def test_direct_cli_takes_the_config_and_a_flag_beats_it(
-    name: str, config_home: Path
+    config_home: Path,
 ) -> None:
-    default, _, opt_out, flag, _ = SETTINGS[name]
-    save(Config(agent=AgentConfig(**{name: opt_out})))
+    save(Config(agent=AgentConfig(window_messages=SET_VALUE)))
     parser = cli._build_parser()
     args = parser.parse_args(["--base-url", URL, "task"])
     agent = cli._build_direct_mode_agent(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
     try:
-        assert getattr(agent.options, name) == opt_out
-        assert agent.hippo.working._max_len == (
-            opt_out if name == "window_messages" else LOCAL_WINDOW_MESSAGES
-        )
+        assert agent.options.window_messages == SET_VALUE
+        assert agent.hippo.working._max_len == SET_VALUE
     finally:
         await agent.close()
-    args = parser.parse_args(["--base-url", URL, flag, str(default), "task"])
+    args = parser.parse_args(
+        ["--base-url", URL, "--window-messages", str(OPTION_DEFAULT), "task"]
+    )
     agent = cli._build_direct_mode_agent(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
     try:
-        assert getattr(agent.options, name) == default
+        assert agent.options.window_messages == OPTION_DEFAULT
     finally:
         await agent.close()
 
@@ -264,25 +244,25 @@ async def test_a_configured_cloud_backend_keeps_the_earlier_window(
     )
     parser = cli._build_parser()
 
-    async def window(*argv: str) -> tuple[str, int]:
+    async def window(*argv: str) -> int:
         args = parser.parse_args([*argv, "task"])
         agent = cli._build_direct_mode_agent(
             args, parser=parser, options=cli._direct_options(parser, args)
         )
         try:
-            return agent.options.cache_layout, agent.options.window_messages
+            return agent.options.window_messages
         finally:
             await agent.close()
 
     save(cfg)
-    assert await window() == ("v3", 20)
-    assert await window("--window-messages", "32") == ("v3", 32)  # a flag wins
+    assert await window() == 20
+    assert await window("--window-messages", "32") == 32  # a flag wins
     cfg.agent.window_messages = 64  # so does a value in the file
     save(cfg)
-    assert await window() == ("v3", 64)
+    assert await window() == 64
 
 
-async def test_the_result_config_names_the_layout_and_window_unless_earlier(
+async def test_the_result_config_names_the_window_unless_earlier(
     config_home: Path,
 ) -> None:
     parser = cli._build_parser()
@@ -294,10 +274,8 @@ async def test_the_result_config_names_the_layout_and_window_unless_earlier(
         config = agent._run_config()
     finally:
         await agent.close()
-    assert (config["cache_layout"], config["window_messages"]) == ("v3", 64)
-    args = parser.parse_args(
-        ["--base-url", URL, "--cache-layout", "v2", "--window-messages", "20", "task"]
-    )
+    assert config["window_messages"] == 64
+    args = parser.parse_args(["--base-url", URL, "--window-messages", "20", "task"])
     agent = cli._build_direct_mode_agent(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
@@ -305,4 +283,4 @@ async def test_the_result_config_names_the_layout_and_window_unless_earlier(
         config = agent._run_config()
     finally:
         await agent.close()
-    assert "cache_layout" not in config and "window_messages" not in config
+    assert "window_messages" not in config
