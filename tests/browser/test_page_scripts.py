@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.browser.safari import (
+from localmelo.support.browser.pagescript import (
     COMMON_JS,
     DISARM_JS,
     PAGE_JS,

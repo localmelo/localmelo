@@ -76,8 +76,10 @@ every route below:
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
 
 The gateway logs the cause of a 500, whose response carries a fixed
-message. A 503 repeats the store's reason with the home folder written as
-`~`; it never carries a traceback, a lease holder or a key.
+message. A 503 from a store call that failed says "The session store is not
+available." and the gateway logs the cause; a store that could not open repeats
+its reason with the home folder written as `~`. A 503 never carries a
+traceback, a lease holder or a key.
 
 The legacy `/v1/*` routes keep their own bodies, including FastAPI's `422` and
 `{"detail": ...}`.
@@ -1290,7 +1292,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   the chat's card. With none open, Auto blocks the step at once, as for a
   script that reads the stream without `watch`. A card nobody answers within
   1 minute, or whose last viewer is gone for 5 seconds, is declined:
-  `approval.resolved` with `outcome` `denied` and `origin` `timeout`.
+  `approval.resolved` with `outcome` `denied` and `origin` `timeout`. The
+  console keeps its stream open while its page is hidden, so a hidden page
+  still counts as a viewer.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it

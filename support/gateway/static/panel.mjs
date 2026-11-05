@@ -160,7 +160,7 @@ export function setupPanel({
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
   const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat});
-  const live = taskLive({api: newest, changed: () => drawBody(), doc, ...stream});
+  const live = taskLive({api: newest, changed: () => drawBody(), ...stream});
   let reads = 0;
 
   function node(tag, className, text) {

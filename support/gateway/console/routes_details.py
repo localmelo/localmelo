@@ -11,7 +11,7 @@ the chat recorded for its tasks (#369), which lives in memory only.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import display
-from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
+from localmelo.support.sessions.store import TurnInfo
 
 from .errors import ApiError
 from .registry import OpenSession
@@ -41,42 +41,10 @@ _TURN_MAX = 2**63 - 1
 # ── Helpers ──
 
 
-async def _store_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await one store call, mapping a store failure as 2.2 says."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _sessions_call(
-    console: Console, coro: Any, session_id: str | None = None
-) -> Any:
-    """Await a registry call, mapping the failures it can raise."""
-    try:
-        return await coro
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-
-
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    info: SessionInfo | None = await _store_call(
-        console, console.store.get_session(session_id), session_id
-    )
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
-
-
 async def _open_session(console: Console, session_id: str) -> OpenSession:
     """The session opened, under its own lock, as the turn routes do."""
     async with console.sessions.lock(session_id):
-        entry: OpenSession = await _sessions_call(
-            console, console.sessions.open(session_id), session_id
-        )
-    return entry
+        return await console.sessions.open(session_id)
 
 
 # MCP in the console is deferred (U3 decision 5B): no MCP tools load, and
@@ -94,7 +62,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/tools")
     async def session_tools(session_id: str) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         entry = await _open_session(console, session_id)
         assert entry.agent is not None
         granted = entry.policy.allowed_tools
@@ -126,12 +94,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
         is 503 (the checks stopped using it already).
         """
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         if tool not in console.sessions.grants(session_id):
             raise ApiError(404, "not_found", t("errors.noGrant"))
-        gone = await _sessions_call(
-            console, console.sessions.forget_grant(session_id, tool), session_id
-        )
+        gone = await console.sessions.forget_grant(session_id, tool)
         return JSONResponse(
             content={
                 "revoked": [{"key": g.key, "scope": g.scope} for g in gone],
@@ -147,10 +113,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         here: ``still_everywhere`` counts them.
         """
         console.require_store()
-        await _require_session(console, session_id)
-        gone = await _sessions_call(
-            console, console.sessions.forget_grant(session_id), session_id
-        )
+        await console.require_session(session_id)
+        gone = await console.sessions.forget_grant(session_id)
         still = {
             g.key
             for g in console.sessions.book.visible(session_id)
@@ -170,14 +134,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         ``everywhere`` says so.
         """
         console.require_store()
-        await _require_session(console, session_id)
-        gone = (
-            await _sessions_call(
-                console, console.sessions.forget_folder(session_id, path), session_id
-            )
-            if path
-            else []
-        )
+        await console.require_session(session_id)
+        gone = await console.sessions.forget_folder(session_id, path) if path else []
         if not gone:
             raise ApiError(404, "not_found", t("errors.noGrant"))
         return JSONResponse(
@@ -191,7 +149,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def revoke_approval(session_id: str, entry_id: str) -> Response:
         """Take back one recorded approval: the step asks again; what ran stays run."""
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         if not console.approvals.revoke(session_id, entry_id):
             raise ApiError(404, "not_found", t("errors.noApproval"))
         return Response(status_code=204)
@@ -199,7 +157,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/memory")
     async def session_memory(session_id: str) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
         # Open sessions show their agent's cap; closed ones, the setting's cap.
@@ -233,20 +191,16 @@ def add_routes(app: FastAPI, console: Console) -> None:
         limit: int = Query(RUN_LIMIT, ge=1, le=_RUNS_MAX),
     ) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
-        turns: list[TurnInfo] = await _store_call(
-            console,
-            console.store.list_turns(session_id, limit=limit, before=before),
-            session_id,
+        await console.require_session(session_id)
+        turns: list[TurnInfo] = await console.store.list_turns(
+            session_id, limit=limit, before=before
         )
         # A running turn has no RunResult yet; it is the transcript's row.
         runs = [run_json(turn) for turn in turns if turn.status != "running"]
         has_earlier = False
         if turns:
-            older = await _store_call(
-                console,
-                console.store.list_turns(session_id, limit=1, before=turns[0].turn),
-                session_id,
+            older = await console.store.list_turns(
+                session_id, limit=1, before=turns[0].turn
             )
             has_earlier = bool(older)
         return JSONResponse(content={"runs": runs, "has_earlier": has_earlier})

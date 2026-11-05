@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from localmelo.support.browser.driver import Element, FieldAttrs, StaleElementError
-from localmelo.support.browser.safari import PAGE_JS, _element
+from localmelo.support.browser.pagescript import PAGE_JS, _element
 from localmelo.tests.browser.fakes import FakeDriver, button, link, page
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_provider import run, tools_of

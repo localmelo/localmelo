@@ -18,7 +18,6 @@ from fastapi.responses import Response
 
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import pictures
-from localmelo.support.sessions.store import SessionStoreError
 
 from .errors import ApiError
 
@@ -37,12 +36,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         session_id: str, path: str = Query(..., min_length=1, max_length=4096)
     ) -> Response:
         console.require_store()
-        try:
-            info = await console.store.get_session(session_id)
-        except SessionStoreError as exc:
-            raise await console.store_api_error(exc, session_id) from exc
-        if info is None:
-            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
+        info = await console.require_session(session_id)
         if not info.workspace:
             raise ApiError(404, "not_found", t("errors.noFolder"))
         try:

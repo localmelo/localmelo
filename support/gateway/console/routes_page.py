@@ -14,9 +14,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
-from localmelo.support.gateway.i18n import t
-from localmelo.support.sessions.store import SessionInfo, SessionStoreError
-
 from .bodies import Body
 from .errors import ApiError
 
@@ -33,24 +30,13 @@ class PresenceRequest(Body):
     session_id: str
 
 
-async def _require_session(console: Console, session_id: str) -> SessionInfo:
-    """The session's row, or 404 / 503 as 2.2 maps them."""
-    try:
-        info = await console.store.get_session(session_id)
-    except SessionStoreError as exc:
-        raise await console.store_api_error(exc, session_id) from exc
-    if info is None:
-        raise ApiError(404, "not_found", t("errors.sessionNotFound"))
-    return info
-
-
 def add_routes(app: FastAPI, console: Console) -> None:
     """Register the level and presence routes on *app*."""
 
     @app.post("/api/sessions/{session_id}/level")
     async def set_level(session_id: str, body: LevelRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        await console.require_session(session_id)
         try:
             level = console.gate.set_level(session_id, body.level)
         except ValueError as exc:  # Pydantic bounds it; the gate is the authority.
@@ -60,7 +46,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/presence")
     async def presence(body: PresenceRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, body.session_id)
+        await console.require_session(body.session_id)
         console.gate.presence(body.session_id)
         return JSONResponse(content={"ok": True})
 

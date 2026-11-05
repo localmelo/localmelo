@@ -138,13 +138,7 @@ class FakeSource {
 }
 
 function followFixture({status = 'running', busy = true, events = [{id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Brief'}}]} = {}) {
-  const f = {sources: [], timers: [], calls: [], draws: 0, status, busy, listeners: new Set(), statusCalls: []};
-  f.doc = {
-    visibilityState: 'visible',
-    addEventListener: (type, fn) => f.listeners.add(fn),
-    removeEventListener: (type, fn) => f.listeners.delete(fn),
-  };
-  f.show = (state) => { f.doc.visibilityState = state; for (const fn of f.listeners) fn(); };
+  const f = {sources: [], timers: [], calls: [], draws: 0, status, busy, statusCalls: []};
   f.timer = (ms) => f.timers.find((t) => t.ms === ms && !t.cleared);
   f.statusRow = {follow: (id) => f.statusCalls.push(['follow', id]), bump: () => f.statusCalls.push(['bump']), clear: () => f.statusCalls.push(['clear'])};
   f.history = workerHistory(async (path) => {
@@ -156,7 +150,7 @@ function followFixture({status = 'running', busy = true, events = [{id: 1, turn:
     open: (url) => { const source = new FakeSource(url); f.sources.push(source); return source; },
     schedule: (fn, ms) => { const timer = {fn, ms, cleared: false}; f.timers.push(timer); return timer; },
     cancel: (timer) => { timer.cleared = true; },
-    statusRow: f.statusRow, doc: f.doc,
+    statusRow: f.statusRow,
   });
   return f;
 }
@@ -209,8 +203,7 @@ test('the end of the stream reads the record once and stops when the run is fini
   assert.equal(source.closed, true);
   assert.equal(f.history.state.session.status, 'completed');
   assert.equal(f.sources.length, 1, 'no stream is opened for a finished run');
-  assert.equal(f.timer(2000), undefined);
-  assert.equal(f.listeners.size, 0, 'the visibility handler is gone');
+  assert.equal(f.timer(1000), undefined);
 });
 
 test('a stream that ends while the run still holds its lease is opened again after the last id', async () => {
@@ -220,7 +213,7 @@ test('a stream that ends while the run still holds its lease is opened again aft
   f.sources[0].end();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(f.sources.length, 1);
-  f.timer(2000).fn();
+  await f.timer(1000).fn();
   assert.equal(f.sources.length, 2);
   assert.equal(f.sources[1].url, '/api/sessions/w/events?after=2');
 });
@@ -231,21 +224,7 @@ test('a run that was deleted ends the follow instead of retrying', async () => {
   f.gone = true;
   f.sources[0].end();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(f.timer(2000), undefined);
-  assert.equal(f.listeners.size, 0);
-});
-
-test('a hidden tab stops following and a shown one catches up from the last id', async () => {
-  const f = followFixture();
-  await f.history.detail('w');
-  f.sources[0].emit(message(2));
-  f.show('hidden');
-  assert.equal(f.sources[0].closed, true);
-  f.show('visible');
-  assert.equal(f.sources.length, 2);
-  assert.equal(f.sources[1].url, '/api/sessions/w/events?after=2');
-  f.show('visible');
-  assert.equal(f.sources.length, 2, 'a stream that is open is not opened twice');
+  assert.equal(f.timer(1000), undefined);
 });
 
 test('a run that is already finished, or has no live lease, is not followed', async () => {
@@ -253,7 +232,6 @@ test('a run that is already finished, or has no live lease, is not followed', as
     const f = followFixture(options);
     await f.history.detail('w');
     assert.equal(f.sources.length, 0);
-    assert.equal(f.listeners.size, 0);
   }
 });
 
@@ -265,7 +243,6 @@ test('leaving or choosing another run closes the stream, the timers and the stat
   f.history.leave();
   assert.equal(f.sources[0].closed, true);
   assert.equal(pendingDraw.cleared, true);
-  assert.equal(f.listeners.size, 0);
   assert.deepEqual(f.statusCalls.at(-1), ['clear']);
   f.sources[0].emit({id: 3, turn: 1, type: 'tool.started', ts: 3, data: {step: 1, call_id: 'c', name: 'shell_exec', arguments: {}}});
   assert.equal(f.history.state.view.turns[0].items.length, 0, 'a frame from a closed stream is dropped');
@@ -281,7 +258,7 @@ test('without an EventSource the unfinished run is read again on the poll', asyn
     calls.push(path);
     if (path.includes('/turns')) return {turns: [{turn: 1, status: 'running', events: []}], has_earlier: false};
     return {session: {id: 'w', kind: 'worker', status: 'running'}};
-  }, () => {}, (fn) => { ticks.push(fn); return () => {}; }, {open: () => null, doc: undefined});
+  }, () => {}, (fn) => { ticks.push(fn); return () => {}; }, {open: () => null});
   await history.detail('w');
   const reads = calls.length;
   await ticks[0]();
@@ -317,7 +294,7 @@ test('a terminal chat is listed under its own kind, opens, and follows while its
     return {session: {id: 't', kind: 'terminal', status: 'running', busy: true}};
   }, () => {}, () => () => {}, {
     open: (url) => { const source = new FakeSource(url); f.sources.push(source); return source; },
-    schedule: (fn, ms) => ({fn, ms}), cancel: () => {}, doc: f.doc,
+    schedule: (fn, ms) => ({fn, ms}), cancel: () => {},
   });
   history.state.kind = 'terminal';
   await history.list();
@@ -350,7 +327,7 @@ test('an idle terminal chat is watched by its record and followed when a turn st
     return {session: {id: 't', kind: 'terminal', status: state.running ? 'running' : 'completed', busy: state.running, updated_at: state.updated}};
   }, () => f.draws++, (fn) => { polls.push(fn); return () => {}; }, {
     open: (url) => { const source = new FakeSource(url); f.sources.push(source); return source; },
-    schedule: (fn, ms) => ({fn, ms}), cancel: () => {}, doc: f.doc,
+    schedule: (fn, ms) => ({fn, ms}), cancel: () => {},
   });
   await history.detail('t');
   assert.equal(f.sources.length, 0, 'a finished chat opens no stream');

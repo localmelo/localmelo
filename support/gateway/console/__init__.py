@@ -79,7 +79,7 @@ from . import (
 from .asks import OwnerAsks
 from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
-from .errors import ApiError
+from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
@@ -103,21 +103,6 @@ logger = logging.getLogger(__name__)
 
 # Seconds between retries of a store open that failed.
 STORE_RETRY_S: Final = 5.0
-
-# What an API v2 message says when another process holds the store's owner
-# lock. It never names the other process: spec 2.2 keeps lease holder
-# strings out of API messages. The terminal keeps the store's own text.
-STORE_OWNED_MESSAGE: Final = (
-    "Another melo gateway is using the console's session file. "
-    "Stop it to use the console here."
-)
-
-
-def store_message(exc: SessionStoreError) -> str:
-    """A store failure as an API v2 message, with the home folder written ``~``."""
-    if isinstance(exc, StoreOwnedError):
-        return STORE_OWNED_MESSAGE
-    return display.home_label(str(exc))
 
 
 @dataclass(frozen=True)
@@ -664,7 +649,7 @@ class Console:
     def store_error(self) -> str:
         """Why the store is not ``ok``, with the home folder as ``~``."""
         if self.store.failed is not None:
-            return display.home_label(str(self.store.failed))
+            return display.home_labelled(str(self.store.failed))
         if self._store_ok:
             return ""
         return self._store_error
@@ -682,31 +667,41 @@ class Console:
             self._store_error or t("errors.storeUnavailable"),
         )
 
+    async def require_session(self, session_id: str) -> SessionInfo:
+        """The row of *session_id*, or 404 ``not_found``.
+
+        A store failure is the exception handler's: 503, or 404 when the row is gone.
+        """
+        info = await self.store.get_session(session_id)
+        if info is None:
+            raise ApiError(404, "not_found", t("errors.sessionNotFound"))
+        return info
+
     async def store_api_error(
         self, exc: SessionStoreError, session_id: str | None = None
     ) -> ApiError:
         """Map a store failure as API v2 says, by state and never by message text.
 
         A failure while ``store.failed`` is set is a 503 without a second
-        read. Any other failure makes the route read the row again: a
-        missing row is 404 ``This session was deleted.``, anything else 503.
+        read. Any other failure makes the route read the row again: a row
+        that is in neither the gateway's file nor the worker history is
+        404 ``This session was deleted.``, anything else 503. A worker or
+        terminal session is never in the gateway's file, so its failure is 503.
+        A 503 says one fixed thing; the failure's own text, which can name a
+        folder, goes to the log.
         """
         if self.store.failed is not None:
             return ApiError(503, "store_unavailable", FAILED_ERROR)
         if session_id is not None:
             try:
                 info = await self.store.get_session(session_id)
+                if info is None:
+                    info = await self.worker_history.get_session(session_id)
             except SessionStoreError:
-                return ApiError(
-                    503, "store_unavailable", self._store_error or store_message(exc)
-                )
+                return store_unavailable(exc)
             if info is None:
                 return ApiError(404, "not_found", t("errors.sessionDeleted"))
-        return ApiError(
-            503,
-            "store_unavailable",
-            self._store_error or store_message(exc),
-        )
+        return store_unavailable(exc)
 
     # ── Event streams ──
 

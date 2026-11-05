@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import TOOL_ASK, ApprovalDecision
-from localmelo.support.browser import render, safari
+from localmelo.support.browser import pagescript, render, safari
 from localmelo.support.browser.driver import (
     ActResult,
     BrowserDriver,
@@ -860,9 +860,9 @@ async def test_a_button_that_sends_a_form_says_so_in_the_page_block() -> None:
 
 def test_nothing_the_page_scripts_do_reads_cookies_or_storage() -> None:
     for script in (
-        safari.PAGE_JS,
-        safari.FOCUS_JS,
-        safari.act_script({"act": "click", "url": "", "at": 0}),
+        pagescript.PAGE_JS,
+        pagescript.FOCUS_JS,
+        pagescript.act_script({"act": "click", "url": "", "at": 0}),
     ):
         for word in ("cookie", "localStorage", "sessionStorage", "indexedDB", "caches"):
             assert word.lower() not in script.lower(), word
@@ -875,7 +875,8 @@ def test_there_is_no_tool_or_driver_call_for_cookies_or_storage() -> None:
         assert word not in names, word
         assert word not in members, word
     # The one place the word appears is the comment that promises it.
-    source = inspect.getsource(safari).lower().replace("cookies or storage", "")
+    source = (inspect.getsource(safari) + inspect.getsource(pagescript)).lower()
+    source = source.replace("cookies or storage", "")
     assert "cookie" not in source
 
 

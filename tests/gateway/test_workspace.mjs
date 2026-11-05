@@ -1150,7 +1150,7 @@ test('a 401 locks, preserves the draft, closes the stream and suppresses retries
   for (const timer of h.timers.filter((item) => item.interval)) await timer.handler();
   source.fail();
   assert.equal(h.net.calls.length, count);
-  assert.equal(h.state().stream.timer, null);
+  assert.equal(h.state().stream, null);
 });
 
 test('a stream failure closes browser retries and a 401 on reconnect locks', async () => {
@@ -2047,7 +2047,8 @@ test('title and independent banners follow active state without replacing notice
   await h.run('init()');
   h.state().health = {...health, configured: false, sessions: {...health.sessions, store: 'error', store_error: 'database offline'}};
   h.state().view.pending.set('req', {});
-  h.run('notify("Other error", {sticky: true}); S.stream.status = "paused"; S.stream.retryAt = 0; syncUI()');
+  h.stream().fail();
+  h.run('notify("Other error", {sticky: true}); syncUI()');
   assert.match(h.context.document.title, /localmelo · New chat · 1/);
   assert.match(h.element('store-banner').textContent, /database offline/);
   assert.match(h.element('model-banner').textContent, /No model/);
@@ -2063,7 +2064,8 @@ test('status banners do not rewrite unchanged live text', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   h.state().health = {...health, configured: false, sessions: {...health.sessions, store: 'error', store_error: 'offline'}};
-  h.run('S.stream.status="paused"; S.stream.retryAt=0; syncUI()');
+  h.stream().fail();
+  h.run('syncUI()');
   const writes = {};
   for (const id of ['store-banner', 'model-banner', 'stream-banner-text']) {
     const node = h.element(id);
@@ -3608,6 +3610,18 @@ test('a closed stream reopens from the last event id', async () => {
   assert.equal(h.stream().url, '/api/sessions/a/events?after=12&watch=true');
 });
 
+test('a hidden page keeps following its chat', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const source = h.stream();
+  h.context.document.hidden = true;
+  for (const handler of h.documentListeners.visibilitychange) handler();
+  assert.equal(source.closed, false);
+  source.emit({id: 12, turn: 1, ts: 30, type: 'turn.undone', data: {turn: 1, turn_id: 'turn-1'}});
+  assert.equal(h.state().view.lastEventId, 12, 'a frame that arrives while the page is hidden is folded in');
+  assert.equal(FakeEventSource.instances.length, 1);
+});
+
 test('the open chat\'s row follows the frames the page sees', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
@@ -3645,10 +3659,11 @@ test('a stream paused on a deleted chat starts a new one instead of reopening', 
   const routes = baseRoutes();
   const h = harness(routes);
   await h.run('init()');
-  h.stream().fail();
   routes['GET /sessions/a'] = {status: 404, body: {error: {code: 'not_found', message: 'Session not found.'}}};
+  h.stream().fail();
   const timer = h.timers.find((entry) => !entry.interval && entry.ms === 1000 && !entry.cleared);
-  await timer.handler();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(timer.cleared, true, 'The wait ends when the chat is found gone');
   assert.equal(FakeEventSource.instances.length, 1, 'No stream reopens on a chat that is gone');
   assert.equal(h.state().activeId, null);
   assert.match(h.element('notice').textContent, /This chat expired or the gateway restarted/);
@@ -4688,7 +4703,7 @@ test('a task that never started shows nothing live and reads no session', async 
   assert.equal(taskStream(h), undefined);
 });
 
-test('the live stream closes in a hidden tab, resumes after the last id, and ends with the task', async () => {
+test('the live stream ends with the task, and the card shows its steps', async () => {
   let state = 'running';
   let events = [liveStarted];
   const h = await openTask({
@@ -4696,22 +4711,13 @@ test('the live stream closes in a hidden tab, resumes after the last id, and end
     [TURNS_T1]: () => ({turns: [turnRow({user_text: 'Objective of t1', status: state === 'running' ? 'running' : 'completed', answer: '', events})], has_earlier: false}),
     'GET /sessions/t1/status': {session_id: 't1', segments: []},
   });
-  const first = taskStream(h);
-  first.emit(liveTool(2));
-  const visibility = h.documentListeners.visibilitychange.at(-1);
-  h.context.document.visibilityState = 'hidden';
-  visibility();
-  assert.equal(first.closed, true);
-  h.context.document.visibilityState = 'visible';
-  visibility();
-  assert.equal(taskStream(h).url, '/api/sessions/t1/events?after=2&watch=true');
-  assert.notEqual(taskStream(h), first);
-  const second = taskStream(h);
+  const stream = taskStream(h);
+  stream.emit(liveTool(2));
   state = 'done';
   events = [liveStarted, liveTool(2), liveTool(3)];
   const poll = h.timers.find((timer) => timer.interval && timer.ms === 3000);
   await poll.handler(); await settle();
-  assert.equal(second.closed, true, 'the stream ends when the task is done');
+  assert.equal(stream.closed, true, 'the stream ends when the task is done');
   assert.equal(taskReads(h), 2, 'one more read catches up with the last events');
   assert.equal(findNode(liveBox(h), (node) => node.classList.contains('tool-card')) !== null, true);
   assert.equal(findNode(liveBox(h), (node) => node.textContent === 'Live'), null, 'a task that ended is no longer Live');

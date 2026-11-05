@@ -892,6 +892,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   exits 2 (a run on the configured backend exited 1 for those five). The interactive terminal on `--base-url` reads the
   file's `[agent]` and `[retrieval]` defaults and `tool_env` as it does for a configured backend. The flags that set one
   option are rows of one table (`support/flag_options.py`), so a new flag is one row (#504).
+- Gateway internals: one handler answers a store failure and a busy chat for every route, the guard alone checks the size
+  and type of a request body (the console's copy of those checks is gone), and an unused store helper is deleted.
+  Answers that changed: a store call that failed says "The session store is not available." (the cause goes to the
+  log); a chat, task or chore that is not there is a 404 and a refused task change a 409 on every route (some said 503);
+  a JSON body nested too deep is a 400 (it was a bare 500). Every other refusal is as before.
+- One way to follow a chat's live events in the console, for the chat, a task's Live section and the Workers view. A
+  page that is hidden keeps following (a task card or a worker run used to stop until the page returned), so a card
+  Auto shows can still be answered when you come back within its wait, and every view opens a stream that ended again
+  after 1, 2, 4, 8, 16 and then 30 seconds.
+- Safari's and Chrome's browsing now share one module for the page scripts and for reading a page, waiting,
+  taking a picture and saying what is at a point (`support/browser/pagescript.py`); the Chrome driver no longer
+  imports from the Safari driver. Browsing behaves as before (#505).
 - Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.

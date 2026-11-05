@@ -35,7 +35,12 @@ from localmelo.support.config import (  # noqa: E402
 from localmelo.support.gateway import GatewayServer  # noqa: E402
 from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
-from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
+from localmelo.support.gateway.guard import (  # noqa: E402
+    LoopbackGuard,
+    is_json_content_type,
+    is_loopback,
+    is_upload_content_type,
+)
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
 
 PORT = 8401
@@ -871,6 +876,174 @@ def test_a_non_empty_api_body_without_json_content_type_is_415(
     assert resp.status_code == 415
     assert resp.headers["cache-control"] == "no-store"
     assert resp.json()["error"]["code"] == "unsupported_media_type"
+
+
+@pytest.mark.parametrize(
+    ("values", "accepted"),
+    [
+        (["application/json"], True),
+        (["Application/JSON; charset=UTF-8"], True),
+        (['application/json; charset="utf-8"'], True),
+        ([], False),
+        (["text/plain"], False),
+        (["application/json", "application/json"], False),
+        (["application/json;"], False),
+        (["application/json; charset"], False),
+        (["application/json; charset=utf-16"], False),
+    ],
+)
+def test_only_one_json_content_type_is_json(values: list[str], accepted: bool) -> None:
+    assert is_json_content_type(values) is accepted
+
+
+@pytest.mark.parametrize(
+    ("values", "accepted"),
+    [
+        (["image/png"], True),
+        (["Image/PNG; charset=binary"], True),
+        ([" image/jpeg ;x=y"], True),
+        (["application/octet-stream"], True),
+        ([], False),
+        (["text/plain"], False),
+        (["application/json"], False),
+        (["image/png", "image/png"], False),
+        (["image/png", "image/jpeg"], False),
+    ],
+)
+def test_only_one_image_content_type_is_an_upload(
+    values: list[str], accepted: bool
+) -> None:
+    assert is_upload_content_type(values) is accepted
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers", "status"),
+    [
+        ("PUT", "/api/settings", [(b"content-length", b"1048577")], 413),
+        ("POST", "/v1/agent/run", [(b"content-length", b"1048577")], 413),
+        ("POST", "/api/uploads", [(b"content-length", b"20971521")], 413),
+        ("PUT", "/api/settings", [(b"content-length", b"5")], 415),
+        ("POST", "//api/uploads", [(b"content-length", b"5")], 415),
+        # Several Content-Length headers: one over the limit refuses the body.
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"5"), (b"content-length", b"1048577")],
+            413,
+        ),
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"1048577"), (b"content-length", b"5")],
+            413,
+        ),
+        (
+            "PUT",
+            "/api/settings",
+            [(b"content-length", b"0"), (b"content-length", b"5")],
+            415,
+        ),
+        # Two image types are no image type.
+        (
+            "POST",
+            "/api/uploads",
+            [
+                (b"content-length", b"5"),
+                (b"content-type", b"image/png"),
+                (b"content-type", b"image/png"),
+            ],
+            415,
+        ),
+    ],
+)
+async def test_a_body_its_headers_refuse_is_never_read(
+    method: str, path: str, headers: list[tuple[bytes, bytes]], status: int
+) -> None:
+    inner = InnerApp()
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        raise AssertionError("the body was read")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "headers": [(b"host", f"127.0.0.1:{PORT}".encode()), *headers],
+    }
+    await LoopbackGuard(inner, port=PORT)(scope, receive, send)
+    assert sent[0]["status"] == status
+    assert inner.scopes == []
+
+
+@pytest.mark.parametrize(
+    ("length", "status"),
+    [
+        pytest.param(b"abc", 200, id="letters"),
+        # "²" is a digit to str.isdigit and no number to int.
+        pytest.param(b"\xb2", 200, id="superscript"),
+        pytest.param(b"\xd9\xa5", 200, id="utf8-digit-read-as-latin-1"),
+        # More digits than int() will read.
+        pytest.param(b"1" * 5000, 413, id="5000-digits"),
+        pytest.param(b"0" * 5000, 200, id="5000-zeros"),
+    ],
+)
+async def test_a_content_length_that_is_not_plain_digits_is_no_number(
+    length: bytes, status: int
+) -> None:
+    """Such a header is judged as the guard judges any text, and never raises."""
+    scope = _http_scope(
+        [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"content-type", b"application/json"),
+            (b"content-length", length),
+        ]
+    )
+
+    sent, _ = await _call_guard(scope)
+
+    assert sent[0]["status"] == status
+
+
+async def test_the_body_is_replayed_once_and_the_servers_disconnect_follows() -> None:
+    """The app reads the whole body in one message, then hears the client go."""
+    received: list[Message] = []
+
+    async def reads_twice(scope: Scope, receive: Receive, send: Send) -> None:
+        received.append(await receive())
+        received.append(await receive())
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    pieces = [b'{"a"', b":1}"]
+
+    async def receive() -> Message:
+        if pieces:
+            return {
+                "type": "http.request",
+                "body": pieces.pop(0),
+                "more_body": bool(pieces),
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        pass
+
+    scope = _http_scope(
+        [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"content-type", b"application/json"),
+        ]
+    )
+    await LoopbackGuard(reads_twice, port=PORT)(scope, receive, send)
+
+    assert received == [
+        {"type": "http.request", "body": b'{"a":1}', "more_body": False},
+        {"type": "http.disconnect"},
+    ]
 
 
 def test_an_empty_api_body_needs_no_content_type(gateway: Gateway) -> None:
