@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -27,6 +27,8 @@ SIGNALS = ("rehearsal", "user_request", "user_statement", "outcome", "sleep")
 # What the store also accepts: the user's own tap on a proposal, or edit, and a
 # line brought in from a file another assistant keeps ("import").
 STORE_SIGNALS = (*SIGNALS, "user_confirm", "user_edit", "import")
+# A decision row keeps at most this many characters of its reason.
+MAX_REASON_CHARS = 500
 
 
 class LongTermSchemaError(Exception):
@@ -80,9 +82,12 @@ class _Entry:
     embed_dim: int = 0
 
 
-def _meta(entry: _Entry) -> dict[str, Any]:
-    """The legacy metadata merged with the typed columns, as search returns it."""
-    provenance = copy.deepcopy(entry.provenance)
+def _typed_meta(entry: _Entry) -> dict[str, Any]:
+    """The legacy metadata merged with the typed columns, as search returns it.
+
+    The provenance is used as it stands, so the caller passes a copy it owns.
+    """
+    provenance = entry.provenance
     origin = provenance.get("origin_task_ids")
     if isinstance(origin, list | tuple) and all(isinstance(i, str) for i in origin):
         origin_task_ids = list(origin)
@@ -111,6 +116,11 @@ def _meta(entry: _Entry) -> dict[str, Any]:
     }
 
 
+def _meta(entry: _Entry) -> dict[str, Any]:
+    """:func:`_typed_meta` of *entry*, with a copy of its provenance."""
+    return _typed_meta(replace(entry, provenance=copy.deepcopy(entry.provenance)))
+
+
 def _stored(entry: _Entry) -> StoredEntry:
     vector: tuple[float, ...] | None = (
         None if entry.vector.size == 0 else tuple(float(v) for v in entry.vector)
@@ -136,12 +146,104 @@ def _stored(entry: _Entry) -> StoredEntry:
     )
 
 
-def _tie_key(entry: _Entry, score: float) -> tuple[float, bool, float]:
-    """The documented equal-score order: rehearsed, then newest."""
+def _tie_key(
+    score: float, admitted_by: str, created_at: float
+) -> tuple[float, bool, float]:
+    """The documented equal-score order: rehearsed, then newest.
+
+    The sort is stable, so the final tie keeps the rows' own order (id
+    ascending): a legacy file's equal scores stay in the order it wrote.
+    """
     return (
         score,
-        entry.admitted_by == "rehearsal",
-        entry.created_at if entry.admitted_by else 0.0,
+        admitted_by == "rehearsal",
+        float(created_at or 0.0) if admitted_by else 0.0,
+    )
+
+
+def _by_tie_key(item: tuple[_Entry, float]) -> tuple[float, bool, float]:
+    entry, score = item
+    return _tie_key(score, entry.admitted_by, entry.created_at)
+
+
+def check_write(kind: str, source: str, admitted_by: str, action: str) -> None:
+    """Refuse a value outside the closed sets, before any store is touched."""
+    for name, value, allowed in (
+        ("kind", kind, KINDS),
+        ("source", source, SOURCES),
+        ("admitted_by", admitted_by, STORE_SIGNALS),
+        ("action", action, ACTIONS),
+    ):
+        if value not in allowed:
+            raise ValueError(f"Unknown long-term {name}: {value!r}")
+
+
+@dataclass(frozen=True)
+class WritePlan:
+    """What a store writes for one decision; see :func:`plan_write`.
+
+    ``action`` and ``target_id`` are the final ones, as the decision row keeps
+    them. ``links`` and ``supersedes`` name rows that exist. ``metadata`` and
+    ``created_at`` are for the new entry; an ``IGNORE`` writes no entry.
+    """
+
+    action: str
+    target_id: int | None
+    reason: str
+    created_at: float
+    links: tuple[int, ...]
+    supersedes: int | None
+    metadata: dict[str, Any]
+
+
+def plan_write(
+    *,
+    kind: str,
+    action: str,
+    target_id: int | None,
+    target_status: str | None,
+    reason: str,
+    provenance: dict[str, Any],
+    task_id: str,
+    session_id: str,
+    created_at: float,
+    now: float,
+) -> WritePlan:
+    """Decide what one write does. Pure: both stores call it and keep their I/O.
+
+    The caller has run :func:`check_write`. *target_status* is the status of
+    the row *target_id* names, ``None`` when the store has no such row, and
+    *now* is the store's clock.
+
+    - An ``UPDATE`` whose target is missing or not active becomes a ``NEW``
+      and drops its target, so the decision row says what happened.
+    - An ``UPDATE`` supersedes its target and links to it; a ``CONFLICT`` or
+      a ``RELATED`` links to its target only when that row exists. A missing
+      target stays in the decision row, with no link.
+    - The decision row keeps at most ``MAX_REASON_CHARS`` of the reason.
+    """
+    if action == "UPDATE" and target_status != "active":
+        action, target_id = "NEW", None
+    exists = target_id is not None and target_status is not None
+    linked = exists and action in ("UPDATE", "RELATED", "CONFLICT")
+    created = created_at or now
+    metadata: dict[str, Any] = {
+        "task_id": task_id,
+        "session_id": session_id,
+        "created_at": created,
+        "origin_task_ids": list(provenance.get("origin_task_ids") or ())
+        or ([task_id] if task_id else []),
+    }
+    if kind == "reflection":
+        metadata["type"] = "reflection"
+    return WritePlan(
+        action=action,
+        target_id=target_id,
+        reason=reason[:MAX_REASON_CHARS],
+        created_at=created,
+        links=(target_id,) if linked and target_id is not None else (),
+        supersedes=target_id if linked and action == "UPDATE" else None,
+        metadata=metadata,
     )
 
 
@@ -200,95 +302,64 @@ class LongTerm:
 
         *record* is for a records file's columns; this store keeps none.
         """
-        for name, value, allowed in (
-            ("kind", kind, KINDS),
-            ("source", source, SOURCES),
-            ("admitted_by", admitted_by, STORE_SIGNALS),
-            ("action", action, ACTIONS),
-        ):
-            if value not in allowed:
-                raise ValueError(f"Unknown long-term {name}: {value!r}")
-        target = self._find(target_id) if target_id is not None else None
-        if action == "UPDATE" and (target is None or target.status != "active"):
-            # The SQLite twin clears the target on this downgrade; the two
-            # stores must answer the same decision row (review finding 12).
-            action = "NEW"
-            target = None
-            target_id = None
-        if action == "IGNORE":
-            if target is not None:
-                target.uses += 1
-                target.last_used_at = time.time()
-            self._decisions.append(
-                self._decision_row(
-                    len(self._decisions) + 1,
-                    candidate_id=candidate_id,
-                    action=action,
-                    kind=kind,
-                    admitted_by=admitted_by,
-                    entry_id=None,
-                    target_id=target_id,
-                    reason=reason,
-                    source_ids=source_ids,
-                    text=text,
-                    keep_text=keep_text,
-                    task_id=task_id,
-                )
-            )
-            self._index = None
-            return None, action
-        now = created_at or time.time()
-        vector = (
-            np.asarray(embedding, dtype=np.float32)
-            if embedding is not None
-            else np.empty(0, dtype=np.float32)
-        )
-        links: tuple[int, ...] = ()
-        supersedes: int | None = None
-        if action == "UPDATE" and target is not None:
-            supersedes = target.id
-            links = (target.id,)
-            target.status = "superseded"
-        elif action in ("CONFLICT", "RELATED") and target is not None:
-            links = (target.id,)
-        meta: dict[str, Any] = {
-            "task_id": task_id,
-            "session_id": session_id,
-            "created_at": now,
-            "origin_task_ids": list(provenance.get("origin_task_ids") or ())
-            or ([task_id] if task_id else []),
-        }
-        if kind == "reflection":
-            meta["type"] = "reflection"
-        entry = _Entry(
-            id=self._next_id,
-            text=text,
-            vector=vector,
-            metadata=meta,
+        check_write(kind, source, admitted_by, action)
+        now = time.time()
+        target = self._find(target_id)
+        plan = plan_write(
             kind=kind,
-            source=source,
-            status="active",
-            admitted_by=admitted_by,
-            supersedes=supersedes,
-            links=links,
-            provenance=copy.deepcopy(provenance),
+            action=action,
+            target_id=target_id,
+            target_status=None if target is None else target.status,
+            reason=reason,
+            provenance=provenance,
             task_id=task_id,
             session_id=session_id,
-            created_at=now,
-            embed_dim=int(vector.size),
+            created_at=created_at,
+            now=now,
         )
-        self._next_id += 1
-        self._entries.append(entry)
+        entry_id: int | None = None
+        if plan.action == "IGNORE":
+            if target is not None:
+                target.uses += 1
+                target.last_used_at = now
+        else:
+            vector = (
+                np.asarray(embedding, dtype=np.float32)
+                if embedding is not None
+                else np.empty(0, dtype=np.float32)
+            )
+            entry = _Entry(
+                id=self._next_id,
+                text=text,
+                vector=vector,
+                metadata=plan.metadata,
+                kind=kind,
+                source=source,
+                status="active",
+                admitted_by=admitted_by,
+                supersedes=plan.supersedes,
+                links=plan.links,
+                provenance=copy.deepcopy(provenance),
+                task_id=task_id,
+                session_id=session_id,
+                created_at=plan.created_at,
+                embed_dim=int(vector.size),
+            )
+            self._next_id += 1
+            self._entries.append(entry)
+            entry_id = entry.id
+            if target is not None and plan.supersedes is not None:
+                target.status = "superseded"
         self._decisions.append(
             self._decision_row(
                 len(self._decisions) + 1,
                 candidate_id=candidate_id,
-                action=action,
+                action=plan.action,
                 kind=kind,
                 admitted_by=admitted_by,
-                entry_id=entry.id,
-                target_id=target_id,
-                reason=reason,
+                entry_id=entry_id,
+                target_id=plan.target_id,
+                reason=plan.reason,
                 source_ids=source_ids,
                 text=text,
                 keep_text=keep_text,
@@ -296,7 +367,7 @@ class LongTerm:
             )
         )
         self._index = None
-        return entry.id, action
+        return entry_id, plan.action
 
     @staticmethod
     def _decision_row(
@@ -382,7 +453,7 @@ class LongTerm:
                 for item in scored
                 if item[0].provenance.get("task_key") == task_key
             ]
-        scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
+        scored.sort(key=_by_tie_key, reverse=True)
         return [(entry.text, score, _meta(entry)) for entry, score in scored[:top_k]]
 
     async def search_embedding(self, *args: Any, **kwargs: Any) -> list[Any]:
@@ -417,7 +488,7 @@ class LongTerm:
                 for item in scored
                 if item[0].provenance.get("task_key") == task_key
             ]
-        scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
+        scored.sort(key=_by_tie_key, reverse=True)
         return [(entry.text, score, _meta(entry)) for entry, score in scored[:top_k]]
 
     async def active_entries(self, kind: str | None = None) -> list[StoredEntry]:
