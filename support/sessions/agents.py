@@ -173,8 +173,14 @@ def configured_session_options(
     *,
     explicit: Collection[str] = (),
     budget_overrides: Mapping[str, int | None] | None = None,
+    backend: str | None = None,
 ) -> AgentOptions:
-    """Config defaults for a session; names in *explicit* retain the caller's values."""
+    """Config defaults for a session; names in *explicit* retain the caller's values.
+
+    A window that the config leaves unset is the default of *backend*, the key
+    of the server the session talks to (``openai-compatible`` for a URL); it is
+    ``cfg.chat_backend`` when None.
+    """
     options = options or AgentOptions()
     overrides = {
         name: getattr(options, name)
@@ -204,7 +210,7 @@ def configured_session_options(
         if name not in explicit
     }
     if "window_messages" in fields:
-        fields["window_messages"] = cfg.agent.window_for(cfg.chat_backend)
+        fields["window_messages"] = cfg.agent.window_for(backend or cfg.chat_backend)
     if fields.get("reasoning", options.reasoning) != "legacy":
         for name, key in (
             ("retriever", "retriever"),

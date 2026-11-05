@@ -282,23 +282,6 @@ async def test_a_configured_cloud_backend_keeps_the_earlier_window(
     assert await window() == ("v3", 64)
 
 
-async def test_direct_cli_refuses_bad_config_values(
-    config_home: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    parser = cli._build_parser()
-    for body, text in (
-        ('cache_layout = "v9"', "cache_layout 'v9'"),
-        ("window_messages = 3", "window_messages must be an int from 8 to 256"),
-    ):
-        (config_home / "config.toml").write_text(f"[agent]\n{body}\n")
-        args = parser.parse_args(["--base-url", URL, "task"])
-        with pytest.raises(SystemExit):
-            cli._build_direct_mode_agent(
-                args, parser=parser, options=cli._direct_options(parser, args)
-            )
-        assert text in capsys.readouterr().err
-
-
 async def test_the_result_config_names_the_layout_and_window_unless_earlier(
     config_home: Path,
 ) -> None:

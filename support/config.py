@@ -1264,6 +1264,15 @@ class Config:
             *self._validate_request_timeout(),
         ]
 
+    def agent_errors(self) -> list[str]:
+        """The ``[agent]`` errors alone: a wrong kind of value, else a value out of range.
+
+        A path that reads the file without validating the rest (a direct run
+        on ``--base-url``) refuses a bad ``[agent]`` with the sentence
+        :meth:`validate` gives.
+        """
+        return self._type_errors(only=("agent",)) or self._validate_agent()
+
     def cli_errors(self) -> list[str]:
         """The ``[cli]`` errors alone, for a path that does not read the rest."""
         return self._type_errors(only=("cli",)) or self._validate_cli()

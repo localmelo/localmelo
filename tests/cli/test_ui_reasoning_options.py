@@ -48,12 +48,15 @@ def test_interactive_parser_accepts_the_newly_wired_provider_options(
     cli._check_args(parser, parser.parse_args(argv))
 
 
+@pytest.mark.parametrize("url", [False, True], ids=["configured", "url"])
 @pytest.mark.parametrize("override", [False, True])
 def test_launch_resolves_config_defaults_and_explicit_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     override: bool,
+    url: bool,
 ) -> None:
+    """A configured backend and a ``--base-url`` one resolve the file the same way."""
     cfg = configured()
     cfg.agent.reasoning = "compress"
     cfg.agent.note_writer = "heuristic"
@@ -80,13 +83,16 @@ def test_launch_resolves_config_defaults_and_explicit_flags(
         else []
     )
     consumer = mock.AsyncMock(return_value=(0, None))
+    choice = (
+        launch.Choice(
+            url_backend("http://127.0.0.1:9/v1", "stub", source="--base-url"), None
+        )
+        if url
+        else launch.Choice(config_backend(cfg, None), cfg)
+    )
     with (
         mock.patch.object(launch, "ui_terminal", return_value=True),
-        mock.patch.object(
-            launch,
-            "choose_backend",
-            return_value=launch.Choice(config_backend(cfg, None), cfg),
-        ),
+        mock.patch.object(launch, "choose_backend", return_value=choice),
         mock.patch.object(config, "load", return_value=cfg),
         mock.patch.object(launch, "configure_logging", return_value="test.log"),
         mock.patch.object(launch, "main_async", consumer),

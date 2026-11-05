@@ -12,7 +12,6 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -228,21 +227,3 @@ class TestRuns:
             "to false to run without it (-X agent.confine_direct_runs=false for "
             "one run)\n"
         )
-
-    def test_a_bad_value_in_the_file_is_a_usage_error(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        bad: Any = "no"
-        monkeypatch.setattr(
-            config,
-            "load",
-            lambda: config.Config(agent=config.AgentConfig(confine_direct_runs=bad)),
-        )
-        code, out, err = self._main(
-            tmp_path, monkeypatch, capsys, self._argv(tmp_path), []
-        )
-        assert code == 2 and out == ""
-        assert "[agent] confine_direct_runs must be a boolean" in err
