@@ -136,6 +136,8 @@ dot. `melo -h all` lists the keys with their defaults.
   behaves as its default did. `-X` and the option exit 2 and say it was removed. A
   config file that still holds one loads, the line is ignored, and `melo config`
   names it. `agent.window_eviction = "slide"` was removed too and reads as `"chunk"`.
+  `memory.followup_query` was removed the same way (it has no option) and behaves as its
+  default `"recent"` did.
 - `agent.answer_on_stop` is on by default (`-X agent.answer_on_stop=off` turns it off): it
   also answers a run whose request the server refused for a
   budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends

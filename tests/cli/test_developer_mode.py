@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -29,6 +31,7 @@ from localmelo.support.option_tiers import (
     USER,
 )
 from localmelo.tests.cli.test_direct_mode import _main
+from localmelo.tests.cli.test_direct_mode_process import _env
 from localmelo.tests.cli.test_e2e_pty import Melo
 from localmelo.tests.cli.test_e2e_pty import melo as melo
 from localmelo.tests.cli.test_e2e_pty import stub as stub
@@ -372,6 +375,29 @@ def test_the_worker_help_says_a_failed_check_exits_4() -> None:
     """The worker help tells a launcher's author when Check: lines run and what a failure does."""
     text = " ".join(command_words.help_text("worker").split())
     assert "Check: lines run when the model is done, and a failed check exits 4" in text
+
+
+# -- settings the benchmark reads -----------------------------------------------
+
+
+def test_the_benchmark_reads_two_settings_on_a_fresh_home(tmp_path: Path) -> None:
+    """Neither a config file nor developer mode is needed to read these two."""
+    for key, value in (
+        ("approvals.auto_asks", "true"),
+        ("agent.empty_reply_fallback", '"on"'),
+    ):
+        done = subprocess.run(
+            [sys.executable, "-I", "-m", "localmelo", "config", "get", key],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=_env(tmp_path),
+            cwd=tmp_path,
+            check=False,
+        )
+        assert (done.returncode, done.stdout.strip()) == (0, value), (key, done.stderr)
+    assert not (tmp_path / ".cache").exists()  # reading wrote no config
 
 
 # -- the banner ----------------------------------------------------------------

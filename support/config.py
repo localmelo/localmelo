@@ -122,10 +122,6 @@ MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
 # MemoryConfig.note_gate.
 MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
-# What a message with no content of its own ("go look it up") is searched with:
-# the user's words of the chat's last turns, or its own words: see
-# MemoryConfig.followup_query.
-MEMORY_FOLLOWUP_QUERY = ("recent", "message")
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
 RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
@@ -254,8 +250,8 @@ class ApprovalsConfig:
     card while someone sees the chat, and the riskiest are blocked and
     explained. Each chat keeps its own mode.
 
-    ``auto_asks`` (developer setting, #465): ``false`` never asks in Auto,
-    so every step it stops is blocked, as before #465 (for benchmarks).
+    ``auto_asks`` (advanced setting): ``false`` never asks in Auto, so every
+    step it stops is blocked, as when nobody watches (for benchmarks).
     """
 
     mode: str = "ask"  # ask | auto
@@ -461,12 +457,7 @@ class MemoryConfig:
     (also a note the model infers from what the user typed, kept as inferred); each
     level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
     similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). ``followup_query`` (#452) is what a message
-    with no content of its own ("go look it up", "continue", "继续") is searched
-    with: ``recent`` (the default) the message and the user's words of the chat's
-    last two turns that the model still shows, or ``message`` the message's own
-    words, as recall did before; with ``recent`` the first message of a new chat
-    that has no content recalls nothing. Two more are for questions about the person's
+    inferred note's bar is 0.15 lower). Two more are for questions about the person's
     own life that count, total or compare across things (#428), and apply to
     ``recall_form = "list"``.
     ``gather``, ``guide`` (the default: for such a question the block's vector bar is
@@ -510,7 +501,6 @@ class MemoryConfig:
     )
     note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
-    followup_query: str = "recent"  # recent | message: what "continue" searches with.
     gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
     gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
@@ -902,7 +892,6 @@ class Config:
             ("recall_form", MEMORY_RECALL_FORM),
             ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
-            ("followup_query", MEMORY_FOLLOWUP_QUERY),
             ("gather", MEMORY_GATHER),
             ("recall_source", MEMORY_RECALL_SOURCE),
             ("open_sources", MEMORY_OPEN_SOURCES),
