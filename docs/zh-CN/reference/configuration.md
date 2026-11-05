@@ -28,13 +28,13 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 
 | 键 | 表 | 默认值 | 说明 |
 |---|---|---|---|
-| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。必需。 |
-| `embedding_backend` | 顶层 | 未设置 | `mlc`、`ollama`、`vllm`、`sglang` 或 `none`；`omlx` 会被当作 `vllm`。必需。 |
+| `chat_backend` | 顶层 | 未设置 | 对话后端；见[后端](../guides/model-servers.md#backends)。对于 oMLX，使用 `omlx`（服务器自称 oMLX 时，首次运行的设置会写入它）或 `vllm`：两者都按 `vllm` 加载，并按原样保存。`melo_serve` 使用 [melo_serve](../guides/model-servers.md#melo_serve) 守护进程。必需。 |
+| `embedding_backend` | 顶层 | 未设置 | `mlc`、`ollama`、`vllm`、`sglang`、`melo_serve` 或 `none`；`omlx` 会被当作 `vllm`。必需。 |
 | `request_timeout_s` | 顶层 | 未设置 | 对话请求超时，以秒计；见[对话请求超时](#chat-request-timeout)。 |
 | `chat_url` | 本地后端 | 未设置 | 模型服务器的 URL。 |
-| `chat_model` | 本地或云端后端 | 未设置 | 要使用的模型。 |
+| `chat_model` | 本地或云端后端 | 未设置 | 要使用的模型。在 `[melo_serve]` 中留空表示 melo_serve 当前提供的模型。 |
 | `embedding_url` | 本地后端 | 未设置 | 嵌入服务器的 URL。 |
-| `embedding_model` | 本地后端 | 未设置 | 要使用的嵌入模型。 |
+| `embedding_model` | 本地后端 | 未设置 | 要使用的嵌入模型。在 `[melo_serve]` 中留空表示 melo_serve 当前提供的嵌入模型。 |
 | `extra_body` | 本地或云端后端 | 未设置 | 每次对话请求的额外字段；见[额外请求字段](#extra-request-fields-extra_body)。 |
 | `reasoning_field` | 本地或云端后端 | 未设置 | 推理随之发回的请求键：`auto`、`reasoning_content` 或 `reasoning`；`[ollama]` 改用 `auto` 或 `thinking`。见[推理](#reasoning)。 |
 | `requires_reasoning_replay` | 本地或云端后端 | `false` | 当服务器拒绝省略了回复推理的请求时为 `true`。见[推理](#reasoning)。 |
@@ -147,9 +147,22 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 
 全是默认值的 `[scheduler]` 表不会被写入，未知的调度器键会被丢弃，因此没有这张表的配置文件保持其确切字节；向导会保留非默认的策略。
 
-顶层键必须位于第一个 `[table]` 行之前。URL 的用法如下：
+顶层键必须位于第一个 `[table]` 行之前。
 
-- `mlc`、`vllm`（oMLX 也用它）和 `sglang`：`chat_url` 和 `embedding_url` 缺少 `/v1` 时会补上。
+`[melo_serve]` 表与其他本地后端一样，接受 `chat_url`、`chat_model`、`embedding_url` 和 `embedding_model`。melo_serve 的地址是 `http://127.0.0.1:8321/v1`。请让 `chat_model` 和 `embedding_model` 留空：localmelo 在创建提供方时会从 melo_serve 的状态文件（`~/.cache/melo_serve/state.json`，或 `MELO_SERVE_HOME` 之下）读取它当前提供哪个模型，因此 `melo-serve use <pick>` 的切换会被跟上。你写出的模型会按原样发送。
+
+```toml
+chat_backend = "melo_serve"
+embedding_backend = "melo_serve"
+
+[melo_serve]
+chat_url = "http://127.0.0.1:8321/v1"
+embedding_url = "http://127.0.0.1:8321/v1"
+```
+
+URL 的用法如下：
+
+- `mlc`、`vllm`（oMLX 也用它）、`sglang` 和 `melo_serve`：`chat_url` 和 `embedding_url` 缺少 `/v1` 时会补上。
 - `ollama`：对话使用 Ollama 自己的 `/api/chat`，因此 `chat_url` 不带 `/v1` 使用（结尾的 `/v1` 会被去掉）。`embedding_url` 会补上 `/v1`。
 - 云端后端：`base_url` 按原样使用。
 
@@ -285,7 +298,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 没有 `fixed_prefix` 时，两个值都不改变任何内容。`cache_layout` 为 `v3` 时，JSON 结果的 `config` 包含它，为 `v2` 时不包含。
 
-`[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
+`[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang、melo_serve）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
 
 你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。
 

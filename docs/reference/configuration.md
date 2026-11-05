@@ -36,13 +36,13 @@ before the run with a plain message (see
 
 | Key | Table | Default | Description |
 |---|---|---|---|
-| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. Required. |
-| `embedding_backend` | top level | not set | `mlc`, `ollama`, `vllm`, `sglang` or `none`; `omlx` is accepted as `vllm`. Required. |
+| `chat_backend` | top level | not set | The chat backend; see [Backends](../guides/model-servers.md#backends). For oMLX, use `omlx`, which first-run setup writes for a server that names itself oMLX, or `vllm`: both load as `vllm` and are saved as written. `melo_serve` uses the [melo_serve](../guides/model-servers.md#melo_serve) daemon. Required. |
+| `embedding_backend` | top level | not set | `mlc`, `ollama`, `vllm`, `sglang`, `melo_serve` or `none`; `omlx` is accepted as `vllm`. Required. |
 | `request_timeout_s` | top level | not set | Chat request timeout in seconds; see [Chat request timeout](#chat-request-timeout). |
 | `chat_url` | local backend | not set | The model server's URL. |
-| `chat_model` | local or cloud backend | not set | The model to use. |
+| `chat_model` | local or cloud backend | not set | The model to use. In `[melo_serve]`, empty means the model melo_serve serves now. |
 | `embedding_url` | local backend | not set | The embedding server's URL. |
-| `embedding_model` | local backend | not set | The embedding model to use. |
+| `embedding_model` | local backend | not set | The embedding model to use. In `[melo_serve]`, empty means the embedding model melo_serve serves now. |
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` takes `auto` or `thinking` instead. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
@@ -162,9 +162,22 @@ A `[scheduler]` table that is all defaults is not written, and unknown
 scheduler keys are dropped, so a config file without such a table keeps its
 exact bytes; the wizard keeps a non-default policy.
 
-Top-level keys must come before the first `[table]` line. How URLs are used:
+Top-level keys must come before the first `[table]` line.
 
-- `mlc`, `vllm` (also for oMLX) and `sglang`: `/v1` is added to
+The `[melo_serve]` table takes `chat_url`, `chat_model`, `embedding_url` and `embedding_model`, like the other local backends. melo_serve's address is `http://127.0.0.1:8321/v1`. Leave `chat_model` and `embedding_model` empty: localmelo then asks melo_serve's state file (`~/.cache/melo_serve/state.json`, or under `MELO_SERVE_HOME`) which model it serves when it builds the provider, so `melo-serve use <pick>` is followed. A model you write is sent as written.
+
+```toml
+chat_backend = "melo_serve"
+embedding_backend = "melo_serve"
+
+[melo_serve]
+chat_url = "http://127.0.0.1:8321/v1"
+embedding_url = "http://127.0.0.1:8321/v1"
+```
+
+How URLs are used:
+
+- `mlc`, `vllm` (also for oMLX), `sglang` and `melo_serve`: `/v1` is added to
   `chat_url` and `embedding_url` when it is missing.
 - `ollama`: chat uses Ollama's own `/api/chat`, so `chat_url` is used without
   `/v1` (a trailing `/v1` is removed). `embedding_url` gets `/v1` added.
@@ -415,7 +428,7 @@ With `v3` and `fixed_prefix`:
 Without `fixed_prefix`, neither value changes anything. The JSON result's `config` has
 `cache_layout` when it is `v3` and not when it is `v2`.
 
-`[agent] window_messages` (default `64` on a local server (Ollama, MLC, vLLM or oMLX, SGLang) and
+`[agent] window_messages` (default `64` on a local server (Ollama, MLC, vLLM or oMLX, SGLang, melo_serve) and
 for a `--base-url` server, `20` on a cloud vendor's backend (OpenAI, Gemini, Anthropic or NVIDIA);
 8 to 256; `--window-messages N` overrides it) is the most messages the working window holds
 before `window_eviction` drops some. A cloud vendor's backend keeps 20 for now: without prompt

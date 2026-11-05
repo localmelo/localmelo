@@ -1,6 +1,6 @@
 # Guide: Model servers
 
-Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vLLM, SGLang or a cloud API. The setting names and defaults are in the [configuration reference](../reference/configuration.md).
+Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vLLM, SGLang, melo_serve or a cloud API. The setting names and defaults are in the [configuration reference](../reference/configuration.md).
 
 - On a Mac with Apple silicon, oMLX is the recommended local server.
 - Ollama is the alternative on other systems.
@@ -130,6 +130,7 @@ ollama pull qwen3:8b
 | `mlc` | local | [MLC LLM](https://llm.mlc.ai) | `http://localhost:8400/v1` (wizard) | yes |
 | `vllm` | local | [oMLX](https://github.com/jundot/omlx), [vLLM](https://docs.vllm.ai) or another OpenAI-compatible server | `http://localhost:8000/v1` (wizard) | yes |
 | `sglang` | local | [SGLang](https://docs.sglang.ai) | `http://localhost:30000/v1` (wizard) | yes |
+| `melo_serve` | local | [melo_serve](https://github.com/localmelo/melo_serve) | `http://127.0.0.1:8321/v1` | yes |
 | `openai` | cloud | OpenAI API | `https://api.openai.com/v1` | no |
 | `anthropic` | cloud | Anthropic API | `https://api.anthropic.com/v1` | no |
 | `gemini` | cloud | Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai` | no |
@@ -168,6 +169,34 @@ enable_thinking = false
 - The `extra_body` table turns off a Qwen3 model's thinking, which makes each step faster; leave it out to keep thinking on. oMLX applies it unless the model's settings in oMLX force `enable_thinking`.
 - With thinking off, melo takes a reply's text as the answer even when the server sends it in the reasoning field; a reply that still carries counted reasoning tokens and no text is not.
 - For long-term memory, oMLX can serve an embedding model from the same directory: set `embedding_backend = "omlx"` and add `embedding_url = "http://127.0.0.1:8000/v1"` and `embedding_model = "<its id>"` to `[vllm]`; the id and one `POST /v1/embeddings` are the check, since `GET /v1/models` gives no type. See [Set up an embedding model](embedding.md#omlx).
+
+### melo_serve
+
+[melo_serve](https://github.com/localmelo/melo_serve) is a separate daemon, one per user, that serves local models (Splash or oMLX) behind one OpenAI-compatible address, `http://127.0.0.1:8321/v1`, and switches them with one command.
+
+1. Install it, and optionally make it a login item:
+
+   ```bash
+   uv tool install git+https://github.com/localmelo/melo_serve
+   melo-serve install
+   ```
+
+2. Set the backend and leave the model out:
+
+   ```toml
+   chat_backend = "melo_serve"
+   embedding_backend = "none"
+
+   [melo_serve]
+   chat_url = "http://127.0.0.1:8321/v1"
+   ```
+
+3. Switch the model whenever you like: `melo-serve use <pick>`.
+
+- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`.
+- First-run setup prefers a running melo_serve and saves it with no model.
+- `melo serve` checks melo_serve when the config uses it; see [Gateway](gateway.md#start-the-gateway).
+- The melo_serve [README](https://github.com/localmelo/melo_serve#readme) covers the picks, the login item and the other commands.
 
 ### Ollama with embeddings
 
