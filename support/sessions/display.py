@@ -740,25 +740,9 @@ _TITLE_TAIL: Final = " ,;:.!-–—·，；：。！"
 # A path reads as its file's name.
 _IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
 # Words a cut title does not end on: "fix the failing test in…".
-_DANGLING: Final = frozenset(
-    {
-        "the",
-        "a",
-        "an",
-        "in",
-        "of",
-        "to",
-        "and",
-        "or",
-        "for",
-        "with",
-        "on",
-        "at",
-        "by",
-        "from",
-        "that",
-        "so",
-    }
+_DANGLING: Final = re.compile(
+    r"(?:[\s,;:]+(?:the|a|an|in|of|to|and|or|for|with|on|at|by|from|that|so))+$",
+    re.IGNORECASE,
 )
 
 
@@ -815,10 +799,8 @@ def short_title(text: str) -> str:
         clause[cut] == " " or _wide(clause[cut]) or _wide(clause[cut - 1])
     ):
         cut -= 1
-    head = clause[: cut or end].rstrip(_TITLE_TAIL)
-    while (split := head.rpartition(" "))[0] and split[2].casefold() in _DANGLING:
-        head = split[0].rstrip(_TITLE_TAIL)
-    return head + "…"
+    head = _DANGLING.sub("", clause[: cut or end].rstrip(_TITLE_TAIL))
+    return head.rstrip(_TITLE_TAIL) + "…"
 
 
 def clean_output(text: str) -> str:
