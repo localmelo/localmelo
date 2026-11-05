@@ -1164,7 +1164,7 @@ step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | The run ended with status `completed`. |
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
-| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode; or `melo --base-url URL`, with or without a task, served several chat models with no `--chat-model` and none known to be loaded (a `--brief` run reports it as a `startup_error` result whose `exit_code` is 2). |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode; or a direct run finds a bad value in the config file's `[agent]` table, with or without `--base-url` (a `--brief` run reports it as a `startup_error` result and exits 1); or `melo --base-url URL`, with or without a task, served several chat models with no `--chat-model` and none known to be loaded (a `--brief` run reports it as a `startup_error` result whose `exit_code` is 2). |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 4 | A `--brief` run ended `completed`, but its brief's check failed for good: `tests.state` is `failed`, a refused check included. `status` stays `completed` and the record's `exit_code` is 4. A brief without a `Check:` line never exits 4. |
 | 129 | SIGHUP ended the run. |

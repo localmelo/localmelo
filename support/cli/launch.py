@@ -34,6 +34,7 @@ from localmelo.support.browser import configured_driver
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.flag_options import flag_options
 from localmelo.support.sessions.agents import (
+    CONTEXT_SETTINGS,
     configured_context_options,
     configured_session_options,
 )
@@ -120,14 +121,11 @@ def _configured(
     cfg: config.Config, model: str | None, args: argparse.Namespace | None = None
 ) -> Choice | int:
     if args is not None:
-        for name in ("context_window", "output_reserve", "safety_margin"):
+        for name in CONTEXT_SETTINGS:
             value = getattr(args, name, None)
             if value is not None:
                 setattr(cfg.agent, name, value)
-        if any(
-            getattr(args, name, None) is not None
-            for name in ("context_window", "output_reserve", "safety_margin")
-        ):
+        if any(getattr(args, name, None) is not None for name in CONTEXT_SETTINGS):
             try:
                 configured_context_options(cfg, AgentOptions(), {})
             except ValueError as exc:
@@ -340,8 +338,7 @@ def run_interactive(
             options,
             explicit=flag_options(args),
             budget_overrides={
-                name: getattr(args, name, None)
-                for name in ("context_window", "output_reserve", "safety_margin")
+                name: getattr(args, name, None) for name in CONTEXT_SETTINGS
             },
             backend=choice.backend.key,
         )

@@ -2377,6 +2377,7 @@ def _build_direct_mode_agent(
     from localmelo.support import config
     from localmelo.support.backends.discovery import OPENAI_COMPATIBLE
     from localmelo.support.sessions.agents import (
+        CONTEXT_SETTINGS,
         configured_attempt_options,
         configured_cache_options,
         configured_context_options,
@@ -2405,16 +2406,13 @@ def _build_direct_mode_agent(
         options = configured_context_options(
             budget_cfg,
             options or AgentOptions(),
-            {
-                name: getattr(args, name, None)
-                for name in ("context_window", "output_reserve", "safety_margin")
-            },
+            {name: getattr(args, name, None) for name in CONTEXT_SETTINGS},
         )
     except ValueError as exc:
         config_value_error(str(exc))
     # The budget the run uses is the file's with the flags over it; the check
     # of [agent] below, and the Agent's config, read it so.
-    for name in ("context_window", "output_reserve", "safety_margin"):
+    for name in CONTEXT_SETTINGS:
         setattr(budget_cfg.agent, name, getattr(options, name))
     # --base-url skips validate_or_raise() below, so [agent] is checked here,
     # once, for both cases.

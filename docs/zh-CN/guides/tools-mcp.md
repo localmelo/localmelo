@@ -255,7 +255,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 行范围 | `file_read` 接受 `start_line` 和 `end_line`（从 1 开始计数，含两端），长文件因此可以分段读取。读到的部分末尾为 `... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`，读到文件末尾时除外（此时为 `showing 801-1240`）；`start_line` 超出文件末尾会报错，并说明文件有多少行。melo 只统计前 64 MB 的行数（更长的文件报告为 `N+`）。 |
 | 命令 | `shell_exec` 和 `python_exec` 在拥有独立进程组的子进程中运行，超时或取消会终止它及其启动的所有进程；根目录只决定它们的启动目录。它们不受范围限制，可以访问任何路径；但在 macOS 上，worker 运行和保存的任务会拒绝它们在工作区之外的写入（`AgentOptions(confine_writes=True)`）。 |
 | 输入 | Shell 命令的标准输入是 `/dev/null`；`python_exec` 通过管道接收代码（绝不通过 argv），随后将 fd 0 指向 `/dev/null`，因此 `input()` 得到 EOF，两者都不读取 melo 所在的终端。 |
-| 环境 | 子进程获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；`--url` 运行会忽略该设置。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。 |
+| 环境 | 子进程获得 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TERM`、`LANG`、所有 `LC_*` 变量和 `TMPDIR`，以及 `AgentOptions(tool_env={...})`。使用配置的直接运行、界面和控制台会话也会解析 `[agent] tool_env` 中的额外名称；`--url` 的直接运行会忽略该设置。MCP 服务器获得相同的基础环境以及自己的 `env`，而不是智能体的额外名称。 |
 | 退出状态 | `shell_exec` 命令以非零状态退出时，其文本以 `[exit code <n>]` 行开头（被信号终止的命令使用 `-<signal>`），调用仍然成功；该行位于开头，因此输出被截断时仍会保留。Python 代码以非零状态退出时，调用以 `Python exited with code <n>` 失败，后面附上输出的最后 4,000 个字符。 |
 | 时限 | `AgentOptions(tool_timeout_s=...)` 以秒为单位设置 `shell_exec` 和 `python_exec` 的时限；不设置时，Shell 命令 30 秒，Python 60 秒。Shell 命令以 `Command timed out after <n> s` 失败；Python 调用以超时结束，提示 `Execution timed out after <n>s`，并终止子进程。 |
 

@@ -83,6 +83,8 @@ def configured_cache_options(
     return dataclasses.replace(options, **changes) if changes else options
 
 
+# The three that make up the context budget: all set or none (AgentOptions).
+CONTEXT_SETTINGS: Final = ("context_window", "output_reserve", "safety_margin")
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
 # The setting of a turn that ends with only thinking
@@ -149,7 +151,6 @@ def configured_context_options(
     cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
 ) -> AgentOptions:
     """Resolve context settings together so flags may override individual keys."""
-    names = ("context_window", "output_reserve", "safety_margin")
     fields: dict[str, Any] = {
         name: (
             overrides.get(name)
@@ -160,7 +161,7 @@ def configured_context_options(
                 else getattr(options, name)
             )
         )
-        for name in names
+        for name in CONTEXT_SETTINGS
     }
     if all(getattr(options, name) == value for name, value in fields.items()):
         return options
@@ -183,9 +184,7 @@ def configured_session_options(
     """
     options = options or AgentOptions()
     overrides = {
-        name: getattr(options, name)
-        for name in ("context_window", "output_reserve", "safety_margin")
-        if name in explicit
+        name: getattr(options, name) for name in CONTEXT_SETTINGS if name in explicit
     }
     overrides.update(budget_overrides or {})
     options = configured_context_options(cfg, options, overrides)
@@ -194,7 +193,7 @@ def configured_session_options(
     options = configured_attempt_options(cfg, options, explicit)
     if overrides:
         cfg = copy.deepcopy(cfg)
-        for name in ("context_window", "output_reserve", "safety_margin"):
+        for name in CONTEXT_SETTINGS:
             setattr(cfg.agent, name, getattr(options, name))
     fields: dict[str, Any] = {
         name: getattr(cfg.agent, name)

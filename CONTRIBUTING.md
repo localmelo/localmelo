@@ -58,7 +58,9 @@ never allowed; a test that genuinely needs the real home is marked
 - [ ] A new `melo` option has a tier in `support/option_tiers.py` and in the
       [CLI reference](docs/reference/cli.md#default-and-developer-mode). An option that
       compares designs is `experimental`, with the issue that will remove it; only a
-      deliberate change adds a `user` option.
+      deliberate change adds a `user` option. A flag that sets one `AgentOptions` field
+      is also one row in `support/flag_options.py`. A new `[agent]` key is checked once, in
+      `Config._validate_agent`; direct mode reads it through `Config.agent_errors()`.
 - [ ] Code, comments, tests and documentation in English.
 
 The [developer guide](https://localmelo.github.io/localmelo/en/developers.html)
