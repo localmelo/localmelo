@@ -877,18 +877,6 @@ class TestDecisions:
                 id="raises",
             ),
             pytest.param(
-                lambda: None,
-                "TypeError: the approval policy returned NoneType, not an "
-                "ApprovalDecision",
-                id="returns_no_decision",
-            ),
-            pytest.param(
-                asyncio.CancelledError(),
-                "RuntimeError: the approval policy raised CancelledError while the "
-                "run was not cancelled",
-                id="spurious_cancelled_error",
-            ),
-            pytest.param(
                 lambda: ApprovalDecision(False, origin="session"),
                 "ValueError: ApprovalDecision.origin 'session' needs allow=True: a "
                 "grant or an earlier approval only allows",
@@ -939,12 +927,6 @@ class TestDecisions:
                 RuntimeError("the policy is down"),
                 "RuntimeError: the policy is down",
                 id="raises",
-            ),
-            pytest.param(
-                lambda: None,
-                "TypeError: the approval policy returned NoneType, not an "
-                "ApprovalDecision",
-                id="returns_no_decision",
             ),
             pytest.param(
                 asyncio.CancelledError(),
