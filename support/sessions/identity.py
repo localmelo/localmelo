@@ -18,15 +18,12 @@ from urllib.parse import urlsplit
 
 from localmelo.melo.agent.agent import _resolve_memory_dir
 from localmelo.support.backends import discovery
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
 from localmelo.support.loopback import is_loopback
 
 if TYPE_CHECKING:
     from localmelo.melo.agent import AgentOptions
     from localmelo.support.config import Config
-
-# The chat backends of servers on this computer or on the user's network, as
-# the terminal's banner calls them; every other backend is a cloud provider.
-LOCAL_BACKENDS: Final = frozenset({"mlc", "ollama", "vllm", "sglang"})
 
 # The one place the reply language is set: every chat turn (the terminal chat,
 # the main chat and the side chats) gets this paragraph, so the rule is not

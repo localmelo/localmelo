@@ -135,6 +135,7 @@ from localmelo.support.gateway.task_policy import (
 )
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.memory.service import CHAT_TURN
+from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
 from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_session_options,
@@ -413,7 +414,7 @@ def thinking_off(settings: Config) -> Config:
     they are.
     """
     section = getattr(settings, settings.chat_backend, None)
-    if settings.chat_backend not in ("vllm", "sglang") or not isinstance(
+    if settings.chat_backend not in TEMPLATE_KWARGS_BACKENDS or not isinstance(
         section, LocalBackendConfig
     ):
         return settings

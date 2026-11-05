@@ -228,16 +228,7 @@ class AgentFactory:
         """
         assert self._cfg is not None
         cfg = copy.deepcopy(self._cfg)
-        if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
-            cfg.chat_alias = ""  # the file's "omlx" named another server
-        if ollama:
-            cfg.chat_backend = "ollama"
-            cfg.ollama.chat_url = url
-            cfg.ollama.chat_model = model
-        else:
-            cfg.chat_backend = "vllm"
-            cfg.vllm.chat_url = url
-            cfg.vllm.chat_model = model
+        cfg.use_chat_server(url, model, ollama=ollama)
         return cfg
 
     async def close(self, agent: Agent) -> None:

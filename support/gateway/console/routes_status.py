@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
 from localmelo.support.sessions.store import SessionStore
 from localmelo.support.usage_snapshot import UsageSnapshot
 
-from .probe import LOCAL_BACKENDS
 from .routes_sessions import _read_session, _store_call
 from .running import live_tasks, task_counts
 

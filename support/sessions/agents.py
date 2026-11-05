@@ -23,10 +23,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
-from localmelo.support.providers.llm.thinking import (
-    LOCAL_BACKENDS,
-    thinking_off_fields,
-)
+from localmelo.support.providers.llm.thinking import is_local, thinking_off_fields
 from localmelo.support.sessions.identity import (
     config_identity,
     kept_across_chats,
@@ -274,7 +271,7 @@ def review_body(llm: BaseLLMProvider, backend: str | None) -> dict[str, Any]:
     cloud backend gets nothing: its models answer fast, and some refuse these
     fields.
     """
-    if backend not in LOCAL_BACKENDS:
+    if not is_local(backend):
         return {}
     off = thinking_off_fields(llm, backend)
     if isinstance(llm, OllamaNativeChat):

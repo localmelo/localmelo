@@ -1587,6 +1587,8 @@ _NEW_LETTERS = frozenset(
 def _build_parser(
     *, direct_only: bool = False, developer: bool | None = None
 ) -> argparse.ArgumentParser:
+    from localmelo.support.backends.openai_family import USUAL_URL
+
     parser_type = _DirectParser if direct_only else _InteractiveParser
     parser = parser_type(
         prog="melo", description="localmelo agent", add_help=not direct_only
@@ -1596,7 +1598,7 @@ def _build_parser(
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Your model server, e.g. http://127.0.0.1:8000/v1",
+        help=f"Your model server, e.g. {USUAL_URL}",
     )
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 

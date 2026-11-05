@@ -19,6 +19,7 @@ from localmelo.melo.schema import (
     ToolInfo,
     split_thinking,
 )
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
 from localmelo.support.cli import mark
 from localmelo.support.cli.hanging import prefix as hung_prefix
 from localmelo.support.cli.text import (
@@ -45,8 +46,6 @@ from localmelo.support.sessions.store import SessionInfo, TurnInfo
 BOX_MIN_COLUMNS: Final = 50
 BOX_MAX_COLUMNS: Final = 80
 _LABEL_CELLS: Final = 11
-
-LOCAL_BACKENDS: Final = frozenset({"mlc", "ollama", "vllm", "sglang"})
 
 # What each source of the backend reads in the banner's second model row.
 SOURCE_TEXT: Final = {

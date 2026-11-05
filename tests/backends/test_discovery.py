@@ -501,6 +501,17 @@ async def test_a_server_without_a_status_route_does_not_say() -> None:
     assert found == LoadedModels()
 
 
+async def test_the_status_is_asked_only_between_several_chat_models() -> None:
+    transport = _server({"/v1/models/status": _OMLX_STATUS})
+    for chat in ([], ["small"]):
+        assert await discovery.loaded_among(URL, chat, transport=transport) == (
+            LoadedModels()
+        )
+    assert transport.asked == []  # type: ignore[attr-defined]
+    found = await discovery.loaded_among(URL, ["big", "small"], transport=transport)
+    assert found == LoadedModels(frozenset({"small"}), True)
+
+
 async def test_a_status_that_lists_none_loaded_is_known_to_be_empty() -> None:
     status = httpx.Response(200, json={"models": [{"id": "big", "loaded": False}]})
     transport = _server({"/v1/models/status": status})

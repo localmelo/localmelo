@@ -14,6 +14,7 @@ import pytest
 
 from localmelo.support import onboard
 from localmelo.support.backends import discovery
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import probe as probe_module
 from localmelo.support.gateway.console.routes_settings import model_json, settings_json
@@ -39,6 +40,7 @@ def test_a_saved_vllm_backend_is_an_openai_compatible_server() -> None:
     assert model_json(_cfg()) == {
         "backend": "vllm",
         "backend_label": GENERIC,
+        "local": True,
         "name": "Qwen3-8B-4bit",
         "embedding": "none",
     }
@@ -58,6 +60,13 @@ def test_other_backends_and_unknown_ones_keep_their_label() -> None:
     )
     assert model_json(cfg)["backend_label"] == "Ollama"
     assert model_json(Config(chat_backend="nonesuch"))["backend_label"] == "nonesuch"
+
+
+def test_the_model_says_whether_it_runs_on_a_server_of_the_users_own() -> None:
+    assert [model_json(Config(chat_backend=key))["local"] for key in LOCAL_BACKENDS]
+    assert not any(
+        model_json(Config(chat_backend=key))["local"] for key in (*CLOUD_BACKENDS, "")
+    )
 
 
 async def test_the_health_probes_listing_makes_the_label_omlx(

@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import NamedTuple
 
+from localmelo.support.backends.openai_family import USUAL_URL
+
 USER = "user"
 ADVANCED = "advanced"
 EXPERIMENTAL = "experimental"
@@ -250,7 +252,7 @@ OLD_SPELLINGS: dict[str, str] = {
 # ``SHORT_ROWS`` are the rows of ``melo -h``.
 OPTION_ROWS = (
     ("-m, --model", "NAME", "chat model for this run"),
-    ("-u, --url", "URL", "model server for this run (http://127.0.0.1:8000/v1)"),
+    ("-u, --url", "URL", f"model server for this run ({USUAL_URL})"),
     ("-w, --workspace", "DIR", "folder to work in (default: this one)"),
     ("-c, --continue", "", "continue the newest chat here"),
     ("-r, --resume", "[ID]", "resume a chat, or pick one from a list"),

@@ -1444,6 +1444,26 @@ class TestOmlxSpelling:
         text = config_path.read_text(encoding="utf-8")
         assert text.startswith('chat_backend = "vllm"\nembedding_backend = "vllm"\n')
 
+    def test_use_chat_server_puts_the_server_in_the_config(self) -> None:
+        cfg = Config(chat_backend="vllm", embedding_backend="vllm")
+        cfg.chat_alias = cfg.embedding_alias = "omlx"
+        cfg.vllm.chat_url = "http://h:1/v1"
+        cfg.use_chat_server("http://h:1/v1", "m")  # the same server keeps its spelling
+        assert (cfg.chat_alias, cfg.vllm.chat_model) == ("omlx", "m")
+        cfg.use_chat_server("http://h:2/v1", "n", embedding_model="e")
+        assert (cfg.chat_alias, cfg.embedding_alias) == ("", "")
+        assert (cfg.embedding_backend, cfg.vllm.embedding_url) == (
+            "vllm",
+            "http://h:2/v1",
+        )
+        assert (cfg.vllm.chat_model, cfg.vllm.embedding_model) == ("n", "e")
+        cfg.use_chat_server("http://h:3", "o", ollama=True)
+        assert (cfg.chat_backend, cfg.ollama.chat_url, cfg.ollama.chat_model) == (
+            "ollama",
+            "http://h:3",
+            "o",
+        )
+
     @pytest.mark.parametrize("spelling", ["OMLX", "omlx ", "omlx2", "oMLX"])
     def test_another_spelling_is_not_recognised(
         self, config_path: Path, spelling: str
