@@ -50,6 +50,10 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
+    # No background maintenance after the commit: it may write into .git
+    # while a test compares the folder before and after a read.
+    _git(root, "config", "maintenance.auto", "false")
+    _git(root, "config", "gc.auto", "0")
     (root / "a.py").write_text("one\ntwo\nthree\n")
     _git(root, "add", "a.py")
     _git(root, "commit", "-q", "-m", "First")
