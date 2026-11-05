@@ -21,7 +21,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   setup saves it with no model. `melo serve` checks it when the config uses it: it prints one line, runs `melo-serve
   up` if it is not running (`up` and the wait share 15 s), or says how to install it. `melo serve status` adds a block
   with whether it runs, its address, the chat and embedding models and its login item, and the welcome row and the
-  gateway's startup line read `<model> on Splash via melo_serve` (#NNN).
+  gateway's startup line read `<model> on Splash via melo_serve` (#523).
 - Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.
 - Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
   alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
