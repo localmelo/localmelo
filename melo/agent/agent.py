@@ -2242,12 +2242,14 @@ class _ToolAsk:
             tier="network",
         )
 
-    async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
-        """:func:`ask` the policy; a question that got no decision is kept in *refused*."""
+    async def _ask(
+        self,
+        decide: Callable[[ApprovalRequest], Awaitable[object]],
+        request: ApprovalRequest,
+    ) -> ApprovalDecision:
+        """:func:`ask`; a question that got no decision is kept in *refused*."""
         return await ask(
-            self._policy.decide,
-            request,
-            record=functools.partial(self._failed, request),
+            decide, request, record=functools.partial(self._failed, request)
         )
 
     def _failed(
@@ -2296,7 +2298,7 @@ class _ToolAsk:
                 request,
                 review=ActionReview("high", ("opaque",), (words,)),
             )
-        decided = await self._ask(request)
+        decided = await self._ask(self._policy.decide, request)
         if not decided.allow and decided.origin == "auto":
             # Auto refused it only because nobody can be asked: say that, not the
             # category of code melo cannot check that the fixed review carries.
@@ -2332,63 +2334,70 @@ class _ToolAsk:
                  **again.record()}
             )  # fmt: skip
             return again
-        if auto and reviewer is not None:
-            site = str(arguments.get("site") or "")
-            access = str(arguments.get("access") or "")
-            # Each step is judged on the goal of the chat (#465). A click or a
-            # choice names what it is on, so each target is reviewed by itself
-            # (once a chat); typed text is the model's own data and a form sent
-            # from a page leaves the computer: each is reviewed by itself, even
-            # on a site you named, and the verdict of one is never kept for the
-            # next.
-            sends = access == "submit"
-            typing = access == "type"
-            reading = access in ("", "read")
-            if arguments.get("target") == "unknown":
-                # melo cannot tell what the click lands on: nobody can judge it
-                # on the goal, so the person is asked (#465).
-                review = ActionReview(
-                    "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
-                )
-            elif access == "handoff":
-                # Another app comes to the front: the person's choice, always.
-                app = " ".join(str(arguments.get("app") or "an app").split())[:80]
-                review = ActionReview(
-                    "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
-                )
-            elif reading and reviewer.names_host(site):
-                review = ActionReview(
-                    "routine", (), (f"Opens {site}, which you named.",)
-                )
-            else:
-                doubt = _site_doubt(access, site, preview)
-                if site and not reading and reviewer.names_host(site):
-                    doubt += _NAMED_SITE
-                review = await reviewer.review(
-                    self._run.reviews,
-                    tool_name=tool_name,
-                    arguments=dict(request.arguments),
-                    preview=preview,
-                    review=ActionReview("undecided", (), (doubt,)),
-                    mode="auto",
-                    key=f"{key}|{self._call.id}" if sends or typing else key,
-                    workspace=self._workspace_root,
-                    # One routine verdict reads the site's plain pages.
-                    shared=(
-                        ""
-                        if sends or typing
-                        else plain_page_key(
-                            tool_name, request.arguments, self._workspace_root
-                        )
-                    ),
-                    refused_sites=_refused_sites(self._policy, self._run),
-                    # A click, a choice or a point carries no value: a click on
-                    # a sign-in button is no credential use (#465). A read's
-                    # address can hold a key, so its review stands.
-                    secret_free=access in _VALUE_FREE_ACCESS,
-                )
-            request = dataclasses.replace(request, review=review)
-        decided = await self._ask(request)
+
+        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
+            # The review is asked in the same guard as the policy, as the
+            # gate does: a failure of either refuses the question alike.
+            nonlocal request
+            if auto and reviewer is not None:
+                site = str(arguments.get("site") or "")
+                access = str(arguments.get("access") or "")
+                # Each step is judged on the goal of the chat (#465). A click or a
+                # choice names what it is on, so each target is reviewed by itself
+                # (once a chat); typed text is the model's own data and a form sent
+                # from a page leaves the computer: each is reviewed by itself, even
+                # on a site you named, and the verdict of one is never kept for the
+                # next.
+                sends = access == "submit"
+                typing = access == "type"
+                reading = access in ("", "read")
+                if arguments.get("target") == "unknown":
+                    # melo cannot tell what the click lands on: nobody can judge it
+                    # on the goal, so the person is asked (#465).
+                    review = ActionReview(
+                        "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
+                    )
+                elif access == "handoff":
+                    # Another app comes to the front: the person's choice, always.
+                    app = " ".join(str(arguments.get("app") or "an app").split())[:80]
+                    review = ActionReview(
+                        "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
+                    )
+                elif reading and reviewer.names_host(site):
+                    review = ActionReview(
+                        "routine", (), (f"Opens {site}, which you named.",)
+                    )
+                else:
+                    doubt = _site_doubt(access, site, preview)
+                    if site and not reading and reviewer.names_host(site):
+                        doubt += _NAMED_SITE
+                    review = await reviewer.review(
+                        self._run.reviews,
+                        tool_name=tool_name,
+                        arguments=dict(request.arguments),
+                        preview=preview,
+                        review=ActionReview("undecided", (), (doubt,)),
+                        mode="auto",
+                        key=f"{key}|{self._call.id}" if sends or typing else key,
+                        workspace=self._workspace_root,
+                        # One routine verdict reads the site's plain pages.
+                        shared=(
+                            ""
+                            if sends or typing
+                            else plain_page_key(
+                                tool_name, request.arguments, self._workspace_root
+                            )
+                        ),
+                        refused_sites=_refused_sites(self._policy, self._run),
+                        # A click, a choice or a point carries no value: a click on
+                        # a sign-in button is no credential use (#465). A read's
+                        # address can hold a key, so its review stands.
+                        secret_free=access in _VALUE_FREE_ACCESS,
+                    )
+                request = dataclasses.replace(asked, review=review)
+            return await self._policy.decide(request)
+
+        decided = await self._ask(settle, request)
         if (
             not decided.allow
             and decided.origin in ("user", "auto", "policy")

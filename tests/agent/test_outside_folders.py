@@ -184,6 +184,40 @@ async def test_a_write_after_a_read_grant_still_asks(root: Path, letters: Path) 
     assert (letters / "cover-letter.md").read_text() == "Engineer, 2020-2026\n"
 
 
+async def test_a_policy_that_fails_on_an_outside_write_refuses_it_and_keeps_why(
+    root: Path, letters: Path
+) -> None:
+    async def down(request: ApprovalRequest) -> ApprovalDecision:
+        raise RuntimeError("the chat is down")
+
+    target = letters / "cover-letter.md"
+    llm = ScriptedLLM(
+        [
+            _calls(("file_write", {"path": str(target), "content": "x"}, "c1")),
+            _answer("ok"),
+        ]
+    )
+    agent = _files_agent(llm, root)
+    recorder = Recorder()
+
+    result = await agent.run_task(
+        "edit my letter", on_event=recorder, approval=ChatPolicy(down)
+    )
+
+    assert result.status == "completed"
+    assert target.read_text() == "Engineer, 2020-2026\n"
+    assert llm.tool_messages(1) == [
+        "Error: Approval failed, so the call did not run: RuntimeError: the chat is down"
+    ]
+    [finished] = recorder.of("tool.finished")
+    approval = finished.data["approval"]
+    assert (approval["allowed"], approval["origin"], approval["reason"]) == (
+        False,
+        "error",
+        "RuntimeError: the chat is down",
+    )
+
+
 async def test_auto_mode_still_asks_the_person(root: Path, letters: Path) -> None:
     llm = ScriptedLLM([_read(letters / "cover-letter.md"), _answer("done")])
     agent = _files_agent(llm, root)
