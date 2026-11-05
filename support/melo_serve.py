@@ -38,6 +38,13 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
+# The melo_serve that first-run setup installs: one commit (a tag can move) and the
+# oldest version it accepts. The commit is a placeholder until one has ``melo-serve get``.
+MELO_SERVE_REF: Final = "ec5305af3e8dd374a73ae87f6fcf18dc13319819"
+MIN_VERSION: Final = "0.2.0"
+ARCHIVE_URL: Final = (
+    f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
+)
 NOT_INSTALLED: Final = f"melo_serve is not installed: {INSTALL_HINT}"
 # The whole budget of ``melo serve`` for a melo_serve that is not running:
 # ``melo-serve up`` and the wait for the state it writes.
@@ -88,8 +95,23 @@ class Snapshot:
     roles: dict[str, Role] = field(default_factory=dict)
 
 
-def _text(value: object) -> str:
+def as_text(value: object) -> str:
     return value if isinstance(value, str) else ""
+
+
+def as_count(value: object) -> int:
+    """*value* when it is a whole number (not a bool) of at least 0, else 0."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(value, 0)
+    return 0
+
+
+def as_number(value: object) -> float:
+    """*value* when it is a finite number (not a bool) of at least 0, else 0.0."""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        number = float(value)
+        return number if 0.0 <= number < float("inf") else 0.0
+    return 0.0
 
 
 def _own(info: os.stat_result) -> bool:
@@ -118,7 +140,7 @@ def _read_state() -> dict[str, Any] | None:
         state = json.loads(raw)
     except (OSError, ValueError, RecursionError, MemoryError):
         return None
-    if not isinstance(state, dict) or not _text(state.get("schema")).startswith(
+    if not isinstance(state, dict) or not as_text(state.get("schema")).startswith(
         SCHEMA_PREFIX
     ):
         return None
@@ -185,13 +207,13 @@ def _answers() -> bool:
 
 def _role(entry: object) -> Role | None:
     """The role *entry* names, or None when it is not a dict with a model."""
-    if not isinstance(entry, dict) or not _text(entry.get("model")):
+    if not isinstance(entry, dict) or not as_text(entry.get("model")):
         return None
     return Role(
         entry["model"],
-        _text(entry.get("name")),
-        _text(entry.get("backend_name")) or _text(entry.get("backend")),
-        _text(entry.get("status")),
+        as_text(entry.get("name")),
+        as_text(entry.get("backend_name")) or as_text(entry.get("backend")),
+        as_text(entry.get("status")),
     )
 
 
@@ -205,9 +227,9 @@ def snapshot() -> Snapshot:
     state = _read_state()
     if state is None:
         return Snapshot()
-    status = _text(state.get("status")) or "ready"
+    status = as_text(state.get("status")) or "ready"
     door = state.get("front_door")
-    url = (_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
+    url = (as_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
     url = _loopback(url) or ""
     if status == "stopped" or not url or not _answers():
         return Snapshot()
@@ -261,30 +283,49 @@ def _check(path: str | None) -> str | None:
     return ""
 
 
-def _candidates() -> tuple[str | None, str]:
-    """Where ``melo-serve`` may be: on PATH, then in the uv tool folder."""
-    folder = (
+def _uv_tool_folder() -> str:
+    """The folder ``uv tool install`` puts commands in."""
+    return (
         os.environ.get("UV_TOOL_BIN_DIR")
         or os.environ.get("XDG_BIN_HOME")
         or "~/.local/bin"
     )
-    return shutil.which(COMMAND), os.path.join(os.path.expanduser(folder), COMMAND)
 
 
-def _find_command() -> str | None:
-    """Where ``melo-serve`` is: the first of PATH and the uv tool folder that is the user's own.
+def _candidates(
+    name: str, before: tuple[str, ...] = (), after: tuple[str, ...] = ()
+) -> list[str | None]:
+    """Where the command *name* may be: the *before* folders, then PATH, then the *after* folders."""
 
-    A launchd login item has no ``~/.local/bin`` on its PATH, where
-    ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
-    else ``~/.local/bin``. A candidate that :func:`_check` refuses is passed
-    over, so a stale file in a system folder does not hide the installed one.
-    The path returned is the file the links lead to, which is what was checked
-    and what is run.
+    def at(folder: str) -> str:
+        return os.path.join(os.path.expanduser(folder), name)
+
+    return [*map(at, before), shutil.which(name), *map(at, after)]
+
+
+def find_executable(
+    name: str, before: tuple[str, ...] = (), after: tuple[str, ...] = ()
+) -> str | None:
+    """The first place of :func:`_candidates` where *name* is the user's own, as :func:`_check` says.
+
+    A candidate that :func:`_check` refuses is passed over, so a stale file in a
+    system folder does not hide the installed one. The path returned is the
+    file the links lead to, which is what was checked and what is run.
     """
-    for path in _candidates():
+    for path in _candidates(name, before, after):
         if path is not None and _check(path) == "":
             return os.path.realpath(path)
     return None
+
+
+def _find_command() -> str | None:
+    """Where ``melo-serve`` is: on PATH, then in the uv tool folder.
+
+    A launchd login item has no ``~/.local/bin`` on its PATH, where
+    ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
+    else ``~/.local/bin``.
+    """
+    return find_executable(COMMAND, after=(_uv_tool_folder(),))
 
 
 def command() -> str | None:
@@ -297,12 +338,15 @@ def refusal() -> str | None:
 
     None when one runs, and when none was found (then it is not installed).
     """
-    checked = [(path, _check(path)) for path in _candidates()]
+    checked = [
+        (path, _check(path))
+        for path in _candidates(COMMAND, after=(_uv_tool_folder(),))
+    ]
     if any(why == "" for _, why in checked):
         return None
     for path, why in checked:
         if why:
-            return _clean(f"melo_serve: {path} is not run: {why}")
+            return clean(f"melo_serve: {path} is not run: {why}")
     return None
 
 
@@ -322,7 +366,7 @@ def unavailable(snap: Snapshot, role: str) -> MeloServeError:
     return MeloServeError(refusal() or NOT_INSTALLED)
 
 
-def _clean(text: str) -> str:
+def clean(text: str) -> str:
     """*text* as a terminal shows it: the cursor stays and the home folder is ``~``."""
     from localmelo.support.sessions.display import clean_output, home_labelled
 
@@ -350,15 +394,15 @@ def status_lines(snap: Snapshot) -> list[str]:
         f"  embedding: {role_text(snap.roles.get('embedding'))}",
         f"  login item: {'installed' if snap.login else 'not installed'}",
     ]
-    return [_clean(line) for line in lines]
+    return [clean(line) for line in lines]
 
 
 def _line(snap: Snapshot, role: str) -> str:
     where = f"({snap.url})"
     served = snap.roles.get(role)
     if served is None:
-        return _clean(f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}")
-    return _clean(f"melo_serve: {served.model} on {served.backend_name} {where}")
+        return clean(f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}")
+    return clean(f"melo_serve: {served.model} on {served.backend_name} {where}")
 
 
 def ensure_running(role: str = "chat") -> str:
@@ -394,12 +438,12 @@ def ensure_running(role: str = "chat") -> str:
     except subprocess.TimeoutExpired:
         return late
     except (OSError, subprocess.SubprocessError) as exc:
-        return _clean(f"melo_serve did not start: {exc}")
+        return clean(f"melo_serve did not start: {exc}")
     if up.returncode != 0:
         for text in (up.stderr, up.stdout):
             lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
             if lines:
-                return _clean(f"melo_serve did not start: {lines[-1]}")
+                return clean(f"melo_serve did not start: {lines[-1]}")
         return f"melo_serve did not start: {COMMAND} up exited {up.returncode}"
     while True:
         snap = snapshot()
