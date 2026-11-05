@@ -183,22 +183,16 @@
         </p>
         <ol>
           <li>
-            在 <code>support/backends/local/</code> 或 <code>support/backends/cloud/</code> 中写一个实现 <code>BaseBackend</code> 的类（<code>support/backends/base.py</code>）：<code>key</code>、<code>display_name</code>、<code>validate</code>、<code>validate_embedding</code>、<code>has_embedding</code>、<code>build_chat_provider</code> 和 <code>build_embedding_provider</code>。大多数服务器可以共用 <code>support/backends/openai_compat.py</code> 里兼容 OpenAI 的代码。
+            添加它的一行。这台电脑上的模型服务器是 <code>support/backends/openai_family.py</code> 里 <code>LOCAL_SERVERS</code> 的一行 <code>LocalBackend(...)</code>：key、名称、设置列表里的那一行、默认地址和建议的模型。托管服务是 <code>support/hosted.py</code> 里 id 等于它的后端的一个 <code>Preset</code>：地址、密钥变量和建议的模型。需要自己行为的服务器继承 <code>LocalBackend</code>（Ollama 的原生对话、oMLX 的标签）。不使用 OpenAI API 的后端实现 <code>BaseBackend</code>（<code>support/backends/base.py</code>），并在 <code>support/backends/registry.py</code> 的 <code>ensure_defaults_registered()</code> 中注册。
           </li>
           <li>
-            在 <code>support/backends/registry.py</code> 的 <code>ensure_defaults_registered()</code> 中注册它。
+            为它添加配置表：在 <code>Config</code> 上加一个以它的 key 命名的字段（<code>LocalBackendConfig</code> 或 <code>CloudVendorConfig</code>）。有效后端列表、设置列表、设置页、启动横幅、模型服务器检测和失败提示都由这一行推出。修改配置结构时，请在 <code>load()</code> 里添加迁移，而不是让已有的配置文件失效。
           </li>
           <li>
-            把它的 key 加到 <code>support/config.py</code> 的 <code>VALID_CHAT_BACKENDS</code>；如果它提供嵌入，也加到 <code>VALID_EMBEDDING_BACKENDS</code>。
+            可选：在 <code>support/gateway/static/i18n/</code> 的两个语言文件里写 <code>settings.backend.&lt;key&gt;</code>，让设置列表有自己的文字；没有时显示设置列表里的那一行。
           </li>
           <li>
-            为它添加配置表：在 <code>Config</code> 上加一个字段，并把名字写进 <code>_LOCAL_SECTIONS</code> 或 <code>_CLOUD_SECTIONS</code>，让 <code>load()</code> 和 <code>save()</code> 能处理它。修改配置结构时，请在 <code>load()</code> 里添加迁移，而不是让已有的配置文件失效。
-          </li>
-          <li>
-            把它加到 <code>support/onboard.py</code> 的配置向导中：<code>CHAT_BACKENDS</code>、<code>EMBEDDING_BACKENDS</code>、默认值（<code>_LOCAL_DEFAULTS</code>、<code>_CLOUD_DEFAULTS</code> 或 <code>_EMBEDDING_DEFAULTS</code>）和 <code>_CHAT_SETUP</code>。
-          </li>
-          <li>
-            在 <code>tests/backends/</code> 中添加测试。连接检查要 mock：测试绝不能连接真实服务器。
+            只为新增的行为加测试：每一行都已经在 <code>tests/backends/test_openai_family.py</code> 里跑过。连接检查要 mock：测试绝不能连接真实服务器。
           </li>
           <li>
             写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">docs/configuration.md（英文）</a>中的后端表和示例。

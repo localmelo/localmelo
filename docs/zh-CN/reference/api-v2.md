@@ -67,7 +67,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
   "version": "0.1.0",
   "configured": true,
   "config_errors": [],
-  "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
+  "model": {"backend": "ollama", "backend_label": "Ollama", "local": true, "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
@@ -90,7 +90,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 
 - `version` 是已安装包的版本；在检出的代码中则为 `git describe` 的结果。
 - `configured` 表示配置文件是否指定了对话后端；`config_errors` 是对所用设置执行 `Config.validate()` 的结果。
-- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`（请求带 `X-LocalMelo-Language: zh-Hans` 时是中文；不带该头的客户端读到英文）。未配置嵌入后端时，`model.embedding` 为 `none`。
+- `model.backend_label` 是后端注册表中的标签；对于 `vllm` 后端，配置文件写 `omlx` 或服务器的模型列表显示它是 oMLX 时为 `oMLX`，否则为 `OpenAI-compatible server`（请求带 `X-LocalMelo-Language: zh-Hans` 时是中文；不带该头的客户端读到英文）。`model.local` 表示对话后端是否是用户自己的服务器（`mlc`、`ollama`、`vllm`、`sglang`），而不是托管服务；页面据此措辞运行失败的提示。未配置嵌入后端时，`model.embedding` 为 `none`。
 - 对于云端后端，`model_server` 为 `null`。对于本地后端，它是 `GET <url>/models` 的缓存结果：在第一次检查结束之前，`reachable` 为 `null`，`checked_s_ago` 为该结果的时长。请求从不等待检查；过期的结果会在后台启动一次检查（30 秒之后，或服务器无响应时的 5 秒之后）。当 `chat_url` 不是绝对的 `http` 或 `https` URL 时，`url_label` 为空，`reachable` 为 `false`；这样的值从不被探测，其文本（包括用户信息）也不会被回显。
 - `limits` 是入口文本上限、会话文本预算，以及以字节计的 API 请求体上限。
 - `sessions.store` 取值为 `ok`、`unavailable`（存储无法打开，网关每 5 秒重试一次）或 `failed`（写入失败；请重启网关）。`store_error` 说明原因，并把主目录写作 `~`。`store_reason` 在健康时为 `null`，另一个网关拥有该存储时为 `owned`，其他任何打开失败为 `open-error`，写入失败之后为 `failed`。客户端应使用这个稳定的原因，而不要解析 `store_error`；存储成功打开后它会被清除。

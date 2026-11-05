@@ -833,7 +833,7 @@ class Config:
             )
 
         # -- Chat request timeout --
-        errors.extend(self._validate_request_timeout())
+        errors.extend(self.validate_request_timeout())
 
         # -- Gateway validation --
         if not self.gateway_port_ok:
@@ -1056,7 +1056,7 @@ class Config:
             f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
         ]
 
-    def _validate_request_timeout(self) -> list[str]:
+    def validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
         value: object = self.request_timeout_s
         if value is None or _is_positive_seconds(value):
@@ -1282,7 +1282,7 @@ class Config:
             *self._validate_console(),
             *self._validate_approvals(),
             *self._validate_workspace(),
-            *self._validate_request_timeout(),
+            *self.validate_request_timeout(),
         ]
 
     def cli_errors(self) -> list[str]:

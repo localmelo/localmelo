@@ -883,6 +883,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: one adapter now serves every OpenAI-compatible backend, and one list of local and hosted backends
+  feeds the config, the setup lists, Settings, the banner, the probe and the failure hints, so a new backend is one
+  row. `GET /api/health` `model.local` tells the page whether the model runs on the user's own server.
 - Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.

@@ -1496,7 +1496,7 @@ class TestOmlxSpelling:
         )
         assert load().validate() == [
             "[vllm] chat_url is empty. "
-            "Set it to your oMLX URL (e.g. http://localhost:8000).",
+            "Set it to your oMLX URL (e.g. http://localhost:8000/v1).",
             "[vllm] chat_model is empty. Specify the oMLX model name.",
         ]
 
