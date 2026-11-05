@@ -64,6 +64,9 @@ def listening() -> Iterator[Path]:
     server = socketserver.ThreadingUnixStreamServer(
         str(folder / "control.sock"), _Hangup
     )
+    (folder / "control.sock").chmod(
+        0o600
+    )  # as melo_serve does: the umask cannot matter
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield folder / "control.sock"

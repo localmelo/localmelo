@@ -188,6 +188,12 @@ def test_ensure_running_has_one_budget_for_up_and_the_wait(
     assert line == "melo_serve did not start in 15 s; try `melo-serve up`"
     assert "/bin/" not in line  # not the command's path
 
+    def cannot_run(args: list[str], **kwargs: Any) -> None:
+        raise PermissionError(13, "Permission denied", str(Path.home() / "bin/x"))
+
+    monkeypatch.setattr(subprocess, "run", cannot_run)
+    assert melo_serve.ensure_running().endswith("Permission denied: '~/bin/x'")
+
 
 def test_validation_reads_no_state_so_melo_serve_can_be_started() -> None:
     cfg = _cfg()
@@ -227,6 +233,22 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv.parent))
     assert melo_serve.command() == str(uv)
     uv.chmod(0o644)  # not executable
+    assert melo_serve.command() is None
+    uv.chmod(0o777)  # others could change it
+    assert melo_serve.command() is None
+    uv.chmod(0o755)
+    uv.parent.chmod(0o777)  # or the folder it is in
+    assert melo_serve.command() is None
+    uv.parent.chmod(0o755)
+    assert melo_serve.command() == str(uv)
+    # uv tool install: a link in the bin folder into the tool's own folder.
+    link = real_command / "links"
+    link.mkdir()
+    (link / "melo-serve").symlink_to(_fake_command(real_command / "tool" / "bin"))
+    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(link))
+    assert melo_serve.command() == str(link / "melo-serve")
+    (link / "melo-serve").unlink()
+    (link / "melo-serve").symlink_to(real_command / "gone")  # a dangling link
     assert melo_serve.command() is None
 
 
@@ -289,11 +311,46 @@ def _shared_folder(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sock.parent.chmod(0o777)
 
 
+def _state_of_another_user(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = os.fstat
+
+    def fstat(fd: int) -> os.stat_result:
+        info = real(fd)
+        return os.stat_result((*info[:4], info.st_uid + 1, *info[5:]))
+
+    monkeypatch.setattr(os, "fstat", fstat)
+
+
+def _state_in_a_shared_folder(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    Path(os.environ[melo_serve.HOME_ENV]).chmod(0o777)
+
+
+def _state_that_is_a_link(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = Path(os.environ[melo_serve.HOME_ENV]) / "state.json"
+    state.rename(state.with_name("real.json"))
+    state.symlink_to("real.json")
+
+
+def _unknown_user_socket(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(sock.parent)  # the unexpanded path is read from here
+    monkeypatch.setenv(melo_serve.SOCKET_ENV, "~nosuchuser/control.sock")
+
+
+def _unknown_user_home(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(sock.parent)
+    monkeypatch.setenv(melo_serve.HOME_ENV, "~nosuchuser/melo_serve")
+
+
 REFUSED = {
     "a symlink to a real socket": _symlink,
     "a regular file": _regular_file,
     "a socket another user owns": _other_owner,
     "a folder others can write": _shared_folder,
+    "a state file another user owns": _state_of_another_user,
+    "a state file in a folder others can write": _state_in_a_shared_folder,
+    "a state file that is a link": _state_that_is_a_link,
+    "a socket path of an unknown user": _unknown_user_socket,
+    "a home of an unknown user": _unknown_user_home,
 }
 
 

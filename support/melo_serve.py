@@ -49,9 +49,13 @@ LOOPBACK_HOSTS: Final = ("127.0.0.1", "localhost", "::1")
 ROLES: Final = ("chat", "embedding")
 
 
+def _path(value: str) -> Path:
+    """*value* as a path, ``~`` expanded; ``~nosuchuser`` stays as it is, never an error."""
+    return Path(os.path.expanduser(value))
+
+
 def home() -> Path:
-    value = os.environ.get(HOME_ENV)
-    return Path(value).expanduser() if value else Path.home() / ".cache" / "melo_serve"
+    return _path(os.environ.get(HOME_ENV) or "~/.cache/melo_serve")
 
 
 def state_path() -> Path:
@@ -60,7 +64,7 @@ def state_path() -> Path:
 
 def socket_path() -> Path:
     value = os.environ.get(SOCKET_ENV)
-    return Path(value).expanduser() if value else home() / "control.sock"
+    return _path(value) if value else home() / "control.sock"
 
 
 @dataclass(frozen=True)
@@ -88,10 +92,26 @@ def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _own(info: os.stat_result) -> bool:
+    """Whether the file or folder *info* describes is this user's, and no one else can write it."""
+    return info.st_uid == os.getuid() and not info.st_mode & 0o022
+
+
 def _read_state() -> dict[str, Any] | None:
-    """The state file as melo_serve wrote it; None if it is missing or not its state."""
+    """The state file as melo_serve wrote it; None if it is missing or not its state.
+
+    It is opened without following a link, and must be a regular file that
+    this user owns, in a folder only this user can write.
+    """
+    path = state_path()
     try:
-        with state_path().open("rb") as handle:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not (
+                stat.S_ISREG(info.st_mode) and _own(info) and _own(os.stat(path.parent))
+            ):
+                return None
             raw = handle.read(MAX_STATE_BYTES + 1)
         if len(raw) > MAX_STATE_BYTES:
             return None
@@ -134,7 +154,7 @@ def _loopback(url: str) -> str | None:
 
 
 def _private(path: Path) -> bool:
-    """Whether *path* is this user's own socket in a folder only this user can change.
+    """Whether *path* is a socket and, with its folder, this user's own (see :func:`_own`).
 
     ``lstat`` does not follow a link, so a symlink is not a socket. A socket
     that another user could have put there is not melo_serve's.
@@ -143,13 +163,7 @@ def _private(path: Path) -> bool:
         sock, folder = os.lstat(path), os.stat(path.parent)
     except (OSError, ValueError):
         return False
-    uid = os.getuid()
-    return (
-        stat.S_ISSOCK(sock.st_mode)
-        and sock.st_uid == uid
-        and folder.st_uid == uid
-        and not folder.st_mode & 0o022
-    )
+    return stat.S_ISSOCK(sock.st_mode) and _own(sock) and _own(folder)
 
 
 def _answers() -> bool:
@@ -214,17 +228,26 @@ class MeloServeError(Exception):
 
 
 def _executable(path: str | None) -> bool:
-    """Whether *path* is an absolute path to a regular file this user owns and can run."""
+    """Whether *path* is an absolute path to a file this user can run, and no one else can change.
+
+    Links are followed. The file they lead to must be a regular file that the
+    user owns and can run, and it and the folders of the path and of the file
+    must pass :func:`_own`. (``uv tool install`` makes ``~/.local/bin/melo-serve``
+    a link into its own folder.)
+    """
     if not path or not os.path.isabs(path):
         return False
     try:
-        info = os.stat(path)
+        real = os.path.realpath(path)
+        info = os.stat(real)
+        folders = (os.stat(os.path.dirname(path)), os.stat(os.path.dirname(real)))
     except OSError:
         return False
     return (
         stat.S_ISREG(info.st_mode)
-        and info.st_uid == os.getuid()
         and bool(info.st_mode & stat.S_IXUSR)
+        and _own(info)
+        and all(_own(folder) for folder in folders)
     )
 
 
@@ -234,13 +257,14 @@ def _find_command() -> str | None:
     A launchd login item has no ``~/.local/bin`` on its PATH, where
     ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
     else ``~/.local/bin``. A candidate that is relative, not a regular
-    executable file, or owned by another user is passed over, so a stale file
-    in a system folder does not hide the installed one.
+    executable file, or that another user owns or that others can write is
+    passed over, so a stale file in a system folder does not hide the
+    installed one.
     """
     folder = (
         os.environ.get("UV_TOOL_BIN_DIR")
         or os.environ.get("XDG_BIN_HOME")
-        or str(Path.home() / ".local" / "bin")
+        or "~/.local/bin"
     )
     for path in (
         shutil.which(COMMAND),
