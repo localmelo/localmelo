@@ -26,7 +26,7 @@ import pytest
 from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.own_gateway import OwnGateway
 from localmelo.melo.executor import sandbox
-from localmelo.melo.executor.builtins import ToolFunction, rooted_builtins
+from localmelo.melo.executor.builtins import ToolFunction, builtin_callables
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import (
@@ -326,7 +326,9 @@ def _tools(
     root: Path, env: dict[str, str], **kwargs: float
 ) -> tuple[WriteConfinement, ToolFunction, ToolFunction]:
     confinement = _real(root, env)
-    tools = rooted_builtins(str(root), tool_env=env, confinement=confinement, **kwargs)
+    tools = builtin_callables(
+        str(root), tool_env=env, confinement=confinement, **kwargs
+    )
     return confinement, tools["shell_exec"][0], tools["python_exec"][0]
 
 
@@ -570,7 +572,7 @@ class TestRealGuard:
             except ConfinementError as exc:
                 pytest.skip(str(exc))
             assert c is not None
-            tools = rooted_builtins(
+            tools = builtin_callables(
                 str(ws), tool_env={"HOME": str(home)}, confinement=c
             )
             shell, python = tools["shell_exec"][0], tools["python_exec"][0]
@@ -633,7 +635,9 @@ async def test_an_auto_call_cannot_ask_macos_to_open_anything(
         pytest.skip(str(exc))
     assert guarded is not None and plain is not None
     for c, status in ((plain, "-10814"), (guarded, "-54")):
-        python = rooted_builtins(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        python = builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][
+            0
+        ]
         assert (await python(_LS_PROBE)).strip() == status
 
 
@@ -658,7 +662,9 @@ async def test_an_auto_call_cannot_reach_a_container_engine_s_socket(
         except ConfinementError as exc:
             pytest.skip(str(exc))
         assert c is not None
-        python = rooted_builtins(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        python = builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][
+            0
+        ]
         code = (
             "import socket\n"
             "for name in ('docker-test.sock', 'other.sock'):\n"

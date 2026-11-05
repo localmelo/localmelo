@@ -239,7 +239,8 @@
         <p>
           A built-in is a <code>ToolDef</code> (a name, a description, JSON
           parameters and semantic tags) and an async function that returns
-          text. Both live in <code>melo/executor/builtins.py</code>, and the
+          text and takes the workspace root first. Both live in
+          <code>melo/executor/builtins.py</code>, and the
           <code>_builtin()</code> decorator adds the pair to
           <code>BUILTINS</code>. <code>register_builtins()</code> in
           <code>melo/executor/__init__.py</code> registers every one with the
@@ -267,10 +268,13 @@
             from the table.
           </li>
           <li>
-            If it needs a workspace root, add its rooted variant to
-            <code>rooted_builtins()</code> in the same file. A tool that starts
-            a child process appends its status to <code>TOOL_EXIT_CODE</code>,
-            so <code>tool.finished</code> carries <code>exit_code</code>.
+            The function's first parameter is the workspace root, or
+            <code>None</code> for a run without a workspace (a tool that does
+            not use it ignores it), and the function is written once for both:
+            <code>builtin_callables()</code> binds the root before the
+            model's arguments. A tool that starts a child process appends its
+            status to <code>TOOL_EXIT_CODE</code>, so
+            <code>tool.finished</code> carries <code>exit_code</code>.
           </li>
           <li>
             Add tests in <code>tests/executor/</code>.
