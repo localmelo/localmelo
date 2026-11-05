@@ -12,6 +12,7 @@
  * command so the two agree.
  */
 import {formatTime, t} from './i18n.mjs';
+import {maker, startOfDay} from './dom.mjs';
 
 const SEPARATOR = ' · ';
 const DAY_S = 86400;
@@ -50,12 +51,6 @@ export function grantWho(grant) {
   return t(grant?.by === 'auto' ? 'permissions.by.auto' : 'permissions.by.person');
 }
 
-const startOfDay = (seconds) => {
-  const day = new Date(seconds * 1000);
-  day.setHours(0, 0, 0, 0);
-  return day.getTime() / 1000;
-};
-
 /** "just now", "12 min ago", "today at 9:05 AM", "yesterday at 9:05 AM", then the day: "Oct 28", "Oct 28, 2025". */
 export function grantedWords(at, now) {
   const when = Number(at);
@@ -75,12 +70,7 @@ export function setupPermissionsTab({doc, api, clock = Date.now, onChange = () =
   let reads = 0; // a read that is not the newest one is dropped
   let epoch = 0; // reset() moves it on: what an old visit started changes nothing
   let controls = []; // the Revoke buttons as drawn, in order, with the grant each one belongs to
-  function node(tag, className, text) {
-    const element = doc.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = String(text);
-    return element;
-  }
+  const {node} = maker(doc);
   const root = node('div', 'perm-tab');
   root.tabIndex = -1; // the focus goes here when the last Revoke button is gone
   const status = node('p', 'perm-status');

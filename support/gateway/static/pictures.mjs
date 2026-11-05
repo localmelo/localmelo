@@ -1,4 +1,5 @@
 import { t } from "./i18n.mjs";
+import { maker } from "./dom.mjs";
 import { formatBytes } from "./turns.mjs";
 
 /**
@@ -108,12 +109,7 @@ export function picturesNode({
 }) {
   if (pictures.length === 0) return null;
   const ask = status ?? (async (url) => (await fetch(url, { credentials: "same-origin" })).status);
-  const node = (tag, className, text) => {
-    const made = doc.createElement(tag);
-    if (className) made.className = className;
-    if (text !== undefined) made.textContent = text;
-    return made;
-  };
+  const {node} = maker(doc);
   const row = node("div", "pictures");
   row.setAttribute("role", "group");
   row.setAttribute("aria-label", label(pictures.length));
@@ -166,12 +162,7 @@ export function picturesNode({
  */
 export function setupPictureBox({ dialog }) {
   const doc = dialog.ownerDocument;
-  const node = (tag, className, text) => {
-    const made = doc.createElement(tag);
-    if (className) made.className = className;
-    if (text !== undefined) made.textContent = text;
-    return made;
-  };
+  const {node} = maker(doc);
   const image = node("img");
   image.alt = "";
   const caption = node("p", "picture-box-caption");

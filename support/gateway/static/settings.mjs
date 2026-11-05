@@ -1,3 +1,4 @@
+import { maker } from "./dom.mjs";
 import { folderChoices, folderName } from "./folder.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { setupPermissionsTab } from "./permissions-tab.mjs";
@@ -631,7 +632,7 @@ export function setupSettings({
     const kept = Array.isArray(settings.extra_folders) ? settings.extra_folders : null;
     for (const id of ["s-extra-title", "s-extra-hint", "s-extra"]) $(id).hidden = kept === null;
     if (kept === null) return;
-    const make = (tag, className, text) => Object.assign(document.createElement(tag), {className, textContent: text});
+    const {node: make} = maker(document);
     const rows = kept.map((item) => {
       const path = String(item.path ?? "");
       const row = make("li", "st-row", "");
@@ -684,7 +685,7 @@ export function setupSettings({
     if (!settings) return;
     $("settings-file").textContent = t("settings.developerFile", {path: settings.file_label || "~/.cache/localmelo/config.toml"});
     $("settings-revision").textContent = t("settings.revision", {revision: settings.revision || t("settings.notSaved")});
-    const make = (tag, className, text) => Object.assign(document.createElement(tag), {className, textContent: text});
+    const {node: make} = maker(document);
     const blocks = [];
     for (const group of settings.developer_settings || []) {
       const list = make("ul", "st-group st-dense", "");

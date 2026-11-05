@@ -884,6 +884,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: the console's approval card lives in `static/approval-card.mjs`, its element and button makers
+  in one `static/dom.mjs` (`(tag, className, text)`) instead of twenty copies, and the asset tests walk every
+  module's imports. The console looks and behaves the same.
 - Python API: `Agent(config=)` is gone, so the core imports nothing from `support/`. Build the providers of a config
   file with `providers_for(cfg)` from `localmelo.support.backends` and pass them: `llm, embedding =
   providers_for(load())`, then `Agent(llm=llm, embedding=embedding)`. Pass the agent's reasoning mode as a second

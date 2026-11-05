@@ -11,6 +11,7 @@
  * `slash-actions.mjs`; the page passes what they need as `host` (see `workspace.js`).
  */
 
+import {maker} from './dom.mjs';
 import {language, t} from './i18n.mjs';
 import {createActions} from './slash-actions.mjs';
 
@@ -53,33 +54,28 @@ export function matchCommands(list, query) {
   return [...prefix, ...rest];
 }
 
-function node(doc, tag, className, text) {
-  const made = doc.createElement(tag);
-  if (className) made.className = className;
-  if (text !== undefined) made.textContent = text;
-  return made;
-}
-
 /** `/name args  help`, as the menu and `/help` write a command: the name in the accent, the arguments muted. */
 function commandLine(doc, className, spelling, command) {
-  const line = node(doc, 'div', className);
-  line.append(node(doc, 'span', 'slash-name', `/${spelling}`));
-  if (command.args) line.append(node(doc, 'span', 'slash-args', command.args));
-  line.append(node(doc, 'span', 'slash-help', helpOf(command)));
+  const {node} = maker(doc);
+  const line = node('div', className);
+  line.append(node('span', 'slash-name', `/${spelling}`));
+  if (command.args) line.append(node('span', 'slash-args', command.args));
+  line.append(node('span', 'slash-help', helpOf(command)));
   return line;
 }
 
 function lineNode(doc, line) {
-  const made = node(doc, 'div', 'local-line');
-  if (line.label) made.append(node(doc, 'span', 'local-label', line.label));
+  const {node} = maker(doc);
+  const made = node('div', 'local-line');
+  if (line.label) made.append(node('span', 'local-label', line.label));
   for (const part of line.parts ?? [{text: line.text, tone: line.tone}]) {
-    const span = node(doc, 'span', 'local-text', part.text);
+    const span = node('span', 'local-text', part.text);
     if (part.tone) span.dataset.tone = part.tone;
     made.append(span);
   }
   if (line.confirm) {
     for (const [label, primary, run] of [[line.confirm.yes, true, line.confirm.onYes], [line.confirm.no, false, line.confirm.onNo]]) {
-      const choice = node(doc, 'button', primary ? 'local-choice primary' : 'local-choice', label);
+      const choice = node('button', primary ? 'local-choice primary' : 'local-choice', label);
       choice.type = 'button';
       choice.addEventListener('click', () => run?.());
       made.append(choice);
@@ -90,12 +86,13 @@ function lineNode(doc, line) {
 
 /** One answer: the command as typed, then its lines (the commands of a `/help` in one aligned table). */
 export function rowNode(doc, row) {
-  const made = node(doc, 'section', 'local-row');
+  const {node} = maker(doc);
+  const made = node('section', 'local-row');
   made.setAttribute('aria-label', t('slash.rowLabel', {command: row.command}));
   const [head, ...rest] = row.command.split(/\s+/);
-  const echo = node(doc, 'div', 'local-command');
-  echo.append(node(doc, 'span', 'slash-name', head));
-  if (rest.length) echo.append(node(doc, 'span', 'slash-args', rest.join(' ')));
+  const echo = node('div', 'local-command');
+  echo.append(node('span', 'slash-name', head));
+  if (rest.length) echo.append(node('span', 'slash-args', rest.join(' ')));
   made.append(echo);
   let table = null;
   for (const line of row.lines) {
@@ -105,7 +102,7 @@ export function rowNode(doc, row) {
       continue;
     }
     if (table === null) {
-      table = node(doc, 'div', 'local-table');
+      table = node('div', 'local-table');
       made.append(table);
     }
     table.append(commandLine(doc, 'local-help', line.help.spelling, line.help.command));
@@ -123,6 +120,7 @@ export function rowNode(doc, row) {
  */
 export function setupSlash(host) {
   const {doc, input, menu, rows: rowsRoot} = host;
+  const {node} = maker(doc);
   let loaded = null;
   let loading = null;
   let shown = [];
@@ -163,8 +161,8 @@ export function setupSlash(host) {
     });
     const query = menuQuery(input.value) ?? '';
     const tail = shown.length === 0
-      ? node(doc, 'div', 'slash-empty', t('slash.noMatch', {name: query}))
-      : node(doc, 'div', 'slash-foot', t('slash.keys'));
+      ? node('div', 'slash-empty', t('slash.noMatch', {name: query}))
+      : node('div', 'slash-foot', t('slash.keys'));
     menu.replaceChildren(...items, tail);
     if (items[at]) {
       input.setAttribute('aria-activedescendant', items[at].id);

@@ -74,6 +74,9 @@ class InputPlaceholders(HTMLParser):
             self.placeholders[str(attributes["id"])] = str(attributes["placeholder"])
 
 
+JAVASCRIPT = {"text/javascript", "application/javascript"}
+
+
 @pytest.fixture()
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
@@ -118,6 +121,23 @@ async def test_bad_or_absent_instance_has_no_header(
         assert "x-localmelo-instance" not in (await client.get("/")).headers
 
 
+async def _walk_modules(client: httpx.AsyncClient, scripts: list[str]) -> set[str]:
+    """Serve each script and, one import after another, every module it imports."""
+    reached: set[str] = set()
+    pending = list(scripts)
+    while pending:
+        path = pending.pop()
+        if path in reached:
+            continue
+        reached.add(path)
+        response = await client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].split(";")[0] in JAVASCRIPT, path
+        for module in re.findall(r"from\s+['\"](\.{1,2}/[^'\"]+)['\"]", response.text):
+            pending.append(response.url.join(module).path)
+    return reached
+
+
 async def test_shell_assets_and_module_imports_are_served(
     client: httpx.AsyncClient,
 ) -> None:
@@ -129,6 +149,7 @@ async def test_shell_assets_and_module_imports_are_served(
     assert any(path.endswith(".css") for path in parser.paths)
     assert any(path.endswith(".js") for path in parser.paths)
 
+    scripts: list[str] = []
     for path in set(parser.paths):
         assert path.startswith("/assets/"), "The workspace must load its assets locally"
         response = await client.get(path)
@@ -144,15 +165,14 @@ async def test_shell_assets_and_module_imports_are_served(
         elif path.endswith(".css"):
             assert media_type == "text/css"
         else:
-            assert media_type in {"text/javascript", "application/javascript"}
-            imports = re.findall(r"from\s+['\"]([^'\"]+)['\"]", response.text)
-            for module in imports:
-                module_response = await client.get(str(response.url.join(module)))
-                assert module_response.status_code == 200, module
-                assert module_response.headers["content-type"].split(";")[0] in {
-                    "text/javascript",
-                    "application/javascript",
-                }
+            assert media_type in JAVASCRIPT
+            scripts.append(path)
+    reached = await _walk_modules(client, scripts)
+    # A module nothing imports is never served to the page: it is dead, or mis-imported.
+    orphans = {path.name for path in webapp._STATIC.glob("*.mjs")} - {
+        Path(path).name for path in reached
+    }
+    assert not orphans, f"modules no page script reaches: {sorted(orphans)}"
 
 
 async def test_icon_links_point_at_images_large_enough_for_their_use(
@@ -243,17 +263,13 @@ async def test_the_empty_chat_shows_the_new_sitting_dog_without_the_old_blink_pa
     assert ".blinks.portrait" not in _stylesheet()
 
 
-async def test_the_moves_are_served_with_their_player(
+async def test_every_sheet_the_moves_manifest_names_is_served(
     client: httpx.AsyncClient,
 ) -> None:
-    script = await client.get("/assets/moves.mjs")
-    assert script.status_code == 200 and "javascript" in script.headers["content-type"]
     manifest = (await client.get("/assets/moves/manifest.json")).json()
     for entry in manifest["states"].values():
         sheet = await client.get(f"/assets/moves/{entry['file']}")
         assert sheet.headers["content-type"] == "image/webp", entry["file"]
-    # The panel draws them: its portrait holds the canvas.
-    assert "startMoves" in (await client.get("/assets/panel.mjs")).text
 
 
 async def test_chat_url_placeholder_matches_the_omlx_hint(
@@ -334,34 +350,6 @@ async def test_the_shell_has_a_level_chip_with_aria_attributes(
     assert re.search(r'<div\b[^>]*\bid="level-menu"[^>]*\bhidden\b', page.text)
 
 
-async def test_the_shell_loads_the_same_assets_as_before(
-    client: httpx.AsyncClient,
-) -> None:
-    page = await client.get("/")
-    parser = ShellAssets()
-    parser.feed(page.text)
-    assert set(parser.paths) == {
-        "/assets/moves/face-brand.png",
-        "/assets/moves/face-waiting.png",
-        "/assets/moves/favicon-16.png",
-        "/assets/moves/favicon-32.png",
-        "/assets/moves/favicon-64.png",
-        "/assets/moves/poster-startup.webp",
-        "/assets/theme-init.js",
-        "/assets/workspace.css",
-        "/assets/workspace.js",
-    }
-
-
-async def test_settings_module_is_served_as_javascript(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/settings.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupSettings" in response.text
-
-
 def test_the_console_reads_an_unreachable_server_as_the_provider_words_it() -> None:
     turns = (webapp._STATIC / "turns.mjs").read_text(encoding="utf-8")
     assert f'const UNREACHABLE_PREFIX = "{UNREACHABLE_PREFIX}";' in turns
@@ -380,22 +368,6 @@ def test_quickstart_describes_available_workspace_controls() -> None:
         "The approval cards and the settings dialog arrive in a later update"
         not in text
     )
-
-
-async def test_theme_init_is_served_as_javascript(client: httpx.AsyncClient) -> None:
-    response = await client.get("/assets/theme-init.js")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "localmelo-console.theme" in response.text
-
-
-async def test_drawer_module_is_served_as_javascript(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/drawer.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupDrawer" in response.text
 
 
 async def test_the_shell_has_a_machine_state_span_with_an_accessible_name(
@@ -422,13 +394,7 @@ async def test_the_shell_keeps_the_machine_line_between_the_title_and_the_level(
     assert text.index('id="machine-state"') < text.index('id="level-btn"')
 
 
-async def test_tasks_module_is_served_and_the_panel_holds_the_task_view(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/tasks.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupTasks" in response.text
+async def test_the_panel_holds_the_task_view(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     # A task opens in the panel beside the chat; the sidebar has no Tasks link of its own.
     assert "tasks-link" not in page.text
@@ -438,44 +404,19 @@ async def test_tasks_module_is_served_and_the_panel_holds_the_task_view(
     assert re.search(r'<section\b[^>]*\bid="task-panel"[^>]*\bhidden\b', panel.group(0))
 
 
-async def test_task_live_module_is_served(client: httpx.AsyncClient) -> None:
-    response = await client.get("/assets/task-live.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "taskLive" in response.text
-
-
-async def test_status_row_module_is_served_and_the_shell_has_its_row(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/status-row.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupStatusRow" in response.text
+async def test_the_shell_has_the_status_row(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     assert re.search(r'<div\b[^>]*\bid="status-row"[^>]*\bhidden\b', page.text)
 
 
-async def test_running_module_is_served_and_the_shell_has_its_chip(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/running.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupRunning" in response.text
+async def test_the_shell_has_the_running_chip(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     assert re.search(r'<div\b[^>]*\bid="running-root"[^>]*\bhidden\b', page.text)
     assert re.search(r'<div\b[^>]*\bid="running-menu"[^>]*\bhidden\b', page.text)
     assert 'id="running-btn"' in page.text
 
 
-async def test_pictures_module_is_served_and_the_shell_has_its_light_box(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/pictures.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "picturesNode" in response.text
+async def test_the_shell_has_the_picture_light_box(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     assert re.search(r'<dialog\b[^>]*\bid="picture-box"', page.text)
 
@@ -564,25 +505,13 @@ def test_shell_buttons_have_no_native_title_tooltips() -> None:
     assert not re.findall(r"<button\b[^>]*\btitle=", page)
 
 
-async def test_setup_card_module_is_served_and_the_shell_has_its_card(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/setup-card.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupModelCard" in response.text
+async def test_the_shell_has_the_setup_card(client: httpx.AsyncClient) -> None:
     page = await client.get("/")
     assert re.search(r'<section\b[^>]*\bid="setup-card"[^>]*\bhidden\b', page.text)
     assert "setup-btn" not in page.text and "POSSIBILITY" not in page.text
 
 
-async def test_import_card_module_is_served_and_the_shell_has_its_hidden_card(
-    client: httpx.AsyncClient,
-) -> None:
-    response = await client.get("/assets/import-card.mjs")
-    assert response.status_code == 200
-    assert "javascript" in response.headers["content-type"]
-    assert "setupImportCard" in response.text and "importSection" in response.text
+async def test_the_shell_has_the_import_card_hidden(client: httpx.AsyncClient) -> None:
     page = (await client.get("/")).text
     card = re.search(r'<section\b[^>]*\bid="import-card"[^>]*>', page)
     assert card and " hidden" in card.group(
@@ -599,7 +528,6 @@ async def test_import_card_module_is_served_and_the_shell_has_its_hidden_card(
 async def test_the_shell_has_the_folder_chip_and_the_starters_in_place_of_the_cards(
     client: httpx.AsyncClient,
 ) -> None:
-    assert "setupFolderPicker" in (await client.get("/assets/folder.mjs")).text
     page = (await client.get("/")).text
     hidden = set(
         re.findall(r'<(?:div|button)\b[^>]*\bid="([\w-]+)"[^>]*\bhidden\b', page)
@@ -733,8 +661,6 @@ async def test_the_shell_pins_the_main_chat_and_drops_the_chats_switch(
     assert "hidden" in parent.group(0)
     workers = re.search(r'id="welcome-workers"[^>]*hidden><a href="#/workers"', page)
     assert workers is not None
-    module = (await client.get("/assets/main-chat.mjs")).text
-    assert "export function timeline" in module
     css = _stylesheet()
     # Phones and touch screens: the way back to the main chat is a 44 px target.
     block = re.search(

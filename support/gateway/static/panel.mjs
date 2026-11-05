@@ -1,4 +1,5 @@
 import {cleanOutput, formatDuration} from './turns.mjs';
+import {maker} from './dom.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
 import {setupScheduledTab} from './scheduled-tab.mjs';
@@ -163,18 +164,7 @@ export function setupPanel({
   const live = taskLive({api: newest, changed: () => drawBody(), ...stream});
   let reads = 0;
 
-  function node(tag, className, text) {
-    const element = doc.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined) element.textContent = String(text);
-    return element;
-  }
-  function button(className, text, action) {
-    const element = node('button', className, text);
-    element.type = 'button';
-    element.addEventListener('click', action);
-    return element;
-  }
+  const {node, button} = maker(doc);
 
   // The header: the portrait (the one bold thing), the name and one status line.
   const ring = node('div', 'panel-portrait');

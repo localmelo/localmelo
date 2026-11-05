@@ -1,4 +1,5 @@
 import {taskLive} from './task-live.mjs';
+import {maker} from './dom.mjs';
 import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts, stepLine} from './blocked.mjs';
@@ -141,19 +142,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const {nodes: liveNodes, result: liveResult, ...follow} = liveOptions ?? {};
   const live = liveOptions ? taskLive({api, changed: drawLive, statusRow, ...follow}) : null;
 
-  function node(tag, text, className) {
-    const element = doc.createElement(tag);
-    if (text !== undefined) element.textContent = String(text);
-    if (className) element.className = className;
-    return element;
-  }
-  function button(text, action, disabled = false) {
-    const element = node('button', text);
-    element.type = 'button';
-    element.disabled = disabled;
-    element.addEventListener('click', action);
-    return element;
-  }
+  const {node, button} = maker(doc);
   const path = (id) => `/tasks/${encodeURIComponent(id)}`;
   const when = (value) => {
     const date = value == null ? null : new Date(value * 1000);
@@ -189,15 +178,15 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function list() {
     const rows = [...state.tasks].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
     const intro = t(developer() ? 'tasks.introDeveloper' : 'tasks.intro');
-    const nodes = [node('p', intro, 'muted')];
-    nodes.push(button(t('common.refresh'), () => show('')));
-    if (!rows.length && !state.error) nodes.push(node('p', t('tasks.none')));
+    const nodes = [node('p', 'muted', intro)];
+    nodes.push(button('', t('common.refresh'), () => show('')));
+    if (!rows.length && !state.error) nodes.push(node('p', '', t('tasks.none')));
     for (const task of rows) {
-      const link = node('a', undefined, 'worker-row task-row');
+      const link = node('a', 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
-      link.append(node('strong', task.title || task.task_id),
-        node('span', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : '',
-          openBlocks(task).length ? t('tasks.blocked.count', {n: openBlocks(task).length}) : ''].filter(Boolean).join(' · '), 'muted'));
+      link.append(node('strong', '', task.title || task.task_id),
+        node('span', 'muted', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : '',
+          openBlocks(task).length ? t('tasks.blocked.count', {n: openBlocks(task).length}) : ''].filter(Boolean).join(' · ')));
       nodes.push(link);
     }
     return nodes;
@@ -206,10 +195,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function card() {
     const task = state.task;
     if (!task) return [];
-    const meta = node('dl', undefined, 'worker-meta');
+    const meta = node('dl', 'worker-meta');
     const row = (label, value) => {
-      const cell = node('dd', value);
-      meta.append(node('dt', label), cell);
+      const cell = node('dd', '', value);
+      meta.append(node('dt', '', label), cell);
       return cell;
     };
     const stateCell = row(t('tasks.row.state'), stateText(task));
@@ -218,12 +207,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     // Why it is not ready, and the tests its run ran (from its own calls, never from its report).
     if (ending && endingWhy(ending)) row(t('ending.row'), endingWhy(ending));
     if (ending?.tests.length) {
-      const tests = node('ul', undefined, 'ending-tests');
+      const tests = node('ul', 'ending-tests');
       for (const test of ending.tests) {
         const words = testWords(test);
         const item = node('li');
         item.dataset.outcome = test.outcome;
-        item.append(node('span', words.mark, 'ending-test-mark'), node('code', words.command), node('span', words.outcome, 'ending-test-outcome'));
+        item.append(node('span', 'ending-test-mark', words.mark), node('code', '', words.command), node('span', 'ending-test-outcome', words.outcome));
         tests.append(item);
       }
       row(t('ending.tests')).append(tests);
@@ -244,7 +233,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (live) { drawLive(); nodes.push(answerBox); }
     nodes.push(meta);
     if (task.folder_problem) nodes.push(folderBox(task));
-    if (task.not_committed) nodes.push(node('p', task.not_committed, 'task-note'));
+    if (task.not_committed) nodes.push(node('p', 'task-note', task.not_committed));
     if (statusRow) nodes.push(statusRow.element);
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
@@ -257,35 +246,35 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (live) nodes.push(liveBox);
     // The card is a developer's recovery note: default mode shows it only when there is one to read.
     if (hasCard(task) || developer()) {
-      nodes.push(node(sectionTag, t('tasks.recoveryCard')));
-      nodes.push(hasCard(task) ? node('pre', task.card, 'worker-brief task-card-text') : node('p', t('tasks.noCard'), 'muted'));
+      nodes.push(node(sectionTag, '', t('tasks.recoveryCard')));
+      nodes.push(hasCard(task) ? node('pre', 'worker-brief task-card-text', task.card) : node('p', 'muted', t('tasks.noCard')));
     }
-    const actions = node('div', undefined, 'task-actions');
+    const actions = node('div', 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
-      actions.append(button(t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), Boolean(state.busy)));
+      actions.append(button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), {disabled: Boolean(state.busy)}));
     }
     if (isStopped(task)) {
-      actions.append(button(t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), Boolean(state.busy)));
+      actions.append(button('', t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), {disabled: Boolean(state.busy)}));
     } else if (canFinish(ending)) {
       // A draft finishes with one tap: the tests (and the commit), through the same continue.
-      actions.append(button(state.busy === 'continue' ? t('common.starting') : finishLabel(ending), () => keepGoing(), Boolean(state.busy)));
+      actions.append(button('', state.busy === 'continue' ? t('common.starting') : finishLabel(ending), () => keepGoing(), {disabled: Boolean(state.busy)}));
     }
     // A task that runs or waits to run can be put on hold and given another priority from here.
     if (ACTIVE.has(task.state)) {
-      actions.append(button(t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), Boolean(state.busy) || state.pausing));
+      actions.append(button('', t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), {disabled: Boolean(state.busy) || state.pausing}));
       const menu = levelMenu(task);
       if (menu) actions.append(menu);
     }
     if (!FINISHED.has(task.state)) {
-      actions.append(button(t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), state.busy === 'stop'));
+      actions.append(button('', t(state.busy === 'stop' ? 'tasks.stopping' : 'common.stop'), () => stop(), {disabled: state.busy === 'stop'}));
     }
     nodes.push(actions);
     if (RESUMABLE.has(task.state) && cardMissing(task)) {
-      const box = node('div', undefined, 'task-missing');
+      const box = node('div', 'task-missing');
       box.setAttribute('role', 'alert');
-      box.append(node('p', t('tasks.missing')),
-        node('p', t('tasks.unknownEffects')),
-        button(t(state.busy === 'again' ? 'common.starting' : 'tasks.startAgain'), () => startAgain(), Boolean(state.busy)));
+      box.append(node('p', '', t('tasks.missing')),
+        node('p', '', t('tasks.unknownEffects')),
+        button('', t(state.busy === 'again' ? 'common.starting' : 'tasks.startAgain'), () => startAgain(), {disabled: Boolean(state.busy)}));
       nodes.push(box);
     }
     return nodes;
@@ -305,9 +294,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       if (steps.length) shown.push(stepsFold(steps));
     } else if (open) {
       const turns = liveNodes(view, drawLive);
-      if (turns.length) shown = [node(sectionTag, t(RUNNING.has(task?.state) ? 'tasks.live' : 'tasks.steps')), ...turns];
+      if (turns.length) shown = [node(sectionTag, '', t(RUNNING.has(task?.state) ? 'tasks.live' : 'tasks.steps')), ...turns];
     }
-    if (live.state.error && state.mode === 'card') shown.push(node('p', live.state.error, 'muted'));
+    if (live.state.error && state.mode === 'card') shown.push(node('p', 'muted', live.state.error));
     answerBox.hidden = !top.length;
     answerBox.replaceChildren(...top);
     liveBox.hidden = !shown.length;
@@ -315,25 +304,25 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   }
 
   function stepsFold(steps) {
-    const fold = node('details', undefined, 'task-steps');
+    const fold = node('details', 'task-steps');
     fold.open = state.stepsOpen;
     fold.addEventListener('toggle', () => { state.stepsOpen = fold.open; });
-    fold.append(node('summary', t('tasks.steps')), ...steps);
+    fold.append(node('summary', '', t('tasks.steps')), ...steps);
     return fold;
   }
 
   function dialog() {
     const open = state.dialog;
-    const element = node('dialog', undefined, 'task-dialog');
+    const element = node('dialog', 'task-dialog');
     element.setAttribute('aria-labelledby', 'task-dialog-title');
     element.setAttribute('aria-describedby', 'task-dialog-text');
-    const title = node('h2', t('tasks.resumeTitle'));
+    const title = node('h2', '', t('tasks.resumeTitle'));
     title.id = 'task-dialog-title';
-    const text = node('p', open.warning || t('tasks.warning'));
+    const text = node('p', '', open.warning || t('tasks.warning'));
     text.id = 'task-dialog-text';
-    const confirm = button(t(state.busy === 'resume' ? 'tasks.resuming' : 'tasks.resumeAnyway'), () => resume(open.token), Boolean(state.busy));
-    const cancel = button(t('common.cancel'), () => closeDialog(), state.busy === 'resume');
-    const actions = node('div', undefined, 'task-actions');
+    const confirm = button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'tasks.resumeAnyway'), () => resume(open.token), {disabled: Boolean(state.busy)});
+    const cancel = button('', t('common.cancel'), () => closeDialog(), {disabled: state.busy === 'resume'});
+    const actions = node('div', 'task-actions');
     actions.append(confirm, cancel);
     element.append(title, text, actions);
     element.addEventListener('cancel', (event) => { event.preventDefault?.(); if (state.busy !== 'resume') closeDialog(); });
@@ -349,7 +338,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   function render() {
     if (!active) return;
-    const link = node('a', t('tasks.back'), 'task-back');
+    const link = node('a', 'task-back', t('tasks.back'));
     link.href = home();
     // A plain press leaves through the page (which keeps the browser's own Back from reopening the task).
     if (back) {
@@ -359,13 +348,13 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
         back();
       });
     }
-    const title = node(titleTag, state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'), 'task-title');
+    const title = node(titleTag, 'task-title', state.mode === 'list' ? t('tasks.title') : state.task?.title || t('tasks.task'));
     title.tabIndex = -1;
     titleNode = title;
     const nodes = [link, title];
     for (const [text, role] of [[state.error, 'alert'], [state.notice, 'status']]) {
       if (!text) continue;
-      const line = node('p', text, role === 'alert' ? 'task-error' : 'muted');
+      const line = node('p', role === 'alert' ? 'task-error' : 'muted', text);
       line.setAttribute('role', role);
       nodes.push(line);
     }
@@ -543,10 +532,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   function levelMenu(task) {
     const level = task.level_eff ?? task.level;
     if (!Number.isInteger(level) || level >= LEVELS.length - 1) return null;
-    const menu = node('select', undefined, 'task-level');
+    const menu = node('select', 'task-level');
     menu.setAttribute('aria-label', t('common.priority'));
     LEVELS.slice(0, -1).forEach((_, at) => {
-      const option = node('option', levelLabel(at));
+      const option = node('option', '', levelLabel(at));
       option.value = String(at);
       option.selected = at === level;
       menu.append(option);
@@ -592,19 +581,19 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   // What auto mode blocked: each opens the chat's card, with Allow once; the task went on without them.
   function blockedBox(task) {
-    const box = node('section', undefined, 'task-blocked');
-    box.append(node(sectionTag, t('tasks.blocked.title')), node('p', t('tasks.blocked.note'), 'muted'));
+    const box = node('section', 'task-blocked');
+    box.append(node(sectionTag, '', t('tasks.blocked.title')), node('p', 'muted', t('tasks.blocked.note')));
     const now = Date.now() / 1000;
     for (const block of blockedOf(task)) {
       const facts = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
         review: block.review, reason: block.reason}, name: block.name, preview: block.preview});
       if (!facts || !facts.category) continue;
       const allowing = allowState({until: task.allowances?.[block.step_key] ?? null, used: block.used_at, now});
-      const fold = node('details', undefined, 'task-block');
+      const fold = node('details', 'task-block');
       fold.open = state.openBlock === block.request_id;
       fold.addEventListener('toggle', () => { if (fold.open) state.openBlock = block.request_id; else if (state.openBlock === block.request_id) state.openBlock = ''; });
       const action = facts.allow && allowing.state === 'open' ? t('auto.blocked.allow') : '';
-      fold.append(node('summary', [facts.title, action].filter(Boolean).join(' · ')), blockCard(doc, facts, {
+      fold.append(node('summary', '', [facts.title, action].filter(Boolean).join(' · ')), blockCard(doc, facts, {
         allowing,
         busy: state.busy === `allow:${block.request_id}` ? 'allowing' : Boolean(state.busy),
         developer: developer(),
@@ -632,20 +621,20 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // Steps that ran without asking because they matched, exactly, a step the person allowed in the task's
   // chat. Revoke takes that approval back (the step asks again next time); what ran stays done.
   function earlierBox(task) {
-    const box = node('section', undefined, 'task-earlier');
-    box.append(node(sectionTag, t('tasks.earlier.title')), node('p', t('tasks.earlier.note'), 'muted'));
-    const list = node('ul', undefined, 'task-earlier-list');
+    const box = node('section', 'task-earlier');
+    box.append(node(sectionTag, '', t('tasks.earlier.title')), node('p', 'muted', t('tasks.earlier.note')));
+    const list = node('ul', 'task-earlier-list');
     for (const use of earlierOf(task)) {
-      const row = node('li', undefined, 'task-earlier-row');
-      const step = node('code', stepLine(use.preview), 'task-earlier-step');
+      const row = node('li', 'task-earlier-row');
+      const step = node('code', 'task-earlier-step', stepLine(use.preview));
       step.title = String(use.preview ?? '');
-      row.append(step, node('span', t('tasks.earlier.when', {approved: clock(use.approved_at), ran: clock(use.at)}), 'task-earlier-when'));
+      row.append(step, node('span', 'task-earlier-when', t('tasks.earlier.when', {approved: clock(use.approved_at), ran: clock(use.at)})));
       if (use.live) {
-        const revoke = button(t('approvals.revoke'), () => revokeEarlier(use), Boolean(state.busy));
+        const revoke = button('', t('approvals.revoke'), () => revokeEarlier(use), {disabled: Boolean(state.busy)});
         revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(use.preview, 60)}));
         row.append(revoke);
       } else {
-        row.append(node('span', t('tasks.earlier.revoked'), 'task-earlier-revoked'));
+        row.append(node('span', 'task-earlier-revoked', t('tasks.earlier.revoked')));
       }
       list.append(row);
     }
@@ -669,14 +658,14 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   // A task refused its folder never ran: it says why and starts again in a folder the person chooses.
   function folderBox(task) {
-    const box = node('div', undefined, 'task-missing task-folder');
+    const box = node('div', 'task-missing task-folder');
     box.setAttribute('role', 'alert');
     const where = task.workspace_label || t('tasks.folder.its');
-    box.append(node('p', t('tasks.folder.notStarted', {where, problem: String(task.folder_problem).replace(/\.?$/, '.')})),
-      node('p', t('tasks.folder.never'), 'muted'));
+    box.append(node('p', '', t('tasks.folder.notStarted', {where, problem: String(task.folder_problem).replace(/\.?$/, '.')})),
+      node('p', 'muted', t('tasks.folder.never')));
     const busy = Boolean(state.busy);
     if (state.folderField) {
-      const field = node('input', undefined, 'task-folder-path');
+      const field = node('input', 'task-folder-path');
       field.type = 'text';
       field.value = state.folderText;
       field.placeholder = '~/projects/my-app';
@@ -685,9 +674,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       field.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); startIn(field.value); }
       });
-      box.append(field, button(t(state.busy === 'folder' ? 'common.starting' : 'tasks.folder.startHere'), () => startIn(field.value), busy));
+      box.append(field, button('', t(state.busy === 'folder' ? 'common.starting' : 'tasks.folder.startHere'), () => startIn(field.value), {disabled: busy}));
     } else {
-      box.append(button(t('tasks.folder.choose'), () => pickFolder(), busy));
+      box.append(button('', t('tasks.folder.choose'), () => pickFolder(), {disabled: busy}));
     }
     return box;
   }
