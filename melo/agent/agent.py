@@ -13,6 +13,7 @@ import os
 import sqlite3
 import time
 from collections.abc import (
+    Awaitable,
     Callable,
     Collection,
     Coroutine,
@@ -284,6 +285,16 @@ def _split_inline_reasoning(response: Message) -> Message:
     if response.thinking:
         return dataclasses.replace(response, content=content)
     return dataclasses.replace(response, content=content, thinking=block)
+
+
+def _answer_of(reply: Message) -> str:
+    """The answer in the reply to a request without tools, or "".
+
+    A blank reply gives none, nor does a tool call written out as text, which
+    such a request can still get.
+    """
+    answer = reply.content.strip()
+    return "" if not answer or broken_tool_call(answer) else answer
 
 
 def _replay_plan(
@@ -2224,11 +2235,7 @@ class Agent(_RecallLoop, _NotesLoop):
             run.plan_call = getattr(self.chat, "last_call", None)
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
-        if self.options.reasoning != "legacy":
-            before = response.thinking
-            response = _split_inline_reasoning(response)
-            if not before and response.thinking:
-                self.chat.stats.reasoning_chars += len(response.thinking)
+        response = self._normalize_reply(response)
 
         check = await self.checker.post_plan(response)
         if not check.allowed:
@@ -3053,33 +3060,39 @@ class Agent(_RecallLoop, _NotesLoop):
                 addendum["addendum"] = f"{REFLECTION_ADDENDUM}\n{block}"
         # The chat's earlier turns, which the window may have lost by now.
         earlier = run.earlier_block if run is not None else ""
-        response = await self.chat.reflect(
-            short=sent,
-            query=task.query,
-            attempt_id=attempt_id,
-            failure_type=failure_type,
-            prior_reflections=prior_reflections or None,
-            final=final,
-            fit=fit,
-            notes=note_lines,
-            draft_titles=draft_titles,
-            earlier=earlier,
-            **addendum,
-        )
+
+        async def ask(**retry: Any) -> Message | None:
+            """One reflection request; the reply, normalized and reported."""
+            reply = await self.chat.reflect(
+                short=sent,
+                query=task.query,
+                attempt_id=attempt_id,
+                failure_type=failure_type,
+                prior_reflections=prior_reflections or None,
+                final=final,
+                fit=fit,
+                notes=note_lines,
+                draft_titles=draft_titles,
+                earlier=earlier,
+                **retry,
+                **addendum,
+            )
+            if reply is None:
+                return None
+            reply = self._normalize_reply(reply)
+            if replies is not None:
+                replies.append(reply)
+            if run is not None:
+                run.events.reflection_call(getattr(self.chat, "last_call", None))
+            return reply
+
+        response = await ask()
         if response is None:
             # The fit refused the request before it was sent; read it as an
             # unreadable reply (see the docstring).
             return None
-        if self.options.reasoning != "legacy":
-            before = response.thinking
-            response = _split_inline_reasoning(response)
-            if not before and response.thinking:
-                self.chat.stats.reasoning_chars += len(response.thinking)
-        if replies is not None:
-            replies.append(response)
-        if run is not None:
-            run.events.reflection_call(getattr(self.chat, "last_call", None))
-        if _read_reflection(response.content) is None:
+        found = _read_reflection(response.content)
+        if found is None:
             reason = _unreadable_reason(response)
             if run is not None:
                 run.events.reflection_unreadable(reason)
@@ -3088,33 +3101,10 @@ class Agent(_RecallLoop, _NotesLoop):
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
-            response = await self.chat.reflect(
-                short=sent,
-                query=task.query,
-                attempt_id=attempt_id,
-                failure_type=failure_type,
-                prior_reflections=prior_reflections or None,
-                final=final,
-                retry=True,
-                retry_hint=hint,
-                fit=fit,
-                notes=note_lines,
-                draft_titles=draft_titles,
-                earlier=earlier,
-                **addendum,
-            )
+            response = await ask(retry=True, retry_hint=hint)
             if response is None:
                 return None
-            if self.options.reasoning != "legacy":
-                before = response.thinking
-                response = _split_inline_reasoning(response)
-                if not before and response.thinking:
-                    self.chat.stats.reasoning_chars += len(response.thinking)
-            if replies is not None:
-                replies.append(response)
-            if run is not None:
-                run.events.reflection_call(getattr(self.chat, "last_call", None))
-        found = _read_reflection(response.content)
+            found = _read_reflection(response.content)
         reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
@@ -4855,6 +4845,45 @@ class Agent(_RecallLoop, _NotesLoop):
         run.result = run.last_text
         run.answer_thinking = run.last_text_thinking
 
+    def _normalize_reply(self, response: Message) -> Message:
+        """*response* with an inline ``<think>`` block moved into its thinking.
+
+        Only in the explicit reasoning modes (see :func:`_split_inline_reasoning`).
+        Thinking found in the content, and not reported by the provider, counts
+        in the run's ``reasoning_chars``.
+        """
+        if self.options.reasoning == "legacy":
+            return response
+        before = response.thinking
+        response = _split_inline_reasoning(response)
+        if not before and response.thinking:
+            self.chat.stats.reasoning_chars += len(response.thinking)
+        return response
+
+    async def _aux_reply(
+        self, request: Awaitable[Message], what: str, task_id: str
+    ) -> Message | None:
+        """The reply to an auxiliary request, with its ``<think>`` block split off.
+
+        ``None`` when the request failed: ``max_calls`` left no call for it, or
+        the server did not answer. That is logged, with *what* the request was
+        for, and never ends the run.
+        """
+        try:
+            reply = await request
+        except CallBudgetError as exc:
+            logger.info("No call left to ask for %s in task %s: %s", what, task_id, exc)
+            return None
+        except Exception as exc:
+            logger.warning(
+                "Could not ask for %s in task %s: %s",
+                what,
+                task_id,
+                exception_text(exc),
+            )
+            return None
+        return _split_inline_reasoning(reply)
+
     async def _answer_on_block(self, task: TaskRecord, run: _RunState) -> None:
         """End a run that auto mode stopped, its answer the explanation (#339).
 
@@ -4866,29 +4895,21 @@ class Agent(_RecallLoop, _NotesLoop):
         """
         window = list(self.hippo.working.get_window())
         answer, thinking = "", ""
-        try:
-            reply = _split_inline_reasoning(
-                await self.chat.final_answer(
-                    window,
-                    task.query,
-                    None,
-                    note=BLOCKED_ANSWER_NOTE,
-                    earlier=run.earlier_block,
-                )
-            )
+        reply = await self._aux_reply(
+            self.chat.final_answer(
+                window,
+                task.query,
+                None,
+                note=BLOCKED_ANSWER_NOTE,
+                earlier=run.earlier_block,
+            ),
+            "the explanation of a block",
+            task.task_id,
+        )
+        if reply is not None:
             answer, thinking = reply.content.strip(), reply.thinking
             if broken_tool_call(answer):  # no tools were offered: not an answer
                 answer, thinking = "", ""
-        except CallBudgetError as exc:
-            logger.info(
-                "No call left to explain the block of %s: %s", task.task_id, exc
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for the explanation of a block in %s: %s",
-                task.task_id,
-                exception_text(exc),
-            )
         if not answer:
             blocked = run.reviews.blocked
             answer = answer_on_block(blocked[-1]["title"] if blocked else "")
@@ -4917,27 +4938,20 @@ class Agent(_RecallLoop, _NotesLoop):
         window = [
             msg for msg in self.hippo.working.get_window() if id(msg) not in shown
         ]
-        try:
-            reply = await self.chat.final_answer(
+        reply = await self._aux_reply(
+            self.chat.final_answer(
                 window,
                 task.query,
                 self.hippo.working.get_reflections(),
                 earlier=run.earlier_block,
-            )
-        except CallBudgetError as exc:
-            logger.info("No call left to answer task %s on stop: %s", task.task_id, exc)
+            ),
+            "an answer on stop",
+            task.task_id,
+        )
+        if reply is None:
             return
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for an answer on stop for task %s: %s",
-                task.task_id,
-                exception_text(exc),
-            )
-            return
-        reply = _split_inline_reasoning(reply)
-        answer = reply.content.strip()
-        # A request without tools can still get a tool call written as text.
-        if not answer or broken_tool_call(answer):
+        answer = _answer_of(reply)
+        if not answer:
             return
         run.result = answer
         run.answered_on_stop = True
@@ -4964,8 +4978,7 @@ class Agent(_RecallLoop, _NotesLoop):
             )
         finally:
             PREFIX_RUN.reset(prefix_run)
-        answer = _split_inline_reasoning(reply).content.strip()
-        return "" if not answer or broken_tool_call(answer) else answer
+        return _answer_of(_split_inline_reasoning(reply))
 
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
@@ -4986,21 +4999,14 @@ class Agent(_RecallLoop, _NotesLoop):
         label = requested_closing_label(run.task_text) if answer else None
         if label is None or has_closing_line(answer, label):
             return
-        try:
-            reply = await self.chat.closing_line(task.query, answer, label)
-        except CallBudgetError as exc:
-            logger.info(
-                "No call left to restore the closing line of %s: %s", task.task_id, exc
-            )
+        reply = await self._aux_reply(
+            self.chat.closing_line(task.query, answer, label),
+            "the closing line",
+            task.task_id,
+        )
+        if reply is None:
             return
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for the closing line of task %s: %s",
-                task.task_id,
-                exception_text(exc),
-            )
-            return
-        line = closing_line_of(_split_inline_reasoning(reply).content, label)
+        line = closing_line_of(reply.content, label)
         if line is None:
             return
         run.result = f"{run.result.rstrip()}\n{line}"
