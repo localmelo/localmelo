@@ -38,6 +38,7 @@ from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStore,
+    SessionStoreError,
     StoredEvent,
 )
 from localmelo.tests.sessions.helpers import (
@@ -2425,3 +2426,126 @@ async def test_the_run_zone_gives_the_steps_in_brief_while_a_turn_runs(
     assert session.status_bar().run == "step 3 of 100 · ctrl+o steps"
     session._state = "idle"
     renderer.live = None
+
+
+async def test_a_session_that_follows_melo_serve_moves_to_the_model_it_now_serves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+) -> None:
+    from localmelo.support import config
+    from localmelo.support.backends import providers_for
+    from localmelo.support.cli.agents import config_backend
+    from localmelo.support.sessions import agents as session_agents
+    from localmelo.tests.fixtures.melo_serve import role, write_state
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = config.Config(
+        chat_backend="melo_serve",
+        embedding_backend="none",
+        melo_serve=config.LocalBackendConfig(chat_url="http://127.0.0.1:8321/v1"),
+    )
+    made: list[Any] = []
+    asked: list[str] = []
+    failed: list[bool] = []
+
+    def providers(cfg: config.Config, reasoning: str) -> tuple[ScriptedLLM, None]:
+        """The real choice of the model to ask for, with a scripted answer, no network."""
+        real, _ = providers_for(cfg, reasoning)
+        made.append(real)
+        if real.model == "model-b" and not failed:  # type: ignore[attr-defined]
+            failed.append(True)  # the first start of model-b fails
+            raise RuntimeError("the model is not loaded")
+        llm = ScriptedLLM([answer(f"{real.model} here.")] * 2)  # type: ignore[attr-defined]
+        llm.model = real.model  # type: ignore[attr-defined]
+        asked.append(real.model)  # type: ignore[attr-defined]
+        return llm, None
+
+    monkeypatch.setattr(session_agents, "providers_for", providers)
+    write_state(melo_serve_home, chat=role("model-a"))
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(memory=False, workspace_root=str(tmp_path)),
+        workspace=str(tmp_path),
+        saves=False,
+    )
+    old = await factory.build()
+    store = SessionStore(tmp_path / "sessions.db", writer="cli")
+    await store.open()
+    out = RecordingOut(100)
+    approver = TerminalApprover()
+    session = CliSession(
+        store=store,
+        factory=factory,
+        agent=old,
+        renderer=TurnRenderer(
+            out,
+            symbols=UNICODE,
+            backend=lambda: factory.backend,
+            snapshots=approver.snapshots,
+        ),
+        approver=approver,
+        mode="ask",
+        out=out,
+    )
+    app = FakeApp()
+    session.attach(app)  # type: ignore[arg-type]
+    line = "The model changed to model-b (via melo_serve)."
+    asks = lambda: session.agent._llm.model  # noqa: E731  # type: ignore[attr-defined]
+    try:
+        session.enter("same model")  # nothing changed: the same Agent answers
+        await _until(lambda: session.state == "idle")
+        assert session.agent is old and line not in out.text()
+        write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
+        session.enter("a start that fails")
+        await _until(lambda: session.state == "idle")
+        # The turn ends as failed, with its message back: the old Agent would
+        # only meet melo_serve's 409.
+        assert session.agent is old and factory.backend.model == "model-a"
+        assert (
+            "✗ The turn could not run: RuntimeError: the model is not loaded"
+            in out.text()
+        )
+        assert app.buffer.text == "a start that fails" and line not in out.text()
+        app.buffer.text = ""
+        session.enter("after the retry")  # the next turn tries again
+        await _until(lambda: session.state == "idle")
+        assert session.agent is not old and asks() == "model-b"
+        assert factory.backend.model == "model-b" and factory.backend.follows
+        assert factory.live_agents() == [session.agent]
+        assert out.text().count(line) == 1
+        assert "model-b here." in out.text()
+        assert asked[-1] == "model-b"
+        # A note switch (/browser) takes the model it is on, and keeps following.
+        write_state(melo_serve_home, chat=role("model-c"))
+        assert await session._switch(
+            factory.backend.model, url=None, note="Browsing is on."
+        )
+        assert factory.backend.model == "model-c" and factory.backend.follows
+        assert asks() == "model-c"
+        # A store failure while moving ends the turn as failed, and the session idle.
+        write_state(melo_serve_home, chat=role("model-d"))
+
+        async def refuse(*args: Any, **kwargs: Any) -> None:
+            raise SessionStoreError("the store is read-only")
+
+        with monkeypatch.context() as broken:
+            broken.setattr(store, "update_session", refuse)
+            session.enter("a store that fails")
+            await _until(lambda: session.state == "idle")
+        assert app.buffer.text == "a store that fails" and asks() == "model-d"
+        write_state(melo_serve_home)  # nothing served: the Agent stays
+        agent = session.agent
+        session.enter("when nothing is served")
+        await _until(lambda: session.state == "idle")
+        assert session.agent is agent
+        assert [
+            t.status
+            for t in await store.list_turns((await store.list_sessions())[0].id)
+        ] == ["completed"] * 3
+    finally:
+        await session.shutdown()
+        for real in made:
+            await real.close()

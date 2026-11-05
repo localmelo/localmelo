@@ -2666,7 +2666,7 @@ def _print_melo_serve_status() -> None:
         uses = False  # a config that does not load names no backend
     else:
         uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
-    if snap.running or uses or melo_serve.command():
+    if snap.running or uses or melo_serve.command() or melo_serve.refusal():
         print()
         print("\n".join(melo_serve.status_lines(snap)))
 

@@ -22,6 +22,7 @@ from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.registry import find, in_use
 from localmelo.support.cli.views import BackendInfo
+from localmelo.support.melo_serve import MeloServeError
 from localmelo.support.sessions.agents import build_session_agent
 
 # What the banner says for a backend that serves its own model, when it serves none.
@@ -157,17 +158,21 @@ class AgentFactory:
         A configured session keeps its config: on a new *url*, the Agent
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
         """
+        followed: BackendInfo | None = None
         if self.backend.follows and url is None and model in (None, self.backend.model):
-            model = None  # none was chosen: the Agent asks for what is served now
-            self._follow()
+            # None was chosen: the Agent asks for what is served now, read once
+            # for the row and the Agent (nothing served: it fails with the hint).
+            followed = self._served()
+            model = None if followed.model == NONE_SERVED else followed.model
         else:
             model = model or self.backend.model
         try:
             agent = await self._build(
                 model, url, self.mcp_config if self.mcp_error is None else None
             )
-        except ValueError:
-            # An invalid mode/provider pair is not an MCP startup failure.
+        except (ValueError, MeloServeError):
+            # An invalid mode/provider pair, or a model melo_serve does not
+            # serve, is not an MCP startup failure.
             raise
         except Exception as exc:
             if self.mcp_config is None or self.mcp_error is not None:
@@ -175,16 +180,34 @@ class AgentFactory:
             # A server that did not start: this session runs without MCP.
             self.mcp_error = str(exc) or type(exc).__name__
             agent = await self._build(model, url, None)
+        # Only now: a failed build leaves the row on the Agent it still has.
+        if followed is not None:
+            self.backend = followed
         self._live.append(agent)
         return agent
 
-    def _follow(self) -> None:
-        """Show what the backend serves now, which the Agent about to be built asks for."""
+    def served_change(self) -> str:
+        """The model a session that follows would now ask for, if it is not its own.
+
+        ``""`` when the session does not follow, when nothing is served, or when
+        the Agent already asks for what is served. One read of the backend.
+        """
+        if not self.backend.follows or self._cfg is None:
+            return ""
+        served = in_use(self._cfg, self.backend.key)[1]
+        return served if served != self.backend.model else ""
+
+    def show_served(self) -> None:
+        """Show what the backend serves now, for a session whose Agent is the gateway's."""
+        now = self._served()
+        if now.model != NONE_SERVED:
+            self.backend = now
+
+    def _served(self) -> BackendInfo:
+        """The row as it shows what the backend serves now, which the Agent about to be built asks for."""
         assert self._cfg is not None  # only a configured backend follows
         now = config_backend(self._cfg, None)
-        self.backend = replace(
-            self.backend, model=now.model, label=now.label, note=now.note
-        )
+        return replace(self.backend, model=now.model, label=now.label, note=now.note)
 
     async def _build(
         self, model: str | None, url: str | None, mcp_config: str | None

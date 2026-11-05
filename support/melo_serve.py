@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -48,9 +49,13 @@ LOOPBACK_HOSTS: Final = ("127.0.0.1", "localhost", "::1")
 ROLES: Final = ("chat", "embedding")
 
 
+def _path(value: str) -> Path:
+    """*value* as a path, ``~`` expanded; ``~nosuchuser`` stays as it is, never an error."""
+    return Path(os.path.expanduser(value))
+
+
 def home() -> Path:
-    value = os.environ.get(HOME_ENV)
-    return Path(value).expanduser() if value else Path.home() / ".cache" / "melo_serve"
+    return _path(os.environ.get(HOME_ENV) or "~/.cache/melo_serve")
 
 
 def state_path() -> Path:
@@ -59,7 +64,7 @@ def state_path() -> Path:
 
 def socket_path() -> Path:
     value = os.environ.get(SOCKET_ENV)
-    return Path(value).expanduser() if value else home() / "control.sock"
+    return _path(value) if value else home() / "control.sock"
 
 
 @dataclass(frozen=True)
@@ -87,10 +92,26 @@ def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _own(info: os.stat_result) -> bool:
+    """Whether the file or folder *info* describes is this user's, and no one else can write it."""
+    return info.st_uid == os.getuid() and not info.st_mode & 0o022
+
+
 def _read_state() -> dict[str, Any] | None:
-    """The state file as melo_serve wrote it; None if it is missing or not its state."""
+    """The state file as melo_serve wrote it; None if it is missing or not its state.
+
+    It is opened without following a link, and must be a regular file that
+    this user owns, in a folder only this user can write.
+    """
+    path = state_path()
     try:
-        with state_path().open("rb") as handle:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not (
+                stat.S_ISREG(info.st_mode) and _own(info) and _own(os.stat(path.parent))
+            ):
+                return None
             raw = handle.read(MAX_STATE_BYTES + 1)
         if len(raw) > MAX_STATE_BYTES:
             return None
@@ -132,12 +153,31 @@ def _loopback(url: str) -> str | None:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
 
 
+def _private(path: Path) -> bool:
+    """Whether *path* is a socket and, with its folder, this user's own (see :func:`_own`).
+
+    ``lstat`` does not follow a link, so a symlink is not a socket. A socket
+    that another user could have put there is not melo_serve's.
+    """
+    try:
+        sock, folder = os.lstat(path), os.stat(path.parent)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISSOCK(sock.st_mode) and _own(sock) and _own(folder)
+
+
 def _answers() -> bool:
-    """Whether something accepts a connection on the control socket."""
+    """Whether something accepts a connection on the control socket.
+
+    Nothing connects to a socket that :func:`_private` refuses.
+    """
+    path = socket_path()
+    if not _private(path):
+        return False
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
             probe.settimeout(CONNECT_TIMEOUT_S)
-            probe.connect(str(socket_path()))
+            probe.connect(str(path))
     except (OSError, ValueError):  # no socket, refused, timed out; a NUL in the path
         return False
     return True
@@ -187,14 +227,88 @@ class MeloServeError(Exception):
     """melo_serve cannot answer for a model; the message says what to run."""
 
 
+def _check(path: str | None) -> str | None:
+    """Why *path* is not run: None when nothing is there, ``""`` when it may be run.
+
+    A reason is a clause that follows ``is not run:``. *path* must be absolute,
+    and the file it leads to a regular file that the user owns and can run.
+    That file, and the folders of *path* and of the file, must pass :func:`_own`.
+    Links are followed (``uv tool install`` makes ``~/.local/bin/melo-serve`` a
+    link into its own folder).
+    """
+    if not path or not os.path.lexists(path):
+        return None
+    if not os.path.isabs(path):
+        return "its path is relative"
+    try:
+        real = os.path.realpath(path)
+        info = os.stat(real)
+        folders = (os.path.dirname(path), os.path.dirname(real))
+        infos = [os.stat(folder) for folder in folders]
+    except OSError:
+        return "it cannot be read"
+    if not stat.S_ISREG(info.st_mode) or not info.st_mode & stat.S_IXUSR:
+        return "it is not a regular executable file"
+    if info.st_uid != os.getuid():
+        return "another user owns it"
+    if info.st_mode & 0o022:
+        return "others can write it"
+    for folder, found in zip(folders, infos, strict=True):
+        if found.st_uid != os.getuid():
+            return f"another user owns its folder {folder}"
+        if not _own(found):
+            return f"others can write its folder {folder}"
+    return ""
+
+
+def _candidates() -> tuple[str | None, str]:
+    """Where ``melo-serve`` may be: on PATH, then in the uv tool folder."""
+    folder = (
+        os.environ.get("UV_TOOL_BIN_DIR")
+        or os.environ.get("XDG_BIN_HOME")
+        or "~/.local/bin"
+    )
+    return shutil.which(COMMAND), os.path.join(os.path.expanduser(folder), COMMAND)
+
+
+def _find_command() -> str | None:
+    """Where ``melo-serve`` is: the first of PATH and the uv tool folder that is the user's own.
+
+    A launchd login item has no ``~/.local/bin`` on its PATH, where
+    ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
+    else ``~/.local/bin``. A candidate that :func:`_check` refuses is passed
+    over, so a stale file in a system folder does not hide the installed one.
+    The path returned is the file the links lead to, which is what was checked
+    and what is run.
+    """
+    for path in _candidates():
+        if path is not None and _check(path) == "":
+            return os.path.realpath(path)
+    return None
+
+
 def command() -> str | None:
     """The installed ``melo-serve`` command, or None."""
-    return shutil.which(COMMAND)
+    return _find_command()
+
+
+def refusal() -> str | None:
+    """The line for a ``melo-serve`` that was found but is not run, or None.
+
+    None when one runs, and when none was found (then it is not installed).
+    """
+    checked = [(path, _check(path)) for path in _candidates()]
+    if any(why == "" for _, why in checked):
+        return None
+    for path, why in checked:
+        if why:
+            return _clean(f"melo_serve: {path} is not run: {why}")
+    return None
 
 
 def start_hint() -> str:
     """How to get a melo_serve that is not running: start it, or install it first."""
-    return f"{COMMAND} up" if command() else INSTALL_HINT
+    return f"{COMMAND} up" if command() else refusal() or INSTALL_HINT
 
 
 def unavailable(snap: Snapshot, role: str) -> MeloServeError:
@@ -205,14 +319,14 @@ def unavailable(snap: Snapshot, role: str) -> MeloServeError:
         )
     if command():
         return MeloServeError(f"melo_serve is not running. Run `{COMMAND} up`.")
-    return MeloServeError(NOT_INSTALLED)
+    return MeloServeError(refusal() or NOT_INSTALLED)
 
 
 def _clean(text: str) -> str:
-    """*text* as a terminal shows it; a state's words never move the cursor."""
-    from localmelo.support.sessions.display import clean_output
+    """*text* as a terminal shows it: the cursor stays and the home folder is ``~``."""
+    from localmelo.support.sessions.display import clean_output, home_labelled
 
-    return clean_output(text)
+    return home_labelled(clean_output(text))
 
 
 def role_text(role: Role | None) -> str:
@@ -254,15 +368,17 @@ def ensure_running(role: str = "chat") -> str:
     up`` starts it (through launchd when its login item is installed, otherwise
     detached) and the state is then waited for, all within one budget of
     :data:`UP_WAIT_S` (15 s); a non-zero exit of ``up`` returns at once with the
-    last line it printed (its stderr, else its stdout). Not installed: the line
-    says how to install it. It never raises, so the gateway starts either way.
+    last line it printed (its stderr, else its stdout), the home folder shown as
+    ``~``. Not installed: the line says how to install it; a ``melo-serve`` that is
+    found but not run (see :func:`refusal`) says why instead. It never raises, so
+    the gateway starts either way.
     """
     snap = snapshot()
     if snap.running:
         return _line(snap, role)
     path = command()
     if path is None:
-        return NOT_INSTALLED
+        return refusal() or NOT_INSTALLED
     late = f"melo_serve did not start in {UP_WAIT_S:g} s; try `{COMMAND} up`"
     deadline = time.monotonic() + UP_WAIT_S
     try:

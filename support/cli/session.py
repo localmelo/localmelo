@@ -716,24 +716,26 @@ class CliSession:
         attachments: tuple[Attachment, ...] = (),
     ) -> None:
         started = self._clock()
-        if self.runner is None:
-            self.runner = SessionRunner(
-                self.agent,
-                self.store,
-                None,
-                new_session=NewSession(
-                    model=self.factory.backend.model,
-                    workspace=self.agent.workspace_root,
-                ),
-                on_event=self.on_event,
-                progress=True,
-                resume_mode=self.navigation.mode,
-                before_turn=self._prepare_turn,
-            )
         runner = self.runner
         result: RunResult | None = None
         error: BaseException | None = None
         try:
+            await self._follow_served()
+            if self.runner is None:
+                self.runner = SessionRunner(
+                    self.agent,
+                    self.store,
+                    None,
+                    new_session=NewSession(
+                        model=self.factory.backend.model,
+                        workspace=self.agent.workspace_root,
+                    ),
+                    on_event=self.on_event,
+                    progress=True,
+                    resume_mode=self.navigation.mode,
+                    before_turn=self._prepare_turn,
+                )
+            runner = self.runner
             kwargs: dict[str, Any] = (
                 {
                     "attachments": tuple(
@@ -767,7 +769,7 @@ class CliSession:
             error = exc
         # A second stop can make run_turn return while the runner still
         # finishes the turn: the next message must not meet it.
-        while runner.busy:
+        while runner is not None and runner.busy:
             await asyncio.sleep(0.05)
         with contextlib.suppress(SessionStoreError):
             await self.session_tools.apply_title()
@@ -793,6 +795,12 @@ class CliSession:
         started = self._clock()
         error: Exception | None = None
         status = ""
+        if typed and self.factory.served_change():
+            # The gateway builds its Agent on the new model at this turn; the
+            # row and the line say so here.
+            before = self.factory.backend.model
+            self.factory.show_served()
+            self._say_followed(before)
         try:
             status = await (
                 self.remote.run_turn(text, retry=retry) if typed else self.remote.wait()
@@ -1938,7 +1946,6 @@ class CliSession:
         switch is complete: a message sent meanwhile would start on the old
         model. Esc cancels only the start of the new Agent.
         """
-        old = self.agent
         self._state, self.activity = "switching", f"Starting {model}"
         self._work = asyncio.current_task()
         try:
@@ -1953,28 +1960,17 @@ class CliSession:
                 )
                 return False
             except Exception as exc:
-                self.out.print(
-                    self._text(
-                        f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
-                        style="error",
-                    )
-                )
+                self._start_failed(model, exc)
                 return False
             self._work = None  # past this point the switch completes
-            new.load_conversation(old.conversation())
-            new.load_notes(old.notes())
-            if self.runner is not None:
-                self.runner.replace_agent(new)
-            self.agent = new
             if url is None:
-                self.factory.use_model(model)
+                if note is None:
+                    self.factory.use_model(model)  # a model change; else the row stays
                 done = f"Model: {model} ({self.factory.backend.label})."
             else:
                 await self.factory.use_url(url, model)
                 done = f"Backend: {url} · {model}."
-            if self.runner is not None and self.runner.session_id is not None:
-                await self.store.update_session(self.runner.session_id, model=model)
-            await self.factory.close(old)
+            await self._carry_over(new)
             if note is None:
                 await self._report_switch(done)
             else:
@@ -1982,6 +1978,53 @@ class CliSession:
             return True
         finally:
             self._state, self.activity, self._work = "idle", None, None
+
+    def _start_failed(self, model: str, exc: Exception) -> None:
+        """Say that the Agent on *model* did not start and which one the chat keeps."""
+        self.out.print(
+            self._text(
+                f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
+                style="error",
+            )
+        )
+
+    async def _carry_over(self, new: Agent) -> None:
+        """Move the conversation to *new*, which the caller has started, and close the old Agent.
+
+        The session records the model the row names, which is what *new* asks for.
+        """
+        old = self.agent
+        new.load_conversation(old.conversation())
+        new.load_notes(old.notes())
+        if self.runner is not None:
+            self.runner.replace_agent(new)
+        self.agent = new
+        await self.factory.close(old)
+        if self.runner is not None and self.runner.session_id is not None:
+            await self.store.update_session(
+                self.runner.session_id, model=self.factory.backend.model
+            )
+
+    async def _follow_served(self) -> None:
+        """At the start of a turn: move to a new Agent when the backend now serves another model.
+
+        Only a session that follows (see ``BackendInfo.follows``) does. A start
+        that fails raises, and the turn ends as failed with its message given
+        back: it would only meet a 409 on the old Agent. The next turn tries again.
+        """
+        if not self.factory.served_change():
+            return
+        before = self.factory.backend.model
+        await self._carry_over(await self.factory.build())
+        self._say_followed(before)
+
+    def _say_followed(self, before: str) -> None:
+        """The muted line for a chat that follows melo_serve, when its model changed from *before*."""
+        model = self.factory.backend.model
+        if model != before:
+            self.out.print(
+                self._text(f"The model changed to {model} (via melo_serve).", "muted")
+            )
 
     async def _report_switch(self, done: str) -> None:
         problem = await self.factory.save()

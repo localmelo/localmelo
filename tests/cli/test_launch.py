@@ -19,6 +19,7 @@ from localmelo.support.backends.discovery import DiscoveryError, LoadedModels
 from localmelo.support.cli import launch
 from localmelo.support.cli.launch import Choice, choose_backend, run_interactive
 from localmelo.support.config import Config, LocalBackendConfig
+from localmelo.support.melo_serve import MeloServeError
 from localmelo.support.onboard import FirstSetup
 
 URL = "http://127.0.0.1:8500/v1"
@@ -649,3 +650,22 @@ async def test_a_session_that_chose_no_model_follows_what_melo_serve_serves(
     await factory.close(agent)
     assert asked == ["model-b", "model-c", "model-c"]  # a chosen model stays
     assert factory.backend.model == "model-c"
+    # Nothing served is melo_serve's own error, not a failed MCP server.
+    write_state(melo_serve_home)
+    bare = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(workspace_root=str(tmp_path)),
+        workspace=str(tmp_path),
+        mcp_config="mcp.json",
+        mcp_servers=[],
+        saves=False,
+    )
+    with (
+        mock.patch(
+            "localmelo.support.sessions.agents.load_mcp_providers", return_value=[]
+        ),
+        pytest.raises(MeloServeError, match="serves no chat model"),
+    ):
+        await bare.build()
+    assert bare.mcp_error is None

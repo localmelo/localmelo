@@ -177,6 +177,60 @@ async def test_a_chat_busy_at_a_settings_change_takes_it_at_its_next_turn(
     assert len(builder.calls) == 2
 
 
+async def test_a_chat_follows_a_melo_serve_switch_at_its_next_turn(
+    console: Console,
+    workspace: str,
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+) -> None:
+    from localmelo.support.backends import providers_for
+    from localmelo.support.config import Config, LocalBackendConfig
+    from localmelo.tests.fixtures.melo_serve import URL, role, write_state
+
+    cfg = Config(
+        chat_backend="melo_serve",
+        embedding_backend="none",
+        melo_serve=LocalBackendConfig(chat_url=URL),
+    )
+    asked: list[str] = []
+
+    async def build(
+        settings: Config, folder: str, mcp_config: str | None, session_id: str
+    ) -> Any:
+        llm, _ = providers_for(settings)  # what a real build asks melo_serve for
+        asked.append(llm.model)  # type: ignore[attr-defined]
+        await llm.close()
+        return FakeAgent(folder)
+
+    reg = ConsoleSessions(
+        console.store, console.broker, lambda: cfg, builder=cast(Any, build)
+    )
+    turn = await seed_turn(console.store, workspace)
+    write_state(melo_serve_home, chat=role("model-a"))
+    entry = await open_session(reg, turn.session_id)
+    old = cast(FakeAgent, entry.agent)
+    old.messages = [Message(role="user", content="kept")]
+    assert (await open_session(reg, turn.session_id)).agent is old  # no change
+    write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
+    reopened = await open_session(reg, turn.session_id)  # the next turn's open
+    new = cast(FakeAgent, reopened.agent)
+    assert reopened is entry and new is not old and old.closed
+    assert new.conversation() == old.messages
+    assert asked == ["model-a", "model-b"]
+    write_state(melo_serve_home)  # nothing served: the Agent stays
+    assert (await open_session(reg, turn.session_id)).agent is new
+    # A chat built while B was served asks for A once A is served again.
+    write_state(melo_serve_home, chat=role("model-b"))
+    created, _ = await reg.create(workspace)  # built on B, as the others
+    assert asked[-1] == "model-b"
+    built_on_b = created.agent
+    write_state(melo_serve_home, chat=role("model-a"))  # back to A
+    assert (await open_session(reg, created.session_id)).agent is not built_on_b
+    assert asked[-1] == "model-a"
+    again = await open_session(reg, turn.session_id)
+    assert again.model == "model-a" and asked[-1] == "model-a"
+
+
 async def test_delete_removes_the_row_and_closes_the_agent(
     console: Console, builder: FakeBuilder, workspace: str
 ) -> None:
