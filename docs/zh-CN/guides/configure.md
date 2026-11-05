@@ -76,7 +76,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 
 没有可用的服务器时：
 
-- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示终端的[只读设置预览](model-servers.md#setup-preview)：推荐项和下载量上限。摘要只显示一次，`Show how to set one up` 会列出最多六步的编号步骤。自动设置即将推出，目前绝不会执行安装。列表也可以重新检查、输入地址或退出；管道输入保留原有的键入答案。其他平台以及网页/应用设置卡片保留手动启动说明。
+- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[一个列表，列出它将要安装的内容](model-servers.md#first-run-setup)，你同意一次后才开始设置；每一项都可以跳过，`Use a server I already run`、`Use a hosted service` 和 `Quit` 在同一个菜单里。管道输入保留原有的键入答案，并会被告知请在终端中运行 melo 来设置。其他平台以及网页/应用设置卡片保留手动服务器说明。
 - 服务器无响应、需要 API 密钥或没有列出模型时，会指出是哪个服务器并给出原因；你可以重试、不保存直接启动或退出。
 - localmelo 从不询问本地服务器的 API 密钥。
 - [终端指南](terminal.md#first-run)列出了所有提示和原因。
@@ -94,7 +94,7 @@ melo --serve --reconfigure  # the wizard, then the gateway
 
 - 向导会询问对话后端、其 URL 和模型，以及嵌入后端；[保存配置](../start/quickstart.md#save-a-configuration)列出了这些提示。
 - 它会向每个服务器发送简短的测试请求，保存配置文件，然后打开对话，或者在使用 `--serve --reconfigure` 时启动网关（Ctrl+C 停止）。
-- 在默认模式下，`melo setup` 会先提供找到的服务器（`Found a model server at …`、`Use this model server?`）。选择 `Use another server`、处于开发者模式，或已经保存后端但没有找到服务器时，会显示完整后端菜单。只有尚未配置后端的首次运行才会在没有找到服务器时显示只读设置预览。
+- 在默认模式下，`melo setup` 会先提供找到的服务器（`Found a model server at …`、`Use this model server?`）。选择 `Use another server`、处于开发者模式，或已经保存后端但没有找到服务器时，会显示完整后端菜单。只有尚未配置后端的首次运行，在没有找到服务器时，才会提议[帮你设置一个](model-servers.md#first-run-setup)。
 - 在开发者模式（`[ui] mode = "developer"`；`melo config set ui.mode developer` 可保存它）下，完整菜单最先出现。
 - 每个问题都会在方括号中提供文件中的当前值：按 Enter 保留。
 

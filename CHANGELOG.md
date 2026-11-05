@@ -28,6 +28,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   lookup as `melo-serve`. On macOS that lookup now accepts a file or folder that the `admin` group can write (Homebrew's
   own `/opt/homebrew/bin` is like that), for command paths only: the state file and the control socket still must be
   writable by no one else (#530).
+- The first run sets up a model server for you, on a Mac, after one OK. With no backend saved and no server found
+  (a server that already runs is still offered first), a Mac with Apple silicon prints `Checking what this Mac can
+  run…` and one list: the chip, memory, macOS and free disk, the recommended model, and each thing it would install
+  (melo_serve, the chat backend, the chat model, the embedding model and melo_serve's login item) with its size and where
+  it goes; what is already there says `✓ already here` and is not counted. The menu starts on `Set up Qwen3 8B (5.8
+  GB)`; nothing is installed until you choose it. `Choose what to install` asks install or skip for each item and the
+  list then says what a skip leads to (no chat yet, memory by words only, or `melo serve` starts melo_serve when
+  needed), `Choose another model` plans another pick (`melo-serve plan --pick`), and `Use a server I already run`,
+  `Use a hosted service` and `Quit` leave as before. The job shows one line per step with a bar for a download;
+  Ctrl-C stops it and keeps what was downloaded, and a failed or stopped try goes back to the menu. When the chat
+  model answers, melo saves melo_serve and opens the chat. A pipe is shown the list and told to run melo in a terminal,
+  and never starts it; other systems and a failed check print the reason and how to start a server by hand. The
+  read-only preview, `Show how to set one up` and its six numbered steps are gone. melo_serve is now pinned at v0.3.1
+  and 0.3.1 is the oldest accepted (#NNN).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,

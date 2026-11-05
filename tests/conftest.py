@@ -145,6 +145,20 @@ def melo_serve_home(
     return home
 
 
+@pytest.fixture(autouse=True)
+def _no_setup_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first run's setup plan is unavailable: no test runs ``uv`` or fetches melo_serve.
+
+    A test of the setup screen fakes ``run.plan`` itself.
+    """
+    from localmelo.support.server_setup import run
+
+    monkeypatch.setattr(
+        run, "plan", lambda timeout=0.0, pick="": run.Plan(False, "no plan in tests")
+    )
+    monkeypatch.setattr(run, "installed_version", lambda: "")
+
+
 @pytest.fixture
 def melo_serve_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """A control socket that accepts connections, so a fake ``state.json`` is running.

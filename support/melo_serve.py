@@ -40,10 +40,10 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
-# The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.0,
+# The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.1,
 # and the oldest version it accepts.
-MELO_SERVE_REF: Final = "4936aa0668949be6d21e0744dad6cf151fefe6af"
-MIN_VERSION: Final = "0.3.0"
+MELO_SERVE_REF: Final = "34c8fdbd7d5c03d2f64ef7c0de476fe80cccb5ca"
+MIN_VERSION: Final = "0.3.1"
 ARCHIVE_URL: Final = (
     f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
 )
