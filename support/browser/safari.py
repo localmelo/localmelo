@@ -9,8 +9,8 @@ client the rest of melo uses.
 Pages are read with ``evaluate_javascript``: one script returns the page's text
 and elements as JSON (:data:`~localmelo.support.browser.pagescript.PAGE_JS`), so
 what the model reads does not depend on the format of the server's own content
-tool. Tool and argument names are
-looked up in the server's ``tools/list`` (:data:`TOOL_NAMES`, :data:`ARG_NAMES`).
+tool. Tool and argument names are looked up in the server's ``tools/list``
+(:data:`TOOL_NAMES`, :data:`ARG_NAMES`).
 
 An act is done by the browser itself where it can be: the page script checks the
 element and finds which of the browser's node ids it is (from
