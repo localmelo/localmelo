@@ -46,6 +46,12 @@ MAX_ATTEMPTS = 5
 # fit.
 MAX_REFLECTION_CHARS = 2000
 
+# Characters of a turn's working-memory budget that the assistant's text
+# keeps ahead of the tool results. A text this short stays beside results
+# cut to fit; a longer one is dropped when it does not fit beside them
+# (see Agent._checked_tool_turn). History keeps the text either way.
+ASSISTANT_TEXT_SHARE = 2_000
+
 # ── Empty replies ──
 
 # A planning reply with neither a tool call nor text is no answer. Working

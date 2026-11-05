@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.agent import ASSISTANT_TEXT_SHARE
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.schema import (
+    ASSISTANT_TEXT_SHARE,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     Message,
