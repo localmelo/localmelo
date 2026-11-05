@@ -394,19 +394,18 @@ that directory shows what the route wrote.
 > The Python interface of the retrievers is experimental and may change
 > before v0.1.0.
 
-`localmelo.melo.memory.retrieval` holds the retrievers, the evaluation and
-the file formats. This script searches and evaluates the files of
+`localmelo.melo.memory.retrieval` holds the retrievers;
+`localmelo.support.memory.retrieval_eval` holds the evaluation and
+`localmelo.support.memory.retrieval_corpus` the file formats. This script
+searches and evaluates the files of
 [the first evaluation](../guides/offline-retrieval.md#run-a-first-evaluation):
 
 ```python
 import asyncio
 
-from localmelo.melo.memory.retrieval import (
-    build_retriever,
-    evaluate,
-    load_corpus,
-    load_queries,
-)
+from localmelo.melo.memory.retrieval import build_retriever
+from localmelo.support.memory.retrieval_corpus import load_corpus, load_queries
+from localmelo.support.memory.retrieval_eval import evaluate
 
 
 async def main() -> None:
@@ -483,11 +482,8 @@ With a model server, `send_from_provider` turns a chat provider into the
 ```python
 import asyncio
 
-from localmelo.melo.memory.retrieval import (
-    build_retriever,
-    load_corpus,
-    send_from_provider,
-)
+from localmelo.melo.memory.retrieval import build_retriever, send_from_provider
+from localmelo.support.memory.retrieval_corpus import load_corpus
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 

@@ -321,7 +321,9 @@ from localmelo.melo.schema import (
     has_content,
     new_record_id,
     new_tool_call_id,
+    shorten,
     split_thinking,
+    strip_code_fences,
     thinking_answer,
     unfinished_as_thinking,
 )
@@ -382,18 +384,6 @@ def _coerce_str_list(value: object) -> list[str]:
 REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
 
 
-def _strip_code_fences(text: str) -> str:
-    """*text* without a Markdown code fence around it, such as ```json ... ```."""
-    body = text.strip()
-    if body.startswith("```"):
-        # The opening fence may name a language; drop its whole line.
-        newline = body.find("\n")
-        body = body[newline + 1 :] if newline != -1 else body[3:]
-    if body.endswith("```"):
-        body = body[:-3]
-    return body.strip()
-
-
 def _json_values(text: str) -> Iterator[object]:
     """Yield the JSON values of a reflection reply, in the order they are read.
 
@@ -407,7 +397,7 @@ def _json_values(text: str) -> Iterator[object]:
     an object it yielded. Nesting deeper than the decoder's recursion
     limit ends the search.
     """
-    body = _strip_code_fences(text)
+    body = strip_code_fences(text)
     try:
         value = json.loads(body)
     except (ValueError, RecursionError):
@@ -496,7 +486,7 @@ def _read_reflection(text: str) -> tuple[dict[str, Any], str | None] | None:
     text = _coerce_str(text)
     if "recommended_action" not in text:
         return None
-    body = _strip_code_fences(text)
+    body = strip_code_fences(text)
     for start, error in itertools.islice(rejected_objects(body), REPAIR_TRIES):
         for repair, fixed in repairs(body, start, error):
             found = _find_reflection(fixed)
@@ -513,7 +503,7 @@ def _json_error_line(text: str) -> str:
     counts the characters of the reply, a code fence around it included.
     """
     text = _coerce_str(text)
-    body = _strip_code_fences(text)
+    body = strip_code_fences(text)
     first = next(rejected_objects(body), None)
     if first is None:
         return ""
@@ -697,26 +687,6 @@ def _reflection_size(entry: ReflectionEntry) -> int:
     return len(_serialize_reflections([entry])[0].content)
 
 
-def _shorten(text: str, width: int) -> str:
-    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
-
-    Text that fits is returned as it is. When the cut falls inside the
-    first word, there is no boundary to go back to, and the text is cut
-    where *width* falls.
-    """
-    if len(text) <= width:
-        return text
-    if width < 1:
-        return ""
-    head = text[: width - 1]
-    if not text[len(head)].isspace() and not head[-1:].isspace():
-        # The cut falls inside a word: leave that word out.
-        words = head.rsplit(None, 1)
-        if len(words) == 2:
-            head = words[0]
-    return head.rstrip() + "…"
-
-
 def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     """*entry*, trimmed until its serialized form fits in *limit* characters.
 
@@ -726,7 +696,7 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     ``next_promising_directions`` last), one at a time and only until the
     entry fits. When the lists are empty and it still does not fit, the
     summary is shortened at a word boundary and ends with "…" (see
-    :func:`_shorten`). *entry* itself is not changed: one that fits is
+    :func:`shorten`). *entry* itself is not changed: one that fits is
     returned as it is, any other as a trimmed copy.
     """
     if _reflection_size(entry) <= limit:
@@ -740,7 +710,7 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
             if _reflection_size(fitted) <= limit:
                 return fitted
     room = limit - _reflection_size(dataclasses.replace(fitted, summary=""))
-    fitted.summary = _shorten(fitted.summary, room)
+    fitted.summary = shorten(fitted.summary, room)
     return fitted
 
 
@@ -756,12 +726,12 @@ def _cap_reflection_lists(entry: ReflectionEntry) -> ReflectionEntry:
 
     A list keeps its first :data:`REFLECTION_LIST_ITEMS` items, each cut to
     :data:`REFLECTION_ITEM_CHARS` characters at a word boundary (see
-    :func:`_shorten`). *entry* itself is not changed.
+    :func:`shorten`). *entry* itself is not changed.
     """
     capped = dataclasses.replace(entry)
     for name in REFLECTION_CAPPED_LISTS:
         items = getattr(entry, name)[:REFLECTION_LIST_ITEMS]
-        setattr(capped, name, [_shorten(item, REFLECTION_ITEM_CHARS) for item in items])
+        setattr(capped, name, [shorten(item, REFLECTION_ITEM_CHARS) for item in items])
     return capped
 
 
@@ -1600,8 +1570,8 @@ def _checked_title(text: str) -> str:
     for separator in (". ", "。", "! ", "? "):
         head, found, _tail = first.partition(separator)
         if found and head.strip():
-            return _shorten(head.strip() + separator.strip(), 120)
-    return _shorten(first, 120)
+            return shorten(head.strip() + separator.strip(), 120)
+    return shorten(first, 120)
 
 
 def _exception_text(exc: BaseException) -> str:

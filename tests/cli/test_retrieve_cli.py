@@ -24,14 +24,14 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.memory.retrieval import (
+from localmelo.melo.memory.retrieval.llm import RETRIEVE_SYSTEM_PROMPT
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.memory.retrieval_corpus import (
     RawCall,
     doc_to_dict,
     docs_from_calls,
     load_raw_calls,
 )
-from localmelo.melo.memory.retrieval.llm import RETRIEVE_SYSTEM_PROMPT
-from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.retrieve import main

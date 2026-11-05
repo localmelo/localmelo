@@ -229,6 +229,51 @@ def has_content(text: str) -> bool:
     return any(unicodedata.category(char)[0] in "LN" for char in text)
 
 
+def shorten(text: str, width: int) -> str:
+    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
+
+    Text that fits is returned as it is. When the cut falls inside the
+    first word, there is no boundary to go back to, and the text is cut
+    where *width* falls.
+    """
+    if len(text) <= width:
+        return text
+    if width < 1:
+        return ""
+    head = text[: width - 1]
+    if not text[len(head)].isspace() and not head[-1:].isspace():
+        # The cut falls inside a word: leave that word out.
+        words = head.rsplit(None, 1)
+        if len(words) == 2:
+            head = words[0]
+    return head.rstrip() + "…"
+
+
+def collapse(text: str) -> str:
+    """*text* with each run of whitespace made one space, and stripped."""
+    return " ".join(text.split())
+
+
+def first_nonblank_line(text: str) -> str:
+    """The first line of *text* that is not blank, stripped; "" if none."""
+    for line in text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def strip_code_fences(text: str) -> str:
+    """*text* without a Markdown code fence around it, such as ```json ... ```."""
+    body = text.strip()
+    if body.startswith("```"):
+        # The opening fence may name a language; drop its whole line.
+        newline = body.find("\n")
+        body = body[newline + 1 :] if newline != -1 else body[3:]
+    if body.endswith("```"):
+        body = body[:-3]
+    return body.strip()
+
+
 def split_thinking(
     text: str, *, strip_answer: bool = True, reasoning_tags: ReasoningTags | None = None
 ) -> tuple[str, str]:

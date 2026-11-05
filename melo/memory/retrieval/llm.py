@@ -42,7 +42,13 @@ from localmelo.melo.memory.retrieval.bm25 import (
     DEFAULT_RELATIVE_CUT,
     BM25Retriever,
 )
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import (
+    Message,
+    collapse,
+    first_nonblank_line,
+    shorten,
+    strip_code_fences,
+)
 
 # Character caps, with their token equivalents at about 3.45 characters
 # per token.
@@ -276,14 +282,14 @@ def _entry_line(alias: str, doc: Doc) -> str:
     step = int_step(doc.meta)
     if step is not None and step > 0:
         parts.append(f"step {step}")
-    title = _collapse(doc.title) or _collapse(_first_nonblank_line(doc.text))
+    title = collapse(doc.title) or collapse(first_nonblank_line(doc.text))
     if title:
         parts.append(title)
     if doc.kind == "long":
-        snippet = _collapse(_first_nonblank_line(doc.text))
+        snippet = collapse(first_nonblank_line(doc.text))
         if snippet and snippet != title:
             parts.append(snippet)
-    return _shorten(" · ".join(parts), CATALOG_ENTRY_CHARS)
+    return shorten(" · ".join(parts), CATALOG_ENTRY_CHARS)
 
 
 def _user_text(
@@ -319,7 +325,7 @@ def _reply_ids(content: str) -> list[Any]:
     search goes on from where the decoder gave up, and after an object,
     from its end.
     """
-    body = _strip_code_fences(content)
+    body = strip_code_fences(content)
     try:
         value = json.loads(body)
     except (ValueError, RecursionError):
@@ -350,58 +356,3 @@ def _ids_list(ids: object) -> list[Any]:
     if not isinstance(ids, list):
         raise _ParseError("the ids are not a list")
     return ids
-
-
-def _strip_code_fences(text: str) -> str:
-    """*text* without a Markdown code fence around it, such as ```json ... ```.
-
-    A copy of ``_strip_code_fences`` in ``melo/agent/agent.py``, which is
-    private to the agent loop.
-    """
-    body = text.strip()
-    if body.startswith("```"):
-        # The opening fence may name a language; drop its whole line.
-        newline = body.find("\n")
-        body = body[newline + 1 :] if newline != -1 else body[3:]
-    if body.endswith("```"):
-        body = body[:-3]
-    return body.strip()
-
-
-# ── Text helpers ──
-
-
-def _shorten(text: str, width: int) -> str:
-    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
-
-    Text that fits is returned as it is. When the cut falls inside the
-    first word, there is no boundary to go back to, and the text is cut
-    where *width* falls.
-
-    A copy of ``_shorten`` in ``melo/agent/agent.py``, which is private to
-    the agent loop.
-    """
-    if len(text) <= width:
-        return text
-    if width < 1:
-        return ""
-    head = text[: width - 1]
-    if not text[len(head)].isspace() and not head[-1:].isspace():
-        # The cut falls inside a word: leave that word out.
-        words = head.rsplit(None, 1)
-        if len(words) == 2:
-            head = words[0]
-    return head.rstrip() + "…"
-
-
-def _collapse(text: str) -> str:
-    """*text* with each run of whitespace made one space, and stripped."""
-    return " ".join(text.split())
-
-
-def _first_nonblank_line(text: str) -> str:
-    """The first line of *text* that is not blank; "" if none."""
-    for line in text.splitlines():
-        if line.strip():
-            return line
-    return ""
