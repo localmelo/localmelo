@@ -1,4 +1,5 @@
 import {formatTime, gistSentence, language, nameList, t} from './i18n.mjs';
+import {maker} from './dom.mjs';
 
 // The kinds of step auto mode blocks (#339), as the review names them.
 export const CATEGORIES = new Set([
@@ -142,12 +143,7 @@ const clock = (seconds) => formatTime(new Date(seconds * 1000), 'clock');
  * failure's text.
  */
 export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false, developer = false, onAllow = null, error = ''} = {}) {
-  const node = (tag, className, text) => {
-    const made = doc.createElement(tag);
-    if (className) made.className = className;
-    if (text !== undefined) made.textContent = text;
-    return made;
-  };
+  const {node} = maker(doc);
   const card = node('section', 'block-card');
   card.dataset.state = facts.self ? 'never' : allowing.state;
   // What the step does comes first, in a plain sentence; a warning follows when the words and the code differ.

@@ -12,6 +12,7 @@
  * modules, served as they are.
  */
 
+import { maker } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
@@ -80,6 +81,7 @@ import {
 } from "./turns.mjs";
 
 const $ = (id) => document.getElementById(id);
+const { node: el, button } = maker(document);
 const KEY = "localmelo-console";
 const PRESENCE_MS = 2500;
 const LIST_POLL_MS = 4000;
@@ -156,20 +158,6 @@ function esc(text) {
     (character) =>
       ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[character],
   );
-}
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function button(className, text, onClick) {
-  const node = el("button", className, text);
-  node.type = "button";
-  node.addEventListener("click", onClick);
-  return node;
 }
 
 function setTextIfChanged(node, text) {
