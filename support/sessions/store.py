@@ -1266,64 +1266,6 @@ class SessionStore:
 
     # ── Components ──
 
-    @staticmethod
-    async def _component_version(conn: aiosqlite.Connection, name: str) -> int | None:
-        rows = await _rows(
-            conn, "SELECT version FROM schema_components WHERE name = ?", (name,)
-        )
-        return int(rows[0][0]) if rows else None
-
-    async def ensure_component(
-        self, name: str, version: int, statements: Sequence[str]
-    ) -> int:
-        """Create a named component at *version*, atomically, or check it.
-
-        The gateway's file only: a terminal ``melo`` file never holds the
-        scheduler's tables. The read of ``schema_components``, the creation
-        of *statements* and the version row are one ``BEGIN IMMEDIATE``
-        transaction, so two opens cannot half-create a component. A file
-        whose component is newer than *version* is refused with
-        :class:`SessionStoreError`, the way a newer ``user_version`` is;
-        this release has no migration from an older one. Returns *version*.
-        """
-        if self._writer != "gateway":
-            raise SessionStoreError(
-                f"The {name} component needs the gateway's store, not the "
-                f"{_OWNERS[self._writer]}'s"
-            )
-        if not isinstance(name, str) or not name:
-            raise ValueError("a component's name must be a non-empty string")
-        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-            raise ValueError("a component's version must be an integer >= 1")
-        if isinstance(statements, str) or not all(
-            isinstance(statement, str) and statement.strip() for statement in statements
-        ):
-            raise ValueError("a component's statements must be SQL strings")
-        async with self._lock:
-            conn = await self._ready()
-            self._check_writable()
-            async with self._transaction(conn, f"component_{name}"):
-                current = await self._component_version(conn, name)
-                if current is None:
-                    for statement in statements:
-                        await conn.execute(statement)
-                    await conn.execute(
-                        "INSERT INTO schema_components (name, version) VALUES (?, ?)",
-                        (name, version),
-                    )
-                    return version
-                if current > version:
-                    raise SessionStoreError(
-                        f"{self._path} has {name} schema version {current}; this "
-                        f"localmelo reads version {version}"
-                    )
-                if current < version:
-                    raise SessionStoreError(
-                        f"{self._path} has {name} schema version {current}; this "
-                        f"localmelo cannot migrate it to version {version}"
-                    )
-                return current
-
     @contextlib.asynccontextmanager
     async def component_transaction(
         self, label: str
