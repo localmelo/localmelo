@@ -17,18 +17,12 @@ from fastapi.responses import JSONResponse
 from pydantic import StrictBool, StrictInt, StrictStr
 
 from localmelo.support.gateway.chore_schedule import Schedule, ScheduleError
-from localmelo.support.gateway.chore_store import (
-    ChoreLimitError,
-    ChoreNotFoundError,
-    ChoreStaleError,
-)
 from localmelo.support.gateway.front_rules import level_number, triage
-from localmelo.support.gateway.i18n import said_text, t
+from localmelo.support.gateway.i18n import t
 from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
-from localmelo.support.gateway.task_store import TaskStoreError
 
 from .bodies import Body
-from .errors import ApiError
+from .errors import ApiError, error_message
 
 if TYPE_CHECKING:
     from . import Console
@@ -58,25 +52,11 @@ class CheckinSwitch(Body):
     on: StrictBool
 
 
-def _message(exc: Exception) -> str:
-    """What a refusal says: the words it keeps, in the request's language, else its English message."""
-    words = getattr(exc, "words", None)
-    return said_text(words) if words else str(exc)
-
-
 async def _call(operation: Awaitable[T]) -> T:
     try:
         return await operation
-    except ChoreNotFoundError as exc:
-        raise ApiError(404, "not_found", _message(exc)) from exc
-    except ChoreStaleError as exc:
-        raise ApiError(409, "stale_revision", _message(exc)) from exc
-    except ChoreLimitError as exc:
-        raise ApiError(409, "chore_limit", _message(exc)) from exc
     except (ScheduleError, TaskPolicyError, ValueError) as exc:
-        raise ApiError(400, "invalid_request", _message(exc)) from exc
-    except TaskStoreError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
+        raise ApiError(400, "invalid_request", error_message(exc)) from exc
 
 
 def _check(function: Callable[[Any], T], value: Any) -> T:
@@ -84,7 +64,7 @@ def _check(function: Callable[[Any], T], value: Any) -> T:
     try:
         return function(value)
     except (ScheduleError, TaskPolicyError, ValueError) as exc:
-        raise ApiError(400, "invalid_request", _message(exc)) from exc
+        raise ApiError(400, "invalid_request", error_message(exc)) from exc
 
 
 def _level(value: object) -> int | None:

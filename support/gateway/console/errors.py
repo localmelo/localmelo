@@ -2,11 +2,12 @@
 
 Every ``/api`` failure is ``{"error": {"code", "message", "details"}}``.
 A route raises :class:`ApiError`; FastAPI's validation errors become a 400
-with the first field named; a store failure a route lets through becomes a
-503 ``store_unavailable``, or a 404 when the chat in its path is gone
-(:meth:`Console.store_api_error`); a busy session becomes a 409
-``session_busy``; and anything unhandled becomes a 500 whose message says
-nothing about the failure. The legacy ``/v1`` routes keep
+with the first field named; a store error a route lets through is answered by
+its kind (a chat, task or chore that is not there is a 404, a refused change a
+409) and any other store failure is a 503 ``store_unavailable``, or a 404 when
+the chat in its path is gone (:meth:`Console.store_api_error`); a busy session
+becomes a 409 ``session_busy``; and anything unhandled becomes a 500 whose
+message says nothing about the failure. The legacy ``/v1`` routes keep
 FastAPI's own 404 and 422 bodies: these handlers are installed by the
 console and leave a request outside ``/api`` alone.
 
@@ -32,14 +33,28 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from localmelo.support.gateway.chore_store import (
+    ChoreLimitError,
+    ChoreNotFoundError,
+    ChoreStaleError,
+)
 from localmelo.support.gateway.guard import (
     _SECURITY_HEADERS,
     API_CSP,
     is_api_path,
     is_upload_request,
 )
-from localmelo.support.gateway.i18n import t
-from localmelo.support.sessions.store import SessionBusyError, SessionStoreError
+from localmelo.support.gateway.i18n import said_text, t
+from localmelo.support.gateway.task_store import (
+    TaskNotFoundError,
+    TaskNotPausedError,
+    TaskStoreError,
+)
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStoreError,
+    UnknownSessionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,19 +273,58 @@ async def _api_error_handler(request: Request, exc: Exception) -> Response:
     return api_error_response(exc)
 
 
-async def _store_error_handler(request: Request, exc: Exception) -> Response:
-    """Any store failure a route lets through, as API v2 maps it.
+def error_message(exc: Exception) -> str:
+    """What a refusal says: the words it keeps, in the request's language, else its English message."""
+    words = getattr(exc, "words", None)
+    return said_text(words) if words else str(exc)
 
-    The chat it concerns is the one in the path, if any: a route whose chat id
-    is not a path parameter maps its own with :meth:`Console.store_api_error`.
+
+def _kind_error(exc: SessionStoreError) -> ApiError | None:
+    """The answer for a store error that is no store failure, or ``None`` for one.
+
+    A chat, task or chore that is not there, or a change the stored state does
+    not allow, is the request's doing and says so; a route that knows better
+    answers first with its own :class:`ApiError`.
+    """
+    if isinstance(exc, UnknownSessionError):
+        return ApiError(404, "not_found", t("errors.sessionDeleted"))
+    if isinstance(exc, TaskNotFoundError | ChoreNotFoundError):
+        return ApiError(404, "not_found", error_message(exc))
+    if isinstance(exc, ChoreStaleError):
+        return ApiError(409, "stale_revision", error_message(exc))
+    if isinstance(exc, ChoreLimitError):
+        return ApiError(409, "chore_limit", error_message(exc))
+    if isinstance(exc, TaskNotPausedError):
+        return ApiError(409, "not_paused", error_message(exc))
+    if isinstance(exc, TaskStoreError):
+        return ApiError(409, "invalid_transition", error_message(exc))
+    return None
+
+
+async def _store_error_handler(request: Request, exc: Exception) -> Response:
+    """Any store error a route lets through, as API v2 maps it.
+
+    A chat, task or chore that is not there, or a change the task store
+    refuses, is answered by its kind (:func:`_kind_error`). Any other failure
+    is the store's: the chat in the path, if any, decides between 404 and 503
+    (:meth:`Console.store_api_error`), and a route whose chat id is not a path
+    parameter maps its own.
     """
     assert isinstance(exc, SessionStoreError)
-    console = request.app.state.console
-    error = await console.store_api_error(exc, request.path_params.get("session_id"))
+    if not is_api_path(request.url.path):
+        raise exc
+    error = _kind_error(exc)
+    if error is None:
+        console = request.app.state.console
+        error = await console.store_api_error(
+            exc, request.path_params.get("session_id")
+        )
     return api_error_response(error)
 
 
 async def _busy_handler(request: Request, exc: Exception) -> Response:
+    if not is_api_path(request.url.path):
+        raise exc
     return error_response(409, "session_busy", t("errors.turnRunning"))
 
 

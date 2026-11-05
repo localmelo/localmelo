@@ -10,9 +10,26 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from localmelo.support.gateway.chore_store import (
+    ChoreError,
+    ChoreLimitError,
+    ChoreNotFoundError,
+    ChoreStaleError,
+)
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import INTERNAL_ERROR, ApiError
-from localmelo.support.sessions.store import SessionBusyError, SessionStoreError
+from localmelo.support.gateway.task_store import (
+    TaskConflictError,
+    TaskNotFoundError,
+    TaskNotPausedError,
+    TaskStoreError,
+)
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionStoreError,
+    StoreOwnedError,
+    UnknownSessionError,
+)
 
 from .conftest import seed_turn
 
@@ -205,6 +222,64 @@ async def test_a_store_error_in_a_session_that_is_gone_is_404(
 
     assert resp.status_code == 404
     assert resp.json()["error"]["message"] == "This session was deleted."
+
+
+@pytest.mark.parametrize(
+    ("exc", "status", "code"),
+    [
+        (UnknownSessionError("Unknown session: x"), 404, "not_found"),
+        (TaskNotFoundError("No task with id t1"), 404, "not_found"),
+        (TaskNotPausedError("task is not paused"), 409, "not_paused"),
+        (TaskConflictError("request key reused"), 409, "invalid_transition"),
+        (TaskStoreError("not allowed now"), 409, "invalid_transition"),
+        (ChoreNotFoundError("No chore c1"), 404, "not_found"),
+        (ChoreStaleError("changed since"), 409, "stale_revision"),
+        (ChoreLimitError("too many chores"), 409, "chore_limit"),
+        (ChoreError("chore trouble"), 503, "store_unavailable"),
+        (StoreOwnedError("held by pid 1"), 503, "store_unavailable"),
+    ],
+)
+async def test_a_store_error_nobody_caught_is_answered_by_its_kind(
+    console: Console, workspace: str, exc: Exception, status: int, code: str
+) -> None:
+    """A task, chore or chat that is not there is not a broken store."""
+    turn = await seed_turn(console.store, workspace)
+    client = _app_raising(console, exc)
+
+    for path in ("/api/raises", f"/api/sessions/{turn.session_id}/raises"):
+        resp = client.get(path)
+        assert (resp.status_code, resp.json()["error"]["code"]) == (status, code), path
+        assert resp.headers["cache-control"] == "no-store"
+
+
+async def test_a_task_error_says_what_the_task_store_said(console: Console) -> None:
+    client = _app_raising(console, TaskNotFoundError("No task with id t1"))
+
+    assert client.get("/api/raises").json()["error"]["message"] == "No task with id t1"
+
+
+@pytest.mark.parametrize(
+    "exc", [SessionStoreError("disk I/O error"), SessionBusyError("x")]
+)
+def test_a_legacy_route_keeps_its_unhandled_500(
+    console: Console, exc: Exception
+) -> None:
+    """The two handlers answer ``/api``; a legacy route's error stays unhandled."""
+    app = FastAPI()
+
+    @app.get("/v1/raises")
+    async def legacy() -> None:
+        raise exc
+
+    console.mount(app)
+    client = TestClient(
+        app, base_url="http://127.0.0.1:8401", raise_server_exceptions=False
+    )
+
+    resp = client.get("/v1/raises")
+
+    assert resp.status_code == 500
+    assert "error" not in resp.text and "session_busy" not in resp.text
 
 
 async def test_a_busy_session_nobody_caught_is_409(console: Console) -> None:

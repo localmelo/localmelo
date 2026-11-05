@@ -20,12 +20,7 @@ from localmelo.support.gateway.resume_evidence import (
 )
 from localmelo.support.gateway.resume_tokens import TOKEN_TTL_S
 from localmelo.support.gateway.task_policy import TaskPolicyError
-from localmelo.support.gateway.task_store import (
-    TaskConflictError,
-    TaskNotFoundError,
-    TaskNotPausedError,
-    TaskStoreError,
-)
+from localmelo.support.gateway.task_store import TaskConflictError
 
 from .activity import left_line
 from .bodies import Body
@@ -68,12 +63,6 @@ async def _call(operation: Awaitable[T]) -> T:
         raise ApiError(400, exc.code, str(exc)) from exc
     except TaskConflictError as exc:
         raise ApiError(409, "submission_conflict", str(exc)) from exc
-    except TaskNotFoundError as exc:
-        raise ApiError(404, "not_found", str(exc)) from exc
-    except TaskNotPausedError as exc:
-        raise ApiError(409, "not_paused", str(exc)) from exc
-    except TaskStoreError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
     except ValueError as exc:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
@@ -103,12 +92,6 @@ async def _resume_call(operation: Awaitable[T]) -> T:
         raise ApiError(
             409, "invalid_transition", str(exc), details={"reason": exc.reason}
         ) from exc
-    except TaskConflictError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
-    except TaskNotFoundError as exc:
-        raise ApiError(404, "not_found", str(exc)) from exc
-    except TaskStoreError as exc:
-        raise ApiError(409, "invalid_transition", str(exc)) from exc
     except ValueError as exc:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
