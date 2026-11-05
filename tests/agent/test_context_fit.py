@@ -126,13 +126,56 @@ def test_failure_pinned_and_inflight_not_truncated() -> None:
         fit(pending, estimate(pending, None) - 100)
 
 
-def test_images_never_evicted_or_dropped() -> None:
+def test_images_and_old_failures_go_only_when_nothing_else_is_left() -> None:
     image = ImagePart.from_bytes(b"image", "image/png")
-    messages = [Message("user", "task"), *pair(1, "short"), *pair(2, "latest")]
-    messages[2].images = [image]
+    messages = [
+        Message("user", "task"),
+        *pair(1, "error: old"),
+        *pair(2, "short"),
+        *pair(3, "plain"),
+        *pair(4, "error: new"),
+        *pair(5, "latest"),
+    ]
+    messages[4].images = [image]
+    head, old, pictured, _plain, failing, newest = (
+        messages[:1],
+        messages[1:3],
+        messages[3:5],
+        messages[5:7],
+        messages[7:9],
+        messages[9:],
+    )
+    kept = head + old + pictured + failing + newest
+    result, counts = fit(messages, estimate(kept, None))
+    assert result == kept and counts["units"] == 1
+    # The latest failing check stays to the end.
+    kept = head + failing + newest
+    result, counts = fit(messages, estimate(kept, None))
+    assert result == kept and counts["units"] == 3
+    assert messages[4].images == [image]
+
+
+def test_earlier_turns_go_whole_before_the_task() -> None:
+    earlier = [
+        Message("user", "old task " + "o" * 2000),
+        Message("assistant", "old answer"),
+        *pair(1, "error: " + "e" * 2000),
+    ]
+    task = [Message("user", "task"), *pair(2, "latest")]
+    messages = [Message("system", "s"), *earlier, *task]
+    limit = estimate([messages[0], *task], None)
+    result, counts = fit_request(
+        messages,
+        None,
+        limit=limit,
+        estimate=estimate,
+        requires_replay=False,
+        history=earlier,
+    )
+    assert result == [messages[0], *task] and counts["units"] == 3
+    # Without them named, the old user turn and answer stay.
     with pytest.raises(ContextFitError):
-        fit(messages, estimate(messages, None) - 100)
-    assert messages[2].images == [image]
+        fit(messages, limit)
 
 
 def test_retry_strict_and_impossible_schemas() -> None:

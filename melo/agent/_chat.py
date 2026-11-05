@@ -15,7 +15,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
-from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
+from localmelo.melo.agent._context_fit import (
+    ContextFitError,
+    FitCut,
+    PromptCapError,
+    fit_request,
+)
 from localmelo.melo.agent._earlier import with_earlier
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
@@ -29,6 +34,7 @@ from localmelo.melo.agent._request_accounting import (
     RequestAccounting,
     request_proxy,
 )
+from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, prompt_chars
 from localmelo.melo.checker.stream_filter import StreamFilter
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
@@ -52,7 +58,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
-    from localmelo.melo.schema import ReflectionEntry
+    from localmelo.melo.schema import CheckResult, ReflectionEntry
 
 logger = logging.getLogger(__name__)
 
@@ -451,11 +457,24 @@ def _build_system_prompt(
 @dataclass(frozen=True)
 class _PlanSnapshot:
     """The latest planning request of a run, as :meth:`Chat.reflect` must repeat
-    it: the messages and tools sent, and the window they came from."""
+    it: the messages and tools sent, the window they came from, and the
+    window's turns before the task query (see :func:`_before_task`)."""
 
     messages: list[Message]
     tools: list[ToolDef]
     short: list[Message]
+    history: list[Message]
+
+
+def _before_task(rest: Sequence[Message], query: str) -> list[Message]:
+    """The messages of *rest* before its last user message that is *query*.
+
+    *rest* is a planning request after its system part, so these are the
+    turns of the chat's earlier tasks that the window still holds: a fit
+    may drop them whole (see ``fit_request``'s *history*).
+    """
+    starts = [i for i, m in enumerate(rest) if m.role == "user" and m.content == query]
+    return list(rest[: starts[-1]]) if starts else []
 
 
 def _turns_after(
@@ -505,6 +524,8 @@ class RequestStats:
     reasoning each response received (``Message.thinking``);
     ``details`` sums the extra usage fields beyond the three standard ones
     (such as ``cached_tokens`` and ``reasoning_tokens``).
+    ``thinking_cleared`` sums the assistant turns whose reasoning a fit
+    left out of the requests that returned a response.
     """
 
     n_llm: int = 0
@@ -514,6 +535,7 @@ class RequestStats:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_chars: int = 0
     details: dict[str, int] = field(default_factory=dict)
+    thinking_cleared: int = 0
     context_budget: list[dict[str, Any]] | None = None
     schema_changes: int = 0
     last_schema: str | None = None
@@ -611,6 +633,15 @@ class Chat:
     attempts included (``stats.n_llm + stats.llm_errors``): a request that
     would pass it is not sent and :class:`CallBudgetError` is raised. With
     *reserve_answer* the last of them is kept for :meth:`final_answer`.
+
+    Every planning and reflection request is fitted on a copy before it is
+    sent (:func:`~localmelo.melo.agent._context_fit.fit_request`, the one
+    fitter): to *context_budget*'s input tokens when there is one, else to
+    :data:`~localmelo.melo.checker.checker.PROMPT_CAP_CHARS` characters,
+    after which *prompt_check* (the agent's ``Checker.pre_plan``) is asked
+    and a refusal raises :class:`PromptCapError` before anything is sent.
+    *fit_target* is the share of the limit a fit that drops whole units
+    drops to, and the cut it made holds for the next request of its kind.
     """
 
     def __init__(
@@ -629,7 +660,9 @@ class Chat:
         identity: str = "",
         max_calls: int | None = None,
         reserve_answer: bool = False,
+        prompt_check: Callable[..., Awaitable[CheckResult]] | None = None,
     ) -> None:
+        self.prompt_check = prompt_check
         self.max_calls = max_calls
         self.reserve_answer = reserve_answer
         self.system_prompt = system_prompt
@@ -645,7 +678,7 @@ class Chat:
         self._plan_tools: list[ToolDef] | None = None
         self.fit_target = fit_target
         # One held cut per request kind: a target below 1 (window_eviction
-        # chunk and boundary) keeps the context fit's cut across requests.
+        # chunk and boundary) keeps the fit's cut across requests.
         self._fit_cuts: dict[str, FitCut] = {}
         self.llm = llm
         self.system_notes = tuple(system_notes)
@@ -764,6 +797,7 @@ class Chat:
         recall: Sequence[Any] = (),
         on_ready: Callable[[list[Message]], None] | None = None,
         closing: bool = False,
+        history: Sequence[Message] = (),
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -791,6 +825,11 @@ class Chat:
         none), the successful attempt's duration and the time it arrived.
         A cancellation during that await propagates with the response
         counted.
+
+        A ``plan`` or ``reflect`` request is fitted first (see the class
+        docstring); *history*, the turns before the current task, may go
+        whole. *on_ready*, when given, receives the messages as they will be
+        sent, before the first attempt.
         """
         self.check_call_budget(closing)
         if kind == "plan":
@@ -807,6 +846,7 @@ class Chat:
             self.stats.last_schema = schema
         attempt = 1
         retry_attempt = 1
+        fitted = kind in ("plan", "reflect")
         scoped = BUDGET_ACCOUNTING.get()
         accounting = (
             (
@@ -814,36 +854,53 @@ class Chat:
                 if scoped is not None and scoped[0] is self
                 else self._accounting
             )
-            if kind in ("plan", "reflect")
+            if fitted
             else None
         )
         pruned = {"tool_results": 0, "thinking": 0, "units": 0}
         overflow_retried = False
+        # The reasoning counts where the provider sends it.
+        replay = bool(getattr(self.llm, "reasoning_field", None))
 
         def estimate(candidate: list[Message], offered: list[ToolDef] | None) -> int:
-            assert accounting is not None
-            size, _ = request_proxy(
-                candidate, offered, replay=bool(self.llm.reasoning_field)
-            )
+            if accounting is None:
+                return prompt_chars(candidate, count_thinking=replay)
+            size, _ = request_proxy(candidate, offered, replay=replay)
             ratio = accounting.ratios.get((self.llm.model, kind), 1.0)
             return math.ceil(size * max(1.0, ratio))
 
+        # The context budget's input tokens, else the prompt cap's characters.
+        limit = (
+            accounting.budget.input_limit
+            if accounting is not None
+            else PROMPT_CAP_CHARS
+        )
         cut = (
             self._fit_cuts.setdefault(kind, FitCut()) if self.fit_target < 1.0 else None
         )
-        if accounting is not None and (
-            estimate(messages, tools) > accounting.budget.input_limit
+        if fitted and (
+            estimate(messages, tools) > limit
             or (cut is not None and cut.key is not None)
         ):
-            messages, pruned = fit_request(
-                messages,
-                tools,
-                limit=accounting.budget.input_limit,
-                estimate=estimate,
-                requires_replay=self.llm.requires_reasoning_replay,
-                drop_target=self.fit_target,
-                hold=cut,
-            )
+            try:
+                messages, pruned = fit_request(
+                    messages,
+                    tools,
+                    limit=limit,
+                    estimate=estimate,
+                    requires_replay=self.llm.requires_reasoning_replay,
+                    drop_target=self.fit_target,
+                    hold=cut,
+                    history=history,
+                )
+            except ContextFitError:
+                if accounting is not None:
+                    raise
+                # Over the prompt cap even fitted: the check below refuses it.
+        if fitted and accounting is None and self.prompt_check is not None:
+            check = await self.prompt_check(messages, count_thinking=replay)
+            if not check.allowed:
+                raise PromptCapError(check.reason)
         if on_ready is not None:
             on_ready(messages)
         while True:
@@ -883,6 +940,7 @@ class Chat:
                         requires_replay=self.llm.requires_reasoning_replay,
                         force_smaller_than=proxy,
                         hold=cut,
+                        history=history,
                     )
                     pruned = {name: pruned[name] + more[name] for name in pruned}
                     attempt += 1
@@ -937,6 +995,7 @@ class Chat:
                 record, proxy, full_usage if full_usage is not None else response.usage
             )
         self.stats.n_llm += 1
+        self.stats.thinking_cleared += pruned["thinking"]
         # A fixed-prefix-v2 reflection offers the plan's tools only to share
         # its prefix; it still counts as an auxiliary request.
         if tools and kind != "reflect":
@@ -1224,15 +1283,17 @@ class Chat:
         if lacks_task_query(short, query):
             rest.append(Message(role="user", content=query))
         rest.extend(m for m in all_context if m.role != "system")
+        history = _before_task(rest, query)
         messages.extend(_pin_earlier(rest, query, earlier))
         if coalesce_users:
             messages = coalesce_user_messages(messages)
-        self._plan = _PlanSnapshot(messages, list(tools), list(short))
+        self._plan = _PlanSnapshot(messages, list(tools), list(short), history)
         return await self._request(
             _with_tail(messages, tail_note, coalesce_users),
             tools=tools,
             kind="plan",
             recall=recalls,
+            history=history,
             **ready_args,
         )
 
@@ -1320,7 +1381,7 @@ class Chat:
 
     async def _retry_on_prefix(
         self,
-        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None,
+        on_ready: Callable[[list[Message]], None] | None,
         hint: str = "",
     ) -> Message | None:
         """Ask a reflection again on the prefix of the request that went unread."""
@@ -1333,14 +1394,31 @@ class Chat:
             ),
         )
         messages = [*self._reflect_sent, self.reflect_exchange[-1], note]
-        if fit is not None:
-            fitted = await fit(messages)
-            if fitted is None:
-                return None
-            messages = fitted
-        response = await self._request(messages, tools=offered or None, kind="reflect")
+        history = self._plan.history if self._plan is not None else []
+        response = await self._reflect_request(messages, offered, on_ready, history)
+        if response is None:
+            return None
         self.reflect_exchange = [*self.reflect_exchange, note, _as_text_reply(response)]
         return response
+
+    async def _reflect_request(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None,
+        on_ready: Callable[[list[Message]], None] | None,
+        history: Sequence[Message] = (),
+    ) -> Message | None:
+        """Send one reflection request; ``None`` when the prompt check refused it."""
+        try:
+            return await self._request(
+                messages,
+                tools=tools or None,
+                kind="reflect",
+                on_ready=on_ready,
+                history=history,
+            )
+        except PromptCapError:
+            return None
 
     async def reflect(
         self,
@@ -1353,7 +1431,7 @@ class Chat:
         final: bool = False,
         retry: bool = False,
         retry_hint: str = "",
-        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
+        on_ready: Callable[[list[Message]], None] | None = None,
         notes: Sequence[str] = (),
         draft_titles: Sequence[str] = (),
         addendum: str = "",
@@ -1385,12 +1463,10 @@ class Chat:
         final user message. The system message then also carries the
         ``used_notes`` paragraph.
 
-        *fit*, when given, receives the built messages before they are
-        sent and returns them, maybe shortened, or ``None`` to refuse the
-        request. The explicit reasoning modes pass it to keep the
-        reflection under the prompt cap; ``legacy`` sends unchecked. A
-        refused request returns ``None``: no reply is invented and no
-        request is sent.
+        The request is fitted as every reflection request is (see the
+        class docstring), and *on_ready* receives it as it will be sent. A
+        request the prompt check refuses returns ``None``: no reply is
+        invented and no request is sent.
 
         A request that shares the plan's prefix is kept in
         :attr:`reflect_exchange` with its reply, for the agent to append to the
@@ -1402,7 +1478,7 @@ class Chat:
         if not retry:
             self.reflect_exchange, self._reflect_sent = [], None
         elif self._reflect_sent is not None and self.reflect_exchange:
-            return await self._retry_on_prefix(fit, retry_hint)
+            return await self._retry_on_prefix(on_ready, retry_hint)
         # Build system prompt with prior reflection context
         system_parts = [self._fixed_system(), self.reflection_prompt]
         prior_data = ""
@@ -1461,14 +1537,11 @@ class Chat:
                 lead.append(USED_NOTES_NOTE)
             asking = Message(role="user", content="\n\n".join([*lead, compose("")]))
             messages = [*shared.messages, *turns, asking]
-            if fit is not None:
-                fitted = await fit(messages)
-                if fitted is None:
-                    return None
-                messages = fitted
-            response = await self._request(
-                messages, tools=shared.tools or None, kind="reflect"
+            response = await self._reflect_request(
+                messages, shared.tools, on_ready, shared.history
             )
+            if response is None:
+                return None
             self._reflect_sent, self._reflect_tools = messages, shared.tools
             self.reflect_exchange = [asking, _as_text_reply(response)]
             return response
@@ -1491,14 +1564,8 @@ class Chat:
         else:
             messages.extend(tail)
             messages.append(Message(role="user", content=request))
-        if fit is not None:
-            fitted = await fit(messages)
-            if fitted is None:
-                # Refused before it is sent: no request and no reply.
-                return None
-            messages = fitted
         # A guarded request offers the plan's tools exactly (so the prefix
         # holds) and asks for text in words; ``tool_choice`` stays the
         # provider's.
         tools = self._plan_tools if guarded else None
-        return await self._request(messages, tools=tools or None, kind="reflect")
+        return await self._reflect_request(messages, tools, on_ready)

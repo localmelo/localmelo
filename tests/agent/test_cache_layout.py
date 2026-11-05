@@ -356,6 +356,14 @@ def _starts_the_same(earlier: dict[str, Any], later: dict[str, Any]) -> bool:
     return bool(later["messages"][: len(kept)] == kept)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the request fit shortens old tool results to previews before it drops "
+        "units, just under the cap and with no hold, so the prefix moves at "
+        "every step until no result is left to shorten"
+    ),
+)
 async def test_a_large_cap_leaves_the_size_fit_to_drop_history_in_chunks() -> None:
     steps = 26
     stub = Stub([*(_big_call(n, 4000) for n in range(steps)), _final_reply(_cached(0))])

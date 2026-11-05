@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
@@ -13,6 +13,10 @@ from localmelo.melo.schema import Message, ToolDef, starts_with_reply_label
 
 class ContextFitError(Exception):
     """The pinned request cannot meet the requested input budget."""
+
+
+class PromptCapError(ContextFitError):
+    """``Checker.pre_plan`` refused a request still over the prompt cap after the fit."""
 
 
 _EXIT = re.compile(r"\[exit code (-?\d+)\]", re.IGNORECASE)
@@ -86,24 +90,37 @@ def fit_request(
     force_smaller_than: int | None = None,
     drop_target: float = 1.0,
     hold: FitCut | None = None,
+    history: Sequence[Message] = (),
 ) -> tuple[list[Message], dict[str, int]]:
     """Fit copies using the caller's assembled-request estimate.
 
     Counts are ``tool_results``, ``thinking`` and ``units``. A retry must
     additionally estimate strictly below ``force_smaller_than``. Failure is
-    conservative: malformed/in-flight pairs, images and failure evidence stay.
-    When whole units must go, *drop_target* < 1 removes them down to that share
-    of *limit* (as far as the pinned context allows), so the next request's
-    retained history starts at the same unit.
+    conservative: malformed/in-flight pairs and user turns stay, and images
+    and failure evidence stay unless nothing else is left to drop; then the
+    oldest go, except the latest failing check. When whole units must go,
+    *drop_target* < 1 removes them down to that share of *limit* (as far as
+    the pinned context allows), so the next request's retained history
+    starts at the same unit.
+
+    *history* names, by identity, messages of *messages* from the turns
+    before the current task (a chat's earlier tasks): a unit made only of
+    them may go whole, whatever it holds.
 
     With a *hold*, the units that the held cut's unit follows are dropped first
     (those the fit may drop), and the fit goes on from there; a cut whose unit
     is no longer in the request is forgotten. The cut then holds the oldest
     unit this fit kept after its last drop, so the next request starts there.
     """
-    units = group_turns(copy.deepcopy(messages), empty_prefix=True)
+    copies = copy.deepcopy(messages)
+    earlier = {id(m) for m in history}
+    past = {id(c) for c, m in zip(copies, messages, strict=True) if id(m) in earlier}
+    units = group_turns(copies, empty_prefix=True)
     counts = {"tool_results": 0, "thinking": 0, "units": 0}
     original = list(units)
+
+    def before_task(unit: list[Message]) -> bool:
+        return all(id(m) in past for m in unit)
 
     def flatten() -> list[Message]:
         return [message for unit in units for message in unit]
@@ -114,30 +131,32 @@ def fit_request(
             force_smaller_than is None or size < force_smaller_than
         )
 
-    # Protect the newest complete structural unit and latest failing check,
-    # as well as all malformed or unfinished protocol units.
+    # Protect the newest complete structural unit and the task's latest
+    # failing check, as well as all malformed or unfinished protocol units.
     complete = [unit for unit in units if _removable(unit)]
     newest = complete[-1] if complete else None
     failing = next(
         (
             unit
             for unit in reversed(units)
-            if any(m.role == "tool" and _failed(m) for m in unit)
+            if not before_task(unit)
+            and any(m.role == "tool" and _failed(m) for m in unit)
         ),
         None,
     )
 
-    def droppable(unit: list[Message]) -> bool:
-        if (
-            unit is newest
-            or unit is failing
-            or unit is units[-1]
-            or not _removable(unit)
+    def droppable(unit: list[Message], *, keep_evidence: bool = True) -> bool:
+        if unit is newest or unit is units[-1]:
+            return False
+        if before_task(unit):
+            return True
+        if unit is failing or not _removable(unit):
+            return False
+        if keep_evidence and any(m.role == "tool" and _failed(m) for m in unit):
+            return False
+        if keep_evidence and any(
+            m.images or (m.tool_result and m.tool_result.images) for m in unit
         ):
-            return False
-        if any(m.role == "tool" and _failed(m) for m in unit):
-            return False
-        if any(m.images or (m.tool_result and m.tool_result.images) for m in unit):
             return False
         # A user message can resemble a recall block; keep it unless the unit
         # is the agent's own empty-reply/nudge pair.
@@ -242,19 +261,21 @@ def fit_request(
 
     fitting: tuple[list[Message], dict[str, int], tuple[object, ...] | None] | None
     fitting = None
-    for unit in list(units):
-        if not droppable(unit):
-            continue
-        units = [candidate for candidate in units if candidate is not unit]
-        counts["units"] += 1
-        if fits(drop_target):
-            return finish()
-        if fitting is None and fits():
-            fitting = (flatten(), dict(counts), held())
-    if fitting is not None:
-        if hold is not None and fitting[2] is not None:
-            hold.key = fitting[2]
-        return fitting[0], fitting[1]
+    # Evidence (a failed check, images) goes only when nothing else is left.
+    for keep_evidence in (True, False):
+        for unit in list(units):
+            if not droppable(unit, keep_evidence=keep_evidence):
+                continue
+            units = [candidate for candidate in units if candidate is not unit]
+            counts["units"] += 1
+            if fits(drop_target):
+                return finish()
+            if fitting is None and fits():
+                fitting = (flatten(), dict(counts), held())
+        if fitting is not None:
+            if hold is not None and fitting[2] is not None:
+                hold.key = fitting[2]
+            return fitting[0], fitting[1]
 
     raise ContextFitError(
         "Request cannot fit without removing pinned context; increase the input "

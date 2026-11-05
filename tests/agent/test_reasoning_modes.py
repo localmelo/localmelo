@@ -10,13 +10,13 @@ import httpx
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.agent import _as_sent, _RunState
+from localmelo.melo.agent.agent import _replay_plan, _RunState
 from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
-from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
+    CheckResult,
     Message,
     TaskRecord,
     ToolCall,
@@ -374,46 +374,40 @@ async def test_replay_required_evicts_whole_units_and_never_cuts() -> None:
     assert result.memory_stats is not None
     assert result.memory_stats["replay_skipped"] == 0
     assert result.memory_stats["replay_stripped"] == 0
-    # The default eviction drops whole units down to 70% of the cap, and the
-    # query is the newest unit here: both turns go, whole, and none is cut.
-    assert _assistant(server.bodies[0]) == []
+    # The turns came before the task: the fit drops the oldest whole, down to
+    # 70% of the cap, and the one it keeps carries all of its reasoning.
+    [sent] = _assistant(server.bodies[0])
+    assert (sent["content"], sent["reasoning_content"]) == ("new", "y" * 60_000)
 
 
 @pytest.mark.asyncio
 async def test_replay_strips_the_oldest_thinking_before_dropping_a_unit() -> None:
-    old = Message(
-        role="assistant",
-        content="old",
-        tool_calls=[ToolCall(tool_name="echo", arguments={"text": "a"}, id="old")],
-        thinking="x" * 39_000,
-    )
-    new = Message(
-        role="assistant",
-        content="new",
-        tool_calls=[ToolCall(tool_name="echo", arguments={"text": "a"}, id="new")],
-        thinking="y" * 39_000,
-    )
+    turns = []
+    for name, mark in (("a", "x"), ("b", "y"), ("c", "z")):
+        turns += [
+            Message(
+                role="assistant",
+                content=name,
+                tool_calls=[ToolCall(tool_name="echo", arguments={}, id=name)],
+                thinking=mark * 35_000,
+            ),
+            Message(role="tool", content="r", tool_call_id=name),
+        ]
     server = Scripted(_reply("done"))
     llm = server.llm(reasoning_field="reasoning_content")
     agent = _agent(llm, _options(reasoning="replay", replay_scope="window"))
-    agent.load_conversation(
-        [
-            old,
-            Message(role="tool", content="r1", tool_call_id="old"),
-            new,
-            Message(role="tool", content="z" * 30_000, tool_call_id="new"),
-        ]
-    )
+    agent.load_conversation(turns)
     result = await agent.run_task("q")
     await agent.close()
 
     assert result.memory_stats is not None
     assert result.memory_stats["replay_stripped"] == 1
     assert result.memory_stats["replay_skipped"] == 0
+    assert result.memory_stats["replayed_chars"] == 70_000
     sent = _assistant(server.bodies[0])
-    assert [m["content"] for m in sent] == ["old", "new"]
+    assert [m["content"] for m in sent] == ["a", "b", "c"]
     assert "reasoning_content" not in sent[0]
-    assert sent[1]["reasoning_content"] == "y" * 39_000
+    assert sent[1]["reasoning_content"] == "y" * 35_000
 
 
 @pytest.mark.asyncio
@@ -478,7 +472,9 @@ def test_an_evicted_task_query_makes_every_remaining_turn_the_tasks() -> None:
         Message(role="user", content="later"),
     ]
     options = AgentOptions(reasoning="replay")
-    sent = _as_sent(window, options, task_query=Message(role="user", content="gone"))
+    sent, _ = _replay_plan(
+        window, options, task_query=Message(role="user", content="gone")
+    )
     assert sent[0].thinking == "old thought"
 
 
@@ -596,63 +592,6 @@ async def test_the_size_cut_turn_keeps_its_thinking_in_replay() -> None:
     assert (cut.content, cut.thinking) == ("", "")
 
 
-@pytest.mark.asyncio
-async def test_the_reflection_request_is_fitted_to_the_cap() -> None:
-    async def noop(text: str) -> str:
-        return text
-
-    agent = _agent(
-        Scripted(_reply("done")).llm(reasoning_field="auto"),
-        _options(reasoning="replay"),
-    )
-    systems = [Message(role="system", content="sys")]
-    earliest = Message(
-        role="assistant",
-        content="a",
-        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="a")],
-    )
-    middle = Message(
-        role="assistant",
-        content="b",
-        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="b")],
-    )
-    newest = Message(
-        role="assistant",
-        content="c",
-        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="c")],
-    )
-    messages = [
-        *systems,
-        earliest,
-        Message(role="tool", content="x" * 60_000, tool_call_id="a"),
-        middle,
-        Message(role="tool", content="y" * 50_000, tool_call_id="b"),
-        newest,
-        Message(role="tool", content="z" * 1_000, tool_call_id="c"),
-        Message(role="user", content="reflect"),
-    ]
-    fitted = await agent._fit_reflection_messages(messages, None)
-    await agent.close()
-    assert fitted is not None
-    assert fitted[0] is systems[0]
-    assert fitted[-1] is messages[-1]
-    assert fitted[1] is middle
-    assert len(json.dumps([m.content for m in fitted])) < 100_000
-
-    too_big = [
-        systems[0],
-        newest,
-        Message(role="tool", content="q" * 120_000, tool_call_id="c"),
-        Message(role="user", content="reflect"),
-    ]
-    agent = _agent(
-        Scripted(_reply("done")).llm(reasoning_field="auto"),
-        _options(reasoning="replay"),
-    )
-    assert await agent._fit_reflection_messages(too_big, None) is None
-    await agent.close()
-
-
 def _unit(call_id: str, output: str, *, thinking: str = "") -> list[Message]:
     return [
         Message(
@@ -691,9 +630,11 @@ async def test_do_reflect_fits_the_request_it_sends() -> None:
     assert "Original task:" in body["messages"][-1]["content"]
     contents = [message.get("content", "") for message in body["messages"]]
     assert sum(len(text) for text in contents) < 100_000
-    assert all("x" * 60_000 not in text for text in contents)
+    # Through the planning request's fit: the oldest result is a preview.
+    [old] = [text for text in contents if text.startswith("x")]
+    assert old.endswith("characters omitted]")
     assert any("y" * 50_000 in text for text in contents)
-    assert (run.replay_skipped, run.replay_stripped) == (0, 0)
+    assert run.replay_skipped == 0
 
 
 @pytest.mark.asyncio
@@ -728,7 +669,9 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
         server.llm(reasoning_field="auto"),
         _options(reasoning="replay"),
     )
-    agent.load_conversation([*_unit("a", "x" * 120_000, thinking="t" * 50_000)])
+    # A failed check is never shortened, and it is the newest unit.
+    failed = "Traceback (most recent call last):\n" + "x" * 120_000
+    agent.load_conversation([*_unit("a", failed, thinking="t" * 50_000)])
     task = TaskRecord(query="q")
     run = _RunState(task_id=task.task_id)
     with _prefix_scope(agent):
@@ -738,31 +681,6 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
     assert reflection is None
     assert server.bodies == []
     assert run.replay_skipped == 0  # nothing was sent, so nothing skipped
-
-
-@pytest.mark.asyncio
-async def test_a_reflection_too_large_to_fit_is_not_sent() -> None:
-    server = Scripted(_reply("done"))
-    llm = server.llm(reasoning_field="auto")
-    agent = _agent(llm, _options(reasoning="replay"))
-    huge = Message(
-        role="assistant",
-        content="a",
-        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="a")],
-    )
-    short = [
-        huge,
-        Message(role="tool", content="x" * 120_000, tool_call_id="a"),
-    ]
-
-    async def fit(messages: list[Message]) -> list[Message] | None:
-        return await agent._fit_reflection_messages(messages, None)
-
-    with _prefix_scope(agent):
-        answer = await agent.chat.reflect(short=short, query="q", attempt_id=0, fit=fit)
-    assert answer is None
-    assert server.bodies == []
-    await agent.close()
 
 
 class CountingEmbedding(BaseEmbeddingProvider):
@@ -848,70 +766,6 @@ async def test_pre_plan_counts_thinking_only_when_asked() -> None:
             count_thinking=True,
         )
     ).allowed
-
-
-@pytest.mark.asyncio
-async def test_strip_first_leaves_out_of_scope_thinking_alone() -> None:
-    agent = _agent(
-        Scripted(_reply("done")).llm(reasoning_field="reasoning_content"),
-        _options(reasoning="replay"),
-    )
-    old = Message(role="assistant", content="old", thinking="o" * 20_000)
-    marker = Message(role="user", content="q")
-    first = Message(role="assistant", content="a", thinking="x" * 20_000)
-    second = Message(role="assistant", content="b", thinking="y" * 20_000)
-    newest = Message(
-        role="assistant",
-        content="c",
-        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="c")],
-        thinking="z" * 20_000,
-    )
-    agent.load_conversation(
-        [
-            old,
-            marker,
-            first,
-            second,
-            newest,
-            Message(role="tool", content="t" * 60_000, tool_call_id="c"),
-        ]
-    )
-    query = next(m for m in agent.hippo.working.get_window() if m.content == "q")
-    run = _RunState(task_id="t")
-    await agent._fit_prompt_cap([], "q", task_query=query, run=run)
-    after = {m.content: m for m in agent.conversation()}
-    await agent.close()
-
-    assert after["old"].thinking == "o" * 20_000
-    assert after["a"].thinking == after["b"].thinking == ""
-    assert after["c"].thinking == "z" * 20_000
-    assert run.replay_stripped == 2
-
-
-def test_strip_thinking_keeps_the_newest_unit() -> None:
-    working = WorkingMemory(max_len=10)
-    first = Message(role="assistant", content="a", thinking="one")
-    second = Message(role="assistant", content="b", thinking="two")
-    working.append(first)
-    working.append(second)
-    assert working.strip_thinking(5) == 1
-    assert working.get_window()[0].thinking == ""
-    assert working.get_window()[1].thinking == "two"
-
-    working = WorkingMemory(max_len=10)
-    working.append(Message(role="assistant", content="a", thinking="one"))
-    working.append(Message(role="assistant", content="b", thinking="two"))
-    assert working.strip_thinking(1) == 1
-    assert [m.thinking for m in working.get_window()] == ["", "two"]
-
-    working = WorkingMemory(max_len=10)
-    working.append(Message(role="assistant", content="a"))
-    working.append(Message(role="assistant", content="b", thinking="two"))
-    assert working.strip_thinking(1) == 0
-
-    working = WorkingMemory(max_len=10)
-    working.append(Message(role="assistant", content="a", thinking="one"))
-    assert working.strip_thinking(1) == 0  # the newest unit always stays
 
 
 @pytest.mark.asyncio
@@ -1058,20 +912,17 @@ async def test_config_providers_keep_the_section_field_in_replay(
 
 
 @pytest.mark.asyncio
-async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
+async def test_a_reflection_the_prompt_check_refuses_reads_as_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def refuse(
-        self: Agent,
-        messages: list[Message],
-        run: _RunState | None,
-        *,
-        skipped: list[int] | None = None,
-        sent: list[Message] | None = None,
-    ) -> None:
-        return None
+    original = Checker.pre_plan
 
-    monkeypatch.setattr(Agent, "_fit_reflection_messages", refuse)
+    async def refuse(self: Checker, messages: list[Message], **kw: Any) -> Any:
+        if "Reflect and decide." in messages[-1].content:
+            return CheckResult(allowed=False, reason="Prompt too large: 1 chars")
+        return await original(self, messages, **kw)
+
+    monkeypatch.setattr(Checker, "pre_plan", refuse)
     server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
