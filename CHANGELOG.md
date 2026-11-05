@@ -12,8 +12,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at
-  most, cancellable), holds new ones and runs them on the new model, and a task mid-step asks again with the model
-  served. `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
+  most, cancellable), holds new ones and runs them on the new model, and a task's request that names the old model asks
+  again with the one served. `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
   `switch`, and the macOS app needs macOS 15 (#NNN).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
