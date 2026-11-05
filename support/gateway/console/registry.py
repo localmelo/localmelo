@@ -283,6 +283,8 @@ class ConsoleSessions:
         # How many times the settings changed: an Agent built before the last
         # change (one that was busy then) is built again at its next open.
         self._settings_epoch = 0
+        # The chat model the settings named at the last open; None before one.
+        self._model_seen: str | None = None
         self._closed = False
 
     # ── Reading ──
@@ -386,6 +388,7 @@ class ConsoleSessions:
     async def _open_locked(self, session_id: str) -> OpenSession:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
+        self._note_served_model()
         entry = self._sessions.get(session_id)
         if entry is not None and entry.agent is not None:
             root = entry.agent.workspace_root
@@ -797,6 +800,20 @@ class ConsoleSessions:
         with contextlib.suppress(Exception):
             await entry.runner.wait()
         entry.policy.auto.withdraw(key)
+
+    def _note_served_model(self) -> None:
+        """A change in the model the settings name is a settings change.
+
+        A backend that serves its own model (melo_serve) changes it with no
+        edit of the settings, so the epoch moves here: each open chat is built
+        again at its next open, as after a Settings save. The first model seen
+        is only recorded, and so is none (nothing served): the Agents stay.
+        """
+        model = self._settings_model()
+        if model and model != self._model_seen:
+            if self._model_seen is not None:
+                self._settings_epoch += 1
+            self._model_seen = model
 
     def _settings_model(self) -> str:
         """The chat model the settings name, as ``session.model`` records it."""
