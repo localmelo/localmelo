@@ -29,7 +29,7 @@ uv run melo --help
 ```
 
 - `melo` lands in `.venv/bin/`, not on PATH. Below, `melo` means `uv run melo` in the clone, `uv run --project CLONE melo` elsewhere, or `CLONE/.venv/bin/melo` (for background jobs; see Gotchas). Scripts: `uv run [--project CLONE] python SCRIPT.py` or `CLONE/.venv/bin/python SCRIPT.py`. Under a temporary `HOME` prefer the `.venv/bin/` paths: `uv run` keeps its cache in `$HOME/.cache/uv` and may resolve and download again.
-- Python >= 3.11; the `gateway` extra (fastapi, uvicorn) is needed for `--serve`. A renamed clone or ZIP folder gives `ModuleNotFoundError: No module named 'localmelo'`.
+- Python >= 3.11; the `gateway` extra (fastapi, uvicorn) is needed for `--serve`.
 - Commands: `melo`, `melo-retrieve` and `melo-procedures` (offline only). macOS tested; Linux untested; no Windows.
 
 ## Use it
@@ -306,7 +306,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 ## Working on the code
 
-- The directory that holds `pyproject.toml` IS the package `localmelo` (`package-dir`: `localmelo = "."`): `melo/agent/agent.py` imports as `localmelo.melo.agent.agent`. Keep the clone named `localmelo`; never create `localmelo/localmelo/`.
+- The directory that holds `pyproject.toml` IS the package `localmelo` whatever the clone is called (`setup.py` sets `package_dir` `localmelo = "."` and lists the packages: every folder with an `__init__.py` except `tests/`): `melo/agent/agent.py` imports as `localmelo.melo.agent.agent`; never create `localmelo/localmelo/`. A new package folder needs an `__init__.py`, or the wheel leaves it out; non-Python files ship only as `package-data` in `pyproject.toml` (the console's `support/gateway/static`).
 - `melo/` is the core (run loop, checks, executor, memory, contracts); `support/` holds backends, providers, gateway, MCP, config, wizard, `melo-retrieve`, `melo-procedures`, scheduler. `melo/` does not import `support/` (`tests/test_layering.py`). `melo/agent/agent.py` is the run loop; the approval gate is `_approval_gate.py`, the reflection reading and fitting `_reflection.py`, and the recall and note methods that `Agent` inherits are `_recall.py` (`_RecallLoop`) and `_notes_loop.py` (`_NotesLoop`).
 - Setup: `uv sync --extra dev --extra gateway`. Tests while working: `uv run pytest --testmon -q` (after its first run, only tests that cover the changed files run). Before a pull request: `uv run pytest -n auto -q` (the offline suite in parallel). A plain run opens no socket: `tests/smoke/test_backend_smoke.py` is skipped unless `LOCALMELO_SMOKE=1`, and `--ignore=tests/smoke/test_backend_smoke.py` still works; pre-commit hooks run it too.
 - Lint: `uv run ruff check .`, `uv run black --check .`, `uv run mypy .`. Web workspace JS (Node from `.nvmrc`): `node --test tests/gateway/*.mjs`.

@@ -30,10 +30,6 @@ source .venv/bin/activate
 uv creates the virtual environment `.venv/` (installing Python 3.13 if you
 do not have it) and installs localmelo with the gateway's dependencies.
 
-Keep the directory name `localmelo`: the package is built from it. A renamed
-folder or a ZIP download (`localmelo-main`) fails with
-`ModuleNotFoundError: No module named 'localmelo'`.
-
 The rest of this guide calls `melo` directly. Activation lasts for this
 terminal only: in a new terminal, run `source <clone>/.venv/bin/activate`
 again, where `<clone>` is your `localmelo` directory. With uv you can also

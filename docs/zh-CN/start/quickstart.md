@@ -27,8 +27,6 @@ source .venv/bin/activate
 
 uv 会创建虚拟环境 `.venv/`（如果没有 Python 3.13，还会安装它），并安装 localmelo 及网关依赖。
 
-请保留目录名 `localmelo`：软件包从该目录构建。重命名文件夹或下载 ZIP（`localmelo-main`）会导致 `ModuleNotFoundError: No module named 'localmelo'`。
-
 本指南余下部分直接调用 `melo`。激活只在当前终端有效：在新终端中需要再次运行 `source <clone>/.venv/bin/activate`，其中 `<clone>` 是你的 `localmelo` 目录。使用 uv 时，也可以在克隆目录中运行 `uv run melo …`，或在其他任何位置运行 `uv run --project <clone> melo …`。
 
 <a id="install-with-pip"></a>

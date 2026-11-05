@@ -38,9 +38,11 @@ error: Failed to spawn: `melo`
 ModuleNotFoundError: No module named 'localmelo'
 ```
 
-- **Cause:** the clone's directory is not named `localmelo`, for example a
-  renamed folder or a ZIP download unpacked as `localmelo-main`.
-- **Fix:** rename the directory to `localmelo` and install again, as in
+- **Cause:** the Python that ran the command does not have localmelo
+  installed, for example a virtual environment other than the clone's, or an
+  install that did not finish.
+- **Fix:** run `uv sync --extra gateway` in the clone and start melo with
+  `uv run melo …`, or activate the clone's `.venv`, as in
   [Install](../start/quickstart.md#install).
 
 ### Gateway requires fastapi and uvicorn
