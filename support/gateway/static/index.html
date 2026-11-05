@@ -124,7 +124,10 @@
           </button>
         </header>
         <div class="banner" id="store-banner" role="status" hidden></div>
-        <div class="banner" id="model-banner" role="status" hidden></div>
+        <div class="banner" id="model-banner" role="status" hidden>
+          <span data-i18n="header.noModelBanner">No model is configured yet.</span>
+          <button type="button" class="link-button" id="model-banner-open" data-i18n="header.noModelOpen">Connect a model</button>
+        </div>
         <div class="banner" id="lock-banner" role="status" hidden></div>
         <div class="banner" id="offline-banner" role="status" hidden>
           <span data-i18n="html.couldNotReachTheGateway">Could not reach the gateway. Check that the gateway is running.</span>

@@ -415,9 +415,21 @@ function needsModel(health) {
   return health.configured === false || health.model_server?.reachable === false;
 }
 
-/** Whether the welcome shows the setup card: a model is needed (or being connected), and no chat is open. */
+/** Whether the chat has nothing in it yet and shows the welcome: a chat not sent, or the main chat before its first word. */
+function chatIsEmpty() {
+  if (!S.activeId) return true;
+  const view = S.view;
+  return mainActive() && !!view?.session && view.turns.length === 0 && !view.cards?.length && !view.echoes?.length;
+}
+
+/** Whether the welcome shows the setup card: a model is needed (or being connected), and the chat is empty. */
 function setupShown() {
-  return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
+  return S.ready && (needsModel(S.health) || setupCard.holding()) && chatIsEmpty() && !pendingOutbox() && !workerMode;
+}
+
+/** Whether nothing can be sent yet: the setup card is up, or no model is configured in any chat. */
+function composerBlocked() {
+  return setupShown() || S.health?.configured === false;
 }
 
 /** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
@@ -494,8 +506,10 @@ function syncUI() {
   setupCard.show(setup);
   importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
-  input.disabled = setup;
-  input.placeholder = setup ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
+  // With no model nothing is sent: the words stay in the box, and the card (or the banner) shows the way.
+  const blocked = composerBlocked();
+  input.disabled = blocked;
+  input.placeholder = blocked ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
   // While melo works, Enter adds the words to the work; Stop is still its own button.
   setTextIfChanged($("composer-hint-text"), t(busy ? "composer.hintWorking" : "html.enterToSend"));
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
@@ -503,9 +517,7 @@ function syncUI() {
   folderPicker.update(fresh);
   modeChip.update();
   $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
-  const modelBanner = $("model-banner");
-  setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? t("header.noModelBanner") : "");
-  modelBanner.hidden = !modelBanner.textContent;
+  $("model-banner").hidden = !(S.health?.configured === false && !setup);
   refreshStreamNotice();
   $("header-model").textContent = session
     ? chatSubtitle(session.model || t("header.yourConfiguredModel"), session.workspace_label)
@@ -535,9 +547,9 @@ function syncUI() {
   // Words, or pictures and files that have arrived at the gateway, can be sent.
   const hasMedia = media.has();
   $("attach-btn").hidden = workerMode;
-  $("attach-btn").disabled = setup || !S.online;
+  $("attach-btn").disabled = blocked || !S.online;
   $("send-btn").disabled =
-    setup ||
+    blocked ||
     !S.online ||
     (sending !== null && sending.state !== "failed") ||
     media.busy() ||
@@ -2093,6 +2105,12 @@ async function send({ asTask = false } = {}) {
 
 async function queueMessage(text, {clearInput = false, asTask = false, carry = null} = {}) {
   if (workerMode) return;
+  // No model is configured: nothing is sent and the words stay in the box. The guide shows where the person is.
+  if (S.health?.configured === false) {
+    if (setupShown()) $("setup-card").focus();
+    else openSettings("model");
+    return;
+  }
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
   if (composerTurn() !== null) {
@@ -3505,6 +3523,7 @@ for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn"]) {
   if (id === "new-btn") node.addEventListener("click", () => newChat());
   else node.addEventListener("click", openSettings);
 }
+$("model-banner-open").addEventListener("click", () => openSettings("model"));
 $("close-settings").addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();

@@ -1,5 +1,6 @@
 /**
- * The welcome's setup card: connect the model server that already runs on this Mac.
+ * The welcome's setup card: connect the model server that already runs on this Mac, or point to the other
+ * way, an account or a key, which the card hands to Settings (`openSettings("model")`).
  *
  * While the page shows it (`show(true)`), it asks `GET /api/setup/detect` and draws what it
  * found: a server with a model to use, a server that needs an API key, or nothing. "Use this
@@ -127,7 +128,7 @@ export function setupModelCard({
     const actions = el("div", "setup-actions");
     if (main) actions.append(main);
     if (found && !list && data.models.length > 1) actions.append(button("link-button", t("setup.another"), choose));
-    if (phase === "failed" || (phase === "ready" && !found)) actions.append(button("link-button", t("setup.address"), openSettings));
+    if (phase === "failed" || (phase === "ready" && !found)) actions.append(button("link-button", t("setup.address"), () => openSettings("model")));
     if (commands.length) {
       const copyButton = button("link-button", t("setup.copy"), async () => {
         try {
@@ -145,6 +146,16 @@ export function setupModelCard({
       actions.append(link);
     }
     if (actions.children.length) parts.push(actions);
+    // The other way to a model, named on every state of the card but the one that is connecting.
+    if (phase !== "connecting") {
+      const other = el("div", "setup-other");
+      other.append(
+        el("h3", "", t("setup.accountTitle")),
+        el("p", "", t("setup.accountText")),
+        button("outline-button", t("setup.account"), () => openSettings("model")),
+      );
+      parts.push(other);
+    }
     root.replaceChildren(...parts);
     root.setAttribute("aria-busy", String(phase === "checking" || phase === "connecting"));
     if (refocus) root.focus(); // The control that was clicked is gone: the next Tab reaches the first one.

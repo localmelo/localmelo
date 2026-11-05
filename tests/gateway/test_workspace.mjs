@@ -1608,7 +1608,7 @@ test('title and independent banners follow active state without replacing notice
   h.run('notify("Other error", {sticky: true}); syncUI()');
   assert.match(h.context.document.title, /localmelo · New chat · 1/);
   assert.match(h.element('store-banner').textContent, /database offline/);
-  assert.match(h.element('model-banner').textContent, /No model/);
+  assert.equal(h.element('model-banner').hidden, false, 'With no model the banner shows');
   assert.equal(h.element('stream-banner').hidden, false);
   assert.equal(h.element('notice').textContent, 'Other error');
   await h.element('reconnect-btn').click();
@@ -1624,18 +1624,17 @@ test('status banners do not rewrite unchanged live text', async () => {
   h.stream().fail();
   h.run('syncUI()');
   const writes = {};
-  for (const id of ['store-banner', 'model-banner', 'stream-banner-text']) {
+  for (const id of ['store-banner', 'stream-banner-text']) {
     const node = h.element(id);
     let value = node.textContent;
     writes[id] = 0;
     Object.defineProperty(node, 'textContent', {get: () => value, set: (text) => { writes[id]++; value = text; }});
   }
   h.run('syncUI(); refreshStreamNotice()');
-  assert.deepEqual(writes, {'store-banner': 0, 'model-banner': 0, 'stream-banner-text': 0});
+  assert.deepEqual(writes, {'store-banner': 0, 'stream-banner-text': 0});
   h.state().health.sessions.store_error = 'new error';
   h.run('syncUI()');
   assert.equal(writes['store-banner'], 1);
-  assert.equal(writes['model-banner'], 0);
 });
 
 // ── The setup card on the welcome ──
@@ -1684,6 +1683,34 @@ test('the setup card shows, and asks what is on this Mac, only while no model ca
   await chat.run('init()');
   assert.equal(chat.element('setup-card').hidden, true, 'An open chat has no setup card');
   assert.equal(chat.net.callsTo('/setup/detect').length, 0);
+});
+
+test('with no model the main chat shows the card with both ways, nothing is sent, and the banner is a button', async () => {
+  const route = {'GET /health': {...health, configured: false}, 'GET /setup/detect': nothing};
+  // The main chat before its first word: the card is in it, and it names a model on this Mac and an account or a key.
+  const empty = harness(mainRoutes(route));
+  await empty.run('init()');
+  await tick();
+  assert.equal(empty.state().activeId, 'm');
+  assert.equal(empty.element('setup-card').hidden, false);
+  assert.match(empty.text('setup-card'), /No model server is running on this Mac.*brew install.*Or use an account or a key.*Choose a service/);
+  assert.equal(empty.element('input').disabled, true);
+  await press(empty.element('setup-card'), 'Choose a service…');
+  assert.equal(empty.context.settingsSection, 'model', 'the account way opens the model settings');
+  // The main chat with history has no card, but still sends nothing: the banner says why and opens the settings.
+  const history = harness(mainRoutes(route, {turns: [turnRow()]}));
+  await history.run('init()');
+  assert.equal(history.element('setup-card').hidden, true);
+  assert.equal(history.element('model-banner').hidden, false);
+  assert.equal(history.element('input').disabled, true);
+  history.element('input').value = 'my words';
+  await history.run('queueMessage("my words", {clearInput: true})');
+  assert.equal(history.net.calls.filter((call) => call.method === 'POST' && /messages|turns|run/.test(call.path)).length, 0, 'nothing was sent');
+  assert.equal(history.element('input').value, 'my words', 'the words stay in the box');
+  assert.equal(history.context.settingsSection, 'model', 'and the model settings open in place of an "Outcome unknown"');
+  history.context.settingsOpened = 0;
+  await history.element('model-banner-open').click();
+  assert.deepEqual([history.context.settingsOpened, history.context.settingsSection], [1, 'model']);
 });
 
 test('Use this model saves the server that was found, tests it, and the welcome is ready without opening settings', async () => {
