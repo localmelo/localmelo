@@ -124,6 +124,14 @@ GATHER_GUIDE: Final = (
     "belong, search again with other words for each kind not listed yet, and count "
     "only what the items say."
 )
+# With ``[memory] premise_check = "on"`` (the default): the sentence that ends the
+# list's guide line, after the gather sentence when there is one: check what the
+# question names against the lines.
+PREMISE_GUIDE: Final = (
+    "If the question names a person, thing, place or role that none of these "
+    "mention, say first that you have no record of it, and do not answer it from "
+    "something similar."
+)
 CUT_MARK: Final = "… (cut)"
 # With ``[memory] excerpt_open = "on"``: the line under the excerpts when one of them
 # starts with its turn's id, because it shows less than the whole turn.

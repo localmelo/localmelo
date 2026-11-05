@@ -9,6 +9,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.
 - Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
   alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
   kept in the chat. If the turn ends first, the words and the pictures run as your next message, also after a
