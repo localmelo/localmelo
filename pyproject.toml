@@ -2,12 +2,7 @@
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.package-dir]
-localmelo = "."
-
-[tool.setuptools.packages.find]
-where = [".."]
-include = ["localmelo", "localmelo.*"]
+# The packages and package_dir are in setup.py: this folder is the package, whatever it is called.
 
 [tool.setuptools.package-data]
 "localmelo.support.gateway" = ["static/*", "static/**/*"]
@@ -92,7 +87,7 @@ exclude = ["^__main__\\.py$"]
 cache_dir = ".cache/mypy"
 
 [[tool.mypy.overrides]]
-module = ["aiosqlite.*", "numpy.*", "httpx.*"]
+module = ["aiosqlite.*", "numpy.*", "httpx.*", "setuptools.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
