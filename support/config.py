@@ -351,12 +351,12 @@ def default_window_messages(backend: str) -> int:
     """The working window's message cap when nothing sets one, for a chat *backend*.
 
     A local server (ollama, mlc, vllm or oMLX, sglang, melo_serve) and an
-    OpenAI-compatible URL reuse the prompt prefix from their cache, so a long window adds few new
-    tokens per request and keeps more of the task in view: 64, the cap that two
-    benchmark rounds measured. Without prompt caching a longer window costs input
-    tokens on every request, so a cloud vendor's backend keeps 20 until a longer
-    window is measured there. An explicit ``[agent] window_messages`` or
-    ``--window-messages`` always wins.
+    OpenAI-compatible URL reuse the prompt prefix from their cache, so a long
+    window adds few new tokens per request and keeps more of the task in view:
+    64, the cap that two benchmark rounds measured. Without prompt caching a
+    longer window costs input tokens on every request, so a cloud vendor's
+    backend keeps 20 until a longer window is measured there. An explicit
+    ``[agent] window_messages`` or ``--window-messages`` always wins.
     """
     return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else LOCAL_WINDOW_MESSAGES
 
