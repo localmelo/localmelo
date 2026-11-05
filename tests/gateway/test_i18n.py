@@ -40,6 +40,8 @@ USAGE = ROOT / "support/usage_snapshot.py"
 DISPLAY = ROOT / "support/sessions/display.py"
 HOSTED_CHECK = ROOT / "support/hosted_check.py"
 DESKTOP = ROOT / "support/browser/desktop.py"
+# How a melo_serve pick reads on every surface (``pick_words``).
+SERVE = ROOT / "support/melo_serve.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -91,6 +93,7 @@ CONVERTED_PY = (
     "routes_pictures.py",
     "routes_sessions.py",
     "routes_turns.py",
+    "serve_switch.py",
 )
 
 # What stays English on purpose. JavaScript: key names, a code the scheduler sends, and the
@@ -283,6 +286,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         DISPLAY,
         TERMINAL,
         DESKTOP,
+        SERVE,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))

@@ -17,7 +17,7 @@ from localmelo.support.backends.registry import in_use
 from localmelo.support.cli.agents import config_backend
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console.routes_settings import model_json
-from localmelo.tests.fixtures.melo_serve import URL, role, write_state
+from localmelo.tests.fixtures.melo_serve import URL, FakeServe, role, write_state
 
 
 def _cfg() -> Config:
@@ -86,7 +86,7 @@ def _oversized(home: Path) -> None:
 
 NOT_RUNNING = melo_serve.Snapshot()
 RUNNING_NO_ROLES = melo_serve.Snapshot(
-    running=True, url=URL, status="ready", login=True
+    running=True, url=URL, status="ready", login=True, generation=1
 )
 RUNNING_LOGINLESS = melo_serve.Snapshot(
     running=True,
@@ -94,6 +94,7 @@ RUNNING_LOGINLESS = melo_serve.Snapshot(
     status="ready",
     login=False,
     roles={"chat": melo_serve.Role("m", "m", "Splash", "ready")},
+    generation=1,
 )
 
 
@@ -167,9 +168,7 @@ def test_a_live_socket_does_not_make_a_bad_state_good(
     MALFORMED["a front door url that is not loopback"][0](melo_serve_home)
     assert not melo_serve.snapshot().running  # its address is never offered
     MALFORMED["a model that is not a string"][0](melo_serve_home)
-    assert melo_serve.snapshot() == melo_serve.Snapshot(
-        running=True, url=URL, status="ready", login=True
-    )  # running, but with no model to serve
+    assert melo_serve.snapshot() == RUNNING_NO_ROLES  # running, with no model to serve
     assert in_use(_cfg(), "melo_serve") == ("melo_serve", "")
 
 
@@ -385,3 +384,50 @@ def test_a_control_socket_that_is_not_the_users_own_is_not_connected_to(
     assert melo_serve.snapshot().running  # the fixture's socket passes the checks
     spoil(melo_serve_socket, monkeypatch)
     assert melo_serve.snapshot() == melo_serve.Snapshot()
+
+
+async def test_the_control_client_reads_the_chat_picks_and_words_them_once(
+    serve_fake: FakeServe,
+) -> None:
+    picks = await melo_serve.picks()
+    assert [pick.name for pick in picks] == [
+        "Qwen3.8 27B",
+        "Qwen3 8B",
+        "Qwen3 4B",
+        "Qwen3 70B",
+    ]  # chat picks only
+    words = [melo_serve.pick_words(pick) for pick in picks]
+    assert words[0] == ("Splash · needs 21 GB · fits", "fits")
+    assert words[2] == ("oMLX · needs 2.5 GB · fits", "fits")
+    assert words[3] == ("Splash · needs 48 GB, 31 GB free", "")  # its reason, no fit
+    assert [p.current for p in picks] == [True, False, False, False]
+    assert [p.loadable for p in picks] == [True, True, True, False]
+    assert melo_serve.pick_words(picks[1], developer=True)[0] == (
+        "oMLX · needs 5 GB · 4.2 GB on disk · fits"
+    )
+    assert melo_serve.pick_words(picks[1], "zh-Hans")[0] == "oMLX · 需要 5 GB · 放得下"
+    assert melo_serve.snapshot().generation == 1
+    # A reply that is not a list of picks is refused; a row that is wrong is left out.
+    serve_fake.reply = {"memory": None, "picks": "all of them"}
+    with pytest.raises(melo_serve.MeloServeError, match="lists no picks"):
+        await melo_serve.picks()
+    serve_fake.reply = {"picks": [{"role": "chat", "id": "\x1b[2J"}, "x", {"id": 3}]}
+    assert await melo_serve.picks() == []
+    serve_fake.reply = {"picks": ["x" * melo_serve.MAX_REPLY_BYTES]}
+    with pytest.raises(melo_serve.MeloServeError, match="too large"):
+        await melo_serve.picks()
+
+
+async def test_a_switch_names_its_generation_and_a_stale_one_is_refused(
+    serve_fake: FakeServe, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reply = await melo_serve.switch("qwen3-8b-omlx", expected_generation=1)
+    assert reply["changed"] is True and reply["generation"] == 2
+    assert serve_fake.switches[-1]["expected_generation"] == 1
+    assert melo_serve.snapshot().roles["chat"].model == "Qwen3-8B-4bit"
+    with pytest.raises(melo_serve.MeloServeError) as refused:
+        await melo_serve.switch("qwen3-4b-omlx", expected_generation=1)
+    assert (refused.value.kind, refused.value.generation) == ("stale_generation", 2)
+    monkeypatch.setenv("MELO_SERVE_SOCKET", "/nonexistent/control.sock")
+    with pytest.raises(melo_serve.MeloServeError, match="not installed"):
+        await melo_serve.picks()  # nothing connects to a socket that is not there
