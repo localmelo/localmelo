@@ -14,13 +14,7 @@ const task = (extra = {}) => ({task_id: 't', state: 'running', started_at: 5, ..
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 function fixture({events = [started], noSource = false} = {}) {
-  const f = {sources: [], timers: [], calls: [], draws: 0, listeners: new Set(), events, missing: false, status: 'running'};
-  f.doc = {
-    visibilityState: 'visible',
-    addEventListener: (type, fn) => f.listeners.add(fn),
-    removeEventListener: (type, fn) => f.listeners.delete(fn),
-  };
-  f.show = (state) => { f.doc.visibilityState = state; for (const fn of f.listeners) fn(); };
+  const f = {sources: [], timers: [], calls: [], draws: 0, events, missing: false, status: 'running'};
   f.timer = (ms) => f.timers.find((t) => t.ms === ms && !t.cleared);
   f.bumps = 0;
   f.live = taskLive({
@@ -35,7 +29,6 @@ function fixture({events = [started], noSource = false} = {}) {
     schedule: (fn, ms) => { const timer = {fn, ms, cleared: false}; f.timers.push(timer); return timer; },
     cancel: (timer) => { timer.cleared = true; },
     statusRow: {bump: () => { f.bumps++; }},
-    doc: f.doc,
   });
   return f;
 }
@@ -86,7 +79,6 @@ test('a task waiting for approval keeps its stream, and a frame from an old stre
   f.sources[0].emit(toolStarted(2));
   f.live.leave();
   assert.equal(f.sources[0].closed, true);
-  assert.equal(f.listeners.size, 0);
   f.sources[0].emit(toolStarted(3, 'late'));
   assert.equal(f.live.state.view, null);
 });
@@ -100,7 +92,6 @@ test('a finished task is read once and never followed', async () => {
     await settle();
     assert.equal(f.calls.length, 1, state);
     assert.equal(f.sources.length, 0, state);
-    assert.equal(f.listeners.size, 0, state);
     assert.equal(f.live.state.view.turns[0].userText, 'Objective');
   }
 });
@@ -113,7 +104,6 @@ test('a task that finishes closes the stream and reads its record once more', as
   f.events = [started, step(2), toolStarted(3), toolFinished(4)];
   f.live.sync(task({state: 'done'}));
   assert.equal(f.sources[0].closed, true);
-  assert.equal(f.listeners.size, 0);
   await settle();
   assert.equal(f.calls.length, 2, 'one catch-up read, so frames the stream had not delivered are not lost');
   assert.equal(f.live.state.view.turns[0].items.length, 1);
@@ -135,21 +125,7 @@ test('a task that stops and is resumed is followed again after the last id', asy
   assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
 });
 
-test('a hidden tab stops following and a shown one catches up from the last id', async () => {
-  const f = fixture();
-  f.live.sync(task());
-  await settle();
-  f.sources[0].emit(step(2));
-  f.show('hidden');
-  assert.equal(f.sources[0].closed, true);
-  f.show('visible');
-  assert.equal(f.sources.length, 2);
-  assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
-  f.show('visible');
-  assert.equal(f.sources.length, 2, 'a stream that is open is not opened twice');
-});
-
-test('a stream that fails is opened again by the next poll, after the last id', async () => {
+test('a stream that fails is opened again after the last id, once, and not once the task has stopped', async () => {
   const f = fixture();
   f.live.sync(task());
   await settle();
@@ -157,8 +133,17 @@ test('a stream that fails is opened again by the next poll, after the last id', 
   f.sources[0].fail();
   assert.equal(f.sources[0].closed, true);
   f.live.sync(task());
+  assert.equal(f.sources.length, 1, 'the poll does not open a second stream while the first one waits');
+  await f.timer(1000).fn();
   assert.equal(f.sources.length, 2);
   assert.equal(f.sources[1].url, '/api/sessions/t/events?after=2&watch=true');
+  f.sources[1].fail();
+  const wait = f.timer(2000);
+  f.events = [started, step(2)];
+  f.live.sync(task({state: 'parked'}));
+  assert.equal(wait.cleared, true, 'a task that stopped is not followed again');
+  await settle();
+  assert.equal(f.sources.length, 2);
 });
 
 test('leaving or opening another task drops a read that answers late', async () => {

@@ -523,8 +523,9 @@ direct `melo` run is recorded there by default (`--no-save-session` or
 that are still going, and the list is read again every three seconds. An open
 unfinished run is read once, then followed on its event stream: new steps, tool
 calls and text appear within about a second, without reading the earlier work
-again, and the stream stops when the run finishes. A hidden tab stops
-following and catches up from the last event when shown. **Refresh** reads the
+again, and the stream stops when the run finishes. A hidden tab keeps
+following; a stream that drops opens again after 1, 2, 4, 8, 16 and then 30
+seconds, from the last event. **Refresh** reads the
 run again at once. A run that holds notes, accepted messages, memory
 decisions or recalls shows each as one muted line. The view cannot send messages, approve calls or change grants; chat
 close and level controls are disabled while Workers is open. Connection
@@ -600,8 +601,10 @@ Tasks link in the sidebar, and the task page is not a view of its own.
   `GET /api/sessions/<task id>/events?after=<last id>`. New events are folded in
   and drawn together at most every 150 ms, without reading the earlier work
   again, and only the Live section is redrawn, so a reason being typed in the
-  approval card keeps its focus. A hidden tab closes the stream and a shown one
-  resumes after the last event. When the task is done, failed, cancelled,
+  approval card keeps its focus. A hidden tab keeps following, so a card Auto
+  shows can still be answered when you come back; a stream that drops opens
+  again after 1, 2, 4, 8, 16 and then 30 seconds, from the last event. When the
+  task is done, failed, cancelled,
   expired, interrupted or parked, the stream closes after one last read; a
   resumed task is followed again. A task that never started shows no steps,
   and a finished task shows its work once. The console shows task
