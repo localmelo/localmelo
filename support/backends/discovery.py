@@ -17,19 +17,24 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 import httpx
 
 from localmelo.support.backends.openai_compat import normalize_url
+from localmelo.support.backends.openai_family import (
+    LOCAL_BACKENDS,
+    LOCAL_SERVERS,
+    OPENAI_COMPATIBLE_NAME,
+)
 
 DISCOVERY_TIMEOUT_S: Final = 5.0
 
-# Where a local server listens by default: vLLM and oMLX, MLC, Ollama, SGLang.
-DETECT_URLS: Final = (
-    "http://127.0.0.1:8000/v1",
-    "http://127.0.0.1:8400/v1",
-    "http://127.0.0.1:11434/v1",
-    "http://127.0.0.1:30000/v1",
+# Where a local server listens by default, the lowest port first (vLLM and oMLX,
+# MLC, Ollama, SGLang): the first that lists a chat model is offered.
+DETECT_URLS: Final = tuple(
+    server.detect_url
+    for server in sorted(LOCAL_SERVERS, key=lambda s: urlsplit(s.detect_url).port or 0)
 )
 DETECT_TIMEOUT_S: Final = 1.0
 
@@ -39,18 +44,15 @@ DETECT_URLS_ENV: Final = "LOCALMELO_DETECT_URLS"
 # The key for a URL given on the command line rather than a configured backend.
 OPENAI_COMPATIBLE: Final = "openai-compatible"
 
-_LISTED_BACKENDS: Final = frozenset(
-    {"mlc", "ollama", "vllm", "sglang", OPENAI_COMPATIBLE}
-)
+_LISTED_BACKENDS: Final = frozenset({*LOCAL_BACKENDS, OPENAI_COMPATIBLE})
 
 NO_API_KEY_HINT: Final = (
     "the server requires an API key; localmelo sends none to local servers "
     '(oMLX: "Allow inference without API key")'
 )
 
-# What a label or an error calls a server of the OpenAI-compatible kind.
+# What a label or an error calls oMLX (OPENAI_COMPATIBLE_NAME is the other server).
 OMLX_NAME: Final = "oMLX"
-OPENAI_COMPATIBLE_NAME: Final = "OpenAI-compatible server"
 
 # The servers whose last model listing named oMLX as its owner, by their
 # normalized URL. A listing is asked for anyway, so this costs no request.
@@ -357,6 +359,17 @@ async def loaded_models(
     )
 
 
+async def loaded_among(url: str, chat: Sequence[str], **options: Any) -> LoadedModels:
+    """Which of the *chat* models of the server at *url* are in memory.
+
+    Only a choice between several chat models needs to know, so with one or none
+    nothing is asked. *options* are those of :func:`loaded_models`.
+    """
+    if len(chat) > 1:
+        return await loaded_models(url, **options)
+    return LoadedModels()
+
+
 LOAD_COST_NOTE: Final = (
     "A model that is not loaded yet can take minutes and a lot of memory to load."
 )
@@ -455,9 +468,8 @@ async def choose_model(
             reason = str(exc)
         else:
             url, reason = normalize_url(url), "" if models else "it lists no models"
-    loaded = LoadedModels()
-    if not chat_model and sum(map(is_chat_model, models)) > 1:
-        loaded = await loaded_models(url)
+    chat = [] if chat_model else [model for model in models if is_chat_model(model)]
+    loaded = await loaded_among(url, chat)
     model = chat_model or pick_model(models, loaded, unique=True)
     return ModelChoice(url, model, tuple(models), loaded, reason)
 

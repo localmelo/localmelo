@@ -982,7 +982,7 @@ async def test_a_replay_required_answer_keeps_its_thinking() -> None:
 async def test_agent_config_clears_the_section_field_outside_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.backends.openai_family import VllmBackend
     from localmelo.support.config import Config, LocalBackendConfig
 
     server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
@@ -1018,7 +1018,7 @@ async def test_agent_config_clears_the_section_field_outside_replay(
 async def test_agent_config_keeps_the_section_field_in_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.backends.openai_family import VllmBackend
     from localmelo.support.config import Config, LocalBackendConfig
 
     server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))

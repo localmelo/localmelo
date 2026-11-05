@@ -95,18 +95,15 @@ def test_fixed_prefix_config_after_brief_reports_startup_error(
     monkeypatch.setattr(
         sys, "argv", ["melo", "--brief", str(brief), "--output-format", fmt]
     )
-    monkeypatch.setattr(
-        config,
-        "load",
-        lambda: config.Config(agent=config.AgentConfig(fixed_prefix="yes")),  # type: ignore[arg-type]
-    )
+    bad = config.Config(agent=config.AgentConfig(fixed_prefix="yes"))  # type: ignore[arg-type]
+    monkeypatch.setattr(config, "load", lambda: bad)
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 1
     records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     result = records[-1]["result"] if fmt == "stream-json" else records[-1]
     assert result["status"] == "startup_error" and result["run"] is None
-    assert "fixed_prefix must be a boolean" in result["error"]
+    assert result["error"] == bad.agent_errors()[0]
 
 
 @pytest.mark.parametrize("fmt", ["json", "stream-json"])

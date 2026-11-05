@@ -205,7 +205,7 @@ async def test_it_writes_chat_sessions_documents_and_notes_at_their_times(
         en = sessions[report.ids["en"]]
         assert en.title == "Moving" and en.created_at == MAY_20
         zh = sessions[report.ids["zh"]]
-        assert zh.title == "我的猫是一只橘猫。" and zh.created_at == JUNE_1
+        assert zh.title == "我的猫是一只橘猫" and zh.created_at == JUNE_1
         turns = await chats.list_turns(en.id)
         assert [(t.turn, t.status, t.user_text) for t in turns] == [
             (1, "completed", "I live in Pittsburgh."),

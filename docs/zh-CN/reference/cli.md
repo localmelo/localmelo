@@ -186,7 +186,7 @@ Forgot note 3.
 
 每次直接运行（`melo "<task>"` 和 `melo --brief FILE`）默认都会记录为 CLI 会话文件 `~/.cache/localmelo/cli/sessions.db` 中的一个 `worker` 会话，因此网页控制台的 Workers 视图和 macOS 应用能看到它，运行中的也一样。记录不改变运行发送或打印的任何内容：模型请求、stdout、JSON 结果和退出码都相同，首个请求之前大约多花 20 毫秒。
 
-把任务放在 `--` 之后；第一行任务作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
+把任务放在 `--` 之后；任务的第一句话（最多 48 列宽）作为标题，`--save-session TITLE` 可另设标题。`--parent-run ID` 把任务关联到启动器，不需要其他旗标。
 
 单次运行可用 `--no-save-session` 退出，整个主目录可在配置的 `[sessions]` 下设置 `record_direct = false`（见[配置参考](configuration.md)）；明确给出 `--save-session` 或 `--parent-run` 时，无论配置如何都会记录。存储无法打开或写入时，运行不会失败：stderr 会输出一行 `melo: could not record this run (<reason>); the run is unchanged`，运行继续，只是不记录。
 
@@ -666,7 +666,7 @@ step 4 of 100 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | 运行以状态 `completed` 结束。 |
 | 1 | 运行以 `crashed` 结束；或者因为没有配置后端或配置文件无效，`melo` 在运行之前就停止了；或者设置向导需要终端但没有终端；或者交互式界面无法打开其会话文件或启动其智能体。 |
-| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
+| 2 | 运行以任何其他状态结束；或者用法错误；或者交互式界面没有终端；或者无论哪种模式下 `--workspace` 都不是文件夹；或者直接运行发现配置文件的 `[agent]` 表中有错误的值，无论有无 `--base-url`（`--brief` 运行把它报告为 `startup_error` 结果并以 1 退出）；或者 `melo --base-url URL`（无论有无任务）所指的服务器有多个对话模型、没有 `--chat-model` 且不知道哪个已加载（`--brief` 运行把它报告为 `exit_code` 为 2 的 `startup_error` 结果）。 |
 | 3 | 网关无法启动，例如其端口已被占用。 |
 | 4 | 一次 `--brief` 运行以 `completed` 结束，但其简报的检查最终失败：`tests.state` 为 `failed`，包括被拒绝的检查。`status` 仍为 `completed`，记录的 `exit_code` 为 4。没有 `Check:` 行的简报永远不会以 4 退出。 |
 | 129 | SIGHUP 结束了运行。 |

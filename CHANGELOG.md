@@ -883,6 +883,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- One rule names every task and chat. The same request now gets the same title wherever it starts: `melo task`, a task card, **Run as a task**, a chat's first title and a `melo "task"` run in the history. The title is the first sentence of the first line, without an opening "please", "请" or level word followed by a colon or comma (`no rush:`), a path shows as its file name, a question keeps its `?`, and a long one is cut at a word, with no "the" or "in" left hanging, and ends in `…`. A chat's first title is therefore shorter than before (at most 48 columns, 24 Chinese characters) and a first message of several lines is named by its first line, skipping a line of only a greeting (`Hi`, `你好`) and a leading code block.
+- Developer only: one adapter now serves every OpenAI-compatible backend, and one list of local and hosted backends
+  feeds the config, the setup lists, Settings, the banner, the probe and the failure hints, so a new backend is one
+  row. `GET /api/health` `model.local` tells the page whether the model runs on the user's own server.
+- Direct runs check the config file's `[agent]` table once, with the sentences the settings give, so a `--base-url` run now
+  refuses a bad `reasoning`, `note_writer`, `replay_turns`, `reflection` or `tool_env` too, and every bad `[agent]` value
+  exits 2 (a run on the configured backend exited 1 for those five). The interactive terminal on `--base-url` reads the
+  file's `[agent]` and `[retrieval]` defaults and `tool_env` as it does for a configured backend. The flags that set one
+  option are rows of one table (`support/flag_options.py`), so a new flag is one row (#504).
 - Developer only: in the list form of recall, when you ask melo to count, total or compare things you told it across chats, it now looks wider in its memory and checks each kind it may have missed, by default; a search on any other turn keeps the usual bar. Part of #428.
 - "Allow for this chat" is no longer memory-only. `GET /api/sessions/{id}` `grants` and `granted_at` list what
   holds in the chat whether it is open or not, the main chat's grants included for a side chat.

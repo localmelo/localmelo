@@ -1662,7 +1662,7 @@ function statusMarkNode(severity, stopped = false) {
 }
 
 // Whether the model runs on a server of the user's own (the settings have an address to change).
-const localBackend = () => ["mlc", "ollama", "vllm", "sglang"].includes(S.health?.model?.backend);
+const localBackend = () => S.health?.model?.local === true;
 
 // What to check or do about a run that ended badly; it names only the buttons the card offers.
 function failureHint(turn, can, error) {

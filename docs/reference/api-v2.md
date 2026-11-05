@@ -104,7 +104,7 @@ output or log the header; same-user processes can still read the token file.
   "version": "0.1.0",
   "configured": true,
   "config_errors": [],
-  "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
+  "model": {"backend": "ollama", "backend_label": "Ollama", "local": true, "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
@@ -133,7 +133,9 @@ output or log the header; same-user processes can still read the token file.
   is `oMLX` when the config file says `omlx` or a model listing of the server
   did, else `OpenAI-compatible server` (in the language of the request when it
   sends `X-LocalMelo-Language: zh-Hans`; a client that sends none reads
-  English). `model.embedding`
+  English). `model.local` is whether the chat backend is a server of the user's
+  own (`mlc`, `ollama`, `vllm`, `sglang`), not a hosted service; the page words a
+  failed run by it. `model.embedding`
   is `none` when no embedding backend is configured.
 - `model_server` is `null` for a cloud backend. For a local one it is the
   cached result of `GET <url>/models`: `reachable` is `null` until the

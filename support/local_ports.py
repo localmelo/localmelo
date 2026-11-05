@@ -13,7 +13,8 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from localmelo.support import config, gateway_endpoint
+from localmelo.support import gateway_endpoint
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -39,10 +40,10 @@ def _url_port(url: object) -> int | None:
 def urls_of(cfg: Config) -> list[str]:
     """Every model server URL *cfg* sets: the local backends' two and the cloud ones' ``base_url``."""
     urls: list[object] = []
-    for name in config._LOCAL_SECTIONS:
+    for name in LOCAL_BACKENDS:
         section = getattr(cfg, name)
         urls.extend((section.chat_url, section.embedding_url))
-    urls.extend(getattr(cfg, name).base_url for name in config._CLOUD_SECTIONS)
+    urls.extend(getattr(cfg, name).base_url for name in CLOUD_BACKENDS)
     return [url for url in urls if isinstance(url, str) and url.strip()]
 
 

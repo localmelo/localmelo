@@ -34,16 +34,8 @@ class FakeBackend(BaseBackend):
         key: str = "fake",
         display_name: str = "Fake Backend",
     ) -> None:
-        self._key = key
-        self._display_name = display_name
-
-    @property
-    def key(self) -> str:
-        return self._key
-
-    @property
-    def display_name(self) -> str:
-        return self._display_name
+        self.key = key
+        self.display_name = display_name
 
     def validate(self, cfg: Config) -> list[str]:
         return []
@@ -294,9 +286,7 @@ class TestABCEnforcement:
 
     def test_incomplete_subclass_raises(self) -> None:
         class Incomplete(BaseBackend):
-            @property
-            def key(self) -> str:
-                return "incomplete"
+            key = "incomplete"
 
         with pytest.raises(TypeError, match="abstract"):
             Incomplete()  # type: ignore[abstract]

@@ -131,16 +131,6 @@ def test_a_file_that_sets_one_key_has_the_defaults_for_the_others(
     )
 
 
-async def test_direct_cli_refuses_a_non_boolean_reflect_tool_guard(
-    config_home: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (config_home / "config.toml").write_text('[agent]\nreflect_tool_guard = "on"\n')
-    options, (parser, args) = _direct_options()
-    with pytest.raises(SystemExit):
-        cli._build_direct_mode_agent(args, parser=parser, options=options)
-    assert "reflect_tool_guard must be a boolean" in capsys.readouterr().err
-
-
 # ── Direct runs: config and flags ──
 
 

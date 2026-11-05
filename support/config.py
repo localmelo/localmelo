@@ -30,6 +30,7 @@ from localmelo.melo.schema import (
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
 )
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 
 
 class ConfigError(Exception):
@@ -54,17 +55,10 @@ def config_path() -> str:
     return os.path.expanduser(CONFIG_PATH)
 
 
-VALID_CHAT_BACKENDS = (
-    "mlc",
-    "ollama",
-    "vllm",
-    "sglang",
-    "openai",
-    "gemini",
-    "anthropic",
-    "nvidia",
-)
-VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
+# The backends, from the rows of support/backends/openai_family.py: each is also a
+# ``[<key>]`` section of Config.
+VALID_CHAT_BACKENDS = (*LOCAL_BACKENDS, *CLOUD_BACKENDS)
+VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
 # Another spelling of "vllm" that a config file may use for either backend.
 OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
@@ -364,12 +358,12 @@ def default_window_messages(backend: str) -> int:
     window is measured there. An explicit ``[agent] window_messages`` or
     ``--window-messages`` always wins.
     """
-    return SHORT_TERM_MAX if backend in _CLOUD_SECTIONS else LOCAL_WINDOW_MESSAGES
+    return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else LOCAL_WINDOW_MESSAGES
 
 
 def window_reason(backend: str) -> str:
     """Why the default window of *backend* is what it is: ``cloud`` or ``local server``."""
-    return "cloud" if backend in _CLOUD_SECTIONS else "local server"
+    return "cloud" if backend in CLOUD_BACKENDS else "local server"
 
 
 def window_default_label(backend: str) -> str:
@@ -746,6 +740,33 @@ class Config:
         except KeyError:
             return False
 
+    def use_chat_server(
+        self,
+        url: str,
+        model: str,
+        *,
+        ollama: bool = False,
+        embedding_model: str | None = None,
+    ) -> None:
+        """Put the chat on the server at *url*, as the first run and ``/backend`` save it.
+
+        *ollama* (the server answered like Ollama) makes the chat backend
+        ``ollama``, which chats on Ollama's native API; otherwise it is
+        ``vllm``, the key for any OpenAI-compatible server. With
+        *embedding_model*, the same table's embedding URL and model are set too.
+        A file's ``omlx`` spelling stays while the chat server is the same. The
+        other values stay. Nothing is written to disk.
+        """
+        if ollama or self.chat_backend != "vllm" or self.vllm.chat_url != url:
+            self.chat_alias = ""  # the file's "omlx" named another server
+        self.chat_backend = "ollama" if ollama else "vllm"
+        section = getattr(self, self.chat_backend)
+        section.chat_url, section.chat_model = url, model
+        if embedding_model is not None:
+            self.embedding_alias = ""
+            self.embedding_backend = self.chat_backend
+            section.embedding_url, section.embedding_model = url, embedding_model
+
     def validate(self) -> list[str]:
         """Return a list of validation errors. Empty list means valid.
 
@@ -812,7 +833,7 @@ class Config:
             )
 
         # -- Chat request timeout --
-        errors.extend(self._validate_request_timeout())
+        errors.extend(self.validate_request_timeout())
 
         # -- Gateway validation --
         if not self.gateway_port_ok:
@@ -1035,7 +1056,7 @@ class Config:
             f"[approvals] mode={self.approvals.mode!r} is not one of {APPROVAL_MODES}"
         ]
 
-    def _validate_request_timeout(self) -> list[str]:
+    def validate_request_timeout(self) -> list[str]:
         """``request_timeout_s`` is unset or a finite number of seconds > 0."""
         value: object = self.request_timeout_s
         if value is None or _is_positive_seconds(value):
@@ -1174,7 +1195,7 @@ class Config:
     def _validate_reasoning_fields(self) -> list[str]:
         """Each backend's ``reasoning_field`` is a known key."""
         errors: list[str] = []
-        for section_name in _BACKEND_SECTIONS:
+        for section_name in VALID_CHAT_BACKENDS:
             value = getattr(self, section_name).reasoning_field
             allowed = (
                 ("", "thinking", "auto")
@@ -1193,7 +1214,7 @@ class Config:
         from localmelo.support import hosted
 
         errors: list[str] = []
-        for section_name in _CLOUD_SECTIONS:
+        for section_name in CLOUD_BACKENDS:
             errors.extend(
                 hosted.hosted_fields_errors(section_name, getattr(self, section_name))
             )
@@ -1244,7 +1265,7 @@ class Config:
 
     def setting_errors(self) -> list[str]:
         """The errors of the settings alone, which need no backend (``-X``, ``melo config``)."""
-        if errors := self._type_errors(skip=_BACKEND_SECTIONS):
+        if errors := self._type_errors(skip=VALID_CHAT_BACKENDS):
             return errors
         return [
             *self._validate_agent(),
@@ -1261,8 +1282,17 @@ class Config:
             *self._validate_console(),
             *self._validate_approvals(),
             *self._validate_workspace(),
-            *self._validate_request_timeout(),
+            *self.validate_request_timeout(),
         ]
+
+    def agent_errors(self) -> list[str]:
+        """The ``[agent]`` errors alone: a wrong kind of value, else a value out of range.
+
+        A path that reads the file without validating the rest (a direct run
+        on ``--base-url``) refuses a bad ``[agent]`` with the sentence
+        :meth:`validate` gives.
+        """
+        return self._type_errors(only=("agent",)) or self._validate_agent()
 
     def cli_errors(self) -> list[str]:
         """The ``[cli]`` errors alone, for a path that does not read the rest."""
@@ -1539,11 +1569,8 @@ def _is_positive_seconds(value: object) -> bool:
     return math.isfinite(seconds) and seconds > 0
 
 
-# -- Section names for iteration --
+# -- Section names for iteration (the backend sections are VALID_CHAT_BACKENDS) --
 
-_LOCAL_SECTIONS = ("mlc", "ollama", "vllm", "sglang")
-_CLOUD_SECTIONS = ("openai", "gemini", "anthropic", "nvidia")
-_BACKEND_SECTIONS = (*_LOCAL_SECTIONS, *_CLOUD_SECTIONS)
 # The tables of display preferences: a bad value warns and falls back (see
 # ``cli_errors()`` and the like) instead of stopping a run, so ``validate()`` leaves
 # them alone. ``[approvals]`` is not one: it changes what runs without asking.
@@ -1586,7 +1613,7 @@ def set_key(cfg: Config, key: str, value: Any) -> bool:
 
 def load() -> Config:
     cfg = _load_file()
-    for name in _BACKEND_SECTIONS:
+    for name in VALID_CHAT_BACKENDS:
         trim_text(getattr(cfg, name))
     for key, value in _OVERRIDES.items():
         original = get_key(cfg, key)
@@ -1662,7 +1689,7 @@ def _load_file() -> Config:
     cfg.embedding_alias = raw_emb if raw_emb == OMLX_ALIAS else ""
 
     _read(cfg, data)
-    for section in _BACKEND_SECTIONS:
+    for section in VALID_CHAT_BACKENDS:
         if isinstance(data.get(section), dict):
             _migrate_extra_body(getattr(cfg, section), data[section])
 

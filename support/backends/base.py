@@ -20,15 +20,10 @@ class BaseBackend(abc.ABC):
     provider objects.  They never own or start runtimes.
     """
 
-    @property
-    @abc.abstractmethod
-    def key(self) -> str:
-        """Config-level backend identifier, e.g. 'mlc', 'ollama', 'openai'."""
-
-    @property
-    @abc.abstractmethod
-    def display_name(self) -> str:
-        """Human-readable label for UI / onboarding."""
+    #: Config-level backend identifier, e.g. 'mlc', 'ollama', 'openai'.
+    key: str
+    #: Human-readable label for UI / onboarding.
+    display_name: str
 
     def label(self, cfg: Config, *, embedding: bool = False) -> str:
         """What a banner or a status row calls the server *cfg* names.

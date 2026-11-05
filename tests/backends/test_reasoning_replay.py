@@ -15,16 +15,15 @@ import httpx
 import pytest
 
 from localmelo.melo.schema import Message, ToolCall
-from localmelo.support.backends.cloud.anthropic_api import AnthropicBackend
-from localmelo.support.backends.cloud.gemini_api import GeminiBackend
-from localmelo.support.backends.cloud.nvidia_api import NvidiaBackend
-from localmelo.support.backends.cloud.openai_api import OpenAIBackend
-from localmelo.support.backends.local.mlc import MlcBackend
-from localmelo.support.backends.local.ollama import OllamaBackend
-from localmelo.support.backends.local.sglang import SglangBackend
-from localmelo.support.backends.local.vllm import VllmBackend
 from localmelo.support.backends.openai_compat import build_openai_chat
-from localmelo.support.config import CloudVendorConfig, Config, LocalBackendConfig
+from localmelo.support.backends.openai_family import LOCAL_BACKENDS
+from localmelo.support.backends.registry import get_backend
+from localmelo.support.config import (
+    VALID_CHAT_BACKENDS,
+    CloudVendorConfig,
+    Config,
+    LocalBackendConfig,
+)
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -279,7 +278,7 @@ async def test_the_backend_builders_pass_the_two_keys_through() -> None:
             requires_reasoning_replay=True,
         ),
     )
-    ollama = OllamaBackend().build_chat_provider(cfg)
+    ollama = get_backend("ollama").build_chat_provider(cfg)
     assert isinstance(ollama, OllamaNativeChat)
     assert ollama.reasoning_field == "thinking"
     assert ollama.requires_reasoning_replay is True
@@ -287,23 +286,10 @@ async def test_the_backend_builders_pass_the_two_keys_through() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("key", "backend_cls"),
-    [
-        ("mlc", MlcBackend),
-        ("sglang", SglangBackend),
-        ("vllm", VllmBackend),
-        ("openai", OpenAIBackend),
-        ("gemini", GeminiBackend),
-        ("anthropic", AnthropicBackend),
-        ("nvidia", NvidiaBackend),
-    ],
-)
-async def test_every_config_driven_builder_passes_the_keys(
-    key: str, backend_cls: type
-) -> None:
+@pytest.mark.parametrize("key", [k for k in VALID_CHAT_BACKENDS if k != "ollama"])
+async def test_every_config_driven_builder_passes_the_keys(key: str) -> None:
     section: LocalBackendConfig | CloudVendorConfig
-    if key in ("mlc", "sglang", "vllm"):
+    if key in LOCAL_BACKENDS:
         section = LocalBackendConfig(
             chat_url="http://stub.test/v1",
             chat_model="m",
@@ -322,7 +308,7 @@ async def test_every_config_driven_builder_passes_the_keys(
         embedding_backend="none",
         **section_by_key,
     )
-    provider = backend_cls().build_chat_provider(cfg)
+    provider = get_backend(key).build_chat_provider(cfg)
     assert isinstance(provider, OpenAICompatLLM)
     assert provider.reasoning_field == "reasoning_content"
     assert provider.requires_reasoning_replay is True

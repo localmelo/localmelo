@@ -85,7 +85,7 @@ def show(value: Any) -> str:
 def catalog() -> dict[str, Key]:
     """Every key ``-X`` and ``melo config`` know, grouped by section."""
     cfg = config.Config()
-    backends = set(config._BACKEND_SECTIONS)
+    backends = set(config.VALID_CHAT_BACKENDS)
     flags = {item.key: item.flag for item in SETTINGS}
     out: dict[str, Key] = {}
     for name, default in config.flat(cfg).items():

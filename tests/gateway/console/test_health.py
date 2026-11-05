@@ -43,6 +43,7 @@ async def test_health_shape(client: TestClient) -> None:
     assert body["model"] == {
         "backend": "mlc",
         "backend_label": "MLC-LLM",
+        "local": True,
         "name": "stub-model",
         "embedding": "none",
     }

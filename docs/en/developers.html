@@ -195,40 +195,37 @@
         </p>
         <ol>
           <li>
-            Write a class in <code>support/backends/local/</code> or
-            <code>support/backends/cloud/</code> that implements
-            <code>BaseBackend</code> (<code>support/backends/base.py</code>):
-            <code>key</code>, <code>display_name</code>, <code>validate</code>,
-            <code>validate_embedding</code>, <code>has_embedding</code>,
-            <code>build_chat_provider</code> and <code>build_embedding_provider</code>.
-            Most servers share the OpenAI-compatible code in
-            <code>support/backends/openai_compat.py</code>.
-          </li>
-          <li>
-            Register it in <code>ensure_defaults_registered()</code> in
+            Add its row. A model server on this computer is a
+            <code>LocalBackend(...)</code> row in <code>LOCAL_SERVERS</code> in
+            <code>support/backends/openai_family.py</code>: its key, name, line
+            in the setup lists, default address and suggested models. A hosted
+            service is a <code>Preset</code> in <code>support/hosted.py</code>
+            whose id is its backend: address, key variable and suggested
+            models. A server that needs its own behaviour subclasses
+            <code>LocalBackend</code> (Ollama's native chat, oMLX's label). A
+            backend that does not speak the OpenAI API implements
+            <code>BaseBackend</code> (<code>support/backends/base.py</code>) and
+            is registered in <code>ensure_defaults_registered()</code> in
             <code>support/backends/registry.py</code>.
           </li>
           <li>
-            Add its key to <code>VALID_CHAT_BACKENDS</code> in
-            <code>support/config.py</code>, and to
-            <code>VALID_EMBEDDING_BACKENDS</code> if it serves embeddings.
+            Give it a config table: a field on <code>Config</code> named by its
+            key (<code>LocalBackendConfig</code> or <code>CloudVendorConfig</code>).
+            The valid backends, the setup lists, the Settings page, the
+            banner, the model-server probe and the failure hints all derive
+            from the row. When you change the schema, add a migration in
+            <code>load()</code> rather than break existing config files.
           </li>
           <li>
-            Give it a config table: a field on <code>Config</code> and its name
-            in <code>_LOCAL_SECTIONS</code> or <code>_CLOUD_SECTIONS</code>, so
-            that <code>load()</code> and <code>save()</code> handle it. When
-            you change the schema, add a migration in <code>load()</code>
-            rather than break existing config files.
+            Optionally, give the Settings list its words in
+            <code>settings.backend.&lt;key&gt;</code> in both catalogs under
+            <code>support/gateway/static/i18n/</code>; without them it shows
+            the setup list's line.
           </li>
           <li>
-            Add it to the setup wizard in <code>support/onboard.py</code>:
-            <code>CHAT_BACKENDS</code>, <code>EMBEDDING_BACKENDS</code>, the
-            defaults (<code>_LOCAL_DEFAULTS</code>, <code>_CLOUD_DEFAULTS</code>
-            or <code>_EMBEDDING_DEFAULTS</code>) and <code>_CHAT_SETUP</code>.
-          </li>
-          <li>
-            Add tests in <code>tests/backends/</code>. Mock the connectivity
-            probes: never let a test contact a real server.
+            Add tests only for what is new: every row already runs through
+            <code>tests/backends/test_openai_family.py</code>. Mock the
+            connectivity probes: never let a test contact a real server.
           </li>
           <li>
             Document it: the backend table and an example in

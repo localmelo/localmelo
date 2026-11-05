@@ -91,8 +91,6 @@ from localmelo.support.gateway.front_rules import (
     FINISHED,
     STARTED_TEXT,
     STARTED_TEXT_ZH,
-    TITLE_CHARS,
-    TITLE_CHARS_ZH,
     Action,
     Routed,
     TaskRef,
@@ -111,7 +109,6 @@ from localmelo.support.gateway.front_rules import (
     norm,
     reply_language,
     route,
-    short_title,
     start_rule,
     triage,
     work_request,
@@ -135,10 +132,12 @@ from localmelo.support.gateway.task_policy import (
 )
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.memory.service import CHAT_TURN
+from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
 from localmelo.support.sessions.agents import (
     build_session_agent,
     configured_session_options,
 )
+from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_width
 from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -317,9 +316,7 @@ def handoff_text(typed: str, *, asks: bool) -> str:
 def wants_title(request: str) -> bool:
     """Whether *request* is too long to be its own title (one line that fits one is)."""
     text = request.strip()
-    return "\n" in text or len(text) > (
-        TITLE_CHARS_ZH if is_chinese(text) else TITLE_CHARS
-    )
+    return "\n" in text or title_width(text) > TITLE_WIDTH
 
 
 def clean_title(raw: str) -> str:
@@ -413,7 +410,7 @@ def thinking_off(settings: Config) -> Config:
     they are.
     """
     section = getattr(settings, settings.chat_backend, None)
-    if settings.chat_backend not in ("vllm", "sglang") or not isinstance(
+    if settings.chat_backend not in TEMPLATE_KWARGS_BACKENDS or not isinstance(
         section, LocalBackendConfig
     ):
         return settings

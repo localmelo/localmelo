@@ -82,7 +82,7 @@ from localmelo.support.sessions.attachments import (
     decode_attachments,
     encode_attachments,
 )
-from localmelo.support.sessions.display import home_label
+from localmelo.support.sessions.display import home_label, short_title
 from localmelo.support.sessions.submissions import (
     WITHDRAWN_ERROR,
     SubmissionConflict,
@@ -255,7 +255,6 @@ RESERVED_EVENT_TYPE_RE: Final = re.compile(r"[a-z]+(\.[a-z_]+)+")
 CLOSED_ERROR: Final = "The session store is closed"
 FAILED_ERROR: Final = "The session store could not record a change; restart the gateway"
 
-_TITLE_CHARS: Final = 60
 _MAX_TITLE_CHARS: Final = 200
 _DAY_S: Final = 86_400.0
 # The owner each writer's file names in the "belongs to" error.
@@ -560,17 +559,6 @@ def _encodable(value: str | None, name: str) -> None:
         value.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError(f"{name} must be valid UTF-8") from exc
-
-
-def title_from_text(text: str) -> str:
-    """*text* with its whitespace collapsed, in at most 60 characters.
-
-    A longer text keeps its first 59 characters and ends with ``…``.
-    """
-    collapsed = " ".join(text.split())
-    if len(collapsed) <= _TITLE_CHARS:
-        return collapsed
-    return collapsed[: _TITLE_CHARS - 1] + "…"
 
 
 def check_title(title: object) -> str:
@@ -2562,7 +2550,7 @@ class SessionStore:
                 # 6. The lease, and 7. the first title.
                 new_title = None
                 if not current_title and not origin:
-                    new_title = title_from_text(typed or user_text)
+                    new_title = short_title(typed or user_text)
                 await conn.execute(
                     "UPDATE sessions SET lease_holder = ?, lease_until = ?, "
                     "updated_at = ?, title = COALESCE(?, title) WHERE id = ?",

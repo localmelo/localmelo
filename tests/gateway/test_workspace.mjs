@@ -1025,7 +1025,7 @@ function session(id, extra = {}) {
 }
 
 const health = {
-  ok: true, configured: true, model: {backend: 'mlc', backend_label: 'MLC', name: 'Qwen-27B', embedding: 'none'},
+  ok: true, configured: true, model: {backend: 'mlc', backend_label: 'MLC', local: true, name: 'Qwen-27B', embedding: 'none'},
   sessions: {open: 0, running: 0, pending_approvals: 0, store: 'ok', store_error: '', resume_mode: 'pairs'},
 };
 
@@ -2361,19 +2361,27 @@ test('a failed turn draws a shared glyph, a plain title and one filled next step
 test('the model server error says what to check for a local server and for a cloud one', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  h.state().health = {...health, model: {...health.model, backend: 'vllm'}, model_server: {url_label: '127.0.0.1:8500', reachable: false}};
+  h.state().health = {...health, model: {...health.model, backend: 'vllm', local: true}, model_server: {url_label: '127.0.0.1:8500', reachable: false}};
   h.context.turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: 'cannot reach the model server'}}));
   assert.match(flatten(h.run('statusNode(turn)')), /Is the model server running at 127\.0\.0\.1:8500\?/);
-  h.state().health = {...health, model: {...health.model, backend: 'openai'}};
+  h.state().health = {...health, model: {...health.model, backend: 'openai', local: false}};
   assert.match(flatten(h.run('statusNode(turn)')), /Check the API key and the model name in model settings/);
+});
+
+test('a backend the page has never heard of is local when the health says so', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, model: {...health.model, backend: 'acme', local: true}, model_server: {url_label: '127.0.0.1:9', reachable: false}};
+  h.context.turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: 'cannot reach the model server'}}));
+  assert.match(flatten(h.run('statusNode(turn)')), /Is the model server running at 127\.0\.0\.1:9\?/);
 });
 
 test('an unreachable server gets a plain title, one hint, Try again first, and its raw error only under Details', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
-  h.state().health = {...health, model: {...health.model, backend: 'vllm'}, model_server: {url_label: 'http://127.0.0.1:9/v1', reachable: false}};
-  const make = (result = {}, backend = 'vllm') => {
-    h.state().health = {...h.state().health, model: {...health.model, backend}};
+  h.state().health = {...health, model: {...health.model, backend: 'vllm', local: true}, model_server: {url_label: 'http://127.0.0.1:9/v1', reachable: false}};
+  const make = (result = {}, backend = 'vllm', local = true) => {
+    h.state().health = {...h.state().health, model: {...health.model, backend, local}};
     const turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: UNREACHABLE, n_tool: 0, ...result}}));
     h.state().view.turns = [turn];
     h.context.turn = turn;
@@ -2397,7 +2405,7 @@ test('an unreachable server gets a plain title, one hint, Try again first, and i
   h.state().view.turns = [h.context.turn, turns.newTurn(turnRow({id: 'next', turn: 2}))];
   assert.deepEqual(actions(h.run('statusNode(turn)')).map(([label]) => label), ['Change the server address', 'Copy error'], 'an older failure keeps only its links');
 
-  const cloud = make({error: 'cannot reach the model server at https://api.example.test/v1. Check the URL and the network. (ConnectError)'}, 'openai');
+  const cloud = make({error: 'cannot reach the model server at https://api.example.test/v1. Check the URL and the network. (ConnectError)'}, 'openai', false);
   assert.equal(part(cloud, 'failure-hint').textContent, 'Check your network connection, then try again.');
   assert.deepEqual(actions(cloud).map(([label]) => label), ['Try again', 'Open model settings', 'Copy error'], 'a hosted model has no address to change');
 

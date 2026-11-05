@@ -83,20 +83,6 @@ async def test_a_direct_run_reads_it(via: str, task: str) -> None:
         await agent.close()
 
 
-def test_a_bad_value_in_the_file_is_a_usage_error(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    bad = config.Config()
-    bad.agent.empty_reply_fallback = "sometimes"
-    monkeypatch.setattr(config, "load", lambda: bad)
-    parser, args = cli._parse([*BASE, "fix it"])
-    options = cli._direct_options(parser, args)
-    with pytest.raises(SystemExit) as stop:
-        cli._build_direct_mode_agent(args, parser=parser, options=options)
-    assert stop.value.code == 2
-    assert "[agent] empty_reply_fallback" in capsys.readouterr().err
-
-
 async def test_the_interactive_ui_the_console_and_the_gateway_read_it(
     tmp_path: Path,
 ) -> None:

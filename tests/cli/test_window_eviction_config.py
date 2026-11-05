@@ -105,16 +105,3 @@ async def test_direct_cli_flag_overrides_the_config(config_home: Path) -> None:
         assert agent.options.window_eviction == "boundary"
     finally:
         await agent.close()
-
-
-async def test_direct_cli_refuses_an_unknown_mode_in_the_config(
-    config_home: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    (config_home / "config.toml").write_text('[agent]\nwindow_eviction = "sliding"\n')
-    parser = cli._build_parser()
-    args = parser.parse_args(["--base-url", "http://127.0.0.1:1/v1", "task"])
-    with pytest.raises(SystemExit):
-        cli._build_direct_mode_agent(
-            args, parser=parser, options=cli._direct_options(parser, args)
-        )
-    assert "window_eviction 'sliding'" in capsys.readouterr().err

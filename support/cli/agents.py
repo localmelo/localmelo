@@ -180,42 +180,31 @@ class AgentFactory:
     async def _build(
         self, model: str, url: str | None, mcp_config: str | None
     ) -> Agent:
+        common: dict[str, Any] = {
+            "model": model,
+            "workspace": self._workspace,
+            "options": self._options,
+            "request_timeout_s": self._request_timeout_s,
+            "reasoning_field": self._reasoning_field,
+            "retrieval_extra_body": self._retrieval_extra_body,
+            "mcp_config": mcp_config,
+            "browser_driver": self.browser_driver,
+            "web_fetch": self.web_fetch,
+            "web_search": self.web_search,
+            "identify": True,
+        }
         if self._cfg is None:
             return await build_session_agent(
                 cfg=None,
                 base_url=url or self.backend.base_url,
-                model=model,
-                workspace=self._workspace,
-                options=self._options,
                 embedding_base_url=self._embedding_base_url,
                 embedding_model=self._embedding_model,
-                request_timeout_s=self._request_timeout_s,
-                reasoning_field=self._reasoning_field,
-                retrieval_extra_body=self._retrieval_extra_body,
-                mcp_config=mcp_config,
-                browser_driver=self.browser_driver,
-                web_fetch=self.web_fetch,
-                web_search=self.web_search,
-                identify=True,
+                **common,
             )
         cfg = self._cfg
         if url is not None:
             cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
-        return await build_session_agent(
-            cfg=cfg,
-            base_url=None,
-            model=model,
-            workspace=self._workspace,
-            options=self._options,
-            request_timeout_s=self._request_timeout_s,
-            reasoning_field=self._reasoning_field,
-            retrieval_extra_body=self._retrieval_extra_body,
-            mcp_config=mcp_config,
-            browser_driver=self.browser_driver,
-            web_fetch=self.web_fetch,
-            web_search=self.web_search,
-            identify=True,
-        )
+        return await build_session_agent(cfg=cfg, base_url=None, **common)
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:
         """The session's config with its chat on *url*, as /backend saves it.
@@ -228,16 +217,7 @@ class AgentFactory:
         """
         assert self._cfg is not None
         cfg = copy.deepcopy(self._cfg)
-        if ollama or cfg.chat_backend != "vllm" or cfg.vllm.chat_url != url:
-            cfg.chat_alias = ""  # the file's "omlx" named another server
-        if ollama:
-            cfg.chat_backend = "ollama"
-            cfg.ollama.chat_url = url
-            cfg.ollama.chat_model = model
-        else:
-            cfg.chat_backend = "vllm"
-            cfg.vllm.chat_url = url
-            cfg.vllm.chat_model = model
+        cfg.use_chat_server(url, model, ollama=ollama)
         return cfg
 
     async def close(self, agent: Agent) -> None:

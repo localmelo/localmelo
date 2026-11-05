@@ -42,6 +42,7 @@ from localmelo.support import (
 from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.backends.registry import get_backend
 from localmelo.support.browser import chrome, desktop
 from localmelo.support.gateway.console.errors import ApiError
@@ -223,9 +224,10 @@ def _choice_label(key: str, label: str) -> str:
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend.
 
-    A ``vllm`` backend is labelled ``oMLX`` when the config says so or the
-    health probe's last model listing did. The generic label reads in the
-    language the request asks for (English for a client that asks for none).
+    ``local`` says the model runs on a server of the user's own (the page words
+    a failed run by it). A ``vllm`` backend is labelled ``oMLX`` when the config
+    says so or the health probe's last model listing did. The generic label reads
+    in the language the request asks for (English for a client that asks for none).
     """
     backend = cfg.chat_backend
     section = getattr(cfg, backend, None) if backend else None
@@ -237,6 +239,7 @@ def model_json(cfg: Any) -> dict[str, Any]:
     return {
         "backend": backend,
         "backend_label": _kind_words(label),
+        "local": backend in LOCAL_BACKENDS,
         "name": name,
         "embedding": cfg.embedding_backend or "none",
     }
@@ -336,9 +339,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     chat = [model for model in found.models if discovery.is_chat_model(model)]
     if not chat:
         return {**body, "problem": body["problem"] or "it lists only embedding models"}
-    loaded = discovery.LoadedModels()
-    if len(chat) > 1:
-        loaded = await discovery.loaded_models(found.url, transport=transport)
+    loaded = await discovery.loaded_among(found.url, chat, transport=transport)
     return {
         **body,
         "state": "found",
@@ -423,7 +424,7 @@ def settings_json() -> dict[str, Any]:
     revision = _file_revision()
     cfg = config.load()
     sections: dict[str, dict[str, Any]] = {}
-    for name in config._LOCAL_SECTIONS:
+    for name in LOCAL_BACKENDS:
         sec = getattr(cfg, name)
         sections[name] = {
             "chat_url": str(sec.chat_url),
@@ -431,7 +432,7 @@ def settings_json() -> dict[str, Any]:
             "embedding_url": str(sec.embedding_url),
             "embedding_model": str(sec.embedding_model),
         }
-    for name in config._CLOUD_SECTIONS:
+    for name in CLOUD_BACKENDS:
         sec = getattr(cfg, name)
         env_name = str(sec.api_key_env)
         preset = hosted.preset_for(name, sec)
@@ -466,7 +467,7 @@ def settings_json() -> dict[str, Any]:
                 {
                     "key": key,
                     "label": _choice_label(key, label),
-                    "kind": "local" if key in config._LOCAL_SECTIONS else "cloud",
+                    "kind": "local" if key in LOCAL_BACKENDS else "cloud",
                 }
                 for key, label in onboard.CHAT_BACKENDS
             ],
@@ -531,9 +532,9 @@ def _extra_folders(cfg: config.Config) -> list[dict[str, Any]]:
 def _validate_sections(sections: dict[str, Any]) -> None:
     for sec_name, sec_fields in sections.items():
         _check_single_line("sections", sec_name)
-        if sec_name in config._LOCAL_SECTIONS:
+        if sec_name in LOCAL_BACKENDS:
             allowed: tuple[str, ...] = _LOCAL_FIELDS
-        elif sec_name in config._CLOUD_SECTIONS:
+        elif sec_name in CLOUD_BACKENDS:
             allowed = _CLOUD_FIELDS
         else:
             raise ApiError(
@@ -562,7 +563,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                 )
             _check_single_line(f"sections.{sec_name}.{field_name}", field_val)
             if (
-                sec_name in config._CLOUD_SECTIONS
+                sec_name in CLOUD_BACKENDS
                 and field_name == "api_key_env"
                 and field_val
                 and not hosted.ENV_NAME_RE.fullmatch(field_val)
@@ -572,7 +573,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                     "invalid_request",
                     f"sections.{sec_name}.api_key_env: Invalid environment variable name.",
                 )
-            if sec_name in config._CLOUD_SECTIONS and field_name == "api_key":
+            if sec_name in CLOUD_BACKENDS and field_name == "api_key":
                 try:
                     keychain.parse_ref(field_val)
                 except ValueError:
@@ -583,7 +584,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                         "keychain:localmelo.<name> reference.",
                     ) from None
             if (
-                sec_name in config._CLOUD_SECTIONS
+                sec_name in CLOUD_BACKENDS
                 and field_name == "thinking"
                 and field_val not in hosted.THINKING
             ):
@@ -717,7 +718,7 @@ def _spell_server(before: config.Config, candidate: config.Config) -> None:
     server = (candidate.chat_backend, candidate.vllm.chat_url)
     if server != (before.chat_backend, before.vllm.chat_url):
         candidate.chat_alias = ""
-    onboard._spell_omlx(candidate)
+    onboard.spell_omlx(candidate)
 
 
 def _check_probe_url(field: str, url: str) -> None:
@@ -730,12 +731,12 @@ def _check_probe_url(field: str, url: str) -> None:
 def _check_candidate_probe_urls(candidate: config.Config) -> None:
     backend = candidate.chat_backend
     section = getattr(candidate, backend)
-    if backend in config._LOCAL_SECTIONS:
+    if backend in LOCAL_BACKENDS:
         _check_probe_url(f"{backend}.chat_url", section.chat_url)
-    elif backend in config._CLOUD_SECTIONS and section.base_url:
+    elif backend in CLOUD_BACKENDS and section.base_url:
         _check_probe_url(f"{backend}.base_url", section.base_url)
     backend = candidate.embedding_backend
-    if backend in config._LOCAL_SECTIONS:
+    if backend in LOCAL_BACKENDS:
         _check_probe_url(
             f"{backend}.embedding_url", getattr(candidate, backend).embedding_url
         )
@@ -775,13 +776,13 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
         changed.append("follow_up")
     if before.agent.reflection != after.agent.reflection:
         changed.append("reflection")
-    for sec_name in config._LOCAL_SECTIONS:
+    for sec_name in LOCAL_BACKENDS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
         for field_name in _LOCAL_FIELDS:
             if getattr(b_sec, field_name) != getattr(a_sec, field_name):
                 changed.append(f"{sec_name}.{field_name}")
-    for sec_name in config._CLOUD_SECTIONS:
+    for sec_name in CLOUD_BACKENDS:
         b_sec = getattr(before, sec_name)
         a_sec = getattr(after, sec_name)
         for field_name in _CLOUD_FIELDS:
@@ -974,7 +975,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def api_test_settings(body: SettingsTestBody) -> JSONResponse:
         _, candidate = _build_candidate(body)
         _check_candidate_probe_urls(candidate)
-        if candidate.chat_backend in config._CLOUD_SECTIONS:
+        if candidate.chat_backend in CLOUD_BACKENDS:
             return await _test_hosted(candidate)
         try:
             async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
@@ -1008,13 +1009,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
         saved = config.load() if os.path.isfile(config.config_path()) else console.cfg
         resolved_backend = backend if backend else saved.chat_backend
-        if resolved_backend in config._CLOUD_SECTIONS:
+        if resolved_backend in CLOUD_BACKENDS:
             raise ApiError(
                 400,
                 "invalid_request",
                 t("errors.listLocalOnly"),
             )
-        if resolved_backend not in config._LOCAL_SECTIONS:
+        if resolved_backend not in LOCAL_BACKENDS:
             raise ApiError(
                 400,
                 "invalid_request",
