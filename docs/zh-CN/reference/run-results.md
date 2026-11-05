@@ -27,10 +27,10 @@
 - **`completed`。** 当反思判定任务已完成时，答案是它的尽力结果；如果那是空的，就是该次运行中模型写下的最新文本。
 - **任务要求的收尾行。** 同一设置下，任务文本点名了答案必须带有的一行（例如“End your reply with one line: FINAL ANSWER: <answer>”、必须以 `Answer:` 开头的最后一行，或收尾行 `最终答案：`），而运行的 `result` 里没有以它开头的行时，会再发出一次不带工具的请求，只根据答案本身索要这一行。这一行加在答案之后，答案保持原样，记录中增加 `"format_fixed": true`。该请求计入 `n_aux`。以 `completed`、`gate_stopped` 或 `budget_exhausted` 结束且有 `result` 的运行才会这样做。任务没有点名这样的行、答案已经有它、请求失败或回复里没有这一行时，运行保持原样。
 - **`failed`。** 错误说明是哪项检查拒绝了运行，例如 `Plan check failed: Prompt too large: <n> chars` 或 `Response check failed: …`。既没有工具调用也没有文本的回复是空回复：localmelo 要求模型继续并重新规划，这一步照常计数。连续两次空回复会以错误 `empty replies` 结束运行。只含未完成思考的回复（见[工作原理](../concepts/how-it-works.md)）作为思考保存，并按空回复计数；其中有这种回复的连续两次会以错误 `melo did not finish an answer` 结束，思考绝不会成为 `result`。例外是服务器报告了推理的模型：在可能时先关闭思考再问一次，仍为空时 `result` 是思考的最后几行，末尾带有 `(from melo's thinking)`，状态为 `completed`；记录中的 `empty_reply` 说明发生了这两步中的哪一步。`-X agent.empty_reply_fallback=off` 会放弃这两步，运行如上所述以 `failed` 结束。没有工具调用、却把调用写成文本的回复（服务器的解析器可能在正文里留下 `text` 或 `<function_calls>` 这样的标记）同样不算回答：localmelo 会再问模型一次，它按空回复计数；其中有这种回复的连续两次会以错误 `tool call written as text` 结束（行内同时有未完成思考时则为 `melo did not finish an answer`），这段文本绝不会成为 `result`。
-- **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n> (stop reason: <code>)`。`reflection` 事件总是带有停止原因和决定的各项标志（见[事件](../../reference/events.md#reflection)）。使用 `--reflection-gate utility` 时，读不懂的反思也会结束运行；超过大小限制的反思同样如此，除非它选择了 `done`。
+- **`gate_stopped`。** 反思选择了 `stop` 或 `decompose`，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。`result` 保存反思的尽力结果（如果有），`error` 保存它的理由；如果它没有给出理由，则是 `Stopped after attempt <n> (stop reason: <code>)`。`reflection` 事件总是带有停止原因和决定的各项标志（见[事件](../../reference/events.md#reflection)）。
 - **运行停止时的答案。** 默认（开发者设置 `[agent] answer_on_stop`，为 `true`；`-X agent.answer_on_stop=off` 关闭它）下，以 `gate_stopped` 或 `budget_exhausted` 结束且 `result` 为空的运行，会再发出一次不带工具的请求，根据工作窗口和最新反思索要最终答案，使用任务要求的格式，允许回答 `unknown`。运行保留原来的状态和 `error`；`result` 就是这个答案，记录中增加 `"answered_on_stop": true`。该请求计入 `n_aux`。请求失败或回复为空时，运行保持原样。服务器因预算或速率限制拒绝请求（重试用尽后的 HTTP 429，或错误信息说明预算已用完）而以 `provider_error` 结束的运行也会得到这次请求：状态和 `error` 仍是服务器的，`result` 是这个答案；该请求失败时，则是该次运行中模型写下的最新文本。
 - **调用预算。** 开发者设置 `[agent] max_calls = N`（`-X agent.max_calls=N`，不小于 2 的整数）让直接运行统计自己发出的模型请求（规划、反思及其他请求，重试的请求每次尝试各算一次），并在会超出上限的那个请求之前停下。开启 `answer_on_stop` 时，最后一次调用留给答案：运行在发出 `N - 1` 个请求后停止，答案请求是第 `N` 次调用。运行以 `budget_exhausted` 结束，错误是 `Call budget reached: <k> model requests sent (max_calls N)`。`result` 是这个答案（记录中带 `"answered_on_stop": true`），否则是该次运行中模型写下的最新文本，再否则为空。未设置（默认）时一切照旧。
-- **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。本来不含反思的回复会对其 JSON 中一处常见小错误尝试一次修补：没有开括号与之匹配的 `]` 或 `}`、闭合括号之前的逗号、字符串内原始的换行符、回车符和制表符、JSON 没有对应转义的字符前的反斜杠（如 `\;`），或被下一个键打断而没有闭合的数组（见[事件](events.md#reflection)中的 `repaired`）。除这一个反斜杠或 `]` 之外，不会补全或插入任何内容，需要两处修补的回复仍然读不懂。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象；若回复含有解码器拒绝的 JSON，再多一行引用解码器的错误。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。使用 `--reflection-gate utility` 时，任何 JSON 对象都算可读，不做修补也不引用错误；第二次回复若没有 JSON 对象，则以 `gate_stopped` 结束运行：回复无法读取时错误是 `Could not parse reflection response`，是有效 JSON 但不是对象时是 `Reflection response was not a JSON object`。如果没有剩余尝试，运行反而以 `budget_exhausted` 结束。
+- **读不懂的反思。** 当反思回复包含一个 `recommended_action` 为 `done`、`continue`、`stop` 或 `decompose` 的 JSON 对象时，它才是可读的；其他 JSON（例如写成文本的工具调用）不算。本来不含反思的回复会对其 JSON 中一处常见小错误尝试一次修补：没有开括号与之匹配的 `]` 或 `}`、闭合括号之前的逗号、字符串内原始的换行符、回车符和制表符、JSON 没有对应转义的字符前的反斜杠（如 `\;`），或被下一个键打断而没有闭合的数组（见[事件](events.md#reflection)中的 `repaired`）。除这一个反斜杠或 `]` 之外，不会补全或插入任何内容，需要两处修补的回复仍然读不懂。读不懂的回复会被再请求一次，且不带工具：该次尝试的轮次以文本写出，结尾一行只要求那个 JSON 对象；若回复含有解码器拒绝的 JSON，再多一行引用解码器的错误。两次请求都计入 `n_aux`。如果第二次回复也读不懂，其中任何内容都不保留，下一次尝试随即开始。如果无法开始任何尝试，运行以 `budget_exhausted` 结束，并把该次运行中模型写下的最新文本作为 `result`。
 - **`budget_exhausted`。** 错误是 `Max steps reached` 或 `Max attempts reached`；设置了 `max_calls` 时是 `Call budget reached: ...`。使用 `--attempt-policy reflect` 时，最后一次反思仍可选择 `done`；否则它的尽力结果成为 `result`。
 - **`stuck`。** 只出现在 `--attempt-policy none` 下；使用 `reflect` 时，由反思决定接下来做什么。错误是 `Stuck: the same tool calls or errors repeated`。返回新结果的重复调用（例如轮询一个任务）不算卡住。
 - **`provider_error`。** 见[提供方错误与重试](#provider-errors-and-retries)。
@@ -81,7 +81,7 @@
 | `usage` | 所有回复的 token 计数，按名称求和，例如 `prompt_tokens`、`completion_tokens` 和 `total_tokens`。在 `legacy` 之外，它还有 `reasoning_chars`（收到的推理，已拆出内联的 `<think>` 块）以及服务器报告时的 `cached_tokens` 或 `reasoning_tokens`。 |
 | `duration_s` | 运行的挂钟时间，以秒计。 |
 | `config` | 本次运行使用的选项（见下文）。 |
-| `prefix_cache` | 启用固定前缀时（默认值；使用 `--fixed-prefix off` 时不出现）：版本、观察到的规划 schema 变化，以及可选的、服务器报告的、在规划和反思回复上求和的缓存 token 数；schema 变化是预期内的失效，不是实测到的缓存未命中。 |
+| `prefix_cache` | 版本、观察到的规划 schema 变化，以及可选的、服务器报告的、在规划和反思回复上求和的缓存 token 数；schema 变化是预期内的失效，不是实测到的缓存未命中。 |
 | `context_budget` | 已配置时，是每次尝试的规划/反思记账记录列表；关闭时不存在。见[上下文记账](configuration.md#context-accounting)。 |
 | `memory_stats` | 在 `legacy` 之外，是回放计数和笔记计数；`legacy` 行中没有此字段。 |
 | `confinement` | 只出现在限制写入的运行中（`--brief` worker 或保存的任务，见[写入留在工作区内](cli.md#confined-writes)）：`{"writes": "confined", "refused_writes": N}`，N 是本次运行的 `shell_exec` 和 `python_exec` 报告被拒绝的工作区外写入次数；在 macOS 之外为 `{"writes": "not_confined", "reason": "..."}`。其他情况下没有此字段。 |
@@ -93,22 +93,20 @@
 
 | 键 | 含义 |
 |---|---|
-| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `reflection_gate`, `tool_exposure`, `memory`, `timeout_s` | 运行选项。没有设置时间限制时，`timeout_s` 为 `null`。 |
+| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `tool_exposure`, `memory`, `timeout_s` | 运行选项。没有设置时间限制时，`timeout_s` 为 `null`。 |
 | `builtins` | 已注册的内置工具，按名称排序。 |
 | `memory_dir` | SQLite 文件所在的目录；记忆留在 RAM 中时为 `null`。 |
 | `tools` | 所有已注册的工具，内置的和 MCP 的，按名称排序。 |
 | `answer_on_stop` | 运行开启了它（默认）时为 `true`；使用 `-X agent.answer_on_stop=off` 时不出现。 |
 | `empty_reply_fallback` | 运行关闭了它时为 `"off"`；默认的 `"on"` 时不出现。 |
 | `max_calls` | 运行设置了调用预算时为该值；否则不出现。 |
-| `window_eviction` | 运行使用了 `chunk`（默认值）或 `boundary` 时为该值；`slide` 不出现。 |
-| `reflect_tool_guard` | 运行使用了保护（默认值）时为 `true`；使用 `--reflect-tool-guard off` 时不出现。 |
-| `cache_layout` | 运行使用了 `v3`（默认值）时为该值；`v2` 不出现。 |
+| `window_eviction` | `chunk`（默认值）或 `boundary`。 |
 | `window_messages` | 窗口的消息数上限不是 20 时为该值（本地服务器或 URL 上默认为 64）；为 20 时不出现。 |
 | `reasoning`, `replay_turns`, `note_writer` | 在 `legacy` 之外，是生效的推理模式、它的轮次上限（`null` 表示范围内的所有轮次）以及压缩模式下由谁写回复的笔记。它们不出现在 `legacy` 行中。 |
 | `retriever`, `retriever_effective`, `recall_at` | 在 `legacy` 之外，是请求的检索器（取默认值时为 `auto`）、已启用触发点的映射（`{"start": "llm", "attempt": "llm", "step": "bm25"}`，已排序）以及排序后的生效触发点列表。 |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | 在 `legacy` 之外，是任务内的命中上限、排序后的已启用类型、步骤中的放置位置，以及嵌入/长期条目的分数下限。 |
 | `cross_task_ratio`, `cross_task_cap`, `cross_task_cold` | 在 `legacy` 之外，是摘要召回的门：跨任务摘要必须达到的同后端倍数、每次召回的条数上限（0–2）以及冷启动配额（0 或 1）。 |
-| `admit_on_outcome`, `keep_decision_text` | 在 `legacy` 之外，是两个 R6-lite 开关：在运行结束时只准入带最终状态的最终摘要，以及在决定的哈希旁保留其文本。两者默认都是 `false`，且不出现在 `legacy` 行中。 |
+| `keep_decision_text` | 在 `legacy` 之外，是 R6-lite 的开关：在决定的哈希旁保留其文本。默认是 `false`，且不出现在 `legacy` 行中。 |
 
 `memory_stats` 按顺序包含：
 

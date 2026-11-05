@@ -18,6 +18,9 @@ On 2026-10-23, on 12 coding exercises run 5 times in each setting, the
 | `utility`, the earlier gate | `--reflection-gate utility` | 50/60 |
 | No reflection | `--attempt-policy none` | 59/60 |
 
+The `--reflection-gate` option has since been removed: the patient gate is the
+only one, so the first two settings can no longer be selected.
+
 ### What the two gates do
 
 After a reflection, `flags` starts the next attempt when the reflection
@@ -96,7 +99,7 @@ each one contributes.
 
 On two sets of 24 web-search questions, each question run once in each
 setting, the patient gate with `answer_on_stop` gave an answer to more of them
-than the earlier defaults (`--reflection-gate flags -X agent.answer_on_stop=off`).
+than the earlier defaults (the `flags` gate with `answer_on_stop` off).
 They are the defaults now.
 
 | Set | Earlier defaults | Patient gate and `answer_on_stop` |

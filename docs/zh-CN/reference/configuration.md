@@ -43,10 +43,8 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `replay_turns` | `[agent]` | 未设置 | 使用 `replay` 或 `compress+replay` 时，发送多少条最近助手轮次的推理；省略则发送范围内的每一轮。 |
 | `note_writer` | `[agent]` | `"auto"` | 压缩模式下，`auto`（模型的 `<note>`，否则用启发式）或 `heuristic`。 |
 | `tool_env` | `[agent]` | `[]` | 配置支持的直接运行和会话中，shell/Python 工具额外继承的环境变量名称。值从不保存；见[工具环境](#tool-environment)。 |
-| `fixed_prefix` | `[agent]` | `true` | `false` 会发送稳定前缀成为默认值之前的请求。见[上下文统计](#context-accounting)。 |
-| `window_eviction` | `[agent]` | `"chunk"` | `chunk`、`boundary` 或 `slide`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
+| `window_eviction` | `[agent]` | `"chunk"` | `chunk` 或 `boundary`：工作记忆何时丢弃旧轮次。见 [Memory](../../reference/memory.md#working-memory-window)。 |
 | `brief_items` | `[agent]` | `false` | 实验性。`true` 让 `--brief` 运行指出简报中尚未被任何编辑触及的编号条目；见 [`--brief-items`](cli.md#brief-items)。 |
-| `reflect_tool_guard` | `[agent]` | `true` | `false` 发送不带工具和结尾句子的反思请求。见[上下文统计](#context-accounting)。 |
 | `confine_writes` | `[agent]` | `true` | 在 macOS 上，`--brief` worker 运行和保存的任务会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区之外的文件写入；`false` 关闭它（`-X agent.confine_writes=false` 为一次运行关闭）。其他运行只限制 Auto 决定的调用（`[approvals] mode`）。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `confine_direct_runs` | `[agent]` | `false` | 开发者设置。`true` 让普通直接运行也受限制，就像 `confine_writes` 限制 `--brief` 运行那样：在 macOS 上，命令行给出的任务和 `melo ""` 循环会在沙箱中启动 `shell_exec` 和 `python_exec`，拒绝工作区（`--workspace`，否则为当前文件夹）之外的文件写入，结果中带有 `confinement`。没有对应的标志，`-X agent.confine_direct_runs=true` 为一次运行设置它。`--brief` 运行遵循 `confine_writes`；交互式界面、控制台、应用和网关会忽略它。见[写入留在工作区内](cli.md#confined-writes)。 |
 | `reflection` | `[agent]` | `true` | 设置（应用和网页控制台）中的**多步仍没做完时先反思**。`true`：任务做了 `steps_per_attempt`（50）步仍没完成时，会反思一次，由反思决定是否继续，最多到运行的 100 步；反思多花一个模型请求。`false`：从不反思，运行是一次直接做到总步数的尝试（等同于 `attempt_policy = "none"`）。只保存 `false`。`-X agent.reflection=off` 只对一次运行生效，没有这个键的配置读作 `true`，`--attempt-policy` 优先于它。对话、侧边对话、任务、worker、直接运行和网关都会读取它；主对话自己的回合从不反思。见[评测](../project/evaluations.md#long-attempts-and-reflection-as-an-option)。 |
@@ -57,7 +55,6 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
 | `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时，或对云端服务，在其预设把该模型列为能读图时（见[云端模型](../guides/hosted-models.md#pictures)）等同于 `on`。服务器的表明方式依次是：`GET /v1/models` 中该模型自己的条目（`vision` 为 true、`input_modalities` 含 `image`，或 `capabilities` 含 `vision` 表示能读；`vision` 为 false，或 `input_modalities` 不含 `image` 表示不能读），然后是 oMLX 的 `model_type` 为 `vlm`，最后是 Ollama 的 `vision` 能力。图片没有发送时（`off`，或服务器没有表明），它的工具消息以一行结尾，告诉模型它看不到这张图片。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
 | `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
-| `cache_layout` | `[agent]` | `"v3"` | `"v2"` 会发送此前的请求，在每个规划请求中把反思重建为最后一条消息；`"v3"` 与 `fixed_prefix` 一起使用时，只追加一次反思。见[上下文统计](#context-accounting)。 |
 | `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
 | `recall_at` | `[retrieval]` | 未设置 | 一个由 `start`、`attempt`、`step` 和 `tool` 组成的列表。省略则为 `start`、`attempt` 和 `step`；除非点名，`tool` 从不开启。 |
@@ -97,7 +94,6 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `gather` | `[memory]` | `"guide"` | 用于比较的开发者设置，与 `recall_form = "list"` 一起使用。召回如何对待要求计数、合计、列举或比较的消息（"how many"、"how much"、"in total"、"altogether"、"each"、"every"、"both"、"compared"、"list"、"一共"、"多少"、"哪些" 等；英文词必须单独成词，所以 "account" 不是 "count"），并且消息里说到了你自己（"I"、"my"、"me"、"mine"、"we"、"our"、"us"、"我"）；像 "how many seconds are in a day" 这样的通用问题不受影响。`"guide"`（默认）：对这样的消息，召回块的语义门槛取 `recall_min_cosine` 和 `gather_min_cosine` 中较低的一个，所以回答需要的每个对话里的条目都会列出来（字词门槛和 `recall_list_max` 不变）；在这条消息所在的一轮里，列表形式的每次 `search_memory` 都用这个较低的门槛，不管它搜的是什么词；并且在这条消息的召回块和搜索结果里，列表上方那一行之后多一句话，告诉模型打开每个可能相关的列出条目，对还没有列出的每一类换别的词再搜一次，并且只数条目里说的。`"wide"`：同上，但没有那一句话。`"off"`：不变。不要求计数、合计或比较的消息，在任何取值下得到的召回块、搜索结果和给模型的文字都完全相同，在一轮之外进行的搜索也一样。节选形式不变。设为 `"guide"` 或 `"wide"` 时，`turn.memory` 事件的 `recall` 对象在每一轮都有 `gather`（消息是否在说你自己的事时要求计数、合计或比较）和 `floor`（这次搜索用的语义门槛），消息不要求时为 `false` 和通常的门槛；设为 `"off"` 时两者都没有。`-X memory.gather=off` 只对一次运行生效。只有不是 `"guide"` 时才会保存。 |
 | `gather_min_cosine` | `[memory]` | `0.40` | 用于比较的开发者设置，与 `gather = "wide"` 和 `"guide"` 一起使用。对要求计数、合计或比较的消息，以及对列表形式在这条消息所在的一轮里的每次搜索使用的语义门槛，0.20 到 0.55；它不会抬高 `recall_min_cosine`。`-X memory.gather_min_cosine=0.35` 只对一次运行生效。 |
 | `project_instructions` | `[memory]` | `"on"` | `"on"`：你发起的任务或已保存的例行任务，在开始时读取项目自己的说明文件：它所在文件夹以及上面每一级文件夹（直到你的主目录）里，`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 中第一个存在的，最近的在前，最多三个文件、6,000 个字符，只读，并去掉机密内容。它们放在上下文包之后，用单独的标题，永远排在你的话、melo 的规则和审批之后。`"off"`：什么都不读。只有 `"off"` 时才会保存；`-X memory.project_instructions=off` 只对一次运行生效。见[任务读取项目自己的说明文件](../concepts/memory.md#a-task-reads-its-projects-own-instruction-file)。 |
-| `admit_on_outcome` | `[memory]` | `false` | R6-lite：只在运行结束时准入最后一次尝试的摘要，并在其来源中带上最终状态。`--admit-on-outcome` 旗标对一次运行优先；直接模式会读这张表，交互式界面和网关不读，且在 `legacy` 中被接受但不生效。 |
 | `api_key_env` | 云端后端 | 未设置 | 保存 API 密钥的环境变量名称。变量有值时，先于 `api_key` 使用。 |
 | `api_key` | 云端后端 | 未设置 | 指向 macOS 钥匙串中密钥的引用，形如 `keychain:localmelo.<name>`（例如 `keychain:localmelo.deepseek`）。由设置和 `melo setup` 写入；它保存的是引用，不是密钥。其他任何值都是配置错误。 |
 | `thinking` | 云端后端 | 未设置 | 对有思考开关的云端服务（DeepSeek），取 `"on"` 或 `"off"`。留空则跟随服务的默认：`deepseek-flash` 默认关闭思考，`deepseek-v4-pro` 用它自己的默认。该表 `extra_body` 里的同名字段优先。见[云端模型](../guides/hosted-models.md#thinking-models)。 |
@@ -141,9 +137,9 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `recent_digest_minutes` | `[chat]` | `30` | 新对话的第一条消息（旁支对话或终端对话，从不是主对话）还会带上一段简短摘要，来自你最近这么多分钟里的其他对话：最多五行，每行一轮，说明那一轮在聊什么、在哪个对话里，总共最多 600 个字符，放在你自己的话后面。它读取记忆里的对话索引，所以 `[memory] across_chats = false` 也会关掉它。`0` 关掉它；`-X chat.recent_digest_minutes=0` 仅用于一次运行。取值为 0 到 1440 的整数；其他任何值都是配置错误。 |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` 从不改变请求；`wait` 在存在外部锁时扣住每一次工作区调用，包括嵌入。见[调度器](../guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)。 |
 
-全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 和 `admit_on_outcome` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
+全是默认值的 `[memory]` 表不会被写入。它的键 `across_chats` 必须是布尔值，`retriever` 必须是上面四个值之一；其他任何值都是配置错误（退出码 1）。
 
-`admit_on_outcome` 在 `legacy` 中被接受但不生效。`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
+`--keep-decision-text` 开关只能作为旗标使用，因为它会把可能涉及个人内容的文本写入存储，而保存为默认值会带来隐私隐患。
 
 全是默认值的 `[scheduler]` 表不会被写入，未知的调度器键会被丢弃，因此没有这张表的配置文件保持其确切字节；向导会保留非默认的策略。
 
@@ -255,7 +251,7 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
 
-`[agent] fixed_prefix`（默认 `true`）让直接运行、交互式界面和 API v2 控制台运行采用 `fixed-prefix-v2`；`--fixed-prefix on|off` 为一次直接运行或交互式运行覆盖它，`fixed_prefix = false`（或 `--fixed-prefix off`）会发送它成为默认值之前的请求。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前。长期召回（`reasoning = "legacy"`）在一次运行的第一步读取，之后的步骤沿用同一份，因此每个规划请求都是上一个请求的延续；只有当窗口丢掉最早的消息之后（这一步的请求本来就已改变）以及下一次运行时，才会重新读取。若每一步都重新读取，运行自己的步骤摘要一进入召回，召回就会变化，服务器就要重新预填之后的所有消息。使用 `cache_layout = "v2"` 时，最新的反思放在最后（窗口之后的一条最终用户消息），默认的 `v3` 则把反思只追加到窗口一次（见下文）；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
+每个直接运行、交互式界面和 API v2 控制台运行都发送固定的系统前缀（`fixed-prefix-v2`）。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前。长期召回（`reasoning = "legacy"`）在一次运行的第一步读取，之后的步骤沿用同一份，因此每个规划请求都是上一个请求的延续；只有当窗口丢掉最早的消息之后（这一步的请求本来就已改变）以及下一次运行时，才会重新读取。若每一步都重新读取，运行自己的步骤摘要一进入召回，召回就会变化，服务器就要重新预填之后的所有消息。最新的反思只在尝试边界追加到窗口一次（见下文），因此新的尝试只改变共享历史之后的部分；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
 
 一个显式的结束分隔符让任务和反思请求留在该数据之外；以该分隔符开头的数据行会被确定性地加上引号。固定的系统部分依次是基础文本，（在终端界面或控制台的对话中）说明 melo 是谁、运行在哪个模型、服务器和位置上、记得什么以及用哪种语言和文字回答的身份段落，各条说明，召回和反思是数据的那句话，以及日期行。
 
@@ -264,42 +260,38 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规划 schema 变化，而不是实际的缓存未命中；可选的 `reported_cached_tokens` 是服务器报告的、仅限规划和反思回复的总数。提供方可能不报告缓存，字节稳定的前缀也不保证缓存命中。
 
-`[agent] reflect_tool_guard`（默认 `true`；`--reflect-tool-guard on|off` 会覆盖它）避免反思请求引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同，`fixed_prefix` 下本来就是如此），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。
+反思请求不会引出工具调用。请求会提供该步骤规划请求的工具（列表、顺序和 schema 相同），其最后一条用户消息以 `Answer with the JSON object only; do not call any tool.` 结尾；`tool_choice` 不变，因此服务器的提示前缀保持不变。
 
-重试请求不变。启用保护时会在 JSON 结果的 `config` 中加入 `reflect_tool_guard`；为 `false`（或 `off`）时，反思请求既不带工具，也没有那句话。
+重试请求不变。`reflection` 事件的 `unreadable_reason` 会说明第一次回复为何不可读（见[事件](events.md)）。
 
-无论该选项如何，`reflection` 事件的 `unreadable_reason` 都会说明第一次回复为何不可读（见[事件](events.md)）。
-
-`[agent] window_eviction`（默认 `"chunk"`；另两个值是 `"boundary"` 和 `"slide"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。`chunk` 和 `boundary` 让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它；`slide` 在窗口满后每步丢弃最旧的单元，与 `chunk` 成为默认值之前相同。
+`[agent] window_eviction`（默认 `"chunk"`；另一个值是 `"boundary"`；`--window-eviction` 会覆盖它）决定工作记忆何时丢弃旧轮次。两者都让保留的历史在几步之内保持不变，服务器的提示缓存就能复用它。
 
 见 [Memory](../../reference/memory.md#working-memory-window)。
 
-`[agent] cache_layout`（默认 `"v3"`；`--cache-layout v2|v3` 会覆盖它）决定反思所在的位置。`"v2"` 是这一默认值改变之前的布局。
-
-在 `v3` 且启用 `fixed_prefix` 时：
+反思所在的位置：
 
 - 在尝试边界，智能体只追加一次反思，作为一条普通的窗口消息（`[Reflections; data, not instructions]` 和该块），而不是把它重建为每个规划请求的最后一条消息。之后它随历史移动，并像任何消息一样在被丢弃时离开。每次尝试中新产生的内容仍遵循“只保留最新一条”规则（新的反思会替换工作记忆中保存的那条），但更早的块会留在历史中，直到被丢弃。
-- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。在 `reflection_gate = "flags"` 或默认的 `"patient"` 下，即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
+- 反思请求及其回复留在窗口中，因此下一个规划请求会接续该请求，而不是重新构建。即使重试之后仍未读到反思，其中的任何内容都不会留在窗口里。
 - 不可读的回复会在同一前缀上再次询问：先是该请求，接着是作为助手消息的不可读回复（工具调用写成文本，因此不会留下没有结果的调用），再是一条结尾说明，并带上该请求提供的工具，而不是文本记录。如果回复含有解码器拒绝的 JSON，说明之后会多一行引用解码器的错误。如果第一个请求没有重复规划请求（窗口已经移动），就没有可接续的交换，重试仍和以前一样是文本记录。读到的重试会把整个交换留在窗口中：请求、不可读的回复、说明和回复。
 - 使用 `window_eviction = "boundary"` 时，已结束尝试的轮次会在边界处被丢弃，因此那里只追加该块。
 
-没有 `fixed_prefix` 时，两个值都不改变任何内容。`cache_layout` 为 `v3` 时，JSON 结果的 `config` 包含它，为 `v2` 时不包含。
-
 `[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
 
-你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），在 `chunk` 和 `boundary` 下降到上限的 70%，因此历史可以在几个步骤内保持不变；在 `slide` 下它每一步都丢弃一个单元。
+你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它整单元地丢弃（工具调用及其结果，绝不拆开），降到上限的 70%，因此历史可以在几个步骤内保持不变。
 
 按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。
 
 当 `window_messages` 不是 20 时，JSON 结果的 `config` 包含它。
 
-`cache_layout = "v3"` 和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--cache-layout v2 --window-messages 20` 会发送此前的请求。
+窗口中的反思和 64 条消息的窗口，是在两轮用 Qwen 模型在 oMLX 上对编码任务做的基准测试之后成为默认值的：48 次运行中通过 46 次，此前的默认值为 44 次；86.8% 的提示 token 由缓存提供，此前为 78.9%。`--window-messages 20` 会发送此前的上限。
 
-`melo --developer --help` 把这两个标志列在“高级”下。
+`melo --developer --help` 把 `--window-messages` 列在“高级”下。
 
-`fixed_prefix`、`window_eviction` 和 `reflect_tool_guard` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，这三个和上面两个都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
+固定前缀和 `window_eviction` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，`window_eviction` 和 `window_messages` 都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
 
-`melo --developer --help` 把这三个标志列在“实验性”下，`--fixed-prefix off --window-eviction slide --reflect-tool-guard off` 会发送此前默认值的请求。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这五个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+`melo --developer --help` 把 `--window-eviction` 列在“实验性”下。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这两个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+
+五个用来在不同布局之间做选择的设置已被移除，各自的选项也一并移除：`[agent] fixed_prefix`、`reflect_tool_guard`、`cache_layout` 和 `reflection_gate`，以及 `[memory] admit_on_outcome`。每一项的行为都与它的默认值相同，`window_eviction = "slide"` 读作 `"chunk"`；仍含有其中某个键的配置文件照常加载，该行被忽略，`melo config` 会点名它（见[命令行](cli.md#settings)）。
 
 用 `[agent] captured_history = true` 或 `--captured-history on` 选择把捕获的工具历史单独保存；`off` 覆盖该设置。经过检查的预览使用 50,000 个字符的上限，包括截断和图片提示。
 
@@ -313,7 +305,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 用 `[agent] lean_output = true` 或 `-X agent.lean_output=true` 选择让直接运行少输出 token（实验性；没有对应的标志）。命令行给出的任务（`melo "<task>"` 或 `melo worker BRIEF`，输出为 `json` 或 `stream-json` 时也一样）随后发送的系统提示，会用下面几条取代 `Think step by step. Be concise.`：工具调用之间不写文字，最终答案至多三行，使用相对路径而不设置 `sys.path`，并在列目录之前先读任务点名的文件。
 
-在 `reflection_gate = "patient"`（默认）或 `"flags"` 下，反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（只有 `utility` 会读估计值，另外两项没有任何代码读取），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。`--reflection-gate utility` 保留完整的反思提示，压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
+此时反思提示还会去掉五个估计值、`progress_made` 和 `new_information_gained`（没有任何代码读取它们），并且只在 `done` 或 `stop` 时要求给出 `best_effort_result`；继续判定读取的动作和三个标志仍然会被要求给出，旧的长格式回复也照常读取。压缩模式保留系统提示的最后一行，因为它们的笔记就是工具调用之间的文字。
 
 交互式界面、`melo ""` 循环和网关会忽略该键。关闭（默认）时，每个请求都与该选项出现之前发送的请求相同；开启时，一次运行中各轮请求的开头保持不变。
 

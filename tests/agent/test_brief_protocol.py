@@ -14,6 +14,7 @@ from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.schema import ReflectionDecision
 from localmelo.tests.agent.test_reflection_gate import (
     CHECKS,
+    STOPPING_CHECKS,
     FakeLLM,
     _agent,
     _answer,
@@ -66,7 +67,7 @@ class TestContinueContinues:
         assert (event["continue_run"], event["stop_reason"]) == (True, None)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("check", CHECKS)
+    @pytest.mark.parametrize("check", STOPPING_CHECKS)
     async def test_the_same_decision_without_a_brief_stops(self, check: str) -> None:
         result, _llm, events = await _run(
             [_echo_call("a"), _reflection("continue", **{check: False})],
@@ -108,18 +109,18 @@ class TestContinueContinues:
                 if k in ReflectionDecision.__dataclass_fields__
             }
         )
-        assert _stop_reason(decision, "flags", "") == "not_concrete"
-        assert _stop_reason(decision, "flags", "", brief=True) is None
-        assert _stop_reason(decision, "utility", "", brief=True) is None
+        assert _stop_reason(decision, "") == "not_concrete"
+        assert _stop_reason(decision, "", brief=True) is None
         assert (
-            _stop_reason(decision, "flags", "Max steps reached", brief=True)
+            _stop_reason(decision, "Max steps reached", brief=True)
             == "step_budget_used"
         )
 
 
 def _pushes(llm: FakeLLM) -> int:
+    """How many requests carry the line (it joins the reflection in one message)."""
     return sum(
-        message.content == NO_CHANGE_PUSH
+        NO_CHANGE_PUSH in message.content
         for call in llm.calls
         for message in call["messages"]
     )
@@ -127,7 +128,7 @@ def _pushes(llm: FakeLLM) -> int:
 
 def _first_push_request(llm: FakeLLM) -> int | None:
     for index, call in enumerate(llm.calls):
-        if any(message.content == NO_CHANGE_PUSH for message in call["messages"]):
+        if any(NO_CHANGE_PUSH in message.content for message in call["messages"]):
             return index
     return None
 

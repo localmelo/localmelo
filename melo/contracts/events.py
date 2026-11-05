@@ -94,8 +94,6 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "action",
                 "continue_run",
                 "flags",
-                "gate",
-                "utility",
                 "stop_reason",
                 "rationale",
                 "summary",
@@ -164,8 +162,6 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
             {
                 "prefix",
                 "flags",
-                "gate",
-                "utility",
                 "stop_reason",
                 "unreadable_reason",
                 "repaired",

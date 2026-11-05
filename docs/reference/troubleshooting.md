@@ -379,10 +379,7 @@ melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: 
 - **Cause:** after an attempt, the reflection decided to stop, or its
   decision to continue did not pass the continuation gate. The error is the
   model's reason, or `Stopped after attempt <n> (stop reason: <code>)` when it gave none;
-  the `reflection` event's `stop_reason` names the check in every case. With
-  `--reflection-gate utility`, it can also be
-  `Could not parse reflection response`: the model twice replied without the
-  JSON object that a reflection asks for.
+  the `reflection` event's `stop_reason` names the check in every case.
 - **Fix:** read the reason. If the model cannot write reflections, try
   another model or `--attempt-policy none`.
 

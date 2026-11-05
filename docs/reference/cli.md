@@ -85,11 +85,7 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--parent-run` | `melo worker BRIEF --parent` |
 | `--import-session` | `melo import FORMAT FILE` |
 | `--attempt-policy` | `-X agent.attempt_policy=VALUE` |
-| `--reflection-gate` | `-X agent.reflection_gate=VALUE` |
-| `--fixed-prefix` | `-X agent.fixed_prefix=VALUE` |
 | `--window-eviction` | `-X agent.window_eviction=VALUE` |
-| `--reflect-tool-guard` | `-X agent.reflect_tool_guard=VALUE` |
-| `--cache-layout` | `-X agent.cache_layout=VALUE` |
 | `--window-messages` | `-X agent.window_messages=VALUE` |
 | `--brief-items` | `-X agent.brief_items=VALUE` |
 | `--reasoning` | `-X agent.reasoning=VALUE` |
@@ -107,7 +103,6 @@ and `melo config set KEY VALUE` saves it (see [Settings](#settings)).
 | `--recall-placement` | `-X retrieval.placement=VALUE` |
 | `--recall-min-score` | `-X retrieval.min_score=VALUE` |
 | `--retrieval-extra-body` | `-X retrieval.extra_body=VALUE` |
-| `--admit-on-outcome` | `-X memory.admit_on_outcome=VALUE` |
 | `--keep-decision-text` | `-X memory.keep_decision_text=true` |
 | `--memory-dir` | `-X memory.dir=VALUE` |
 | `--request-timeout` | `-X request_timeout_s=VALUE` |
@@ -129,11 +124,18 @@ dot. `melo -h all` lists the keys with their defaults.
 - A key that has an old option becomes that option before parsing (see the table
   above): `-X retrieval.k=5` is `--recall-k 5`, with the same checks and refusals. Any
   other key (`cli.stream`, `scheduler.policy`...) overrides the config this process
-  loads, and a bad value exits 2 naming what the key allows. Nine settings are for one
+  loads, and a bad value exits 2 naming what the key allows. Eight settings are for one
   run only, so `-X` takes them and the file does not: `agent.attempt_policy`,
-  `agent.reflection_gate`, `agent.tool_exposure`, `memory.dir`,
-  `memory.keep_decision_text`, `retrieval.extra_body`, `endpoint.embedding_url`,
-  `endpoint.embedding_model` and `endpoint.reasoning_field`.
+  `agent.tool_exposure`, `memory.dir`, `memory.keep_decision_text`,
+  `retrieval.extra_body`, `endpoint.embedding_url`, `endpoint.embedding_model` and
+  `endpoint.reasoning_field`.
+- Five settings were removed, with their options: `agent.fixed_prefix`
+  (`--fixed-prefix`), `agent.reflect_tool_guard` (`--reflect-tool-guard`),
+  `agent.cache_layout` (`--cache-layout`), `agent.reflection_gate`
+  (`--reflection-gate`) and `memory.admit_on_outcome` (`--admit-on-outcome`). Each
+  behaves as its default did. `-X` and the option exit 2 and say it was removed. A
+  config file that still holds one loads, the line is ignored, and `melo config`
+  names it. `agent.window_eviction = "slide"` was removed too and reads as `"chunk"`.
 - `agent.answer_on_stop` is on by default (`-X agent.answer_on_stop=off` turns it off): it
   also answers a run whose request the server refused for a
   budget or rate limit (HTTP 429, or an error that says a budget is used): the run still ends
@@ -343,18 +345,14 @@ two equal.
 | `--context-window` | advanced |  |
 | `--output-reserve` | advanced |  |
 | `--safety-margin` | advanced |  |
-| `--cache-layout` | advanced |  |
 | `--window-messages` | advanced |  |
 | `--memory-dir` | advanced |  |
 | `--request-timeout` | advanced |  |
 | `--embedding-base-url` | advanced |  |
 | `--embedding-model` | advanced |  |
 | `--attempt-policy` | experimental | #185 |
-| `--reflection-gate` | experimental | #185 |
 | `--brief-items` | experimental | #185 |
-| `--fixed-prefix` | experimental | #183 |
 | `--window-eviction` | experimental | #183 |
-| `--reflect-tool-guard` | experimental | #183 |
 | `--reasoning` | experimental | #183 |
 | `--reasoning-field` | experimental | #183 |
 | `--replay-turns` | experimental | #183 |
@@ -367,7 +365,6 @@ two equal.
 | `--recall-kinds` | experimental | #4 |
 | `--recall-placement` | experimental | #4 |
 | `--recall-min-score` | experimental | #4 |
-| `--admit-on-outcome` | experimental | #4 |
 | `--keep-decision-text` | experimental | #4 |
 | `--retrieval-extra-body` | experimental | #4 |
 
@@ -435,17 +432,13 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--inbox FILE` | not set | With `--brief`, accept complete appended instruction lines at planning boundaries. The path is explicit, relative to the invocation directory, and must resolve outside the workspace. |
 | `--inbox-fd N` | not set | With `--brief`, accept the same lines from an inherited, readable pipe fd `N`. Requires the parent to keep the write end; the read end is close-on-exec before tools start. Cannot be combined with `--inbox`. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
-| `--fixed-prefix on\|off` | `on` | Use a versioned fixed system prefix with the local date frozen at run start; `off` sends the earlier requests. Overrides `[agent] fixed_prefix`. |
-| `--window-eviction slide\|chunk\|boundary` | `chunk` | How working memory drops old turns: `chunk` eight messages at a time; `slide` one unit per step once full (the earlier default); `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
-| `--reflect-tool-guard on\|off` | `on` | With `on`, every reflection request offers the tools of that step's planning request (same list, order and schema, so a server's prompt prefix holds) and its last user message ends with `Answer with the JSON object only; do not call any tool.`; `tool_choice` is untouched. The retry request is unchanged with `--cache-layout v2`; with the default `v3` it continues the request. With `off`, the request has neither. Overrides `[agent] reflect_tool_guard`; see [Configuration](configuration.md#context-accounting). |
-| `--cache-layout v2\|v3` | `v3` | With the fixed prefix, `v3` appends a reflection once at the attempt boundary as a window message, keeps the reflection request and its reply in the window, and asks an unreadable reflection again on the same prefix; `v2` sends the earlier requests. Without the fixed prefix neither changes anything. Overrides `[agent] cache_layout`; see [Configuration](configuration.md#context-accounting). |
+| `--window-eviction chunk\|boundary` | `chunk` | How working memory drops old turns: `chunk` eight messages at a time; `boundary` also drops a finished attempt's turns at the next attempt. Overrides `[agent] window_eviction`; see [Memory](memory.md#working-memory-window). |
 | `--window-messages N` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. Overrides `[agent] window_messages`; see [Memory](memory.md#working-memory-window). |
 | `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--brief-items on\|off` | `off` | Experimental. With `--brief`, name the brief's numbered items that no edit has touched yet in each reflection request and two steps before the last attempt ends; see [Run a worker task](#brief-items). Overrides `[agent] brief_items`; inert without `--brief`. |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `100` | The most planning steps the whole run may take (also `-s N`). |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts of `agent.steps_per_attempt` steps (50) with a reflection after each. `none`: one attempt of `--max-steps` steps, no reflection. `[agent] reflection = false` (**Reflect when stuck after many steps** in Settings, or `-X agent.reflection=off` for one run) gives `none` to every run that reads the config; this option keeps its say over it. |
-| `--reflection-gate flags\|utility\|patient` | `patient` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option), or as `flags`, but once per run also when the next step is not novel (`patient`, the default). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
 | `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` and `list_files` (the interactive UI keeps all five by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
@@ -470,7 +463,6 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
 | `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
 | `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. Available for a task or the interactive UI with `llm`/`auto` outside `legacy`; never saved to the config file. |
-| `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
 | `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
 - `--workspace`: without it a task runs in the current folder, exactly as
@@ -494,9 +486,6 @@ accepts the options named in [Interactive UI](#interactive-ui).
   is kept to ask once, without tools, for the final answer from the evidence, so the
   run sends `N - 1` requests and then that one. Both appear in `melo -h all`, and
   [Run results](run-results.md#statuses) says what the record holds.
-- `--reflection-gate`: see [Reflection](../concepts/how-it-works.md#reflection). It has
-  no effect with `--attempt-policy none`. `--reflection-gate flags` gives the gate from
-  before `patient` became the default (`-X agent.reflection_gate=flags` for one run).
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
   `file_write`, `list_files`, `python_exec` and `shell_exec`. A direct run's default set
@@ -568,13 +557,10 @@ accepts the options named in [Interactive UI](#interactive-ui).
   melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
     --reasoning compress --retriever off -- "List the files"
   ```
-- `--admit-on-outcome` and `--keep-decision-text`: see
-  [Long-term memory](memory.md#long-term-memory). They are accepted in
-  `legacy` and do nothing there. `--keep-decision-text` writes potentially
-  personal text to the store, so the interactive UI refuses it (exit 2, one
-  line). `[memory] admit_on_outcome` is the saved default for the first
-  in direct mode (the interactive UI and the gateway do not read the table);
-  the second is flag-only.
+- `--keep-decision-text`: see [Long-term memory](memory.md#long-term-memory). It is
+  accepted in `legacy` and does nothing there. It writes potentially personal text
+  to the store, so the interactive UI refuses it (exit 2, one line). It is
+  flag-only.
 - `--note-writer`: `auto` (default) parses the model's
   `<note>plan: … found: … open: … remember: …</note>` block and falls back
   to a heuristic when there is none; `heuristic` ignores the block. A note
@@ -606,7 +592,7 @@ These options apply to `melo` without a task.
 
 - The UI also takes `--context-window`, `--output-reserve`, `--safety-margin`,
   `--workspace`, `--max-steps`, `--attempt-policy`,
-  `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
+  `--builtins`, `--memory`, `--memory-dir`,
   `--request-timeout`, `--reasoning`, `--reasoning-field`, `--replay-turns`,
   `--note-writer`, `--retriever`, `--recall-*`, `--retrieval-extra-body` and
   the `--embedding-*` options, for every turn of the session. Explicit flags

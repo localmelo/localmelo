@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
@@ -17,6 +16,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -956,9 +956,9 @@ class TestBuildSystemPrompt:
 
     @pytest.mark.asyncio
     async def test_plan_step_single_system_message(self) -> None:
-        """plan_step must produce exactly one system message even with memory."""
+        """plan_step produces exactly one system message even with memory."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
-        chat = Chat(llm)
+        chat = _scoped_chat(llm)
         context = [
             Message(role="system", content="[memory] mem0"),
             Message(role="system", content="[memory] mem1"),
@@ -969,9 +969,11 @@ class TestBuildSystemPrompt:
         sent = llm.calls[0]["messages"]
         sys_msgs = [m for m in sent if m.role == "system"]
         assert len(sys_msgs) == 1, f"Expected 1 system message, got {len(sys_msgs)}"
-        assert "[RECALL]" in sys_msgs[0].content
-        assert "mem0" in sys_msgs[0].content
-        assert "mem1" in sys_msgs[0].content
+        # The recalled memory is data in a user message, so the system prompt
+        # stays the same from step to step.
+        assert "mem0" not in sys_msgs[0].content
+        [data] = [m for m in sent if m.role == "user" and "[RECALL]" in m.content]
+        assert "mem0" in data.content and "mem1" in data.content
 
 
 class TestProvidersFromConfig:

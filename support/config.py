@@ -63,8 +63,7 @@ VALID_EMBEDDING_BACKENDS = (*LOCAL_BACKENDS, "none")
 OMLX_ALIAS = "omlx"
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
-WINDOW_EVICTIONS = ("slide", "chunk", "boundary")
-CACHE_LAYOUTS = ("v2", "v3")
+WINDOW_EVICTIONS = ("chunk", "boundary")
 TOOL_IMAGES = ("auto", "on", "off")
 EMPTY_REPLY_FALLBACKS = ("on", "off")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
@@ -267,10 +266,7 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
-    fixed_prefix: bool = True  # stable prompt prefix; false is the old request
-    window_eviction: str = "chunk"  # slide | chunk | boundary
-    reflect_tool_guard: bool = True  # reflection requests ask for JSON, not a tool
-    cache_layout: str = "v3"  # v2 | v3 (the reflection layout; needs fixed_prefix)
+    window_eviction: str = "chunk"  # chunk | boundary
     # Working window cap, 8-256; None: default_window_messages() of the backend.
     window_messages: int | None = None
     context_window: int | None = None
@@ -477,7 +473,6 @@ class MemoryConfig:
     ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
     """
 
-    admit_on_outcome: bool = False
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
     keep_statements: bool = False
@@ -1093,7 +1088,6 @@ class Config:
             ("reasoning", REASONING_MODES),
             ("note_writer", NOTE_WRITERS),
             ("window_eviction", WINDOW_EVICTIONS),
-            ("cache_layout", CACHE_LAYOUTS),
         ):
             value = getattr(agent, name)
             if value not in allowed:
@@ -1647,6 +1641,8 @@ def _digits_as_text(value: Any) -> Any:
 # The few fields the file spells loosely: key -> what the file's value stands for.
 # Every other field is read as the file has it.
 _SPELLINGS: dict[str, Callable[[Any], Any]] = {
+    # "slide" was removed (settings.removed_in says so); it reads as the default.
+    "agent.window_eviction": lambda value: "chunk" if value == "slide" else value,
     "cli.colors": _digits_as_text,
     "cli.background": _digits_as_text,
     "sessions.record_direct": lambda value: value

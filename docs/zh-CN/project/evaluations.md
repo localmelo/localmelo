@@ -16,6 +16,8 @@
 | `utility`，较早的判定 | `--reflection-gate utility` | 50/60 |
 | 不使用反思 | `--attempt-policy none` | 59/60 |
 
+`--reflection-gate` 选项后来已被移除：耐心判定是唯一的判定，因此前两种设置不能再选用。
+
 <a id="what-the-two-gates-do"></a>
 
 ### 两种判定的作用
@@ -67,7 +69,7 @@
 
 ## 耐心判定与停止时的答案
 
-在两组各 24 个网络搜索问题上，每个问题在每种设置下各运行一次，耐心判定加 `answer_on_stop` 给出答案的问题比较早的默认设置（`--reflection-gate flags -X agent.answer_on_stop=off`）更多。它们现在是默认设置。
+在两组各 24 个网络搜索问题上，每个问题在每种设置下各运行一次，耐心判定加 `answer_on_stop` 给出答案的问题比较早的默认设置（`flags` 判定且关闭 `answer_on_stop`）更多。它们现在是默认设置。
 
 | 组 | 较早的默认设置 | 耐心判定与 `answer_on_stop` |
 |---|---:|---:|

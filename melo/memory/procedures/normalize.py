@@ -41,11 +41,15 @@ UNKNOWN_MODELS: Final = frozenset({"", "default"})
 # The run options that shape a run's length (keys of RunResult.config).
 LENGTH_OPTIONS: Final = (
     "attempt_policy",
-    "reflection_gate",
     "max_steps",
     "steps_per_attempt",
     "max_attempts",
 )
+
+# ``reflection_gate`` is no option any more and a run's config no longer has it.
+# A template's hash still holds it, with the one value every run has now, so a
+# template learned before the option went still matches.
+GATE_GONE: Final = "patient"
 
 # Similar matching: the fewest routines a place must hold, the least
 # best ÷ self score and the most second ÷ best score.
@@ -199,8 +203,13 @@ def known_model(model: str) -> bool:
 
 
 def length_options(config: Mapping[str, Any]) -> dict[str, Any]:
-    """The :data:`LENGTH_OPTIONS` of a run's *config*; a missing one is ``None``."""
-    return {name: config.get(name) for name in LENGTH_OPTIONS}
+    """The :data:`LENGTH_OPTIONS` of a run's *config*; a missing one is ``None``.
+
+    And ``reflection_gate``: what an older config says, else :data:`GATE_GONE`.
+    """
+    options = {name: config.get(name) for name in LENGTH_OPTIONS}
+    options["reflection_gate"] = config.get("reflection_gate", GATE_GONE)
+    return options
 
 
 def canonical_json(value: Any) -> str:

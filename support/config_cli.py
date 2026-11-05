@@ -38,6 +38,12 @@ def _read() -> tuple[config.Config, dict[str, Any]] | None:
     return cfg, data
 
 
+def _note_removed(data: dict[str, Any]) -> None:
+    """One line on stderr for each removed setting the file still holds."""
+    for note in settings.removed_in(data):
+        print(f"melo: note: {note}. Delete the line.", file=sys.stderr)
+
+
 def _show_changes() -> int:
     path = config.config_path()
     read = _read()
@@ -49,6 +55,7 @@ def _show_changes() -> int:
         print(f"{key} = {settings.show(value)}")
     if not changed:
         print("every setting is at its default")
+    _note_removed(read[1])
     return 0
 
 
@@ -98,6 +105,7 @@ def _keys(pattern: str) -> int:
     for row in rows:
         print("  ".join([*(row[col].ljust(widths[col]) for col in range(3)), row[3]]))
     settings.warn(listed)
+    _note_removed(data)
     return 0
 
 

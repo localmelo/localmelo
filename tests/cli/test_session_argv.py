@@ -7,8 +7,9 @@ The three explicit R4 overrides were captured from upstream cb250c6 before U2b,
 not from the new parser: compress became valid, and two replay errors name it.
 R2b intentionally retires the no-query reasoning-field refusal: that one case
 now checks UI dispatch and its complete namespace; the original golden remains.
-The invalid ``--reflection-gate`` choice's error now lists ``patient`` too (an
-``upstream_overrides`` entry and the 3.12 variant); every other case is as recorded.
+The cases that gave ``--reflection-gate`` are gone with the option, and the
+``--a`` prefix no longer matches ``--admit-on-outcome`` (an ``upstream_overrides``
+entry); every other case is as recorded.
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 
@@ -69,16 +70,13 @@ R5_DEFAULTS = dict.fromkeys(
 )
 # P5 moved --workspace into direct mode: the direct parser carries it now.
 P5_DEFAULTS = {"workspace": None}
-# R6-lite added two direct-mode options.
-R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
+# R6-lite added a direct-mode option.
+R6_DEFAULTS = {"keep_decision_text": False}
 # U3 PR 4 added --allow-unconfigured for --serve.
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
-# Fixed prefix is opt-in; historical invocations leave it unset.
-FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 CAPTURED_DEFAULTS = {"captured_history": None, "brief_items": None}
 WINDOW_EVICTION_DEFAULTS = {"window_eviction": None}
-REFLECT_TOOL_GUARD_DEFAULTS = {"reflect_tool_guard": None}
-CACHE_LAYOUT_DEFAULTS = {"cache_layout": None, "window_messages": None}
+WINDOW_MESSAGES_DEFAULTS = {"window_messages": None}
 WORKER_DEFAULTS = {
     **dict.fromkeys(
         (
@@ -157,11 +155,9 @@ def test_historical_dispatch(
             **R6_DEFAULTS,
             **U3_PR4_DEFAULTS,
             **WORKER_DEFAULTS,
-            **FIXED_PREFIX_DEFAULTS,
             **CAPTURED_DEFAULTS,
             **WINDOW_EVICTION_DEFAULTS,
-            **REFLECT_TOOL_GUARD_DEFAULTS,
-            **CACHE_LAYOUT_DEFAULTS,
+            **WINDOW_MESSAGES_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -188,11 +184,9 @@ def test_historical_dispatch(
         **R6_DEFAULTS,
         **U3_PR4_DEFAULTS,
         **WORKER_DEFAULTS,
-        **FIXED_PREFIX_DEFAULTS,
         **CAPTURED_DEFAULTS,
         **WINDOW_EVICTION_DEFAULTS,
-        **REFLECT_TOOL_GUARD_DEFAULTS,
-        **CACHE_LAYOUT_DEFAULTS,
+        **WINDOW_MESSAGES_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

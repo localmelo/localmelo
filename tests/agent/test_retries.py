@@ -9,7 +9,7 @@ from collections import deque
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import RETRY_DELAYS_S, Chat
+from localmelo.melo.agent._chat import RETRY_DELAYS_S
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     BaseEmbeddingProvider,
@@ -17,6 +17,7 @@ from localmelo.melo.contracts.providers import (
     ProviderError,
 )
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 REFUSED = 'POST /chat/completions failed with HTTP 400: {"error": "bench_budget"}'
 
@@ -159,7 +160,7 @@ def _user(text: str = "q") -> list[Message]:
 
 class TestChatRetries:
     def test_two_retries_after_1_s_and_4_s_by_default(self) -> None:
-        chat = Chat(ScriptedLLM([]))
+        chat = _scoped_chat(ScriptedLLM([]))
         assert chat.retry_delays == RETRY_DELAYS_S == (1.0, 4.0)
         assert chat.sleep is asyncio.sleep
 
@@ -168,7 +169,7 @@ class TestChatRetries:
         usage = {"prompt_tokens": 7, "completion_tokens": 1, "total_tokens": 8}
         llm = ScriptedLLM([_busy(), _busy(429), _answer("ok", usage)])
         sleeps = Sleeps()
-        chat = Chat(llm, sleep=sleeps)
+        chat = _scoped_chat(llm, sleep=sleeps)
         reply = await chat.plan_step(context=[], short=_user(), tools=[ECHO], query="q")
         assert reply.content == "ok"
         assert llm.attempts == [1, 2, 3]
@@ -182,7 +183,7 @@ class TestChatRetries:
     async def test_after_two_retries_the_last_error_propagates(self) -> None:
         llm = ScriptedLLM([_busy(502), _busy(503), _busy(504), _answer("never")])
         sleeps = Sleeps()
-        chat = Chat(llm, sleep=sleeps)
+        chat = _scoped_chat(llm, sleep=sleeps)
         with pytest.raises(ProviderError) as excinfo:
             await chat.reflect(short=_user(), query="q", attempt_id=0)
         assert excinfo.value.status_code == 504
@@ -194,7 +195,7 @@ class TestChatRetries:
     async def test_a_non_retryable_error_is_not_retried(self) -> None:
         llm = ScriptedLLM([_refused(), _answer("never")])
         sleeps = Sleeps()
-        chat = Chat(llm, sleep=sleeps)
+        chat = _scoped_chat(llm, sleep=sleeps)
         with pytest.raises(ProviderError, match="HTTP 400"):
             await chat._request(_user(), tools=None)
         assert (llm.attempts, sleeps.delays) == ([1], [])
@@ -204,7 +205,7 @@ class TestChatRetries:
     async def test_other_exceptions_are_not_retried(self) -> None:
         llm = ScriptedLLM([ConnectionError("refused"), _answer("never")])
         sleeps = Sleeps()
-        chat = Chat(llm, sleep=sleeps)
+        chat = _scoped_chat(llm, sleep=sleeps)
         with pytest.raises(ConnectionError):
             await chat._request(_user(), tools=None)
         assert (llm.attempts, sleeps.delays) == ([1], [])
@@ -214,14 +215,14 @@ class TestChatRetries:
     async def test_a_custom_schedule_sets_the_number_of_retries(self) -> None:
         llm = ScriptedLLM([_busy(), _busy(), _answer("never")])
         sleeps = Sleeps()
-        chat = Chat(llm, retry_delays=[0.5], sleep=sleeps)
+        chat = _scoped_chat(llm, retry_delays=[0.5], sleep=sleeps)
         with pytest.raises(ProviderError):
             await chat._request(_user(), tools=None)
         assert (llm.attempts, sleeps.delays) == ([1, 2], [0.5])
 
     @pytest.mark.asyncio
     async def test_the_attempt_number_is_back_to_1_after_a_request(self) -> None:
-        chat = Chat(ScriptedLLM([_busy(), _answer("a"), _busy(), _refused()]))
+        chat = _scoped_chat(ScriptedLLM([_busy(), _answer("a"), _busy(), _refused()]))
         chat.sleep = Sleeps()
         await chat._request(_user(), tools=None)
         assert LLM_REQUEST_ATTEMPT.get() == 1
@@ -234,7 +235,7 @@ class TestChatRetries:
         self,
     ) -> None:
         llm = BlockingLLM()
-        chat = Chat(llm)
+        chat = _scoped_chat(llm)
         request = asyncio.create_task(chat._request(_user(), tools=None))
         await llm.blocked.wait()
         request.cancel()
@@ -253,7 +254,7 @@ class TestChatRetries:
             waiting.set()
             await asyncio.Event().wait()
 
-        chat = Chat(llm, sleep=sleep)
+        chat = _scoped_chat(llm, sleep=sleep)
         request = asyncio.create_task(chat._request(_user(), tools=None))
         await waiting.wait()
         request.cancel()

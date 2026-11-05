@@ -45,7 +45,6 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
-from localmelo.tests.legacy_options import LEGACY_ANSWER_OPTIONS
 
 # The keys an event may lack: run.finished's reviews without an approval
 # policy (#339), tool.finished's tool_asks when no question was refused (#431)
@@ -226,8 +225,6 @@ def _agent(
     """An agent with the custom tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
     options.setdefault("tool_exposure", "all")
-    for name, value in LEGACY_ANSWER_OPTIONS.items():
-        options.setdefault(name, value)
     agent = Agent(
         llm=llm,
         embedding=embedding,
@@ -583,8 +580,6 @@ class TestFields:
                 "action",
                 "continue_run",
                 "flags",
-                "gate",
-                "utility",
                 "stop_reason",
                 "rationale",
                 "summary",
@@ -1254,7 +1249,9 @@ class TestEveryStatus:
                 [
                     _echo("a"),
                     _reflection(
-                        "continue", next_step_is_novel=False, rationale="Nothing new."
+                        "continue",
+                        next_step_is_concrete=False,
+                        rationale="Nothing new.",
                     ),
                 ]
             ),
@@ -1266,23 +1263,6 @@ class TestEveryStatus:
         assert reflection["action"] == "continue"
         assert (reflection["continue_run"], reflection["readable"]) == (False, True)
         assert recorder.types[-2:] == ["reflection", "run.finished"]
-        await check_guarantees(recorder, result, agent)
-
-    @pytest.mark.asyncio
-    async def test_gate_stopped_by_an_unreadable_reflection_under_utility(
-        self,
-    ) -> None:
-        recorder = Recorder()
-        agent = _agent(
-            ScriptedLLM([_echo("a"), _answer(PROSE), _answer(PROSE)]),
-            steps_per_attempt=1,
-            reflection_gate="utility",
-        )
-        result = await agent.run_task("echo a", on_event=recorder)
-        assert result.status == "gate_stopped"
-        reflection = recorder.of("reflection")[0].data
-        assert (reflection["readable"], reflection["action"]) == (True, "stop")
-        assert reflection["rationale"] == "Could not parse reflection response"
         await check_guarantees(recorder, result, agent)
 
     @pytest.mark.asyncio
@@ -1548,8 +1528,6 @@ class TestReflections:
             "action": "continue",
             "continue_run": True,
             "flags": ALL_FLAGS,
-            "gate": "flags",
-            "utility": None,
             "stop_reason": None,
             "rationale": "Echo once more.",
             "summary": "Echoed a.",
@@ -1588,8 +1566,6 @@ class TestReflections:
             "action": None,
             "continue_run": True,
             "flags": None,
-            "gate": "flags",
-            "utility": None,
             "stop_reason": None,
             "rationale": None,
             "summary": None,
@@ -1624,24 +1600,6 @@ class TestReflections:
         assert reflection.data["continue_run"] is False
         assert recorder.types[-2:] == ["reflection", "run.finished"]
         assert recorder.events[-1].data["result"]["status"] == "budget_exhausted"
-
-    @pytest.mark.asyncio
-    async def test_the_same_script_under_utility(self) -> None:
-        recorder = Recorder()
-        agent = _agent(
-            ScriptedLLM([_echo("a"), _answer(PROSE), _answer(PROSE)]),
-            steps_per_attempt=1,
-            reflection_gate="utility",
-        )
-        result = await agent.run_task("echo a", on_event=recorder)
-        assert result.status == "gate_stopped"
-        [reflection] = recorder.of("reflection")
-        assert (
-            reflection.data["readable"],
-            reflection.data["action"],
-            reflection.data["requests"],
-            reflection.data["continue_run"],
-        ) == (True, "stop", 2, False)
 
     @pytest.mark.asyncio
     async def test_a_trimmed_reflection_reports_its_entry(self) -> None:

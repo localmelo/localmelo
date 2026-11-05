@@ -19,7 +19,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple, NoReturn
 
 from localmelo.support import config
-from localmelo.support.option_tiers import OLD_SPELLINGS, OPTION_ROWS, SETTINGS
+from localmelo.support.option_tiers import (
+    OLD_SPELLINGS,
+    OPTION_ROWS,
+    REMOVED_SETTINGS,
+    SETTINGS,
+)
 
 # The order of sections in listings; a key with no section comes first.
 SECTIONS = (
@@ -106,13 +111,18 @@ def catalog() -> dict[str, Key]:
     return dict(sorted(out.items(), key=lambda pair: rank.get(pair[1].section, 99)))
 
 
+def spelled(name: str) -> str:
+    """The option that the last part of the setting *name* spells (``--max-steps``)."""
+    return "--" + name.rpartition(".")[2].replace("_", "-")
+
+
 def option_for(name: str) -> str | None:
     """The option that the last part of *name* spells, as ``melo -h`` writes it.
 
     ``agent.max_steps`` spells ``--max-steps``, which ``-s N (--steps)`` replaces; None
     when no option has that name.
     """
-    option = "--" + name.rpartition(".")[2].replace("_", "-")
+    option = spelled(name)
     for names, meta, _ in OPTION_ROWS:
         spellings = names.split(", ")
         if option in spellings or OLD_SPELLINGS.get(option) == names:
@@ -122,8 +132,21 @@ def option_for(name: str) -> str | None:
     return None
 
 
+def refuse_removed(words: Sequence[str]) -> None:
+    """Exit 2 on the option of a removed setting in *words* (those before ``--``)."""
+    gone = {spelled(name): name for name in REMOVED_SETTINGS}
+    for word in words:
+        if word == "--":
+            return
+        option = word.partition("=")[0]
+        if option in gone:
+            fail(f"{option} was removed: {REMOVED_SETTINGS[gone[option]]}.")
+
+
 def lookup(name: str) -> Key:
     keys = catalog()
+    if name in REMOVED_SETTINGS:
+        fail(f"{name} was removed: {REMOVED_SETTINGS[name]}.")
     if name not in keys:
         # A name that is a key by its last part (`agent.mcp_config`) gets the nearest
         # keys; one that is only an option (`agent.max_steps`) gets the option.
@@ -236,6 +259,7 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
     is False, becomes an override of the config this process loads.
     """
     rest, pairs = scan(argv)
+    refuse_removed(rest)
     found: list[str] = []
     values: dict[str, Any] = {}
     for pair in pairs:
@@ -255,6 +279,24 @@ def expand(argv: Sequence[str], *, options: bool = True) -> list[str]:
     config.set_overrides(values)
     cut = rest.index("--") if "--" in rest else len(rest)
     return [*rest[:cut], *found, *rest[cut:]]
+
+
+def removed_in(data: Mapping[str, Any]) -> list[str]:
+    """One note for each removed setting that a parsed ``config.toml`` still holds."""
+    held = file_keys(data)
+    notes = [
+        f"{name} was removed ({why}); the line in the file is ignored"
+        for name, why in REMOVED_SETTINGS.items()
+        if name in held
+    ]
+    agent = data.get("agent")
+    if isinstance(agent, dict) and agent.get("window_eviction") == "slide":
+        # config._SPELLINGS reads it as "chunk".
+        notes.append(
+            'agent.window_eviction = "slide" was removed (a full window drops in '
+            'chunks); it reads as "chunk"'
+        )
+    return notes
 
 
 def file_keys(data: Mapping[str, Any]) -> set[str]:

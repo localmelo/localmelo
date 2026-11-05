@@ -32,7 +32,7 @@ import pytest
 
 import localmelo.melo.executor.builtins as builtin_tools
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import REFLECTION_PROMPT, SYSTEM_PROMPT
+from localmelo.melo.agent._chat import SYSTEM_PROMPT
 from localmelo.melo.agent.agent import WORKSPACE_NOTE
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ExecutorResultPayload
@@ -58,7 +58,6 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import Message, ToolCall, ToolDef
-from localmelo.tests.legacy_options import legacy_options
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1168,10 +1167,11 @@ async def test_the_workspace_note_is_given_only_with_a_root(
     llm = _PromptRecorder()
     agent = Agent(
         llm=llm,
-        options=legacy_options(
+        options=AgentOptions(
             builtins=frozenset({"file_read"}),
             max_attempts=1,
             steps_per_attempt=1,
+            answer_on_stop=False,
             workspace_root=str(root) if rooted else None,
         ),
     )
@@ -1186,9 +1186,9 @@ async def test_the_workspace_note_is_given_only_with_a_root(
         "run there; file_read and file_write refuse paths outside it."
     )
     if rooted:
-        assert planning == f"{SYSTEM_PROMPT}\n\n{note}"
+        assert planning.startswith(f"{SYSTEM_PROMPT}\n\n{note}")
     else:
-        assert planning == SYSTEM_PROMPT
-    # A reflection builds its own system prompt, without the note.
-    assert reflecting.startswith(REFLECTION_PROMPT)
-    assert "Working directory:" not in reflecting
+        assert planning.startswith(SYSTEM_PROMPT)
+        assert "Working directory:" not in planning
+    # The reflection request shares the plan request's system prompt.
+    assert reflecting == planning

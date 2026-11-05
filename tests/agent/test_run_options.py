@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.agent.agent import _resolve_memory_dir
 from localmelo.melo.checker import TASK_BUILTINS
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
@@ -22,7 +21,10 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
-from localmelo.tests.legacy_options import legacy_options
+from localmelo.tests.agent.test_reflection_gate import (
+    _planning_calls,
+    _reflection_calls,
+)
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -135,20 +137,6 @@ def _reflection(action: str, best_effort: str = "") -> Message:
         "feasibility": 0.8,
     }
     return Message(role="assistant", content=json.dumps(data))
-
-
-def _is_reflection(call: dict[str, Any]) -> bool:
-    return bool(call["messages"]) and call["messages"][0].content.startswith(
-        REFLECTION_PROMPT
-    )
-
-
-def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if not _is_reflection(c)]
-
-
-def _reflection_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if _is_reflection(c)]
 
 
 def _only_task(agent: Agent) -> TaskRecord:
@@ -460,7 +448,9 @@ class TestReflectPolicyBudgets:
                 _echo_call("e"),
             ]
         )
-        options = legacy_options(max_steps=3, steps_per_attempt=2, max_attempts=5)
+        options = AgentOptions(
+            max_steps=3, steps_per_attempt=2, max_attempts=5, answer_on_stop=False
+        )
         agent = _echo_agent(llm, options)
         assert await agent.run("echo q") == "[budget_exhausted] Max steps reached"
         # Attempt 0 uses 2 steps, attempt 1 the 1 step left; no attempt 2.

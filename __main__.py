@@ -1426,10 +1426,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--parent-run",
             "--import-session",
             "--title",
-            "--fixed-prefix",
             "--window-eviction",
-            "--reflect-tool-guard",
-            "--cache-layout",
             "--window-messages",
             "--developer",
             "--captured-history",
@@ -1579,15 +1576,6 @@ def _build_parser(
         help="Reflect between attempts (default), or run one attempt",
     )
     direct.add_argument(
-        "--reflection-gate",
-        choices=["flags", "utility", "patient"],
-        help="After a reflection, start the next attempt when it chooses continue "
-        "and its three checks hold (flags), or also require its utility "
-        "score to reach 0.1 (utility, the behavior before this option), or as "
-        "flags, but once per run also when the next step is not novel (patient, "
-        "default)",
-    )
-    direct.add_argument(
         "--captured-history",
         choices=["on", "off"],
         help="Store bounded, redacted captured tool results (default off)",
@@ -1600,30 +1588,10 @@ def _build_parser(
         "(default off)",
     )
     direct.add_argument(
-        "--fixed-prefix",
-        choices=["on", "off"],
-        help="Use a versioned run-frozen system prefix and local date (default on); "
-        "off sends the earlier requests",
-    )
-    direct.add_argument(
         "--window-eviction",
-        choices=["slide", "chunk", "boundary"],
+        choices=["chunk", "boundary"],
         help="How working memory drops old turns: chunk eight messages at a "
-        "time (default), slide one unit per step once full, or boundary, which "
-        "also drops at the end of an attempt",
-    )
-    direct.add_argument(
-        "--reflect-tool-guard",
-        choices=["on", "off"],
-        help="Reflection requests offer the plan's tools and end with a sentence "
-        "that asks for the JSON object, not a tool call (default on)",
-    )
-    direct.add_argument(
-        "--cache-layout",
-        choices=["v2", "v3"],
-        help="With the fixed prefix, v3 (default) appends a reflection once at the "
-        "attempt boundary, keeps the reflection request in the window and retries "
-        "an unreadable reflection on the same prefix; v2 sends the earlier requests",
+        "time (default), or boundary, which also drops at the end of an attempt",
     )
     direct.add_argument(
         "--window-messages",
@@ -1778,13 +1746,6 @@ def _build_parser(
         "(default 0.35; inert only for the task-local bm25/llm ranking)",
     )
     direct.add_argument(
-        "--admit-on-outcome",
-        choices=["on", "off"],
-        help="R6-lite: with a reasoning mode other than legacy, admit the final "
-        "attempt digest to long-term memory at the end of the run (default off); "
-        "inert in legacy",
-    )
-    direct.add_argument(
         "--keep-decision-text",
         action="store_true",
         help="R6-lite: also store the checked text of each admission decision "
@@ -1803,7 +1764,7 @@ def _build_parser(
             "interactive mode",
             "Options for bare melo, which opens the interactive UI on a terminal. "
             "It also takes --base-url, --chat-model, --workspace, --max-steps, "
-            "--attempt-policy, --reflection-gate, --builtins, --memory, "
+            "--attempt-policy, --builtins, --memory, "
             "--memory-dir, --request-timeout, --reasoning, --reasoning-field, "
             "--replay-turns, --note-writer, --retriever, --recall-*, "
             "--retrieval-extra-body and the --embedding-* options.",
@@ -2555,8 +2516,6 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
-    if getattr(args, "admit_on_outcome", None) is None and cfg.memory.admit_on_outcome:
-        options = dataclasses.replace(options, admit_on_outcome=True)
 
     # R5's [retrieval]: a value applies only when its flag is absent, and
     # the table is inert in legacy (decision 10).

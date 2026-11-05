@@ -15,10 +15,10 @@ from typing import Any, Literal
 # ── Config ──
 
 SHORT_TERM_MAX = 20
-# window_eviction="chunk"/"boundary": a full window drops whole units down to
-# SHORT_TERM_MAX - WINDOW_EVICT_CHUNK messages at once, and the prompt-cap fit
-# and the context fit drop down to WINDOW_FIT_TARGET of their limit, so the
-# retained history stays the same for several steps (prompt-cache reuse).
+# A full window drops whole units down to SHORT_TERM_MAX - WINDOW_EVICT_CHUNK
+# messages at once, and the prompt-cap fit and the context fit drop down to
+# WINDOW_FIT_TARGET of their limit, so the retained history stays the same for
+# several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
 # The working window's message cap (``window_messages``): any value in this
@@ -43,8 +43,7 @@ MAX_ATTEMPTS = 5
 
 # Reflection budget. Only one reflection is carried into the next attempt's
 # prompt. If its serialized form exceeds the char cap, the agent trims it to
-# fit (AgentOptions.reflection_gate="flags", the default) or forces a
-# decompose action instead of continuing ("utility").
+# fit.
 MAX_REFLECTION_CHARS = 2000
 
 # ── Empty replies ──
@@ -1141,12 +1140,6 @@ class ReflectionDecision:
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
-    # Active-learning acquisition signals
-    estimated_info_gain: float = 0.0
-    estimated_cost: float = 0.0
-    repeat_risk: float = 0.0
-    novelty: float = 0.0
-    feasibility: float = 0.0
 
 
 # ── Long-term memory candidates (R6-lite) ──

@@ -83,7 +83,7 @@ from localmelo.melo.agent._earlier import (
     earlier_block,
     with_earlier,
 )
-from localmelo.melo.agent._events import GateVerdict, _Emitter, check_sink
+from localmelo.melo.agent._events import _Emitter, check_sink
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
 from localmelo.melo.agent._picture_refusal import names_pictures
 from localmelo.melo.agent._step_review import (
@@ -102,7 +102,6 @@ from localmelo.melo.agent._tool_images import (
 from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
-    ReflectionGate,
     reasoning_refusal,
     retrieval_refusal,
 )
@@ -366,11 +365,6 @@ def _coerce_float(value: object, default: float = 0.0) -> float:
     return result if math.isfinite(result) else default
 
 
-def _coerce_unit_float(value: object, default: float = 0.0) -> float:
-    """Coerce to a float clamped to [0.0, 1.0]. Non-finite values use *default*."""
-    return max(0.0, min(1.0, _coerce_float(value, default)))
-
-
 def _coerce_str_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(v) for v in value]
@@ -381,9 +375,8 @@ def _coerce_str_list(value: object) -> list[str]:
     return [str(value)]
 
 
-# The decisions a reflection may recommend. Under reflection_gate="utility"
-# any other value reads "stop"; under "flags" an object without one of them
-# is no reflection (see _find_reflection).
+# The decisions a reflection may recommend. An object without one of them is no
+# reflection (see _find_reflection).
 REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
 
 
@@ -442,7 +435,7 @@ def _holds_reflection_object(text: str) -> bool:
 
 
 def _find_reflection(text: str) -> dict[str, Any] | None:
-    """The reflection a reply holds under ``reflection_gate="flags"``, or ``None``.
+    """The reflection a reply holds, or ``None``.
 
     That is the first JSON value of the reply (see :func:`_json_values`)
     that is an object whose ``recommended_action``, as a string, is one
@@ -468,7 +461,7 @@ REPAIR_TRIES = 8
 
 
 def _read_reflection(text: str) -> tuple[dict[str, Any], str | None] | None:
-    """The reflection a reply holds under ``"flags"``, and the repair it took.
+    """The reflection a reply holds, and the repair it took.
 
     That is the reflection of :func:`_find_reflection` with ``None`` as the
     repair. A reply that holds none gets one more reading with a single
@@ -513,16 +506,16 @@ def _json_error_line(text: str) -> str:
     return error_line(body, first[1], max(text.find(body), 0))
 
 
-def _unreadable_reason(reply: Message, *, flags: bool) -> str:
+def _unreadable_reason(reply: Message) -> str:
     """Why *reply* holds no reflection: ``tool_call``, ``invalid`` or ``no_json``.
 
     ``tool_call``: the reply has tool calls (and no reflection in its text);
-    ``invalid``: its text has a JSON object that ``"flags"`` does not accept;
+    ``invalid``: its text has a JSON object that no reflection is read from;
     ``no_json``: its text has no JSON object.
     """
     if reply.tool_calls:
         return "tool_call"
-    if flags and _holds_reflection_object(reply.content):
+    if _holds_reflection_object(reply.content):
         return "invalid"
     return "no_json"
 
@@ -717,8 +710,8 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     return fitted
 
 
-# The lists of a reflection that reflection_gate="patient" and answer_on_stop
-# cap, the most items each keeps and the most characters of an item.
+# The lists of a reflection that are capped, the most items each keeps and the
+# most characters of an item.
 REFLECTION_CAPPED_LISTS = ("useful_evidence", "failed_hypotheses", "recommended_avoids")
 REFLECTION_LIST_ITEMS = 8
 REFLECTION_ITEM_CHARS = 300
@@ -965,25 +958,6 @@ def _within_turn_budget(
 # text; see melo.schema), and the model plans again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
 
-# The utility (see _utility) that reflection_gate="utility" requires for
-# the next attempt to start.
-CONTINUATION_UTILITY_THRESHOLD = 0.1
-
-
-def _utility(decision: ReflectionDecision) -> float:
-    """The utility of another attempt, from the reflection's own estimates.
-
-    ``estimated_info_gain * feasibility * novelty - estimated_cost -
-    repeat_risk``, each a number in [0, 1] that the model chose. Only
-    ``reflection_gate="utility"`` acts on it (see :func:`_should_continue`).
-    """
-    return (
-        decision.estimated_info_gain * decision.feasibility * decision.novelty
-        - decision.estimated_cost
-        - decision.repeat_risk
-    )
-
-
 # The line a brief run adds to the window when an attempt boundary finds the
 # workspace unchanged since the run started.
 NO_CHANGE_PUSH = (
@@ -993,19 +967,15 @@ NO_CHANGE_PUSH = (
 
 
 def _gate_stop_reason(
-    decision: ReflectionDecision,
-    gate: ReflectionGate = "flags",
-    *,
-    patient: bool = False,
+    decision: ReflectionDecision, *, patient: bool = False
 ) -> str | None:
     """The first check of the continuation gate that *decision* fails.
 
     The codes are the ones in ``docs/reference/events.md``:
-    ``action_not_continue``, ``not_feasible``, ``not_concrete``,
-    ``not_novel`` and, with ``"utility"`` only, ``utility_below_threshold``.
-    ``None`` when every check holds, so that the next attempt may start.
-    With ``"patient"`` and *patient* true (the run's one allowance is
-    unspent), a decision that is not novel passes that check.
+    ``action_not_continue``, ``not_feasible``, ``not_concrete`` and
+    ``not_novel``. ``None`` when every check holds, so that the next attempt
+    may start. With *patient* true (the run's one allowance is unspent), a
+    decision that is not novel passes that check.
     """
     if decision.recommended_action != "continue":
         return "action_not_continue"
@@ -1013,26 +983,9 @@ def _gate_stop_reason(
         return "not_feasible"
     if not decision.next_step_is_concrete:
         return "not_concrete"
-    if not decision.next_step_is_novel and not (gate == "patient" and patient):
+    if not decision.next_step_is_novel and not patient:
         return "not_novel"
-    if gate == "utility" and _utility(decision) < CONTINUATION_UTILITY_THRESHOLD:
-        return "utility_below_threshold"
     return None
-
-
-def _should_continue(
-    decision: ReflectionDecision, gate: ReflectionGate = "flags"
-) -> bool:
-    """Whether the next attempt starts after a reflection's *decision*.
-
-    With either *gate* (see ``AgentOptions.reflection_gate``), only when
-    the decision is ``continue`` and its three checks hold:
-    ``task_still_feasible``, ``next_step_is_concrete`` and
-    ``next_step_is_novel``. ``"flags"`` asks nothing more. ``"utility"``,
-    the gate from before that option, also requires :func:`_utility` to
-    reach :data:`CONTINUATION_UTILITY_THRESHOLD`.
-    """
-    return _gate_stop_reason(decision, gate) is None
 
 
 # The stop reasons of the budget boundaries, by the error that the run
@@ -1045,7 +998,6 @@ _OUT_OF_REASONS = {
 
 def _stop_reason(
     decision: ReflectionDecision | None,
-    gate: ReflectionGate,
     out_of: str,
     *,
     brief: bool = False,
@@ -1068,7 +1020,7 @@ def _stop_reason(
         return _OUT_OF_REASONS[out_of]
     if brief and decision.recommended_action == "continue":
         return None
-    return _gate_stop_reason(decision, gate, patient=patient)
+    return _gate_stop_reason(decision, patient=patient)
 
 
 def _providers_from_config(
@@ -1280,7 +1232,7 @@ class _RunState:
     fixed_tools: list[ToolDef] | None = None
     # run_task(hide_tools=): the tools this run is not offered.
     hidden: frozenset[str] = frozenset()
-    # reflection_gate="patient": whether the run's one non-novel continue is spent.
+    # Whether the run's one non-novel continue is spent.
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
     answered_on_stop: bool = False
@@ -1291,7 +1243,7 @@ class _RunState:
     early_stop: str = ""
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none, and the result of a
-    # final boundary whose reflection is unreadable (reflection_gate="flags").
+    # final boundary whose reflection is unreadable.
     last_text: str = ""
     # The thinking of the planning reply that set last_text, and of the last
     # reflection reply read; _record_answer replays the one behind the result.
@@ -1336,8 +1288,8 @@ class _RunState:
 
     # User messages the run inserted mid-run (inbox): kept at a boundary drop.
     pinned: list[Message] = dataclasses.field(default_factory=list)
-    # cache_layout v3: the message that carries the latest reflection in the
-    # window, put back once if an eviction takes it.
+    # The message that carries the latest reflection in the window, put back
+    # once if an eviction takes it.
     reflection_msg: Message | None = None
     # An opt-in source of parent instructions at planning boundaries.
     inbox: InboxSource | None = None
@@ -2544,15 +2496,13 @@ class Agent:
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy and its reflection gate, tool exposure, the
-    built-in tools, memory and a run timeout; the defaults keep the
-    behavior from before options existed, except that every step now
-    offers all registered built-ins and runs only the tools it offered,
-    and that with ``reflection_gate="flags"`` a reflection decides on its
-    own checks whether the next attempt starts, a reply without a
-    reflection does not stop the run, and an over-long reflection is
-    trimmed (``"utility"`` keeps the behavior from before that option,
-    see :meth:`_run_reflective_attempts`).
+    the attempt policy, tool exposure, the built-in tools, memory and a run
+    timeout; the defaults keep the behavior from before options existed,
+    except that every step now offers all registered built-ins and runs only
+    the tools it offered, and that a reflection decides on its own checks
+    whether the next attempt starts, a reply without a reflection does not
+    stop the run, and an over-long reflection is trimmed (see
+    :meth:`_run_reflective_attempts`).
     ``tool_providers`` supply further tools, for example those of MCP
     servers: the first run starts them and registers their tools next to
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
@@ -2722,13 +2672,6 @@ class Agent:
         # the documented behavior of that option: no long-term recall, no
         # long-term writes, no reflection promotion, and reflections are
         # still cleared. self._embedding stays set so close() closes it.
-        # window_eviction "chunk" and "boundary": drop in chunks (see schema).
-        self._evicts_in_chunks = self.options.window_eviction != "slide"
-        # cache_layout "v3" (with the fixed prefix): a reflection is a message of
-        # the window, appended at the attempt boundary, not rebuilt per request.
-        self._reflection_in_window = (
-            self.options.fixed_prefix and self.options.cache_layout == "v3"
-        )
         # Pictures tools return (AgentOptions.tool_images): the store whose
         # payloads planning requests carry; "auto" asks the provider once.
         self._tool_images = ToolImageStore(
@@ -2744,11 +2687,8 @@ class Agent:
             long=long_backend,
             procedures=procedures_backend,
             short_term_empty_prefix=self.options.reasoning != "legacy",
-            short_term_evict_chunk=(
-                WINDOW_EVICT_CHUNK if self._evicts_in_chunks else 0
-            ),
+            short_term_evict_chunk=WINDOW_EVICT_CHUNK,
             memory=self.options.memory,
-            admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
         )
         self.checker = Checker(mode=self.options.mode, builtins=self.options.builtins)
@@ -2813,14 +2753,9 @@ class Agent:
             note_instruction=instruction,
             empty_prefix=self.options.reasoning != "legacy",
             context_budget=budget,
-            fixed_prefix=self.options.fixed_prefix,
-            fit_target=WINDOW_FIT_TARGET if self._evicts_in_chunks else 1.0,
-            tool_guard=self.options.reflect_tool_guard,
-            window_reflection=self._reflection_in_window,
+            fit_target=WINDOW_FIT_TARGET,
             # lean_output keeps the full system prompt in the compress modes,
-            # whose note before each tool call is text between tool calls, and
-            # the full reflection prompt under the utility gate, which reads
-            # the estimates the lean one leaves out.
+            # whose note before each tool call is text between tool calls.
             system_prompt=(
                 LEAN_SYSTEM_PROMPT
                 if self.options.lean_output and not instruction
@@ -2829,7 +2764,6 @@ class Agent:
             reflection_prompt=(
                 LEAN_REFLECTION_PROMPT
                 if self.options.lean_output
-                and self.options.reflection_gate != "utility"
                 else REFLECTION_PROMPT
             ),
             identity=self.options.identity or "",
@@ -4236,29 +4170,17 @@ class Agent:
                 self._drain_decisions(decisions, run)
 
     @staticmethod
-    def _used_notes(content: str, flags: bool) -> list[str]:
+    def _used_notes(content: str) -> list[str]:
         """The string aliases of the reflection reply's ``used_notes``.
 
-        The object is the one the gate's parser reads: with ``"flags"``
-        the first object with a valid ``recommended_action`` (see
-        :func:`_read_reflection`), with ``"utility"`` the first JSON
-        object. A non-list or non-string entries are ignored.
+        The object is the one the gate's parser reads: the first object with a
+        valid ``recommended_action`` (see :func:`_read_reflection`). A non-list
+        or non-string entries are ignored.
         """
-        data: dict[str, Any] | None
-        if flags:
-            found = _read_reflection(_coerce_str(content))
-            data = found[0] if found is not None else None
-        else:
-            try:
-                value = _decode_reflection(_coerce_str(content))
-            except ValueError:
-                return []
-            if not isinstance(value, dict):
-                return []
-            data = value
-        if data is None:
+        found = _read_reflection(_coerce_str(content))
+        if found is None:
             return []
-        names = data.get("used_notes")
+        names = found[0].get("used_notes")
         if not isinstance(names, list):
             return []
         return [name for name in names if isinstance(name, str) and name]
@@ -4609,7 +4531,7 @@ class Agent:
                     break
             else:
                 return  # not even the newest unit fits: keep the window
-            if first and self._evicts_in_chunks:
+            if first:
                 # Drop to WINDOW_FIT_TARGET of the cap, so the next steps fit
                 # without dropping again (when no such cut fits, keep *first*).
                 for deeper in range(first + 1, len(units)):
@@ -4628,18 +4550,17 @@ class Agent:
     async def _long_context(self, query: str, run: _RunState | None) -> list[Message]:
         """The long-term context a legacy planning request carries.
 
-        Without ``fixed_prefix``, or outside a run, it is read for every
-        request, as before. With it, a run reads it at its first step and
-        again only at a step whose window no longer holds the message that
-        led it when the block was last kept: an eviction has changed the
-        request there already. Between those steps the query is the same and
+        Outside a run it is read for every request. A run reads it at its
+        first step and again only at a step whose window no longer holds the
+        message that led it when the block was last kept: an eviction has
+        changed the request there already. Between those steps the query is the same and
         the store gains only the run's own step summaries, whose turns the
         window still holds. Reading it on every step would repeat them and
         change the message right after the system prompt, so a server would
         prefill every later message again; kept, each request extends the
         previous one.
         """
-        if run is None or not self.options.fixed_prefix:
+        if run is None:
             return await self.hippo.retrieve_context(query)
         if run.long_context is None or (
             run.long_head is not None and not self.hippo.working.holds(run.long_head)
@@ -4694,14 +4615,8 @@ class Agent:
             )
             run.boundary_block = block
         query_block = "" if run is None else run.boundary_block
-        # In the window already when the layout keeps the reflection there.
-        reflection_msgs = (
-            []
-            if self._reflection_in_window
-            else _serialize_reflections(self.hippo.working.get_reflections())
-        )
         await self._fit_prompt_cap(
-            long_context + reflection_msgs,
+            long_context,
             query,
             task_query=task_query,
             query_block=query_block,
@@ -4717,7 +4632,7 @@ class Agent:
         if self.options.tool_exposure == "all":
             # The same list on every step, so the tools part of the request
             # stays byte-stable for prefix caching.
-            if self.options.fixed_prefix and run is not None:
+            if run is not None:
                 if run.fixed_tools is None:
                     run.fixed_tools = copy.deepcopy(
                         sorted(self.hippo.list_tools(), key=lambda t: t.name)
@@ -4734,8 +4649,8 @@ class Agent:
             # A provider's tool group is offered like the built-ins, after them.
             offered = builtins | self._grouped_names
             # Hints are the model's tool calls, which live in the window; the
-            # long-term and reflection messages carry none.
-            hint_sources = long_context + short_window + reflection_msgs
+            # long-term messages carry none.
+            hint_sources = long_context + short_window
             tool_hints = [
                 name
                 for name in self.hippo.extract_tool_hints(hint_sources)
@@ -4792,7 +4707,7 @@ class Agent:
         )
         if run is not None and (run.inbox is not None or run.brief):
             planned = coalesce_user_messages(planned)
-        all_msgs = long_context + planned + reflection_msgs
+        all_msgs = long_context + planned
         check = await self.checker.pre_plan(
             all_msgs, count_thinking=self._counts_thinking
         )
@@ -4818,7 +4733,6 @@ class Agent:
         short_window: list[Message],
         tools: list[ToolDef],
         query: str,
-        reflections: list[ReflectionEntry] | None = None,
         *,
         task_query: Message | None = None,
         run: _RunState | None = None,
@@ -4869,7 +4783,6 @@ class Agent:
             short=sent,
             tools=tools,
             query=query,
-            reflections=reflections,
             query_block=query_block,
             recalls=recalls,
             earlier="" if run is None else run.plan_earlier,
@@ -5676,42 +5589,26 @@ class Agent:
         A reply that holds no reflection, often a tool call, is asked for
         once more, with the window's turns written out as text and
         :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
-        With ``"flags"``, when that reply has JSON that the decoder rejects
-        and is not a tool call, one more line follows the note and quotes
-        the decoder's error (see :func:`_json_error_line`).
-        What counts as a reflection, and how one whose serialized form
-        exceeds :data:`MAX_REFLECTION_CHARS` is kept to that budget,
-        depends on ``reflection_gate``:
+        When that reply has JSON that the decoder rejects and is not a tool
+        call, one more line follows the note and quotes the decoder's error
+        (see :func:`_json_error_line`).
 
-        - ``"flags"``: a JSON object with a valid ``recommended_action``
-          (see :func:`_read_reflection`, which repairs one common slip of
-          the JSON and tells the event which), so a reply whose only JSON is
-          something else, such as a tool call written out as text, is
-          asked for again too. When the second reply holds no reflection
-          either, this returns ``None``: the boundary has no reflection
-          (see :meth:`_run_reflective_attempts`). A reflection over the
-          budget is trimmed to fit (see :func:`_fit_reflection`),
-          whatever its decision: the decision and its rationale stay the
-          model's, and its ``tried_memory`` is the trimmed entry.
-        - ``"utility"``, the behavior from before that option: any JSON
-          object (see :func:`_holds_reflection_object`). The second reply
-          is parsed whatever it holds, so one that still has no object
-          falls back to ``stop`` (see :meth:`_parse_reflection`). A
-          reflection over the budget forces
-          ``decision.recommended_action = "decompose"``, with a note in
-          the rationale, so the next attempt does not start. The model is
-          meant to keep the reflection compact — when it cannot, the
-          agent stops chasing instead of carrying an ever-growing
-          scratchpad. A ``done`` decision is left as it is: it ends the
-          run, so no attempt would carry the reflection.
+        A reflection is a JSON object with a valid ``recommended_action``
+        (see :func:`_read_reflection`, which repairs one common slip of the
+        JSON and tells the event which), so a reply whose only JSON is
+        something else, such as a tool call written out as text, is asked for
+        again too. When the second reply holds no reflection either, this
+        returns ``None``: the boundary has no reflection (see
+        :meth:`_run_reflective_attempts`). A reflection over
+        :data:`MAX_REFLECTION_CHARS` once serialized is trimmed to fit (see
+        :func:`_fit_reflection`), whatever its decision: the decision and its
+        rationale stay the model's, and its ``tried_memory`` is the trimmed
+        entry.
 
-        A reflection request that ``fit`` refuses (the explicit modes,
-        when even its newest tail unit is over the prompt cap) is a reply
-        that cannot be read: with ``"flags"`` this returns ``None``, and
-        with ``"utility"`` it reads ``stop`` as a reply without a JSON
-        object does.
+        A reflection request that ``fit`` refuses (the explicit modes, when
+        even its newest tail unit is over the prompt cap) is a reply that
+        cannot be read: this returns ``None``.
         """
-        flags = self.options.reflection_gate != "utility"
         short_window = self.hippo.working.get_window()
         task_query = run.task_query_msg if run is not None else None
         sent, skipped = _replay_plan(
@@ -5758,10 +5655,8 @@ class Agent:
         )
         if response is None:
             # The fit refused the request before it was sent; read it as an
-            # unreadable reply (see the docstring and _parse_reflection).
-            return (
-                None if flags else self._parse_reflection("", attempt_id, failure_type)
-            )
+            # unreadable reply (see the docstring).
+            return None
         if self.options.reasoning != "legacy":
             before = response.thinking
             response = _split_inline_reasoning(response)
@@ -5771,20 +5666,12 @@ class Agent:
             replies.append(response)
         if run is not None:
             run.events.reflection_call(getattr(self.chat, "last_call", None))
-        if flags:
-            readable = _read_reflection(response.content) is not None
-        else:
-            readable = _holds_reflection_object(response.content)
-        if not readable:
-            reason = _unreadable_reason(response, flags=flags)
+        if _read_reflection(response.content) is None:
+            reason = _unreadable_reason(response)
             if run is not None:
                 run.events.reflection_unreadable(reason)
             # JSON the decoder rejected: say where, so the retry can mend it.
-            hint = (
-                _json_error_line(response.content)
-                if flags and reason != "tool_call"
-                else ""
-            )
+            hint = _json_error_line(response.content) if reason != "tool_call" else ""
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
@@ -5804,11 +5691,7 @@ class Agent:
                 **addendum,
             )
             if response is None:
-                return (
-                    None
-                    if flags
-                    else self._parse_reflection("", attempt_id, failure_type)
-                )
+                return None
             if self.options.reasoning != "legacy":
                 before = response.thinking
                 response = _split_inline_reasoning(response)
@@ -5818,97 +5701,26 @@ class Agent:
                 replies.append(response)
             if run is not None:
                 run.events.reflection_call(getattr(self.chat, "last_call", None))
+        found = _read_reflection(response.content)
         reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
-            readable = (
-                _read_reflection(response.content) is not None
-                if flags
-                else _holds_reflection_object(response.content)
-            )
-            if self._notes_mode and readable:
-                await self._cite_notes(self._used_notes(response.content, flags), run)
+            if self._notes_mode and found is not None:
+                await self._cite_notes(self._used_notes(response.content), run)
                 reflection_entry = self._store_reflection_note(response, task, run)
                 if reflection_entry is not None and reflection_entry.note is not None:
                     reflection_note_id = reflection_entry.note.note_id
-        if flags:
-            found = _read_reflection(response.content)
-            if found is None:
-                return None
-            data, repair = found
-            if run is not None:
-                run.events.reflection_repaired(repair)
-            entry, decision = self._reflection_from_object(
-                data, attempt_id, failure_type
-            )
-            if self.options.reflection_gate == "patient" or self.options.answer_on_stop:
-                entry = _cap_reflection_lists(entry)
-            entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
-            decision.tried_memory = entry
-            if run is not None and self._notes_mode:
-                self._propose_reflection(entry, run, note_id=reflection_note_id)
-            return entry, decision
-        entry, decision = self._parse_reflection(
-            response.content, attempt_id, failure_type
-        )
-        serialized = _serialize_reflections([entry])
-        size = serialized[0].content.__len__() if serialized else 0
-        if size > MAX_REFLECTION_CHARS and decision.recommended_action != "done":
-            decision.recommended_action = "decompose"
-            note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
-            decision.rationale = (decision.rationale or "") + note
+        if found is None:
+            return None
+        data, repair = found
+        if run is not None:
+            run.events.reflection_repaired(repair)
+        entry, decision = self._reflection_from_object(data, attempt_id, failure_type)
+        entry = _fit_reflection(_cap_reflection_lists(entry), MAX_REFLECTION_CHARS)
+        decision.tried_memory = entry
         if run is not None and self._notes_mode:
             self._propose_reflection(entry, run, note_id=reflection_note_id)
         return entry, decision
-
-    @staticmethod
-    def _parse_reflection(
-        text: str,
-        attempt_id: int,
-        failure_type: str,
-    ) -> tuple[ReflectionEntry, ReflectionDecision]:
-        """Parse LLM reflection JSON with strict coercion and conservative fallback.
-
-        The parser of ``reflection_gate="utility"``; ``"flags"`` reads the
-        object that :func:`_find_reflection` finds instead (see
-        :meth:`_do_reflect`).
-
-        Parsing is tolerant: a Markdown code fence around the reply is
-        stripped, and a reply that is not JSON as a whole is read from the
-        first ``{...}`` object in it (see :func:`_decode_reflection`). Only
-        a reply without such an object falls back to ``stop``, with the
-        rationale "Could not parse reflection response"; a reply that is
-        JSON but not an object stops too. The object itself is read by
-        :meth:`_reflection_from_object`.
-        """
-        try:
-            data = _decode_reflection(_coerce_str(text))
-        except ValueError:
-            entry = ReflectionEntry(
-                attempt_id=attempt_id,
-                summary=_coerce_str(text)[:200],
-                failure_type=failure_type,
-            )
-            return entry, ReflectionDecision(
-                recommended_action="stop",
-                rationale="Could not parse reflection response",
-                best_effort_result=_coerce_str(text)[:500],
-                tried_memory=entry,
-            )
-
-        if not isinstance(data, dict):
-            entry = ReflectionEntry(
-                attempt_id=attempt_id,
-                summary=str(data)[:200],
-                failure_type=failure_type,
-            )
-            return entry, ReflectionDecision(
-                recommended_action="stop",
-                rationale="Reflection response was not a JSON object",
-                best_effort_result="",
-                tried_memory=entry,
-            )
-        return Agent._reflection_from_object(data, attempt_id, failure_type)
 
     @staticmethod
     def _reflection_from_object(
@@ -5918,8 +5730,8 @@ class Agent:
     ) -> tuple[ReflectionEntry, ReflectionDecision]:
         """The reflection entry and decision that the JSON object *data* gives.
 
-        Each value is coerced to its field's type, the five estimates
-        clamped to [0, 1], and a missing one takes a default. A
+        Each value is coerced to its field's type, and a missing one takes a
+        default. A
         ``recommended_action`` that is not one of
         :data:`REFLECTION_ACTIONS` reads ``stop``.
         """
@@ -5952,12 +5764,6 @@ class Agent:
             rationale=_coerce_str(data.get("rationale")),
             best_effort_result=_coerce_str(data.get("best_effort_result")),
             tried_memory=entry,
-            # Active-learning fields (clamped to [0, 1])
-            estimated_info_gain=_coerce_unit_float(data.get("estimated_info_gain")),
-            estimated_cost=_coerce_unit_float(data.get("estimated_cost")),
-            repeat_risk=_coerce_unit_float(data.get("repeat_risk")),
-            novelty=_coerce_unit_float(data.get("novelty")),
-            feasibility=_coerce_unit_float(data.get("feasibility")),
         )
         return entry, decision
 
@@ -6020,11 +5826,6 @@ class Agent:
         drops the text before ``run.finished``.
         """
         fingerprints: list[tuple[str, str, str]] = []
-        reflections = (
-            None
-            if self._reflection_in_window
-            else self.hippo.working.get_reflections() or None
-        )
         run.attempt_calls.clear()
         run.read_streak = 0
 
@@ -6108,7 +5909,6 @@ class Agent:
                     short_window,
                     tools,
                     query,
-                    reflections=reflections,
                     task_query=run.task_query_msg,
                     run=run,
                     **({"on_ready": on_ready} if on_ready is not None else {}),
@@ -6409,7 +6209,7 @@ class Agent:
         - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out.
           With ``attempt_policy="reflect"`` the last reflection's best
           effort, if any, is the result, or the latest planning text when
-          that reflection was unreadable (``reflection_gate="flags"``, see
+          that reflection was unreadable (see
           :meth:`_run_reflective_attempts`). Also the end of a run whose next
           request would pass ``max_calls``: the error says ``Call budget
           reached``, and the result is the latest text the model wrote in the
@@ -7084,12 +6884,6 @@ class Agent:
                 # nothing unchecked to long-term memory. R6-lite's flush
                 # admits the run's candidates through the boundary and
                 # policy; its failure is logged, never raised.
-                if (
-                    run.final_digest is not None
-                    and self.options.admit_on_outcome
-                    and not run.remember_request
-                ):
-                    run.final_digest.provenance["final_status"] = run.status
                 decisions = await self.hippo.flush(
                     run_request=run.remember_request,
                     digest=run.final_digest,
@@ -7561,19 +7355,15 @@ class Agent:
             config=self._run_config(),
             memory_stats=memory_stats,
             context_budget=stats.context_budget,
-            prefix_cache=(
-                {
-                    "version": PREFIX_VERSION,
-                    "schema_changes": stats.schema_changes,
-                    **(
-                        {"reported_cached_tokens": stats.prefix_cached_tokens}
-                        if stats.prefix_cached_tokens is not None
-                        else {}
-                    ),
-                }
-                if self.options.fixed_prefix
-                else None
-            ),
+            prefix_cache={
+                "version": PREFIX_VERSION,
+                "schema_changes": stats.schema_changes,
+                **(
+                    {"reported_cached_tokens": stats.prefix_cached_tokens}
+                    if stats.prefix_cached_tokens is not None
+                    else {}
+                ),
+            },
             confinement=self._confinement_record(run),
             answered_on_stop=run.answered_on_stop,
             format_fixed=run.format_fixed,
@@ -7605,7 +7395,6 @@ class Agent:
             "attempt_policy": opts.attempt_policy,
             "steps_per_attempt": opts.steps_per_attempt,
             "max_attempts": opts.max_attempts,
-            "reflection_gate": opts.reflection_gate,
             "tool_exposure": opts.tool_exposure,
             "mode": opts.mode,
             "builtins": sorted(builtins),
@@ -7622,12 +7411,7 @@ class Agent:
             config["refused_steps"] = opts.refused_steps
         if opts.max_calls is not None:
             config["max_calls"] = opts.max_calls
-        if opts.window_eviction != "slide":
-            config["window_eviction"] = opts.window_eviction
-        if opts.reflect_tool_guard:
-            config["reflect_tool_guard"] = True
-        if opts.cache_layout != "v2":
-            config["cache_layout"] = opts.cache_layout
+        config["window_eviction"] = opts.window_eviction
         if opts.window_messages != SHORT_TERM_MAX:
             config["window_messages"] = opts.window_messages
         if opts.reasoning != "legacy":
@@ -7644,7 +7428,6 @@ class Agent:
             config["cross_task_ratio"] = opts.cross_task_ratio
             config["cross_task_cap"] = opts.cross_task_cap
             config["cross_task_cold"] = opts.cross_task_cold
-            config["admit_on_outcome"] = opts.admit_on_outcome
             config["keep_decision_text"] = opts.keep_decision_text
         return config
 
@@ -7851,37 +7634,29 @@ class Agent:
           only finalize the answer. Any decision but ``done`` ends the run
           as ``budget_exhausted``, with its ``best_effort_result`` as the
           result.
-        - Otherwise the continuation gate (:func:`_should_continue`)
-          decides, as ``reflection_gate`` says. With ``"flags"`` the next
-          attempt starts when the decision is ``continue`` and its three
-          checks hold (``task_still_feasible``, ``next_step_is_concrete``
-          and ``next_step_is_novel``). ``"utility"``, the gate from before
-          that option, also requires the utility computed from the
-          decision's own estimates (:func:`_utility`) to reach
-          :data:`CONTINUATION_UTILITY_THRESHOLD`. A gate that stops the
-          run ends it as ``gate_stopped``, with the ``best_effort_result``
-          as the result and the decision's rationale as the error, or
+        - Otherwise the continuation gate decides: the next attempt starts
+          when the decision is ``continue`` and its checks hold
+          (``task_still_feasible`` and ``next_step_is_concrete``; and
+          ``next_step_is_novel``, except that the run lets one ``continue``
+          that is not novel through). A gate that stops the run ends it as
+          ``gate_stopped``, with the ``best_effort_result`` as the result and
+          the decision's rationale as the error, or
           ``Stopped after attempt <n> (stop reason: <code>)`` (``n``
           counting from 1; the code is the check that stopped the run, see
           :func:`_gate_stop_reason`) when the rationale is blank. The
           ``reflection`` event carries the code in every case.
 
-        With ``"flags"``, a reply that holds no reflection even when asked
-        again (see :meth:`_do_reflect`) gives no decision and adds no
-        reflection: the previous one, if any, stays in working memory, and
-        nothing of the reply reaches long-term memory. The next attempt
-        starts; when none can start, the run ends as ``budget_exhausted``
-        with the boundary's usual error, ``Max attempts reached`` or
-        ``Max steps reached``, and the latest non-blank text of a planning
-        reply in this run as the result. One INFO line names the attempt.
-        With ``"utility"`` such a reply reads ``stop`` (see
-        :meth:`_parse_reflection`) and is kept as the reflection.
+        A reply that holds no reflection even when asked again (see
+        :meth:`_do_reflect`) gives no decision and adds no reflection: the
+        previous one, if any, stays in working memory, and nothing of the
+        reply reaches long-term memory. The next attempt starts; when none
+        can start, the run ends as ``budget_exhausted`` with the boundary's
+        usual error, ``Max attempts reached`` or ``Max steps reached``, and
+        the latest non-blank text of a planning reply in this run as the
+        result. One INFO line names the attempt.
 
-        A reflection over :data:`MAX_REFLECTION_CHARS` keeps its decision
-        with ``"flags"`` and is trimmed to fit before it is kept; with
-        ``"utility"`` any decision but ``done`` becomes ``decompose``,
-        which the gate stops, and ``done`` ends the run as it is (see
-        :meth:`_do_reflect`).
+        A reflection over :data:`MAX_REFLECTION_CHARS` keeps its decision and
+        is trimmed to fit before it is kept (see :meth:`_do_reflect`).
         """
         opts = self.options
         total_steps = 0
@@ -7931,10 +7706,10 @@ class Agent:
             decision = None
             if reflection is not None:
                 entry, decision = reflection
-            # None for a reply with no reflection, only with "flags".
-            patient = opts.reflection_gate == "patient" and not run.patience_spent
+            # None for a reply with no reflection.
+            patient = not run.patience_spent
             stop_reason = _stop_reason(
-                decision, opts.reflection_gate, out_of, brief=run.brief, patient=patient
+                decision, out_of, brief=run.brief, patient=patient
             )
             if (
                 patient
@@ -7945,15 +7720,6 @@ class Agent:
             ):
                 run.patience_spent = True  # this attempt rests on the allowance
             continue_run = stop_reason is None
-            verdict = GateVerdict(
-                opts.reflection_gate,
-                stop_reason,
-                (
-                    _utility(decision)
-                    if decision is not None and opts.reflection_gate == "utility"
-                    else None
-                ),
-            )
             if self._plan.attempt is not None:
                 if continue_run:
                     # The new attempt's block replaces the old one; do not
@@ -7975,8 +7741,10 @@ class Agent:
                 else:
                     run.boundary_block = ""
             record_digest()
-            if reflection is None:  # only with reflection_gate="flags"
-                run.events.reflection(None, continue_run=continue_run, verdict=verdict)
+            if reflection is None:
+                run.events.reflection(
+                    None, continue_run=continue_run, stop_reason=stop_reason
+                )
                 if out_of:
                     logger.info(
                         "Reflection after attempt %d unreadable after a retry, "
@@ -8003,12 +7771,11 @@ class Agent:
                 # starts from the query (and what the run pinned) alone.
                 self.hippo.working.drop_since(run.task_query_msg, run.pinned)
                 exchange = []
-            if self._reflection_in_window:
-                # Once, here: the exchange (when the request shared the plan's
-                # prefix) and the block that carries the reflection.
-                run.reflection_msg = self.chat.reflection_message(entry)
-                for message in (*exchange, run.reflection_msg):
-                    self.hippo.working.append(message)
+            # Once, here: the exchange (when the request shared the plan's
+            # prefix) and the block that carries the reflection.
+            run.reflection_msg = self.chat.reflection_message(entry)
+            for message in (*exchange, run.reflection_msg):
+                self.hippo.working.append(message)
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
@@ -8017,13 +7784,13 @@ class Agent:
                     # A failing brief check overrules the done: the next
                     # attempt starts with what the check showed.
                     run.events.reflection(
-                        reflection,
-                        continue_run=True,
-                        verdict=verdict._replace(stop_reason=None),
+                        reflection, continue_run=True, stop_reason=None
                     )
                     self.hippo.working.append(Message(role="user", content=retry))
                     continue
-                run.events.reflection(reflection, continue_run=False, verdict=verdict)
+                run.events.reflection(
+                    reflection, continue_run=False, stop_reason=stop_reason
+                )
                 if best_effort.strip():
                     answer = best_effort
                     run.answer_thinking = run.reflection_thinking
@@ -8033,12 +7800,16 @@ class Agent:
                 run.end("completed", result=answer)
                 return
             if out_of:
-                run.events.reflection(reflection, continue_run=False, verdict=verdict)
+                run.events.reflection(
+                    reflection, continue_run=False, stop_reason=stop_reason
+                )
                 run.answer_thinking = run.reflection_thinking
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
             if not continue_run:
-                run.events.reflection(reflection, continue_run=False, verdict=verdict)
+                run.events.reflection(
+                    reflection, continue_run=False, stop_reason=stop_reason
+                )
                 # The rationale is the model's own words (frozen by the
                 # legacy goldens); only the fallback names the check.
                 error = decision.rationale.strip() or (
@@ -8053,7 +7824,9 @@ class Agent:
                 run.answer_thinking = run.reflection_thinking
                 run.end("gate_stopped", result=best_effort, error=error)
                 return
-            run.events.reflection(reflection, continue_run=True, verdict=verdict)
+            run.events.reflection(
+                reflection, continue_run=True, stop_reason=stop_reason
+            )
             await self._push_if_unchanged(run, entry)
 
     async def _push_if_unchanged(

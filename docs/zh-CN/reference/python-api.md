@@ -40,7 +40,6 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `attempt_policy` | `"reflect"` | `"reflect"`：分多次尝试，每次之后有一次反思。`"none"`：只有一次尝试。 |
 | `steps_per_attempt` | `50` | 使用 `"reflect"` 时每次尝试最多的步骤数：一次运行用完它们仍没有答案时才会反思。 |
 | `max_attempts` | `5` | 使用 `"reflect"` 时每次运行最多的尝试次数。 |
-| `reflection_gate` | `"patient"` | 使用 `"reflect"` 时为 `"patient"`、`"flags"` 或 `"utility"`；见[反思](../concepts/how-it-works.md#reflection)。 |
 | `answer_on_stop` | `True` | `True`：以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的证据索要答案；答案里没有任务要求的收尾行时，再发出一次请求把它加上；`False` 两种请求都不发。见[运行结果](run-results.md#statuses)。 |
 | `empty_reply_fallback` | `"on"` | `"on"`：会思考的模型以没有答案、也没有工具调用结束一个回合时，在提供方设置了 `thinking_off_body` 的情况下关闭思考再问一次，仍为空时以带标记的思考末尾作为答案；`RunResult.empty_reply` 以及 `thinking_off_retry` 和 `answer_from_thinking` 通知会说明这一点。`"off"`：运行像以前一样以 `failed` 结束。见[运行结果](run-results.md#statuses)。 |
 | `max_calls` | `None` | 不小于 2 的整数：一次运行最多发出的模型请求数；在会超出它的那个请求之前运行以 `budget_exhausted` 结束（开启 `answer_on_stop` 时，最后一次调用留给答案）。`None`：没有上限。见[运行结果](run-results.md#statuses)。 |

@@ -9,14 +9,11 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent.agent import _gate_stop_reason, _should_continue, _stop_reason
-from localmelo.melo.agent.options import ReflectionGate
+from localmelo.melo.agent.agent import _gate_stop_reason, _stop_reason
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.schema import ReflectionDecision
 from localmelo.tests.agent.test_reflection_gate import (
-    CHECKS,
-    GATES,
-    LOW_UTILITY,
+    STOPPING_CHECKS,
     FakeLLM,
     _agent,
     _answer,
@@ -27,7 +24,6 @@ from localmelo.tests.agent.test_reflection_gate import (
 REASON_OF = {
     "task_still_feasible": "not_feasible",
     "next_step_is_concrete": "not_concrete",
-    "next_step_is_novel": "not_novel",
 }
 PROSE = "I would rather say it in words."
 STILL_PROSE = "Still in words, no object."
@@ -45,14 +41,12 @@ async def _run(
 
 class TestStopReasonInTheEvent:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("gate", GATES)
     async def test_a_continue_that_passes_carries_the_flags_and_no_reason(
-        self, gate: ReflectionGate
+        self,
     ) -> None:
         result, [first, *_] = await _run(
             [_echo_call("a"), _reflection("continue"), _answer("42")],
             max_attempts=3,
-            reflection_gate=gate,
         )
         assert result.status == "completed"
         assert first["flags"] == {
@@ -60,27 +54,23 @@ class TestStopReasonInTheEvent:
             "next_step_is_concrete": True,
             "next_step_is_novel": True,
         }
-        assert (first["gate"], first["stop_reason"]) == (gate, None)
+        assert first["stop_reason"] is None
         assert first["continue_run"] is True
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("gate", GATES)
-    @pytest.mark.parametrize("check", CHECKS)
-    async def test_a_failed_check_names_itself(
-        self, gate: ReflectionGate, check: str
-    ) -> None:
+    @pytest.mark.parametrize("check", STOPPING_CHECKS)
+    async def test_a_failed_check_names_itself(self, check: str) -> None:
         result, [event] = await _run(
             [
                 _echo_call("a"),
                 _reflection("continue", rationale="go on", **{check: False}),
             ],
             max_attempts=3,
-            reflection_gate=gate,
         )
         assert result.status == "gate_stopped"
         assert event["flags"][check] is False
         assert [v for v in event["flags"].values() if v is False] == [False]
-        assert (event["gate"], event["continue_run"]) == (gate, False)
+        assert event["continue_run"] is False
         assert event["stop_reason"] == REASON_OF[check]
         assert result.error == "go on"
 
@@ -89,12 +79,12 @@ class TestStopReasonInTheEvent:
         result, [event] = await _run(
             [
                 _echo_call("a"),
-                _reflection("continue", rationale="", next_step_is_novel=False),
+                _reflection("continue", rationale="", next_step_is_concrete=False),
             ],
             max_attempts=3,
         )
-        assert result.error == "Stopped after attempt 1 (stop reason: not_novel)"
-        assert event["stop_reason"] == "not_novel"
+        assert result.error == "Stopped after attempt 1 (stop reason: not_concrete)"
+        assert event["stop_reason"] == "not_concrete"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("action", ["stop", "decompose"])
@@ -119,18 +109,6 @@ class TestStopReasonInTheEvent:
             "done",
             "action_not_continue",
         )
-
-    @pytest.mark.asyncio
-    async def test_low_utility_stops_only_under_utility(self) -> None:
-        replies = [_echo_call("a"), _reflection("continue", **LOW_UTILITY)]
-        result, [event] = await _run(replies, max_attempts=3, reflection_gate="utility")
-        assert result.status == "gate_stopped"
-        assert event["stop_reason"] == "utility_below_threshold"
-        assert event["utility"] == pytest.approx(-0.5)
-        result, [event, *_] = await _run(
-            [*replies, _answer("42")], max_attempts=3, reflection_gate="flags"
-        )
-        assert (event["stop_reason"], event["utility"]) == (None, None)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -179,33 +157,23 @@ FLAG_VALUES = list(itertools.product([True, False], repeat=3))
 class TestAlwaysConsistent:
     """``continue_run`` is whether there is no stop reason, for every input."""
 
-    @pytest.mark.parametrize("gate", GATES)
-    def test_over_every_decision(self, gate: ReflectionGate) -> None:
-        estimates = [0.0, 0.5, 1.0]
-        for action, flags, out_of, gain, cost in itertools.product(
+    def test_over_every_decision(self) -> None:
+        for action, flags, out_of, patient in itertools.product(
             ["continue", "stop", "decompose", "done"],
             FLAG_VALUES,
             ["", "Max attempts reached", "Max steps reached"],
-            estimates,
-            estimates,
+            [False, True],
         ):
             decision = ReflectionDecision(
                 recommended_action=action,
                 task_still_feasible=flags[0],
                 next_step_is_concrete=flags[1],
                 next_step_is_novel=flags[2],
-                estimated_info_gain=gain,
-                estimated_cost=cost,
-                novelty=0.5,
-                feasibility=0.5,
-                repeat_risk=0.0,
             )
-            reason = _stop_reason(decision, gate, out_of)
-            old = not out_of and action != "done" and _should_continue(decision, gate)
-            assert (reason is None) == old, (action, flags, out_of, gain, cost)
-            assert (_gate_stop_reason(decision, gate) is None) == _should_continue(
-                decision, gate
-            )
+            reason = _stop_reason(decision, out_of, patient=patient)
+            gate = _gate_stop_reason(decision, patient=patient)
+            expected = not out_of and action != "done" and gate is None
+            assert (reason is None) == expected, (action, flags, out_of, patient)
             if reason is not None:
                 assert reason in KNOWN_REASONS
 
@@ -216,13 +184,13 @@ class TestAlwaysConsistent:
             next_step_is_concrete=False,
             next_step_is_novel=False,
         )
-        assert _gate_stop_reason(decision, "flags") == "not_feasible"
+        assert _gate_stop_reason(decision) == "not_feasible"
         decision.task_still_feasible = True
-        assert _gate_stop_reason(decision, "flags") == "not_concrete"
+        assert _gate_stop_reason(decision) == "not_concrete"
         decision.next_step_is_concrete = True
-        assert _gate_stop_reason(decision, "flags") == "not_novel"
+        assert _gate_stop_reason(decision) == "not_novel"
         decision.recommended_action = "stop"
-        assert _gate_stop_reason(decision, "flags") == "action_not_continue"
+        assert _gate_stop_reason(decision) == "action_not_continue"
 
 
 KNOWN_REASONS = {
@@ -230,7 +198,6 @@ KNOWN_REASONS = {
     "not_feasible",
     "not_concrete",
     "not_novel",
-    "utility_below_threshold",
     "no_attempt_left",
     "step_budget_used",
     "unreadable_reply",
