@@ -79,7 +79,7 @@ from . import (
 from .asks import OwnerAsks
 from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
-from .errors import ApiError
+from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
@@ -103,33 +103,6 @@ logger = logging.getLogger(__name__)
 
 # Seconds between retries of a store open that failed.
 STORE_RETRY_S: Final = 5.0
-
-# What an API v2 message says when another process holds the store's owner
-# lock. It never names the other process: spec 2.2 keeps lease holder
-# strings out of API messages. The terminal keeps the store's own text.
-STORE_OWNED_MESSAGE: Final = (
-    "Another melo gateway is using the console's session file. "
-    "Stop it to use the console here."
-)
-
-
-def store_message(exc: SessionStoreError) -> str:
-    """A store failure as an API v2 message, with the home folder written ``~``."""
-    if isinstance(exc, StoreOwnedError):
-        return STORE_OWNED_MESSAGE
-    return display.home_label(str(exc))
-
-
-def store_unavailable(exc: SessionStoreError) -> ApiError:
-    """The 503 of a store call that failed: one fixed message, the cause in the log.
-
-    The failure's own text can name a folder or repeat the database's words, so
-    it is logged and never answered.
-    """
-    logger.warning("A session store call failed: %s", store_message(exc))
-    if isinstance(exc, StoreOwnedError):
-        return ApiError(503, "store_unavailable", STORE_OWNED_MESSAGE)
-    return ApiError(503, "store_unavailable", t("errors.storeUnavailable"))
 
 
 @dataclass(frozen=True)
@@ -676,7 +649,7 @@ class Console:
     def store_error(self) -> str:
         """Why the store is not ``ok``, with the home folder as ``~``."""
         if self.store.failed is not None:
-            return display.home_label(str(self.store.failed))
+            return display.home_labelled(str(self.store.failed))
         if self._store_ok:
             return ""
         return self._store_error

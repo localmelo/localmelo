@@ -37,7 +37,7 @@ from localmelo.support.sessions.store import (
     UnknownSessionError,
 )
 
-from .conftest import seed_turn
+from .conftest import open_session, seed_turn
 
 
 def test_an_unknown_api_route_is_the_envelope(client: TestClient) -> None:
@@ -464,3 +464,34 @@ def test_a_picture_body_and_a_query_that_is_utf8_reach_the_route(
     )
 
     assert resp.status_code == 200
+
+
+def test_a_store_reason_names_the_home_folder_as_tilde_wherever_it_stands() -> None:
+    """The reason a store could not open names its file in the middle of the text."""
+    from localmelo.support.sessions import display
+
+    home = str(Path.home())
+    reason = f"Cannot open {home}/x/sessions.db: locked ({home})"
+    assert display.home_labelled(reason) == "Cannot open ~/x/sessions.db: locked (~)"
+    # A folder whose name only starts like the home folder is someone else's.
+    assert display.home_labelled(f"{home}2/y") == f"{home}2/y"
+
+
+async def test_a_chat_that_cannot_be_read_when_it_opens_says_the_fixed_message(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opening a chat's agent answers the fixed store message, never the failure text."""
+    from localmelo.support.gateway.console.errors import ApiError
+
+    turn = await seed_turn(console.store, workspace)
+    detail = f"unable to open {Path.home()}/secret-folder/sessions.db: disk I/O error"
+
+    async def broken(session_id: str) -> None:
+        raise SessionStoreError(detail)
+
+    monkeypatch.setattr(console.store, "get_session", broken)
+    with pytest.raises(ApiError) as caught:
+        await open_session(console.sessions, turn.session_id)
+    assert caught.value.status_code == 503
+    assert "secret-folder" not in str(caught.value.message)
+    assert caught.value.message == "The session store is not available."

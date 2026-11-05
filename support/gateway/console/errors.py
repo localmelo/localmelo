@@ -50,13 +50,43 @@ from localmelo.support.gateway.task_store import (
     TaskNotPausedError,
     TaskStoreError,
 )
+from localmelo.support.sessions import display
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStoreError,
+    StoreOwnedError,
     UnknownSessionError,
 )
 
 logger = logging.getLogger(__name__)
+
+# What an API v2 message says when another process holds the store's owner
+# lock. It never names the other process: spec 2.2 keeps lease holder
+# strings out of API messages. The terminal keeps the store's own text.
+STORE_OWNED_MESSAGE: Final = (
+    "Another melo gateway is using the console's session file. "
+    "Stop it to use the console here."
+)
+
+
+def store_message(exc: SessionStoreError) -> str:
+    """A store failure as an API v2 message, with the home folder written ``~``."""
+    if isinstance(exc, StoreOwnedError):
+        return STORE_OWNED_MESSAGE
+    return display.home_labelled(str(exc))
+
+
+def store_unavailable(exc: SessionStoreError) -> ApiError:
+    """The 503 of a store call that failed: one fixed message, the cause in the log.
+
+    The failure's own text can name a folder or repeat the database's words, so
+    it is logged and never answered.
+    """
+    logger.warning("A session store call failed: %s", store_message(exc))
+    if isinstance(exc, StoreOwnedError):
+        return ApiError(503, "store_unavailable", STORE_OWNED_MESSAGE)
+    return ApiError(503, "store_unavailable", t("errors.storeUnavailable"))
+
 
 # The message of a failure the gateway did not expect. It names neither the
 # traceback nor any value of the request.
