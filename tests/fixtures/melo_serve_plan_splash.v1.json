@@ -1,0 +1,81 @@
+{
+  "schema": "melo_serve.plan/1",
+  "machine": {
+    "chip": "Apple M5 Max",
+    "arch": "arm64",
+    "ram_gb": 128,
+    "macos": "27.2",
+    "macos_build": "26B123",
+    "free_gb": 83.0,
+    "hf_home": "~/models/huggingface",
+    "hf_home_from": "env",
+    "homebrew": true
+  },
+  "supported": true,
+  "reason": "",
+  "reason_hint": "",
+  "pick": {
+    "id": "qwen3.8-27b-splash",
+    "name": "Qwen3.8 27B",
+    "backend": "splash",
+    "fit": "estimate"
+  },
+  "items": [
+    {
+      "id": "backend:splash",
+      "kind": "backend",
+      "name": "Splash 1.5.0",
+      "via": "homebrew",
+      "size_bytes": 264000000,
+      "dest": "/opt/homebrew/bin/splash",
+      "state": "done"
+    },
+    {
+      "id": "backend:omlx",
+      "kind": "backend",
+      "name": "oMLX 0.7.3",
+      "via": "dmg",
+      "size_bytes": 881239063,
+      "dest": "~/Applications/oMLX.app",
+      "state": "todo",
+      "sha256": "2acfde41aeac0b022dbca803ca109437f3ccaf0c33f3415881526b985bee86f2",
+      "file": "oMLX-0.7.3-macos26-27.dmg"
+    },
+    {
+      "id": "model:qwen3.8-27b-splash",
+      "kind": "model",
+      "name": "Qwen3.8 27B",
+      "via": "huggingface",
+      "size_bytes": 22763326669,
+      "dest": "~/models/huggingface",
+      "state": "done",
+      "role": "chat",
+      "backend": "splash"
+    },
+    {
+      "id": "model:qwen3-embedding-0.6b-omlx",
+      "kind": "model",
+      "name": "Qwen3 Embedding 0.6B",
+      "via": "huggingface",
+      "size_bytes": 1288490189,
+      "dest": "~/models/huggingface",
+      "state": "todo",
+      "role": "embedding",
+      "backend": "omlx"
+    }
+  ],
+  "download_bytes": 2169729252,
+  "enough_disk": true,
+  "alternatives": [
+    {
+      "id": "qwen3-8b-omlx",
+      "name": "Qwen3 8B",
+      "backend": "omlx"
+    },
+    {
+      "id": "qwen3-4b-omlx",
+      "name": "Qwen3 4B Instruct",
+      "backend": "omlx"
+    }
+  ]
+}

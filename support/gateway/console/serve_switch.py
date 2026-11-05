@@ -58,7 +58,7 @@ class Switch:
     id: int
     pick: str
     name: str
-    load_s: float | None
+    load_s: float
     generation: int
     state: str = "waiting"
     waiting_for: int = 0

@@ -25,6 +25,7 @@ terminal when no gateway runs), and every surface words a pick with
 
 from __future__ import annotations
 
+import grp
 import json
 import math
 import os
@@ -32,6 +33,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +49,13 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
+# The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.0,
+# and the oldest version it accepts.
+MELO_SERVE_REF: Final = "4936aa0668949be6d21e0744dad6cf151fefe6af"
+MIN_VERSION: Final = "0.3.0"
+ARCHIVE_URL: Final = (
+    f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
+)
 NOT_INSTALLED: Final = f"melo_serve is not installed: {INSTALL_HINT}"
 # The whole budget of ``melo serve`` for a melo_serve that is not running:
 # ``melo-serve up`` and the wait for the state it writes.
@@ -121,6 +130,8 @@ class Pick:
     it (free now, plus what the model it replaces gives back): the two figures
     that decide whether it fits. *verdict* is melo_serve's fit word and
     *problem* why it cannot load at all (not downloaded, ...), else ``""``.
+    A figure melo_serve leaves out is 0; only *free_gb* has None for that, as
+    0 there would say that nothing is free.
     """
 
     id: str
@@ -131,10 +142,10 @@ class Pick:
     current: bool = False
     problem: str = ""
     verdict: str = ""
-    need_gb: float | None = None
+    need_gb: float = 0.0
     free_gb: float | None = None
-    disk_gb: float | None = None
-    load_s: float | None = None
+    disk_gb: float = 0.0
+    load_s: float = 0.0
 
     @property
     def loadable(self) -> bool:
@@ -142,24 +153,23 @@ class Pick:
         return not self.problem and self.verdict != TOO_BIG
 
 
-def _text(value: object) -> str:
+def as_text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _number(value: object) -> float | None:
-    """*value* as a finite number; a bool, a string or NaN is no number."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    return float(value) if math.isfinite(value) else None
+def as_count(value: object) -> int:
+    """*value* when it is a whole number (not a bool) of at least 0, else 0."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(value, 0)
+    return 0
 
 
-def _whole(value: object) -> int:
-    """*value* as a whole number that is not negative, else 0."""
-    return (
-        value
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
-        else 0
-    )
+def as_number(value: object) -> float:
+    """*value* when it is a finite number (not a bool) of at least 0, else 0.0."""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        number = float(value)
+        return number if 0.0 <= number < float("inf") else 0.0
+    return 0.0
 
 
 def _own(info: os.stat_result) -> bool:
@@ -188,7 +198,7 @@ def _read_state() -> dict[str, Any] | None:
         state = json.loads(raw)
     except (OSError, ValueError, RecursionError, MemoryError):
         return None
-    if not isinstance(state, dict) or not _text(state.get("schema")).startswith(
+    if not isinstance(state, dict) or not as_text(state.get("schema")).startswith(
         SCHEMA_PREFIX
     ):
         return None
@@ -255,13 +265,13 @@ def _answers() -> bool:
 
 def _role(entry: object) -> Role | None:
     """The role *entry* names, or None when it is not a dict with a model."""
-    if not isinstance(entry, dict) or not _text(entry.get("model")):
+    if not isinstance(entry, dict) or not as_text(entry.get("model")):
         return None
     return Role(
         entry["model"],
-        _text(entry.get("name")),
-        _text(entry.get("backend_name")) or _text(entry.get("backend")),
-        _text(entry.get("status")),
+        as_text(entry.get("name")),
+        as_text(entry.get("backend_name")) or as_text(entry.get("backend")),
+        as_text(entry.get("status")),
     )
 
 
@@ -275,9 +285,9 @@ def snapshot() -> Snapshot:
     state = _read_state()
     if state is None:
         return Snapshot()
-    status = _text(state.get("status")) or "ready"
+    status = as_text(state.get("status")) or "ready"
     door = state.get("front_door")
-    url = (_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
+    url = (as_text(door.get("url")) if isinstance(door, dict) else "") or DEFAULT_URL
     url = _loopback(url) or ""
     if status == "stopped" or not url or not _answers():
         return Snapshot()
@@ -290,7 +300,7 @@ def snapshot() -> Snapshot:
         status=status,
         login=isinstance(service, dict) and service.get("login") is True,
         roles={name: role for name, role in roles.items() if role is not None},
-        generation=_whole(state.get("generation")),
+        generation=as_count(state.get("generation")),
     )
 
 
@@ -310,14 +320,39 @@ class MeloServeError(Exception):
         self.generation = generation
 
 
+def _admin_gid() -> int | None:
+    """The group id of macOS's ``admin`` group, looked up now; None elsewhere or when that fails."""
+    if sys.platform != "darwin":  # another system's ``admin`` group is not macOS's
+        return None
+    try:
+        return grp.getgrnam("admin").gr_gid
+    except Exception:  # no such group, no group database: no exemption (fail closed)
+        return None
+
+
+def _others_write(info: os.stat_result, admin: int | None) -> bool:
+    """Whether someone but the owner can write what *info* describes.
+
+    Group-write counts, except for the ``admin`` group: Homebrew's own folder
+    (``/opt/homebrew/bin``) is the user's with mode 775 and that group.
+    """
+    if info.st_mode & 0o002:
+        return True
+    return bool(info.st_mode & 0o020) and (admin is None or info.st_gid != admin)
+
+
 def _check(path: str | None) -> str | None:
     """Why *path* is not run: None when nothing is there, ``""`` when it may be run.
 
     A reason is a clause that follows ``is not run:``. *path* must be absolute,
     and the file it leads to a regular file that the user owns and can run.
-    That file, and the folders of *path* and of the file, must pass :func:`_own`.
-    Links are followed (``uv tool install`` makes ``~/.local/bin/melo-serve`` a
-    link into its own folder).
+    That file, and the folders of *path* and of the file, must be the user's
+    and not writable by others, as :func:`_own` says, except that the ``admin``
+    group may write (:func:`_others_write`; :func:`_own` itself, which the state
+    file and the socket use, has no such exemption; nor has any system but
+    macOS). Links are followed
+    (``uv tool install`` makes ``~/.local/bin/melo-serve`` a link into its own
+    folder).
     """
     if not path or not os.path.lexists(path):
         return None
@@ -334,40 +369,63 @@ def _check(path: str | None) -> str | None:
         return "it is not a regular executable file"
     if info.st_uid != os.getuid():
         return "another user owns it"
-    if info.st_mode & 0o022:
+    admin = _admin_gid()
+    if _others_write(info, admin):
         return "others can write it"
     for folder, found in zip(folders, infos, strict=True):
         if found.st_uid != os.getuid():
             return f"another user owns its folder {folder}"
-        if not _own(found):
+        if _others_write(found, admin):
             return f"others can write its folder {folder}"
     return ""
 
 
-def _candidates() -> tuple[str | None, str]:
-    """Where ``melo-serve`` may be: on PATH, then in the uv tool folder."""
-    folder = (
+def _uv_tool_folder() -> str:
+    """The folder ``uv tool install`` puts commands in."""
+    return (
         os.environ.get("UV_TOOL_BIN_DIR")
         or os.environ.get("XDG_BIN_HOME")
         or "~/.local/bin"
     )
-    return shutil.which(COMMAND), os.path.join(os.path.expanduser(folder), COMMAND)
+
+
+def _candidates(
+    name: str, before: tuple[str, ...] = (), after: tuple[str, ...] = ()
+) -> list[str | None]:
+    """Where the command *name* may be: the *before* folders, then PATH, then the *after* folders."""
+
+    def at(folder: str) -> str:
+        return os.path.join(os.path.expanduser(folder), name)
+
+    return [*map(at, before), shutil.which(name), *map(at, after)]
+
+
+def find_executable(
+    name: str, before: tuple[str, ...] = (), after: tuple[str, ...] = ()
+) -> str | None:
+    """The first place of :func:`_candidates` where *name* is the user's own, as :func:`_check` says.
+
+    A candidate that :func:`_check` refuses is passed over, so a stale file in a
+    system folder does not hide the installed one. The path returned is the
+    file the links lead to, which is checked once more and is what is run.
+    """
+    for path in _candidates(name, before, after):
+        if path is None:
+            continue
+        real = os.path.realpath(path)
+        if _check(path) == _check(real) == "":
+            return real
+    return None
 
 
 def _find_command() -> str | None:
-    """Where ``melo-serve`` is: the first of PATH and the uv tool folder that is the user's own.
+    """Where ``melo-serve`` is: on PATH, then in the uv tool folder.
 
     A launchd login item has no ``~/.local/bin`` on its PATH, where
     ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
-    else ``~/.local/bin``. A candidate that :func:`_check` refuses is passed
-    over, so a stale file in a system folder does not hide the installed one.
-    The path returned is the file the links lead to, which is what was checked
-    and what is run.
+    else ``~/.local/bin``.
     """
-    for path in _candidates():
-        if path is not None and _check(path) == "":
-            return os.path.realpath(path)
-    return None
+    return find_executable(COMMAND, after=(_uv_tool_folder(),))
 
 
 def command() -> str | None:
@@ -380,12 +438,15 @@ def refusal() -> str | None:
 
     None when one runs, and when none was found (then it is not installed).
     """
-    checked = [(path, _check(path)) for path in _candidates()]
+    checked = [
+        (path, _check(path))
+        for path in _candidates(COMMAND, after=(_uv_tool_folder(),))
+    ]
     if any(why == "" for _, why in checked):
         return None
     for path, why in checked:
         if why:
-            return _clean(f"melo_serve: {path} is not run: {why}")
+            return clean(f"melo_serve: {path} is not run: {why}")
     return None
 
 
@@ -405,7 +466,7 @@ def unavailable(snap: Snapshot, role: str) -> MeloServeError:
     return MeloServeError(refusal() or NOT_INSTALLED)
 
 
-def _clean(text: str) -> str:
+def clean(text: str) -> str:
     """*text* as a terminal shows it: the cursor stays and the home folder is ``~``."""
     from localmelo.support.sessions.display import clean_output, home_labelled
 
@@ -426,12 +487,12 @@ def _refusal(status: int, reply: object) -> MeloServeError:
     """The error a refusal of the control socket carries, in melo_serve's words."""
     error = reply.get("error") if isinstance(reply, dict) else None
     error = error if isinstance(error, dict) else {}
-    message = _text(error.get("message")) or f"it answered {status}"
+    message = as_text(error.get("message")) or f"it answered {status}"
     generation = error.get("generation")
     return MeloServeError(
-        _clean(f"melo_serve: {message}"),
-        _text(error.get("type")),
-        _whole(generation) if isinstance(generation, int) else None,
+        clean(f"melo_serve: {message}"),
+        as_text(error.get("type")),
+        as_count(generation) if isinstance(generation, int) else None,
     )
 
 
@@ -465,7 +526,7 @@ async def _call(
             status = response.status_code
     except httpx.HTTPError as exc:
         said = str(exc) or type(exc).__name__
-        raise MeloServeError(_clean(f"melo_serve did not answer: {said}")) from None
+        raise MeloServeError(clean(f"melo_serve did not answer: {said}")) from None
     try:
         reply = json.loads(raw)
     except (ValueError, RecursionError):
@@ -475,36 +536,44 @@ async def _call(
     return reply
 
 
-def _pick(entry: object, total_gb: float | None, free_pct: float | None) -> Pick | None:
+def _pick(entry: object, total_gb: float, free_pct: float) -> Pick | None:
     """A chat row of ``GET /picks``; None for any other row, or one with no usable id."""
     if not isinstance(entry, dict) or entry.get("role") != "chat":
         return None
-    pick_id = _text(entry.get("id"))
+    pick_id = as_text(entry.get("id"))
     if not pick_id or not pick_id.isprintable():
         return None
     fit = entry.get("fit")
     fit = fit if isinstance(fit, dict) else {}
-    need, after = _number(fit.get("need_gb")), _number(fit.get("after_pct"))
+    need = as_number(fit.get("need_gb"))
+    # Below 0 for a model that does not fit, which as_number would read as 0, so it is checked here.
+    after = fit.get("after_pct")
     free = None
-    if total_gb is not None and need is not None and after is not None:
+    if (
+        total_gb
+        and need
+        and isinstance(after, int | float)
+        and not isinstance(after, bool)
+        and math.isfinite(after)
+    ):
         free = max(0.0, need + after * total_gb / 100)  # the memory there is for it
-    elif total_gb is not None and free_pct is not None:
+    elif total_gb and free_pct:
         free = free_pct * total_gb / 100
     return Pick(
         id=pick_id,
-        short=_clean(_text(entry.get("short"))),
-        name=_clean(_text(entry.get("name")) or pick_id),
-        backend_name=_clean(
-            _text(entry.get("backend_name")) or _text(entry.get("backend"))
+        short=clean(as_text(entry.get("short"))),
+        name=clean(as_text(entry.get("name")) or pick_id),
+        backend_name=clean(
+            as_text(entry.get("backend_name")) or as_text(entry.get("backend"))
         ),
-        model=_clean(_text(entry.get("model"))),
+        model=clean(as_text(entry.get("model"))),
         current=entry.get("current") is True,
-        problem=_clean(_text(entry.get("problem"))),
-        verdict=_text(fit.get("verdict")),
+        problem=clean(as_text(entry.get("problem"))),
+        verdict=as_text(fit.get("verdict")),
         need_gb=need,
         free_gb=free,
-        disk_gb=_number(entry.get("disk_gb")),
-        load_s=_number(entry.get("load_s")),
+        disk_gb=as_number(entry.get("disk_gb")),
+        load_s=as_number(entry.get("load_s")),
     )
 
 
@@ -521,7 +590,9 @@ async def picks() -> list[Pick]:
         raise MeloServeError("melo_serve's answer to /picks lists no picks")
     memory = reply.get("memory")
     memory = memory if isinstance(memory, dict) else {}
-    total, free_pct = _number(memory.get("total_gb")), _number(memory.get("free_pct"))
+    total, free_pct = as_number(memory.get("total_gb")), as_number(
+        memory.get("free_pct")
+    )
     found = (_pick(entry, total, free_pct) for entry in rows[:MAX_PICKS])
     return [pick for pick in found if pick is not None]
 
@@ -570,7 +641,7 @@ def pick_words(
     fit = ""
     if pick.problem:
         parts.append(pick.problem)
-    elif pick.verdict == TOO_BIG and pick.need_gb is not None:
+    elif pick.verdict == TOO_BIG and pick.need_gb:
         need = _gb(pick.need_gb)
         parts.append(
             _words("serve.pick.noRoom", language, need=need)
@@ -580,9 +651,9 @@ def pick_words(
             )
         )
     else:
-        if pick.need_gb is not None:
+        if pick.need_gb:
             parts.append(_words("serve.pick.needs", language, need=_gb(pick.need_gb)))
-        if developer and pick.disk_gb is not None:
+        if developer and pick.disk_gb:
             parts.append(_words("serve.pick.disk", language, disk=_gb(pick.disk_gb)))
         word = _FIT_WORDS.get(pick.verdict)
         if word:
@@ -612,15 +683,15 @@ def status_lines(snap: Snapshot) -> list[str]:
         f"  embedding: {role_text(snap.roles.get('embedding'))}",
         f"  login item: {'installed' if snap.login else 'not installed'}",
     ]
-    return [_clean(line) for line in lines]
+    return [clean(line) for line in lines]
 
 
 def _line(snap: Snapshot, role: str) -> str:
     where = f"({snap.url})"
     served = snap.roles.get(role)
     if served is None:
-        return _clean(f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}")
-    return _clean(f"melo_serve: {served.model} on {served.backend_name} {where}")
+        return clean(f"melo_serve: no {role} model yet; run `{USE_HINT}` {where}")
+    return clean(f"melo_serve: {served.model} on {served.backend_name} {where}")
 
 
 def ensure_running(role: str = "chat") -> str:
@@ -656,12 +727,12 @@ def ensure_running(role: str = "chat") -> str:
     except subprocess.TimeoutExpired:
         return late
     except (OSError, subprocess.SubprocessError) as exc:
-        return _clean(f"melo_serve did not start: {exc}")
+        return clean(f"melo_serve did not start: {exc}")
     if up.returncode != 0:
         for text in (up.stderr, up.stdout):
             lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
             if lines:
-                return _clean(f"melo_serve did not start: {lines[-1]}")
+                return clean(f"melo_serve did not start: {lines[-1]}")
         return f"melo_serve did not start: {COMMAND} up exited {up.returncode}"
     while True:
         snap = snapshot()
