@@ -1273,7 +1273,7 @@
   "permissions.fromMain": "来自主对话",
   "permissions.groupChats": "单个对话",
   "permissions.groupEverywhere": "所有对话",
-  "permissions.help": "在主对话里允许的，到处都算；在旁支对话里允许的，只在那个对话里算。花钱、账号相关的步骤，以及输入或提交表单，每次都会再问你，也不会出现在这里。",
+  "permissions.help": "在主对话里允许的，到处都算；在旁支对话里允许的，只在那个对话里算。花钱和账号相关的步骤每次都会再问你，也不会出现在这里。输入文字和发送表单都不会为对话保留：“询问”模式每次都问；“自动”模式逐个对照你的请求检查，任务明显需要的直接运行，其余的拦下（询问你，涉及密钥则直接拦下）。",
   "permissions.place.everywhere": "所有对话",
   "permissions.readFailed": "无法读取你允许过的事。",
   "permissions.reading": "正在读取你允许过的事…",

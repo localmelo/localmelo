@@ -1329,7 +1329,7 @@
   "permissions.fromMain": "From the main chat",
   "permissions.groupChats": "Per chat",
   "permissions.groupEverywhere": "Everywhere",
-  "permissions.help": "What you allow in the main chat counts everywhere; in a side chat, only there. Spending money, account steps, and typing or sending forms always ask again and never show here.",
+  "permissions.help": "What you allow in the main chat counts everywhere; in a side chat, only there. Spending money and account steps always ask and never show here. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).",
   "permissions.place.everywhere": "everywhere",
   "permissions.readFailed": "Could not read what you allowed.",
   "permissions.reading": "Reading what you allowed…",

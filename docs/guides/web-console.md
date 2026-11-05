@@ -970,7 +970,7 @@ commands and file changes.
   choosing on it) run in the chat. A site Auto let the chat open
   stays allowed for reading its pages in that chat too, also
   after you switch to Ask, and holds in that chat only, even the main chat; a click on it still asks in Ask. The chip's menu lists the sites the chat allowed, each with
-  **Remove**. Typing on a page and sending a form ask every time, a
+  **Remove**. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret). A
   high-impact step never rides an allowance, and a new chat starts with only what you allowed in the main chat.
 - **What is blocked.** Typing or reading a secret (a password, a one-time
   code, a key; clicking a sign-in button is none), system settings, scripts
@@ -1006,7 +1006,7 @@ Everything you allow "for this chat" is a grant: a tool, a site, a folder outsid
 - **Only there:** a side chat's grant holds in that chat. A task's **Allow for this task** holds in that task. A site Auto let the chat read holds in that chat only, even in the main chat.
 - **The page:** two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
 - **`/grants`** lists the same rows with numbers (everywhere first, newest first, then each chat, the one with the newest grant first); `/grants revoke N` takes the N-th back.
-- **Never kept, never listed:** **Allow once**, typing on a page, sending a form, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time.
+- **Never kept, never listed:** **Allow once**, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).
 
 Deleting a chat deletes its grants. Moving a side chat to another folder takes back its own (the main chat's still hold).
 

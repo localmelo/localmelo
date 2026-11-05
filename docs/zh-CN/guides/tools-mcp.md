@@ -156,7 +156,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 用 Safari 时，在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。用 Chrome 时只需要安装 Google Chrome。
 - 之后终端聊天以及网页控制台和 App 的每个聊天会得到十二个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot` 和 `browser_click_point`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态；或在使用 melo 自己配置的 Chrome 里工作，从不使用你的配置。
-- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击或选择前会再问一次。输入文字和发送表单都不会为对话保留：“询问”模式每次都问；“自动”模式逐个对照你的请求检查，任务明显需要的直接运行，其余的拦下（询问你，涉及密钥则直接拦下）。输入的文字会完整显示，发送的表单会显示发往哪里、里面有什么。它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
@@ -220,7 +220,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
-- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击和输入、发送表单与读取分开问）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击、输入和发送表单与读取分开决定）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。
