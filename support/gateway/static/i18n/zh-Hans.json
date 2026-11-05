@@ -1375,6 +1375,7 @@
   "settings.approvals.hint": "询问：melo 运行命令或更改文件前先问你。自动：它不问就做，并拦下有风险的步骤。每个对话都可以在输入框下切换。",
   "settings.approvals.saved": "新对话以“{mode}”开始。",
   "settings.approvals.title": "新对话开始时",
+  "settings.backend.melo_serve": "melo_serve（本地模型，统一地址）",
   "settings.backend.mlc": "MLC（本地服务器）",
   "settings.backend.none": "无（没有长期记忆）",
   "settings.backend.ollama": "Ollama（本地服务器）",

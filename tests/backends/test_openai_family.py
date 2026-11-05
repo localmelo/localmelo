@@ -32,6 +32,8 @@ from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 OPENAI_FORMAT_LOCAL = [key for key in LOCAL_BACKENDS if key != "ollama"]
+# melo_serve serves its own model, so its config names none (tested below).
+NAMES_A_MODEL = [key for key in LOCAL_BACKENDS if key != "melo_serve"]
 
 
 def _local(key: str, **fields: str) -> Config:
@@ -58,7 +60,7 @@ def test_the_rows_are_the_registered_backends_and_the_config_sections() -> None:
 # -- a model server on this computer --
 
 
-@pytest.mark.parametrize("key", LOCAL_BACKENDS)
+@pytest.mark.parametrize("key", NAMES_A_MODEL)
 def test_an_empty_local_section_says_what_to_set(key: str) -> None:
     backend = get_backend(key)
     assert isinstance(backend, LocalBackend)

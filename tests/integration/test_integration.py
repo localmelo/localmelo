@@ -1440,7 +1440,7 @@ class TestBackendAdapterArchitecture:
         _clear()
         ensure_defaults_registered()
 
-    def test_registry_has_all_eight_backends(self) -> None:
+    def test_registry_has_all_nine_backends(self) -> None:
         from localmelo.support.backends import get_backend, list_backends
 
         backends = list_backends()
@@ -1450,6 +1450,7 @@ class TestBackendAdapterArchitecture:
             "ollama",
             "vllm",
             "sglang",
+            "melo_serve",
             "openai",
             "gemini",
             "anthropic",

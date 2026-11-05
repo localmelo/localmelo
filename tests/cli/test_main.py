@@ -908,7 +908,7 @@ class TestRegisterBackends:
         _register_backends()
         _register_backends()  # must not raise
 
-        assert len(list_backends()) == 8
+        assert len(list_backends()) == 9
         _clear()
 
     def test_main_calls_register_backends_first(self) -> None:
@@ -953,8 +953,8 @@ class TestOnboardingDispatch:
         patched_setup = {**_onboard._CHAT_SETUP, "ollama": mock_handler}
 
         with (
-            # choice 2 = ollama in CHAT_BACKENDS, choice 5 = none in EMBEDDING_BACKENDS
-            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[2, 5]),
+            # choice 2 = ollama in CHAT_BACKENDS, choice 6 = none in EMBEDDING_BACKENDS
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[2, 6]),
             mock.patch.dict(
                 "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
             ),
@@ -981,8 +981,8 @@ class TestOnboardingDispatch:
         patched_setup = {**_onboard._CHAT_SETUP, "openai": mock_handler}
 
         with (
-            # choice 5 = openai in CHAT_BACKENDS, choice 5 = none in EMBEDDING_BACKENDS
-            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[5, 5]),
+            # choice 6 = openai in CHAT_BACKENDS, choice 6 = none in EMBEDDING_BACKENDS
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[6, 6]),
             mock.patch.dict(
                 "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
             ),
@@ -1008,6 +1008,7 @@ class TestOnboardingDispatch:
             "ollama",
             "vllm",
             "sglang",
+            "melo_serve",
             "openai",
             "gemini",
             "anthropic",
@@ -1018,19 +1019,19 @@ class TestOnboardingDispatch:
         assert set(_CHAT_SETUP.keys()) == expected
         assert all(callable(fn) for fn in _CHAT_SETUP.values())
 
-    def test_chat_backends_list_has_8_entries(self) -> None:
-        """CHAT_BACKENDS lists the 8 backends; the setup list adds DeepSeek and Other."""
+    def test_chat_backends_list_has_9_entries(self) -> None:
+        """CHAT_BACKENDS lists the 9 backends; the setup list adds DeepSeek and Other."""
         from localmelo.support.onboard import CHAT_BACKENDS, SETUP_CHOICES
 
-        assert len(CHAT_BACKENDS) == 8
-        assert [key for key, _ in SETUP_CHOICES[8:]] == ["deepseek", "other"]
+        assert len(CHAT_BACKENDS) == 9
+        assert [key for key, _ in SETUP_CHOICES[9:]] == ["deepseek", "other"]
 
     def test_embedding_backends_list_includes_local_and_none(self) -> None:
         """EMBEDDING_BACKENDS must include local backends + none only."""
         from localmelo.support.onboard import EMBEDDING_BACKENDS
 
         keys = [k for k, _ in EMBEDDING_BACKENDS]
-        assert keys == ["mlc", "ollama", "vllm", "sglang", "none"]
+        assert keys == ["mlc", "ollama", "vllm", "sglang", "melo_serve", "none"]
 
     def test_setup_cancelled_returns_none(self) -> None:
         """If user cancels during chat setup, returns None."""

@@ -973,8 +973,8 @@ class TestRequestTimeoutConfig:
         import localmelo.support.onboard as onboard
 
         with (
-            # 2 = ollama in CHAT_BACKENDS, 5 = none in EMBEDDING_BACKENDS
-            mock.patch.object(onboard, "_ask_choice", side_effect=[2, 5]),
+            # 2 = ollama in CHAT_BACKENDS, 6 = none in EMBEDDING_BACKENDS
+            mock.patch.object(onboard, "_ask_choice", side_effect=[2, 6]),
             mock.patch.dict(onboard._CHAT_SETUP, {"ollama": setup_ollama}),
             mock.patch.object(onboard, "_run_probes", return_value=True),
             mock.patch("builtins.print"),
@@ -1002,8 +1002,8 @@ class TestRequestTimeoutConfig:
         import localmelo.support.onboard as onboard
 
         with (
-            # 3 = vllm in CHAT_BACKENDS, 5 = none in EMBEDDING_BACKENDS
-            mock.patch.object(onboard, "_ask_choice", side_effect=[3, 5]),
+            # 3 = vllm in CHAT_BACKENDS, 6 = none in EMBEDDING_BACKENDS
+            mock.patch.object(onboard, "_ask_choice", side_effect=[3, 6]),
             # Keep the saved [vllm] section as it is.
             mock.patch.dict(onboard._CHAT_SETUP, {"vllm": lambda cfg: True}),
             # "[r]etry, [s]ave anyway, [N]o" is answered with its default, No.

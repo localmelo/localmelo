@@ -33,6 +33,20 @@ class BaseBackend(abc.ABC):
         """
         return self.display_name
 
+    def welcome_note(self, cfg: Config) -> str:
+        """Words the terminal's welcome row shows beside the model; empty for none."""
+        return ""
+
+    def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The model *cfg* names for this backend; empty when it names none.
+
+        A backend whose model is not in the config (melo_serve serves what it
+        serves now) answers from its source, so a banner shows the model in use.
+        """
+        section = getattr(cfg, self.key, None)
+        field = "embedding_model" if embedding else "chat_model"
+        return str(getattr(section, field, ""))
+
     @abc.abstractmethod
     def validate(self, cfg: Config) -> list[str]:
         """Return a list of validation error strings (empty = valid)."""

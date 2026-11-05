@@ -19,7 +19,7 @@ imported where a provider is built.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from localmelo.support import hosted
 from localmelo.support.backends.base import BaseBackend
@@ -52,6 +52,8 @@ class LocalBackend(BaseBackend):
     chat_model: str = ""
     embedding_model: str = ""
     template_kwargs: bool = False
+    #: Whether the config must name a model (melo_serve's row serves its own).
+    model_required: ClassVar[bool] = True
 
     @property
     def detect_url(self) -> str:
@@ -67,7 +69,7 @@ class LocalBackend(BaseBackend):
                 f"[{self.key}] chat_url is empty. "
                 f"Set it to your {name} URL (e.g. {self.url})."
             )
-        if not section.chat_model:
+        if self.model_required and not section.chat_model:
             example = f" (e.g. {self.chat_model})" if self.chat_model else ""
             errors.append(
                 f"[{self.key}] chat_model is empty. "
@@ -83,7 +85,7 @@ class LocalBackend(BaseBackend):
                 f"[{self.key}] embedding_url is empty. "
                 f"Set it to your {name} URL for embedding."
             )
-        if not section.embedding_model:
+        if self.model_required and not section.embedding_model:
             errors.append(
                 f"[{self.key}] embedding_model is empty. "
                 f"Set the {name} embedding model name."
@@ -94,6 +96,10 @@ class LocalBackend(BaseBackend):
         section = getattr(cfg, self.key)
         return bool(section.embedding_url and section.embedding_model)
 
+    def request_model(self, cfg: Config, *, embedding: bool = False) -> str:
+        """The model a provider built now asks for; raises when there is none."""
+        return self.model_name(cfg, embedding=embedding)
+
     def build_chat_provider(self, cfg: Config) -> BaseLLMProvider:
         from localmelo.support.backends.openai_compat import (
             build_openai_chat,
@@ -103,7 +109,7 @@ class LocalBackend(BaseBackend):
         section = getattr(cfg, self.key)
         return build_openai_chat(
             base_url=normalize_url(section.chat_url),
-            model=section.chat_model,
+            model=self.request_model(cfg),
             extra_body=section.extra_body,
             timeout=cfg.request_timeout_s,
             reasoning_field=section.reasoning_field or None,
@@ -121,7 +127,7 @@ class LocalBackend(BaseBackend):
             return None
         return build_openai_embedding(
             base_url=normalize_url(section.embedding_url),
-            model=section.embedding_model,
+            model=self.request_model(cfg, embedding=True),
         )
 
 
@@ -166,6 +172,63 @@ class VllmBackend(LocalBackend):
         return discovery.server_name(url, declared=declared == "omlx")
 
 
+class MeloServeBackend(LocalBackend):
+    """melo_serve: one address for the models it serves, switched in one command.
+
+    The config names no model (an empty one is the usual): what melo_serve
+    serves now is read from its state file when a provider is built or a banner
+    is drawn, so a switch made with ``melo-serve use`` is followed from the next
+    build. This row only reads; ``melo serve`` is what asks melo_serve to start.
+    """
+
+    model_required: ClassVar[bool] = False
+
+    def _entry(self, embedding: bool) -> dict[str, Any] | None:
+        from localmelo.support import melo_serve
+
+        return melo_serve.served(
+            melo_serve.read_state(), "embedding" if embedding else "chat"
+        )
+
+    def model_name(self, cfg: Config, *, embedding: bool = False) -> str:
+        named = super().model_name(cfg, embedding=embedding)
+        entry = None if named else self._entry(embedding)
+        return named or (entry["model"] if entry else "")
+
+    def request_model(self, cfg: Config, *, embedding: bool = False) -> str:
+        model = self.model_name(cfg, embedding=embedding)
+        if not model:
+            from localmelo.support.melo_serve import USE_HINT, MeloServeError
+
+            role = "embedding" if embedding else "chat"
+            raise MeloServeError(
+                0,
+                "no_model",
+                f"melo_serve serves no {role} model now. "
+                f"Run `{USE_HINT}` to choose one.",
+            )
+        return model
+
+    def has_embedding(self, cfg: Config) -> bool:
+        section = getattr(cfg, self.key)
+        return bool(section.embedding_url) and bool(
+            self.model_name(cfg, embedding=True)
+        )
+
+    def label(self, cfg: Config, *, embedding: bool = False) -> str:
+        """``Splash via melo_serve`` when it serves the role, else ``melo_serve``."""
+        from localmelo.support import melo_serve
+
+        entry = self._entry(embedding)
+        if entry is None:
+            return self.display_name
+        return f"{melo_serve.backend_name(entry)} via {self.display_name}"
+
+    def welcome_note(self, cfg: Config) -> str:
+        """The server that really answers: a model served through melo_serve."""
+        return self.label(cfg)
+
+
 LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
     LocalBackend(
         "mlc",
@@ -197,6 +260,15 @@ LOCAL_SERVERS: Final[tuple[LocalBackend, ...]] = (
         "SGLang",
         "SGLang (local endpoint)",
         "http://localhost:30000/v1",
+        template_kwargs=True,
+    ),
+    # It stands in for the stack it replaces (oMLX or Splash), which is reached
+    # as vllm today, so it takes the same chat_template_kwargs.
+    MeloServeBackend(
+        "melo_serve",
+        "melo_serve",
+        "melo_serve (local models, one address)",
+        "http://127.0.0.1:8321/v1",
         template_kwargs=True,
     ),
 )

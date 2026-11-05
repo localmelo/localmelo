@@ -345,6 +345,7 @@ def test_detect_urls_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) 
 def test_the_default_detection_urls_are_the_local_servers_default_ports() -> None:
     assert discovery.DETECT_URLS == (
         "http://127.0.0.1:8000/v1",
+        "http://127.0.0.1:8321/v1",
         "http://127.0.0.1:8400/v1",
         "http://127.0.0.1:11434/v1",
         "http://127.0.0.1:30000/v1",
