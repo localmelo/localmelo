@@ -662,7 +662,7 @@ These options apply to `melo` without a task.
 | `--port PORT` | `8401` | The port the gateway listens on. With `--serve`, `0` asks the system for a free port: the startup lines print the real address, the sign-in line (printed when no browser opens) names the port for `melo --gateway-login --port PORT`, and `melo-task` needs `--gateway URL`. `0` is refused with `--daemon` and the gateway authentication commands, and in `[gateway] port`. |
 | `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
 | `--reconfigure` | off | Run the setup wizard (in default mode without `--serve`, first the found server and `Use this model server?`; the full menu after `Use another server`, with `--developer` or `[ui] mode = "developer"`, or with none found while a backend is saved; with nothing saved and none found, the read-only setup preview), then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
-| `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`; `status` also prints the `melo_serve:` block when melo_serve is in use or installed. |
+| `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`; `status` also prints the `melo_serve:` block when melo_serve runs, is in use or is installed. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
   the config file. The options change them for this run only.

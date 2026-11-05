@@ -145,7 +145,7 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 
 顶层键必须位于第一个 `[table]` 行之前。
 
-`[melo_serve]` 表与其他本地后端一样，接受 `chat_url`、`chat_model`、`embedding_url` 和 `embedding_model`。melo_serve 的地址是 `http://127.0.0.1:8321/v1`。请让 `chat_model` 和 `embedding_model` 留空：localmelo 在创建提供方时会从 melo_serve 的状态文件（`~/.cache/melo_serve/state.json`，或 `MELO_SERVE_HOME` 之下）读取它当前提供哪个模型，因此 `melo-serve use <pick>` 的切换会被跟上。你写出的模型会按原样发送。
+`[melo_serve]` 表与其他本地后端一样，接受 `chat_url`、`chat_model`、`embedding_url` 和 `embedding_model`。melo_serve 的地址是 `http://127.0.0.1:8321/v1`。请让 `chat_model` 和 `embedding_model` 留空：localmelo 在创建提供方时会从 melo_serve 的状态文件（`~/.cache/melo_serve/state.json`，或 `MELO_SERVE_HOME` 之下）读取它当前提供哪个模型，因此 `melo-serve use <pick>` 的切换会被跟上。只有控制套接字接受连接时，melo_serve 才算在运行。检查配置从不询问当前提供什么；没有提供任何模型时，运行会以一行说明要运行的命令结束。你写出的模型会按原样发送。
 
 ```toml
 chat_backend = "melo_serve"

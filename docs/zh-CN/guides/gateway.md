@@ -38,8 +38,8 @@ melo serve
 
 当 `chat_backend` 或 `embedding_backend` 设为 `melo_serve`（[melo_serve](model-servers.md#melo_serve)）时，`melo serve` 会先检查 melo_serve，并在启动信息之前输出一行：
 
-- 正在运行：`melo_serve: <model> on Splash (http://127.0.0.1:8321/v1)`，其中是它当前提供的模型。尚无模型时，它会提示运行 `melo-serve use <pick>`。
-- 未运行：它会运行 `melo-serve up`，等待 melo_serve 启动，然后输出同样的一行。`melo-serve up` 失败时，该行为 `melo_serve did not start:` 加上它输出的最后一行。
+- 正在运行：`melo_serve: <model> on Splash (http://127.0.0.1:8321/v1)`，其中是它当前提供的模型。尚无模型时，它会提示运行 `melo-serve use <pick>`。状态文件没有写 `stopped`、并且控制套接字接受连接时，melo_serve 才算在运行；崩溃或停止后留下的状态不算。
+- 未运行：它会运行 `melo-serve up`，等待 melo_serve 启动，然后输出同样的一行。`up` 和等待共用 15 秒的时间；超时后该行为 `melo_serve did not start in 15 s`。`melo-serve up` 失败时，该行为 `melo_serve did not start:` 加上它输出的最后一行。
 - 未安装：该行给出安装命令 `uv tool install git+https://github.com/localmelo/melo_serve`。
 
 以上各种情况下网关都会启动。它的 `Model:` 行写出 melo_serve 提供的模型，如 `qwen3-8b on Splash via melo_serve`。
@@ -111,7 +111,7 @@ melo serve uninstall
 - `install --port N` 使用其他端口。主机地址取自配置文件中的 `[gateway] host`；`--host` 会被忽略。
 - 日志写入 `~/.localmelo/logs/gateway.stdout.log` 和 `~/.localmelo/logs/gateway.stderr.log`。
 - `status` 输出服务是否为 `installed` 和 `running`，以及它的 `pid`。
-- 本机有 melo_serve 时，`status` 还会输出一个 `melo_serve:` 块：`running`、它的 `address`、`chat` 和 `embedding` 模型（`model · backend · status`，或 `none`），以及它的 `login item` 是否已安装。它没有运行时，该块会说明如何启动或安装。melo_serve 的状态文件存在、配置使用 melo_serve，或已安装 `melo-serve` 时，才会出现这个块。
+- 本机有 melo_serve 时，`status` 还会输出一个 `melo_serve:` 块：`running`、它的 `address`、`chat` 和 `embedding` 模型（`model · backend · status`，或 `none`），以及它的 `login item` 是否已安装。它没有运行时，该块会说明如何启动或安装。melo_serve 正在运行、配置使用 melo_serve，或已安装 `melo-serve` 时，才会出现这个块。
 - 在执行 `install` 前，使用 `melo` 或在终端中使用配置向导保存配置。服务无法回答问题：没有配置文件时，launchd 每次启动服务都会将 `melo: no backend is configured; run melo setup in a terminal` 写入 `gateway.stderr.log`。
 - launchd 启动服务时不会带上你的 shell 环境变量，因此云端 API 密钥和 `LOCALMELO_PERSIST_MEMORY` 均不可用。请为该服务使用本地后端。
 - 该服务需要 macOS；在其他系统上执行 `install` 会失败。

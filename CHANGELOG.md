@@ -13,11 +13,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,
   `embedding_model`) selects it; an empty model means what melo_serve serves now, read from its state file when the
-  provider is built, so a switch is followed. Detection prefers a running melo_serve and setup saves it with no
-  model. `melo serve` checks it when the config uses it: it prints one line, runs `melo-serve up` if it is not
-  running, or says how to install it. `melo serve status` adds a block with whether it runs, its address, the chat
-  and embedding models and its login item, and the welcome row and the gateway's startup line read `<model> on
-  Splash via melo_serve` (#NNN).
+  provider is built or a banner is drawn, so a switch is followed, also by the terminal chat until you pick a model
+  with `/model`. melo_serve counts as running only while its control socket accepts a connection, so a state left by a
+  crash or a stop serves nothing. Checking the configuration never asks what is served. With nothing served, a direct
+  run ends with one line that says what to run (`melo-serve up`, the install command or `melo-serve use <pick>`) and
+  exit code 1, and `POST /v1/agent/run` answers 502 `agent_start_failed`. Detection prefers a running melo_serve and
+  setup saves it with no model. `melo serve` checks it when the config uses it: it prints one line, runs `melo-serve
+  up` if it is not running (`up` and the wait share 15 s), or says how to install it. `melo serve status` adds a block
+  with whether it runs, its address, the chat and embedding models and its login item, and the welcome row and the
+  gateway's startup line read `<model> on Splash via melo_serve` (#NNN).
 - Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.
 - Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
   alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is

@@ -175,8 +175,9 @@ enable_thinking = false
 
 3. 想换模型时随时切换：`melo-serve use <pick>`。
 
-- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。
-- 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。
+- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。只有控制套接字接受连接时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
+- 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
+- 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
 - 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
 - melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
 

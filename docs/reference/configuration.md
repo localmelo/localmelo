@@ -159,7 +159,7 @@ exact bytes; the wizard keeps a non-default policy.
 
 Top-level keys must come before the first `[table]` line.
 
-The `[melo_serve]` table takes `chat_url`, `chat_model`, `embedding_url` and `embedding_model`, like the other local backends. melo_serve's address is `http://127.0.0.1:8321/v1`. Leave `chat_model` and `embedding_model` empty: localmelo then asks melo_serve's state file (`~/.cache/melo_serve/state.json`, or under `MELO_SERVE_HOME`) which model it serves when it builds the provider, so `melo-serve use <pick>` is followed. A model you write is sent as written.
+The `[melo_serve]` table takes `chat_url`, `chat_model`, `embedding_url` and `embedding_model`, like the other local backends. melo_serve's address is `http://127.0.0.1:8321/v1`. Leave `chat_model` and `embedding_model` empty: localmelo then asks melo_serve's state file (`~/.cache/melo_serve/state.json`, or under `MELO_SERVE_HOME`) which model it serves when it builds the provider, so `melo-serve use <pick>` is followed. melo_serve counts as running only while its control socket accepts a connection. Checking the configuration never asks what is served; a run with nothing served ends with one line that names the command to run. A model you write is sent as written.
 
 ```toml
 chat_backend = "melo_serve"

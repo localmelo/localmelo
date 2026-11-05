@@ -34,8 +34,8 @@ It prints the model, the embedding and its addresses:
 
 With `chat_backend` or `embedding_backend` set to `melo_serve` ([melo_serve](model-servers.md#melo_serve)), `melo serve` first checks melo_serve and prints one line before the startup lines:
 
-- Running: `melo_serve: <model> on Splash (http://127.0.0.1:8321/v1)`, the model it serves now. With no model yet it says to run `melo-serve use <pick>`.
-- Not running: it runs `melo-serve up`, waits for melo_serve to come up, and prints the same line. If `melo-serve up` fails, the line says `melo_serve did not start:` and the last line it printed.
+- Running: `melo_serve: <model> on Splash (http://127.0.0.1:8321/v1)`, the model it serves now. With no model yet it says to run `melo-serve use <pick>`. melo_serve counts as running when its state file does not say `stopped` and its control socket accepts a connection, so a state left by a crash or a stop does not count.
+- Not running: it runs `melo-serve up`, waits for melo_serve to come up, and prints the same line. `up` and the wait share one budget of 15 s; after it the line says `melo_serve did not start in 15 s`. If `melo-serve up` fails, the line says `melo_serve did not start:` and the last line it printed.
 - Not installed: the line gives the install command, `uv tool install git+https://github.com/localmelo/melo_serve`.
 
 The gateway starts in each case. Its `Model:` line names the model melo_serve serves, as `qwen3-8b on Splash via melo_serve`.
@@ -132,7 +132,7 @@ melo serve uninstall
   `~/.localmelo/logs/gateway.stderr.log`.
 - `status` prints whether the service is `installed` and `running`, and its
   `pid`.
-- When melo_serve exists on this computer, `status` also prints a `melo_serve:` block: `running`, its `address`, the `chat` and `embedding` models (`model · backend · status`, or `none`), and whether its `login item` is installed. When it is not running, the block says how to start or install it. The block appears when melo_serve's state file exists, the config uses melo_serve, or `melo-serve` is installed.
+- When melo_serve exists on this computer, `status` also prints a `melo_serve:` block: `running`, its `address`, the `chat` and `embedding` models (`model · backend · status`, or `none`), and whether its `login item` is installed. When it is not running, the block says how to start or install it. The block appears when melo_serve runs, the config uses melo_serve, or `melo-serve` is installed.
 - Save a configuration before `install`, with `melo` or the setup wizard in
   a terminal. The service cannot answer questions: without a config file it
   writes `melo: no backend is configured; run melo setup in a terminal`
