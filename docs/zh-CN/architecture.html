@@ -566,7 +566,7 @@
               <tr><th scope="col">边界</th><th scope="col">规则</th><th scope="col">为什么重要</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>melo/</code> 和 <code>support/</code></td><td><code>melo/</code> 在模块级别从不导入 <code>support/</code>；<code>Agent(config=…)</code> 是唯一的桥。</td><td>智能体可以使用你自己构建的提供方运行，新增后端只改 <code>support/</code>。</td></tr>
+              <tr><td><code>melo/</code> 和 <code>support/</code></td><td><code>melo/</code> 从不导入 <code>support/</code>；调用方构建提供方（<code>providers_for(cfg)</code>）并交给 <code>Agent</code>。</td><td>智能体可以使用你自己构建的提供方运行，新增后端只改 <code>support/</code>。</td></tr>
               <tr><td>智能体和执行器</td><td>一步只运行它提供的工具，每个调用都先通过检查。</td><td>被拒绝的调用从不运行。在“询问”下，检查是护栏，不是沙箱；在 macOS 的“自动”下，步骤还会在写入沙箱里运行。</td></tr>
               <tr><td>智能体和记忆</td><td>记忆写入要通过检查器的大小限制。</td><td>提示和存储都保持在限定范围内。</td></tr>
               <tr><td>后端和模型服务器</td><td>后端只连接一个 URL。</td><td>模型服务器始终由你掌控。</td></tr>

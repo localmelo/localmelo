@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
+from localmelo.support.backends import providers_for
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.thinking import is_local, thinking_off_fields
 from localmelo.support.sessions.identity import (
@@ -427,7 +428,6 @@ async def build_session_agent(
         providers.append(WebSearchProvider(browser=window, cfg=cfg))
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
-    from_config = False
     if base_url:
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
@@ -467,21 +467,9 @@ async def build_session_agent(
                 )
             if section is not None:
                 section.reasoning_field = reasoning_field
-        if (
-            wrap_llm is None
-            and wrap_embedding is None
-            and retrieval_extra_body is None
-            and agent_options.reasoning == "legacy"
-        ):
-            # Keep the original legacy path. Other modes may be refused by
-            # Agent.__init__, so own their providers to close them on refusal.
-            from_config = True
-        else:
-            # The providers must exist before the Agent's Chat is made, so
-            # build them here exactly as Agent(config=...) would.
-            from localmelo.melo.agent.agent import _providers_from_config
-
-            llm, embedding = _providers_from_config(cfg)
+        # The providers must exist before the Agent's Chat is made, and are
+        # closed below if a wrapper or the Agent refuses them.
+        llm, embedding = providers_for(cfg, agent_options.reasoning)
     if identify and agent_options.identity is None:
         identity = None
         if base_url:
@@ -492,40 +480,26 @@ async def build_session_agent(
             identity = config_identity(cfg, kept, notes)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:
-        if not from_config:
-            assert llm is not None
-            replay = agent_options.reasoning in ("replay", "compress+replay") or (
-                agent_options.reasoning == "compress" and llm.requires_reasoning_replay
-            )
-            if cfg is not None and cfg.chat_backend != "ollama" and not replay:
-                llm.reasoning_field = None
-            if retrieval_extra_body is not None:
-                from localmelo.support.providers.llm._protocol import prepare_extra_body
+        assert llm is not None
+        if retrieval_extra_body is not None:
+            from localmelo.support.providers.llm._protocol import prepare_extra_body
 
-                llm.extra_body_by_kind = {
-                    "retrieve": prepare_extra_body(
-                        copy.deepcopy(dict(retrieval_extra_body))
-                    )
-                }
-            with_review_body(llm, None if cfg is None else cfg.chat_backend)
-            if wrap_llm is not None:
-                llm = wrap_llm(llm)
-            if wrap_embedding is not None and embedding is not None:
-                embedding = wrap_embedding(embedding)
-            agent = (agent_class or Agent)(
-                llm=llm,
-                embedding=embedding,
-                options=agent_options,
-                tool_providers=providers,
-            )
-        else:
-            assert cfg is not None
-            agent = (agent_class or Agent)(
-                config=cfg, options=agent_options, tool_providers=providers
-            )
-            built = getattr(agent, "_llm", None)
-            if isinstance(built, BaseLLMProvider):
-                with_review_body(built, cfg.chat_backend)
+            llm.extra_body_by_kind = {
+                "retrieve": prepare_extra_body(
+                    copy.deepcopy(dict(retrieval_extra_body))
+                )
+            }
+        with_review_body(llm, None if cfg is None else cfg.chat_backend)
+        if wrap_llm is not None:
+            llm = wrap_llm(llm)
+        if wrap_embedding is not None and embedding is not None:
+            embedding = wrap_embedding(embedding)
+        agent = (agent_class or Agent)(
+            llm=llm,
+            embedding=embedding,
+            options=agent_options,
+            tool_providers=providers,
+        )
     except BaseException:
         # No Agent exists to own these if a wrapper or constructor refused.
         for provider in (llm, embedding, *providers):

@@ -393,7 +393,7 @@ async def test_the_hook_wraps_the_providers_the_agent_is_built_with(
         await agent.close()
 
 
-async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_keeps_the_old_path(
+async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_leaves_them_as_built(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _RecordingAgent.built.clear()
@@ -404,7 +404,7 @@ async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_keeps_the_ol
     cfg.vllm.embedding_url = "http://127.0.0.1:9/v1"
     cfg.vllm.embedding_model = "cfg-e"
 
-    # No hook: the Agent is made from the config, as it was before the hook.
+    # No hook: the Agent is made from the providers the config names.
     agent = await build_session_agent(
         cfg=cfg,
         base_url=None,
@@ -413,8 +413,7 @@ async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_keeps_the_ol
         options=AgentOptions(),
     )
     try:
-        assert "config" in built[0]
-        assert "llm" not in built[0]
+        assert built[0]["llm"] is agent._llm
         assert isinstance(agent._llm, OpenAICompatLLM)
         assert agent._llm.model == "cfg-m"
         assert isinstance(agent._embedding, OpenAICompatEmbedding)
@@ -441,9 +440,7 @@ async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_keeps_the_ol
         wrap_embedding=wrap_embedding,
     )
     try:
-        # With a hook the providers exist first, so the Agent is made from
-        # them, and they are the ones the wrappers returned.
-        assert "config" not in built[1]
+        # With a hook the Agent is made from what the wrappers returned.
         assert built[1]["llm"] is seen[0]
         assert built[1]["embedding"] is seen[1]
         assert agent._llm is seen[0]

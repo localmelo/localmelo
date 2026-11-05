@@ -884,6 +884,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Python API: `Agent(config=)` is gone, so the core imports nothing from `support/`. Build the providers of a config
+  file with `providers_for(cfg)` from `localmelo.support.backends` and pass them: `llm, embedding =
+  providers_for(load())`, then `Agent(llm=llm, embedding=embedding)`. Pass the agent's reasoning mode as a second
+  argument, `providers_for(cfg, options.reasoning)`: outside replay the provider's reasoning field is cleared, as the
+  Agent did for a config. `Agent(llm=...)` is unchanged.
+- Developer only: `melo/agent/agent.py` is split by what each part does. The approval gate (`_approval_gate.py`), the
+  reflection reading and fitting (`_reflection.py`), and the recall and note methods that `Agent` inherits
+  (`_recall.py`, `_notes_loop.py`) have their own modules; the six run-scoped context variables are set and reset by
+  one `_run_scope()`; the repeated reply clean-up and the auxiliary requests (`_normalize_reply`, `_aux_reply`) are one
+  function each; `_run_attempt` hands the inbox, the answer taken from thinking, the direct answer and the empty reply
+  to methods of their own. A run sends the same requests as before.
 - Developer only: one function asks an approval policy for every call, folder and question a tool asks itself, and it fails
   closed the same way each time. A question a tool asked itself used to pass a policy's `CancelledError` on while the
   run was not cancelled and kept no trace of a policy that failed or of a cancellation; it now refuses the question as

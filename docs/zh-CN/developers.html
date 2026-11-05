@@ -87,10 +87,9 @@
             <code>tests/</code> 与这两部分一一对应。<code>docs/</code> 里是 Markdown 页面和网站。
           </li>
         </ul>
-        <p><strong>核心不导入 <code>support/</code>。</strong>唯一的桥是 <code>Agent(config=...)</code>。</p>
+        <p><strong>核心不导入 <code>support/</code>。</strong>调用方用配置构建提供方（<code>support/backends</code> 中的 <code>providers_for</code>），再交给 <code>Agent</code>。</p>
         <ul>
           <li><code>tests/test_layering.py</code> 在 <code>melo/</code> 下发现任何形式（普通、相对或通过 <code>importlib</code>）导入 <code>support/</code> 时失败。</li>
-          <li>它允许两处：仅用于类型检查的 <code>Config</code>，以及 <code>_providers_from_config</code> 内部的 <code>get_backend</code>。</li>
           <li><code>prompt_toolkit</code> 和 <code>rich</code> 不进入核心和后端；会话和终端界面不依赖网关。</li>
           <li>核心需要 <code>support/</code> 里的代码时，把契约放进 <code>melo/contracts/</code>。</li>
         </ul>

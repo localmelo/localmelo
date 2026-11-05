@@ -290,7 +290,9 @@ class TestBuildDirectModeAgent:
         )
         with mock.patch("localmelo.support.config.load", return_value=cfg):
             kwargs = self._build()
-        assert kwargs == {"config": cfg, "embedding_cls": kwargs["embedding_cls"]}
+        assert set(kwargs) == {"llm", "embedding", "embedding_cls"}
+        assert kwargs["llm"].model == "Qwen3-1.7B"
+        assert kwargs["embedding"] is not None
 
 
 # ── Usage errors: exit code 2 before any run ────────────────────────────────

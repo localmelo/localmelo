@@ -85,7 +85,7 @@ async def test_native_gated_retrieval_override_is_applied_only_to_retrieve(
     agent = None
     try:
         with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
+            "localmelo.support.sessions.agents.providers_for",
             return_value=(provider, None),
         ):
             agent = await build_session_agent(

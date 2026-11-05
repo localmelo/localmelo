@@ -15,11 +15,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._tool_images import withheld_note
-from localmelo.melo.agent.agent import (
-    ASSISTANT_TEXT_SHARE,
-    WITHHELD_PREVIEW_CHARS,
-    _cut_to,
-)
+from localmelo.melo.agent.agent import WITHHELD_PREVIEW_CHARS, _cut_to
 from localmelo.melo.checker.validators import (
     MAX_MEMORY_TEXT_LEN,
     MAX_OUTPUT_LEN,
@@ -30,6 +26,7 @@ from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
 from localmelo.melo.schema import (
+    ASSISTANT_TEXT_SHARE,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     ImagePart,

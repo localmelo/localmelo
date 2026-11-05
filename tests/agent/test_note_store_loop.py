@@ -555,11 +555,11 @@ async def test_every_document_crosses_the_boundary_once() -> None:
 
 @pytest.mark.asyncio
 async def test_the_reflection_block_keeps_twelve_notes_of_four_hundred_chars() -> None:
-    from localmelo.melo.agent.agent import (
+    from localmelo.melo.agent._notes_loop import (
         REFLECTION_MAX_NOTES,
         REFLECTION_NOTE_CHARS,
-        _RunState,
     )
+    from localmelo.melo.agent.agent import _RunState
     from localmelo.melo.memory.notes import ReasoningNote
 
     agent = _agent(FakeLLM(), _options(reasoning="compress"))

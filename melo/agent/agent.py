@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
+import contextlib
 import copy
 import dataclasses
 import functools
 import hashlib
 import inspect
-import itertools
 import json
 import logging
-import math
 import os
 import sqlite3
 import time
-import uuid
 from collections.abc import (
     Awaitable,
     Callable,
@@ -25,13 +22,14 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import Any, Literal
 
 from localmelo.melo.agent._answer_format import (
     closing_line_of,
     has_closing_line,
     requested_closing_label,
 )
+from localmelo.melo.agent._approval_gate import _ApprovalGate, _ToolAsk
 from localmelo.melo.agent._brief_aids import (
     DROPPED_KEPT,
     REFLECTION_ADDENDUM,
@@ -84,14 +82,20 @@ from localmelo.melo.agent._earlier import (
     with_earlier,
 )
 from localmelo.melo.agent._events import _Emitter, check_sink
-from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
+from localmelo.melo.agent._notes_loop import _NotesLoop
 from localmelo.melo.agent._picture_refusal import names_pictures
-from localmelo.melo.agent._step_review import (
-    RunReviews,
-    StepReviewer,
-    answer_on_block,
-    plain_page_key,
+from localmelo.melo.agent._recall import RECALL_RUN, _RecallLoop
+from localmelo.melo.agent._reflection import (
+    _cap_reflection_lists,
+    _fit_reflection,
+    _json_error_line,
+    _read_reflection,
+    _reflection_from_object,
+    _reflection_summary,
+    _stop_reason,
+    _unreadable_reason,
 )
+from localmelo.melo.agent._step_review import RunReviews, StepReviewer, answer_on_block
 from localmelo.melo.agent._task_aids import FINISH_NOTE, refusal_note
 from localmelo.melo.agent._tool_images import (
     TEXT_READERS,
@@ -103,19 +107,15 @@ from localmelo.melo.agent.options import (
     REPLAY_TURN_CAP,
     AgentOptions,
     reasoning_refusal,
-    retrieval_refusal,
 )
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
-    ActionReviewPayload,
     ExecutorResultPayload,
-    MemoryCandidatePayload,
     MemoryWritePayload,
     ToolResolutionResult,
 )
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.review.model import recalled_part
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import (
@@ -125,56 +125,19 @@ from localmelo.melo.checker.validators import (
     image_problem,
 )
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
-    BLOCKED_ALIKE,
-    BLOCKED_EARLIER,
-    DESKTOP_ACT,
-    NOBODY_TO_ASK,
     SELF_ASKING_TOOLS,
-    STOPPED_NOTE,
-    TAKEOVER,
     TOOL_ASK,
-    WINDOW_READ,
-    ApprovalDecision,
     ApprovalPolicy,
-    ApprovalRequest,
-    AutoPolicy,
-    Chosen,
-    ReviewMode,
-    Withdrawal,
-    ask,
-    block_note,
-    call_key,
     find_auto,
-    find_earlier,
-    find_folder_asker,
-    holds_grant,
     is_cancellation,
-    question_key,
-    review_mode,
-    site_key,
 )
 from localmelo.melo.contracts.events import EventSink
-from localmelo.melo.contracts.folders import OutsideAccess, home_label
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_EXTRA_BODY,
     BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
-)
-from localmelo.melo.contracts.review import (
-    CATEGORY_WORDS,
-    RULED_TOOLS,
-    SELF_DENIAL,
-    SITE_KEY,
-    TITLES,
-    ActionReview,
-    address_keys,
-    block_words,
-    loose_keys,
-    reaches_unread_site,
-    step_key,
 )
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
@@ -189,7 +152,6 @@ from localmelo.melo.executor import (
     AutoConfinement,
     Executor,
     WriteConfinement,
-    call_preview,
     confine,
     platform_note,
     register_builtins,
@@ -200,37 +162,12 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
     SIGNALS,
-    MemoryDecision,
     classify_user_text,
     request_candidates,
     user_candidates,
 )
 from localmelo.melo.memory.long import LongTerm
-from localmelo.melo.memory.notes import (
-    NOTE_MAX_DECIDED,
-    NOTE_MAX_FOUND,
-    NOTE_SHOWN_CHARS,
-    Draft,
-    ReasoningNote,
-    SourceRecordLog,
-    candidate_items,
-    candidate_text,
-    digest_note,
-    draft_title,
-    extract_draft,
-    mark_drafts_written,
-    note_from_reply,
-    note_title,
-    path_spans,
-    reflection_candidate_text,
-    render_digest,
-    render_draft_block,
-    render_note,
-    same_path,
-    source_records,
-    split_note,
-    thought_chunks,
-)
+from localmelo.melo.memory.notes import SourceRecordLog, note_from_reply, split_note
 from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
     key_for_query,
@@ -241,54 +178,23 @@ from localmelo.melo.memory.procedures.normalize import (
 from localmelo.melo.memory.procedures.store import RunFacts, harness_version
 from localmelo.melo.memory.procedures.template import TemplateView
 from localmelo.melo.memory.procedures.trace import Trace
-from localmelo.melo.memory.procedures.tracker import (
-    Limits,
-    progress_state,
-    shown_view,
-)
+from localmelo.melo.memory.procedures.tracker import Limits, progress_state, shown_view
 from localmelo.melo.memory.recall import (
     DEFAULT_TRIGGERS,
-    LONG_POOL,
-    RECALL_BOUNDARY_CHARS,
     RECALL_DATA_NOTE,
-    RECALL_END,
-    RECALL_K_MAX,
-    RECALL_LIVE_CHARS,
-    RECALL_LONG_K,
-    RECALL_THOUGHT_PER_TASK,
     RECALL_TOOL_DEF,
     RECALL_TOOL_TIMEOUT_S,
-    RECALL_TURN_CHARS,
-    RecallHit,
     RecallRecord,
     build_attempt_query,
     build_start_query,
-    build_step_query,
-    compact_record,
     default_kinds,
-    docs_from_entries,
-    docs_from_notes,
-    fit_recall_block,
-    hit_from_doc,
-    recall_span_chars,
-    recall_spans,
-    record_to_dict,
-    relation_counts,
     resolve_plan,
 )
-from localmelo.melo.memory.recall_gate import (
-    digest_has_evidence,
-    digest_task_key,
-    gate_long_docs,
-    is_task_digest,
-    same_task,
-)
-from localmelo.melo.memory.retrieval import build_retriever
-from localmelo.melo.memory.retrieval.base import Doc, RetrievalResult, Retriever
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
+    ASSISTANT_TEXT_SHARE,
     CALL_INTERRUPTED,
     CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
@@ -302,7 +208,6 @@ from localmelo.melo.schema import (
     UNFINISHED_ANSWER_ERROR,
     WINDOW_EVICT_CHUNK,
     WINDOW_FIT_TARGET,
-    CandidateItem,
     ImagePart,
     MemoryCandidate,
     Message,
@@ -320,204 +225,16 @@ from localmelo.melo.schema import (
     broken_tool_call,
     clip_session_text,
     describe_images,
+    exception_text,
     has_content,
     new_record_id,
     new_tool_call_id,
-    shorten,
     split_thinking,
-    strip_code_fences,
     thinking_answer,
     unfinished_as_thinking,
 )
 
-if TYPE_CHECKING:
-    from localmelo.support.config import Config
-
 logger = logging.getLogger(__name__)
-
-# ── Reflection coercion helpers ──
-
-
-def _coerce_str(value: object) -> str:
-    if value is None:
-        return ""
-    return str(value)
-
-
-def _coerce_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.lower() in ("true", "1", "yes")
-    try:
-        return bool(value)
-    except (TypeError, ValueError):
-        return False
-
-
-def _coerce_float(value: object, default: float = 0.0) -> float:
-    if value is None:
-        return default
-    try:
-        result = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return result if math.isfinite(result) else default
-
-
-def _coerce_str_list(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    if isinstance(value, str):
-        return [value] if value else []
-    if value is None:
-        return []
-    return [str(value)]
-
-
-# The decisions a reflection may recommend. An object without one of them is no
-# reflection (see _find_reflection).
-REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
-
-
-def _json_values(text: str) -> Iterator[object]:
-    """Yield the JSON values of a reflection reply, in the order they are read.
-
-    A Markdown code fence around the reply is stripped first. When the
-    rest is JSON as a whole, that value is the only one. Otherwise each
-    balanced ``{...}`` in it that parses as a JSON object is one, so text
-    around the objects does not matter. After a ``{`` that does not
-    start one, the search goes on from where the decoder gave up, and
-    after an object, from its end, so it reads the reply about once and
-    never starts inside a string of the text it already read, nor inside
-    an object it yielded. Nesting deeper than the decoder's recursion
-    limit ends the search.
-    """
-    body = strip_code_fences(text)
-    try:
-        value = json.loads(body)
-    except (ValueError, RecursionError):
-        pass
-    else:
-        yield value
-        return
-    decoder = json.JSONDecoder()
-    start = body.find("{")
-    while start != -1:
-        try:
-            value, end = decoder.raw_decode(body, start)
-        except json.JSONDecodeError as exc:
-            start = body.find("{", max(exc.pos, start + 1))
-            continue
-        except RecursionError:
-            return
-        yield value
-        start = body.find("{", end)
-
-
-def _decode_reflection(text: str) -> object:
-    """Return the first JSON value of a reflection reply; ``ValueError`` if none.
-
-    See :func:`_json_values` for how the reply is read: the reply as a
-    whole when it is JSON, else the first ``{...}`` object in it.
-    """
-    for value in _json_values(text):
-        return value
-    raise ValueError("No JSON object in the reflection response")
-
-
-def _holds_reflection_object(text: str) -> bool:
-    """Whether a reflection reply holds a JSON object (see :func:`_decode_reflection`)."""
-    try:
-        return isinstance(_decode_reflection(_coerce_str(text)), dict)
-    except ValueError:
-        return False
-
-
-def _find_reflection(text: str) -> dict[str, Any] | None:
-    """The reflection a reply holds, or ``None``.
-
-    That is the first JSON value of the reply (see :func:`_json_values`)
-    that is an object whose ``recommended_action``, as a string, is one
-    of :data:`REFLECTION_ACTIONS`. An object without one, such as the
-    arguments of a tool call written out as text, is passed over for the
-    objects after it, but an object nested inside it is not looked at.
-    JSON that is not an object holds no reflection. This is the strict
-    reading; the loop reads replies with :func:`_read_reflection`.
-    """
-    try:
-        for value in _json_values(_coerce_str(text)):
-            if not isinstance(value, dict):
-                continue
-            if _coerce_str(value.get("recommended_action")) in REFLECTION_ACTIONS:
-                return value
-    except ValueError:  # a number the decoder cannot convert ends the search
-        pass
-    return None
-
-
-# The most ``{...}`` objects of one reply that _read_reflection tries to repair.
-REPAIR_TRIES = 8
-
-
-def _read_reflection(text: str) -> tuple[dict[str, Any], str | None] | None:
-    """The reflection a reply holds, and the repair it took.
-
-    That is the reflection of :func:`_find_reflection` with ``None`` as the
-    repair. A reply that holds none gets one more reading with a single
-    conservative repair of a ``{...}`` the decoder rejects:
-    ``"unmatched_closer"``, ``"trailing_comma"``, ``"control_char"``,
-    ``"invalid_escape"`` or ``"unclosed_array"`` (see
-    :func:`~localmelo.melo.agent._json_repair.repairs`). The repaired text is
-    read as any reply is, so a repair counts only when it gives an object
-    with a valid ``recommended_action``, under the order and the nesting rule
-    of :func:`_find_reflection`. A reply that needs two repairs holds no
-    reflection, and nothing but a backslash or a bracket is inserted, so
-    truncated text stays unreadable. A reply that reads as it stands is never
-    repaired.
-    """
-    found = _find_reflection(text)
-    if found is not None:
-        return found, None
-    text = _coerce_str(text)
-    if "recommended_action" not in text:
-        return None
-    body = strip_code_fences(text)
-    for start, error in itertools.islice(rejected_objects(body), REPAIR_TRIES):
-        for repair, fixed in repairs(body, start, error):
-            found = _find_reflection(fixed)
-            if found is not None:
-                return found, repair
-    return None
-
-
-def _json_error_line(text: str) -> str:
-    """The line that a retry adds when a reply has JSON the decoder rejects, else ``""``.
-
-    It quotes the error of the first such ``{...}`` and the text around it
-    (see :func:`~localmelo.melo.agent._json_repair.error_line`); the position
-    counts the characters of the reply, a code fence around it included.
-    """
-    text = _coerce_str(text)
-    body = strip_code_fences(text)
-    first = next(rejected_objects(body), None)
-    if first is None:
-        return ""
-    return error_line(body, first[1], max(text.find(body), 0))
-
-
-def _unreadable_reason(reply: Message) -> str:
-    """Why *reply* holds no reflection: ``tool_call``, ``invalid`` or ``no_json``.
-
-    ``tool_call``: the reply has tool calls (and no reflection in its text);
-    ``invalid``: its text has a JSON object that no reflection is read from;
-    ``no_json``: its text has no JSON object.
-    """
-    if reply.tool_calls:
-        return "tool_call"
-    if _holds_reflection_object(reply.content):
-        return "invalid"
-    return "no_json"
 
 
 def _as_planned(
@@ -565,6 +282,16 @@ def _split_inline_reasoning(response: Message) -> Message:
     if response.thinking:
         return dataclasses.replace(response, content=content)
     return dataclasses.replace(response, content=content, thinking=block)
+
+
+def _answer_of(reply: Message) -> str:
+    """The answer in the reply to a request without tools, or "".
+
+    A blank reply gives none, nor does a tool call written out as text, which
+    such a request can still get.
+    """
+    answer = reply.content.strip()
+    return "" if not answer or broken_tool_call(answer) else answer
 
 
 def _replay_plan(
@@ -649,97 +376,9 @@ def _as_sent(
     )[0]
 
 
-def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
-    """Convert reflection entries into compact system Messages for retrieval context."""
-    if not entries:
-        return []
-    parts: list[str] = []
-    for r in entries:
-        lines = [f"[reflection] Attempt {r.attempt_id}: {r.summary}"]
-        if r.recommended_avoids:
-            lines.append(f"  Avoid: {'; '.join(r.recommended_avoids)}")
-        if r.next_promising_directions:
-            lines.append(f"  Try: {'; '.join(r.next_promising_directions)}")
-        if r.useful_evidence:
-            lines.append(f"  Evidence: {'; '.join(r.useful_evidence)}")
-        if r.failed_hypotheses:
-            lines.append(f"  Failed: {'; '.join(r.failed_hypotheses)}")
-        parts.append("\n".join(lines))
-    return [Message(role="system", content="\n".join(parts))]
-
-
-# The lists of a reflection entry that _fit_reflection empties, in this
-# order and each from its end, until the entry fits its budget.
-REFLECTION_TRIM_ORDER = (
-    "failed_hypotheses",
-    "useful_evidence",
-    "recommended_avoids",
-    "next_promising_directions",
-)
-
-
-def _reflection_size(entry: ReflectionEntry) -> int:
-    """Characters of *entry* as :func:`_serialize_reflections` writes it."""
-    return len(_serialize_reflections([entry])[0].content)
-
-
-def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
-    """*entry*, trimmed until its serialized form fits in *limit* characters.
-
-    The serialized form is the one :func:`_serialize_reflections` writes.
-    Items are dropped from the end of each list of
-    :data:`REFLECTION_TRIM_ORDER` in turn (``failed_hypotheses`` first,
-    ``next_promising_directions`` last), one at a time and only until the
-    entry fits. When the lists are empty and it still does not fit, the
-    summary is shortened at a word boundary and ends with "…" (see
-    :func:`shorten`). *entry* itself is not changed: one that fits is
-    returned as it is, any other as a trimmed copy.
-    """
-    if _reflection_size(entry) <= limit:
-        return entry
-    fitted = dataclasses.replace(entry)
-    for name in REFLECTION_TRIM_ORDER:
-        items = list(getattr(entry, name))  # a copy: entry keeps its own
-        setattr(fitted, name, items)
-        while items:
-            items.pop()
-            if _reflection_size(fitted) <= limit:
-                return fitted
-    room = limit - _reflection_size(dataclasses.replace(fitted, summary=""))
-    fitted.summary = shorten(fitted.summary, room)
-    return fitted
-
-
-# The lists of a reflection that are capped, the most items each keeps and the
-# most characters of an item.
-REFLECTION_CAPPED_LISTS = ("useful_evidence", "failed_hypotheses", "recommended_avoids")
-REFLECTION_LIST_ITEMS = 8
-REFLECTION_ITEM_CHARS = 300
-
-
-def _cap_reflection_lists(entry: ReflectionEntry) -> ReflectionEntry:
-    """*entry* with each of :data:`REFLECTION_CAPPED_LISTS` kept to its cap.
-
-    A list keeps its first :data:`REFLECTION_LIST_ITEMS` items, each cut to
-    :data:`REFLECTION_ITEM_CHARS` characters at a word boundary (see
-    :func:`shorten`). *entry* itself is not changed.
-    """
-    capped = dataclasses.replace(entry)
-    for name in REFLECTION_CAPPED_LISTS:
-        items = getattr(entry, name)[:REFLECTION_LIST_ITEMS]
-        setattr(capped, name, [shorten(item, REFLECTION_ITEM_CHARS) for item in items])
-    return capped
-
-
 # Characters of a withheld tool result that stay visible to the model. A
 # result left less room than this in its turn is withheld, not cut.
 WITHHELD_PREVIEW_CHARS = 200
-
-# Characters of a turn's working-memory budget that the assistant's text
-# keeps ahead of the tool results. A text this short stays beside results
-# cut to fit; a longer one is dropped when it does not fit beside them
-# (see Agent._checked_tool_turn). History keeps the text either way.
-ASSISTANT_TEXT_SHARE = 2_000
 
 # Key of the placeholder that replaces tool-call arguments too long for
 # working memory. Only the working-memory copy of a turn carries it:
@@ -966,86 +605,6 @@ NO_CHANGE_PUSH = (
 )
 
 
-def _gate_stop_reason(
-    decision: ReflectionDecision, *, patient: bool = False
-) -> str | None:
-    """The first check of the continuation gate that *decision* fails.
-
-    The codes are the ones in ``docs/reference/events.md``:
-    ``action_not_continue``, ``not_feasible``, ``not_concrete`` and
-    ``not_novel``. ``None`` when every check holds, so that the next attempt
-    may start. With *patient* true (the run's one allowance is unspent), a
-    decision that is not novel passes that check.
-    """
-    if decision.recommended_action != "continue":
-        return "action_not_continue"
-    if not decision.task_still_feasible:
-        return "not_feasible"
-    if not decision.next_step_is_concrete:
-        return "not_concrete"
-    if not decision.next_step_is_novel and not patient:
-        return "not_novel"
-    return None
-
-
-# The stop reasons of the budget boundaries, by the error that the run
-# ends with there.
-_OUT_OF_REASONS = {
-    "Max attempts reached": "no_attempt_left",
-    "Max steps reached": "step_budget_used",
-}
-
-
-def _stop_reason(
-    decision: ReflectionDecision | None,
-    out_of: str,
-    *,
-    brief: bool = False,
-    patient: bool = False,
-) -> str | None:
-    """Why the run does not go on after a reflection, ``None`` if it does.
-
-    *decision* is ``None`` for a reply that holds no reflection, and
-    *out_of* is the boundary's error (``""`` when another attempt can
-    start). The one place that decides: ``continue_run`` is whether this
-    is ``None``. In a *brief* run (``AgentOptions.brief_probe``) a
-    ``continue`` goes on whatever the gate's flags say. *patient* is
-    :func:`_gate_stop_reason`'s.
-    """
-    if decision is None:
-        return "unreadable_reply" if out_of else None
-    if decision.recommended_action == "done":
-        return "action_not_continue"
-    if out_of:
-        return _OUT_OF_REASONS[out_of]
-    if brief and decision.recommended_action == "continue":
-        return None
-    return _gate_stop_reason(decision, patient=patient)
-
-
-def _providers_from_config(
-    cfg: Config,
-) -> tuple[BaseLLMProvider, BaseEmbeddingProvider | None]:
-    """Build LLM and embedding providers from a Config object.
-
-    Uses the split backend model: ``cfg.chat_backend`` selects the chat
-    provider and ``cfg.embedding_backend`` selects the embedding provider.
-    The two may refer to different backend adapters.
-    """
-    from localmelo.support.backends import get_backend
-
-    chat_backend = get_backend(cfg.chat_backend)
-    llm = chat_backend.build_chat_provider(cfg)
-
-    embedding = None
-    if cfg.has_embedding:
-        emb_key = cfg.embedding_backend  # direct key, no mapping needed
-        emb_backend = get_backend(emb_key)
-        embedding = emb_backend.build_embedding_provider(cfg)
-
-    return llm, embedding
-
-
 # SQLite directory when LOCALMELO_PERSIST_MEMORY is set without
 # LOCALMELO_MEMORY_DIR. Expanded when used, not at import.
 DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
@@ -1111,12 +670,6 @@ NOTE_REPLAY_SENTENCE = (
     "Your earlier thinking is not shown to you again; your notes and code "
     "drafts are."
 )
-
-# A note text after this many characters is cut in the reflection's block.
-REFLECTION_NOTE_CHARS = NOTE_SHOWN_CHARS
-
-# Notes of this attempt the reflection request carries at most.
-REFLECTION_MAX_NOTES = 12
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1481,7 +1034,7 @@ class _RunState:
         except Exception as exc:
             self.tracing = False
             logger.debug(
-                "The trace of task %s stopped: %s", self.task_id, _exception_text(exc)
+                "The trace of task %s stopped: %s", self.task_id, exception_text(exc)
             )
             return
         self.report_progress()
@@ -1505,34 +1058,10 @@ class _RunState:
             logger.debug(
                 "The progress of task %s stopped: %s",
                 self.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
             return
         self.events.progress(state)
-
-
-# The run a ``recall`` tool call belongs to, set by run_task beside
-# CALL_RECORDER. The tool's handler reads it; outside a run it is None and
-# the handler answers in one line.
-RECALL_RUN: contextvars.ContextVar[_RunState | None] = contextvars.ContextVar(
-    "RECALL_RUN", default=None
-)
-
-
-def _checked_title(text: str) -> str:
-    """The first sentence of checked *text*, at most 120 characters."""
-    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    for separator in (". ", "。", "! ", "? "):
-        head, found, _tail = first.partition(separator)
-        if found and head.strip():
-            return shorten(head.strip() + separator.strip(), 120)
-    return shorten(first, 120)
-
-
-def _exception_text(exc: BaseException) -> str:
-    """``"<type>: <message>"``, or the type alone when the message is empty."""
-    message = str(exc)
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _reviews_of(run: _RunState) -> dict[str, Any] | None:
@@ -1555,949 +1084,22 @@ def _check_approval(approval: object) -> None:
         raise TypeError("approval must have an async decide(request) method")
 
 
-class _ApprovalGate:
-    """The executor's approval gate for one call of a run with a policy.
-
-    The executor calls it just before a tool that requires approval would
-    run (see :meth:`Executor.execute_structured`). It builds the
-    :class:`ApprovalRequest` from the request that would run, asks the
-    run's policy, and keeps what came of it in :attr:`asked` for the
-    call's ``tool.finished`` event. While the review and the policy decide,
-    ``run.waiting_call_id`` names the call, so that a cancellation there
-    closes the call as not started (see :meth:`Agent._on_cancelled`).
-
-    With a *checker*, the request carries the call's review (#279), kept in
-    :attr:`review` for the denial text; a call that would change localmelo
-    itself (the ``self`` category) is denied without asking the policy.
-    With a *reviewer*, the user's model settles a call the rules left open
-    when the policy would let it run without a person (a session grant, or
-    auto mode; see :mod:`localmelo.melo.agent._step_review`). In auto mode
-    (#339) a denial is a block: the model reads the note of
-    :func:`~localmelo.melo.contracts.approvals.block_note`, and a second
-    block of the same kind sets ``run.reviews.stop``; the step's later
-    calls are then blocked unreviewed. A tool the rules do not read
-    (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
-    read-only is undecided in auto mode, so the user's model reviews it.
-    While a site is refused in the task (#433), a ``shell_exec`` or
-    ``python_exec`` call the rules find routine that reaches a host melo
-    cannot read (:func:`~localmelo.melo.contracts.review.reaches_unread_site`)
-    is undecided too when it would run without a person, so the user's
-    model reviews it, told which sites were refused.
-
-    A file tool's call on a path outside the workspace (#405) is asked of
-    the policy's folder layer only
-    (:func:`~localmelo.melo.contracts.approvals.find_folder_asker`), and
-    only in a run the person started: auto mode never decides it and no
-    tool grant covers it (see :meth:`asks_folders` and :meth:`_folder`).
-
-    The run's cancellation propagates, and the prompt counts as withdrawn.
-    The policy fails closed otherwise: an exception it raises, a
-    ``CancelledError`` while nothing cancels the run, and a return value
-    other than an :class:`ApprovalDecision` each reach the executor as an
-    exception, and the executor refuses the call.
-    """
-
-    def __init__(
-        self,
-        policy: ApprovalPolicy,
-        run: _RunState,
-        call: ToolCall,
-        workspace_root: str | None,
-        tier: ToolTier,
-        checker: Checker | None = None,
-        reviewer: StepReviewer | None = None,
-        destructive: bool = False,
-        confinement: AutoConfinement | None = None,
-        asks_itself: bool = False,
-    ) -> None:
-        self._policy = policy
-        self._run = run
-        self._call = call
-        self._workspace_root = workspace_root
-        self._tier = tier
-        self._checker = checker
-        self._reviewer = reviewer
-        self._destructive = destructive
-        self._confinement = confinement
-        self._asks_itself = asks_itself
-        self.review: ActionReview | None = None
-        # The approval of tool.finished: request_id, allowed, reason,
-        # remember and origin, once the policy is asked; None until then.
-        self.asked: dict[str, Any] | None = None
-        self._mode: ReviewMode = "ask"
-        self._key = ""
-        self._allowance = False
-
-    def asks_folders(self, outside: OutsideAccess) -> bool:
-        """Whether a person may be asked about *outside* (#405).
-
-        Only in a run the person started, and only when the policy has a
-        layer that asks about folders; otherwise the executor refuses the
-        path as it always did.
-        """
-        return self._run.from_person and find_folder_asker(self._policy) is not None
-
-    async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
-        earlier = self._earlier(request)
-        if earlier is not None:
-            return earlier
-        if self._asks_itself:
-            # One of melo's own tools that ask their questions themselves (the
-            # browser tools that act: per site, for every text typed and every
-            # form sent) is not asked a second, empty question here about its
-            # call. Only the names melo lists count, never a tool's annotation.
-            return ApprovalDecision(True, origin="policy")
-        if request.outside is not None:
-            return await self._folder(request, request.outside)
-        run = self._run
-        if self._checker is not None:
-            # In a thread: a runner's review walks the workspace.
-            self.review = await asyncio.to_thread(
-                self._checker.review_action,
-                ActionReviewPayload(
-                    request.tool_name,
-                    dict(request.arguments),
-                    self._workspace_root,
-                    since=None if self._reviewer is None else self._reviewer.since,
-                    destructive=self._destructive,
-                ),
-            )
-        asking = self._asking(request, review=self.review)
-        preview = asking.preview
-        self._mode = review_mode(self._policy, asking)
-        auto = find_auto(self._policy) if self._mode == "auto" else None
-        if (
-            self._mode == "auto"
-            and self.review is not None
-            and self.review.verdict == "routine"
-            and request.tool_name not in RULED_TOOLS
-            and self._tier != "read"
-        ):
-            self.review = ActionReview(
-                "undecided",
-                (),
-                (f"Runs {request.tool_name}, a tool melo's rules do not read.",),
-            )
-            asking = dataclasses.replace(asking, review=self.review)
-        refused = _refused_sites(self._policy, run)
-        if (
-            self._mode != "ask"
-            and refused
-            and self.review is not None
-            and self.review.verdict == "routine"
-            and reaches_unread_site(request.tool_name, request.arguments)
-        ):
-            # A site is refused in this task: a step that reaches a host melo
-            # cannot read is reviewed, not run as routine (#433).
-            self.review = dataclasses.replace(
-                self.review, verdict="undecided", reasons=(UNREAD_SITE,)
-            )
-            asking = dataclasses.replace(asking, review=self.review)
-        run.reviews.count(self.review)
-        if self.review is not None and (
-            self._mode != "ask" or self.review.verdict != "routine"
-        ):
-            self._key = step_key(
-                request.tool_name,
-                request.arguments,
-                self._workspace_root,
-                self.review.inputs,
-            )
-        if self._mode == "auto" and run.reviews.stop:
-            # The turn already stopped: the step's later calls do not run.
-            self._record(asking, origin="auto", reason="the turn stopped")
-            return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
-        if self._mode == "auto":
-            again = run.reviews.declined_again(
-                [
-                    call_key(
-                        request.tool_name, request.arguments, self._workspace_root
-                    ),
-                    *loose_keys(request.tool_name, request.arguments),
-                ]
-            )
-            if again is not None:
-                # This step, or one alike, was declined on the card earlier in
-                # this turn (the person's Don't allow, or no answer): nobody is
-                # asked again (#465).
-                self._record(asking, origin=again.origin, reason=again.reason)
-                assert self.asked is not None
-                self.asked["declined"] = True
-                self.asked.update(again.record())
-                return again
-        if self.review is not None and "self" in self.review.categories:
-            # No model reviews it and no policy is asked.
-            self._counted(request.tool_name, preview)
-            if self._mode == "auto":
-                words = CATEGORY_WORDS["self"]
-                self._record(asking, origin="auto", reason=words, denial=True)
-                return ApprovalDecision(
-                    False, self._block(asking, auto, words), origin="auto"
-                )
-            self._record(asking, origin="policy", reason=SELF_DENIAL, denial=True)
-            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-
-        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
-            # The review is asked in the same guard as the policy: a failure of
-            # either refuses the call alike.
-            if (
-                self._reviewer is not None
-                and self.review is not None
-                and not (auto is not None and auto.allowed_once(self._key))
-            ):
-                self.review = await self._reviewer.review(
-                    run.reviews,
-                    tool_name=request.tool_name,
-                    arguments=dict(request.arguments),
-                    preview=preview,
-                    review=self.review,
-                    mode=self._mode,
-                    key=self._key,
-                    workspace=self._workspace_root,
-                    refused_sites=refused,
-                )
-                asked = dataclasses.replace(asked, review=self.review)
-            self._counted(request.tool_name, preview)
-            return await self._policy.decide(asked)
-
-        decided = await self._ask(settle, asking)
-        # Who decided, not the mode the call began in: a chat may switch
-        # while the call is reviewed. Auto's card nobody answered is auto
-        # mode's decision (#465).
-        allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
-        unanswered = isinstance(decided, Chosen) and decided.origin == "timeout"
-        if decided.origin == "auto" or allowance or unanswered:
-            self._mode = "auto"
-            auto = find_auto(self._policy) or auto
-        elif self._mode == "auto":
-            self._mode = "ask"
-        self._allowance = decided.allow and allowance
-        if decided.allow and self._confinement is not None:
-            # A call auto mode let run starts confined; one a person allowed
-            # does not.
-            self._confinement.on = self._mode == "auto"
-            if self._confinement.on:
-                await asyncio.to_thread(self._confinement.ready)
-        self._record(
-            asking,
-            origin=decided.origin,
-            allowed=decided.allow,
-            reason=decided.reason,
-            remember=decided.remember,
-            # A person's Deny, an auto block, a policy's refusal of the step
-            # itself; never a question withdrawn or one that could not be asked.
-            denial=not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal),
-        )
-        if isinstance(decided, Chosen) and not decided.allow:
-            # Don't allow on the card, or no answer, holds for the rest of the
-            # turn (#465); a card nobody answered keeps why, for the surfaces.
-            assert self.asked is not None
-            self.asked.update(decided.record())
-            run.reviews.decline(
-                [
-                    call_key(
-                        request.tool_name, request.arguments, self._workspace_root
-                    ),
-                    *loose_keys(
-                        request.tool_name,
-                        request.arguments,
-                        () if self.review is None else self.review.categories,
-                    ),
-                ],
-                decided,
-            )
-        if not decided.allow and decided.origin == "auto":
-            return dataclasses.replace(
-                decided, reason=self._block(asking, auto, decided.reason)
-            )
-        return decided
-
-    def _earlier(self, request: ExecutionRequest) -> ApprovalDecision | None:
-        """A refusal of a step blocked earlier in this task, before any review (#411).
-
-        Only a policy with :class:`~localmelo.melo.contracts.approvals.EarlierBlocks`
-        in it refuses: a task the chat continued on its own. The record says
-        who blocked the step first (``approval.earlier``).
-        """
-        blocks = find_earlier(self._policy)
-        found = (
-            None
-            if blocks is None
-            else blocks.match(
-                request.tool_name, request.arguments, self._workspace_root
-            )
-        )
-        if found is None:
-            return None
-        who, exact = found
-        asking = self._asking(request, outside=request.outside)
-        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
-        self._record(asking, origin="policy", reason=reason)
-        assert self.asked is not None
-        self.asked["earlier"] = who
-        return ApprovalDecision(False, reason, origin="policy")
-
-    async def _folder(
-        self, request: ExecutionRequest, outside: OutsideAccess
-    ) -> ApprovalDecision:
-        """Ask the person about a call on a path outside the workspace (#405).
-
-        The policy's folder layer decides; its answer may be a grant of the
-        folder for the chat or in the settings, which only a read uses. A
-        write is reviewed by the rules first and is high-impact: a write
-        into localmelo itself is denied without asking. Failures and the
-        run's cancellation go as they go for any other call.
-        """
-        run = self._run
-        self._mode = "ask"
-        if outside.access == "write":
-            review = None
-            if self._checker is not None:
-                review = await asyncio.to_thread(
-                    self._checker.review_action,
-                    ActionReviewPayload(
-                        request.tool_name,
-                        dict(request.arguments),
-                        self._workspace_root,
-                    ),
-                )
-            self.review = _outside_write(review, outside)
-            run.reviews.count(self.review)
-        asking = self._asking(request, review=self.review, outside=outside)
-        asker = find_folder_asker(self._policy)
-        if asker is None or not run.from_person:
-            # asks_folders said yes, so only a policy changed meanwhile.
-            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
-            return ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
-        if self.review is not None and "self" in self.review.categories:
-            self._record(asking, origin="policy", reason=SELF_DENIAL)
-            return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-        decided = await self._ask(asker.decide_folder, asking)
-        if decided.allow and decided.origin in ("auto", "earlier"):
-            # Only a person, a grant of the folder or the settings allow it.
-            refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
-            self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)
-            return refused
-        self._record(
-            asking,
-            origin=decided.origin,
-            allowed=decided.allow,
-            reason=decided.reason,
-            remember=decided.remember,
-        )
-        assert self.asked is not None
-        self.asked["folder"] = {**outside.to_json(), "scope": _folder_scope(decided)}
-        return decided
-
-    def _asking(
-        self,
-        request: ExecutionRequest,
-        *,
-        review: ActionReview | None = None,
-        outside: OutsideAccess | None = None,
-    ) -> ApprovalRequest:
-        """The request to the policy for the call *request* would run."""
-        return ApprovalRequest(
-            request_id=uuid.uuid4().hex,
-            run_id=self._run.task_id,
-            call_id=self._call.id,
-            tool_name=request.tool_name,
-            arguments=copy.deepcopy(request.arguments),
-            preview=call_preview(request.tool_name, request.arguments),
-            workspace_root=self._workspace_root,
-            tier=self._tier,
-            review=review,
-            outside=outside,
-        )
-
-    async def _ask(
-        self,
-        decide: Callable[[ApprovalRequest], Awaitable[object]],
-        asking: ApprovalRequest,
-    ) -> ApprovalDecision:
-        """:func:`ask` with the call named in ``run.waiting_call_id`` meanwhile."""
-        run = self._run
-        run.waiting_call_id = self._call.id
-        decided = await ask(
-            decide, asking, record=functools.partial(self._failed, asking)
-        )
-        run.waiting_call_id = ""
-        return decided
-
-    def _failed(
-        self, asking: ApprovalRequest, origin: str, error: BaseException | None
-    ) -> None:
-        """Keep a question that got no decision (see :func:`ask`)."""
-        if error is not None:
-            # A withdrawn question keeps the name: the call did not start.
-            self._run.waiting_call_id = ""
-        reason = "" if error is None else _exception_text(error)
-        self._record(asking, origin=origin, reason=reason)
-
-    def _counted(self, tool_name: str, preview: str) -> None:
-        """Count the call among those that a later model review is told came before it."""
-        self._run.reviews.calls.append(
-            (
-                tool_name,
-                preview,
-                "routine" if self.review is None else self.review.verdict,
-            )
-        )
-
-    def _block(
-        self, asking: ApprovalRequest, auto: AutoPolicy | None, words: str = ""
-    ) -> str:
-        """Keep an auto-mode block and return the note the model reads."""
-        task = auto is not None and auto.task
-        changed = auto is not None and auto.has_allowances(asking.tool_name)
-        if self._reviewer is None:
-            return block_note(self.review, words=words, task=task, changed=changed)
-        return self._reviewer.blocked(
-            self._run.reviews,
-            review=self.review,
-            key=self._key,
-            call_id=self._call.id,
-            preview=asking.preview,
-            words=words or block_words(self.review),
-            task=task,
-            workspace=self._workspace_root,
-            changed=changed,
-        )
-
-    def _record(
-        self,
-        asking: ApprovalRequest,
-        *,
-        origin: str,
-        allowed: bool = False,
-        reason: str = "",
-        remember: bool = False,
-        denial: bool = False,
-    ) -> None:
-        """Keep the outcome of *asking*.
-
-        *origin* is the decision's, ``"error"`` when the policy failed (the
-        reason is then the failure), or ``"withdrawn"`` when the run was
-        cancelled while the policy decided. In auto mode, and for a call
-        that is not plainly routine, the record also holds the ``mode``, the
-        ``review`` and the ``step_key``; an allowance used is ``"once"``.
-        *denial*: the step itself was denied (a person's Deny, an auto block,
-        a policy's refusal of the step); the record then keeps its
-        ``call_key`` and ``loose_keys``, so a task its chat continues does not
-        run it, or a step alike, again (#411).
-        """
-        self.asked = {
-            "request_id": asking.request_id,
-            "allowed": allowed,
-            "reason": reason,
-            "remember": remember,
-            "origin": origin,
-        }
-        review = self.review
-        if self._mode == "auto":
-            self.asked["mode"] = "auto"
-        if review is not None and (
-            self._mode == "auto" or review.verdict != "routine" or review.by == "model"
-        ):
-            shown = review.to_json()
-            # The sentence the approval card starts with (#454).
-            gist = step_gist(asking.tool_name, asking.arguments, review)
-            if gist is not None:
-                shown["gist"] = gist.to_json()
-            self.asked["review"] = shown
-            if self._key:
-                self.asked["step_key"] = self._key
-        if self._allowance:
-            self.asked["allowance"] = "once"
-        if denial and not allowed:
-            # What makes a later call the same step, or one alike: a task the
-            # chat continues on its own never runs it again (#411).
-            self.asked["call_key"] = call_key(
-                asking.tool_name, asking.arguments, self._workspace_root
-            )
-            self.asked["loose_keys"] = loose_keys(
-                asking.tool_name,
-                asking.arguments,
-                () if review is None else review.categories,
-            )
-
-
-# Why a step is reviewed that the rules found routine: it reaches a host melo
-# cannot read while a site is refused in the task (#433).
-UNREAD_SITE: Final = (
-    "Reaches a host melo cannot read, while a site is refused in this task."
-)
-
-# Why a path outside the workspace was refused when no person could be
-# asked after all (the policy changed while the call was checked).
-NO_FOLDER_ASKER: Final = "no one can allow a folder outside the workspace in this run"
-
-
-def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> ActionReview:
-    """*review* of a write outside the workspace: high-impact, ``outside_write`` included.
-
-    The rules leave the category out of a file tool's review, since the
-    workspace fence used to place every write; here it is outside.
-    """
-    found = review or ActionReview("routine")
-    categories = [*found.categories]
-    if "outside_write" not in categories:
-        categories.append("outside_write")
-    order = list(TITLES)
-    categories.sort(key=lambda name: order.index(name) if name in order else len(order))
-    reasons = (
-        *found.reasons,
-        f"Writes {home_label(outside.path)}, outside the workspace.",
-    )
-    return dataclasses.replace(
-        found, verdict="high", categories=tuple(categories), reasons=reasons[:3]
-    )
-
-
-def _folder_scope(decision: ApprovalDecision) -> str:
-    """What allowed a call outside the workspace: once, chat, always, or "" (denied)."""
-    if not decision.allow:
-        return ""
-    if decision.origin == "session":
-        return "chat"
-    if decision.origin == "policy":
-        return "always"
-    if decision.always:
-        return "always"
-    return "chat" if decision.remember else "once"
-
-
-# The words of auto mode's review of a site question, by what the tool wants to
-# do there: open it (no ``access``), click or choose on a page, click at a
-# point, type on it, or send a form from it. The step is judged on the goal of
-# the chat (#465), so nothing here says the request did not name it.
-_SITE_DOUBT = {
-    "": "Opens {site}.",
-    "read": "Opens {site}.",
-    "act": "Clicks or chooses on {site}.",
-    "point": "Clicks at a point on {site}.",
-    "submit": "Sends a form from {site}, which needs its own review.",
-    "dialog": "Answers OK to a question the page on {site} asks.",
-}
-# A page asked to open another app (an address of the app's kind): only a
-# person's answer lets melo open it, in auto mode too.
-_HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
-# The questions only the person answers, in Ask and in Auto alike: no model sees them, so no
-# review decides them. In Auto each is stopped for a card with these words (nobody else sees
-# them): a window another app put up, a press in one, and a page that needs the person.
-_PERSON_WORDS = {
-    WINDOW_READ: "Another app put up a window right after a step; only you decide whether melo sees it.",
-    DESKTOP_ACT: "Pressing a button in another app's window is yours to decide, every time.",
-    TAKEOVER: "melo needs you on this page (a sign-in or a check only you can do); only you can take it over.",
-}
-_TYPING_DOUBT = (
-    "Types text on {site}, which needs its own review: the text is the model's own."
-)
-# A click on a site the person's words name: still reviewed, by what it is on.
-_NAMED_SITE = " The user's words name this site."
-# A click whose target melo cannot tell (#465): the person is asked.
-_UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
-# The site questions that carry no value of melo's (#465): a click or a choice
-# on a page, a click at a point, an OK to a box. Only these can turn a model's
-# ``credentials`` into no category; a read (its address can hold a key), a
-# search, typing, a form sent, or any access not listed never does.
-_VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
-
-
-def _site_doubt(access: str, site: str, preview: str) -> str:
-    """What a running tool's question does, for its review.
-
-    A question of a kind this table does not know (another tool's) is
-    described by its preview.
-    """
-    if access == "type":
-        return _TYPING_DOUBT.format(site=site)
-    if access in _SITE_DOUBT:
-        return _SITE_DOUBT[access].format(site=site)
-    said = " ".join(preview.split())[:200].rstrip(".")
-    return (
-        f"{said[:1].upper()}{said[1:]}." if said else _SITE_DOUBT[""].format(site=site)
-    )
-
-
-class _ToolAsk:
-    """What a running tool uses to ask the run's approval policy (``TOOL_ASK``).
-
-    The request is for a name and arguments the tool chooses, not for the
-    tool's own call, so a policy that keeps grants by name keeps one per name.
-    It has the call's id, so a surface shows the question with the call. The
-    run's cancellation propagates, and the prompt counts as withdrawn. The
-    policy fails closed as it does for a call (:func:`ask`), and a question that
-    got no decision is kept in *refused* with its ``origin`` (``withdrawn`` or
-    ``error``).
-
-    In auto mode (#339) a site the browser would open is reviewed first:
-    routine when the user's words name it, otherwise the user's model asks
-    whether it serves the request (cached per site for the chat), and a
-    block is kept as the gate keeps one.
-
-    A question refused is a blocked step like any other (#431): it is kept
-    in *refused* (the call's ``tool_asks``) with its ``call_key`` and its
-    ``loose_keys`` (:func:`question_key` and, for a site, :func:`site_key`
-    among them), and a run its chat continued on its own refuses the same
-    question, one under the same name, or one about the same host however
-    its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
-    """
-
-    def __init__(
-        self,
-        policy: ApprovalPolicy,
-        run: _RunState,
-        call: ToolCall,
-        workspace_root: str | None,
-        reviewer: StepReviewer | None = None,
-        refused: list[dict[str, Any]] | None = None,
-    ) -> None:
-        self._policy = policy
-        self._run = run
-        self._call = call
-        self._workspace_root = workspace_root
-        self._reviewer = reviewer
-        self.refused: list[dict[str, Any]] = [] if refused is None else refused
-
-    def names_host(self, host: str) -> bool:
-        """Whether the user's recent messages name *host* itself (``www.`` aside)."""
-        return self._reviewer is not None and self._reviewer.names_host(host)
-
-    def granted(self, name: str) -> bool:
-        """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
-        return holds_grant(self._policy, name)
-
-    def refused_earlier(
-        self, tool_name: str, arguments: Mapping[str, Any], preview: str
-    ) -> ApprovalDecision | None:
-        """The refusal of a question blocked earlier in this task, or one alike, or None.
-
-        Asked before anything lets the question through without asking, such
-        as a site the user's words name: a block stands over that (#431).
-        """
-        return self._earlier(self._request(tool_name, arguments, preview))
-
-    def _request(
-        self, tool_name: str, arguments: Mapping[str, Any], preview: str
-    ) -> ApprovalRequest:
-        return ApprovalRequest(
-            request_id=uuid.uuid4().hex,
-            run_id=self._run.task_id,
-            call_id=self._call.id,
-            tool_name=tool_name,
-            arguments=copy.deepcopy(dict(arguments)),
-            preview=preview,
-            workspace_root=self._workspace_root,
-            tier="network",
-        )
-
-    async def _ask(
-        self,
-        decide: Callable[[ApprovalRequest], Awaitable[object]],
-        request: ApprovalRequest,
-    ) -> ApprovalDecision:
-        """:func:`ask`; a question that got no decision is kept in *refused*."""
-        return await ask(
-            decide, request, record=functools.partial(self._failed, request)
-        )
-
-    def _failed(
-        self, request: ApprovalRequest, origin: str, error: BaseException | None
-    ) -> None:
-        """Keep a question that got no decision (see :func:`ask`).
-
-        Without its preview, which can name a window of another app.
-        """
-        self.refused.append(
-            {"request_id": request.request_id, "tool": request.tool_name,
-             "allowed": False, "origin": origin,
-             "reason": "" if error is None else _exception_text(error)}
-        )  # fmt: skip
-
-    async def _window(
-        self,
-        tool_name: str,
-        arguments: Mapping[str, Any],
-        preview: str,
-        words: str,
-    ) -> ApprovalDecision:
-        """A question only the person answers: whether melo may see another app's window, or press a button in one.
-
-        Nothing about the window (its app, its title) or the press goes to any
-        model: not to the review model, which never sees this question, and not
-        into a blocked step's record or a later review's prompt. In Auto the policy
-        is handed a review that only a card can settle (the one category
-        ``opaque``, which words and the model never allow), so it asks the
-        person like a card-only kind, or denies when nobody is watching (the reason
-        is :data:`NOBODY_TO_ASK`, not the category's words). An
-        answer of "Allow <App> in this chat" is the policy's grant of this
-        name (``window-read:<bundle id>``). A press (``desktop-act:<app>``) is
-        asked every time and never kept.
-
-        The card that asks the person to take over a page of melo's browser
-        (``takeover:<site>``) goes the same way: only the person can sign in or
-        pass a check, so no review decides it. *words* are the card's own, per
-        kind (:data:`_PERSON_WORDS`).
-        """
-        request = self._request(tool_name, arguments, preview)
-        if review_mode(self._policy, request) == "auto":
-            if self._run.reviews.stop:
-                return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
-            request = dataclasses.replace(
-                request,
-                review=ActionReview("high", ("opaque",), (words,)),
-            )
-        decided = await self._ask(self._policy.decide, request)
-        if not decided.allow and decided.origin == "auto":
-            # Auto refused it only because nobody can be asked: say that, not the
-            # category of code melo cannot check that the fixed review carries.
-            return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
-        return decided
-
-    async def __call__(
-        self, tool_name: str, arguments: Mapping[str, Any], preview: str
-    ) -> ApprovalDecision:
-        for prefix, words in _PERSON_WORDS.items():
-            if tool_name.startswith(prefix):
-                return await self._window(tool_name, arguments, preview, words)
-        request = self._request(tool_name, arguments, preview)
-        earlier = self._earlier(request)
-        if earlier is not None:
-            return earlier
-        reviewer = self._reviewer
-        auto = review_mode(self._policy, request) == "auto" and reviewer is not None
-        key = step_key(tool_name, request.arguments, self._workspace_root)
-        if auto and reviewer is not None and self._run.reviews.stop:
-            # The turn already stopped: no site opens either.
-            return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
-        declined = _declined_keys(tool_name, request.arguments, self._workspace_root)
-        again = self._run.reviews.declined_again(declined) if auto else None
-        if again is not None:
-            # The same question was declined on the card earlier in this turn
-            # (the person's Don't allow, or no answer): nobody is asked again
-            # (#465). A repeat is no new refusal: it keeps no call key.
-            self.refused.append(
-                {"request_id": request.request_id, "tool": tool_name,
-                 "allowed": False, "origin": again.origin,
-                 "reason": again.reason, "declined": True, "preview": preview,
-                 **again.record()}
-            )  # fmt: skip
-            return again
-
-        async def settle(asked: ApprovalRequest) -> ApprovalDecision:
-            # The review is asked in the same guard as the policy, as the
-            # gate does: a failure of either refuses the question alike.
-            nonlocal request
-            if auto and reviewer is not None:
-                site = str(arguments.get("site") or "")
-                access = str(arguments.get("access") or "")
-                # Each step is judged on the goal of the chat (#465). A click or a
-                # choice names what it is on, so each target is reviewed by itself
-                # (once a chat); typed text is the model's own data and a form sent
-                # from a page leaves the computer: each is reviewed by itself, even
-                # on a site you named, and the verdict of one is never kept for the
-                # next.
-                sends = access == "submit"
-                typing = access == "type"
-                reading = access in ("", "read")
-                if arguments.get("target") == "unknown":
-                    # melo cannot tell what the click lands on: nobody can judge it
-                    # on the goal, so the person is asked (#465).
-                    review = ActionReview(
-                        "high", ("opaque",), (_UNKNOWN_TARGET.format(site=site),)
-                    )
-                elif access == "handoff":
-                    # Another app comes to the front: the person's choice, always.
-                    app = " ".join(str(arguments.get("app") or "an app").split())[:80]
-                    review = ActionReview(
-                        "high", ("open_app",), (_HANDOFF.format(app=app, site=site),)
-                    )
-                elif reading and reviewer.names_host(site):
-                    review = ActionReview(
-                        "routine", (), (f"Opens {site}, which you named.",)
-                    )
-                else:
-                    doubt = _site_doubt(access, site, preview)
-                    if site and not reading and reviewer.names_host(site):
-                        doubt += _NAMED_SITE
-                    review = await reviewer.review(
-                        self._run.reviews,
-                        tool_name=tool_name,
-                        arguments=dict(request.arguments),
-                        preview=preview,
-                        review=ActionReview("undecided", (), (doubt,)),
-                        mode="auto",
-                        key=f"{key}|{self._call.id}" if sends or typing else key,
-                        workspace=self._workspace_root,
-                        # One routine verdict reads the site's plain pages.
-                        shared=(
-                            ""
-                            if sends or typing
-                            else plain_page_key(
-                                tool_name, request.arguments, self._workspace_root
-                            )
-                        ),
-                        refused_sites=_refused_sites(self._policy, self._run),
-                        # A click, a choice or a point carries no value: a click on
-                        # a sign-in button is no credential use (#465). A read's
-                        # address can hold a key, so its review stands.
-                        secret_free=access in _VALUE_FREE_ACCESS,
-                    )
-                request = dataclasses.replace(asked, review=review)
-            return await self._policy.decide(request)
-
-        decided = await self._ask(settle, request)
-        if (
-            not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal)
-        ):
-            # A person's Deny, an auto block, a policy's refusal of the step:
-            # a task its chat continues on its own never asks it again.
-            self._keep(request, decided)
-        if isinstance(decided, Chosen) and not decided.allow:
-            # Don't allow on the card, or no answer, holds for the rest of the
-            # turn (#465).
-            self._run.reviews.decline(declined, decided)
-            if decided.origin == "timeout":
-                # Nobody's denial of the step (no call key), but the call's
-                # tool_asks say why it did not run, for the surfaces.
-                self.refused.append(
-                    {"request_id": request.request_id, "tool": tool_name,
-                     "allowed": False, "origin": "timeout",
-                     "reason": decided.reason, "preview": preview,
-                     **decided.record()}
-                )  # fmt: skip
-        if (
-            auto
-            and reviewer is not None
-            and not decided.allow
-            and decided.origin == "auto"
-        ):
-            policy = find_auto(self._policy)
-            note = reviewer.blocked(
-                self._run.reviews,
-                review=request.review,
-                key=key,
-                call_id=self._call.id,
-                preview=preview,
-                words=decided.reason,
-                task=policy is not None and policy.task,
-                workspace=self._workspace_root,
-            )
-            return dataclasses.replace(decided, reason=note)
-        return decided
-
-    def _earlier(self, request: ApprovalRequest) -> ApprovalDecision | None:
-        """A refusal of a question refused earlier in this task, or one alike, before any review."""
-        blocks = find_earlier(self._policy)
-        name = request.tool_name
-        found = (
-            None
-            if blocks is None
-            else blocks.match(
-                name,
-                request.arguments,
-                self._workspace_root,
-                # An address nested in its path (a reader, an archive) too:
-                # only to refuse, never kept with a refusal.
-                also=(
-                    *_question_keys(name, request.arguments),
-                    *address_keys(str(request.arguments.get("url") or "")),
-                ),
-            )
-        )
-        if found is None:
-            return None
-        who, exact = found
-        reason = (BLOCKED_EARLIER if exact else BLOCKED_ALIKE).format(who=who)
-        # A refusal of a repeat is no new block: it keeps no call key.
-        self.refused.append(
-            {"request_id": request.request_id, "tool": name, "allowed": False,
-             "origin": "policy", "reason": reason, "earlier": who,
-             "preview": request.preview}
-        )  # fmt: skip
-        return ApprovalDecision(False, reason, origin="policy")
-
-    def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
-        """Keep a refused question as a blocked step: its call key and keys alike.
-
-        A refused site joins the run's refused sites, which a later review
-        is told of (#433).
-        """
-        name, arguments = request.tool_name, request.arguments
-        categories = () if request.review is None else request.review.categories
-        site = site_key(arguments)
-        refused = self._run.reviews.refused_sites
-        if site is not None and site[len(SITE_KEY) :] not in refused:
-            refused.append(site[len(SITE_KEY) :])
-        self.refused.append(
-            {"request_id": request.request_id, "tool": name, "allowed": False,
-             "origin": decided.origin, "reason": decided.reason,
-             "preview": request.preview,
-             "call_key": call_key(name, arguments, self._workspace_root),
-             "loose_keys": [*loose_keys(name, arguments, categories),
-                            *_question_keys(name, arguments)]}
-        )  # fmt: skip
-
-
-def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:
-    """The hosts of the sites refused in this task (#433): earlier runs' first, then this run's."""
-    blocks = find_earlier(policy)
-    found = dict.fromkeys(() if blocks is None else blocks.refused_sites())
-    found.update(dict.fromkeys(run.reviews.refused_sites))
-    return tuple(found)
-
-
-def _question_keys(name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
-    """The loose keys of a running tool's question: its name, and its site's host."""
-    site = site_key(arguments)
-    return (question_key(name),) if site is None else (question_key(name), site)
-
-
-def _declined_keys(
-    name: str, arguments: Mapping[str, Any], workspace_root: str | None
-) -> tuple[str, ...]:
-    """The keys a Don't allow of a running tool's question holds for the turn (#465).
-
-    A click or a choice that names what it is on holds for that exact
-    question: Don't allow on "Pay" does not refuse the check-in button. Any
-    other (typing, a form sent, a click melo cannot tell) holds for every
-    question under its name and site.
-    """
-    if (
-        arguments.get("on")
-        and arguments.get("target") != "unknown"
-        and arguments.get("access") not in ("type", "submit")
-    ):
-        return (call_key(name, arguments, workspace_root),)
-    return _question_keys(name, arguments)
-
-
 class _ToolSetupError(Exception):
     """The tool providers could not be set up; the message is the run's error."""
 
 
-class Agent:
+class Agent(_RecallLoop, _NotesLoop):
     """Task-solving agent with tool use and memory.
 
-    Two construction modes:
-
-    1. **Config-based** (gateway / full app)::
-
-        from localmelo.support.config import load
-        agent = Agent(config=load())
-
-    2. **Direct provider injection** (testing / custom setups)::
+    It is built from providers::
 
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
-    Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, tool exposure, the built-in tools, memory and a run
-    timeout; the defaults keep the behavior from before options existed,
+    The providers of a config file come from
+    :func:`localmelo.support.backends.providers_for`. ``options=AgentOptions(...)``
+    sets step budgets, the attempt policy, tool exposure, the built-in tools,
+    memory and a run timeout; the defaults keep the behavior from before
+    options existed,
     except that every step now offers all registered built-ins and runs only
     the tools it offered, and that a reflection decides on its own checks
     whether the next attempt starts, a reply without a reflection does not
@@ -2524,20 +1126,14 @@ class Agent:
 
     def __init__(
         self,
-        config: Config | None = None,
         *,
-        llm: BaseLLMProvider | None = None,
+        llm: BaseLLMProvider,
         embedding: BaseEmbeddingProvider | None = None,
         options: AgentOptions | None = None,
         tool_providers: Sequence[BaseToolProvider] = (),
     ) -> None:
-        if llm is not None:
-            self._llm = llm
-            self._embedding = embedding
-        elif config is not None:
-            self._llm, self._embedding = _providers_from_config(config)
-        else:
-            raise TypeError("Agent requires either config= or llm= to be provided")
+        self._llm = llm
+        self._embedding = embedding
 
         self.options = options if options is not None else AgentOptions()
         if self.options.reasoning == "compress" and bool(
@@ -2553,17 +1149,6 @@ class Agent:
                 replay_turns=None,
                 replay_scope="task",
             )
-        if (
-            config is not None
-            and llm is None
-            and self.options.reasoning not in ("replay", "compress+replay")
-            and config.chat_backend != "ollama"
-        ):
-            # The section's key is only for replay: legacy and drop send no
-            # reasoning, and the gateway, a configured UI session and a
-            # Python caller all build their provider here. Ollama keeps its
-            # fixed "thinking" field, whose native wire legacy already uses.
-            self._llm.reasoning_field = None
         # The API user's error; the CLI refuses the same pairs before it
         # builds an Agent, so direct mode never reaches this traceback.
         refusal = reasoning_refusal(
@@ -2706,7 +1291,7 @@ class Agent:
         refusal = self._retrieval_refusal()
         if refusal is not None:
             raise ValueError(refusal)
-        self._retrievers: dict[str, Retriever] = {}
+        self._retrievers = {}
         self._recall_tool_registered = False
         self._effective_kinds = frozenset(
             default_kinds()
@@ -3031,1196 +1616,6 @@ class Agent:
                 )
         return self.hippo.working.notes.load(loaded)
 
-    # ── Reasoning notes (R4) ──
-
-    @property
-    def _notes_mode(self) -> bool:
-        """Whether the run compresses its replies into notes."""
-        return self.options.reasoning in ("compress", "compress+replay")
-
-    # ── Recall (R5) ──
-
-    def _retrieval_refusal(self) -> str | None:
-        return retrieval_refusal(
-            self.options.retriever,
-            self._plan,
-            self.hippo.embedding is not None,
-            self.options.reasoning,
-            memory=self.options.memory,
-            placement=self.options.recall_placement,
-            recall_at=self.options.recall_at or (),
-            builtins=self.options.builtins,
-        )
-
-    def _get_retriever(self, name: str) -> Retriever:
-        """The Agent's one retriever called *name*, built on first use."""
-        retriever = self._retrievers.get(name)
-        if retriever is not None:
-            return retriever
-        options: dict[str, Any] = {}
-        if name == "embedding":
-            options["min_score"] = self.options.recall_min_score
-        retriever = build_retriever(
-            name,
-            send=self.chat.retrieve,
-            embedding=self.hippo.embedding,
-            **options,
-        )
-        self._retrievers[name] = retriever
-        return retriever
-
-    async def _long_docs(self, query: str, run: _RunState) -> list[Doc]:
-        """The other tasks' active long entries that may answer *query*, aliased."""
-        if "long" not in self._effective_kinds:
-            return []
-        try:
-            rows = await self.hippo.recall_long(
-                query,
-                exclude_task_ids={run.task_id},
-                pool=LONG_POOL,
-                task_key=digest_task_key(run.task_text, run.place or ""),
-                min_score=self.options.recall_min_score,
-            )
-        except ProviderError as exc:
-            run.retrieve_errors += 1
-            logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
-            return []
-        except (IndexError, ValueError) as exc:
-            run.retrieve_errors += 1
-            logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
-            return []
-        # The cosine floor applies only to an embedding score; BM25 has no
-        # absolute floor, and docs_from_entries reads each row's retriever.
-        docs = docs_from_entries(
-            rows,
-            exclude_task_ids={run.task_id},
-            min_score=self.options.recall_min_score,
-        )
-        key = digest_task_key(run.task_text, run.place or "")
-        docs = gate_long_docs(
-            docs,
-            key,
-            ratio=self.options.cross_task_ratio,
-            cap=self.options.cross_task_cap,
-            cold=self.options.cross_task_cold,
-        )[:RECALL_LONG_K]
-        docs = [
-            dataclasses.replace(
-                doc,
-                meta={
-                    **doc.meta,
-                    "task_relation": (
-                        "same"
-                        if same_task(doc, key)
-                        else "cross" if is_task_digest(doc) else "unscoped"
-                    ),
-                },
-            )
-            for doc in docs
-        ]
-        # Same-task digests first; within each group the creation-time order.
-        docs.sort(
-            key=lambda doc: (
-                doc.meta["task_relation"] != "same",
-                float(doc.meta.get("created_at") or 0.0),
-                doc.doc_id,
-            )
-        )
-        return [
-            dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
-            for index, doc in enumerate(docs, start=1)
-        ]
-
-    def _hits_from_result(
-        self,
-        result: RetrievalResult,
-        docs: Sequence[Doc],
-        *,
-        k: int,
-    ) -> list[RecallHit]:
-        """The task-local hits of *result*, at most *k*, in rank order."""
-        by_id = {doc.doc_id: doc for doc in docs}
-        hits: list[RecallHit] = []
-        for item in result.hits:
-            doc = by_id.get(item.doc_id)
-            if doc is None:
-                continue
-            hits.append(hit_from_doc(doc, score=item.score, rank=len(hits) + 1))
-            if len(hits) == k:
-                break
-        return hits
-
-    def _merge_llm_hits(
-        self,
-        result: RetrievalResult,
-        docs: Sequence[Doc],
-        *,
-        k: int,
-        long_ids: set[str],
-    ) -> list[RecallHit]:
-        """The llm hits split into at most *k* task and 2 long, in its order."""
-        by_id = {doc.doc_id: doc for doc in docs}
-        hits: list[RecallHit] = []
-        task_kept = 0
-        long_kept = 0
-        for item in result.hits:
-            doc = by_id.get(item.doc_id)
-            if doc is None:
-                continue
-            if doc.doc_id in long_ids:
-                if long_kept >= RECALL_LONG_K:
-                    continue
-                long_kept += 1
-                score = float(doc.meta.get("score") or item.score)
-            else:
-                if task_kept >= k:
-                    continue
-                task_kept += 1
-                score = item.score
-            hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
-        return hits
-
-    async def _run_recall(
-        self,
-        trigger: str,
-        query: str,
-        run: _RunState,
-        *,
-        boundary: bool = False,
-        include_superseded: bool = False,
-        k: int | None = None,
-        placement: str = "",
-        exclude: Iterable[str] = (),
-    ) -> tuple[RecallRecord | None, str, list[RecallHit]]:
-        """Run one recall trigger and return its record, block and hits.
-
-        ``([], "")`` when the trigger is off, when nothing is a candidate,
-        or when the block cannot be made to fit; a refused block counts
-        ``recall_refused`` and returns nothing.
-        """
-        name = getattr(self._plan, trigger, None)
-        if name is None:
-            return None, "", []
-        started = time.perf_counter()
-        # The query can carry a tool call's command or path, so it is a
-        # request path P4 must redact too: before an llm or embedding
-        # retriever sees it (bm25 ranks on the raw text; decision 1).
-        redacted_query, query_spans = redact_secrets(query)
-        search_query = redacted_query if name in ("llm", "embedding") else query
-        limit_k = (
-            self.options.recall_k if k is None else max(1, min(int(k), RECALL_K_MAX))
-        )
-        excluded = set(exclude) | set(run.pending_shown)
-        task_docs: list[Doc] = []
-        if trigger != "start":
-            task_docs = docs_from_notes(
-                self.hippo.working.notes.entries(),
-                task_id=run.task_id,
-                kinds=self._effective_kinds,
-                exclude_aliases=excluded,
-                include_superseded=include_superseded,
-            )
-        long_docs = await self._long_docs(redacted_query, run)
-        if long_docs:
-            shown = "\n".join(
-                [*recall_spans(self.hippo.working.get_window()), run.boundary_block]
-            )
-            long_docs = [
-                doc
-                for doc in long_docs
-                if hit_from_doc(doc, score=0.0, rank=1).text not in shown
-            ]
-        if not task_docs and not long_docs:
-            run.recall_empty += 1
-            return None, "", []
-        hits: list[RecallHit] = []
-        retriever = name
-        fallback = ""
-        if name == "llm":
-            docs = [*task_docs, *long_docs]
-            long_ids = {doc.doc_id for doc in long_docs}
-            result = await self._get_retriever("llm").search(
-                search_query,
-                docs,
-                k=limit_k + min(len(long_docs), RECALL_LONG_K),
-            )
-            if search_query.strip():
-                run.aux_retrieve_calls += 1
-            self._count_retrieve_usage(result, run)
-            retriever, fallback = result.retriever, result.fallback
-            hits = self._merge_llm_hits(result, docs, k=limit_k, long_ids=long_ids)
-        else:
-            if task_docs:
-                result = await self._get_retriever(name).search(
-                    search_query, task_docs, k=limit_k
-                )
-                retriever, fallback = result.retriever, result.fallback
-                self._count_retrieve_usage(result, run)
-                hits = self._hits_from_result(result, task_docs, k=limit_k)
-            for doc in long_docs:
-                score = float(doc.meta.get("score") or 0.0)
-                # The floor is a cosine floor; a BM25-scored row has none.
-                if (
-                    doc.meta.get("retrieval") != "bm25"
-                    and score < self.options.recall_min_score - 1e-6
-                ):
-                    continue
-                hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
-        hits.sort(key=lambda hit: hit.task_relation != "same")
-        hits = [
-            dataclasses.replace(hit, rank=index) for index, hit in enumerate(hits, 1)
-        ]
-        if fallback:
-            run.recall_fallbacks += 1
-            run.retrieve_errors += 1
-        if trigger == "start":
-            hits = [hit for hit in hits if hit.kind == "long"][:RECALL_LONG_K]
-        if not hits:
-            run.recall_empty += 1
-            return None, "", []
-        candidates = len(task_docs) + len(long_docs)
-        checked_hits: list[RecallHit] = []
-        for hit in hits:
-            text = hit.text
-            checked = text
-            if hit.kind == "long":
-                checked_text = self._check_candidate(
-                    text, "recall", run, target="prompt"
-                )
-                if checked_text is None:
-                    continue
-                checked = checked_text
-            checked_hits.append(
-                dataclasses.replace(
-                    hit, text=checked, chars=len(checked), rank=len(checked_hits) + 1
-                )
-            )
-        if not checked_hits:
-            return None, "", []
-        if boundary:
-            limit = RECALL_BOUNDARY_CHARS
-        else:
-            live = RECALL_LIVE_CHARS - recall_span_chars(
-                self.hippo.working.get_window()
-            )
-            limit = min(RECALL_TURN_CHARS, max(live, 0))
-        if limit <= 0:
-            run.recall_skipped += 1
-            return None, "", []
-        # The block's bytes do not carry the latency, so fitting is stable;
-        # the record below keeps it for recall_json, the event and stats.
-        ms = round((time.perf_counter() - started) * 1000)
-        kept, block = fit_recall_block(
-            checked_hits,
-            trigger=trigger,
-            retriever=retriever,
-            placement=placement,
-            limit=limit,
-        )
-        if not kept or not block:
-            run.recall_skipped += 1
-            return None, "", []
-        checked_block = self._check_recall_block(block, run)
-        if checked_block is None:
-            return None, "", []
-        run.redactions += query_spans
-        record_hits = [
-            dataclasses.replace(
-                hit,
-                doc_id=redact_secrets(hit.doc_id)[0],
-                alias=redact_secrets(hit.alias)[0],
-            )
-            for hit in kept
-        ]
-        record = RecallRecord(
-            trigger=trigger,
-            placement=placement,
-            retriever=retriever,
-            query=redacted_query,
-            k=limit_k,
-            candidates=candidates,
-            hits=record_hits,
-            chars=len(checked_block),
-            ms=ms,
-            fallback=fallback,
-            boundary=boundary,
-            step=run.steps,
-            attempt=run.attempts,
-        )
-        run.pending_recalls.append(record_to_dict(record))
-        run.pending_recall_records.append(record)
-        return record, checked_block, record_hits
-
-    @staticmethod
-    def _count_retrieve_usage(result: RetrievalResult, run: _RunState) -> None:
-        if not result.usage:
-            return
-        run.retrieve_prompt_tokens += int(result.usage.get("prompt_tokens", 0) or 0)
-        run.retrieve_completion_tokens += int(
-            result.usage.get("completion_tokens", 0) or 0
-        )
-
-    @staticmethod
-    def _commit_recalls(records: Sequence[RecallRecord], run: _RunState) -> None:
-        """Count, log and emit the recall records a request has just carried."""
-        for record in records:
-            run.recalls += 1
-            run.recalls_by_trigger[record.trigger] = (
-                run.recalls_by_trigger.get(record.trigger, 0) + 1
-            )
-            run.recall_hits += len(record.hits)
-            counts = relation_counts(record.hits)
-            run.recall_same_task += counts["same_task"]
-            run.recall_cross_task += counts["cross_task"]
-            run.recall_task_notes += counts["task_notes"]
-            run.recall_chars += record.chars
-            run.recall_ms += record.ms
-            run.recall_log.append(compact_record(record))
-            run.events.recall(record)
-
-    def _check_recall_block(self, text: str, run: _RunState) -> str | None:
-        """Run one whole recall block through the candidate boundary."""
-        run.candidates += 1
-        check = self.checker.check_memory_candidate(
-            MemoryCandidatePayload(text=text, source="recall", target="prompt")
-        )
-        if not check.allowed:
-            run.candidates_refused += 1
-            run.recall_refused += 1
-            logger.debug(
-                "Refused a recall block of task %s: %s", run.task_id, check.reason
-            )
-            return None
-        payload = check.sanitized_payload
-        run.redactions += int(payload.metadata.get("redactions", 0) or 0)
-        checked = str(payload.text)
-        if not checked.endswith(RECALL_END):
-            run.recall_refused += 1
-            logger.debug(
-                "Refused a recall block of task %s: the boundary cut its "
-                "closing delimiter",
-                run.task_id,
-            )
-            return None
-        return checked
-
-    async def _step_recall(
-        self,
-        run: _RunState,
-        note_entry: NoteStoreEntry | None,
-        calls: Sequence[ToolCall],
-        *,
-        fallback: str,
-        exclude: Iterable[str] = (),
-    ) -> tuple[str, list[RecallHit]]:
-        """The step trigger's block for the next planning call, and its hits.
-
-        A note from an earlier attempt is ``superseded`` at that attempt's
-        boundary, but its turn can still be evicted from the window, and
-        R5's step trigger is what makes an evicted turn reachable again;
-        step recall therefore ranks superseded notes too. The window's
-        aliases still exclude what the request already shows.
-        """
-        if self._plan.step is None:
-            return "", []
-        note_text = "" if note_entry is None else note_entry.text
-        outcome = ""
-        if note_entry is not None and note_entry.note is not None:
-            outcome = note_entry.note.outcome
-        query = build_step_query(note_text, calls, fallback=fallback, outcome=outcome)
-        _record, block, hits = await self._run_recall(
-            "step",
-            query,
-            run,
-            placement=self.options.recall_placement,
-            exclude=exclude,
-            include_superseded=True,
-        )
-        if block:
-            run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
-        return block, hits
-
-    async def _store_thought_chunks(
-        self, response: Message, run: _RunState
-    ) -> list[str]:
-        """Store up to the task's remaining thought chunks from *response*.
-
-        Returns the aliases of the chunks stored, so the caller can mark
-        them shown with the reply's turn.
-        """
-        if "thought" not in self._effective_kinds or not self._notes_mode:
-            return []
-        stored = sum(
-            1
-            for entry in self.hippo.working.notes.of_kind("thought")
-            if entry.task_id == run.task_id
-        )
-        remaining = RECALL_THOUGHT_PER_TASK - max(run.thought_chunks, stored)
-        if remaining <= 0 or not response.thinking:
-            return []
-        aliases: list[str] = []
-        for chunk in thought_chunks(response.thinking)[:remaining]:
-            checked = self._check_candidate(chunk.text, "thought", run)
-            if checked is None:
-                continue
-            entry = self.hippo.working.notes.add(
-                "thought",
-                checked,
-                step=run.steps,
-                attempt=run.attempts,
-                task_id=run.task_id,
-                title=_checked_title(checked),
-            )
-            if entry is not None:
-                run.thought_chunks += 1
-                aliases.append(entry.alias)
-        return aliases
-
-    async def _recall_tool(self, query: str, k: int | None = None) -> str:
-        """The ``recall`` tool: rank the task's documents for *query*."""
-        run = RECALL_RUN.get()
-        if run is None:
-            return "recall is only available inside a run"
-        if not isinstance(query, str) or not query.strip():
-            return "recall needs a non-empty query"
-        if isinstance(k, bool) or not isinstance(k, int):
-            k = self.options.recall_k
-        refused_before = run.recall_refused
-        _record, block, hits = await self._run_recall(
-            "tool",
-            query,
-            run,
-            include_superseded=True,
-            k=k,
-            placement="tool-result",
-            exclude=self.hippo.working.shown_aliases(),
-        )
-        if not block:
-            if run.recall_refused > refused_before:
-                return "recall refused: the block did not pass the boundary"
-            return "recall found nothing for that query"
-        run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
-        return block
-
-    @staticmethod
-    def _last_call_seq() -> int:
-        """The ``llm_calls.seq`` of the reply that just arrived, or 0."""
-        recorder = CALL_RECORDER.get()
-        return int(getattr(recorder, "last_seq", 0) or 0)
-
-    def _reply_note(
-        self,
-        response: Message,
-        results: Sequence[ToolResult],
-        *,
-        kind: str,
-        task_id: str,
-        run: _RunState,
-    ) -> tuple[ReasoningNote, str]:
-        """Build the note of *response* and the content without its note block."""
-        window_ids = {
-            message.tool_call_id
-            for message in self.hippo.working.get_window()
-            if message.role == "tool" and message.tool_call_id
-        }
-        window_records, task_records = run.source_log.earlier(window_ids)
-        note, rest = note_from_reply(
-            response.content,
-            response.thinking,
-            response.tool_calls,
-            results,
-            kind=kind,
-            writer=self.options.note_writer,
-            window_records=window_records,
-            task_records=task_records,
-        )
-        note = dataclasses.replace(
-            note,
-            note_id=new_record_id(),
-            task_id=task_id,
-            step=run.steps,
-            attempt=run.attempts,
-            call_seq=self._last_call_seq(),
-            created_at=time.time(),
-        )
-        return note, rest
-
-    def _check_candidate(
-        self, text: str, source: str, run: _RunState, *, target: str = "candidate"
-    ) -> str | None:
-        """Run one document through the candidate boundary; its checked text."""
-        run.candidates += 1
-        check = self.checker.check_memory_candidate(
-            MemoryCandidatePayload(text=text, source=source, target=target)
-        )
-        if not check.allowed:
-            run.candidates_refused += 1
-            logger.debug(
-                "Dropped a %s candidate of task %s: %s",
-                source,
-                run.task_id,
-                check.reason,
-            )
-            return None
-        payload = check.sanitized_payload
-        run.redactions += int(payload.metadata.get("redactions", 0) or 0)
-        return str(payload.text)
-
-    def _checked_candidate_text(
-        self, text: str, source: str, run: _RunState
-    ) -> str | None:
-        """A candidate text through the boundary, counted as one boundary check.
-
-        The note or draft it comes from was counted when it entered its own
-        store; this pass is the one R6-lite requires before a candidate is
-        staged, so the policy never compares raw text. ``candidates`` counts
-        boundary checks, not documents (review finding 11).
-        """
-        run.candidates += 1
-        check = self.checker.check_memory_candidate(
-            MemoryCandidatePayload(text=text, source=source, target="candidate")
-        )
-        if not check.allowed:
-            run.candidates_refused += 1
-            return None
-        payload = check.sanitized_payload
-        run.redactions += int((payload.metadata or {}).get("redactions", 0) or 0)
-        return str(payload.text)
-
-    def _memory_provenance(
-        self,
-        run: _RunState,
-        *,
-        note: ReasoningNote | None = None,
-        calls: Sequence[ToolCall] = (),
-    ) -> dict[str, Any]:
-        """The provenance a candidate records about the turn that made it."""
-        paths: list[str] = []
-        commands: list[str] = []
-        for call in calls:
-            for name in self._touched_names(call):
-                bucket = paths if path_spans(name) else commands
-                if name not in bucket:
-                    bucket.append(name)
-        source_ids = list(note.source_ids) if note is not None else []
-        return {
-            "task_id": run.task_id,
-            "session_id": "",
-            "step": run.steps,
-            "attempt": run.attempts,
-            "call_seq": self._last_call_seq(),
-            "task_text": run.task_text[:300],
-            "paths": paths,
-            "commands": commands,
-            "source_ids": source_ids,
-            "note_id": note.note_id if note is not None else "",
-        }
-
-    def _propose_note_candidate(
-        self,
-        note: ReasoningNote,
-        run: _RunState,
-        calls: Sequence[ToolCall] = (),
-    ) -> None:
-        """Stage a rememberable note's items for long-term memory."""
-        if not note.remember or not (note.found or note.decided):
-            return
-        text = self._checked_candidate_text(candidate_text(note), "reasoning_note", run)
-        if text is None:
-            return
-        items: list[CandidateItem] = []
-        for item in candidate_items(note):
-            checked = self._checked_candidate_text(item.text, "reasoning_note", run)
-            if checked is not None:
-                items.append(CandidateItem(checked, item.source_ids))
-        candidate = MemoryCandidate(
-            candidate_id=note.note_id,
-            source="reasoning_note",
-            text=text,
-            remember_by=note.remember_by or "rule",
-            task_id=run.task_id,
-            session_id="",
-            provenance=self._memory_provenance(run, note=note, calls=calls),
-            created_at=note.created_at,
-            remember=True,
-            items=tuple(items),
-        )
-        self.hippo.propose(candidate)
-
-    def _drain_decisions(
-        self, decisions: Sequence[MemoryDecision], run: _RunState
-    ) -> None:
-        """Count the decisions an admission made and emit one event each."""
-        for decision in decisions:
-            if decision.refused:
-                run.candidates_refused += 1
-                continue
-            run.redactions += decision.redactions
-            run.admitted[decision.admitted_by] = (
-                run.admitted.get(decision.admitted_by, 0) + 1
-            )
-            if decision.action == "IGNORE":
-                run.ignored += 1
-            else:
-                run.written[decision.kind] = run.written.get(decision.kind, 0) + 1
-            run.events.memory(
-                candidate_id=decision.candidate_id,
-                action=decision.action,
-                kind=decision.kind,
-                admitted_by=decision.admitted_by,
-                entry_id=decision.entry_id,
-            )
-
-    def _propose_reflection(
-        self, entry: ReflectionEntry, run: _RunState, *, note_id: str = ""
-    ) -> None:
-        """Stage the final reflection, with its next directions and open questions."""
-        candidate_id = note_id or new_record_id()
-        text = self._checked_candidate_text(
-            reflection_candidate_text(entry), "reflection", run
-        )
-        if text is None:
-            return
-        provenance = self._memory_provenance(run, note=None)
-        provenance["note_id"] = candidate_id
-        candidate = MemoryCandidate(
-            candidate_id=candidate_id,
-            source="reflection",
-            text=text,
-            remember_by="rule",
-            task_id=run.task_id,
-            session_id="",
-            provenance=provenance,
-            created_at=time.time(),
-            remember=True,
-        )
-        run.final_reflection = candidate
-        self.hippo.propose(candidate)
-
-    def _store_note(
-        self,
-        note: ReasoningNote,
-        run: _RunState,
-        *,
-        source: str,
-        drafts: Sequence[str] = (),
-        calls: Sequence[ToolCall] = (),
-    ) -> NoteStoreEntry | None:
-        """Check and store one note; emit its ``note`` event."""
-        text = render_note(note, executor=True)
-        checked = self._check_candidate(text, source, run)
-        if checked is None:
-            return None
-        entry = self.hippo.working.notes.add(
-            "note",
-            checked,
-            note=note,
-            stage=note.stage,
-            step=note.step,
-            attempt=note.attempt,
-            remember=note.remember,
-            remember_by=note.remember_by,
-            task_id=note.task_id,
-            title=note_title(note),
-        )
-        if entry is None:
-            run.candidates_refused += 1
-            return None
-        run.notes += 1
-        run.note_chars += len(checked)
-        if note.source == "model":
-            run.notes_model += 1
-        elif note.source == "heuristic":
-            run.notes_heuristic += 1
-        if note.remember and note.remember_by == "model":
-            run.remember_model += 1
-        elif note.remember and note.remember_by == "heuristic":
-            run.remember_heuristic += 1
-        run.events.note(
-            step=note.step,
-            attempt=note.attempt,
-            note_id=note.note_id,
-            kind=note.kind,
-            source=note.source,
-            text=checked,
-            chars=len(checked),
-            drafts=list(drafts),
-            remember=note.remember,
-            stage=entry.stage,
-        )
-        if source == "reasoning_note":
-            self._propose_note_candidate(note, run, calls)
-        return entry
-
-    def _store_draft(self, draft: Draft, run: _RunState) -> NoteStoreEntry | None:
-        """Check and store one draft, superseding older pending ones."""
-        checked = self._check_candidate(draft.text, "draft", run)
-        if checked is None:
-            return None
-        entry = self.hippo.working.notes.add(
-            "draft",
-            checked,
-            draft=draft,
-            step=draft.step,
-            attempt=run.attempts,
-            task_id=draft.task_id,
-            title=draft_title(draft),
-        )
-        if entry is None:
-            run.candidates_refused += 1
-            return None
-        run.drafts += 1
-        self.hippo.working.notes.supersede_drafts(draft.target, keep=entry.alias)
-        return entry
-
-    async def _prepare_note_turn(
-        self,
-        response: Message,
-        step: _InflightStep,
-        pairs: Sequence[tuple[ToolCall, ToolResult]],
-        run: _RunState,
-    ) -> tuple[str, str, NoteStoreEntry | None, NoteStoreEntry | None]:
-        """Build and store a tool-call reply's draft and note; place them.
-
-        Returns the working-memory content and thinking of the turn, and
-        the stored note and draft entries (either may be ``None`` when the
-        boundary or the store refuses it). The draft is marked written
-        first, for this reply's writes and any earlier pending draft they
-        cover, so a draft written in the same reply is never pinned.
-        """
-        store = self.hippo.working.notes
-        pending = [
-            entry.draft
-            for entry in store.of_kind("draft")
-            if entry.draft is not None and entry.draft.status == "pending"
-        ]
-        run.drafts_written += mark_drafts_written(pending, pairs)
-        draft_entry = None
-        draft = extract_draft(step.rest, recent_path=step.recent_path)
-        if draft is not None:
-            draft = dataclasses.replace(
-                draft,
-                draft_id=new_record_id(),
-                task_id=run.task_id,
-                step=run.steps,
-                call_seq=self._last_call_seq(),
-                created_at=time.time(),
-            )
-            run.drafts_written += mark_drafts_written([draft], pairs)
-            draft_entry = self._store_draft(draft, run)
-        note, _rest = self._reply_note(
-            response,
-            [result for _call, result in pairs],
-            kind="step",
-            task_id=run.task_id,
-            run=run,
-        )
-        aliases = [] if draft_entry is None else [draft_entry.alias]
-        note_entry = self._store_note(
-            note,
-            run,
-            source="reasoning_note",
-            drafts=aliases,
-            calls=[call for call, _result in pairs],
-        )
-        # The note is built: these observations are earlier results for the
-        # next reply's note, never this one's.
-        for call, result in pairs:
-            run.source_log.add(call.id, source_records([(call, result)]))
-        if note_entry is not None:
-            await self._restate(note, run)
-        note_text = "" if note_entry is None else note_entry.text
-        if step.has_model_note:
-            content = response.content
-        elif not step.rest.strip():
-            content = note_text
-        elif note_text and len(step.rest) + 2 + len(note_text) <= ASSISTANT_TEXT_SHARE:
-            content = f"{step.rest}\n\n{note_text}"
-        else:
-            content = step.rest
-        thinking = "" if self.options.reasoning == "compress" else response.thinking
-        return content, thinking, note_entry, draft_entry
-
-    def _pin_pending_draft(
-        self,
-        tool_msgs: list[Message],
-        draft_entry: NoteStoreEntry | None,
-        run: _RunState,
-    ) -> bool:
-        """Append the turn's pending targeted draft to its last tool result.
-
-        Returns whether the draft was placed, so the step block skips it.
-        """
-        if (
-            draft_entry is None
-            or draft_entry.draft is None
-            or draft_entry.draft.status != "pending"
-            or not draft_entry.draft.target
-            or not tool_msgs
-        ):
-            return False
-        block = render_draft_block(
-            draft_entry.alias,
-            draft_entry.step,
-            draft_entry.draft,
-            text=draft_entry.text,
-        )
-        checked = self._check_candidate(block, "draft", run)
-        if checked:
-            last = tool_msgs[-1]
-            tool_msgs[-1] = dataclasses.replace(
-                last, content=f"{last.content}\n{checked}"
-            )
-            return True
-        return False
-
-    @staticmethod
-    def _checked_note_copy(entry: NoteStoreEntry) -> ReasoningNote:
-        """*entry*'s note with only the fields its checked text still holds.
-
-        The digest is built from the checked text the store keeps, never
-        from raw fields a redaction or a cap changed: an item whose raw
-        text is not in ``entry.text`` is left out, and the rest is a copy
-        that the digest may read.
-        """
-        note = entry.note
-        assert note is not None
-        text = entry.text
-
-        def kept(items: Sequence[str]) -> list[str]:
-            return [item for item in items if item and item in text]
-
-        return dataclasses.replace(
-            note,
-            plan="",
-            found=kept(note.found),
-            decided=kept(note.decided),
-            open_questions=kept(note.open_questions),
-            observed=kept(note.observed),
-            outcome=note.outcome if note.outcome and note.outcome in text else "",
-            stage="rehearsed",
-        )
-
-    def _build_digest(
-        self, query: str, outcome: str, run: _RunState, task_id: str
-    ) -> str:
-        """Build, check and store the digest of the attempt that just ended."""
-        notes = [
-            self._checked_note_copy(entry)
-            for entry in self.hippo.working.notes.of_kind("note")
-            if entry.attempt == run.attempts
-            and entry.stage == "rehearsed"
-            and entry.note is not None
-        ]
-        note = digest_note(
-            query,
-            outcome or run.status,
-            notes,
-            task_id=task_id,
-            attempt=run.attempts,
-            step=run.steps,
-            calls=run.attempt_calls,
-            root=run.place or "",
-        )
-        note = dataclasses.replace(
-            note,
-            note_id=new_record_id(),
-            call_seq=self._last_call_seq(),
-            created_at=time.time(),
-        )
-        checked = self._check_candidate(render_digest(note), "digest", run)
-        if checked is None:
-            return ""
-        entry = self.hippo.working.notes.add(
-            "digest",
-            checked,
-            note=note,
-            step=note.step,
-            attempt=note.attempt,
-            remember=True,
-            remember_by="rule",
-            task_id=task_id,
-            title=note_title(note),
-        )
-        if entry is None:
-            run.candidates_refused += 1
-            return ""
-        run.digests += 1
-        run.events.note(
-            step=note.step,
-            attempt=note.attempt,
-            note_id=note.note_id,
-            kind="digest",
-            source=note.source,
-            text=checked,
-            chars=len(checked),
-            drafts=[],
-            remember=True,
-            stage=entry.stage,
-        )
-        provenance = self._memory_provenance(run, note=note)
-        # Key the digest by the run's task, the same input recall hashes: the
-        # checked text may have escaped a role token or cut a long plan, and a
-        # key read from it would no longer match this run's task.
-        provenance["task_key"] = digest_task_key(query, run.place or "")
-        candidate = MemoryCandidate(
-            candidate_id=note.note_id,
-            source="digest",
-            text=checked,
-            remember_by="rule",
-            task_id=task_id,
-            session_id="",
-            provenance=provenance,
-            created_at=note.created_at,
-            remember=True,
-        )
-        if digest_has_evidence(checked):
-            # Keep the run's last evidence-bearing attempt. A final attempt
-            # without evidence must not drop an episode whose earlier attempt
-            # wrote a file or passed a check.
-            run.final_digest = candidate
-            self.hippo.propose(candidate)
-        return checked
-
-    async def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
-        """Compact *note*'s new items into an older note with the same facts.
-
-        A later note whose ``found`` or ``decided`` items match an existing
-        note's by normalized text restates it: the new items join the older
-        note (deduplicated, caps kept), its rendered text passes the
-        boundary again, and its stage becomes ``rehearsed``. Returns
-        whether a restatement happened.
-        """
-        items = [*note.found, *note.decided]
-        if not items:
-            return False
-        new_keys = {" ".join(item.split()).lower() for item in items}
-        for entry in self.hippo.working.notes.of_kind("note"):
-            older = entry.note
-            if older is None or older is note or entry.stage == "superseded":
-                continue
-            if not any(
-                " ".join(item.split()).lower() in new_keys
-                for item in (*older.found, *older.decided)
-            ):
-                continue
-            found = list(older.found)
-            decided = list(older.decided)
-            old_keys = {" ".join(item.split()).lower() for item in (*found, *decided)}
-            for item in note.found:
-                key = " ".join(item.split()).lower()
-                if key not in old_keys and len(found) < NOTE_MAX_FOUND:
-                    found.append(item)
-                    old_keys.add(key)
-            for item in note.decided:
-                key = " ".join(item.split()).lower()
-                if key not in old_keys and len(decided) < NOTE_MAX_DECIDED:
-                    decided.append(item)
-                    old_keys.add(key)
-            source_ids = list(older.source_ids)
-            for source_id in note.source_ids:
-                if source_id not in source_ids:
-                    source_ids.append(source_id)
-            source_records = list(older.source_records)
-            seen = {record_id for record_id, _text in source_records}
-            for record in note.source_records:
-                if record[0] not in seen:
-                    source_records.append(record)
-                    seen.add(record[0])
-            remember = older.remember or note.remember
-            remember_by = older.remember_by if older.remember else note.remember_by
-            updated = dataclasses.replace(
-                older,
-                found=found,
-                decided=decided,
-                source_ids=source_ids,
-                source_records=source_records,
-                remember=remember,
-                remember_by=remember_by,
-                stage="rehearsed",
-                uses=older.uses + 1,
-                last_used_at=time.time(),
-            )
-            checked = self._check_candidate(
-                render_note(updated, executor=True), "reasoning_note", run
-            )
-            if checked is None:
-                return False
-            if not self.hippo.working.notes.replace_text(entry.alias, checked, updated):
-                return False
-            self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
-            run.rehearsed["restated"] += 1
-            # The new note's candidate is superseded by the merged one; a
-            # request would otherwise be able to admit both (review finding 8).
-            self.hippo.staged.drop(note.note_id)
-            self._propose_note_candidate(updated, run)
-            decisions = await self.hippo.admit(updated.note_id, "rehearsal")
-            self._drain_decisions(decisions, run)
-            return True
-        return False
-
-    @staticmethod
-    def _call_succeeded(
-        call: ToolCall, result: ToolResult, exit_codes: Sequence[int]
-    ) -> bool:
-        """Whether a call returned without an error and with exit status 0.
-
-        *exit_codes* are the statuses the tool recorded in ``TOOL_EXIT_CODE``
-        (see :meth:`_do_execute`). A rooted ``shell_exec`` prefixes a
-        non-zero status in its text; an unrooted one records none, so its
-        status is unknown there and the call is not counted as a success:
-        a rehearsal signal must not come from a command that may have
-        failed.
-        """
-        if result.error.strip():
-            return False
-        if call.tool_name != "shell_exec":
-            return True
-        if result.output.startswith("[exit code "):
-            return result.output.startswith("[exit code 0]")
-        return bool(exit_codes) and exit_codes[-1] == 0
-
-    @staticmethod
-    def _touched_names(call: ToolCall) -> list[str]:
-        """The paths and command words a successful call acted on."""
-        names: list[str] = []
-        if call.tool_name in ("file_read", "file_write", "file_edit"):
-            path = call.arguments.get("path")
-            if isinstance(path, str) and path.strip():
-                names.append(path)
-                names.extend(path[start:end] for start, end in path_spans(path))
-        elif call.tool_name == "shell_exec":
-            command = call.arguments.get("command")
-            if isinstance(command, list):
-                command = " ".join(str(part) for part in command)
-            if isinstance(command, str) and command.strip():
-                names.append(command)
-                names.extend(command[start:end] for start, end in path_spans(command))
-                head = command.split()[0]
-                if head:
-                    names.append(head)
-        return [name for name in names if len(name) >= 3]
-
-    @staticmethod
-    def _mentions(text: str, name: str) -> bool:
-        """Whether *text* names *name* as a path or a whole word.
-
-        A path or file name is compared with :func:`same_path` against
-        the paths :func:`~localmelo.melo.memory.notes.path_spans` finds in
-        *text*; any other name (a command word) must stand between
-        non-word characters, so ``ls`` does not match ``results``.
-        """
-        if path_spans(name):
-            return any(
-                same_path(text[start:end], name) for start, end in path_spans(text)
-            )
-        start = 0
-        while True:
-            index = text.find(name, start)
-            if index < 0:
-                return False
-            before = text[index - 1] if index else ""
-            after = text[index + len(name) : index + len(name) + 1]
-            if not (before.isalnum() or before == "_") and not (
-                after.isalnum() or after == "_"
-            ):
-                return True
-            start = index + 1
-
-    async def _rehearse_acted(
-        self,
-        call: ToolCall,
-        result: ToolResult,
-        run: _RunState,
-        exit_codes: Sequence[int] = (),
-    ) -> None:
-        """Mark the notes a successful call acted on as rehearsed."""
-        if not self._call_succeeded(call, result, exit_codes):
-            return
-        touched = self._touched_names(call)
-        if not touched:
-            return
-        for entry in self.hippo.working.notes.of_kind("note"):
-            note = entry.note
-            if note is None or entry.stage == "superseded":
-                continue
-            text = " ".join((*note.found, *note.decided))
-            if entry.stage == "rehearsed":
-                continue
-            if not any(self._mentions(text, name) for name in touched):
-                continue
-            note.stage = "rehearsed"
-            self.hippo.working.notes.touch(entry.alias, stage="rehearsed")
-            run.rehearsed["acted"] += 1
-            decisions = await self.hippo.admit(note.note_id, "rehearsal")
-            self._drain_decisions(decisions, run)
-
-    async def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
-        """Mark the notes a reflection cited in ``used_notes`` as rehearsed."""
-        for alias in aliases:
-            entry = self.hippo.working.notes.get(alias)
-            if entry is None or entry.kind != "note" or entry.stage == "superseded":
-                continue
-            if entry.note is not None:
-                entry.note.stage = "rehearsed"
-            self.hippo.working.notes.touch(alias, use=True, stage="rehearsed")
-            run.rehearsed["cited"] += 1
-            if entry.note is not None:
-                decisions = await self.hippo.admit(entry.note.note_id, "rehearsal")
-                self._drain_decisions(decisions, run)
-
-    @staticmethod
-    def _used_notes(content: str) -> list[str]:
-        """The string aliases of the reflection reply's ``used_notes``.
-
-        The object is the one the gate's parser reads: the first object with a
-        valid ``recommended_action`` (see :func:`_read_reflection`). A non-list
-        or non-string entries are ignored.
-        """
-        found = _read_reflection(_coerce_str(content))
-        if found is None:
-            return []
-        names = found[0].get("used_notes")
-        if not isinstance(names, list):
-            return []
-        return [name for name in names if isinstance(name, str) and name]
-
-    def _reflection_note_inputs(self, run: _RunState) -> tuple[list[str], list[str]]:
-        """The notes lines and draft-title lines a reflection request carries."""
-        notes = [
-            entry
-            for entry in self.hippo.working.notes.of_kind("note")
-            if entry.attempt == run.attempts
-            and entry.stage != "superseded"
-            and entry.note is not None
-        ][-REFLECTION_MAX_NOTES:]
-        lines = [
-            f"[{entry.alias}] note · step {entry.step} · "
-            f"{entry.text[:REFLECTION_NOTE_CHARS]}"
-            for entry in notes
-        ]
-        # A pending draft is store-global: an earlier attempt's draft that
-        # was never written is still one the next step may need.
-        drafts = [
-            entry
-            for entry in self.hippo.working.notes.of_kind("draft")
-            if entry.draft is not None and entry.draft.status == "pending"
-        ]
-        titles: list[str] = []
-        for entry in drafts:
-            if entry.draft is None:
-                continue
-            title = (
-                f"[{entry.alias}] draft · step {entry.step} · "
-                f"{draft_title(dataclasses.replace(entry.draft, text=entry.text))}"
-            )
-            # The target is raw metadata; the line reaches a prompt only
-            # after the candidate boundary.
-            checked = self._check_candidate(title, "draft", run)
-            if checked:
-                titles.append(checked)
-        return lines, titles
-
     # ── Tool providers ──
 
     async def _ensure_tools(self) -> None:
@@ -4276,7 +1671,7 @@ class Agent:
                 self._check_not_closing()
                 self._check_tool_names(provided)
             except BaseException as exc:
-                self._tools_failure = str(exc) or _exception_text(exc)
+                self._tools_failure = str(exc) or exception_text(exc)
                 await self._close_providers(started)
                 raise
             for tool in provided:
@@ -4410,7 +1805,7 @@ class Agent:
             provider.kill()
         except Exception as exc:
             logger.warning(
-                "Could not kill tool provider %s: %s", name, _exception_text(exc)
+                "Could not kill tool provider %s: %s", name, exception_text(exc)
             )
 
     async def _close_provider(self, provider: BaseToolProvider) -> None:
@@ -4422,7 +1817,7 @@ class Agent:
             logger.warning(
                 "Could not close tool provider %s: %s",
                 type(provider).__name__,
-                _exception_text(exc),
+                exception_text(exc),
             )
 
     # ── Stage helpers ──
@@ -4792,11 +2187,7 @@ class Agent:
             run.plan_call = getattr(self.chat, "last_call", None)
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
-        if self.options.reasoning != "legacy":
-            before = response.thinking
-            response = _split_inline_reasoning(response)
-            if not before and response.thinking:
-                self.chat.stats.reasoning_chars += len(response.thinking)
+        response = self._normalize_reply(response)
 
         check = await self.checker.post_plan(response)
         if not check.allowed:
@@ -5534,7 +2925,7 @@ class Agent:
             response.thinking,
             kind="reflection",
             writer="heuristic",
-            fallback=self._reflection_summary(response.content),
+            fallback=_reflection_summary(response.content),
         )
         note = dataclasses.replace(
             note,
@@ -5548,25 +2939,6 @@ class Agent:
             remember_by="rule",
         )
         return self._store_note(note, run, source="reflection")
-
-    @staticmethod
-    def _reflection_summary(content: str) -> str:
-        """The summary (else rationale) of a readable reflection reply, or ""."""
-        found = _read_reflection(content)
-        if found is not None:
-            data: object = found[0]
-        else:
-            try:
-                data = _decode_reflection(_coerce_str(content))
-            except ValueError:
-                return ""
-        if not isinstance(data, dict):
-            return ""
-        for key in ("summary", "rationale"):
-            value = data.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-        return ""
 
     async def _do_reflect(
         self,
@@ -5640,33 +3012,39 @@ class Agent:
                 addendum["addendum"] = f"{REFLECTION_ADDENDUM}\n{block}"
         # The chat's earlier turns, which the window may have lost by now.
         earlier = run.earlier_block if run is not None else ""
-        response = await self.chat.reflect(
-            short=sent,
-            query=task.query,
-            attempt_id=attempt_id,
-            failure_type=failure_type,
-            prior_reflections=prior_reflections or None,
-            final=final,
-            fit=fit,
-            notes=note_lines,
-            draft_titles=draft_titles,
-            earlier=earlier,
-            **addendum,
-        )
+
+        async def ask(**retry: Any) -> Message | None:
+            """One reflection request; the reply, normalized and reported."""
+            reply = await self.chat.reflect(
+                short=sent,
+                query=task.query,
+                attempt_id=attempt_id,
+                failure_type=failure_type,
+                prior_reflections=prior_reflections or None,
+                final=final,
+                fit=fit,
+                notes=note_lines,
+                draft_titles=draft_titles,
+                earlier=earlier,
+                **retry,
+                **addendum,
+            )
+            if reply is None:
+                return None
+            reply = self._normalize_reply(reply)
+            if replies is not None:
+                replies.append(reply)
+            if run is not None:
+                run.events.reflection_call(getattr(self.chat, "last_call", None))
+            return reply
+
+        response = await ask()
         if response is None:
             # The fit refused the request before it was sent; read it as an
             # unreadable reply (see the docstring).
             return None
-        if self.options.reasoning != "legacy":
-            before = response.thinking
-            response = _split_inline_reasoning(response)
-            if not before and response.thinking:
-                self.chat.stats.reasoning_chars += len(response.thinking)
-        if replies is not None:
-            replies.append(response)
-        if run is not None:
-            run.events.reflection_call(getattr(self.chat, "last_call", None))
-        if _read_reflection(response.content) is None:
+        found = _read_reflection(response.content)
+        if found is None:
             reason = _unreadable_reason(response)
             if run is not None:
                 run.events.reflection_unreadable(reason)
@@ -5675,33 +3053,10 @@ class Agent:
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
-            response = await self.chat.reflect(
-                short=sent,
-                query=task.query,
-                attempt_id=attempt_id,
-                failure_type=failure_type,
-                prior_reflections=prior_reflections or None,
-                final=final,
-                retry=True,
-                retry_hint=hint,
-                fit=fit,
-                notes=note_lines,
-                draft_titles=draft_titles,
-                earlier=earlier,
-                **addendum,
-            )
+            response = await ask(retry=True, retry_hint=hint)
             if response is None:
                 return None
-            if self.options.reasoning != "legacy":
-                before = response.thinking
-                response = _split_inline_reasoning(response)
-                if not before and response.thinking:
-                    self.chat.stats.reasoning_chars += len(response.thinking)
-            if replies is not None:
-                replies.append(response)
-            if run is not None:
-                run.events.reflection_call(getattr(self.chat, "last_call", None))
-        found = _read_reflection(response.content)
+            found = _read_reflection(response.content)
         reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
@@ -5715,56 +3070,11 @@ class Agent:
         data, repair = found
         if run is not None:
             run.events.reflection_repaired(repair)
-        entry, decision = self._reflection_from_object(data, attempt_id, failure_type)
+        entry, decision = _reflection_from_object(data, attempt_id, failure_type)
         entry = _fit_reflection(_cap_reflection_lists(entry), MAX_REFLECTION_CHARS)
         decision.tried_memory = entry
         if run is not None and self._notes_mode:
             self._propose_reflection(entry, run, note_id=reflection_note_id)
-        return entry, decision
-
-    @staticmethod
-    def _reflection_from_object(
-        data: dict[str, Any],
-        attempt_id: int,
-        failure_type: str,
-    ) -> tuple[ReflectionEntry, ReflectionDecision]:
-        """The reflection entry and decision that the JSON object *data* gives.
-
-        Each value is coerced to its field's type, and a missing one takes a
-        default. A
-        ``recommended_action`` that is not one of
-        :data:`REFLECTION_ACTIONS` reads ``stop``.
-        """
-        entry = ReflectionEntry(
-            attempt_id=attempt_id,
-            summary=_coerce_str(data.get("summary")),
-            failed_hypotheses=_coerce_str_list(data.get("failed_hypotheses")),
-            disproven_actions=_coerce_str_list(data.get("disproven_actions")),
-            useful_evidence=_coerce_str_list(data.get("useful_evidence")),
-            unresolved_questions=_coerce_str_list(data.get("unresolved_questions")),
-            recommended_avoids=_coerce_str_list(data.get("recommended_avoids")),
-            next_promising_directions=_coerce_str_list(
-                data.get("next_promising_directions")
-            ),
-            failure_type=failure_type or _coerce_str(data.get("failure_type")),
-            confidence=_coerce_float(data.get("confidence")),
-        )
-
-        action = _coerce_str(data.get("recommended_action")) or "stop"
-        if action not in REFLECTION_ACTIONS:
-            action = "stop"
-
-        decision = ReflectionDecision(
-            progress_made=_coerce_bool(data.get("progress_made")),
-            task_still_feasible=_coerce_bool(data.get("task_still_feasible", True)),
-            new_information_gained=_coerce_bool(data.get("new_information_gained")),
-            next_step_is_concrete=_coerce_bool(data.get("next_step_is_concrete")),
-            next_step_is_novel=_coerce_bool(data.get("next_step_is_novel")),
-            recommended_action=action,
-            rationale=_coerce_str(data.get("rationale")),
-            best_effort_result=_coerce_str(data.get("best_effort_result")),
-            tried_memory=entry,
-        )
         return entry, decision
 
     # ── Attempt ──
@@ -5845,20 +3155,7 @@ class Agent:
                 # An eviction took the latest reflection: it goes back once, at
                 # the end, where the eviction has already changed the prefix.
                 self.hippo.working.append(reflection)
-            pending = run.inbox.poll() if run.inbox is not None else []
-            inserted = None
-            if pending:
-                assert run.inbox is not None
-                pending, shown = _read_notes(run.inbox, pending)
-                inserted = Message(
-                    role="user",
-                    content="\n\n".join(text for _, text in pending),
-                    images=self._tool_images.keep_user(shown),
-                )
-                self.hippo.working.append(inserted)
-                run.pinned.append(inserted)
-                for _, text in pending:
-                    self._reviewer.user_message(text)
+            inserted, pending = self._read_inbox(run)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -5871,25 +3168,7 @@ class Agent:
                 if not any(message is inserted for message in short_window):
                     run.end("failed", error="inbox instructions do not fit the prompt")
                     return step + 1, ""
-
-                def on_ready(
-                    messages: list[Message],
-                    *,
-                    inserted: Message = inserted,
-                    pending: list[tuple[int, str]] = pending,
-                ) -> None:
-                    assert run.inbox is not None
-                    if (
-                        not messages
-                        or messages[-1].role != "user"
-                        or not messages[-1].content.endswith(inserted.content)
-                    ):
-                        raise ContextFitError(
-                            "Inbox instructions do not fit the request"
-                        )
-                    for offset, text in pending:
-                        run.inbox.accept(offset)
-                        run.events.inbox_accepted(offset, text, run.steps, run.attempts)
+                on_ready = self._accept_inbox(run, inserted, pending)
 
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
@@ -5911,7 +3190,7 @@ class Agent:
                     query,
                     task_query=run.task_query_msg,
                     run=run,
-                    **({"on_ready": on_ready} if on_ready is not None else {}),
+                    on_ready=on_ready,
                 )
             finally:
                 if retry_token is not None:
@@ -5923,7 +3202,7 @@ class Agent:
             )
             # What the provider reported as the model's reasoning, before an
             # unfinished reply's text is merged into it: only that is a model
-            # reasoning its way to an answer (see the rescue below).
+            # reasoning its way to an answer (see :meth:`_answer_from_thinking`).
             reasoned = response.thinking
             if unfinished:
                 before = len(response.thinking)
@@ -5940,39 +3219,9 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
-            # A reply with thinking but no tool call and no words may have its
-            # answer in the thinking (#469). The row's last empty reply first
-            # asks once more with thinking off, where the provider has that
-            # switch; if the row still ends empty, the end of the thinking is
-            # the answer, marked as such.
-            if (
-                self.options.empty_reply_fallback == "on"
-                and not response.tool_calls
-                and not has_content(response.content)
-            ):
-                if reasoned.strip():
-                    run.row_thinking = reasoned
-                if (
-                    run.empty_replies + 1 >= MAX_EMPTY_REPLIES
-                    and run.row_thinking.strip()
-                    and not run.broken_row
-                ):
-                    if (
-                        not run.thinking_retry_used
-                        and step + 1 < budget
-                        and self._thinking_retry_body()
-                    ):
-                        run.thinking_retry_used = True
-                        run.thinking_retry_armed = True
-                        run.fallback_retried = True
-                    else:
-                        marked = thinking_answer(run.row_thinking)
-                        response = dataclasses.replace(
-                            response, content=marked, thinking=run.row_thinking
-                        )
-                        if marked:  # thinking with no words gives no answer
-                            run.fallback_answered = True
-                            run.events.answer_from_thinking()
+            response = self._answer_from_thinking(
+                response, reasoned, run, can_retry=step + 1 < budget
+            )
             rest = response.content
             has_model_note = False
             if self._notes_mode:
@@ -5989,124 +3238,27 @@ class Agent:
             # text: no fallback may show it as one.
             broken = not response.tool_calls and broken_tool_call(rest, tools)
             # Dots, dashes or emoji alone say nothing: the text is blank.
-            if has_content(rest) and not broken:
+            answered = has_content(rest) and not broken
+            if answered:
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
-                if has_content(rest) and not broken:
-                    # No tool call → direct answer. In the compress modes
-                    # the note is stored first and the answer is the text
-                    # without its <note> block.
-                    if self._notes_mode:
-                        note, _ = self._reply_note(
-                            response,
-                            (),
-                            kind="answer",
-                            task_id=task.task_id,
-                            run=run,
-                        )
-                        entry = self._store_note(note, run, source="reasoning_note")
-                        if entry is not None:
-                            await self._restate(note, run)
-                    run.answer_thinking = response.thinking
-                    retry = await self._brief_gate(run, can_retry=step + 1 < budget)
-                    if retry is None:
-                        run.end("completed", result=rest)
-                        return step + 1, ""
-                    # The answer was no end: the model reads what its check
-                    # showed and plans again.
-                    answer = Message(role="assistant", content=rest)
-                    if self.options.reasoning not in ("legacy", "compress"):
-                        answer = dataclasses.replace(answer, thinking=response.thinking)
-                    self.hippo.working.append_turn(
-                        answer, [Message(role="user", content=retry)]
+                if answered:
+                    ended = await self._direct_answer(
+                        task, run, response, rest, can_retry=step + 1 < budget
                     )
-                    continue
-                # An empty reply is no answer: ask for one and plan again. So
-                # is a tool call written as text, with a label and nudge that
-                # say so; its text is no note either.
-                label_text = TOOL_CALL_TEXT_LABEL if broken else EMPTY_REPLY_LABEL
-                label_content = label_text
-                entry = None
-                if self._notes_mode:
-                    note, _ = self._reply_note(
-                        (
-                            dataclasses.replace(response, content="")
-                            if broken
-                            else response
-                        ),
-                        (),
-                        kind="empty",
-                        task_id=task.task_id,
-                        run=run,
+                else:
+                    ended = await self._empty_reply(
+                        task,
+                        run,
+                        response,
+                        broken=broken,
+                        unfinished=unfinished,
+                        thought_aliases=thought_aliases,
                     )
-                    entry = self._store_note(note, run, source="reasoning_note")
-                    if entry is not None:
-                        label_content = f"{label_text}\n{entry.text}"
-                run.empty_replies += 1
-                run.unfinished_row = run.unfinished_row or unfinished
-                run.broken_row = run.broken_row or broken
-                if broken:
-                    # Before the row's limit: the reply that ends the run is
-                    # dropped from the displays too, never shown as text.
-                    run.events.tool_call_as_text(
-                        run.empty_replies,
-                        final=run.empty_replies >= MAX_EMPTY_REPLIES,
-                    )
-                if (
-                    run.empty_replies >= MAX_EMPTY_REPLIES
-                    and not run.thinking_retry_armed
-                ):
-                    run.end(
-                        "failed",
-                        error=(
-                            UNFINISHED_ANSWER_ERROR
-                            if run.unfinished_row
-                            else (
-                                TOOL_CALL_TEXT_ERROR
-                                if run.broken_row
-                                else "empty replies"
-                            )
-                        ),
-                    )
+                if ended:
                     return step + 1, ""
-                # The label stands in for the reply, so the nudge does not
-                # follow another user message; as one unit, the two are
-                # only ever dropped together.
-                label = Message(role="assistant", content=label_content)
-                if self.options.reasoning not in ("legacy", "compress"):
-                    label = dataclasses.replace(label, thinking=response.thinking)
-                nudge = TOOL_CALL_TEXT_NUDGE if broken else EMPTY_REPLY_NUDGE
-                aliases: set[str] = set(thought_aliases)
-                block, _hits = await self._step_recall(
-                    run,
-                    entry,
-                    (),
-                    fallback=label_text,
-                    exclude={
-                        *self.hippo.working.shown_aliases(),
-                        *({entry.alias} if entry is not None else set()),
-                        *thought_aliases,
-                    },
-                )
-                if block:
-                    nudge = f"{nudge}\n\n{block}"
-                    aliases.update(hit.alias for hit in _hits if hit.kind != "long")
-                aliases.update(run.pending_shown)
-                run.pending_shown.clear()
-                self.hippo.working.append_turn(
-                    label,
-                    [Message(role="user", content=nudge)],
-                    aliases=aliases,
-                )
-                if unfinished:
-                    run.events.unfinished_answer()
-                elif not broken:
-                    run.events.empty_reply(run.empty_replies)
-                if run.thinking_retry_armed:
-                    # Armed by this reply: the next request is the retry.
-                    run.events.thinking_off_retry()
                 continue
             run.empty_replies = 0
             run.unfinished_row = False
@@ -6163,6 +3315,216 @@ class Agent:
         run.events.budget_used()
         return budget, "budget"
 
+    def _read_inbox(
+        self, run: _RunState
+    ) -> tuple[Message | None, list[tuple[int, str]]]:
+        """The notes the user sent during the run, read as one user message.
+
+        The message goes into working memory and is pinned. The notes count
+        as accepted only once a request carries them (:meth:`_accept_inbox`).
+        Returns ``(None, [])`` when there are none.
+        """
+        pending = run.inbox.poll() if run.inbox is not None else []
+        if not pending:
+            return None, []
+        assert run.inbox is not None
+        pending, shown = _read_notes(run.inbox, pending)
+        inserted = Message(
+            role="user",
+            content="\n\n".join(text for _, text in pending),
+            images=self._tool_images.keep_user(shown),
+        )
+        self.hippo.working.append(inserted)
+        run.pinned.append(inserted)
+        for _, text in pending:
+            self._reviewer.user_message(text)
+        return inserted, pending
+
+    @staticmethod
+    def _accept_inbox(
+        run: _RunState, inserted: Message, pending: list[tuple[int, str]]
+    ) -> Callable[[list[Message]], None]:
+        """The ``on_ready`` hook that accepts *pending* once the request is built.
+
+        It raises :class:`ContextFitError` when the request does not end with
+        the inserted message.
+        """
+
+        def on_ready(messages: list[Message]) -> None:
+            assert run.inbox is not None
+            if (
+                not messages
+                or messages[-1].role != "user"
+                or not messages[-1].content.endswith(inserted.content)
+            ):
+                raise ContextFitError("Inbox instructions do not fit the request")
+            for offset, text in pending:
+                run.inbox.accept(offset)
+                run.events.inbox_accepted(offset, text, run.steps, run.attempts)
+
+        return on_ready
+
+    def _answer_from_thinking(
+        self, response: Message, reasoned: str, run: _RunState, *, can_retry: bool
+    ) -> Message:
+        """The reply, or the end of the row's thinking when that is the answer.
+
+        A reply with thinking but no tool call and no words may have its
+        answer in the thinking (#469). The row's last empty reply first asks
+        once more with thinking off, where the provider has that switch (and
+        *can_retry*, a step is left); if the row still ends empty, the end of
+        the thinking is the answer, marked as such.
+        """
+        if (
+            self.options.empty_reply_fallback != "on"
+            or response.tool_calls
+            or has_content(response.content)
+        ):
+            return response
+        if reasoned.strip():
+            run.row_thinking = reasoned
+        if (
+            run.empty_replies + 1 >= MAX_EMPTY_REPLIES
+            and run.row_thinking.strip()
+            and not run.broken_row
+        ):
+            if (
+                not run.thinking_retry_used
+                and can_retry
+                and self._thinking_retry_body()
+            ):
+                run.thinking_retry_used = True
+                run.thinking_retry_armed = True
+                run.fallback_retried = True
+            else:
+                marked = thinking_answer(run.row_thinking)
+                response = dataclasses.replace(
+                    response, content=marked, thinking=run.row_thinking
+                )
+                if marked:  # thinking with no words gives no answer
+                    run.fallback_answered = True
+                    run.events.answer_from_thinking()
+        return response
+
+    async def _direct_answer(
+        self,
+        task: TaskRecord,
+        run: _RunState,
+        response: Message,
+        rest: str,
+        *,
+        can_retry: bool,
+    ) -> bool:
+        """A reply with words and no tool call: the answer, unless a check objects.
+
+        In the compress modes the note is stored first and the answer is the
+        text without its ``<note>`` block (*rest*). Returns True when the run
+        ended as ``completed``. When the brief's check shows the answer was no
+        end, the model reads what the check showed and plans again: False.
+        """
+        if self._notes_mode:
+            note, _ = self._reply_note(
+                response, (), kind="answer", task_id=task.task_id, run=run
+            )
+            entry = self._store_note(note, run, source="reasoning_note")
+            if entry is not None:
+                await self._restate(note, run)
+        run.answer_thinking = response.thinking
+        retry = await self._brief_gate(run, can_retry=can_retry)
+        if retry is None:
+            run.end("completed", result=rest)
+            return True
+        answer = Message(role="assistant", content=rest)
+        if self.options.reasoning not in ("legacy", "compress"):
+            answer = dataclasses.replace(answer, thinking=response.thinking)
+        self.hippo.working.append_turn(answer, [Message(role="user", content=retry)])
+        return False
+
+    async def _empty_reply(
+        self,
+        task: TaskRecord,
+        run: _RunState,
+        response: Message,
+        *,
+        broken: bool,
+        unfinished: bool,
+        thought_aliases: list[str],
+    ) -> bool:
+        """A reply with no tool call and no answer: ask for one and plan again.
+
+        So is a tool call written as text (*broken*), with a label and nudge
+        that say so; its text is no note either. Returns True when this reply
+        ended the run as ``failed``.
+        """
+        label_text = TOOL_CALL_TEXT_LABEL if broken else EMPTY_REPLY_LABEL
+        label_content = label_text
+        entry = None
+        if self._notes_mode:
+            note, _ = self._reply_note(
+                dataclasses.replace(response, content="") if broken else response,
+                (),
+                kind="empty",
+                task_id=task.task_id,
+                run=run,
+            )
+            entry = self._store_note(note, run, source="reasoning_note")
+            if entry is not None:
+                label_content = f"{label_text}\n{entry.text}"
+        run.empty_replies += 1
+        run.unfinished_row = run.unfinished_row or unfinished
+        run.broken_row = run.broken_row or broken
+        if broken:
+            # Before the row's limit: the reply that ends the run is
+            # dropped from the displays too, never shown as text.
+            run.events.tool_call_as_text(
+                run.empty_replies, final=run.empty_replies >= MAX_EMPTY_REPLIES
+            )
+        if run.empty_replies >= MAX_EMPTY_REPLIES and not run.thinking_retry_armed:
+            run.end(
+                "failed",
+                error=(
+                    UNFINISHED_ANSWER_ERROR
+                    if run.unfinished_row
+                    else (TOOL_CALL_TEXT_ERROR if run.broken_row else "empty replies")
+                ),
+            )
+            return True
+        # The label stands in for the reply, so the nudge does not
+        # follow another user message; as one unit, the two are
+        # only ever dropped together.
+        label = Message(role="assistant", content=label_content)
+        if self.options.reasoning not in ("legacy", "compress"):
+            label = dataclasses.replace(label, thinking=response.thinking)
+        nudge = TOOL_CALL_TEXT_NUDGE if broken else EMPTY_REPLY_NUDGE
+        aliases: set[str] = set(thought_aliases)
+        block, _hits = await self._step_recall(
+            run,
+            entry,
+            (),
+            fallback=label_text,
+            exclude={
+                *self.hippo.working.shown_aliases(),
+                *({entry.alias} if entry is not None else set()),
+                *thought_aliases,
+            },
+        )
+        if block:
+            nudge = f"{nudge}\n\n{block}"
+            aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+        aliases.update(run.pending_shown)
+        run.pending_shown.clear()
+        self.hippo.working.append_turn(
+            label, [Message(role="user", content=nudge)], aliases=aliases
+        )
+        if unfinished:
+            run.events.unfinished_answer()
+        elif not broken:
+            run.events.empty_reply(run.empty_replies)
+        if run.thinking_retry_armed:
+            # Armed by this reply: the next request is the retry.
+            run.events.thinking_off_retry()
+        return False
+
     # ── Main loop ──
 
     async def run(self, query: str) -> str:
@@ -6174,6 +3536,46 @@ class Agent:
         """
         outcome = await self.run_task(query)
         return outcome.result or f"[{outcome.status}] {outcome.error}"
+
+    @contextlib.contextmanager
+    def _run_scope(self, run: _RunState, task_id: str) -> Iterator[None]:
+        """Set the context variables that one run's requests and tools read.
+
+        ``PREFIX_RUN`` (the date line of the fixed prefix), ``BUDGET_ACCOUNTING``
+        and ``BUDGET_HOOK`` (the context budget), ``RETRY_HOOK`` (the retry
+        notices, only with a sink), ``CALL_RECORDER`` and ``RECALL_RUN`` (the run
+        a ``recall`` tool call belongs to). Leaving the scope, also when the run
+        raises, resets them in the order ``PREFIX_RUN``, ``BUDGET_HOOK``,
+        ``BUDGET_ACCOUNTING``, ``RETRY_HOOK``, ``CALL_RECORDER``, ``RECALL_RUN``.
+        """
+        prefix_run = self.chat.begin_prefix()
+        budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
+        budget_hook = BUDGET_HOOK.set(
+            (self.chat, run.events.context_budget)
+            if self.options.context_window is not None
+            else None
+        )
+        # The retry notices of this run's model requests; only with a sink.
+        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
+        # Every response of this run's model requests becomes a row of
+        # history's llm_calls table, when the history keeps model calls,
+        # with or without a sink. Read at each run, so a history set after
+        # the Agent was built records too.
+        history = self.hippo.history
+        recorder = CALL_RECORDER.set(
+            CallLog(history, task_id, run) if isinstance(history, CallHistory) else None
+        )
+        recall_run = RECALL_RUN.set(run)
+        try:
+            yield
+        finally:
+            PREFIX_RUN.reset(prefix_run)
+            BUDGET_HOOK.reset(budget_hook)
+            BUDGET_ACCOUNTING.reset(budget_accounting)
+            if retries is not None:
+                RETRY_HOOK.reset(retries)
+            CALL_RECORDER.reset(recorder)
+            RECALL_RUN.reset(recall_run)
 
     async def run_task(
         self,
@@ -6484,221 +3886,204 @@ class Agent:
             )
         if chat_started is not None:
             self._reviewer.since = chat_started
-        prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
-        budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
-        budget_hook = BUDGET_HOOK.set(
-            (self.chat, run.events.context_budget)
-            if self.options.context_window is not None
-            else None
-        )
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
-        # The retry notices of this run's model requests; only with a sink.
-        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
-        # Every response of this run's model requests becomes a row of
-        # history's llm_calls table, when the history keeps model calls,
-        # with or without a sink. Read at each run, so a history set after
-        # the Agent was built records too.
-        history = self.hippo.history
-        recorder = CALL_RECORDER.set(
-            CallLog(history, task.task_id, run)
-            if isinstance(history, CallHistory)
-            else None
-        )
-        recall_run = RECALL_RUN.set(run)
-        self._active_runs += 1
-        try:
-            run.events.run_started(
-                query,
-                max_steps=self.options.max_steps,
-                workspace_root=self.executor.workspace_root,
-                approval=approval is not None,
-            )
+        with self._run_scope(run, task.task_id):
+            self._active_runs += 1
             try:
-                if run.inbox is not None:
-                    run.inbox.validate(self.executor.workspace_root or os.getcwd())
-                if run.brief:
-                    assert self.options.brief_probe is not None
-                    run.workspace_digest = await asyncio.to_thread(
-                        self.options.brief_probe, self._workspace_for_brief()
-                    )
-                    run.step_digest = run.workspace_digest
-                    run.check_digest = run.workspace_digest
-                    self.hippo.working.on_drop = lambda gone: self._note_dropped(
-                        run, gone
-                    )
-                    if self.options.brief_items:
-                        run.items = parse_items(query)
-                        if run.items:
-                            run.items_baseline = await asyncio.to_thread(
-                                workspace_stamps, self._workspace_for_brief()
-                            )
-                if self.options.brief_check is not None:
-                    run.check_commands = check_commands(query)
-                async with deadline:
-                    try:
-                        await self._look_up(run, query)
-                    finally:
-                        # Also when a timeout or a stop cuts the lookup
-                        # short: the first run.progress follows run.started.
-                        run.report_progress()
-                    await self.hippo.save_task(task)
-                    try:
-                        await self._ensure_tools()
-                    except Exception as exc:
-                        raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
-                    query_msg = Message(
-                        role="user",
-                        content=query,
-                        images=self._tool_images.keep_user(pictures),
-                    )
-                    run.window_had_turns = any(
-                        msg.role != "system" for msg in self.hippo.working.get_window()
-                    )
-                    self.hippo.working.append(query_msg)
-                    run.task_query_msg = query_msg
-                    run.query_in_memory = True
-                    if self.options.reasoning != "legacy" and from_person:
-                        # Only the user's own text gives a user signal: a
-                        # direct statement is admitted at once, while the
-                        # fact a remember request carries is staged and
-                        # admitted with the digest at flush. A query the
-                        # person did not write gives none.
-                        signals = classify_user_text(query)
-                        for candidate in user_candidates(
-                            query,
-                            task_id=run.task_id,
-                            provenance={
-                                "task_text": run.task_text[:300],
-                                "source_ids": [],
-                            },
-                        ):
-                            checked = self._checked_candidate_text(
-                                candidate.text, "user", run
-                            )
-                            if checked is None:
-                                continue
-                            candidate.text = checked
-                            self.hippo.propose(candidate)
-                            decisions = await self.hippo.admit(
-                                candidate.candidate_id, "user_statement"
-                            )
-                            self._drain_decisions(decisions, run)
-                        for candidate in request_candidates(
-                            query,
-                            task_id=run.task_id,
-                            provenance={
-                                "task_text": run.task_text[:300],
-                                "source_ids": [],
-                            },
-                        ):
-                            checked = self._checked_candidate_text(
-                                candidate.text, "user", run
-                            )
-                            if checked is None:
-                                continue
-                            candidate.text = checked
-                            self.hippo.propose(candidate)
-                        run.remember_request = signals.remember
-                    await self._run_attempts(task, query, run)
-                    if self.options.answer_on_stop:
-                        await self._answer_on_stop(task, run)
-                        await self._restore_closing_line(task, run)
-                    self._keep_best_effort(run)
-            except _ToolSetupError as exc:
-                # Reported in the result, not a crash: no traceback.
-                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
-                run.end("setup_error", error=str(exc))
-            except InboxError as exc:
-                # An inbox that became unreadable mid-run is a setup failure,
-                # not a crash: report its message without a class prefix.
-                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
-                run.end("setup_error", error=str(exc))
-            except ContextFitError as exc:
-                run.end("context_budget_exceeded", error=str(exc))
-            except ProviderError as exc:
-                # Reported in the result, not a crash: no traceback.
-                logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-                error = str(exc) or _exception_text(exc)
-                if self._refused_pictures(exc):
-                    error = PICTURES_REFUSED_ERROR
-                run.end("provider_error", error=error)
-            except Exception as exc:
-                if (
-                    isinstance(exc, TimeoutError)
-                    and timeout_s is not None
-                    and deadline.expired()
-                ):
-                    # This run's own deadline; any other TimeoutError is a crash.
-                    logger.info("Task %s timed out after %g s", task.task_id, timeout_s)
-                    run.end("timeout", error=f"Timed out after {timeout_s:g} s")
-                else:
-                    logger.exception("Task %s crashed", task.task_id)
-                    run.end("crashed", error=_exception_text(exc))
-            except BaseException as exc:
-                if run.interactive and is_cancellation(exc):
-                    # A caller stopped a run that it follows.
-                    await self._on_cancelled(query, run, exc)
-                else:
-                    if (
-                        isinstance(exc, asyncio.CancelledError)
-                        and self._exit is not None
-                    ):
-                        error = self._exit.reason  # cancelled for an exit
-                    else:
-                        error = _exception_text(exc)
-                    run.end("crashed", error=error)
-                raise
-            finally:
-                if run.running:
-                    # Every path above ends the run; this keeps the record
-                    # terminal should a later change miss one.
-                    run.end("crashed", error="The run ended without a status")
-                self._record_answer(run)
-                if run.status == "cancelled":
-                    # Only _on_cancelled ends a run so. Its finalizer saves the
-                    # run and reports run.finished, in place of the lines below.
-                    await self._finalize_in_task(task, run, stats, started)
-                else:
-                    try:
-                        if self._exit is not None:
-                            await self._finish_task_for_exit(task, run, self._exit)
-                        else:
-                            try:
-                                await self._finish_task(task, run)
-                            except asyncio.CancelledError:
-                                # An exit that began during the final save
-                                # cancelled it, perhaps before it was committed:
-                                # save again, within the exit's time.
-                                if self._exit is None:
-                                    raise
-                                await self._finish_task_for_exit(task, run, self._exit)
-                                raise
-                    finally:
-                        # Built here, so that run.finished carries it on every
-                        # path, also when run_task raises.
-                        outcome = self._run_result(
-                            task, run, stats, time.perf_counter() - started
+                run.events.run_started(
+                    query,
+                    max_steps=self.options.max_steps,
+                    workspace_root=self.executor.workspace_root,
+                    approval=approval is not None,
+                )
+                try:
+                    if run.inbox is not None:
+                        run.inbox.validate(self.executor.workspace_root or os.getcwd())
+                    if run.brief:
+                        assert self.options.brief_probe is not None
+                        run.workspace_digest = await asyncio.to_thread(
+                            self.options.brief_probe, self._workspace_for_brief()
                         )
-                        run.outcome = outcome
-                        run.report_progress(ended=run.status)
-                        run.events.run_finished(outcome, _reviews_of(run))
-            await self._learn(run, query, outcome)
-            return outcome
-        finally:
-            if run.brief:
-                self.hippo.working.on_drop = None
-            PREFIX_RUN.reset(prefix_run)
-            BUDGET_HOOK.reset(budget_hook)
-            BUDGET_ACCOUNTING.reset(budget_accounting)
-            if run.finalizer is None:
-                # Else the finalizer counts the run out when it ends.
-                self._active_runs -= 1
-            if retries is not None:
-                RETRY_HOOK.reset(retries)
-            CALL_RECORDER.reset(recorder)
-            RECALL_RUN.reset(recall_run)
+                        run.step_digest = run.workspace_digest
+                        run.check_digest = run.workspace_digest
+                        self.hippo.working.on_drop = lambda gone: self._note_dropped(
+                            run, gone
+                        )
+                        if self.options.brief_items:
+                            run.items = parse_items(query)
+                            if run.items:
+                                run.items_baseline = await asyncio.to_thread(
+                                    workspace_stamps, self._workspace_for_brief()
+                                )
+                    if self.options.brief_check is not None:
+                        run.check_commands = check_commands(query)
+                    async with deadline:
+                        try:
+                            await self._look_up(run, query)
+                        finally:
+                            # Also when a timeout or a stop cuts the lookup
+                            # short: the first run.progress follows run.started.
+                            run.report_progress()
+                        await self.hippo.save_task(task)
+                        try:
+                            await self._ensure_tools()
+                        except Exception as exc:
+                            raise _ToolSetupError(
+                                str(exc) or exception_text(exc)
+                            ) from exc
+                        query_msg = Message(
+                            role="user",
+                            content=query,
+                            images=self._tool_images.keep_user(pictures),
+                        )
+                        run.window_had_turns = any(
+                            msg.role != "system"
+                            for msg in self.hippo.working.get_window()
+                        )
+                        self.hippo.working.append(query_msg)
+                        run.task_query_msg = query_msg
+                        run.query_in_memory = True
+                        if self.options.reasoning != "legacy" and from_person:
+                            # Only the user's own text gives a user signal: a
+                            # direct statement is admitted at once, while the
+                            # fact a remember request carries is staged and
+                            # admitted with the digest at flush. A query the
+                            # person did not write gives none.
+                            signals = classify_user_text(query)
+                            for candidate in user_candidates(
+                                query,
+                                task_id=run.task_id,
+                                provenance={
+                                    "task_text": run.task_text[:300],
+                                    "source_ids": [],
+                                },
+                            ):
+                                checked = self._checked_candidate_text(
+                                    candidate.text, "user", run
+                                )
+                                if checked is None:
+                                    continue
+                                candidate.text = checked
+                                self.hippo.propose(candidate)
+                                decisions = await self.hippo.admit(
+                                    candidate.candidate_id, "user_statement"
+                                )
+                                self._drain_decisions(decisions, run)
+                            for candidate in request_candidates(
+                                query,
+                                task_id=run.task_id,
+                                provenance={
+                                    "task_text": run.task_text[:300],
+                                    "source_ids": [],
+                                },
+                            ):
+                                checked = self._checked_candidate_text(
+                                    candidate.text, "user", run
+                                )
+                                if checked is None:
+                                    continue
+                                candidate.text = checked
+                                self.hippo.propose(candidate)
+                            run.remember_request = signals.remember
+                        await self._run_attempts(task, query, run)
+                        if self.options.answer_on_stop:
+                            await self._answer_on_stop(task, run)
+                            await self._restore_closing_line(task, run)
+                        self._keep_best_effort(run)
+                except _ToolSetupError as exc:
+                    # Reported in the result, not a crash: no traceback.
+                    logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                    run.end("setup_error", error=str(exc))
+                except InboxError as exc:
+                    # An inbox that became unreadable mid-run is a setup failure,
+                    # not a crash: report its message without a class prefix.
+                    logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                    run.end("setup_error", error=str(exc))
+                except ContextFitError as exc:
+                    run.end("context_budget_exceeded", error=str(exc))
+                except ProviderError as exc:
+                    # Reported in the result, not a crash: no traceback.
+                    logger.info(
+                        "Task %s ended with provider_error: %s", task.task_id, exc
+                    )
+                    error = str(exc) or exception_text(exc)
+                    if self._refused_pictures(exc):
+                        error = PICTURES_REFUSED_ERROR
+                    run.end("provider_error", error=error)
+                except Exception as exc:
+                    if (
+                        isinstance(exc, TimeoutError)
+                        and timeout_s is not None
+                        and deadline.expired()
+                    ):
+                        # This run's own deadline; any other TimeoutError is a crash.
+                        logger.info(
+                            "Task %s timed out after %g s", task.task_id, timeout_s
+                        )
+                        run.end("timeout", error=f"Timed out after {timeout_s:g} s")
+                    else:
+                        logger.exception("Task %s crashed", task.task_id)
+                        run.end("crashed", error=exception_text(exc))
+                except BaseException as exc:
+                    if run.interactive and is_cancellation(exc):
+                        # A caller stopped a run that it follows.
+                        await self._on_cancelled(query, run, exc)
+                    else:
+                        if (
+                            isinstance(exc, asyncio.CancelledError)
+                            and self._exit is not None
+                        ):
+                            error = self._exit.reason  # cancelled for an exit
+                        else:
+                            error = exception_text(exc)
+                        run.end("crashed", error=error)
+                    raise
+                finally:
+                    if run.running:
+                        # Every path above ends the run; this keeps the record
+                        # terminal should a later change miss one.
+                        run.end("crashed", error="The run ended without a status")
+                    self._record_answer(run)
+                    if run.status == "cancelled":
+                        # Only _on_cancelled ends a run so. Its finalizer saves the
+                        # run and reports run.finished, in place of the lines below.
+                        await self._finalize_in_task(task, run, stats, started)
+                    else:
+                        try:
+                            if self._exit is not None:
+                                await self._finish_task_for_exit(task, run, self._exit)
+                            else:
+                                try:
+                                    await self._finish_task(task, run)
+                                except asyncio.CancelledError:
+                                    # An exit that began during the final save
+                                    # cancelled it, perhaps before it was committed:
+                                    # save again, within the exit's time.
+                                    if self._exit is None:
+                                        raise
+                                    await self._finish_task_for_exit(
+                                        task, run, self._exit
+                                    )
+                                    raise
+                        finally:
+                            # Built here, so that run.finished carries it on every
+                            # path, also when run_task raises.
+                            outcome = self._run_result(
+                                task, run, stats, time.perf_counter() - started
+                            )
+                            run.outcome = outcome
+                            run.report_progress(ended=run.status)
+                            run.events.run_finished(outcome, _reviews_of(run))
+                await self._learn(run, query, outcome)
+                return outcome
+            finally:
+                if run.brief:
+                    self.hippo.working.on_drop = None
+                if run.finalizer is None:
+                    # Else the finalizer counts the run out when it ends.
+                    self._active_runs -= 1
 
     # ── Procedural memory ──
 
@@ -6766,7 +4151,7 @@ class Agent:
             if isinstance(exc, TimeoutError) and bound.expired():
                 reason = f"no answer within {LOOKUP_TIMEOUT_S:g} s"
             else:
-                reason = _exception_text(exc)
+                reason = exception_text(exc)
             logger.info("No progress template for task %s: %s", run.task_id, reason)
 
     async def _learn(self, run: _RunState, query: str, outcome: RunResult) -> None:
@@ -6808,7 +4193,7 @@ class Agent:
             if isinstance(exc, TimeoutError) and bound.expired():
                 reason = f"no answer within {LEARN_TIMEOUT_S:g} s"
             else:
-                reason = _exception_text(exc)
+                reason = exception_text(exc)
             logger.info("Could not learn from task %s: %s", outcome.task_id, reason)
 
     def _record_answer(self, run: _RunState) -> None:
@@ -6877,7 +4262,7 @@ class Agent:
                 logger.warning(
                     "Could not save the final state of task %s: %s",
                     task.task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
             if self.options.reasoning != "legacy":
                 # R4 gates the promotion too: the explicit modes write
@@ -6917,7 +4302,7 @@ class Agent:
                         logger.warning(
                             "Could not promote the reflections of task %s: %s",
                             task.task_id,
-                            _exception_text(exc),
+                            exception_text(exc),
                         )
         finally:
             self.hippo.working.clear_reflections()
@@ -6954,7 +4339,7 @@ class Agent:
                 if isinstance(exc, TimeoutError) and bound.expired():
                     reason = "no time left before the exit"
                 else:
-                    reason = _exception_text(exc)
+                    reason = exception_text(exc)
                 logger.warning(
                     "Could not save the final state of task %s: %s",
                     task.task_id,
@@ -7254,7 +4639,7 @@ class Agent:
                 logger.warning(
                     "Could not save a step of task %s: %s",
                     task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
         calls = step.response.tool_calls
         for index in range(len(step.records), len(calls)):
@@ -7276,7 +4661,7 @@ class Agent:
                 logger.warning(
                     "Could not save a step of task %s: %s",
                     task_id,
-                    _exception_text(exc),
+                    exception_text(exc),
                 )
 
     async def _save_final_state(self, task: TaskRecord) -> None:
@@ -7287,7 +4672,7 @@ class Agent:
             logger.warning(
                 "Could not save the final state of task %s: %s",
                 task.task_id,
-                _exception_text(exc),
+                exception_text(exc),
             )
 
     def _run_result(
@@ -7455,7 +4840,7 @@ class Agent:
                 raise
             logger.info("Task %s was refused by the server: %s", task.task_id, exc)
             run.early_stop = "refused"
-            run.end("provider_error", error=str(exc) or _exception_text(exc))
+            run.end("provider_error", error=str(exc) or exception_text(exc))
 
     def _keep_best_effort(self, run: _RunState) -> None:
         """A run that stopped on ``max_calls`` or a refusal, with no answer: its latest text."""
@@ -7463,6 +4848,45 @@ class Agent:
             return
         run.result = run.last_text
         run.answer_thinking = run.last_text_thinking
+
+    def _normalize_reply(self, response: Message) -> Message:
+        """*response* with an inline ``<think>`` block moved into its thinking.
+
+        Only in the explicit reasoning modes (see :func:`_split_inline_reasoning`).
+        Thinking found in the content, and not reported by the provider, counts
+        in the run's ``reasoning_chars``.
+        """
+        if self.options.reasoning == "legacy":
+            return response
+        before = response.thinking
+        response = _split_inline_reasoning(response)
+        if not before and response.thinking:
+            self.chat.stats.reasoning_chars += len(response.thinking)
+        return response
+
+    async def _aux_reply(
+        self, request: Awaitable[Message], what: str, task_id: str
+    ) -> Message | None:
+        """The reply to an auxiliary request, with its ``<think>`` block split off.
+
+        ``None`` when the request failed: ``max_calls`` left no call for it, or
+        the server did not answer. That is logged, with *what* the request was
+        for, and never ends the run.
+        """
+        try:
+            reply = await request
+        except CallBudgetError as exc:
+            logger.info("No call left to ask for %s in task %s: %s", what, task_id, exc)
+            return None
+        except Exception as exc:
+            logger.warning(
+                "Could not ask for %s in task %s: %s",
+                what,
+                task_id,
+                exception_text(exc),
+            )
+            return None
+        return _split_inline_reasoning(reply)
 
     async def _answer_on_block(self, task: TaskRecord, run: _RunState) -> None:
         """End a run that auto mode stopped, its answer the explanation (#339).
@@ -7475,29 +4899,21 @@ class Agent:
         """
         window = list(self.hippo.working.get_window())
         answer, thinking = "", ""
-        try:
-            reply = _split_inline_reasoning(
-                await self.chat.final_answer(
-                    window,
-                    task.query,
-                    None,
-                    note=BLOCKED_ANSWER_NOTE,
-                    earlier=run.earlier_block,
-                )
-            )
+        reply = await self._aux_reply(
+            self.chat.final_answer(
+                window,
+                task.query,
+                None,
+                note=BLOCKED_ANSWER_NOTE,
+                earlier=run.earlier_block,
+            ),
+            "the explanation of a block",
+            task.task_id,
+        )
+        if reply is not None:
             answer, thinking = reply.content.strip(), reply.thinking
             if broken_tool_call(answer):  # no tools were offered: not an answer
                 answer, thinking = "", ""
-        except CallBudgetError as exc:
-            logger.info(
-                "No call left to explain the block of %s: %s", task.task_id, exc
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for the explanation of a block in %s: %s",
-                task.task_id,
-                _exception_text(exc),
-            )
         if not answer:
             blocked = run.reviews.blocked
             answer = answer_on_block(blocked[-1]["title"] if blocked else "")
@@ -7526,27 +4942,20 @@ class Agent:
         window = [
             msg for msg in self.hippo.working.get_window() if id(msg) not in shown
         ]
-        try:
-            reply = await self.chat.final_answer(
+        reply = await self._aux_reply(
+            self.chat.final_answer(
                 window,
                 task.query,
                 self.hippo.working.get_reflections(),
                 earlier=run.earlier_block,
-            )
-        except CallBudgetError as exc:
-            logger.info("No call left to answer task %s on stop: %s", task.task_id, exc)
+            ),
+            "an answer on stop",
+            task.task_id,
+        )
+        if reply is None:
             return
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for an answer on stop for task %s: %s",
-                task.task_id,
-                _exception_text(exc),
-            )
-            return
-        reply = _split_inline_reasoning(reply)
-        answer = reply.content.strip()
-        # A request without tools can still get a tool call written as text.
-        if not answer or broken_tool_call(answer):
+        answer = _answer_of(reply)
+        if not answer:
             return
         run.result = answer
         run.answered_on_stop = True
@@ -7573,8 +4982,7 @@ class Agent:
             )
         finally:
             PREFIX_RUN.reset(prefix_run)
-        answer = _split_inline_reasoning(reply).content.strip()
-        return "" if not answer or broken_tool_call(answer) else answer
+        return _answer_of(_split_inline_reasoning(reply))
 
     async def _restore_closing_line(self, task: TaskRecord, run: _RunState) -> None:
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
@@ -7595,21 +5003,14 @@ class Agent:
         label = requested_closing_label(run.task_text) if answer else None
         if label is None or has_closing_line(answer, label):
             return
-        try:
-            reply = await self.chat.closing_line(task.query, answer, label)
-        except CallBudgetError as exc:
-            logger.info(
-                "No call left to restore the closing line of %s: %s", task.task_id, exc
-            )
+        reply = await self._aux_reply(
+            self.chat.closing_line(task.query, answer, label),
+            "the closing line",
+            task.task_id,
+        )
+        if reply is None:
             return
-        except Exception as exc:
-            logger.warning(
-                "Could not ask for the closing line of task %s: %s",
-                task.task_id,
-                _exception_text(exc),
-            )
-            return
-        line = closing_line_of(_split_inline_reasoning(reply).content, label)
+        line = closing_line_of(reply.content, label)
         if line is None:
             return
         run.result = f"{run.result.rstrip()}\n{line}"

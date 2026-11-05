@@ -9,13 +9,11 @@ calls may run.
 
 ## Agent
 
-There are two ways to build an agent:
-
-- `Agent(config=load())` uses the backends of a configuration, as `melo` and
-  the gateway do. `Config`, `load` and `save` come from
-  `localmelo.support.config`.
-- `Agent(llm=..., embedding=...)` uses model providers that you build. The
-  embedding provider is optional; without it there is no long-term memory.
+An agent is built from model providers: `Agent(llm=..., embedding=...)`. The
+embedding provider is optional; without it there is no long-term memory. To use
+the backends of a configuration, as `melo` and the gateway do, build the
+providers with `providers_for(cfg)` from `localmelo.support.backends`. `Config`,
+`load` and `save` come from `localmelo.support.config`.
 
 ```python
 from localmelo import Agent, AgentOptions
@@ -25,7 +23,9 @@ llm = OpenAICompatLLM(base_url="http://127.0.0.1:11434/v1", model="qwen3:8b")
 agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60))
 ```
 
-- Both forms take `options=AgentOptions(...)` and `tool_providers=[...]`.
+- `Agent` takes `options=AgentOptions(...)` and `tool_providers=[...]`. Pass
+  the agent's `reasoning` mode on, as `providers_for(cfg, options.reasoning)`:
+  outside replay, the providers send no reasoning field.
 - An agent runs one task at a time. Tasks on the same agent share its working
   memory.
 - `await agent.close()` stops the tool providers and closes the model
@@ -156,11 +156,13 @@ servers:
 
 ```python
 from localmelo import Agent
+from localmelo.support.backends import providers_for
 from localmelo.support.config import load
 from localmelo.support.mcp import McpToolProvider, load_mcp_config
 
 servers = load_mcp_config("mcp.json")
-agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
+llm, embedding = providers_for(load())
+agent = Agent(llm=llm, embedding=embedding, tool_providers=[McpToolProvider(servers)])
 ```
 
 - The file uses the format in [MCP config file](../guides/tools-mcp.md#mcp-config-file).
@@ -186,7 +188,7 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - The chat request timeout belongs to the provider: pass `timeout=` (in
   seconds) to `OpenAICompatLLM` or to `OllamaNativeChat`
   (`localmelo.support.providers.llm.ollama_chat`). With
-  `Agent(config=...)`, `request_timeout_s` sets it.
+  `providers_for(cfg)`, the config's `request_timeout_s` sets it.
 - To connect another kind of server, subclass `BaseLLMProvider` (or
   `BaseEmbeddingProvider`) from `localmelo.melo.contracts.providers`, and
   implement `chat()` and `close()` (or `embed()` and `close()`).

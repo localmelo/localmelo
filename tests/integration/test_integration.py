@@ -21,6 +21,7 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.backends import providers_for
 from localmelo.support.config import (
     CloudVendorConfig,
     Config,
@@ -808,15 +809,15 @@ class TestArtifactMetadata:
         await agent.close()
 
 
-# ── 10. Config → Agent creation (_providers_from_config) ────────────────────
+# ── 10. Config → providers (providers_for) ──────────────────────────────────
 
 
-class TestProvidersFromConfig:
-    """Verify _providers_from_config returns correct provider types for each backend."""
+class TestProvidersFor:
+    """Verify providers_for returns correct provider types for each backend."""
 
     @pytest.fixture(autouse=True)
     def _register_backends(self) -> None:
-        """Register backends so _providers_from_config can look them up."""
+        """Register backends so providers_for can look them up."""
         from localmelo.support.backends.registry import (
             _clear,
             ensure_defaults_registered,
@@ -826,7 +827,6 @@ class TestProvidersFromConfig:
         ensure_defaults_registered()
 
     def test_mlc_backend_creates_llm_and_embedding(self) -> None:
-        from localmelo.melo.agent.agent import _providers_from_config
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
         )
@@ -842,13 +842,12 @@ class TestProvidersFromConfig:
                 embedding_model="nomic-embed",
             ),
         )
-        llm, embedding = _providers_from_config(cfg)
+        llm, embedding = providers_for(cfg)
         assert isinstance(llm, OpenAICompatLLM)
         assert isinstance(embedding, OpenAICompatEmbedding)
         assert llm.model == "Qwen3-1.7B"
 
     def test_ollama_backend_creates_providers(self) -> None:
-        from localmelo.melo.agent.agent import _providers_from_config
         from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 
         cfg = Config(
@@ -861,15 +860,14 @@ class TestProvidersFromConfig:
                 embedding_model="nomic-embed",
             ),
         )
-        llm, embedding = _providers_from_config(cfg)
+        llm, embedding = providers_for(cfg)
         assert isinstance(llm, OllamaNativeChat)
         assert embedding is not None
         assert llm.model == "qwen3:8b"
 
     def test_ollama_without_embedding_model_returns_none(self) -> None:
         """Ollama with no embedding_model and embedding_backend='none'
-        returns None from _providers_from_config."""
-        from localmelo.melo.agent.agent import _providers_from_config
+        returns None from providers_for."""
 
         cfg = Config(
             chat_backend="ollama",
@@ -880,12 +878,11 @@ class TestProvidersFromConfig:
                 embedding_model="",
             ),
         )
-        llm, embedding = _providers_from_config(cfg)
+        llm, embedding = providers_for(cfg)
         assert embedding is None
 
     def test_openai_cloud_backend_no_embedding(self) -> None:
         """OpenAI cloud backend is chat-only; embedding is None."""
-        from localmelo.melo.agent.agent import _providers_from_config
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
         cfg = Config(
@@ -897,13 +894,12 @@ class TestProvidersFromConfig:
             ),
         )
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
-            llm, embedding = _providers_from_config(cfg)
+            llm, embedding = providers_for(cfg)
         assert isinstance(llm, OpenAICompatLLM)
         assert embedding is None
 
     def test_gemini_chat_with_mlc_embedding(self) -> None:
         """Gemini cloud chat + mlc local embedding (split backend model)."""
-        from localmelo.melo.agent.agent import _providers_from_config
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
         )
@@ -923,15 +919,14 @@ class TestProvidersFromConfig:
             ),
         )
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "key-test"}):
-            llm, embedding = _providers_from_config(cfg)
+            llm, embedding = providers_for(cfg)
         assert isinstance(embedding, OpenAICompatEmbedding)
 
     def test_unknown_backend_raises(self) -> None:
-        from localmelo.melo.agent.agent import _providers_from_config
 
         cfg = Config(chat_backend="something-else", embedding_backend="none")
         with pytest.raises(KeyError, match="Unknown backend"):
-            _providers_from_config(cfg)
+            providers_for(cfg)
 
 
 # ── 11. Agent + no-embedding full tool-call path ───────────────────────────
@@ -1322,67 +1317,11 @@ class TestAgentCloseCascade:
             assert (Path(mem_dir) / "long_term.db").exists()
 
 
-# ── 15. Config → Agent end-to-end (mock providers, real wiring) ────────────
-
-
-class TestConfigToAgentEndToEnd:
-    """Config-based Agent construction and execution with mock providers."""
-
-    @pytest.mark.asyncio
-    async def test_config_based_agent_runs_query(self) -> None:
-        """Build Agent from Config, mock the HTTP layer, verify full run."""
-        cfg = Config(
-            chat_backend="mlc",
-            embedding_backend="mlc",
-            mlc=LocalBackendConfig(
-                chat_url="http://127.0.0.1:8400/v1",
-                chat_model="Qwen3-1.7B",
-                embedding_url="http://127.0.0.1:8400/v1",
-                embedding_model="nomic-embed",
-            ),
-        )
-        # We mock _providers_from_config to inject fake providers
-        fake_llm = FakeLLM([Message(role="assistant", content="42")])
-        fake_emb = FakeEmbedding()
-        with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
-            return_value=(fake_llm, fake_emb),
-        ):
-            agent = Agent(config=cfg)
-            result = await agent.run("What is 6*7?")
-            assert result == "42"
-            await agent.close()
-
-    @pytest.mark.asyncio
-    async def test_config_openai_no_embedding_agent(self) -> None:
-        """OpenAI cloud config with no embedding -> Agent works without long-term memory."""
-        cfg = Config(
-            chat_backend="openai",
-            embedding_backend="none",
-            openai=CloudVendorConfig(
-                api_key_env="OPENAI_API_KEY",
-                chat_model="gpt-4o",
-            ),
-        )
-        fake_llm = FakeLLM([Message(role="assistant", content="answer")])
-        with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
-            return_value=(fake_llm, None),
-        ):
-            agent = Agent(config=cfg)
-            assert agent._embedding is None
-            result = await agent.run("question")
-            assert result == "answer"
-            # Long-term must be empty
-            assert len(agent.hippo.long._entries) == 0
-            await agent.close()
-
-
-# ── 16. has_embedding → Agent embedding wiring consistency ─────────────────
+# ── 16. has_embedding → embedding provider consistency ─────────────────────
 
 
 class TestHasEmbeddingConsistency:
-    """Config.has_embedding must predict whether Agent gets an embedding provider."""
+    """Config.has_embedding must predict whether providers_for builds an embedding."""
 
     def test_mlc_has_embedding_matches_provider(self) -> None:
         cfg = Config(
@@ -1397,14 +1336,8 @@ class TestHasEmbeddingConsistency:
         )
         assert cfg.has_embedding is True
 
-        fake_llm = FakeLLM()
-        fake_emb = FakeEmbedding()
-        with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
-            return_value=(fake_llm, fake_emb),
-        ):
-            agent = Agent(config=cfg)
-            assert agent._embedding is not None
+        _, embedding = providers_for(cfg)
+        assert embedding is not None
 
     def test_openai_no_embedding_matches_provider(self) -> None:
         cfg = Config(
@@ -1417,13 +1350,9 @@ class TestHasEmbeddingConsistency:
         )
         assert cfg.has_embedding is False
 
-        fake_llm = FakeLLM()
-        with mock.patch(
-            "localmelo.melo.agent.agent._providers_from_config",
-            return_value=(fake_llm, None),
-        ):
-            agent = Agent(config=cfg)
-            assert agent._embedding is None
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            _, embedding = providers_for(cfg)
+        assert embedding is None
 
 
 # ── 17. Backend adapter architecture integration ────────────────────────────

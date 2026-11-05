@@ -23,11 +23,12 @@ from localmelo.melo.agent._json_repair import (
     rejected_objects,
     repairs,
 )
-from localmelo.melo.agent.agent import (
+from localmelo.melo.agent._reflection import (
     REPAIR_TRIES,
     _find_reflection,
     _json_error_line,
     _read_reflection,
+    _reflection_summary,
 )
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.tests.agent.test_cache_telemetry import (
@@ -630,8 +631,8 @@ class TestInTheLoop:
 
 class TestWhereTheReaderIsUsed:
     def test_the_summary_of_a_repaired_reply_is_its_own(self) -> None:
-        assert Agent._reflection_summary(STRAY_CLOSER) == "Echoed once."
-        assert Agent._reflection_summary("[1,") == ""
+        assert _reflection_summary(STRAY_CLOSER) == "Echoed once."
+        assert _reflection_summary("[1,") == ""
 
     def test_the_notes_that_a_repaired_reply_cites_are_read(self) -> None:
         text = '{"recommended_action": "done", "used_notes": ["n1", 2, ""],}'

@@ -2454,6 +2454,7 @@ def _build_direct_mode_agent(
 
     # No --base-url: use configured backends from config file
     from localmelo.support import config
+    from localmelo.support.backends import providers_for
 
     cfg = budget_cfg
     if not cfg.is_configured:
@@ -2604,7 +2605,13 @@ def _build_direct_mode_agent(
 
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
-    agent = Agent(config=cfg, options=options, tool_providers=tool_providers)
+    llm_provider, embedding_provider = providers_for(cfg, options.reasoning)
+    agent = Agent(
+        llm=llm_provider,
+        embedding=embedding_provider,
+        options=options,
+        tool_providers=tool_providers,
+    )
     extra_body = getattr(args, "retrieval_extra_body", None)
     if extra_body is not None:
         _set_retrieval_extra_body(parser, agent, extra_body)

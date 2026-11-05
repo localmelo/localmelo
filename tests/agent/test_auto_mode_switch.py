@@ -132,8 +132,9 @@ async def test_a_waiting_card_stays_when_the_chat_switches(tmp_path: Path) -> No
 async def test_the_site_question_of_a_stopped_turn_is_refused_without_a_review(
     tmp_path: Path,
 ) -> None:
+    from localmelo.melo.agent._approval_gate import _ToolAsk
     from localmelo.melo.agent._step_review import RunReviews
-    from localmelo.melo.agent.agent import _RunState, _ToolAsk
+    from localmelo.melo.agent.agent import _RunState
     from localmelo.melo.schema import ToolCall
 
     llm = FakeModel([], [verdict()])
