@@ -158,11 +158,3 @@ def test_cap_path_without_end_matches_whole(monkeypatch: pytest.MonkeyPatch) -> 
     out = "".join(release.feed(text[i : i + 7]) for i in range(0, len(text), 7))
     assert out + release.finish() == redaction.redact_secrets(text)[0]
     assert len(release._pending) < 96
-
-
-def test_unreviewed_edit_still_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    import re
-
-    monkeypatch.setattr(redaction, "_PEM", re.compile(r"-----BEGIN PRIVATE KEY-----"))
-    release = LineRedactor()
-    assert release.feed("a\nb\n") == ""

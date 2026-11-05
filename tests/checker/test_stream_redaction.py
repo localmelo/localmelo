@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-import hashlib
+import re
+from collections.abc import Sequence
 from pathlib import Path
+from re import _parser  # type: ignore[attr-defined]
+from typing import Any
 
 import pytest
 
@@ -40,90 +43,95 @@ def test_completed_line_releases_and_open_bearer_waits() -> None:
     assert release.finish() == ""
 
 
-def test_unknown_rules_force_whole_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    from localmelo.melo.checker import _stream_redaction
-
-    monkeypatch.setattr(_stream_redaction, "_known_rules", lambda bindings: False)
-    release = LineRedactor()
-    assert release.feed("first\nsecond\n") == ""
-    assert release.finish() == "first\nsecond\n"
-
-
-def test_changed_active_rule_buffers_and_uses_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import re
-
-    monkeypatch.setattr(redaction, "_KEY", re.compile(r"start\nsecret"))
-    release = LineRedactor()
-    assert release.feed("start\n") == ""
-    monkeypatch.setattr(redaction, "_KEY", re.compile(r"different"))
-    assert release.feed("secret\n") == ""
-    assert release.finish() == "[redacted]\n"
-
-
-def test_changed_active_function_buffers(monkeypatch: pytest.MonkeyPatch) -> None:
-    def changed(text: str) -> tuple[str, int]:
-        return text.replace("first\nsecond", "[redacted]"), 1
-
-    monkeypatch.setattr(redaction, "redact_secrets", changed)
-    release = LineRedactor()
-    assert release.feed("first\n") == ""
-    assert release.feed("second\n") == ""
-    assert release.finish() == "[redacted]\n"
-
-
-def test_new_multiline_rule_stays_buffered_even_after_hash_update(
+def test_a_comment_added_to_the_rules_file_changes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from localmelo.melo.checker import _stream_redaction
-
+    # The stream once held every reply until its end when the rules' source
+    # differed from a pinned copy, a comment included.
     assert redaction.__file__ is not None
-    source = Path(redaction.__file__).read_text()
-    source = source.replace(
-        "def redact_secrets(text:",
-        '_UNREVIEWED = re.compile(r"-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----", re.DOTALL)\n\n\ndef redact_secrets(text:',
-    )
-    source = source.replace(
-        "    text, keys = _KEY.subn(REDACTED, text)",
-        "    text, _ = _UNREVIEWED.subn(REDACTED, text)\n    text, keys = _KEY.subn(REDACTED, text)",
-    )
-    path = tmp_path / "redaction.py"
-    path.write_text(source)
-    namespace: dict = {"__file__": str(path)}
-    exec(compile(source, str(path), "exec"), namespace)
-    monkeypatch.setattr(
-        _stream_redaction,
-        "_RULES_SHA256",
-        hashlib.sha256(path.read_bytes()).hexdigest(),
-    )
-    assert not _stream_redaction._known_rules(namespace)
-    release = LineRedactor((namespace["redact_secrets"], False))
-    assert release.feed("-----BEGIN PRIVATE KEY-----\nTOPSECRETMATERIAL\n") == ""
-    assert release.feed("-----END PRIVATE KEY-----\n") == ""
-    assert release.finish() == "[redacted]\n"
+    edited = tmp_path / "redaction.py"
+    edited.write_text(Path(redaction.__file__).read_text() + "\n# a new comment\n")
+    monkeypatch.setattr(redaction, "__file__", str(edited))
+    release = LineRedactor()
+    assert release.feed("first\nsecond\n") == "first\nsecond\n"
+    assert release.finish() == ""
 
 
-def test_rule_inventory_requires_deliberate_update() -> None:
-    # A changed regex must be assessed for cross-line matches before release.
-    # Any change, including a new pass, forces a review of line locality.
-    assert redaction.__file__ is not None
-    assert hashlib.sha256(Path(redaction.__file__).read_bytes()).hexdigest() == (
-        "3500b204c8b2c598d748b5e241adc6c2eeac9275348c90315b2c73fa2f28ddca"
-    )
-    assert redaction._PEM.pattern == (
-        r"(-----BEGIN (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----)"
-        r"(.*?)"
-        r"(-----END (?:[A-Z0-9]{1,16} ){0,3}PRIVATE KEY(?: BLOCK)?-----|\Z)"
-    )
-    assert redaction._KEY.pattern == (
-        r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"
-        r"|(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"
-        r"|(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"
-    )
-    assert redaction._BEARER.pattern == r"(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}"
-    assert redaction._CODE_KEYWORD.pattern == (
-        r"verification code|passcode|(?<![A-Za-z0-9_])otp(?![A-Za-z0-9_])|验证码"
-    )
-    assert redaction._CODE.pattern == r"(?<![A-Za-z0-9])[0-9]{4,8}(?![A-Za-z0-9])"
-    assert redaction._CODE_REACH == 20
+# The streamed answer is redacted one complete line at a time, which is the
+# same as redacting it whole only if no rule matches across a line break
+# (or looks at text past one). Two rules do by design, and LineRedactor
+# holds what they need: a PEM block from its BEGIN line to its END line,
+# and the bearer word and its white space until the token arrives.
+SPANNING_BY_DESIGN = {"_PEM", "_BEARER"}
+
+
+def _can_see_a_newline(nodes: Sequence[Any], dotall: bool) -> bool:
+    """Whether a part of a parsed pattern can match, or look at, a newline.
+
+    Anything it does not know counts as yes, so a new construct is reviewed.
+    """
+    for op, arg in nodes:
+        kind = str(op)
+        if kind == "LITERAL":
+            seen = arg == ord("\n")
+        elif kind == "NOT_LITERAL":
+            seen = arg != ord("\n")
+        elif kind == "ANY":
+            seen = dotall
+        elif kind == "IN":
+            seen = _set_has_a_newline(arg)
+        elif kind in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+            seen = _can_see_a_newline(arg[2], dotall)
+        elif kind == "SUBPATTERN":
+            seen = _can_see_a_newline(arg[3], dotall or bool(arg[1] & re.DOTALL))
+        elif kind == "BRANCH":
+            seen = any(_can_see_a_newline(branch, dotall) for branch in arg[1])
+        elif kind in ("ASSERT", "ASSERT_NOT"):
+            seen = _can_see_a_newline(arg[1], dotall)
+        elif kind == "AT":  # \b, \Z: they look at no character
+            seen = False
+        else:
+            seen = True
+        if seen:
+            return True
+    return False
+
+
+def _set_has_a_newline(items: Sequence[Any]) -> bool:
+    """Whether a character set of a parsed pattern contains a newline."""
+    negated = bool(items) and str(items[0][0]) == "NEGATE"
+    inside = False
+    for op, arg in items[1:] if negated else items:
+        kind = str(op)
+        if kind == "LITERAL":
+            inside |= arg == ord("\n")
+        elif kind == "RANGE":
+            inside |= arg[0] <= ord("\n") <= arg[1]
+        elif kind == "CATEGORY":
+            inside |= str(arg) not in (
+                "CATEGORY_DIGIT",
+                "CATEGORY_WORD",
+                "CATEGORY_NOT_SPACE",
+            )
+        else:
+            return True
+    return not inside if negated else inside
+
+
+def test_only_the_two_rules_the_stream_holds_can_match_across_lines() -> None:
+    rules = {
+        name: value
+        for name, value in vars(redaction).items()
+        if isinstance(value, re.Pattern)
+    }
+    # A new rule is a new pattern here: decide whether it may span lines
+    # (then LineRedactor must hold what it needs) before it is released.
+    assert set(rules) == {"_PEM", "_KEY", "_BEARER", "_CODE_KEYWORD", "_CODE"}
+    spanning = {
+        name
+        for name, rule in rules.items()
+        if _can_see_a_newline(
+            _parser.parse(rule.pattern, rule.flags), rule.flags & re.DOTALL > 0
+        )
+    }
+    assert spanning == SPANNING_BY_DESIGN
