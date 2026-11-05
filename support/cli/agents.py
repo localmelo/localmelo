@@ -22,6 +22,7 @@ from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.registry import find, in_use
 from localmelo.support.cli.views import BackendInfo
+from localmelo.support.melo_serve import MeloServeError
 from localmelo.support.sessions.agents import build_session_agent
 
 # What the banner says for a backend that serves its own model, when it serves none.
@@ -166,8 +167,9 @@ class AgentFactory:
             agent = await self._build(
                 model, url, self.mcp_config if self.mcp_error is None else None
             )
-        except ValueError:
-            # An invalid mode/provider pair is not an MCP startup failure.
+        except (ValueError, MeloServeError):
+            # An invalid mode/provider pair, or a model melo_serve does not
+            # serve, is not an MCP startup failure.
             raise
         except Exception as exc:
             if self.mcp_config is None or self.mcp_error is not None:
