@@ -1,4 +1,5 @@
 import {t} from './i18n.mjs';
+import {maker} from './dom.mjs';
 
 /** The two ways melo works in a chat (#339): asks first, or works on its own and blocks risky steps. */
 export const MODES = ['ask', 'auto'];
@@ -49,12 +50,7 @@ export function setupModeChip({doc, state, pick, openSettings, remove = null}) {
   // Every control the arrows move through: the two modes, then each grant's Remove.
   let controls = [];
 
-  function node(tag, className, text) {
-    const made = doc.createElement(tag);
-    if (className) made.className = className;
-    if (text !== undefined) made.textContent = text;
-    return made;
-  }
+  const {node} = maker(doc);
 
   function menu() {
     const {mode, fallback} = state();

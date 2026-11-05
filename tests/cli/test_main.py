@@ -389,7 +389,7 @@ class TestBuildDirectModeAgent:
             _build_direct_mode_agent(ns)
 
         _, kwargs = cls.call_args
-        assert kwargs.get("config") is cfg
+        assert kwargs["llm"].model == "Qwen3-1.7B"
 
     def test_no_base_url_unconfigured_exits(self) -> None:
         """No --base-url and no configured backend -> SystemExit(1)."""

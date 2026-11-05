@@ -60,7 +60,10 @@ async def test_the_chosen_row_has_the_pickers_mark_and_the_names_do_not_move() -
 
 async def test_the_bar_shows_only_when_there_are_more_rows_than_fit() -> None:
     async with running_app(FakeController(), completer=SlashCompleter()) as app:
-        rows = await _opened(app, "/")
+        await _opened(app, "/")
+        # The bar comes with the list, but under load its redraw can come later.
+        await app.wait(lambda: UNICODE.bar in app.text())
+        rows = _menu(app)
         assert any(row.endswith(UNICODE.bar) for row in rows), rows
         app.type("mo")
         await app.wait(lambda: len(_menu(app)) == 1)

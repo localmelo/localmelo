@@ -32,8 +32,8 @@ error: Failed to spawn: `melo`
 ModuleNotFoundError: No module named 'localmelo'
 ```
 
-- **原因：** 克隆目录的名称不是 `localmelo`，例如目录被重命名，或者 ZIP 包被解压为 `localmelo-main`。
-- **修复：** 把目录重命名为 `localmelo`，然后重新安装，步骤见[安装](../start/quickstart.md#install)。
+- **原因：** 运行命令的 Python 没有安装 localmelo，例如用的不是克隆目录的虚拟环境，或者安装没有完成。
+- **修复：** 在克隆目录中运行 `uv sync --extra gateway`，并用 `uv run melo …` 启动 melo，或激活克隆目录的 `.venv`，步骤见[安装](../start/quickstart.md#install)。
 
 ### Gateway requires fastapi and uvicorn
 
@@ -281,7 +281,7 @@ melo: run ended with status stuck: Stuck: the same tool calls or errors repeated
 melo: run ended with status gate_stopped: Stopped after attempt 1 (stop reason: not_novel)
 ```
 
-- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。使用 `--reflection-gate utility` 时，它还可能显示为 `Could not parse reflection response`：模型两次回复时都没有反思所需的 JSON 对象。
+- **原因：** 一次尝试之后，反思决定停止，或者它继续的决定没有通过继续判定（见[反思](../concepts/how-it-works.md#reflection)）。错误信息是模型给出的理由，若它没有给出理由，则为 `Stopped after attempt <n> (stop reason: <code>)`；在所有情况下，`reflection` 事件的 `stop_reason` 都会指明是哪项检查。
 - **修复：** 阅读其理由。如果模型无法写出反思，请换一个模型，或使用 `--attempt-policy none`。
 
 ### Tool not offered in this step

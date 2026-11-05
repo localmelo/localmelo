@@ -28,14 +28,8 @@ def test_the_direct_mode_flags_are_the_rows_and_the_flags_without_one() -> None:
 
 
 def test_a_given_flag_sets_its_field_and_the_rest_set_nothing() -> None:
-    args = cli._build_parser().parse_args(
-        ["--timeout", "9", "--fixed-prefix", "off", "--memory", "on", "task"]
-    )
-    assert flag_options(args) == {
-        "timeout_s": 9,
-        "fixed_prefix": False,
-        "memory": True,
-    }
+    args = cli._build_parser().parse_args(["--timeout", "9", "--memory", "on", "task"])
+    assert flag_options(args) == {"timeout_s": 9, "memory": True}
     assert flag_options(cli._build_parser().parse_args(["task"])) == {}
 
 

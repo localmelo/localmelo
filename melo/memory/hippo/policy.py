@@ -24,8 +24,7 @@ from localmelo.melo.memory.notes import (
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
-# The reason for an IGNORE of identical text. Under the typed-assertion gate only this
-# IGNORE stands; a near-duplicate with different content is kept as a distinct note.
+# The reason for an IGNORE of identical text.
 EXACT_DUPLICATE_REASON = "exact duplicate"
 
 # A short fact is noise: fewer than this many normalised characters.
@@ -490,29 +489,6 @@ def _entry_created(entry: Any) -> float:
     return float(value or 0.0)
 
 
-def _meta_filter_applies(
-    text: str,
-    *,
-    source: str,
-    admitted_by: str,
-    provenance: Mapping[str, Any],
-) -> bool:
-    """Whether the meta filter may drop *text* at this boundary.
-
-    A digest admitted by ``outcome`` for a completed run is never filtered:
-    the end of a completed task is exactly the episode that signal exists
-    to keep. A digest with a ``task:`` line is content anyway (see
-    :func:`~localmelo.melo.memory.notes.is_meta_claim`).
-    """
-    if (
-        admitted_by == "outcome"
-        and source == "digest"
-        and str(provenance.get("final_status") or "") == "completed"
-    ):
-        return False
-    return is_meta_claim(text)
-
-
 def decide(
     text: str,
     *,
@@ -529,9 +505,7 @@ def decide(
     item_key = _item_key(provenance)
     subject = subjects(text, kind, task_text=task_text, item_key=item_key)
     content = content_tokens(text)
-    if _meta_filter_applies(
-        text, source=source, admitted_by=admitted_by, provenance=provenance
-    ):
+    if is_meta_claim(text):
         return PolicyDecision(
             action="IGNORE",
             kind=kind,

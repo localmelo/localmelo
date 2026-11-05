@@ -42,16 +42,12 @@ def _flag(
 
 # The order is the order a refusal names the flags in.
 FLAG_OPTIONS: Final = (
-    _flag("fixed_prefix", convert=_on),
     _flag("window_eviction"),
-    _flag("reflect_tool_guard", convert=_on),
-    _flag("cache_layout"),
     _flag("window_messages"),
     _flag("captured_history", convert=_on),
     _flag("brief_items", convert=_on),
     _flag("max_steps"),
     _flag("attempt_policy"),
-    _flag("reflection_gate"),
     _flag("tool_exposure"),
     _flag("memory", convert=_on),
     _flag("memory_dir"),
@@ -65,7 +61,6 @@ FLAG_OPTIONS: Final = (
     _flag("recall_kinds"),
     _flag("recall_placement"),
     _flag("recall_min_score"),
-    _flag("admit_on_outcome", convert=_on),
     _flag("keep_decision_text"),
 )
 

@@ -9,13 +9,11 @@ calls may run.
 
 ## Agent
 
-There are two ways to build an agent:
-
-- `Agent(config=load())` uses the backends of a configuration, as `melo` and
-  the gateway do. `Config`, `load` and `save` come from
-  `localmelo.support.config`.
-- `Agent(llm=..., embedding=...)` uses model providers that you build. The
-  embedding provider is optional; without it there is no long-term memory.
+An agent is built from model providers: `Agent(llm=..., embedding=...)`. The
+embedding provider is optional; without it there is no long-term memory. To use
+the backends of a configuration, as `melo` and the gateway do, build the
+providers with `providers_for(cfg)` from `localmelo.support.backends`. `Config`,
+`load` and `save` come from `localmelo.support.config`.
 
 ```python
 from localmelo import Agent, AgentOptions
@@ -25,7 +23,9 @@ llm = OpenAICompatLLM(base_url="http://127.0.0.1:11434/v1", model="qwen3:8b")
 agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60))
 ```
 
-- Both forms take `options=AgentOptions(...)` and `tool_providers=[...]`.
+- `Agent` takes `options=AgentOptions(...)` and `tool_providers=[...]`. Pass
+  the agent's `reasoning` mode on, as `providers_for(cfg, options.reasoning)`:
+  outside replay, the providers send no reasoning field.
 - An agent runs one task at a time. Tasks on the same agent share its working
   memory.
 - `await agent.close()` stops the tool providers and closes the model
@@ -41,7 +41,6 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `attempt_policy` | `"reflect"` | `"reflect"`: attempts with a reflection after each. `"none"`: one attempt. |
 | `steps_per_attempt` | `50` | The most steps per attempt, with `"reflect"`: a run reflects once it has used them without an answer. |
 | `max_attempts` | `5` | The most attempts per run, with `"reflect"`. |
-| `reflection_gate` | `"patient"` | `"patient"`, `"flags"` or `"utility"`, with `"reflect"`; see [Reflection](../concepts/how-it-works.md#reflection). |
 | `answer_on_stop` | `True` | `True`: a run that ends `gate_stopped` or `budget_exhausted` with no answer makes one more request, without tools, for the answer from the evidence gathered, and an answer that lacks the closing line the task asks for gets it from one more; `False` sends neither. See [Run results](run-results.md#statuses). |
 | `empty_reply_fallback` | `"on"` | `"on"`: a turn that a model that did think ends with no answer and no tool call is asked once more with thinking off (where the provider sets `thinking_off_body`) and, if still empty, answered with the marked end of its thinking; `RunResult.empty_reply` and the `thinking_off_retry` and `answer_from_thinking` notices say so. `"off"`: the run ends `failed`, as before. See [Run results](run-results.md#statuses). |
 | `max_calls` | `None` | An int >= 2: the most model requests a run sends; before the one that would pass it the run ends `budget_exhausted` (with `answer_on_stop`, the last call is kept for the answer). `None`: no limit. See [Run results](run-results.md#statuses). |
@@ -157,11 +156,13 @@ servers:
 
 ```python
 from localmelo import Agent
+from localmelo.support.backends import providers_for
 from localmelo.support.config import load
 from localmelo.support.mcp import McpToolProvider, load_mcp_config
 
 servers = load_mcp_config("mcp.json")
-agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
+llm, embedding = providers_for(load())
+agent = Agent(llm=llm, embedding=embedding, tool_providers=[McpToolProvider(servers)])
 ```
 
 - The file uses the format in [MCP config file](../guides/tools-mcp.md#mcp-config-file).
@@ -187,7 +188,7 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - The chat request timeout belongs to the provider: pass `timeout=` (in
   seconds) to `OpenAICompatLLM` or to `OllamaNativeChat`
   (`localmelo.support.providers.llm.ollama_chat`). With
-  `Agent(config=...)`, `request_timeout_s` sets it.
+  `providers_for(cfg)`, the config's `request_timeout_s` sets it.
 - To connect another kind of server, subclass `BaseLLMProvider` (or
   `BaseEmbeddingProvider`) from `localmelo.melo.contracts.providers`, and
   implement `chat()` and `close()` (or `embed()` and `close()`).

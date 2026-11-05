@@ -80,7 +80,7 @@ def test_config_value_after_brief_reports_startup_error(
 
 
 @pytest.mark.parametrize("fmt", ["json", "stream-json"])
-def test_fixed_prefix_config_after_brief_reports_startup_error(
+def test_bad_agent_config_after_brief_reports_startup_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -95,7 +95,7 @@ def test_fixed_prefix_config_after_brief_reports_startup_error(
     monkeypatch.setattr(
         sys, "argv", ["melo", "--brief", str(brief), "--output-format", fmt]
     )
-    bad = config.Config(agent=config.AgentConfig(fixed_prefix="yes"))  # type: ignore[arg-type]
+    bad = config.Config(agent=config.AgentConfig(window_eviction="sliding"))
     monkeypatch.setattr(config, "load", lambda: bad)
     with pytest.raises(SystemExit) as exc:
         cli.main()

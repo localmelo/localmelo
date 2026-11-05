@@ -12,16 +12,11 @@
 
 import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
 import {blockCard, blockFacts, stepLine} from "./blocked.mjs";
+import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
 
 const DAY_S = 86400;
-
-function startOfDay(ts) {
-  const day = new Date(ts * 1000);
-  day.setHours(0, 0, 0, 0);
-  return day.getTime() / 1000;
-}
 
 const daysAgo = (ts, now) => Math.round((startOfDay(now) - startOfDay(ts)) / DAY_S);
 
@@ -219,12 +214,7 @@ export function cardWords(card) {
  * `developer`). Its day is the divider above it.
  */
 export function cardNode({doc, card, open, resume = null, approval = null, block = null}) {
-  const el = (tag, className, text) => {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
+  const {node: el} = maker(doc);
   const words = cardWords(card);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
@@ -404,12 +394,7 @@ export function echoActions(echo, done) {
  * `{doc, echo, done, act}`: `act(echo, do, level)` runs a button; `done` hides them.
  */
 export function echoNodes({doc, echo, done = false, act}) {
-  const el = (tag, className, text) => {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
+  const {node: el} = maker(doc);
   const nodes = [];
   // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing. What a follow-up did
   // only tells the page whether more runs for its task (#431).

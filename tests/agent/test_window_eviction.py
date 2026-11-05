@@ -1,16 +1,14 @@
 """``AgentOptions.window_eviction``: the window's eviction, the cap fit and the context fit.
 
-``slide`` is today's behaviour. ``chunk`` and ``boundary`` keep the retained
-history stable for several steps so a server's prompt cache can reuse it.
+``chunk`` and ``boundary`` keep the retained history stable for several steps so a
+server's prompt cache can reuse it. The window itself, used on its own, still slides
+(one unit leaves per step) unless it is given an ``evict_chunk``.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
-import subprocess
-import sys
-from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -31,7 +29,6 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
-REPO = Path(__file__).resolve().parents[2]
 ECHO = ToolDef(
     name="echo",
     description="Echo text back",
@@ -153,10 +150,11 @@ def test_drop_since_forgets_the_aliases_of_what_it_drops() -> None:
 # ── The options ──
 
 
-def test_the_option_is_validated_and_defaults_to_chunk() -> None:
+@pytest.mark.parametrize("mode", ["sliding", "slide"])
+def test_the_option_is_validated_and_defaults_to_chunk(mode: str) -> None:
     assert AgentOptions().window_eviction == "chunk"
     with pytest.raises(ValueError, match="window_eviction"):
-        AgentOptions(window_eviction="sliding")  # type: ignore[arg-type]
+        AgentOptions(window_eviction=mode)  # type: ignore[arg-type]
 
 
 async def _agent(mode: str) -> Agent:
@@ -175,19 +173,14 @@ async def _agent(mode: str) -> Agent:
     )
 
 
-@pytest.mark.parametrize("mode", ["slide", "chunk", "boundary"])
+@pytest.mark.parametrize("mode", ["chunk", "boundary"])
 async def test_the_mode_reaches_the_window_and_the_run_config(mode: str) -> None:
     agent = await _agent(mode)
     try:
         sizes = _fill(agent.hippo.working, 12)
-        # The window's size after the tenth step: full under slide, a chunk
-        # less under chunk and boundary.
-        assert sizes[9] == (SHORT_TERM_MAX if mode == "slide" else 12)
-        config = agent._run_config()
-        if mode == "slide":
-            assert "window_eviction" not in config
-        else:
-            assert config["window_eviction"] == mode
+        # The window's size after the tenth step: a chunk less than full.
+        assert sizes[9] == 12
+        assert agent._run_config()["window_eviction"] == mode
     finally:
         await agent.close()
 
@@ -205,16 +198,6 @@ def _bulk_window(agent: Agent, units: int, size: int) -> Message:
 
 def _window_chars(agent: Agent) -> int:
     return sum(len(m.content) for m in agent.hippo.working.get_window())
-
-
-async def test_the_cap_fit_drops_to_just_under_the_cap_under_slide() -> None:
-    agent = await _agent("slide")
-    try:
-        query = _bulk_window(agent, 9, 12_000)  # 108,000 chars of results
-        await agent._fit_prompt_cap([], "query", task_query=query)
-        assert 90_000 < _window_chars(agent) <= 100_000
-    finally:
-        await agent.close()
 
 
 @pytest.mark.parametrize("mode", ["chunk", "boundary"])
@@ -405,6 +388,11 @@ def test_a_held_cut_never_drops_a_pinned_unit() -> None:
 # ── A run against a stub server with a prefix cache ──
 
 
+def _asks_to_reflect(body: dict[str, Any]) -> bool:
+    """A reflection request also offers the tools, so the tools do not tell it apart."""
+    return "Reflect and decide." in body["messages"][-1]["content"]
+
+
 @dataclasses.dataclass
 class CacheServer:
     """A stub OpenAI-compatible server that also models a prompt cache.
@@ -441,7 +429,7 @@ class CacheServer:
             "total_tokens": len(text) // 4 + 5,
             "prompt_tokens_details": {"cached_tokens": shared // 4},
         }
-        if body.get("tools"):
+        if not _asks_to_reflect(body):
             self.plans += 1
             call = {
                 "id": f"call_{self.plans}",
@@ -494,12 +482,7 @@ async def _stub_run(
             window_eviction=mode,  # type: ignore[arg-type]
             max_steps=max_steps,
             steps_per_attempt=steps_per_attempt,
-            **{
-                "fixed_prefix": False,
-                "reflect_tool_guard": False,
-                "window_messages": SHORT_TERM_MAX,
-                **options,
-            },
+            **{"window_messages": SHORT_TERM_MAX, **options},
         ),
     )
     agent.hippo.register_tool(ECHO)
@@ -527,12 +510,6 @@ def _collapsed_steps(events: list[AgentEvent]) -> list[int]:
     ]
 
 
-async def test_slide_collapses_the_shared_history_every_step_once_full() -> None:
-    events, _, _ = await _stub_run("slide", max_steps=24, steps_per_attempt=24)
-    collapsed = _collapsed_steps(events)
-    assert collapsed == list(range(12, 25))  # the window is full after step 10
-
-
 async def test_chunk_collapses_at_most_once_per_half_chunk() -> None:
     events, server, _ = await _stub_run("chunk", max_steps=24, steps_per_attempt=24)
     collapsed = _collapsed_steps(events)
@@ -540,8 +517,10 @@ async def test_chunk_collapses_at_most_once_per_half_chunk() -> None:
     assert collapsed[0] == 11  # the tenth step overflowed the window
     gaps = [b - a for a, b in zip(collapsed, collapsed[1:], strict=False)]
     assert min(gaps) >= WINDOW_EVICT_CHUNK // 2
-    # No request carries more than the window's maximum, plus the system message.
-    assert all(len(b["messages"]) <= SHORT_TERM_MAX + 2 for b in server.bodies)
+    # No planning request carries more than the window's maximum, plus the system
+    # message.
+    plans = [b for b in server.bodies if not _asks_to_reflect(b)]
+    assert all(len(b["messages"]) <= SHORT_TERM_MAX + 2 for b in plans)
 
 
 async def test_boundary_drops_the_finished_attempt_at_the_next_attempt() -> None:
@@ -550,22 +529,15 @@ async def test_boundary_drops_the_finished_attempt_at_the_next_attempt() -> None
     starts = [1, 13, 25]
     collapsed = _collapsed_steps(events)
     assert {13, 25} <= set(collapsed)
-    # Within an attempt the chunk fallback collapses at most once (at 11, 24).
-    assert sorted(set(collapsed) - set(starts)) == [11, 24]
-    # The first request of an attempt holds the system message, the query and the
-    # reflection carried in the system text, not the finished attempt's turns.
-    plan_bodies = [b for b in server.bodies if b.get("tools")]
+    # Within an attempt the chunk fallback collapses at most once (at 11, 23).
+    assert sorted(set(collapsed) - set(starts)) == [11, 23]
+    # The first request of an attempt holds the system message and the query with
+    # the reflection, not the finished attempt's turns.
+    plan_bodies = [b for b in server.bodies if not _asks_to_reflect(b)]
     for step in (13, 25):
         roles = [m["role"] for m in plan_bodies[step - 1]["messages"]]
         assert roles == ["system", "user"]
     assert len(plans) == 30
-
-
-async def test_slide_keeps_the_finished_attempt_across_the_boundary() -> None:
-    _, server, _ = await _stub_run("slide", max_steps=30, steps_per_attempt=12)
-    plan_bodies = [b for b in server.bodies if b.get("tools")]
-    roles = [m["role"] for m in plan_bodies[12]["messages"]]  # step 13
-    assert roles.count("assistant") > 0 and len(roles) > 10
 
 
 # A context budget that binds before the window does: about six units fit.
@@ -592,43 +564,33 @@ async def test_the_context_fit_collapses_the_history_once_per_several_steps(
         events, _, _ = await _stub_run(
             "chunk", max_steps=30, steps_per_attempt=30, pad=100, **TIGHT
         )
-    assert _collapsed_steps(events) == list(range(6, 31))  # every step
+    first = _collapsed_steps(events)[0]
+    assert _collapsed_steps(events) == list(range(first, 31))  # every step
     events, server, _ = await _stub_run(
         "chunk", max_steps=30, steps_per_attempt=30, pad=100, **TIGHT
     )
     collapsed = _collapsed_steps(events)
     gaps = [b - a for a, b in zip(collapsed, collapsed[1:], strict=False)]
-    assert collapsed[0] == 6 and len(collapsed) >= 5
+    assert collapsed[0] == first and len(collapsed) >= 5
     assert min(gaps) >= 3
-    assert all(len(b["messages"]) <= SHORT_TERM_MAX + 2 for b in server.bodies)
-
-
-async def test_the_context_fit_under_slide_is_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events, server, _ = await _stub_run(
-        "slide", max_steps=24, steps_per_attempt=24, pad=100, **TIGHT
-    )
-    assert _collapsed_steps(events) == list(range(6, 25))
-    _without_hold(monkeypatch)
-    _, plain, _ = await _stub_run(
-        "slide", max_steps=24, steps_per_attempt=24, pad=100, **TIGHT
-    )
-    assert server.bodies == plain.bodies
+    plans = [b for b in server.bodies if not _asks_to_reflect(b)]
+    assert all(len(b["messages"]) <= SHORT_TERM_MAX + 2 for b in plans)
 
 
 async def test_the_cut_resets_after_a_boundary_drop() -> None:
     # Roomier than TIGHT: the reflection request must fit too.
+    # The window is wide, so only the context fit drops within an attempt.
     events, server, agent = await _stub_run(
         "boundary",
         max_steps=30,
         steps_per_attempt=12,
         pad=250,
+        window_messages=64,
         context_window=1400,
         output_reserve=100,
         safety_margin=50,
     )
-    plan_bodies = [b for b in server.bodies if b.get("tools")]
+    plan_bodies = [b for b in server.bodies if not _asks_to_reflect(b)]
     # The attempt's first request holds only the system message and the query,
     # so the cut of the finished attempt is gone and the new one starts afresh.
     for step in (13, 25):
@@ -706,42 +668,3 @@ async def test_an_overflow_retry_moves_the_held_cut_on() -> None:
     # The request after the retry starts at or after the retry's cut.
     assert first(after) >= first(retried)
     assert agent.chat._fit_cuts["plan"].key is not None
-
-
-async def test_the_run_reports_the_mode_and_slide_adds_no_key() -> None:
-    _, _, agent = await _stub_run("chunk", max_steps=3, steps_per_attempt=3)
-    assert agent._run_config()["window_eviction"] == "chunk"
-
-
-def _report(log: Path) -> str:
-    done = subprocess.run(
-        [sys.executable, str(REPO / "scripts" / "cache_report.py"), str(log)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert done.returncode == 0, done.stderr
-    return done.stdout
-
-
-def _cached_share(out: str) -> float:
-    line = next(x for x in out.splitlines() if x.strip().startswith("total:"))
-    return float(line.rsplit("cached share", 1)[1].strip().rstrip("%"))
-
-
-async def test_the_modes_rank_by_cache_reuse_in_cache_report(tmp_path: Path) -> None:
-    shares = {}
-    for mode in ("slide", "chunk", "boundary"):
-        events, _, _ = await _stub_run(mode, max_steps=30, steps_per_attempt=12)
-        log = tmp_path / f"{mode}.jsonl"
-        log.write_text(
-            "\n".join(
-                json.dumps({"v": 1, "type": "event", "event": e.to_dict()})
-                for e in events
-            )
-        )
-        out = _report(log)
-        shares[mode] = _cached_share(out)
-        print(mode, out.splitlines()[-1])
-    assert shares["chunk"] > shares["slide"]
-    assert shares["boundary"] > shares["slide"]

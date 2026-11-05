@@ -12,7 +12,7 @@ A native window around the web console, a menu-bar item and Melo on your desktop
 - With neither compiler the build stops at once and prints one line that says so; a `DEVELOPER_DIR` in the environment picks another developer folder.
 - The build starts, installs and downloads no model server, and changes no signing identity or Xcode setting.
 
-From a checkout named `localmelo`, one command builds the app and installs it for your user, with no admin rights:
+From a checkout, one command builds the app and installs it for your user, with no admin rights:
 
 ```bash
 uv run python scripts/build_macos_app.py --install

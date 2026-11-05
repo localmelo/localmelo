@@ -172,7 +172,6 @@ RESULT = {
         "attempt_policy": "reflect",
         "steps_per_attempt": 10,
         "max_attempts": 3,
-        "reflection_gate": "flags",
         "timeout_s": None,
     },
     "localmelo_version": "0.1.0",

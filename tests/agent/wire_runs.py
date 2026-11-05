@@ -1,40 +1,37 @@
-"""Golden fixtures of legacy runs on the wire — no real model.
+"""Scripted runs on the wire: a stub chat server, a run's document and the golden check.
 
-T-COMPAT (``test_phase1a_compat.py``) fixes what scripted runs send and keep
-at the level of ``Message`` objects. These goldens add what it does not
-cover: the request bodies the real chat providers put on the wire, and the
-usage a server reports beyond the three summed keys. Every run here goes
-through ``Agent.run_task`` as direct mode runs it, without an event sink or
-an approval policy, through the real :class:`OpenAICompatLLM` or
-:class:`OllamaNativeChat` against an ``httpx.MockTransport`` server, with
-SQLite history in a temporary ``memory_dir``. Its golden file,
-``goldens/legacy/<run>.json``, holds:
+A run goes through ``Agent.run_task`` as direct mode runs it, without an event
+sink or an approval policy, through the real :class:`OpenAICompatLLM` or
+:class:`OllamaNativeChat` against an ``httpx.MockTransport`` server, with SQLite
+history in a temporary ``memory_dir``. Its document holds:
 
 - ``result``: ``RunResult.to_dict()`` as a whole, except ``duration_s``;
-- ``requests``: every request body as sent (``json.loads`` of its
-  content), reflection requests included. Headers are not recorded;
+- ``requests``: every request body as sent (``json.loads`` of its content),
+  reflection requests included. Headers are not recorded;
 - ``window``: working memory once the run is over, by ``Message`` field;
-- ``history``: the ``tasks`` and ``steps`` rows of ``history.db``, read by
-  column name.
+- ``history``: the ``tasks`` and ``steps`` rows of ``history.db``, read by column
+  name.
 
-The documents are built and normalized with T-COMPAT's serializer and
-compared with its ``check_golden``, so the same rules apply: generated ids
-become ordinals, timestamps and durations are dropped,
-``config.memory_dir`` becomes ``<memory_dir>``, a long text keeps its start,
-length and digest, and ``LOCALMELO_RECORD_GOLDENS=1`` writes the files
-instead of comparing them.
+Before a golden is compared, generated ids (task, step and tool-call ids) become
+ordinals in order of first appearance, such as ``<task:1>``; timestamps and
+durations are dropped; ``config.memory_dir``, a temporary directory, becomes
+``<memory_dir>``; and a text longer than 10,000 characters keeps its first 100
+characters, its length and its SHA-256.
 
-The goldens were recorded at ade1513, which holds C1, the reflection gate
-with its default ``reflection_gate="flags"``, U1a (#37), the web workspace
-(#35) and R3 (#38), before any change of R1. Every later change must leave
-them as they are.
+``LOCALMELO_RECORD_GOLDENS=1`` writes the golden files instead of comparing them.
+It is for recording a run again; the suite never sets it.
 """
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+import os
+import re
+import sqlite3
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,22 +41,179 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message, RunResult
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
-from localmelo.tests.agent.test_phase1a_compat import (
-    Normalizer,
-    check_golden,
-    history_json,
-    result_json,
-    window_json,
+
+# Set to "1" to write the golden files instead of comparing them.
+RECORD_ENV = "LOCALMELO_RECORD_GOLDENS"
+
+# ── The serializer ──────────────────────────────────────────────────────────
+
+# The fields and columns a golden holds, by name.
+WINDOW_MESSAGE_FIELDS = (
+    "role",
+    "content",
+    "thinking",
+    "tool_calls",
+    "tool_call_id",
+    "images",
 )
-from localmelo.tests.legacy_options import (
-    LEGACY_ANSWER_OPTIONS,
-    LEGACY_CACHE_OPTIONS,
-    LEGACY_STEP_OPTIONS,
+TOOL_CALL_FIELDS = ("tool_name", "arguments", "id")
+IMAGE_FIELDS = ("mime_type", "sha256", "size_bytes")
+TASK_COLUMNS = ("task_id", "query", "status", "result")
+STEP_COLUMNS = (
+    "step_id",
+    "task_id",
+    "thought",
+    "tool_call_json",
+    "tool_result_json",
+    "seq",
 )
 
-GOLDEN_DIR = Path(__file__).parent / "goldens" / "legacy"
+
+def _message_field(message: Message, name: str) -> Any:
+    value = getattr(message, name)
+    if name == "tool_calls":
+        return [
+            {f: copy.deepcopy(getattr(call, f)) for f in TOOL_CALL_FIELDS}
+            for call in value
+        ]
+    if name == "images":
+        return [{f: getattr(image, f) for f in IMAGE_FIELDS} for image in value]
+    return value
+
+
+def window_json(messages: Iterable[Message]) -> list[dict[str, Any]]:
+    """The working-memory window, by the fields of WINDOW_MESSAGE_FIELDS."""
+    return [
+        {name: _message_field(m, name) for name in WINDOW_MESSAGE_FIELDS}
+        for m in messages
+    ]
+
+
+def result_json(result: RunResult, memory_dir: str) -> dict[str, Any]:
+    """``RunResult.to_dict()``, in its key order, without ``duration_s``."""
+    data = result.to_dict()
+    del data["duration_s"]
+    if data["config"].get("memory_dir") == memory_dir:
+        data["config"]["memory_dir"] = "<memory_dir>"
+    return data
+
+
+def history_json(db_path: Path) -> dict[str, list[dict[str, Any]]]:
+    """The ``tasks`` and ``steps`` rows of *db_path*, by the named columns.
+
+    The JSON columns of ``steps`` are parsed, and ``duration_ms`` is left
+    out of ``tool_result_json``.
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tasks = conn.execute(
+            f"SELECT {', '.join(TASK_COLUMNS)} FROM tasks ORDER BY rowid"
+        ).fetchall()
+        steps = conn.execute(
+            f"SELECT {', '.join(STEP_COLUMNS)} FROM steps ORDER BY rowid"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "tasks": [{name: row[name] for name in TASK_COLUMNS} for row in tasks],
+        "steps": [_step_json(row) for row in steps],
+    }
+
+
+def _step_json(row: sqlite3.Row) -> dict[str, Any]:
+    step = {name: row[name] for name in STEP_COLUMNS}
+    step["tool_call_json"] = _stored_json(step["tool_call_json"])
+    result = _stored_json(step["tool_result_json"])
+    if isinstance(result, dict):
+        result.pop("duration_ms", None)
+    step["tool_result_json"] = result
+    return step
+
+
+def _stored_json(text: str | None) -> Any:
+    """The value of a JSON column, which must hold exactly its ``json.dumps``.
+
+    So the parsed value, whose key order a golden keeps, pins the text.
+    """
+    if text is None:
+        return None
+    value = json.loads(text)
+    assert json.dumps(value) == text, f"not as json.dumps writes it: {text}"
+    return value
+
+
+# A tool-call id that ToolCall generated, and a task or step id (UUID4 hex).
+_CALL_ID = re.compile(r"call_[0-9a-f]{24}(?![0-9a-f])")
+_RECORD_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
+
+# A longer text keeps only its first LONG_TEXT_KEPT characters, its length
+# and its digest in a golden.
+LONG_TEXT_CHARS = 10_000
+LONG_TEXT_KEPT = 100
+
+
+class Normalizer:
+    """Makes a run's document comparable across runs.
+
+    Calling it returns a normalized copy of a JSON-like value. Ids become
+    ordinals in the order it meets them: ``<task:n>`` and ``<step:n>`` for
+    the ids in *tasks* and *steps*, ``<call:n>`` for generated tool-call
+    ids and ``<id:n>`` for any other UUID4 hex. So one normalizer serves
+    one document. A text longer than LONG_TEXT_CHARS is shortened (see the
+    module docstring).
+    """
+
+    def __init__(self, *, tasks: Iterable[str] = (), steps: Iterable[str] = ()) -> None:
+        self._kinds = {**dict.fromkeys(tasks, "task"), **dict.fromkeys(steps, "step")}
+        self._labels: dict[str, str] = {}
+        self._counts: dict[str, int] = {}
+
+    def __call__(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return self._text(value)
+        if isinstance(value, list):
+            return [self(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self(item) for key, item in value.items()}
+        return value
+
+    def _label(self, kind: str, value: str) -> str:
+        if value not in self._labels:
+            self._counts[kind] = self._counts.get(kind, 0) + 1
+            self._labels[value] = f"<{kind}:{self._counts[kind]}>"
+        return self._labels[value]
+
+    def _text(self, text: str) -> str:
+        text = _CALL_ID.sub(lambda m: self._label("call", m.group()), text)
+        text = _RECORD_ID.sub(
+            lambda m: self._label(self._kinds.get(m.group(), "id"), m.group()), text
+        )
+        if len(text) > LONG_TEXT_CHARS:
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            text = f"{text[:LONG_TEXT_KEPT]}… [{len(text)} chars, sha256 {digest}]"
+        return text
+
+
+def check_golden(path: Path, document: Any) -> None:
+    """Compare *document* with the golden file *path*, or record it there.
+
+    The text is compared too, so key order counts: the CLI's JSON line
+    prints ``RunResult.to_dict()`` in its order.
+    """
+    text = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+    if os.environ.get(RECORD_ENV) == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        pytest.skip(f"recorded {path.name}")
+    assert path.is_file(), f"no golden file {path}"
+    golden = path.read_text(encoding="utf-8")
+    assert json.loads(text) == json.loads(golden)
+    assert text == golden
+
 
 # ── The scripted server ─────────────────────────────────────────────────────
 
@@ -227,16 +381,6 @@ def _reflection(action: str, *, thinking: str = "", **fields: Any) -> Reply:
     )
 
 
-# More than ASSISTANT_TEXT_SHARE (2,000) characters, so the turn's text gets
-# no share of the memory budget beside its result.
-LONG_DRAFT = "Here is a long draft of the reasoning behind the answer. " * 45
-
-# A result that the executor cuts to MAX_OUTPUT_LEN (50,000): with the long
-# draft, the turn passes MAX_MEMORY_TEXT_LEN, so working memory keeps neither
-# its text nor its thinking.
-LONG_OUTPUT_CODE = "print('x' * 60000)"
-
-
 @dataclass
 class Scenario:
     """One scripted run: options, the query and the model's replies.
@@ -250,33 +394,7 @@ class Scenario:
     options: dict[str, Any] = field(default_factory=dict)
 
 
-def _tools_empty_cut_answer() -> Scenario:
-    return Scenario(
-        status="completed",
-        query="What is six times seven? Check it with Python.",
-        replies=[
-            _python(
-                "print(6 * 7)",
-                content="Computing it.",
-                thinking="I compute six times seven with Python first.",
-            ),
-            Reply(prompt_tokens=180, completion_tokens=0),
-            _python(
-                LONG_OUTPUT_CODE,
-                content=LONG_DRAFT,
-                thinking="A long draft, and a long output to check it against.",
-            ),
-            Reply(
-                content="Six times seven is 42.",
-                thinking="Python printed 42.",
-                prompt_tokens=400,
-                completion_tokens=12,
-            ),
-        ],
-    )
-
-
-def _reflection_continues() -> Scenario:
+def reflection_continues() -> Scenario:
     return Scenario(
         status="completed",
         query="What is 2 to the power of 10? Check it with Python.",
@@ -302,92 +420,6 @@ def _reflection_continues() -> Scenario:
     )
 
 
-def _reflection_stops() -> Scenario:
-    # A continue whose next step is not novel: the gate stops the run.
-    return Scenario(
-        status="gate_stopped",
-        query="Find the largest prime below 10 with Python.",
-        options={"steps_per_attempt": 1},
-        replies=[
-            _python("print(7)", content="Trying a guess.", thinking="7 is prime."),
-            _reflection(
-                "continue",
-                thinking="Running the same code again would not help.",
-                summary="Printed 7 without checking it.",
-                next_step_is_novel=False,
-                rationale="Running the same code again would not help.",
-                best_effort_result="7",
-            ),
-        ],
-    )
-
-
-def _reflection_done() -> Scenario:
-    return Scenario(
-        status="completed",
-        query="What is 2 + 2? Check it with Python.",
-        options={"steps_per_attempt": 1},
-        replies=[
-            _python(
-                "print(2 + 2)",
-                content="Let me compute it.",
-                thinking="A one-line program answers it.",
-            ),
-            _reflection(
-                "done",
-                thinking="Python printed 4, so the task is done.",
-                summary="Python printed 4.",
-                rationale="The code printed the answer.",
-                best_effort_result="2 + 2 = 4",
-            ),
-        ],
-    )
-
-
-# Usage as an OpenAI-compatible server reports it for a reasoning model with
-# a prefix cache.
-USAGE_DETAILS: dict[str, Any] = {
-    "prompt_tokens_details": {"cached_tokens": 96},
-    "completion_tokens_details": {"reasoning_tokens": 28},
-}
-
-
-def _usage_details() -> Scenario:
-    return Scenario(
-        status="completed",
-        query="List the files with Python.",
-        replies=[
-            Reply(
-                thinking="I list the directory first.",
-                calls=(Call("python_exec", {"code": "print('notes.txt')"}),),
-                prompt_tokens=120,
-                completion_tokens=40,
-                usage_details=USAGE_DETAILS,
-            ),
-            Reply(
-                content="The directory holds notes.txt.",
-                thinking="The listing shows one file.",
-                prompt_tokens=200,
-                completion_tokens=30,
-                usage_details=USAGE_DETAILS,
-            ),
-        ],
-    )
-
-
-SCENARIOS: dict[str, tuple[str, Callable[[], Scenario]]] = {
-    "openai_tools_empty_cut_answer": ("openai", _tools_empty_cut_answer),
-    "ollama_tools_empty_cut_answer": ("ollama", _tools_empty_cut_answer),
-    "openai_reflection_continues": ("openai", _reflection_continues),
-    "ollama_reflection_continues": ("ollama", _reflection_continues),
-    "openai_reflection_stops": ("openai", _reflection_stops),
-    "ollama_reflection_stops": ("ollama", _reflection_stops),
-    "openai_reflection_done": ("openai", _reflection_done),
-    "ollama_reflection_done": ("ollama", _reflection_done),
-    "openai_usage_details": ("openai", _usage_details),
-}
-
-
 async def record_run(
     provider: str,
     scenario: Scenario,
@@ -403,15 +435,7 @@ async def record_run(
     server = ScriptedServer(_bodies(provider, scenario.replies))
     agent = Agent(
         llm=_llm(provider, httpx.MockTransport(server.handler)),
-        options=AgentOptions(
-            memory_dir=memory_dir,
-            **{
-                **LEGACY_CACHE_OPTIONS,
-                **LEGACY_ANSWER_OPTIONS,
-                **LEGACY_STEP_OPTIONS,
-                **scenario.options,
-            },
-        ),
+        options=AgentOptions(memory_dir=memory_dir, **scenario.options),
     )
     try:
         result = await agent.run_task(scenario.query)
@@ -437,38 +461,3 @@ async def record_run(
     if raw_bodies is not None:
         raw_bodies.extend(server.raw_bodies)
     return result, document
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("name", list(SCENARIOS))
-async def test_legacy_run_matches_its_golden(
-    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    provider, build = SCENARIOS[name]
-    scenario = build()
-    result, document = await record_run(provider, scenario, tmp_path, monkeypatch)
-    assert (result.status, result.config["reflection_gate"]) == (
-        scenario.status,
-        "flags",
-    )
-    check_golden(GOLDEN_DIR / f"{name}.json", document)
-
-
-async def test_default_two_step_wire_and_result_remain_golden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    raw: list[str] = []
-    result, document = await record_run(
-        "openai", _usage_details(), tmp_path, monkeypatch, raw
-    )
-    golden = json.loads((GOLDEN_DIR.parent / "context_budget_wire.json").read_text())
-    assert len(raw) == 2
-    assert "context_budget" not in result.to_dict()
-    assert raw == golden["requests"]
-    assert json.dumps(document["result"], ensure_ascii=False) == golden["result"]
-    with pytest.raises(AssertionError):
-        assert [raw[0] + " ", raw[1]] == golden["requests"]
-
-
-def test_every_legacy_golden_file_has_its_run() -> None:
-    assert sorted(path.stem for path in GOLDEN_DIR.glob("*.json")) == sorted(SCENARIOS)

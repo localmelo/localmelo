@@ -18,6 +18,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   running, or says how to install it. `melo serve status` adds a block with whether it runs, its address, the chat
   and embedding models and its login item, and the welcome row and the gateway's startup line read `<model> on
   Splash via melo_serve` (#NNN).
+- Developer only: in the list form of recall, melo now says first when it has no record of something a question names, instead of answering from something similar, by default. Part of #428.
 - Pictures while melo works. Drop, paste or pick a picture while a turn runs and Send adds it, with your words or
   alone, to the turn: melo reads it at its next step beside the words, the note shows it in the turn's work, and it is
   kept in the chat. If the turn ends first, the words and the pictures run as your next message, also after a
@@ -892,6 +893,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: the console's approval card lives in `static/approval-card.mjs`, its element and button makers
+  in one `static/dom.mjs` (`(tag, className, text)`) instead of twenty copies, and the asset tests walk every
+  module's imports. The console looks and behaves the same.
+- Python API: `Agent(config=)` is gone, so the core imports nothing from `support/`. Build the providers of a config
+  file with `providers_for(cfg)` from `localmelo.support.backends` and pass them: `llm, embedding =
+  providers_for(load())`, then `Agent(llm=llm, embedding=embedding)`. Pass the agent's reasoning mode as a second
+  argument, `providers_for(cfg, options.reasoning)`: outside replay the provider's reasoning field is cleared, as the
+  Agent did for a config. `Agent(llm=...)` is unchanged.
+- Developer only: `melo/agent/agent.py` is split by what each part does. The approval gate (`_approval_gate.py`), the
+  reflection reading and fitting (`_reflection.py`), and the recall and note methods that `Agent` inherits
+  (`_recall.py`, `_notes_loop.py`) have their own modules; the six run-scoped context variables are set and reset by
+  one `_run_scope()`; the repeated reply clean-up and the auxiliary requests (`_normalize_reply`, `_aux_reply`) are one
+  function each; `_run_attempt` hands the inbox, the answer taken from thinking, the direct answer and the empty reply
+  to methods of their own. A run sends the same requests as before.
+- Developer only: one function asks an approval policy for every call, folder and question a tool asks itself, and it fails
+  closed the same way each time. A question a tool asked itself used to pass a policy's `CancelledError` on while the
+  run was not cancelled and kept no trace of a policy that failed or of a cancellation; it now refuses the question as
+  a call is refused, and the call's `tool_asks` says why (`error` or `withdrawn`).
+- Developer only: each built-in tool is one function that takes the workspace folder (or none) instead of a copy for a
+  run with a folder and one without, so a fix to a tool lands in one place; a run with no approval prompts that
+  passes a tool an argument it does not have now gets an error naming the tool's own function. A streamed reply no
+  longer re-reads the redaction rules' source file while it runs (any edit to that file, even a comment, used to
+  hold every streamed answer until its end); tests now fail the build when a redaction rule could match across
+  lines, when the redaction code uses a pattern they do not inspect, or when a streamed answer cut at random places
+  differs from the whole text redacted, which is what makes streaming line by line safe. A layering test pins that
+  the shared contracts never import the checker.
 - One rule names every task and chat. The same request now gets the same title wherever it starts: `melo task`, a task card, **Run as a task**, a chat's first title and a `melo "task"` run in the history. The title is the first sentence of the first line, without an opening "please", "请" or level word followed by a colon or comma (`no rush:`), a path shows as its file name, a question keeps its `?`, and a long one is cut at a word, with no "the" or "in" left hanging, and ends in `…`. A chat's first title is therefore shorter than before (at most 48 columns, 24 Chinese characters) and a first message of several lines is named by its first line, skipping a line of only a greeting (`Hi`, `你好`) and a leading code block.
 - Developer only: one adapter now serves every OpenAI-compatible backend, and one list of local and hosted backends
   feeds the config, the setup lists, Settings, the banner, the probe and the failure hints, so a new backend is one
@@ -1264,6 +1291,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   codes. Typing is unchanged: "today", "no rush", "later", the old words,
   `P1` and `1` still set the same levels. The API still answers `level_word`
   beside `level` ([#343]).
+- `[approvals] auto_asks` and `[agent] empty_reply_fallback` are advanced settings now, no longer listed as
+  experimental with an issue that decides them (#465, #469). Names, values and defaults are the same, and
+  `melo config get` reads both without a config file or developer mode.
 
 ### Removed
 
@@ -1277,6 +1307,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   packages, the step-estimate request and its `estimate` call kind, and gateway
   and store methods that only tests called. Settings, commands and what you see
   are otherwise unchanged.
+- Agent options whose comparison already decided against them (#510). `[agent] fixed_prefix`,
+  `reflect_tool_guard`, `cache_layout` and `reflection_gate` and `[memory] admit_on_outcome` are gone
+  with their options (`--fixed-prefix`, `--reflect-tool-guard`, `--cache-layout`, `--reflection-gate`,
+  `--admit-on-outcome`), and so is `window_eviction = "slide"`; `chunk` and `boundary` stay. A run
+  already behaved as the defaults of these settings did, so no request changes. A config file that
+  still holds a removed key loads, the line is ignored and `melo config` names it once (`"slide"` reads
+  as `"chunk"`); the options and `-X` settings exit 2 and say they were removed. The JSON result's
+  `config` no longer has `reflect_tool_guard`, `cache_layout` or `reflection_gate`, the `reflection`
+  event no longer has `gate` or `utility` (the `utility_below_threshold` stop reason went with them),
+  and `AgentOptions` no longer takes the removed names. A routine learned under the patient gate keeps
+  its template.
+- The experimental, Python-only typed assertions option is removed. Nothing could turn it on from the command line or settings, and it had no measured gain.
+- `[memory] followup_query` is removed (#452). A message with no content of its own is always searched with what
+  you typed in the chat's last turns, as its default `"recent"` did. A config file that still holds the key loads,
+  the line is ignored and `melo config` names it; `-X memory.followup_query=...` exits 2 and says it was removed.
 
 ### Security
 
@@ -1516,6 +1561,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A clone can have any folder name. The package was found by looking for a folder called `localmelo` beside the clone, so a clone with another name (a ZIP download, a checkout per commit) built a wheel with no package in it; the package list now comes from the clone itself. The wheel also no longer carries the `tests/` and `scripts/` folders it picked up by accident. (#516)
 - `melo-retrieve` now reads a reflection the same way a run does, so a reflection with a small JSON slip that the run acted on is in its corpus too.
 - The config file is read and saved from the settings' own fields, so a setting no longer needs hand-written load and save code: `[cli] chat` is kept when it is saved, a value of the wrong kind in any table (a quoted port, `"yes"` for an on/off setting) is reported as one plain sentence instead of a traceback or a silent change, the saved file lists only settings that differ from the defaults, and spaces around a backend URL or model name are removed. Closes #496.
 - Pictures from tools now reach a model whose server says it reads them. With `[agent] tool_images = "auto"`, melo asked

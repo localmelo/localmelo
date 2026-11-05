@@ -11,6 +11,7 @@
  * model appears without a click; a hidden card or tab asks nothing.
  */
 import {t} from "./i18n.mjs";
+import {maker} from "./dom.mjs";
 
 const RECHECK_MS = 3000;
 
@@ -39,18 +40,7 @@ export function setupModelCard({
   let refocus = false;
   let timer = null; // The next look, while the card says that no server runs.
 
-  const el = (tag, className, text) => {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
-  const button = (className, label, onClick) => {
-    const node = el("button", className, label);
-    node.type = "button";
-    node.addEventListener("click", onClick);
-    return node;
-  };
+  const {node: el, button} = maker(doc);
 
   /** The words of the card's state, and its main action. */
   function copy() {

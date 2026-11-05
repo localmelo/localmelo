@@ -90,6 +90,11 @@ def test_user_candidates_do_not_emit_a_meta_sentence() -> None:
     assert candidates == []
 
 
+def test_user_candidates_skip_a_plain_short_statement_and_a_question() -> None:
+    text = "Mina lives in Paris. Does Mina live in Rome?"
+    assert user_candidates(text, task_id="task") == []
+
+
 def test_request_candidates_are_remember_candidates() -> None:
     candidates = request_candidates(
         "Remember that the Bluebird launch code is NECTAR-42.", task_id="t1"

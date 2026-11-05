@@ -3,14 +3,13 @@
 The rule is checked on the AST of every module under ``melo/``, so text
 that only names ``localmelo.support``, such as a docstring, does not
 count, and an import of any form does: plain, relative or through
-``importlib.import_module``. Two imports predate the rule and are allowed,
-matched by module, name and the scope they sit in rather than by line:
-``Config``, imported only for type checking, and ``get_backend``, imported
-inside ``_providers_from_config`` when an Agent is built from a Config.
+``importlib.import_module``. An import is matched by module, name and the
+scope it sits in rather than by line, so a ``TYPE_CHECKING`` import counts too.
 
 The same walk checks a table of other rules (:data:`FORBIDDEN`): the
 terminal UI's libraries stay out of the core, the sessions and the model
-listing, and the sessions and the UI stay clear of the gateway.
+listing, the contracts stay clear of the checker, and the sessions and the UI
+stay clear of the gateway.
 """
 
 from __future__ import annotations
@@ -25,25 +24,9 @@ PACKAGE_DIR = Path(__file__).resolve().parents[1]
 CORE_DIR = PACKAGE_DIR / "melo"
 SUPPORT = "localmelo.support"
 
-# One import of support: the file, the module imported from, the name
-# imported ("" for a whole module) and the enclosing scopes, outermost
-# first.
+# One import: the file, the module imported from, the name imported ("" for
+# a whole module) and the enclosing scopes, outermost first.
 Found = tuple[str, str, str, tuple[str, ...]]
-
-ALLOWED: list[Found] = [
-    (
-        "melo/agent/agent.py",
-        "localmelo.support.backends",
-        "get_backend",
-        ("def _providers_from_config",),
-    ),
-    (
-        "melo/agent/agent.py",
-        "localmelo.support.config",
-        "Config",
-        ("if TYPE_CHECKING",),
-    ),
-]
 
 
 def _is_under(module: str, prefixes: tuple[str, ...]) -> bool:
@@ -190,10 +173,8 @@ def _core_imports() -> list[Found]:
     return _imports_under(CORE_DIR, (SUPPORT,))
 
 
-def test_the_core_imports_from_support_only_what_predates_the_rule() -> None:
-    # Exactly these two: a third fails the rule, and a missing one means
-    # this list is out of date (or the walk found nothing).
-    assert sorted(_core_imports()) == sorted(ALLOWED)
+def test_the_core_imports_nothing_from_support() -> None:
+    assert _core_imports() == []
 
 
 MODULE = "localmelo.melo.agent.agent"
@@ -276,9 +257,12 @@ def test_core_imports_and_text_about_support_are_not_imports_of_it() -> None:
 
 # A path under the package (a directory or one module) and the modules it
 # must not import. The core's imports of localmelo.support are the test
-# above, with its two exceptions.
+# above.
 FORBIDDEN: list[tuple[str, tuple[str, ...]]] = [
     ("melo", ("prompt_toolkit", "rich")),
+    # The contracts are what the checker and the agent share, so they cannot
+    # lean on the checker.
+    ("melo/contracts", ("localmelo.melo.checker",)),
     (
         "support/sessions",
         (

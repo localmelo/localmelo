@@ -90,8 +90,6 @@ def core_event(
                 "next_step_is_concrete": True,
                 "next_step_is_novel": True,
             },
-            "gate": "flags",
-            "utility": None,
             "stop_reason": None,
             "rationale": "",
             "summary": "",

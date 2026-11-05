@@ -65,7 +65,7 @@
         <h2>The repository</h2>
         <ul>
           <li>The folder that holds <code>pyproject.toml</code> is the <code>localmelo</code> package itself; there is no <code>localmelo/localmelo/</code>.</li>
-          <li><code>melo/agent/agent.py</code> is imported as <code>localmelo.melo.agent.agent</code>; keep the clone named <code>localmelo</code>.</li>
+          <li><code>melo/agent/agent.py</code> is imported as <code>localmelo.melo.agent.agent</code>, whatever the clone is called.</li>
         </ul>
         <figure class="terminal">
           <figcaption class="terminal-title">Layout</figcaption>
@@ -94,10 +94,9 @@
             Markdown pages and the website.
           </li>
         </ul>
-        <p><strong>The core does not import <code>support/</code>.</strong> The one bridge is <code>Agent(config=...)</code>.</p>
+        <p><strong>The core does not import <code>support/</code>.</strong> Callers build the providers from a config (<code>providers_for</code> in <code>support/backends</code>) and pass them to <code>Agent</code>.</p>
         <ul>
           <li><code>tests/test_layering.py</code> fails on any import of <code>support/</code> under <code>melo/</code>: plain, relative or through <code>importlib</code>.</li>
-          <li>It allows two: <code>Config</code> for type checking, and <code>get_backend</code> inside <code>_providers_from_config</code>.</li>
           <li><code>prompt_toolkit</code> and <code>rich</code> stay out of the core and the backends; sessions and the terminal UI stay clear of the gateway.</li>
           <li>Need code from <code>support/</code> in the core? Push a contract into <code>melo/contracts/</code>.</li>
         </ul>
@@ -239,7 +238,8 @@
         <p>
           A built-in is a <code>ToolDef</code> (a name, a description, JSON
           parameters and semantic tags) and an async function that returns
-          text. Both live in <code>melo/executor/builtins.py</code>, and the
+          text and takes the workspace root first. Both live in
+          <code>melo/executor/builtins.py</code>, and the
           <code>_builtin()</code> decorator adds the pair to
           <code>BUILTINS</code>. <code>register_builtins()</code> in
           <code>melo/executor/__init__.py</code> registers every one with the
@@ -267,10 +267,13 @@
             from the table.
           </li>
           <li>
-            If it needs a workspace root, add its rooted variant to
-            <code>rooted_builtins()</code> in the same file. A tool that starts
-            a child process appends its status to <code>TOOL_EXIT_CODE</code>,
-            so <code>tool.finished</code> carries <code>exit_code</code>.
+            The function's first parameter is the workspace root, or
+            <code>None</code> for a run without a workspace (a tool that does
+            not use it ignores it), and the function is written once for both:
+            <code>builtin_callables()</code> binds the root before the
+            model's arguments. A tool that starts a child process appends its
+            status to <code>TOOL_EXIT_CODE</code>, so
+            <code>tool.finished</code> carries <code>exit_code</code>.
           </li>
           <li>
             Add tests in <code>tests/executor/</code>.

@@ -190,7 +190,13 @@ async def test_the_interactive_ui_the_console_and_the_gateway_read_the_switch(
 
 
 def _gateway_options(cfg: config.Config) -> AgentOptions:
-    with mock.patch("localmelo.support.gateway.session.Agent") as agent_cls:
+    with (
+        mock.patch(
+            "localmelo.support.gateway.session.providers_for",
+            return_value=(mock.Mock(), None),
+        ),
+        mock.patch("localmelo.support.gateway.session.Agent") as agent_cls,
+    ):
         SessionManager(config=cfg)._create_agent()
     options: AgentOptions = agent_cls.call_args.kwargs["options"]
     return options

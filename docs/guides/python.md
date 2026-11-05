@@ -8,11 +8,13 @@ This guide shows how to use localmelo from your own Python code: run a task, fol
 import asyncio
 
 from localmelo import Agent, AgentOptions
+from localmelo.support.backends import providers_for
 from localmelo.support.config import load
 
 
 async def main() -> None:
-    agent = Agent(config=load(), options=AgentOptions(max_steps=10))
+    llm, embedding = providers_for(load())
+    agent = Agent(llm=llm, embedding=embedding, options=AgentOptions(max_steps=10))
     try:
         result = await agent.run_task("What is 6*7?")
         print(result.status, result.result or result.error)
@@ -23,7 +25,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-- `load()` reads `~/.cache/localmelo/config.toml`, so save a configuration first ([Configuration](../reference/configuration.md)).
+- `load()` reads `~/.cache/localmelo/config.toml`, so save a configuration first ([Configuration](../reference/configuration.md)). `providers_for` builds the model providers it names.
 - The script prints the status and the answer, such as `completed 42`.
 
 ## Follow a run with events

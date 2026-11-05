@@ -51,7 +51,7 @@ source .venv/bin/activate
 ```
 <!-- /usage -->
 
-请保留目录名 `localmelo`：软件包就是从这个目录构建的。不使用 uv 时，请看[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)。
+不使用 uv 时，请看[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)。
 
 ## 在 Mac 上：应用
 

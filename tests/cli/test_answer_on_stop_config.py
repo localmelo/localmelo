@@ -1,9 +1,7 @@
-"""``[agent] answer_on_stop`` (a key with no option) and ``--reflection-gate``.
+"""``[agent] answer_on_stop`` (a key with no option).
 
 A direct run reads the key; the interactive UI, the console and the gateway do not.
-Both are on by default: ``answer_on_stop`` is ``true`` and the gate is ``patient``;
-``-X agent.answer_on_stop=off`` and ``--reflection-gate flags`` give the earlier
-behavior.
+It is on by default; ``-X agent.answer_on_stop=off`` gives the earlier behavior.
 """
 
 from __future__ import annotations
@@ -70,20 +68,3 @@ async def test_the_interactive_ui_and_the_gateway_ignore_it(tmp_path: Path) -> N
         assert agent.options.answer_on_stop is True
     finally:
         await agent.close()
-
-
-@pytest.mark.parametrize("spelling", ["flag", "x"])
-def test_the_flags_gate_reaches_the_options(spelling: str) -> None:
-    given = (
-        ["--reflection-gate", "flags"]
-        if spelling == "flag"
-        else ["-X", "agent.reflection_gate=flags"]
-    )
-    parser, args = cli._parse([*given, *BASE, "fix it"])
-    assert cli._direct_options(parser, args).reflection_gate == "flags"
-
-
-def test_the_gate_defaults_are_patient_and_the_answer_request() -> None:
-    parser, args = cli._parse([*BASE, "fix it"])
-    options = cli._direct_options(parser, args)
-    assert (options.reflection_gate, options.answer_on_stop) == ("patient", True)

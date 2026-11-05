@@ -104,7 +104,6 @@
 <span class="ln cmd"><span class="p">$</span> <span class="c">source</span> <span class="a">.venv/bin/activate</span></span></code></pre></figure><!-- /usage -->
         <ul>
           <li>uv creates <code>.venv/</code> (installing Python 3.13 if needed) with the gateway's dependencies.</li>
-          <li>Keep the folder name <code>localmelo</code>: a renamed folder or a ZIP download fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.</li>
           <li>Activation lasts for this terminal; elsewhere use <code>uv run --project &lt;clone&gt; melo …</code>.</li>
           <li>On a Mac with Apple silicon, <code class="wrap">uv run python scripts/build_macos_app.py --install</code> builds the <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">app</a> into <code>~/Applications</code>.</li>
         </ul>

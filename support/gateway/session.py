@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.support.backends import providers_for
 from localmelo.support.sessions.agents import (
     configured_attempt_options,
     configured_cache_options,
@@ -84,15 +85,14 @@ class SessionManager:
         if self._config is None:
             raise RuntimeError("SessionManager requires a config to create agents")
         # A session keeps its answers, so a follow-up sees them (#37's option).
-        return Agent(
-            config=self._config,
-            options=configured_attempt_options(
-                self._config,
-                configured_cache_options(
-                    self._config, AgentOptions(record_answers=True, mode="gateway")
-                ),
+        options = configured_attempt_options(
+            self._config,
+            configured_cache_options(
+                self._config, AgentOptions(record_answers=True, mode="gateway")
             ),
         )
+        llm, embedding = providers_for(self._config, options.reasoning)
+        return Agent(llm=llm, embedding=embedding, options=options)
 
     def get(self, session_id: str) -> Session | None:
         s = self._sessions.get(session_id)

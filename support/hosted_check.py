@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final
 
 import httpx
 
@@ -111,19 +111,6 @@ def failure(status: int | None, text: str) -> tuple[str, str]:
     return ERROR, detail
 
 
-def _ids(body: Any) -> list[str]:
-    """The model ids in a ``GET /models`` body, without a ``models/`` prefix."""
-    rows = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(rows, list):
-        return []
-    ids = []
-    for row in rows:
-        name = row.get("id") if isinstance(row, dict) else None
-        if isinstance(name, str) and name:
-            ids.append(name.removeprefix("models/"))
-    return ids
-
-
 async def list_models(
     address: str, key: str, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> tuple[list[str], HostedCheck | None]:
@@ -153,7 +140,8 @@ async def list_models(
         body = response.json()
     except ValueError:
         return [], None
-    models = sorted(name for name in _ids(body) if discovery.is_chat_model(name))
+    names = (name.removeprefix("models/") for name in discovery.parse_model_ids(body))
+    models = sorted(name for name in names if discovery.is_chat_model(name))
     return models[:MAX_MODELS], None
 
 

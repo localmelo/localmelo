@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
@@ -17,6 +16,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.agent.test_reflection_gate import _scoped_chat
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -956,9 +956,9 @@ class TestBuildSystemPrompt:
 
     @pytest.mark.asyncio
     async def test_plan_step_single_system_message(self) -> None:
-        """plan_step must produce exactly one system message even with memory."""
+        """plan_step produces exactly one system message even with memory."""
         llm = FakeLLM([Message(role="assistant", content="ok")])
-        chat = Chat(llm)
+        chat = _scoped_chat(llm)
         context = [
             Message(role="system", content="[memory] mem0"),
             Message(role="system", content="[memory] mem1"),
@@ -969,95 +969,11 @@ class TestBuildSystemPrompt:
         sent = llm.calls[0]["messages"]
         sys_msgs = [m for m in sent if m.role == "system"]
         assert len(sys_msgs) == 1, f"Expected 1 system message, got {len(sys_msgs)}"
-        assert "[RECALL]" in sys_msgs[0].content
-        assert "mem0" in sys_msgs[0].content
-        assert "mem1" in sys_msgs[0].content
-
-
-class TestProvidersFromConfig:
-    """_providers_from_config delegates to the backend registry."""
-
-    def test_delegates_to_backend_registry(self) -> None:
-        """build_chat_provider and build_embedding_provider are called
-        on potentially different backends for chat vs embedding."""
-        from unittest import mock
-
-        fake_llm = mock.MagicMock()
-        fake_emb = mock.MagicMock()
-
-        fake_chat_backend = mock.MagicMock()
-        fake_chat_backend.build_chat_provider.return_value = fake_llm
-
-        fake_emb_backend = mock.MagicMock()
-        fake_emb_backend.build_embedding_provider.return_value = fake_emb
-
-        def _get_backend(key: str) -> mock.MagicMock:
-            if key == "openai":
-                return fake_chat_backend
-            if key == "ollama":
-                return fake_emb_backend
-            raise KeyError(key)
-
-        with mock.patch(
-            "localmelo.support.backends.get_backend", side_effect=_get_backend
-        ):
-            from localmelo.melo.agent.agent import _providers_from_config
-            from localmelo.support.config import Config, LocalBackendConfig
-
-            cfg = Config(
-                chat_backend="openai",
-                embedding_backend="ollama",
-                ollama=LocalBackendConfig(
-                    embedding_url="http://localhost:11434",
-                    embedding_model="nomic-embed",
-                ),
-            )
-            llm, embedding = _providers_from_config(cfg)
-
-        fake_chat_backend.build_chat_provider.assert_called_once_with(cfg)
-        fake_emb_backend.build_embedding_provider.assert_called_once_with(cfg)
-        assert llm is fake_llm
-        assert embedding is fake_emb
-
-    def test_no_embedding_when_backend_is_none(self) -> None:
-        """When embedding_backend is 'none', embedding provider is None."""
-        from unittest import mock
-
-        fake_llm = mock.MagicMock()
-        fake_backend = mock.MagicMock()
-        fake_backend.build_chat_provider.return_value = fake_llm
-
-        with mock.patch(
-            "localmelo.support.backends.get_backend", return_value=fake_backend
-        ):
-            from localmelo.melo.agent.agent import _providers_from_config
-            from localmelo.support.config import Config
-
-            cfg = Config(
-                chat_backend="openai",
-                embedding_backend="none",
-            )
-            llm, embedding = _providers_from_config(cfg)
-
-        fake_backend.build_chat_provider.assert_called_once_with(cfg)
-        fake_backend.build_embedding_provider.assert_not_called()
-        assert llm is fake_llm
-        assert embedding is None
-
-    def test_unknown_backend_raises_key_error(self) -> None:
-        """Requesting an unregistered backend raises KeyError."""
-        from unittest import mock
-
-        with mock.patch(
-            "localmelo.support.backends.get_backend",
-            side_effect=KeyError("Unknown backend 'nope'"),
-        ):
-            from localmelo.melo.agent.agent import _providers_from_config
-            from localmelo.support.config import Config
-
-            cfg = Config(chat_backend="nope", embedding_backend="none")
-            with pytest.raises(KeyError, match="nope"):
-                _providers_from_config(cfg)
+        # The recalled memory is data in a user message, so the system prompt
+        # stays the same from step to step.
+        assert "mem0" not in sys_msgs[0].content
+        [data] = [m for m in sent if m.role == "user" and "[RECALL]" in m.content]
+        assert "mem0" in data.content and "mem1" in data.content
 
 
 # ── Test helper ─────────────────────────────────────────────────────────────

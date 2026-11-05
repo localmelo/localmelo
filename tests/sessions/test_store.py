@@ -1523,8 +1523,6 @@ async def test_a_reflection_from_before_the_prefix_key_is_stored(
     for key in (
         "prefix",
         "flags",
-        "gate",
-        "utility",
         "stop_reason",
         "unreadable_reason",
         "repaired",

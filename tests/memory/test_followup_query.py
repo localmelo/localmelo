@@ -2,10 +2,9 @@
 
 "go look it up", "continue" or "去查一下" says nothing to search for: on its own words,
 BM25 matches whatever holds them (the person's identity turns, say), and those went
-into the prompt. With ``[memory] followup_query = "recent"`` (the default) such a
-message is searched with the user's words of the chat's last two turns that the
-model's window still shows; with no such turn nothing is recalled; ``message`` is
-what recall did before. Synthetic chats and notes, words only, no model.
+into the prompt. Such a message is searched with the user's words of the chat's last
+two turns that the model's window still shows; with no such turn nothing is recalled.
+Synthetic chats and notes, words only, no model.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.schema import Message
-from localmelo.support.config import Config, MemoryConfig
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, service
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import gate_terms, is_contentless
@@ -78,10 +77,8 @@ async def store(tmp_path: Path, clock: Clock) -> AsyncIterator[SessionStore]:
         await store.aclose()
 
 
-def config(**memory: object) -> Config:
-    cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory = MemoryConfig(**memory)  # type: ignore[arg-type]
-    return cfg
+def config() -> Config:
+    return Config(chat_backend="vllm", embedding_backend="none")
 
 
 async def finish(
@@ -350,7 +347,7 @@ async def test_a_follow_up_recalls_what_the_chat_was_about_not_its_own_words(
         turns = await chat_of(store, clock, friend)
         sid = turns[0].session_id
         spy = Spy(memory)
-        # The default searches the last two turns' words with it.
+        # The last two turns' words are searched with it.
         info = await now_in(store, clock, sid, message)
         found = await memory.before_turn(store, info, message)
         assert spy.queries == [f"{message}\n{friend[2]}\n{friend[1]}"]
@@ -359,15 +356,6 @@ async def test_a_follow_up_recalls_what_the_chat_was_about_not_its_own_words(
         assert found.recall is not None and found.recall.query_from == "recent"
         assert found.block and wanted in found.block
         assert found.event()["recall"]["query_from"] == "recent"  # type: ignore[index]
-        await finish(store, info)
-        # On its own words the message matches an unrelated turn: today's recall.
-        cfg.memory.followup_query = "message"
-        spy.queries.clear()
-        info = await now_in(store, clock, sid, message)
-        before = await memory.before_turn(store, info, message)
-        assert spy.queries == [message]
-        assert before.used and not about(before, wanted)
-        assert before.recall is not None and before.recall.query_from == "message"
     finally:
         await memory.aclose()
 
@@ -571,17 +559,12 @@ async def test_a_question_about_the_person_is_searched_as_typed_in_a_new_chat(
     )
     try:
         spy = Spy(memory)
-        results = []
-        for setting in ("recent", "message"):
-            cfg.memory.followup_query = setting
-            info = await store.begin_turn(
-                None, message, holder=HOLDER, title=message, new_session=NewSession()
-            )
-            found = await memory.before_turn(store, info, message, window=[])
-            assert found.recall is not None and found.recall.query_from == "message"
-            results.append((found.block, [item.key for item in found.used]))
-        assert spy.queries == [message, message]  # a search ran, on the message
-        assert results[0] == results[1]  # the same as before this change
+        info = await store.begin_turn(
+            None, message, holder=HOLDER, title=message, new_session=NewSession()
+        )
+        found = await memory.before_turn(store, info, message, window=[])
+        assert found.recall is not None and found.recall.query_from == "message"
+        assert spy.queries == [message]  # a search ran, on the message
     finally:
         await memory.aclose()
 
@@ -703,21 +686,15 @@ async def test_a_message_with_content_is_searched_as_it_is(
         turns = await chat_of(store, clock, friend)
         sid = turns[0].session_id
         spy = Spy(memory)
-        results = []
-        for setting in ("recent", "message"):
-            cfg.memory.followup_query = setting
-            info = await now_in(store, clock, sid, message)
-            found = await memory.before_turn(store, info, message)
-            await finish(store, info)
-            assert found.recall is not None and found.recall.query_from == "message"
-            results.append((found.block, [item.key for item in found.used]))
-        assert spy.queries == [message, message]  # byte for byte
-        assert results[0] == results[1]
-        # A new chat's first message with content is searched as before, too.
+        info = await now_in(store, clock, sid, message)
+        found = await memory.before_turn(store, info, message)
+        await finish(store, info)
+        assert found.recall is not None and found.recall.query_from == "message"
+        assert spy.queries == [message]  # byte for byte
+        # A new chat's first message with content is searched as it is, too.
         info = await store.begin_turn(
             None, message, holder=HOLDER, title=message, new_session=NewSession()
         )
-        cfg.memory.followup_query = "recent"
         first = await memory.before_turn(store, info, message, window=[])
         assert spy.queries[-1] == message
         assert first.recall is not None and first.recall.query_from == "message"
@@ -757,53 +734,6 @@ async def test_a_tasks_question_to_its_chat_is_searched_as_before(
         found = await memory.before_turn(store, asked, "", window=window_of(*turns))
         assert spy.queries == ["go look it up"]
         assert found.recall is not None and found.recall.query_from == "message"
-    finally:
-        await memory.aclose()
-
-
-# ── The setting ──
-
-
-async def test_message_is_what_recall_did_before(
-    tmp_path: Path, store: SessionStore, clock: Clock
-) -> None:
-    cfg = config(followup_query="message")
-    memory = await build(tmp_path, store, clock, cfg, [EN_FRIEND_DOC], EN_IDENTITY)
-    try:
-        turns = await chat_of(store, clock, EN_FRIEND)
-        spy = Spy(memory)
-        info = await now_in(store, clock, turns[0].session_id, "go look it up")
-        found = await memory.before_turn(
-            store, info, "go look it up", window=window_of(*turns)
-        )
-        assert spy.queries == ["go look it up"]
-        assert found.used and not about(found, "Lena")
-        assert found.recall is not None and found.recall.query_from == "message"
-        # A new chat's contentless first message is searched too, and finds the same.
-        first = await store.begin_turn(
-            None, "go look it up", holder=HOLDER, title="new", new_session=NewSession()
-        )
-        again = await memory.before_turn(store, first, "go look it up", window=[])
-        assert spy.queries[-1] == "go look it up"
-        assert [item.key for item in again.used] == [item.key for item in found.used]
-        assert again.recall is not None and again.recall.query_from == "message"
-    finally:
-        await memory.aclose()
-
-
-async def test_the_setting_is_read_again_each_turn(
-    tmp_path: Path, store: SessionStore, clock: Clock
-) -> None:
-    cfg = config()
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
-    try:
-        assert memory.recall_settings().followup is True
-        cfg.memory.followup_query = "message"
-        assert memory.recall_settings().followup is False
-        for bad in ("", "both", True, 3, None):
-            cfg.memory.followup_query = bad  # type: ignore[assignment]
-            assert memory.recall_settings().followup is True, bad
-        assert ChatMemory(lambda: None).recall_settings().followup is True
     finally:
         await memory.aclose()
 

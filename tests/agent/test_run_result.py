@@ -22,20 +22,12 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import (
-    MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
-    STEPS_PER_ATTEMPT,
     Message,
     RunResult,
     TaskRecord,
     ToolCall,
     ToolDef,
-)
-from localmelo.tests.legacy_options import (
-    LEGACY_ANSWER_OPTIONS,
-    LEGACY_CACHE_OPTIONS,
-    LEGACY_STEP_OPTIONS,
-    legacy_options,
 )
 
 # The fields in the order of the Phase 1a spec (B4). The CLI's JSON output
@@ -250,15 +242,7 @@ async def _echo(text: str) -> str:
 
 def _options(**kwargs: Any) -> AgentOptions:
     """Options without built-ins, so the test's echo tool is the only tool."""
-    return AgentOptions(
-        builtins=frozenset(),
-        **{
-            **LEGACY_CACHE_OPTIONS,
-            **LEGACY_ANSWER_OPTIONS,
-            **LEGACY_STEP_OPTIONS,
-            **kwargs,
-        },
-    )
+    return AgentOptions(builtins=frozenset(), **kwargs)
 
 
 def _agent(
@@ -389,14 +373,18 @@ class TestStatuses:
     @pytest.mark.asyncio
     async def test_gate_stop_without_a_best_effort_reports_the_error(self) -> None:
         llm = FakeLLM([_echo_call("a"), _reflection("stop")])
-        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2))
+        agent = _agent(
+            llm, _options(steps_per_attempt=1, max_attempts=2, answer_on_stop=False)
+        )
         assert await agent.run("echo q") == "[gate_stopped] test"
         assert _only_task(agent).result == "test"
 
     @pytest.mark.asyncio
     async def test_budget_exhausted_by_max_steps(self) -> None:
         llm = FakeLLM([_echo_call(str(i)) for i in range(5)])
-        agent = _agent(llm, _options(attempt_policy="none", max_steps=3))
+        agent = _agent(
+            llm, _options(attempt_policy="none", max_steps=3, answer_on_stop=False)
+        )
         result = await agent.run_task("echo q")
         assert (result.status, result.result, result.error) == (
             "budget_exhausted",
@@ -416,7 +404,9 @@ class TestStatuses:
                 _reflection("continue"),
             ]
         )
-        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2))
+        agent = _agent(
+            llm, _options(steps_per_attempt=1, max_attempts=2, answer_on_stop=False)
+        )
         result = await agent.run_task("echo q")
         assert (result.status, result.result, result.error) == (
             "budget_exhausted",
@@ -747,7 +737,6 @@ CONFIG_KEYS = [
     "attempt_policy",
     "steps_per_attempt",
     "max_attempts",
-    "reflection_gate",
     "tool_exposure",
     "mode",
     "builtins",
@@ -755,18 +744,16 @@ CONFIG_KEYS = [
     "memory_dir",
     "timeout_s",
     "tools",
+    "answer_on_stop",
+    "window_eviction",
+    "window_messages",
 ]
 
 
 class TestConfig:
     @pytest.mark.asyncio
     async def test_default_configuration(self) -> None:
-        # The earlier gate and cache layout, with the run length of today (100 steps in
-        # attempts of 50): it is the length the config reports.
-        options = legacy_options(
-            max_steps=MAX_AGENT_STEPS, steps_per_attempt=STEPS_PER_ATTEMPT
-        )
-        agent = Agent(llm=FakeLLM([_answer("ok")]), options=options)
+        agent = Agent(llm=FakeLLM([_answer("ok")]))
         result = await agent.run_task("q")
         assert list(result.config) == CONFIG_KEYS
         assert result.config == {
@@ -774,7 +761,6 @@ class TestConfig:
             "attempt_policy": "reflect",
             "steps_per_attempt": 50,
             "max_attempts": MAX_ATTEMPTS,
-            "reflection_gate": "flags",
             "tool_exposure": "retrieve",
             "mode": "python",
             "builtins": sorted(DEFAULT_BUILTINS["python"]),
@@ -782,6 +768,9 @@ class TestConfig:
             "memory_dir": None,
             "timeout_s": None,
             "tools": sorted(DEFAULT_BUILTINS["python"]),
+            "answer_on_stop": True,
+            "window_eviction": "chunk",
+            "window_messages": 64,
         }
 
     @pytest.mark.asyncio
@@ -789,12 +778,14 @@ class TestConfig:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
-        options = legacy_options(
+        options = AgentOptions(
             max_steps=4,
             attempt_policy="none",
             steps_per_attempt=2,
             max_attempts=1,
-            reflection_gate="utility",
+            answer_on_stop=False,
+            window_eviction="boundary",
+            window_messages=30,
             tool_exposure="all",
             builtins=frozenset({"python_exec", "file_read"}),
             memory=False,
@@ -809,7 +800,6 @@ class TestConfig:
             "attempt_policy": "none",
             "steps_per_attempt": 2,
             "max_attempts": 1,
-            "reflection_gate": "utility",
             "tool_exposure": "all",
             "mode": "python",
             "builtins": ["file_read", "python_exec"],
@@ -819,6 +809,8 @@ class TestConfig:
             "timeout_s": 2.5,
             # Built-in and other registered tools alike.
             "tools": ["echo", "file_read", "python_exec"],
+            "window_eviction": "boundary",
+            "window_messages": 30,
         }
 
     @pytest.mark.asyncio
@@ -836,7 +828,8 @@ class TestConfig:
     async def test_run_result_is_json(self) -> None:
         result = await _agent(FakeLLM([_answer("ok")])).run_task("q")
         data = result.to_dict()
-        assert list(data) == SPEC_FIELDS
+        # A run reports its prefix_cache after the spec fields.
+        assert list(data) == [*SPEC_FIELDS, "prefix_cache"]
         assert json.loads(json.dumps(data)) == data
 
 

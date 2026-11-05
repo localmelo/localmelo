@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from localmelo.tests import macos_swift
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def run_policy(source: str, *more: str) -> None:
+    """Run `source` as the test main of the policy file (and any other of the app's files named)."""
+    macos_swift.run_swift(
+        ["GatewayPolicy.swift", "L10n.swift", *more], "import Foundation\n" + source
+    )
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_gateway_instance_and_listener_decisions(tmp_path: Path) -> None:
-    main = tmp_path / "main.swift"
-    main.write_text("""import Foundation
-let expected = "0123456789abcdef0123456789abcdef"
+def test_gateway_instance_and_listener_decisions() -> None:
+    run_policy("""let expected = "0123456789abcdef0123456789abcdef"
 precondition(acceptsInstance(expected, expected: expected, childRunning: true))
 precondition(!acceptsInstance(nil, expected: expected, childRunning: true))
 precondition(!acceptsInstance("other", expected: expected, childRunning: true))
@@ -74,32 +79,11 @@ precondition(gatewayExitMessage(detail: " Port 9 is held by process 4.").contain
 precondition(gatewayExitLogLine(status: 9, signalled: true) == "The gateway was terminated by signal 9.")
 precondition(gatewayExitLogLine(status: 2, signalled: false) == "The gateway exited (status 2).")
 """)
-    binary = tmp_path / "test-policy"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=60,
-    )
-    subprocess.run([str(binary)], check=True, timeout=5)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_running_count_title_and_quit_text(tmp_path: Path) -> None:
-    main = tmp_path / "main.swift"
-    main.write_text("""import Foundation
-func health(_ running: String) -> Data {
+def test_running_count_title_and_quit_text() -> None:
+    run_policy("""func health(_ running: String) -> Data {
     Data((#"{"api":2,"status":{"running":"# + running + #","tasks":{}}}"#).utf8)
 }
 let none = runningCounts(health(#"{"chats":0,"tasks":0,"runs":0,"terminal":0}"#))
@@ -127,57 +111,11 @@ for counts in [none, busy, chat, chats, runsOnly, nil] {
     precondition(!quitMessage(counts, statusKnown: false).lowercased().contains("gateway"))
 }
 """)
-    binary = tmp_path / "test-running"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=60,
-    )
-    subprocess.run([str(binary)], check=True, timeout=5)
-
-
-def run_policy(tmp_path: Path, source: str, *more: str) -> None:
-    """Compile the policy file (and any other of the app's files named) with a test main and run it."""
-    main = tmp_path / "main.swift"
-    main.write_text("import Foundation\n" + source)
-    binary = tmp_path / "test-policy"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            str(ROOT / "macos/LocalMeloApp/GatewayPolicy.swift"),
-            str(ROOT / "macos/LocalMeloApp/L10n.swift"),
-            *(str(ROOT / "macos/LocalMeloApp" / name) for name in more),
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=60,
-    )
-    subprocess.run([str(binary)], check=True, timeout=5)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_quitting_asks_only_when_something_would_stop(tmp_path: Path) -> None:
+def test_quitting_asks_only_when_something_would_stop() -> None:
     run_policy(
-        tmp_path,
         r"""
 func health(_ chats: Int, _ tasks: Int, _ runs: Int, waiting: String = "[]") -> Data {
     let running = #"{"chats":\#(chats),"tasks":\#(tasks),"runs":\#(runs),"terminal":1}"#
@@ -192,9 +130,8 @@ precondition(quitNeedsConfirmation(nil) && quitNeedsConfirmation(Data(#"{"api":2
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_gateway_port_comes_from_the_startup_line(tmp_path: Path) -> None:
+def test_gateway_port_comes_from_the_startup_line() -> None:
     run_policy(
-        tmp_path,
         r"""
 func port(_ line: String) -> Int? { gatewayPort(fromLine: line) }
 precondition(port("  Gateway: http://127.0.0.1:51234") == 51234)
@@ -226,9 +163,8 @@ precondition(silent.append(Data("\n  Gateway: http://127.0.0.1:777\n".utf8)) == 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_window_texts_and_actions(tmp_path: Path) -> None:
+def test_window_texts_and_actions() -> None:
     run_policy(
-        tmp_path,
         r"""
 // The step line follows what the app knows: no port yet, a port, a signed-in console.
 precondition(startStepText(portKnown: false, ready: false) == "Starting the local server")
@@ -249,11 +185,10 @@ precondition(late.actions == [.tryAgain, .openLog, .quit])
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_sign_in_again_is_offered_after_failed_sign_ins_a_locked_page_or_developer_mode(
-    tmp_path: Path,
-) -> None:
+def test_sign_in_again_is_offered_after_failed_sign_ins_a_locked_page_or_developer_mode() -> (
+    None
+):
     run_policy(
-        tmp_path,
         r"""
 let idle = PageState()
 precondition(!offersSignIn(failures: 0, page: idle), "a working app does not offer it")
@@ -274,9 +209,8 @@ for damaged in [nil, "", "not json", #"{"mode":7,"locked":"yes"}"#, "[]"] as [St
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_menu_bar_state_words_and_route_come_from_health(tmp_path: Path) -> None:
+def test_menu_bar_state_words_and_route_come_from_health() -> None:
     run_policy(
-        tmp_path,
         r"""
 func health(_ running: String, waiting: String = "[]") -> Data {
     Data((#"{"api":2,"status":{"running":"# + running + #","tasks":{},"items":[],"waiting":"# + waiting + #"}}"#).utf8)
@@ -349,11 +283,8 @@ def test_the_menu_bar_dot_has_three_to_one_against_its_ring_and_either_bar() -> 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_the_quit_bridge_takes_one_message_from_the_gateway_page(
-    tmp_path: Path,
-) -> None:
+def test_the_quit_bridge_takes_one_message_from_the_gateway_page() -> None:
     run_policy(
-        tmp_path,
         r"""
 // The console's /exit asks the app to quit with exactly this message.
 precondition(quitRequest(["action": "quit"]))
@@ -366,11 +297,10 @@ precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_the_browser_bridge_takes_one_message_from_the_gateway_page_and_the_pop_out_stays_on_the_gateway(
-    tmp_path: Path,
-) -> None:
+def test_the_browser_bridge_takes_one_message_from_the_gateway_page_and_the_pop_out_stays_on_the_gateway() -> (
+    None
+):
     run_policy(
-        tmp_path,
         r"""
 // The Browser panel asks for its own window with exactly this message.
 precondition(browserRequest(["action": "popOut", "session": "abc"]) == .popOut("abc"))
@@ -428,11 +358,10 @@ precondition(!allows("http://127.0.0.1:0/", port: 0) && !allows("http://127.0.0.
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
-def test_the_folder_bridge_takes_known_requests_from_the_gateway_page_and_shows_only_chat_folders(
-    tmp_path: Path,
-) -> None:
+def test_the_folder_bridge_takes_known_requests_from_the_gateway_page_and_shows_only_chat_folders() -> (
+    None
+):
     run_policy(
-        tmp_path,
         r"""
 precondition(folderRequest(["action": "choose"]) == .choose)
 precondition(folderRequest(["action": "reveal", "path": "~/b"]) == .reveal("~/b"))
@@ -464,18 +393,5 @@ precondition(revealTarget(file, allowed: [file]) == nil && revealTarget(gone, al
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_real_host_typechecks() -> None:
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            "-typecheck",
-            # The files the build compiles, as it finds them.
-            *map(str, sorted((ROOT / "macos/LocalMeloApp").glob("*.swift"))),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=60,
-    )
+    # The files the build compiles, as it finds them.
+    macos_swift.typecheck_swift(macos_swift.app_sources())

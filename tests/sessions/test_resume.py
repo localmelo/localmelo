@@ -436,34 +436,6 @@ async def test_a_checkpoint_of_four_turns_and_a_tail_of_two(
     await store.aclose()
 
 
-async def test_an_evicted_checkpoint_counts_only_what_stayed(tmp_path: Path) -> None:
-    store = SessionStore(tmp_path / "s.db", writer="cli")
-    sid, _, live = await window_session(tmp_path, store, 10)  # 20 messages
-    for index in (10, 11):
-        turn = await store.begin_turn(sid, f"question {index}", holder=HOLDER)
-        await store.finish_turn(
-            sid,
-            turn.turn,
-            holder=HOLDER,
-            status="completed",
-            cause="run",
-            result=None,
-            answer=f"answer {index}",
-        )
-    runner, agent, _ = await runner_for(
-        tmp_path, store, sid, "window", window_eviction="slide", window_messages=20
-    )
-    assert await runner.resume() == 10  # 24 loaded, the 4 oldest evicted
-    info = runner.last_resume
-    assert info is not None
-    assert (info.turns, info.checkpoint_turns) == (10, 8)
-    assert info.turns - info.checkpoint_turns == 2  # the tail
-    assert agent.conversation()[0].content == "question 2"
-    await live.close()
-    await agent.close()
-    await store.aclose()
-
-
 async def test_resume_without_a_session_loads_nothing(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "s.db", writer="gateway")
     agent = await started_agent(tmp_path / "ws", ScriptedLLM())
@@ -478,7 +450,7 @@ async def test_resume_without_a_session_loads_nothing(tmp_path: Path) -> None:
     await store.aclose()
 
 
-async def test_an_evicted_checkpoint_counts_only_what_stayed_under_chunk(
+async def test_an_evicted_checkpoint_counts_only_what_stayed(
     tmp_path: Path,
 ) -> None:
     store = SessionStore(tmp_path / "s.db", writer="cli")
@@ -494,8 +466,7 @@ async def test_an_evicted_checkpoint_counts_only_what_stayed_under_chunk(
             result=None,
             answer=f"answer {index}",
         )
-    # The default window eviction drops whole units at once, so fewer stay than
-    # under slide; the count is still the questions that stayed.
+    # The window drops whole units at once; the count is the questions that stayed.
     runner, agent, _ = await runner_for(
         tmp_path, store, sid, "window", window_messages=20
     )
@@ -505,6 +476,7 @@ async def test_an_evicted_checkpoint_counts_only_what_stayed_under_chunk(
     assert len(questions) == stayed and questions[-1] == "question 11"
     info = runner.last_resume
     assert info is not None and info.turns == stayed
+    assert info.turns - info.checkpoint_turns == 2  # the tail
     await live.close()
     await agent.close()
     await store.aclose()

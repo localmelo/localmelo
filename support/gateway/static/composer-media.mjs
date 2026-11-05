@@ -1,4 +1,5 @@
 import { t } from "./i18n.mjs";
+import { maker } from "./dom.mjs";
 import { formatBytes } from "./turns.mjs";
 
 /**
@@ -104,12 +105,7 @@ export function setupMedia(host) {
   // A turn was refused for its pictures: the model of the settings is text only, whatever an item says.
   let refused = false;
 
-  const node = (tag, className, text) => {
-    const made = doc.createElement(tag);
-    if (className) made.className = className;
-    if (text !== undefined) made.textContent = text;
-    return made;
-  };
+  const {node} = maker(doc);
 
   const pictures = () => items.filter((item) => item.kind === "picture");
   const files = () => items.filter((item) => item.kind === "file");

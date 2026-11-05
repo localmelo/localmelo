@@ -110,7 +110,7 @@ def _same_date(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_each_step_extends_the_previous_request(tmp_path: Path) -> None:
     provider = Script()
-    agent = _agent(tmp_path, provider, fixed_prefix=True)
+    agent = _agent(tmp_path, provider)
     try:
         provider.files = ["part1.txt"]
         assert (await agent.run_task("Read part1.txt")).status == "completed"
@@ -145,7 +145,6 @@ async def test_block_is_read_again_after_the_window_evicts(
     agent = _agent(
         tmp_path,
         provider,
-        fixed_prefix=True,
         window_messages=8,
         window_eviction="chunk",
     )
@@ -181,24 +180,3 @@ async def test_block_is_read_again_after_the_window_evicts(
         "contents of part 1"
         in after.split("[end of retrieved context and reflections]")[0]
     )
-
-
-async def test_old_request_reads_recall_on_every_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    provider = Script()
-    agent = _agent(tmp_path, provider, fixed_prefix=False)
-    reads: list[int] = []
-    retrieve = agent.hippo.retrieve_context
-
-    async def counted(query: str) -> list[Message]:
-        reads.append(len(provider.requests))
-        return await retrieve(query)
-
-    monkeypatch.setattr(agent.hippo, "retrieve_context", counted)
-    try:
-        provider.files = ["part1.txt", "part2.txt"]
-        assert (await agent.run_task("Read two parts")).status == "completed"
-    finally:
-        await agent.close()
-    assert reads == [0, 1, 2]

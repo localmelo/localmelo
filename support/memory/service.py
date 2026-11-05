@@ -131,6 +131,7 @@ from localmelo.support.memory.recall import (
     MIN_COVERAGE,
     OPEN_CHARS,
     PER_SESSION,
+    PREMISE_GUIDE,
     SIDE_SUMMARY,
     WHOLE,
     Corpus,
@@ -309,16 +310,17 @@ class RecallSettings(NamedTuple):
     instead of showing excerpts of them, *list_max* is the most turns it lists
     and *open_chars* the room one opened turn takes. *items* says recall draws on
     memory items in place of the chat turns, and *open_sources* that an opened item
-    also shows the turns it came from. *followup* says a message with no content of
-    its own is searched with the user's words of the chat's last turns (``[memory]
-    followup_query = "recent"``, the default) instead of its own. *excerpt_open* (on by default) says
+    also shows the turns it came from. *excerpt_open* (on by default) says
     an excerpt that shows less than the whole turn carries the turn's id and the model
     may open it (:attr:`opens_excerpts`). *gather* is ``[memory] gather`` (``off``,
     ``wide`` or ``guide``) and *gather_floor* ``gather_min_cosine``: the vector bar
-    of a question that counts, totals or compares. The defaults are the shipped
-    ones: a block of :data:`BLOCK_CHARS` and a turn of :data:`ITEM_CHARS` (#349),
-    *followup* and *excerpt_open* on, *gather* ``guide`` (:data:`MEMORY_GATHER_DEFAULT`),
-    and what recall did before these were settings for the rest.
+    of a question that counts, totals or compares. *premise* (``[memory]
+    premise_check``, on by default) ends the list form's guide line with
+    :data:`PREMISE_GUIDE`; the excerpt form never shows a guide line. The defaults
+    are the shipped ones: a block of :data:`BLOCK_CHARS` and a turn of
+    :data:`ITEM_CHARS` (#349), *excerpt_open* and *premise* on, *gather*
+    ``guide`` (:data:`MEMORY_GATHER_DEFAULT`), and what recall did before these were
+    settings for the rest.
     """
 
     records: int = AUTO_RECORDS
@@ -335,10 +337,10 @@ class RecallSettings(NamedTuple):
     open_chars: int = OPEN_CHARS
     items: bool = False
     open_sources: bool = False
-    followup: bool = True
     excerpt_open: bool = True
     gather: str = MEMORY_GATHER_DEFAULT
     gather_floor: float = GATHER_COSINE
+    premise: bool = True
 
     @property
     def opens_excerpts(self) -> bool:
@@ -368,12 +370,17 @@ class RecallSettings(NamedTuple):
 
 def _guide(settings: RecallSettings, gathers: bool) -> str:
     """The line above a list of turns or items: :data:`LIST_GUIDE` (or
-    :data:`ITEM_LIST_GUIDE`) and, with ``[memory] gather = "guide"`` on a turn that
-    asks to count, total or compare (*gathers*), :data:`GATHER_GUIDE` after it."""
-    guide = ITEM_LIST_GUIDE if settings.items else LIST_GUIDE
+    :data:`ITEM_LIST_GUIDE`), then :data:`GATHER_GUIDE` with ``[memory] gather =
+    "guide"`` on a turn that asks to count, total or compare (*gathers*), then
+    :data:`PREMISE_GUIDE` with ``[memory] premise_check = "on"``, each after one
+    space. Only the list form shows it (:func:`.recall.block` ignores it without
+    ``listing``)."""
+    parts = [ITEM_LIST_GUIDE if settings.items else LIST_GUIDE]
     if gathers and settings.gather == "guide":
-        return f"{guide} {GATHER_GUIDE}"
-    return guide
+        parts.append(GATHER_GUIDE)
+    if settings.premise:
+        parts.append(PREMISE_GUIDE)
+    return " ".join(parts)
 
 
 class NoteSettings(NamedTuple):
@@ -1018,10 +1025,10 @@ class ChatMemory:
             bounded("recall_open_chars", OPEN_CHARS, MEMORY_RECALL_OPEN_CHARS),
             getattr(memory, "recall_source", "turns") == "items",
             getattr(memory, "open_sources", "off") == "on",
-            getattr(memory, "followup_query", "recent") != "message",
             getattr(memory, "excerpt_open", "on") != "off",
             gathering if gathering in MEMORY_GATHER else MEMORY_GATHER_DEFAULT,
             bar("gather_min_cosine", GATHER_COSINE, MEMORY_GATHER_MIN_COSINE),
+            getattr(memory, "premise_check", "on") != "off",
         )
 
     def note_settings(self) -> NoteSettings:
@@ -1555,8 +1562,7 @@ class ChatMemory:
         # there is no recall. A message that asks to remember something, or
         # carries a secret, is not one: its notes are kept either way.
         if (
-            budget.followup
-            and not asked
+            not asked
             and not found
             and not refused
             and query.strip()
@@ -3328,8 +3334,8 @@ class MemoryTools(BaseToolProvider):
         chat: ChatTurn | None,
     ) -> str:
         """The search result of the list form: the notes found as before, numbered,
-        then, under :data:`LIST_GUIDE`, a line for each chat turn (up to ``k``,
-        which may reach ``recall_list_max``, and ``recall_list_max`` without it)."""
+        then, under the list guide (:func:`_guide`), a line for each chat turn (up to
+        ``k``, which may reach ``recall_list_max``, or that many with no ``k``)."""
         notes_k = max(1, min(int(5 if k is None else k), 8))
         turns_k = (
             settings.list_max if k is None else max(1, min(int(k), settings.list_max))

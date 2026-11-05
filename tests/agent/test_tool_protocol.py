@@ -14,13 +14,8 @@ import httpx
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.agent._tool_images import withheld_note
-from localmelo.melo.agent.agent import (
-    ASSISTANT_TEXT_SHARE,
-    WITHHELD_PREVIEW_CHARS,
-    _cut_to,
-)
+from localmelo.melo.agent.agent import WITHHELD_PREVIEW_CHARS, _cut_to
 from localmelo.melo.checker.validators import (
     MAX_MEMORY_TEXT_LEN,
     MAX_OUTPUT_LEN,
@@ -31,6 +26,7 @@ from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
 from localmelo.melo.schema import (
+    ASSISTANT_TEXT_SHARE,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     ImagePart,
@@ -51,7 +47,10 @@ from localmelo.support.providers.llm.openai_compat import (
 from localmelo.support.providers.llm.openai_compat import (
     _tool_def_to_openai as _openai_tool_def,
 )
-from localmelo.tests.legacy_options import legacy_options
+from localmelo.tests.agent.test_reflection_gate import (
+    _planning_calls,
+    _reflection_calls,
+)
 
 # ── Schema: tool call ids ──────────────────────────────────────────────────
 
@@ -255,20 +254,6 @@ def _cut_parts(content: str) -> tuple[str, int]:
     match = _CUT_MARKER.search(content)
     assert match, f"not a cut result: ...{content[-80:]!r}"
     return content[: match.start()], int(match.group(1))
-
-
-def _is_reflection(call: dict[str, Any]) -> bool:
-    return bool(call["messages"]) and call["messages"][0].content.startswith(
-        REFLECTION_PROMPT
-    )
-
-
-def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if not _is_reflection(c)]
-
-
-def _reflection_calls(llm: FakeLLM) -> list[dict[str, Any]]:
-    return [c for c in llm.calls if _is_reflection(c)]
 
 
 # ── Multiple tool calls per step ───────────────────────────────────────────
@@ -1265,7 +1250,7 @@ class TestAgentWindowTruncation:
 
     @pytest.mark.asyncio
     async def test_reflection_window_is_protocol_valid(self) -> None:
-        options = legacy_options(steps_per_attempt=3, max_attempts=1)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(
@@ -1539,7 +1524,9 @@ class TestStuckDetectionMultiCall:
 
     @pytest.mark.asyncio
     async def test_loop_stops_on_repeated_batches(self) -> None:
-        options = legacy_options(steps_per_attempt=6, max_attempts=1)
+        options = AgentOptions(
+            steps_per_attempt=6, max_attempts=1, answer_on_stop=False
+        )
         llm = FakeLLM(
             [
                 Message(

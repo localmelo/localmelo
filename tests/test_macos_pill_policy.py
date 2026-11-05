@@ -5,12 +5,12 @@ opened here (the pill is drawn offscreen by tests/test_macos_pill_panel.py).
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -38,44 +38,17 @@ let tests = item("task", "t1", "Running the tests", "run")
 """
 
 
-def run_swift(tmp_path: Path, source: str) -> None:
-    """Compile the policy files with a test main (a raw string: it holds `\\#(` interpolations) and run it."""
-    main = tmp_path / "main.swift"
-    main.write_text("import Foundation\n" + FIXTURES + source)
-    binary = tmp_path / "test-pill-policy"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            *[
-                str(APP / name)
-                for name in (
-                    "GatewayPolicy.swift",
-                    "L10n.swift",
-                    "PetPolicy.swift",
-                    "PillPolicy.swift",
-                )
-            ],
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=120,
+def run_swift(source: str) -> None:
+    """Run the raw string `source` (it holds `\\#(` interpolations) as the test main of the policy files."""
+    macos_swift.run_swift(
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift", "PillPolicy.swift"],
+        "import Foundation\n" + FIXTURES + source,
     )
-    subprocess.run([str(binary)], check=True, timeout=5)
 
 
 @darwin
-def test_the_pill_says_what_the_focus_does_and_how_many_more_run(
-    tmp_path: Path,
-) -> None:
+def test_the_pill_says_what_the_focus_does_and_how_many_more_run() -> None:
     run_swift(
-        tmp_path,
         r"""
 func snap(_ data: Data, age: Double = 0) -> PillSnapshot? { pillSnapshot(health: data, age: age) }
 
@@ -156,9 +129,8 @@ precondition(pillPictureFile(.done) == "face-done.png" && pillPictureFile(.error
 
 
 @darwin
-def test_the_pill_follows_the_clock_the_window_and_the_choice(tmp_path: Path) -> None:
+def test_the_pill_follows_the_clock_the_window_and_the_choice() -> None:
     run_swift(
-        tmp_path,
         r"""
 var policy = PillPolicy()
 func ask(_ data: Data?, reply: Double, now: Double, window: Bool = false, mode: DesktopMode = .pill,
@@ -290,11 +262,8 @@ precondition(d.pill != nil)
 
 
 @darwin
-def test_the_pill_sits_at_the_pets_spot_and_stays_on_the_screen(
-    tmp_path: Path,
-) -> None:
+def test_the_pill_sits_at_the_pets_spot_and_stays_on_the_screen() -> None:
     run_swift(
-        tmp_path,
         r"""
 // The width: the portrait and mark, the line (cut at 320 pt) and the tail; the "+1" chip adds its own room.
 precondition(pillWidth(text: 152, more: 0) == 244)  // "Reading example.com" in the design
@@ -362,9 +331,8 @@ precondition(petPlacement(kept, screens: [main])!.frame.maxX == free.frame.maxX)
 
 
 @darwin
-def test_the_desktop_choice_is_saved_with_the_pets_settings(tmp_path: Path) -> None:
+def test_the_desktop_choice_is_saved_with_the_pets_settings() -> None:
     run_swift(
-        tmp_path,
         r"""
 func settings(_ text: String?) -> PetSettings { petSettings(text.map { Data($0.utf8) }) }
 

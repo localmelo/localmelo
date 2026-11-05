@@ -1,4 +1,5 @@
 import {stepLine} from './blocked.mjs';
+import {maker} from './dom.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {formatDuration, statusText} from './turns.mjs';
 
@@ -21,23 +22,12 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   let busy = false;
   let returnFocus = null;
 
-  function node(tag, text, className) {
-    const element = doc.createElement(tag);
-    if (text !== undefined) element.textContent = String(text);
-    if (className) element.className = className;
-    return element;
-  }
-  function button(text, action) {
-    const element = node('button', text);
-    element.type = 'button';
-    element.addEventListener('click', action);
-    return element;
-  }
-  const heading = node('h2', t('drawer.title'));
-  const closeButton = button(t('drawer.close'), () => close());
-  const tabs = node('div', undefined, 'drawer-tabs');
-  const content = node('div', undefined, 'drawer-content');
-  const message = node('p', '', 'drawer-message');
+  const {node, button} = maker(doc);
+  const heading = node('h2', '', t('drawer.title'));
+  const closeButton = button('', t('drawer.close'), () => close());
+  const tabs = node('div', 'drawer-tabs');
+  const content = node('div', 'drawer-content');
+  const message = node('p', 'drawer-message');
   message.setAttribute('role', 'status');
   message.setAttribute('aria-live', 'polite');
   root.setAttribute('role', 'region');
@@ -48,7 +38,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   const TABS = ['tools', 'memory', 'runs', 'events'];
   const available = (name) => name !== 'events' || developer();
   for (const name of TABS) {
-    const item = button(t(`drawer.tab.${name}`), () => selectTab(name));
+    const item = button('', t(`drawer.tab.${name}`), () => selectTab(name));
     tabButtons[name] = item;
     tabs.append(item);
   }
@@ -69,40 +59,40 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     return error?.message || t('drawer.requestFailed');
   }
   function line(parent, label, value) {
-    parent.append(node('p', t('drawer.line', {label, value})));
+    parent.append(node('p', '', t('drawer.line', {label, value})));
   }
   function toolView(data) {
-    content.append(node('p', t('drawer.tools.opens')));
+    content.append(node('p', '', t('drawer.tools.opens')));
     const tools = data.tools || [];
-    if (!tools.length) content.append(node('p', t('drawer.tools.none')));
+    if (!tools.length) content.append(node('p', '', t('drawer.tools.none')));
     for (const tool of tools) {
-      const row = node('div', undefined, 'drawer-tool');
-      row.append(node('strong', tool.name), node('span', ` ${tool.source || ''} · ${t(tool.granted ? 'drawer.tools.allowed' : 'drawer.tools.notAllowed')}`));
-      if (tool.description) row.append(node('p', tool.description));
+      const row = node('div', 'drawer-tool');
+      row.append(node('strong', '', tool.name), node('span', '', ` ${tool.source || ''} · ${t(tool.granted ? 'drawer.tools.allowed' : 'drawer.tools.notAllowed')}`));
+      if (tool.description) row.append(node('p', '', tool.description));
       if (tool.granted) {
-        const revoke = button(t('drawer.tools.revoke'), () => revokeGrants(tool.name));
+        const revoke = button('', t('drawer.tools.revoke'), () => revokeGrants(tool.name));
         revoke.setAttribute('aria-label', t('drawer.tools.revokeOne', {tool: tool.name}));
         row.append(revoke);
       }
       content.append(row);
     }
     const folders = Array.isArray(data.folders) ? data.folders : [];
-    if (tools.some((tool) => tool.granted) || folders.length) content.append(button(t('drawer.tools.revokeAll'), () => revokeGrants()));
+    if (tools.some((tool) => tool.granted) || folders.length) content.append(button('', t('drawer.tools.revokeAll'), () => revokeGrants()));
     foldersView(folders);
     approvalsView(data.approvals || []);
-    if (data.mcp_config_label) content.append(node('p', data.mcp_config_label));
-    if (data.mcp_error) content.append(node('p', data.mcp_error));
+    if (data.mcp_config_label) content.append(node('p', '', data.mcp_config_label));
+    if (data.mcp_error) content.append(node('p', '', data.mcp_error));
   }
   // The folders outside the workspace this chat may read until it ends (#405), each revocable.
   function foldersView(folders) {
     if (!folders.length) return;
-    content.append(node('h3', t('drawer.folders.title'), 'drawer-subhead'), node('p', t('drawer.folders.note')));
+    content.append(node('h3', 'drawer-subhead', t('drawer.folders.title')), node('p', '', t('drawer.folders.note')));
     for (const folder of folders) {
       const label = String(folder.label || folder.path || '');
-      const row = node('div', undefined, 'drawer-tool drawer-approval');
-      const where = node('code', label, 'drawer-approval-step');
+      const row = node('div', 'drawer-tool drawer-approval');
+      const where = node('code', 'drawer-approval-step', label);
       where.title = String(folder.path ?? '');
-      const revoke = button(t('drawer.tools.revoke'), () => revokeAt(`folders?path=${encodeURIComponent(String(folder.path ?? ''))}`));
+      const revoke = button('', t('drawer.tools.revoke'), () => revokeAt(`folders?path=${encodeURIComponent(String(folder.path ?? ''))}`));
       revoke.setAttribute('aria-label', t('drawer.folders.revokeOne', {folder: label}));
       row.append(where, revoke);
       content.append(row);
@@ -111,14 +101,14 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   // The steps the person allowed in this chat, which its tasks run again without asking (#369).
   function approvalsView(approvals) {
     if (!approvals.length) return;
-    content.append(node('h3', t('drawer.approvals.title'), 'drawer-subhead'), node('p', t('drawer.approvals.note')));
+    content.append(node('h3', 'drawer-subhead', t('drawer.approvals.title')), node('p', '', t('drawer.approvals.note')));
     for (const entry of approvals) {
-      const row = node('div', undefined, 'drawer-tool drawer-approval');
-      const step = node('code', stepLine(entry.preview), 'drawer-approval-step');
+      const row = node('div', 'drawer-tool drawer-approval');
+      const step = node('code', 'drawer-approval-step', stepLine(entry.preview));
       step.title = String(entry.preview ?? '');
       const at = formatTime(new Date(entry.at * 1000), 'clock');
-      row.append(step, node('p', t('drawer.approvals.when', {tool: entry.tool, time: at})));
-      const revoke = button(t('approvals.revoke'), () => revokeAt(`approvals/${encodeURIComponent(entry.id)}`));
+      row.append(step, node('p', '', t('drawer.approvals.when', {tool: entry.tool, time: at})));
+      const revoke = button('', t('approvals.revoke'), () => revokeAt(`approvals/${encodeURIComponent(entry.id)}`));
       revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(entry.preview, 60)}));
       row.append(revoke);
       content.append(row);
@@ -129,10 +119,10 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     const longTerm = data.long_term || {};
     line(content, t('drawer.memory.longTerm'), `${t(longTerm.enabled ? 'drawer.memory.on' : 'drawer.memory.off')}${developer() ? ` (${longTerm.backend || 'none'})` : ''}`);
     if (developer() && data.agent) line(content, t('drawer.memory.agent'), typeof data.agent === 'string' ? data.agent : JSON.stringify(data.agent));
-    if (!data.working?.length) content.append(node('p', t('drawer.memory.empty')));
+    if (!data.working?.length) content.append(node('p', '', t('drawer.memory.empty')));
     for (const entry of data.working || []) {
-      const row = node('div', undefined, 'drawer-memory');
-      row.append(node('strong', entry.role), node('p', entry.text));
+      const row = node('div', 'drawer-memory');
+      row.append(node('strong', '', entry.role), node('p', '', entry.text));
       if (entry.tool_calls?.length) line(row, t('drawer.memory.tools'), entry.tool_calls.join(', '));
       if (entry.tool_call_id) line(row, t('drawer.memory.toolCall'), entry.tool_call_id);
       if (entry.images) line(row, t('drawer.memory.images'), entry.images);
@@ -145,11 +135,11 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     return Number.isNaN(date.getTime()) ? String(value) : formatTime(date, 'full');
   }
   function runsView() {
-    if (!runs.length) content.append(node('p', t('drawer.runs.none')));
+    if (!runs.length) content.append(node('p', '', t('drawer.runs.none')));
     for (const run of runs) {
-      const row = node('div', undefined, 'drawer-run');
+      const row = node('div', 'drawer-run');
       const status = statusText(run.status);
-      row.append(node('strong', t('drawer.runs.turn', {turn: run.turn, status: status.word})));
+      row.append(node('strong', '', t('drawer.runs.turn', {turn: run.turn, status: status.word})));
       line(row, t('drawer.runs.started'), timestamp(run.started_at));
       line(row, t('drawer.runs.finished'), timestamp(run.finished_at));
       if (typeof run.started_at === 'number' && typeof run.finished_at === 'number') {
@@ -162,17 +152,17 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       }
       content.append(row);
     }
-    if (earlier && runs.length) content.append(button(t('drawer.runs.earlier'), () => load(true)));
-    else if (earlier) content.append(node('p', t('drawer.runs.noEarlier')));
+    if (earlier && runs.length) content.append(button('', t('drawer.runs.earlier'), () => load(true)));
+    else if (earlier) content.append(node('p', '', t('drawer.runs.noEarlier')));
   }
   function eventsView(data) {
     const turn = (data.turns || []).at(-1);
     const events = turn?.events || [];
-    if (!events.length) content.append(node('p', t('drawer.events.none')));
+    if (!events.length) content.append(node('p', '', t('drawer.events.none')));
     else line(content, t('drawer.events.ofTurn'), turn.turn);
     for (const event of events) {
-      const row = node('div', undefined, 'drawer-event');
-      row.append(node('strong', `#${event.id} ${event.type}`), node('pre', JSON.stringify(event, null, 1)));
+      const row = node('div', 'drawer-event');
+      row.append(node('strong', '', `#${event.id} ${event.type}`), node('pre', '', JSON.stringify(event, null, 1)));
       content.append(row);
     }
   }
@@ -209,7 +199,7 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       if (!valid(token, session, selected)) return;
       message.textContent = notice ? `${notice} ${errorText(error)}` : errorText(error);
       if (!append) {
-        clearContent(button(t('drawer.retry'), () => load(false, notice)));
+        clearContent(button('', t('drawer.retry'), () => load(false, notice)));
       }
     } finally {
       if (valid(token, session, selected)) busy = false;

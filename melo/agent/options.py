@@ -30,12 +30,10 @@ from localmelo.melo.schema import (
 )
 
 AttemptPolicy = Literal["reflect", "none"]
-ReflectionGate = Literal["flags", "utility", "patient"]
 ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
 NoteWriter = Literal["auto", "heuristic"]
-WindowEviction = Literal["slide", "chunk", "boundary"]
-CacheLayout = Literal["v2", "v3"]
+WindowEviction = Literal["chunk", "boundary"]
 ToolImages = Literal["auto", "on", "off"]
 EmptyReplyFallback = Literal["on", "off"]
 
@@ -70,7 +68,7 @@ class AgentOptions:
     existed, except that every step now offers all registered built-ins
     and runs only the tools it offered (see ``tool_exposure``), that
     a reflection decides on its own checks whether the next attempt
-    starts, patiently (see ``reflection_gate``), that a run without
+    starts, patiently (see ``attempt_policy``), that a run without
     a usable answer is asked for one (see ``answer_on_stop``), and that an
     attempt is long: 50 steps, in a run of 100 (see ``steps_per_attempt``).
     An invalid value raises ``ValueError`` naming the field.
@@ -82,26 +80,17 @@ class AgentOptions:
       so a run reflects after 50 steps without an answer, then goes on to
       ``max_steps``. ``"none"`` runs one attempt with budget ``max_steps`` and
       makes no reflection calls (``[agent] reflection = false`` sets it for the
-      chats, tasks and runs that read the config).
-    - ``reflection_gate``: how a reflection decides whether the next
-      attempt starts; it matters only with ``attempt_policy="reflect"``.
-      ``"flags"`` starts it when the reflection chooses ``continue`` and
-      its three checks hold (``task_still_feasible``,
-      ``next_step_is_concrete`` and ``next_step_is_novel``). A reply that
-      holds no reflection, also when asked again, starts it too when one
-      can start, and is not kept; a reflection over
-      ``MAX_REFLECTION_CHARS`` keeps its decision and is trimmed to fit.
-      ``"utility"``, the behavior from before this option, also requires
-      the utility score computed from the reflection's own estimates to
-      reach 0.1; a reply without a reflection reads as ``stop``, and a
-      reflection over the budget as ``decompose``, unless it chooses
-      ``done``, which ends the run as it is. ``"patient"``, the default,
-      is ``"flags"``, except that a ``continue`` that is feasible
-      and concrete but not novel still starts the next attempt, once per
-      run; a second one stops the run as ``"flags"`` does. With it, a
-      reflection's ``useful_evidence``, ``failed_hypotheses`` and
-      ``recommended_avoids`` keep at most 8 items of at most 300
-      characters each (``"flags"`` does too when ``answer_on_stop`` is on).
+      chats, tasks and runs that read the config). A reflection starts the
+      next attempt when it chooses ``continue`` and its checks hold:
+      ``task_still_feasible`` and ``next_step_is_concrete``. The run is
+      patient with the third, ``next_step_is_novel``: a ``continue`` that is
+      feasible and concrete but not novel still starts the next attempt, once
+      per run; a second one stops the run. A reply that holds no reflection,
+      also when asked again, starts it too when one can start, and is not
+      kept; a reflection over ``MAX_REFLECTION_CHARS`` keeps its decision and
+      is trimmed to fit. A reflection's ``useful_evidence``,
+      ``failed_hypotheses`` and ``recommended_avoids`` keep at most 8 items of
+      at most 300 characters each.
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for
@@ -197,10 +186,6 @@ class AgentOptions:
       back to the heuristic, ``"heuristic"`` always writes it from the
       reply's text and thinking. It is accepted and inert in the other
       modes.
-    - ``fixed_prefix``: when true (the default), the run freezes its system
-      prefix and local date and keeps each request an extension of the
-      previous one, so a server's prompt cache can reuse it. ``False`` is the
-      behavior before this default changed.
     - ``window_eviction``: how working memory drops old turns. ``"chunk"``
       (default) drops whole units down to ``window_messages -
       WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
@@ -208,25 +193,7 @@ class AgentOptions:
       limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
       drops a finished attempt's turns when the next attempt starts after a
       reflection. Both keep the retained history stable for several steps,
-      which a server's prompt cache can reuse. ``"slide"`` drops the oldest
-      unit at every step once the window is full, as before ``"chunk"`` became
-      the default.
-    - ``reflect_tool_guard``: when true, a reflection request offers the tools
-      the step's planning request sent (the same list, order and schema, so a
-      server's prompt prefix holds) and its last user message ends with
-      ``REFLECT_TOOL_GUARD_NOTE``, which asks for the JSON object and no tool
-      call. The retry request is unchanged. The default is true; ``False`` keeps
-      the reflection request as it was before the guard (#183).
-    - ``cache_layout``: ``"v3"`` (default), with ``fixed_prefix``, appends a
-      reflection once, at the attempt boundary, as an ordinary window message
-      (it moves with the history and leaves by eviction) instead of rebuilding
-      it as the last message of every planning request, keeps a reflection
-      request and its reply in the window so the next planning request
-      continues it, and sends an unreadable reflection's retry on the same
-      prefix (the reply as an assistant message, then the retry note) instead
-      of as a text transcript. Older reflection blocks stay in the history
-      until evicted. ``"v2"`` is the layout before this default changed.
-      Without ``fixed_prefix`` neither value changes anything.
+      which a server's prompt cache can reuse.
     - ``window_messages``: the working window's message cap (8 to 256, default
       ``LOCAL_WINDOW_MESSAGES``, 64). A larger cap leaves the prompt-size fit
       (see ``window_eviction``) to drop history. 20 is the cap before this
@@ -234,9 +201,6 @@ class AgentOptions:
       use on a cloud vendor's backend when the config sets none (see
       ``support.config.default_window_messages``); a Python caller sets it
       here.
-    - ``typed_assertions``: opt into conservative, evidence-checked typed
-      memory updates and historical recall in explicit reasoning modes. The
-      default is false; this experimental option is available through Python.
     - ``brief_probe``: set only by the ``--brief`` worker path. A function of
       the workspace root that returns a digest of the workspace's changes
       (``None`` outside a git tree). Setting it marks the run as a brief run:
@@ -261,10 +225,9 @@ class AgentOptions:
       most three lines, relative paths without a ``sys.path`` setup, and for
       reading the files a task names before listing folders, in place of
       "Think step by step. Be concise." (the compress modes keep that line:
-      their note before each tool call is such text). With
-      ``reflection_gate="flags"`` the reflection prompt also leaves out the
-      keys nothing reads and asks for ``best_effort_result`` only with ``done``
-      or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
+      their note before each tool call is such text). The reflection prompt
+      also leaves out the keys nothing reads and asks for ``best_effort_result``
+      only with ``done`` or ``stop``. The CLI sets it for a task from ``[agent] lean_output`` or
       ``-X agent.lean_output=true``; the interactive UI and the gateway never
       do. Default false: requests are as they were before the option.
     - ``identity``: a paragraph for the system prompt of a chat surface: who
@@ -366,7 +329,6 @@ class AgentOptions:
     attempt_policy: AttemptPolicy = "reflect"
     steps_per_attempt: int = STEPS_PER_ATTEMPT
     max_attempts: int = MAX_ATTEMPTS
-    reflection_gate: ReflectionGate = "patient"
     tool_exposure: ToolExposure = "retrieve"
     builtins: frozenset[str] | None = None
     memory: bool = True
@@ -391,21 +353,15 @@ class AgentOptions:
     cross_task_ratio: float = 1.1
     cross_task_cap: int = 1
     cross_task_cold: int = 0
-    # R6-lite's write path: admit the final digest at the run's end, and
-    # keep a decision's text (an evaluation switch). Both are inert in
-    # ``legacy``.
-    admit_on_outcome: bool = False
+    # R6-lite's write path: keep a decision's text (an evaluation switch);
+    # inert in ``legacy``.
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
-    fixed_prefix: bool = True
     captured_history: bool = False
-    typed_assertions: bool = False
     window_eviction: WindowEviction = "chunk"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
-    reflect_tool_guard: bool = True
-    cache_layout: CacheLayout = "v3"
     window_messages: int = LOCAL_WINDOW_MESSAGES
     brief_items: bool = False
     lean_output: bool = False
@@ -421,8 +377,6 @@ class AgentOptions:
     empty_reply_fallback: EmptyReplyFallback = "on"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.fixed_prefix, bool):
-            raise ValueError("fixed_prefix must be a bool")
         if (
             isinstance(self.window_messages, bool)
             or not isinstance(self.window_messages, int)
@@ -432,8 +386,6 @@ class AgentOptions:
                 f"window_messages must be an int from {WINDOW_MESSAGES_MIN} "
                 f"to {WINDOW_MESSAGES_MAX}, got {self.window_messages!r}"
             )
-        if not isinstance(self.reflect_tool_guard, bool):
-            raise ValueError("reflect_tool_guard must be a bool")
         if self.brief_probe is not None and not callable(self.brief_probe):
             raise ValueError("brief_probe must be callable or None")
         if self.brief_check is not None and not callable(self.brief_check):
@@ -480,14 +432,12 @@ class AgentOptions:
 
         for name, allowed in (
             ("attempt_policy", get_args(AttemptPolicy)),
-            ("reflection_gate", get_args(ReflectionGate)),
             ("tool_exposure", get_args(ToolExposure)),
             ("mode", get_args(ToolMode)),
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),
             ("window_eviction", get_args(WindowEviction)),
-            ("cache_layout", get_args(CacheLayout)),
             ("tool_images", get_args(ToolImages)),
             ("empty_reply_fallback", get_args(EmptyReplyFallback)),
             ("retriever", RETRIEVER_MODES),
@@ -549,10 +499,8 @@ class AgentOptions:
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
 
         for name in (
-            "admit_on_outcome",
             "keep_decision_text",
             "captured_history",
-            "typed_assertions",
             "brief_items",
             "lean_output",
             "answer_on_stop",

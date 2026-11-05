@@ -55,15 +55,13 @@ Reflection is an option, on by default (**Reflect when stuck after many steps** 
 | `decompose` | The task should be split up. localmelo does not split tasks, so the run ends as `gate_stopped`. |
 
 - The continuation gate lets a run continue only when the reflection says the task is still feasible and names a concrete next step; otherwise the run ends as `gate_stopped`.
-- By default the gate is patient: a next step that is not new still continues, once per run. A second one ends the run.
-- With `--reflection-gate flags`, a next step that is not new always ends the run.
-- With `--reflection-gate utility`, the behavior before that option, the reflection must also estimate that another attempt's gain outweighs its cost and the risk of repeating itself: a utility score of at least 0.1 ([Evaluations](../project/evaluations.md#reflection-gate) compares the gates).
-- The reflection's `useful_evidence`, `failed_hypotheses` and `recommended_avoids` keep at most 8 items of at most 300 characters each (not with `--reflection-gate flags -X agent.answer_on_stop=off`).
+- The gate is patient: a next step that is not new still continues, once per run. A second one ends the run ([Evaluations](../project/evaluations.md#reflection-gate) compares it with the earlier gates).
+- The reflection's `useful_evidence`, `failed_hypotheses` and `recommended_avoids` keep at most 8 items of at most 300 characters each.
 
 More about reflections:
 
-- Only the latest reflection is carried forward: each replaces the one before. By default it joins the conversation once as an ordinary message; with `--cache-layout v2` it is rebuilt as the last message of every request.
-- A reflection longer than about 2,000 characters is trimmed to fit and its decision stands (the last items of its lists go first, then the end of its summary); with `--reflection-gate utility`, such a reflection ends the run instead, unless it chose `done`.
+- Only the latest reflection is carried forward: each replaces the one before. It joins the conversation once, as an ordinary message.
+- A reflection longer than about 2,000 characters is trimmed to fit and its decision stands (the last items of its lists go first, then the end of its summary).
 - When no attempt can follow, the reflection is told so; it can still choose `done`, otherwise the run ends as `budget_exhausted` with its best answer as the result.
 - A reply with no reflection (no JSON object with one of the four actions) is asked for once more; if the second has none either, the next attempt starts without a new reflection, or the run ends as `budget_exhausted` (see [Run results](../reference/run-results.md#statuses)).
 - A reply whose JSON has one common slip, such as a stray `]` after a string value, a backslash before a character that JSON has no escape for, or an array that the next key breaks off, is mended and read without a second request.
@@ -86,7 +84,7 @@ More about reflections:
 - On each step, the planning request includes the recent conversation from working memory, and each tool call is recorded in history.
 - In `legacy`, with an embedding backend and memory on, the request also includes the long-term memories closest to the task; each tool call is summarized into long-term memory, which also receives the run's latest reflection when the run ends.
 - When the run ends, what it did (its step counts and the classes and labels of its tool calls) is recorded in [procedural memory](procedures.md), which no prompt includes.
-- In the explicit modes, a reply's note, the attempt digest and the reflection are **candidates** for long-term memory: one is written only when a signal admits it (a rehearsal, a user statement, a user request covering the run, or `--admit-on-outcome` for the final digest).
+- In the explicit modes, a reply's note, the attempt digest and the reflection are **candidates** for long-term memory: one is written only when a signal admits it (a rehearsal, a user statement or a user request covering the run).
 - The checked write classifies the fact, compares it with the active entries of its kind and records one action (`NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`) in the store's decision log; every stored text is redacted first.
 
 See [How memory works](memory.md#how-memory-works) and [Long-term memory](../reference/memory.md#long-term-memory) for the limits and the exact behavior.
