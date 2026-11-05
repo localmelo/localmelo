@@ -12,9 +12,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at
-  most, cancellable), holds new ones and runs them on the new model, and a task's request that names the old model asks
-  again with the one served. `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
-  `switch`, and the macOS app needs macOS 15 (#NNN).
+  most, cancellable), holds new ones and runs them on the new model, and a task mid-step waits out the load (10 minutes
+  at most, Stop ends it at once) and goes on with the model served. `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
+  `switch`, and the macOS app needs macOS 15 (#532).
 - The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`; no screen yet). `plan()`
   asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.3.0, otherwise
   `uv tool run --python <this interpreter> --from <archive of a pinned melo_serve commit>`, which fetches melo_serve's

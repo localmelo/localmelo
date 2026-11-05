@@ -206,7 +206,7 @@ enable_thinking = false
 - **Console:** the model chip in the header and the model button under the message box open the same list, as do **Settings → Model server** and `/model`.
 - **App:** the menu-bar menu's **Model** submenu.
 - Every chat on this Mac follows the switch. It first waits for the chats that are running a turn (`Waiting for 1 chat to finish`, 10 minutes at most); a turn sent meanwhile waits (`Waiting for the model switch`) and runs on the new model. **Cancel** (Esc in the terminal) ends the wait; a load that has started goes on in melo_serve.
-- A model that needs more memory than is free shows dimmed, with what it needs and what is free, and cannot be chosen. Tasks are not held: a task's request that names the old model after the switch asks again with the new one. While the model loads melo_serve answers `503`, which a step retries for about 5 seconds, so a step that lands in a longer load can end with that error.
+- A model that needs more memory than is free shows dimmed, with what it needs and what is free, and cannot be chosen. A task is not held: while the model loads, its request waits and asks again, then goes on with the new model. So does a chat caught by a `melo-serve use` from a terminal. The wait lasts 10 minutes at most and Stop ends it at once; past that the task ends `failed`, or the turn `provider_error`, with melo_serve's answer.
 - When a gateway runs, the terminal switches through it with the token its main chat already uses, so the gateway's chats wait too; with none, it asks melo_serve itself. Developer mode adds each model's size on disk.
 
 ### Ollama with embeddings
