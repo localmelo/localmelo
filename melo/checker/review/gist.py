@@ -42,6 +42,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
+from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
@@ -119,25 +120,10 @@ _GIT_AGREES: Final = re.compile(
     r"(?i)\b(?:revert|restor|reset|undo|roll\s?back|throw\s+away|check\s?out"
     r"|clear|drop|abandon|reject)\w*|还原|撤销|回滚|放弃|重置|恢复"
 )
-# Words that start a command line and run the command after them, with the
-# options of each that take a value (so the value is not read as the program).
-_WRAPPERS: Final = frozenset(
-    ["sudo", "doas", "xargs", "nice", "time", "env", "command", "exec", "nohup"]
-    + ["timeout", "caffeinate", "stdbuf", "ionice", "builtin"]
-    # shell keywords that put a command after them
-    + ["do", "then", "else", "elif", "if", "while", "until", "{", "(", "!"]
-)
-_WRAPPER_VALUES: Final[dict[str, frozenset[str]]] = {
-    "sudo": frozenset(
-        ["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"]
-    ),
-    "doas": frozenset(["-u", "-C"]),
-    "env": frozenset(["-u", "-C", "-S"]),
-    "timeout": frozenset(["-s", "-k", "--signal", "--kill-after"]),
-    "nice": frozenset(["-n"]),
-    "ionice": frozenset(["-c", "-n", "-p"]),
-    "xargs": frozenset(["-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a"]),
-}
+# Words that start a command line and run the command after them: the
+# wrappers (with the options of each that take a value, so the value is not
+# read as the program), the shell keywords and a subshell's parenthesis.
+_WRAPPERS: Final = frozenset([*shell_lexer.WRAPPERS, *shell_lexer.KEYWORDS, "("])
 # The ends of a block, which name no command of their own.
 # ``command -v rm``: a lookup of a program, not a run of it.
 _LOOKUP: Final = re.compile(r"-[pvV]*[vV][pvV]*")
@@ -543,7 +529,7 @@ def _program(words: list[str]) -> tuple[str, list[str]]:
                 words[at + 1 :],
             )  # command -v rm looks rm up, it does not run it
         opening = base.lstrip("({")  # a group: (rm x), { rm x; }
-        if word in _WRAPPER_VALUES.get(wrapper, ()):
+        if word in shell_lexer.WRAPPERS.get(wrapper, ()):
             at += 2
         elif (
             word.startswith("-")

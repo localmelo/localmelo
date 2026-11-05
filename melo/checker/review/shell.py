@@ -160,55 +160,8 @@ _PIP_TARGET = {"-t", "--target", "--prefix", "--root", "-d", "--dest"}
 _PIP_VALUED = (
     _PIP_MANIFEST | _PIP_TARGET | set(["-c", "-i", "-f", "--index-url", "--python"])
 )
-_WRAPPERS = set(
-    [
-        "env",
-        "nice",
-        "time",
-        "command",
-        "builtin",
-        "exec",
-        "caffeinate",
-        "timeout",
-        "xargs",
-        "stdbuf",
-        "unbuffer",
-        "chronic",
-        "ionice",
-        "taskpolicy",
-        "arch",
-        "xcrun",
-        "watch",
-        "flock",
-    ]
-)
 # Programs that fetch a package and run it (see _package_run).
 _PACKAGE_RUNNERS = set(["npx", "bunx", "pnpx", "uvx"])
-# Options of one wrapper that take a value, beyond _VALUED.
-_WRAPPER_VALUED: dict[str, set[str]] = {
-    "stdbuf": {"-i", "-o", "-e"},
-    "taskpolicy": {"-c", "-t", "-l", "-g"},
-    "xcrun": {"--sdk", "-sdk", "--toolchain", "-toolchain"},
-    "ionice": {"-c", "-n", "-p"},
-}
-_VALUED = set(
-    [
-        "-n",
-        "-u",
-        "-I",
-        "-P",
-        "-L",
-        "-s",
-        "-E",
-        "-d",
-        "-k",
-        "--with",
-        "--python",
-        "-p",
-        "--project",
-        "--from",
-    ]
-)
 # Writes: the last argument (cp …), every argument, or every one but the first.
 _WRITERS = {
     **dict.fromkeys(["cp", "mv", "ln", "link", "rsync", "install", "ditto"], "last"),
@@ -358,6 +311,8 @@ _RUNNERS |= set(["ninja", "rake", "gradle", "gradlew", "mvn", "npx", "bunx", "pn
 _RUNNERS |= set(["jest", "vitest", "mocha", "pre-commit", "ctest", "hatch"])
 # `<tool> run …` runs a script the project's configuration names.
 _RUN_WRAPPERS = set(["uv", "poetry", "pdm", "hatch", "pipenv"])
+# The options of ``uv run`` and of the package runners that take a value.
+_RUN_VALUED = set(["--with", "--python", "-p", "-P", "--project", "--from"])
 # git commands that run the repository's hooks.
 _HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
@@ -936,7 +891,7 @@ def _head(words: list[str]) -> list[str]:
 
     ``IFS= read -r pid`` and ``while read pid`` both run ``read``.
     """
-    rest = _past_keywords(words)
+    rest = shell_lexer.past_keywords(words)
     at = 0
     while at < len(rest) and (_ASSIGN.fullmatch(rest[at]) or rest[at] in _PREFIXES):
         at += 1
@@ -1075,7 +1030,7 @@ def _bindings(
     """
     head = _head(words)
     lead = words
-    while lead and lead[0] in _KEYWORDS:
+    while lead and lead[0] in shell_lexer.KEYWORDS:
         lead = lead[1:]
     if lead[:1] == ["coproc"] and lead[2:3] == ["{"] and _NAME.fullmatch(lead[1]):
         other.add(lead[1])  # coproc NAME { …; } makes NAME an array
@@ -1227,7 +1182,7 @@ def _run_segments(
                     review_shell(ctx.deeper(), f, inner[0] or inner[1])
         if argv[1:2] == ["run"] and os.path.basename(argv[0]) in _RUN_WRAPPERS:
             file_rules.runner(ctx, f, f"{os.path.basename(argv[0])} run")
-        argv = _unwrap(f, _past_keywords(argv))
+        argv = _unwrap(ctx, f, argv)
         if not argv:
             continue
         prog = os.path.basename(argv[0]).lower()
@@ -1275,82 +1230,58 @@ def _run_segments(
         searched = _find_roots(argv[1:]) if prog == "find" else []
 
 
-# Words that start a part of a loop, a condition or a group and are followed
-# by the command it runs: `for x in a; do CMD; done`, `if c; then CMD; fi`.
-_KEYWORDS = frozenset(["do", "then", "else", "elif", "if", "while", "until", "!", "{"])
+def _unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[str]:
+    """*argv* as the program it runs: past keywords, ``VAR=x`` and wrappers.
 
-
-def _past_keywords(argv: list[str]) -> list[str]:
-    """*argv* without the shell keywords in front of the command.
-
-    Those are ``do``, ``then``, ``if``… and the head of a function or a
-    coprocess that has the command inside it: ``function NAME {`` and
-    ``coproc NAME {`` (``coproc`` alone is followed by the command itself).
-    """
-    at = 0
-    while at < len(argv):
-        if argv[at] in _KEYWORDS:
-            at += 1
-        elif argv[at] == "function" and at + 1 < len(argv):
-            at += 2
-        elif argv[at] == "coproc":
-            at += 2 if argv[at + 2 : at + 3] == ["{"] else 1
-        else:
-            break
-    return argv[at:]
-
-
-def _unwrap(f: Findings, argv: list[str]) -> list[str]:
-    """*argv* without ``VAR=x`` prefixes and wrappers such as ``nice`` or ``uv run``.
-
-    With ``PATH=.:$PATH`` (a folder named relatively first), a program named
-    bare may be a file there: it is named by that path then (``./tool``).
+    The words before the program are read by
+    :func:`~localmelo.melo.contracts.shell_lexer.unwrap` (``sudo``, ``env``,
+    ``timeout``…); here they are judged, and ``busybox``, ``uv run`` and the
+    package runners are read past too. A command line a wrapper has a shell
+    run (``env -S``) is reviewed as a command. With ``PATH=.:$PATH`` (a
+    folder named relatively first), a program named bare may be a file
+    there: it is named by that path then (``./tool``).
     """
     local = ""
     while argv:
-        prog = os.path.basename(argv[0]).lower()
-        if re.match(r"[A-Za-z_]\w*=", argv[0]):
-            _runs_var(f, argv[0])
-            local = local or _local_path(argv[0])
-            argv = argv[1:]
-            continue
+        # xargs adds arguments melo cannot see.
+        found = shell_lexer.unwrap(argv, [UNKNOWN_ARG])
+        local = local or _note_assignments(f, found.assignments)
+        for wrapper in found.wrappers:
+            if wrapper in ("sudo", "doas"):
+                f.add("system", "Runs a command as the administrator.")
+            elif wrapper in ("nohup", "setsid", "disown"):
+                f.add("persistence", "Keeps a program running after this call ends.")
+        for code in found.codes:
+            review_shell(ctx.deeper(), f, code)
+        argv = found.words
+        prog = os.path.basename(argv[0]).lower() if argv else ""
         if prog == "busybox" and argv[1:]:
             argv = argv[1:]  # busybox ln …: the applet is the program
             continue
-        if prog in ("sudo", "doas"):
-            f.add("system", "Runs a command as the administrator.")
-        elif prog in ("nohup", "setsid", "disown"):
-            f.add("persistence", "Keeps a program running after this call ends.")
-        elif prog in ("uv", "poetry", "pdm", "hatch", "pipenv") and argv[1:2] == [
-            "run"
-        ]:
-            argv = argv[1:]
+        if prog in _RUN_WRAPPERS and argv[1:2] == ["run"]:
+            start = 2
         elif _package_run(f, prog, argv):
-            if prog not in _PACKAGE_RUNNERS:
-                argv = [prog, *argv[2:]]  # without dlx / exec / x
-        elif prog not in _WRAPPERS and prog != "gtimeout":
+            start = 1 if prog in _PACKAGE_RUNNERS else 2  # past dlx / exec / x
+        else:
             break
-        rest, i = argv[1:], 0
-        valued = _VALUED | _WRAPPER_VALUED.get(prog, set())
-        while i < len(rest) and (
-            rest[i][:1] == "-" or "=" in rest[i] or "timeout" in prog and i == 0
-        ):
-            if "=" in rest[i] and rest[i][:1] != "-":
-                _runs_var(f, rest[i])
-                local = local or _local_path(rest[i])
-            i += 2 if rest[i] in valued else 1
-        if prog == "flock" and i < len(rest):
-            i += 1  # its lock file, then the command
-        # xargs adds arguments melo cannot see.
-        argv = rest[i:] + ([UNKNOWN_ARG] if prog == "xargs" and rest[i:] else [])
+        argv, _, assigned = shell_lexer.past_options(argv[start:], _RUN_VALUED)
+        local = local or _note_assignments(f, assigned)
     if local and argv and "/" not in argv[0]:
         argv = [os.path.join(local, argv[0]), *argv[1:]]
     return argv
 
 
-def _local_path(assignment: str) -> str:
+def _note_assignments(f: Findings, assignments: list[tuple[str, str]]) -> str:
+    """Note each ``VAR=value`` that has a program start another; the folder ``PATH=`` puts first."""
+    local = ""
+    for name, value in assignments:
+        _runs_var(f, name)
+        local = local or _local_path(name, value)
+    return local
+
+
+def _local_path(name: str, value: str) -> str:
     """For ``PATH=…``: the first folder it names relatively (``.``, ``bin``), else ``""``."""
-    name, _, value = assignment.partition("=")
     if name != "PATH":
         return ""
     for part in value.split(":"):
@@ -1388,16 +1319,15 @@ def _package_run(f: Findings, prog: str, argv: list[str]) -> bool:
     return runs
 
 
-def _runs_var(f: Findings, assignment: str) -> None:
+def _runs_var(f: Findings, name: str) -> None:
     """``VAR=value`` before a command: a doubt when *VAR* names a program to start."""
-    name = assignment.split("=", 1)[0]
     if name in _RUNS_VARS or name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
         f.doubt(f"Sets {name}, which can make a program start another one.")
 
 
-def unwrap(f: Findings, argv: list[str]) -> list[str]:
+def unwrap(ctx: Context, f: Findings, argv: list[str]) -> list[str]:
     """*argv* as the program it runs (see _unwrap), for a Python process call."""
-    return _unwrap(f, argv) or argv
+    return _unwrap(ctx, f, argv) or argv
 
 
 def _find_roots(args: list[str]) -> list[str]:

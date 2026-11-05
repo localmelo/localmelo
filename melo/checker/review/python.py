@@ -1107,7 +1107,7 @@ class _Review:
                 # Wrappers (env, nice, xargs…) run the program they name; input
                 # given to it (input=, stdin=) is code for an interpreter.
                 given = "input" in kw or "stdin" in kw
-                ran = shell.unwrap(f, [program, *rest])
+                ran = shell.unwrap(ctx, f, [program, *rest])
                 shell.run_argv(ctx.deeper(), f, ran, ctx.root, given)
             else:
                 f.doubt("Runs a command melo could not read.")

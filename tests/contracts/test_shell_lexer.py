@@ -1,5 +1,8 @@
 """The linear shell lexer reads exactly what the standard library's reads.
 
+And :func:`~localmelo.melo.contracts.shell_lexer.unwrap` finds the program a
+command runs past keywords, assignments and wrappers (the end of the file).
+
 The review classifies a command from the words the lexer cuts it into, so a
 different cut could make a step look safer. :class:`Lexer` and :func:`split`
 are compared with :class:`shlex.shlex` and :func:`shlex.split` token for
@@ -233,3 +236,72 @@ def test_one_long_word_costs_time_in_proportion_to_its_length() -> None:
     """Sixteen times the text takes about sixteen times as long, not 256."""
     short, long = best_cpu_time("a" * 25_000), best_cpu_time("a" * 400_000)
     assert long < 64 * short
+
+
+# ── The program a command runs ──
+
+
+@pytest.mark.parametrize(
+    ("command", "words", "wrappers"),
+    [
+        ("sudo -u root -E rm x", ["rm", "x"], ["sudo"]),
+        ("env -C /tmp -i A=1 'x y=z' rm x", ["rm", "x"], ["env"]),
+        ("env - rm x", ["rm", "x"], ["env"]),
+        ("env -u HOME --unset PATH rm x", ["rm", "x"], ["env"]),
+        ("timeout -s KILL 5 rm x", ["rm", "x"], ["timeout"]),
+        ("gtimeout --kill-after 1 --signal=KILL 5 rm x", ["rm", "x"], ["gtimeout"]),
+        ("time -p rm x", ["rm", "x"], ["time"]),
+        ("time -o out.txt rm x", ["rm", "x"], ["time"]),
+        ("flock -n /tmp/lock rm x", ["rm", "x"], ["flock"]),
+        ("flock -w 5 /tmp/lock rm x", ["rm", "x"], ["flock"]),
+        ("caffeinate -d -t 60 rm x", ["rm", "x"], ["caffeinate"]),
+        ("arch -arm64 -arch arm64 rm x", ["rm", "x"], ["arch"]),
+        ("exec -a name rm x", ["rm", "x"], ["exec"]),
+        ("stdbuf -o L -eL rm x", ["rm", "x"], ["stdbuf"]),
+        ("xcrun -n --sdk macosx rm x", ["rm", "x"], ["xcrun"]),
+        ("/usr/bin/nice -n 5 nohup rm x", ["rm", "x"], ["nice", "nohup"]),
+        ("xargs -p -n 1 rm", ["rm", "?"], ["xargs"]),
+        ("xargs", [], ["xargs"]),
+        ("A=1 B=2 sudo rm x", ["rm", "x"], ["sudo"]),
+        ("if ! time -p rm x", ["rm", "x"], ["time"]),
+        ("function f { rm x", ["rm", "x"], []),
+        ("coproc NAME { rm x", ["rm", "x"], []),
+        ("coproc rm x", ["rm", "x"], []),
+        ("done", [], []),
+        ("make all", ["make", "all"], []),
+    ],
+)
+def test_unwrap_finds_the_program_past_keywords_and_wrappers(
+    command: str, words: list[str], wrappers: list[str]
+) -> None:
+    found = shell_lexer.unwrap(shlex.split(command), ["?"])
+    assert (found.words, found.wrappers) == (words, wrappers)
+
+
+def test_unwrap_keeps_the_assignments_in_order() -> None:
+    found = shell_lexer.unwrap(shlex.split("A=1 env -i B=2 'x y=z' sudo C=3 rm x"))
+    assert found.assignments == [("A", "1"), ("B", "2"), ("x y", "z"), ("C", "3")]
+
+
+@pytest.mark.parametrize(
+    ("command", "codes"),
+    [
+        ("env -S 'rm -rf x' y", ["rm -rf x"]),
+        ("env -S'rm -rf x'", ["rm -rf x"]),
+        ("env --split-string='a=b c'", ["a=b c"]),
+        ("env --split-string 'rm -rf x'", ["rm -rf x"]),
+        ("flock /tmp/lock -c 'rm -rf x'", ["rm -rf x"]),
+        ("flock /tmp/lock --command 'rm -rf x'", ["rm -rf x"]),
+        ("env -i rm x", []),
+    ],
+)
+def test_unwrap_finds_the_command_line_a_wrapper_hands_to_a_shell(
+    command: str, codes: list[str]
+) -> None:
+    assert shell_lexer.unwrap(shlex.split(command)).codes == codes
+
+
+def test_every_wrapper_is_named_in_lower_case_and_its_options_are_options() -> None:
+    for name, options in shell_lexer.WRAPPERS.items():
+        assert name == name.lower()
+        assert all(option.startswith("-") for option in options), name

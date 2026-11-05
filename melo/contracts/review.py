@@ -317,7 +317,7 @@ _EXECUTABLE: Final = "sys.executable"
 
 
 def _program(word: str) -> str:
-    name = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    name = shell_lexer.program(word)
     if name == _EXECUTABLE or _PYTHON.match(name):
         return "python"
     return "pip" if _PIP.match(name) else name
@@ -830,25 +830,6 @@ _NETWORK: Final = frozenset(
 )
 _GIT_NETWORK: Final = frozenset({"clone", "fetch", "pull", "push", "ls-remote"})
 _SHELLS: Final = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish"})
-# Words that run the command after them; the value of each option given.
-_WRAPPERS: Final[dict[str, frozenset[str]]] = {
-    "command": frozenset(),
-    "exec": frozenset(),
-    "time": frozenset(),
-    "nohup": frozenset(),
-    "env": frozenset({"-u", "-C", "-S"}),
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U"}),
-    "xargs": frozenset({"-n", "-I", "-P", "-L", "-d", "-E", "-s", "-a", "-J", "-R"}),
-    "nice": frozenset({"-n"}),
-    "timeout": frozenset({"-s", "-k"}),
-    "builtin": frozenset(),
-}
-# Shell words that open or close a compound command: the command follows.
-_KEYWORDS: Final = frozenset(
-    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{"}
-    | {"}", "time", "coproc"}
-)
-_ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
 # What separates two commands, or redirects one, in a shell's text.
 _OPERATORS: Final = ";&|()<>`\n"
 # A command substitution in a word: ``$(…)`` or ``\`…\```.
@@ -967,43 +948,6 @@ def _shell_words(command: Any) -> list[str]:
     return _shell_tokens(str(command or ""))
 
 
-def _unwrapped(
-    words: Sequence[str],
-) -> tuple[list[str], list[tuple[str, str]], list[str]]:
-    """*words* from the program they run, the assignments before it, and code given to ``env -S``.
-
-    Shell keywords (``if``, ``do``, ``!``, ``{``), assignments and wrappers
-    (``sudo``, ``xargs``, ``env``) are dropped.
-    """
-    rest = list(words)
-    assigned: list[tuple[str, str]] = []
-    codes: list[str] = []
-    while rest:
-        if rest[0] in _KEYWORDS:
-            rest = rest[1:]
-            continue
-        found = _ASSIGNMENT.fullmatch(rest[0])
-        if found:
-            assigned.append((found.group(1), found.group(2)))
-            rest = rest[1:]
-            continue
-        wrapper = _program(rest[0])
-        valued = _WRAPPERS.get(wrapper)
-        if valued is None:
-            break
-        rest = rest[1:]
-        while rest and rest[0].startswith("-") and rest[0] != "-":
-            option = rest[0]
-            if wrapper == "env" and option in ("-S", "--split-string") and rest[1:]:
-                codes.append(rest[1])  # a command line env splits and runs
-            elif wrapper == "env" and option.startswith(("-S", "--split-string=")):
-                codes.append(option.split("=", 1)[-1] if "=" in option else option[2:])
-            rest = rest[2:] if option in valued else rest[1:]
-        if rest and wrapper == "timeout":
-            rest = rest[1:]  # its duration
-    return rest, assigned, codes
-
-
 def _proxy_sites(value: str) -> Sites:
     """The keys of a proxy (``host:port``, ``socks5://host``), and whether it is unread."""
     value = value.strip()
@@ -1109,7 +1053,8 @@ def _code_sites(code: str, python: bool, depth: int) -> Sites:
 
 
 def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -> Sites:
-    words, assigned, codes = _unwrapped(words)
+    found = shell_lexer.unwrap(words)
+    words, assigned, codes = found.words, found.assignments, found.codes
     keys: set[str] = set()
     unread = False
 
