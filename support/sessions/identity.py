@@ -282,13 +282,15 @@ def config_identity(cfg: Config, kept: str = "", notes: str | None = None) -> st
 
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
+    model = getattr(section, "chat_model", "")
     try:
-        server = get_backend(key).label(cfg)
+        row = get_backend(key)
+        server, model = row.label(cfg), row.model_name(cfg)
     except KeyError:
         server = key
     url = getattr(section, "chat_url", "") or getattr(section, "base_url", "")
     return identity_text(
-        getattr(section, "chat_model", ""),
+        model,
         server,
         local=key in LOCAL_BACKENDS,
         url=url,

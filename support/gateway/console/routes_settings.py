@@ -233,7 +233,8 @@ def model_json(cfg: Any) -> dict[str, Any]:
     section = getattr(cfg, backend, None) if backend else None
     name = getattr(section, "chat_model", "") if section is not None else ""
     try:
-        label = get_backend(backend).label(cfg)
+        row = get_backend(backend)
+        label, name = row.label(cfg), row.model_name(cfg)
     except KeyError:
         label = backend
     return {

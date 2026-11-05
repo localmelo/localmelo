@@ -20,8 +20,19 @@ from typing import Any
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
+from localmelo.support.backends.base import BaseBackend
 from localmelo.support.cli.views import BackendInfo
 from localmelo.support.sessions.agents import build_session_agent
+
+
+def _registered(key: str) -> BaseBackend | None:
+    """The backend *key* names, or None when it is not registered."""
+    from localmelo.support.backends.registry import get_backend
+
+    try:
+        return get_backend(key)
+    except KeyError:
+        return None
 
 
 def _backend_label(cfg: config.Config, key: str, *, embedding: bool = False) -> str:
@@ -29,12 +40,8 @@ def _backend_label(cfg: config.Config, key: str, *, embedding: bool = False) -> 
 
     A ``vllm`` backend is ``oMLX`` when the config or a listing says so.
     """
-    from localmelo.support.backends.registry import get_backend
-
-    try:
-        return get_backend(key).label(cfg, embedding=embedding)
-    except KeyError:
-        return key
+    backend = _registered(key)
+    return backend.label(cfg, embedding=embedding) if backend else key
 
 
 def _embedding_name(cfg: config.Config) -> str:
@@ -42,8 +49,8 @@ def _embedding_name(cfg: config.Config) -> str:
     if not cfg.has_embedding:
         return ""
     key = cfg.embedding_backend
-    section = getattr(cfg, key, None)
-    model = getattr(section, "embedding_model", "")
+    backend = _registered(key)
+    model = backend.model_name(cfg, embedding=True) if backend else ""
     label = _backend_label(cfg, key, embedding=True)
     return f"{label} · {model}" if model else label
 
@@ -52,13 +59,15 @@ def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
     """The configured chat backend, with *model* when one is given."""
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
+    backend = _registered(key)
     return BackendInfo(
         key=key,
         label=_backend_label(cfg, key),
-        model=model or getattr(section, "chat_model", "") or "default",
+        model=model or (backend.model_name(cfg) if backend else "") or "default",
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
         embedding=_embedding_name(cfg),
         key_env=getattr(section, "api_key_env", ""),
+        note=backend.welcome_note(cfg) if backend else "",
     )
 
 
