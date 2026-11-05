@@ -491,6 +491,37 @@ class TestBuildDirectModeAgent:
             "Run `melo-serve use <pick>` to choose one.\n"
         )
 
+    def test_retriever_embedding_with_no_embedding_served_prints_one_line(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        melo_serve_home: Path,
+        melo_serve_socket: Path,
+    ) -> None:
+        """A configured embedding address is not a provider: one line, not a traceback."""
+        from localmelo.__main__ import main
+
+        cfg = Config(
+            chat_backend="melo_serve",
+            embedding_backend="melo_serve",
+            melo_serve=LocalBackendConfig(
+                chat_url=MELO_SERVE_URL, embedding_url=MELO_SERVE_URL
+            ),
+        )
+        write_state(melo_serve_home, chat=role("m"))  # chat only
+        argv = ["melo", "--reasoning", "compress", "--retriever", "embedding", "q"]
+        with (
+            mock.patch("localmelo.support.config.load", return_value=cfg),
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("sys.argv", argv),
+            pytest.raises(SystemExit) as stopped,
+        ):
+            main()
+        assert stopped.value.code == 1
+        assert capsys.readouterr().err == (
+            "melo: error: melo_serve serves no embedding model now. "
+            "Run `melo-serve use <pick>` to choose one.\n"
+        )
+
     def test_default_model_when_base_url_no_model(self) -> None:
         """--base-url without --chat-model uses 'default' as model name."""
         from localmelo.__main__ import _build_direct_mode_agent

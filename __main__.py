@@ -2613,6 +2613,21 @@ def _build_direct_mode_agent(
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     llm_provider, embedding_provider = providers_for(cfg, options.reasoning)
+    if (
+        options.reasoning != "legacy"
+        and options.retriever == "embedding"
+        and embedding_provider is None
+    ):
+        # A configured embedding address is not a provider: melo_serve builds
+        # none while it serves no embedding model.
+        if cfg.embedding_backend == "melo_serve":
+            from localmelo.support import melo_serve
+
+            raise melo_serve.unavailable(melo_serve.snapshot(), "embedding")
+        parser.error(
+            "argument --retriever: embedding needs an embedding provider "
+            "in the config"
+        )
     agent = Agent(
         llm=llm_provider,
         embedding=embedding_provider,
