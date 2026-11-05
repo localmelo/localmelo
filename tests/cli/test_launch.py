@@ -609,3 +609,43 @@ def test_a_bad_mcp_config_file_is_one_line_and_exit_2(
     assert _run(monkeypatch, terminal=True, mcp_config=str(path)) == 2
     err = capsys.readouterr().err
     assert err.startswith("melo: error: ") and err.count("\n") == 1
+
+
+async def test_a_session_that_chose_no_model_follows_what_melo_serve_serves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+) -> None:
+    from localmelo.support.cli.agents import AgentFactory, config_backend
+    from localmelo.tests.fixtures.melo_serve import role, write_state
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = Config(
+        chat_backend="melo_serve",
+        embedding_backend="none",
+        melo_serve=LocalBackendConfig(chat_url=URL),
+    )
+    write_state(melo_serve_home, chat=role("model-a"))
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(workspace_root=str(tmp_path)),
+        workspace=str(tmp_path),
+        saves=False,
+    )
+    assert factory.backend.model == "model-a"
+    write_state(melo_serve_home, chat=role("model-b"))  # `melo-serve use`
+    asked: list[str] = []
+    for choose in (None, "model-c"):  # then the user picks one with /model
+        if choose:
+            factory.use_model(choose)
+        agent = await factory.build()
+        asked.append(agent._llm.model)  # type: ignore[attr-defined]
+        await factory.close(agent)
+    write_state(melo_serve_home, chat=role("model-d"))
+    agent = await factory.build()
+    asked.append(agent._llm.model)  # type: ignore[attr-defined]
+    await factory.close(agent)
+    assert asked == ["model-b", "model-c", "model-c"]  # a chosen model stays
+    assert factory.backend.model == "model-c"

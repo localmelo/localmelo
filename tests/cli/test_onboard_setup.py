@@ -1259,6 +1259,28 @@ def test_the_wizard_offers_the_chat_servers_embedding_model(
     ) in out
 
 
+def test_the_wizard_saves_a_backend_that_serves_its_own_model_with_none(
+    config_path: Path,
+) -> None:
+    listing = mock.AsyncMock(return_value=["Qwen3-8B", "Qwen3-Embedding-0.6B"])
+    config.save(
+        Config(
+            chat_backend="melo_serve",
+            embedding_backend="none",
+            melo_serve=LocalBackendConfig(chat_url=URL),
+        )
+    )
+    answers = _Answers("", "", "", "", "7")  # the listed embedding model
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch.object(discovery, "list_models", listing),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None and cfg.embedding_backend == "melo_serve"
+    assert (cfg.melo_serve.embedding_url, cfg.melo_serve.embedding_model) == (URL, "")
+
+
 def test_embedding_choices_are_pure_and_in_recommendation_order() -> None:
     cfg = _configured()
     before = (

@@ -653,7 +653,7 @@ async def test_a_listing_that_names_omlx_as_owner_marks_the_server() -> None:
 
 
 async def test_melo_serve_is_found_by_its_state_or_marked_by_its_listing(
-    melo_serve_home: Path,
+    melo_serve_home: Path, melo_serve_socket: Path
 ) -> None:
     served = fake_melo_serve.role("Qwen3.8-27B-Q4KM-splash")
     listing = {"data": [{"id": served["model"], "owned_by": "melo_serve"}]}
@@ -687,8 +687,8 @@ async def test_melo_serve_is_found_by_its_state_or_marked_by_its_listing(
     assert found == discovery.FoundServer(fake_melo_serve.URL, [served["model"]])
     assert discovery.is_melo_serve(fake_melo_serve.URL)
 
-    # One that stopped (a dead pid) is not preferred.
-    fake_melo_serve.write_state(melo_serve_home, chat=served, pid=2**22 + 1)
+    # One that stopped is not preferred.
+    fake_melo_serve.write_state(melo_serve_home, chat=served, status="stopped")
     found = await detect_local_server([other], transport=transport)
     assert found is not None and found.url == other
 

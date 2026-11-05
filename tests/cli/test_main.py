@@ -456,6 +456,41 @@ class TestBuildDirectModeAgent:
         )
         assert "[mlc] extra_body must not set 'model'" in stderr_text
 
+    def test_a_direct_run_with_nothing_served_prints_one_line_and_exits_1(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        melo_serve_home: Path,
+        melo_serve_socket: Path,
+    ) -> None:
+        """melo_serve serves no model: what to run, not a traceback."""
+        from localmelo.__main__ import main
+
+        cfg = Config(
+            chat_backend="melo_serve",
+            embedding_backend="none",
+            melo_serve=LocalBackendConfig(chat_url=MELO_SERVE_URL),
+        )
+
+        def run() -> str:
+            with (
+                mock.patch("localmelo.support.config.load", return_value=cfg),
+                mock.patch("localmelo.__main__._register_backends"),
+                mock.patch("sys.argv", ["melo", "hello"]),
+                pytest.raises(SystemExit) as stopped,
+            ):
+                main()
+            assert stopped.value.code == 1
+            return capsys.readouterr().err
+
+        assert run() == (  # no state: it is not installed here
+            f"melo: error: melo_serve is not installed: {melo_serve.INSTALL_HINT}\n"
+        )
+        write_state(melo_serve_home)  # it runs, and serves no chat model
+        assert run() == (
+            "melo: error: melo_serve serves no chat model now. "
+            "Run `melo-serve use <pick>` to choose one.\n"
+        )
+
     def test_default_model_when_base_url_no_model(self) -> None:
         """--base-url without --chat-model uses 'default' as model name."""
         from localmelo.__main__ import _build_direct_mode_agent
@@ -644,7 +679,10 @@ class TestGatewayMode:
         assert out.index("  Model:") < out.index("  Gateway: http://")
 
     def test_serve_status_shows_the_gateway_and_melo_serve(
-        self, capsys: pytest.CaptureFixture[str], melo_serve_home: Path
+        self,
+        capsys: pytest.CaptureFixture[str],
+        melo_serve_home: Path,
+        melo_serve_socket: Path,
     ) -> None:
         write_state(
             melo_serve_home,
@@ -671,11 +709,31 @@ class TestGatewayMode:
             "  login item: installed\n"
         )
 
+    def test_serve_status_does_not_fail_on_a_config_that_does_not_load(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        from localmelo.support import config
+
+        bad = tmp_path / "config.toml"
+        bad.write_text("chat_backend = [", encoding="utf-8")
+        with (
+            mock.patch.object(config, "CONFIG_PATH", bad),
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("sys.argv", ["melo", "serve", "status"]),
+            mock.patch("localmelo.support.gateway.daemon.status", return_value={}),
+            mock.patch.object(melo_serve, "command", lambda: "/bin/melo-serve"),
+        ):
+            from localmelo.__main__ import main
+
+            main()
+        assert "melo_serve:\n  running: False\n" in capsys.readouterr().out
+
     def test_serve_starts_melo_serve_when_the_config_uses_it(
         self,
         capsys: pytest.CaptureFixture[str],
         monkeypatch: pytest.MonkeyPatch,
         melo_serve_home: Path,
+        melo_serve_socket: Path,
         tmp_path: Path,
     ) -> None:
         # A fake `melo-serve up` that writes the state of a running melo_serve.
