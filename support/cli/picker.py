@@ -3,7 +3,8 @@
 :class:`ListPicker` is the one list. :class:`SessionPicker` fills it with saved
 chats (``/sessions``, ``-r``) and :class:`ModelPicker` with the models of a
 server (``/model``, and the first run's question, which :func:`run_inline` asks
-before melo's own UI exists). :class:`ChoicePicker` is a question and its few
+before melo's own UI exists). :class:`PickPicker` lists the chat models
+melo_serve offers (``/model`` when it is the model server). :class:`ChoicePicker` is a question and its few
 answers, with no filter field: the first run's and the wizard's questions
 (:func:`choose_inline`) and the attach question in melo's own screen.
 """
@@ -33,7 +34,7 @@ from prompt_toolkit.layout import (
     Window,
 )
 
-from localmelo.support.cli.text import cells, cut_cells, cut_middle
+from localmelo.support.cli.text import cells, cut_cells, cut_middle, pad_cells
 from localmelo.support.cli.theme import (
     PT_STYLE,
     Symbols,
@@ -42,6 +43,7 @@ from localmelo.support.cli.theme import (
     symbols_for,
     wants_no_color,
 )
+from localmelo.support.melo_serve import Pick, pick_words
 from localmelo.support.sessions.display import clean_output, home_label, session_age
 from localmelo.support.sessions.store import SessionInfo, SessionStore
 
@@ -481,6 +483,79 @@ class ModelPicker(ListPicker[ModelRow]):
         ]
         room = self.width() - 1
         return next((o for o in options if cells(o) <= room), options[-1])
+
+
+class PickPicker(ListPicker[Pick]):
+    """melo_serve's chat picks, as the console and the app list them.
+
+    ✓ marks the current one, where the highlight starts. A pick that cannot
+    load is muted with its reason, and ↑↓ skip it. *foot* is the line above
+    the keys: every chat follows the switch.
+    """
+
+    debounce_s = 0.0
+    filterable = False
+
+    def __init__(
+        self,
+        picks: Sequence[Pick],
+        *,
+        foot: str,
+        width: Callable[[], int],
+        invalidate: Callable[[], None],
+        symbols: Symbols,
+    ) -> None:
+        self.picks, self.foot = list(picks), foot
+        self.words = {pick.id: pick_words(pick) for pick in self.picks}
+        self.name_cells = max((cells(pick.name) for pick in self.picks), default=0)
+        super().__init__(width=width, invalidate=invalidate, symbols=symbols)
+
+    async def load(self, query: str) -> list[Pick]:
+        return self.picks
+
+    def _start(self, rows: list[Pick]) -> int:
+        current = [i for i, pick in enumerate(rows) if pick.current]
+        loadable = [i for i, pick in enumerate(rows) if pick.loadable]
+        return (current or loadable or [0])[0]
+
+    def move(self, step: int) -> None:
+        target = self.selected + step
+        while 0 <= target < len(self.rows) and not self.rows[target].loadable:
+            target += step
+        if 0 <= target < len(self.rows):
+            self.selected = target
+        self.invalidate()
+
+    def _enter(self, event: KeyPressEvent) -> None:
+        if 0 <= self.selected < len(self.rows) and self.rows[self.selected].loadable:
+            super()._enter(event)
+
+    def _header(self) -> str:
+        return " Switch model · models on this Mac"
+
+    def _row_fragments(self, pick: Pick) -> StyleAndTextTuples:
+        """``✓ Qwen3.8 27B   Splash · needs 21 GB · fits``: the fit word coloured."""
+        name = pad_cells(pick.name, self.name_cells)
+        words, fit = self.words[pick.id]
+        if not pick.loadable:
+            return [("class:muted", f"  {name}   {words}")]
+        style = "class:warn_text" if pick.verdict == "alone" else "class:ok_text"
+        return [
+            ("class:ok", "✓" if pick.current else " "),
+            ("", f" {name}   "),
+            ("class:muted", words[: len(words) - len(fit)]),
+            (style, fit),
+        ]
+
+    def _footer(self) -> str:
+        current = next((pick.name for pick in self.rows if pick.current), "")
+        keep = f"esc keep {current}" if current else "esc cancel"
+        return f"{self.symbols.arrows} select · enter switch · {keep}"
+
+    def _drawn(self) -> list[StyleAndTextTuples]:
+        lines = super()._drawn()
+        foot = fit_row([("class:muted", f" {self.foot}")], self.width())
+        return [*lines[:-1], foot, lines[-1]]
 
 
 @dataclass(frozen=True)

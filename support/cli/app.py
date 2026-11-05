@@ -91,6 +91,7 @@ from localmelo.support.cli.picker import (
     ModelRow,
     NotePicker,
     NoteRow,
+    PickPicker,
     SessionPicker,
     fit_row,
     key_line,
@@ -108,6 +109,7 @@ from localmelo.support.cli.text import (
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols, pt_color_depth
 from localmelo.support.cli.usershell import parse as parse_shell
 from localmelo.support.cli.work import WORK_BINDING
+from localmelo.support.melo_serve import Pick
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionInfo, SessionStore
 from localmelo.support.usage_snapshot import BarPart
@@ -741,6 +743,18 @@ class InteractiveApp:
         )
         return None if row is None else row.id
 
+    async def choose_pick(self, picks: Sequence[Pick], *, foot: str) -> Pick | None:
+        """The melo_serve pick chosen from *picks*, the current one marked; None when closed."""
+        return await self.choose(
+            PickPicker(
+                picks,
+                foot=foot,
+                width=self._width,
+                invalidate=self.invalidate,
+                symbols=self.symbols,
+            )
+        )
+
     async def pick(
         self, title: str, options: Sequence[str], *, default: int, escape: int
     ) -> int:
@@ -898,6 +912,7 @@ class InteractiveApp:
         width = self.app.output.get_size().columns
         now = self._clock()
         live = self.renderer.live
+        after: StyleAndTextTuples = []
         if live is not None:
             if self.controller.state == "stopping" and not live.finished:
                 live.activity = "Stopping"
@@ -923,12 +938,16 @@ class InteractiveApp:
                 self.symbols.ellipsis,
             )
             rows = [[("class:accent", text[: len(mark)]), ("", text[len(mark) :])]]
+            # What the wait may take and the key that ends it, muted after the words.
+            note = str(getattr(self.controller, "activity_note", "") or "")
+            if note and width - cells(text) - 2 >= cells(note):
+                after = [("", "  "), *key_line(note)]
         fragments: StyleAndTextTuples = []
         for number, row in enumerate(rows):
             if number:
                 fragments.append(("", "\n"))
             fragments.extend(row)
-        return fragments
+        return fragments + after
 
     def _queued_fragments(self) -> StyleAndTextTuples:
         queued = self.controller.queued or ""

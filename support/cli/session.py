@@ -39,7 +39,7 @@ from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.openai_family import USUAL_URL
-from localmelo.support.cli import browsing, commands, hanging, usershell
+from localmelo.support.cli import browsing, commands, hanging, serve_model, usershell
 from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
@@ -313,6 +313,8 @@ class CliSession:
         self._shell: usershell.ShellRun | None = None
         self.shell_ran = False
         self.activity: str | None = None
+        # Muted words after the activity: what the wait may take, and the key that ends it.
+        self.activity_note = ""
         self.title = ""
         self.models: list[str] = []
         self._clock = clock
@@ -605,7 +607,12 @@ class CliSession:
             side = commands.find("side")
             assert side is not None
             return side, "side", ""
-        if command is not None and command.name in commands.LOCAL_ONLY:
+        if (
+            command is not None
+            and command.name in commands.LOCAL_ONLY
+            and not (command.name == "model" and serve_model.applies(self))
+        ):
+            # melo_serve's /model switches what every chat uses, the main chat's too.
             self.out.print(
                 self._text(
                     f"/{name} works only in the terminal's own chat "
@@ -1792,7 +1799,13 @@ class CliSession:
             self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
     async def model(self, arguments: str) -> None:
-        """``/model``: pick one of the server's models, or switch to one by name and save it."""
+        """``/model``: pick one of the server's models, or switch to one by name and save it.
+
+        With melo_serve, its chat models instead, and a switch every chat follows.
+        """
+        if serve_model.applies(self):
+            await serve_model.command(self, arguments)
+            return
         backend = self.factory.backend
         if not arguments:
             await self._pick_current_server_model()
