@@ -111,33 +111,47 @@ def test_every_program_table_is_keyed_in_lower_case() -> None:
     assert [n for n in shell_lexer.WRAPPERS if n != n.lower()] == []
 
 
+# Wrappers with options that take a value or do not; the categories the
+# wrapper itself adds (sudo: an administrator's command).
+WRAPPED = {
+    "time -p": set(),
+    "time -o out.txt": set(),
+    "flock -n /tmp/lock": set(),
+    "flock -w 5 /tmp/lock": set(),
+    "timeout -s KILL 5": set(),
+    "timeout --signal KILL 5": set(),
+    "gtimeout -k 1 5": set(),
+    "env -C /tmp": set(),
+    "exec -a name": set(),
+    "caffeinate -t 60": set(),
+    "caffeinate -d": set(),
+    "arch -arch arm64": set(),
+    "xcrun -n": set(),
+    "watch -d": set(),
+    "xargs -p": set(),
+    "uv run -s": set(),
+    "sudo -E": {"system"},
+    "doas -n": {"system"},
+}
+
+
 @pytest.mark.parametrize(
-    "prefix",
-    [
-        "time -p",
-        "time -o out.txt",
-        "flock -n /tmp/lock",
-        "flock -w 5 /tmp/lock",
-        "timeout -s KILL 5",
-        "timeout --signal KILL 5",
-        "gtimeout -k 1 5",
-        "env -C /tmp",
-        "exec -a name",
-        "caffeinate -t 60",
-        "caffeinate -d",
-        "arch -arch arm64",
-        "xcrun -n",
-        "watch -d",
-        "xargs -p",
-        "sudo -E",
-        "doas -n",
-        "uv run -s",
-    ],
+    "command",
+    ["rm -rf ~/x", "cat ~/.ssh/id_rsa", "pip install requests"],
 )
-def test_a_wrappers_options_do_not_hide_the_program_it_runs(
+@pytest.mark.parametrize("prefix", WRAPPED)
+def test_a_wrapped_command_is_reviewed_as_the_command_itself(
+    ws: Path, prefix: str, command: str
+) -> None:
+    alone = set(sh(ws, command).categories)
+    assert alone
+    assert set(sh(ws, f"{prefix} {command}").categories) == alone | WRAPPED[prefix]
+
+
+@pytest.mark.parametrize("prefix", WRAPPED)
+def test_a_wrapped_process_call_is_reviewed_as_the_command_itself(
     ws: Path, prefix: str
 ) -> None:
-    assert is_delete(sh(ws, f"{prefix} rm -rf ~/x"))
     words = [*shlex.split(prefix), "rm", "-rf", f"{ws.parent}/x"]
     assert is_delete(py(ws, f"import subprocess\nsubprocess.run({words!r})"))
 
