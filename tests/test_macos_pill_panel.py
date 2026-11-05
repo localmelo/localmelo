@@ -5,13 +5,13 @@ beside the person's work. The pictures land in `.cache/shots/` of the checkout (
 
 from __future__ import annotations
 
-import os
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -148,29 +148,6 @@ print("rendered")
 """
 
 
-def compile_swift(tmp_path: Path, source: str) -> Path:
-    main = tmp_path / "main.swift"
-    main.write_text(source)
-    binary = tmp_path / "test-pill-panel"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            *[str(APP / name) for name in FILES],
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=180,
-    )
-    return binary
-
-
 def png_size(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
@@ -178,12 +155,13 @@ def png_size(path: Path) -> tuple[int, int]:
 
 
 @darwin
-def test_the_pill_is_drawn_in_light_and_dark_for_every_state(tmp_path: Path) -> None:
-    binary = compile_swift(tmp_path, RENDER)
+def test_the_pill_is_drawn_in_light_and_dark_for_every_state() -> None:
     shots = SHOTS / "pill"
-    subprocess.run(
-        [str(binary), str(ROOT / "support/gateway/static/moves"), str(shots)],
-        check=True,
+    macos_swift.run_swift(
+        FILES,
+        RENDER,
+        str(ROOT / "support/gateway/static/moves"),
+        str(shots),
         timeout=60,
     )
     light, dark = shots / "pill-light.png", shots / "pill-dark.png"
@@ -202,11 +180,9 @@ def test_the_pill_is_drawn_in_light_and_dark_for_every_state(tmp_path: Path) -> 
 
 
 @darwin
-def test_the_view_reads_as_one_button_and_its_parts_follow_the_state(
-    tmp_path: Path,
-) -> None:
-    binary = compile_swift(
-        tmp_path,
+def test_the_view_reads_as_one_button_and_its_parts_follow_the_state() -> None:
+    macos_swift.run_swift(
+        FILES,
         r"""
 import AppKit
 _ = NSApplication.shared
@@ -326,8 +302,8 @@ precondition(told.count == 5 && hidden.count == 3)
 try? FileManager.default.removeItem(at: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pill-test-\(getpid())"))
 print("ok")
 """,
+        timeout=30,
     )
-    subprocess.run([str(binary)], check=True, timeout=30)
 
 
 def test_the_app_wires_the_pill_beside_the_pet_and_never_launches_it_here() -> None:

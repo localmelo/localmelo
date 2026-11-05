@@ -6,12 +6,12 @@ does; no window is opened here (tests/test_macos_webview_integration.py has thos
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -20,28 +20,9 @@ darwin = pytest.mark.skipif(
 )
 
 
-def run_swift(tmp_path: Path, files: list[str], source: str) -> None:
-    """Compile `files` of the app with a test main (a raw string) and run it."""
-    main = tmp_path / "main.swift"
-    main.write_text("import Foundation\nimport QuartzCore\n" + source)
-    binary = tmp_path / "test-pet-desktop"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            *[str(APP / name) for name in files],
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=120,
-    )
-    subprocess.run([str(binary)], check=True, timeout=10)
+def run_swift(files: list[str], source: str) -> None:
+    """Run the raw string `source` as the test main of `files` of the app."""
+    macos_swift.run_swift(files, "import Foundation\nimport QuartzCore\n" + source)
 
 
 def test_the_panel_holds_the_moves_canvas_with_the_paws_on_its_ground_line() -> None:
@@ -76,11 +57,10 @@ def test_the_pet_is_silent_when_a_wait_starts_because_the_menu_bar_item_announce
 
 
 @darwin
-def test_the_pet_shows_only_while_the_window_is_put_away_and_a_click_goes_where_it_is_needed(
-    tmp_path: Path,
-) -> None:
+def test_the_pet_shows_only_while_the_window_is_put_away_and_a_click_goes_where_it_is_needed() -> (
+    None
+):
     run_swift(
-        tmp_path,
         ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 // The window is "in front" when it is ordered in, not minimized and the app is not hidden.
@@ -105,11 +85,8 @@ precondition(petIsClick(moved: 0) && petIsClick(moved: 3) && !petIsClick(moved: 
 
 
 @darwin
-def test_what_is_remembered_survives_a_damaged_file_and_a_changed_screen(
-    tmp_path: Path,
-) -> None:
+def test_what_is_remembered_survives_a_damaged_file_and_a_changed_screen() -> None:
     run_swift(
-        tmp_path,
         ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 func settings(_ text: String?) -> PetSettings { petSettings(text.map { Data($0.utf8) }) }
@@ -172,11 +149,8 @@ precondition(petPlacement(corner, screens: [taller])!.frame == CGRect(x: 1364, y
 
 
 @darwin
-def test_the_console_settings_may_read_and_choose_what_is_on_the_desktop(
-    tmp_path: Path,
-) -> None:
+def test_the_console_settings_may_read_and_choose_what_is_on_the_desktop() -> None:
     run_swift(
-        tmp_path,
         ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
         r"""
 precondition(desktopRequest(["action": "get"]) == .get)

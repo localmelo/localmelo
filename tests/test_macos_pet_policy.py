@@ -5,12 +5,12 @@ where its panel goes. The Swift is compiled with a test main, as tests/test_maco
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from localmelo.tests import macos_swift
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "macos/LocalMeloApp"
@@ -19,30 +19,12 @@ darwin = pytest.mark.skipif(
 )
 
 
-def run_swift(tmp_path: Path, source: str) -> None:
-    """Compile the two policy files with a test main (a raw string: it holds `\\#(` interpolations) and run it."""
-    main = tmp_path / "main.swift"
-    main.write_text("import Foundation\n" + source)
-    binary = tmp_path / "test-pet-policy"
-    subprocess.run(
-        [
-            "/usr/bin/xcrun",
-            "swiftc",
-            str(APP / "GatewayPolicy.swift"),
-            str(APP / "L10n.swift"),
-            str(APP / "PetPolicy.swift"),
-            str(main),
-            "-o",
-            str(binary),
-        ],
-        env={
-            **os.environ,
-            "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
-        },
-        check=True,
-        timeout=120,
+def run_swift(source: str) -> None:
+    """Run the raw string `source` (it holds `\\#(` interpolations) as the test main of the policy files."""
+    macos_swift.run_swift(
+        ["GatewayPolicy.swift", "L10n.swift", "PetPolicy.swift"],
+        "import Foundation\n" + source,
     )
-    subprocess.run([str(binary)], check=True, timeout=5)
 
 
 def test_the_first_window_shows_a_still_of_the_moves_at_their_canvas() -> None:
@@ -72,9 +54,8 @@ def test_the_first_window_shows_a_still_of_the_moves_at_their_canvas() -> None:
 
 
 @darwin
-def test_the_mood_follows_the_health_reply_and_the_quiet_clock(tmp_path: Path) -> None:
+def test_the_mood_follows_the_health_reply_and_the_quiet_clock() -> None:
     run_swift(
-        tmp_path,
         r"""
 func health(running: Int = 0, waiting: String = "[]", recent: String = "null") -> Data {
     Data(#"{"api":2,"status":{"running":{"chats":\#(running),"tasks":0,"runs":0,"terminal":0},"waiting":\#(waiting),"recent":\#(recent)}}"#.utf8)
@@ -164,11 +145,8 @@ precondition(startPortrait(failed: false) == "startup" && startPortrait(failed: 
 
 
 @darwin
-def test_the_pet_moves_only_when_it_may_and_its_panel_stays_on_screen(
-    tmp_path: Path,
-) -> None:
+def test_the_pet_moves_only_when_it_may_and_its_panel_stays_on_screen() -> None:
     run_swift(
-        tmp_path,
         r"""
 // The activity pill's loops stop for Reduce Motion, Low Power Mode, heat, a hidden panel and a sleeping screen.
 var env = PetEnvironment()
@@ -253,9 +231,8 @@ precondition(petFrame(size: size, spot: kept, belowPaws: below, on: small)
 
 
 @darwin
-def test_each_mood_shows_moves_or_a_still_never_both(tmp_path: Path) -> None:
+def test_each_mood_shows_moves_or_a_still_never_both() -> None:
     run_swift(
-        tmp_path,
         r"""
 let moods: [PetMood] = [.unknown, .resting, .sleeping, .working(1), .waiting, .done, .failed, .stopped, .noModel,
                         .unreachable]
