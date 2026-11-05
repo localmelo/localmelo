@@ -711,8 +711,12 @@ class TestGatewayMode:
             assert line in capsys.readouterr().out
             assert calls.read_text() == "up\n"
 
-            (melo_serve_home / "state.json").unlink()  # stopped, and not installed
-            monkeypatch.setenv("PATH", os.defpath)
+            (melo_serve_home / "state.json").unlink()  # stopped
+            script.write_text("#!/bin/sh\necho first >&2\necho last >&2\nexit 3\n")
+            from localmelo.support.melo_serve import ensure_running
+
+            assert ensure_running() == "melo_serve did not start: last"  # at once
+            monkeypatch.setenv("PATH", os.defpath)  # and not installed
             _start_gateway(cfg)
         assert "uv tool install git+https://github.com/localmelo/melo_serve" in (
             capsys.readouterr().out

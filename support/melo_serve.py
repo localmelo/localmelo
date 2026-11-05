@@ -243,7 +243,8 @@ def ensure_running(role: str = "chat") -> str:
     Running: the line names what it serves for *role*. Not running: ``melo-serve
     up`` starts it (through launchd when its login item is installed, otherwise
     detached) and returns once it is up; the state is then waited for up to
-    :data:`UP_WAIT_S`. Not installed: the line says how to install it. It never
+    :data:`UP_WAIT_S`; a non-zero exit of ``up`` returns at once with the last
+    line it printed (its stderr, else its stdout). Not installed: the line says how to install it. It never
     raises, so the gateway starts either way.
     """
     state = read_state()
@@ -254,15 +255,23 @@ def ensure_running(role: str = "chat") -> str:
     if command is None:
         return f"melo_serve is not installed: {INSTALL_HINT}"
     try:
-        subprocess.run(
+        up = subprocess.run(
             [command, "up"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
+            text=True,
+            errors="replace",
             timeout=UP_WAIT_S * 2,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return f"melo_serve did not start: {exc}"
+    if up.returncode != 0:
+        for text in (up.stderr, up.stdout):
+            lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+            if lines:
+                return f"melo_serve did not start: {lines[-1]}"
+        return f"melo_serve did not start: {COMMAND} up exited {up.returncode}"
     deadline = time.monotonic() + UP_WAIT_S
     while True:
         state = read_state()
