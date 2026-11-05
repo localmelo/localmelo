@@ -4,13 +4,11 @@ Every macOS test file compiles some of the app's Swift files with a test ``main.
 runs the result. This is the one place that does it: ``run_swift`` builds and runs,
 ``build_swift`` only builds, and ``typecheck_swift`` checks that files compile together.
 
-A build is kept for the test session in a temporary folder, by the files and the hash of the
-main source, so the same program is built once however many tests ask for it.
+Builds go to one temporary folder for the test session.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import subprocess
@@ -24,7 +22,7 @@ DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
 COMPILE_TIMEOUT_S = 300
 
 _folder: tempfile.TemporaryDirectory[str] | None = None
-_built: dict[tuple[tuple[str, ...], str], Path] = {}
+_builds = 0
 
 
 def _swiftc(*args: str) -> None:
@@ -49,27 +47,21 @@ def app_sources(*, but: str = "") -> list[Path]:
 def build_swift(
     files: Sequence[str | Path], source: str, *, to: Path | None = None
 ) -> Path:
-    """The program of *files* and the test ``main.swift`` *source*, built once per session.
+    """The program of *files* and the test ``main.swift`` *source*, built.
 
     A name in *files* is a file of the app; a path stands for itself. The binary is the
-    session's own copy unless *to* is given: then it is copied there (a program that must
+    build's own unless *to* is given: then it is copied there (a program that must
     sit at a given place, such as an app bundle's executable) and that path is returned.
     """
-    global _folder
-    key = (
-        tuple(str(file) for file in files),
-        hashlib.sha256(source.encode()).hexdigest(),
-    )
-    binary = _built.get(key)
-    if binary is None:
-        if _folder is None:
-            _folder = tempfile.TemporaryDirectory(prefix="localmelo-swift-")
-        build = Path(_folder.name) / str(len(_built))
-        build.mkdir()
-        (build / "main.swift").write_text(source, encoding="utf-8")
-        binary = build / "Test"
-        _swiftc(*_paths(files), str(build / "main.swift"), "-o", str(binary))
-        _built[key] = binary
+    global _folder, _builds
+    if _folder is None:
+        _folder = tempfile.TemporaryDirectory(prefix="localmelo-swift-")
+    _builds += 1
+    build = Path(_folder.name) / str(_builds)
+    build.mkdir()
+    (build / "main.swift").write_text(source, encoding="utf-8")
+    binary = build / "Test"
+    _swiftc(*_paths(files), str(build / "main.swift"), "-o", str(binary))
     if to is None:
         return binary
     shutil.copy2(binary, to)
