@@ -746,34 +746,34 @@ class Config:
     ) -> None:
         """Put the chat on the server at *url*, as the first run and ``/backend`` save it.
 
-        *ollama* (the server answered like Ollama) makes the chat backend
-        ``ollama``, which chats on Ollama's native API. A server whose model
-        listing named melo_serve as its owner makes it ``melo_serve`` (as the
-        oMLX spelling is known, from the listing already made), saved with no
-        model, so the config follows what melo_serve serves. Otherwise it is
-        ``vllm``, the key for any OpenAI-compatible server. With
+        The backend is :func:`~localmelo.support.backends.discovery.server_backend`'s
+        answer: ``ollama`` (*ollama*: the server answered like Ollama), which
+        chats on Ollama's native API, ``melo_serve`` or ``vllm``, the key for any
+        OpenAI-compatible server. A backend whose config names no model
+        (``model_required`` is false) is saved without one. With
         *embedding_model*, the same table's embedding URL and model are set too.
         A file's ``omlx`` spelling stays while the chat server is the same. The
         other values stay. Nothing is written to disk.
         """
         from localmelo.support.backends import discovery
+        from localmelo.support.backends.registry import get_backend
 
-        follows = not ollama and discovery.is_melo_serve(url)
-        backend = "ollama" if ollama else "melo_serve" if follows else "vllm"
+        backend = discovery.server_backend(url, ollama=ollama)
         if (
             backend != "vllm"
             or self.chat_backend != "vllm"
             or self.vllm.chat_url != url
         ):
             self.chat_alias = ""  # the file's "omlx" named another server
+        named = get_backend(backend).model_required
         self.chat_backend = backend
         section = getattr(self, backend)
-        section.chat_url, section.chat_model = url, "" if follows else model
+        section.chat_url, section.chat_model = url, model if named else ""
         if embedding_model is not None:
             self.embedding_alias = ""
             self.embedding_backend = backend
             section.embedding_url = url
-            section.embedding_model = "" if follows else embedding_model
+            section.embedding_model = embedding_model if named else ""
 
     def validate(self) -> list[str]:
         """Return a list of validation errors. Empty list means valid.
