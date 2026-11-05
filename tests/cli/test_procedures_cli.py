@@ -25,8 +25,8 @@ import pytest
 from localmelo.melo.memory.procedures.normalize import key_for_query
 from localmelo.melo.memory.procedures.store import RunFacts, SqliteProcedures
 from localmelo.melo.memory.procedures.trace import Segment
-from localmelo.melo.memory.retrieval import RawCall
 from localmelo.melo.schema import ToolCall, ToolResult
+from localmelo.support.memory.retrieval_corpus import RawCall
 from localmelo.support.procedures import main
 from localmelo.tests.memory.history_fixture import write_history_sync
 

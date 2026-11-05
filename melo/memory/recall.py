@@ -24,12 +24,11 @@ from localmelo.melo.memory.notes import (
     DRAFT_SHOWN_CHARS,
     RECALL_END,
     RECALL_START,
-    _shorten,
     path_spans,
 )
 from localmelo.melo.memory.retrieval.base import DOC_KINDS, Doc
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message, ToolDef, shorten
 
 RetrieverMode = Literal["auto", "off", "bm25", "llm", "embedding"]
 RecallPlacement = Literal["tool", "message"]
@@ -311,20 +310,20 @@ def build_step_query(
             if name not in names:
                 names.append(name)
     if not names:
-        return _shorten(head, RECALL_QUERY_CHARS)
+        return shorten(head, RECALL_QUERY_CHARS)
     # Reserve at most half the query for the names, so a long command cannot
     # shrink the note's head to nothing.
-    name_text = _shorten(" ".join(names), RECALL_QUERY_CHARS // 2)
+    name_text = shorten(" ".join(names), RECALL_QUERY_CHARS // 2)
     if not head:
         return name_text
     room = max(RECALL_QUERY_CHARS - len(name_text) - 1, 1)
-    head = _shorten(head, room)
+    head = shorten(head, room)
     return f"{head} {name_text}"[:RECALL_QUERY_CHARS]
 
 
 def build_start_query(query: str) -> str:
     """The start trigger's query: the task text, cut to the cap."""
-    return _shorten(" ".join(query.split()), RECALL_QUERY_CHARS)
+    return shorten(" ".join(query.split()), RECALL_QUERY_CHARS)
 
 
 def build_attempt_query(
@@ -353,7 +352,7 @@ def build_attempt_query(
     if not parts:
         head = " ".join(part for part in (failure_type, fallback) if part).strip()
         parts.append(head or failure_type or fallback)
-    return _shorten(" · ".join(part for part in parts if part), RECALL_QUERY_CHARS)
+    return shorten(" · ".join(part for part in parts if part), RECALL_QUERY_CHARS)
 
 
 # ── Documents from the stores ──
@@ -698,7 +697,7 @@ def _cap_text(kind: str, text: str) -> str:
         return text
     if kind == "draft":
         return _cut_lines(text, limit)
-    return _shorten(text, limit)
+    return shorten(text, limit)
 
 
 def _cut_lines(text: str, limit: int) -> str:

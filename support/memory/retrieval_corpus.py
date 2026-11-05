@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from localmelo.melo.agent.agent import _read_reflection
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
 from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS
 from localmelo.melo.memory.notes import (
@@ -39,8 +40,6 @@ from localmelo.melo.memory.notes import (
     NOTE_PLAN_CHARS,
     Draft,
     ReasoningNote,
-    _collapse,
-    _shorten,
     draft_title,
     extract_draft,
     mark_drafts_written,
@@ -51,16 +50,18 @@ from localmelo.melo.memory.notes import (
     thought_chunks,
 )
 from localmelo.melo.memory.retrieval.base import DOC_KINDS, Doc, int_step
-from localmelo.melo.memory.retrieval.evaluate import LabelledQuery
-from localmelo.melo.memory.retrieval.llm import _strip_code_fences
-from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall, ToolResult
+from localmelo.melo.schema import (
+    RAW_ARGUMENTS_KEY,
+    ToolCall,
+    ToolResult,
+    collapse,
+    shorten,
+)
+from localmelo.support.memory.retrieval_eval import LabelledQuery
 
 # The call kinds, shared with the agent that records them in llm_calls.
 CALL_KINDS = LLM_REQUEST_KINDS
 
-# The decisions a reflection may recommend: a copy of REFLECTION_ACTIONS in
-# melo/agent/agent.py (see _find_reflection below).
-REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
 CALL_OUTCOMES = ("tools", "answer", "empty", "aux")
 
 # The note kind of a planning call, by its outcome.
@@ -175,7 +176,7 @@ def load_queries(lines: Iterable[str], corpus: Sequence[Doc]) -> list[LabelledQu
     is short for ``<scope.task_id>:<id>``, and an error without a
     ``task_id``. Every relevant id must be in *corpus* and a candidate of
     its query (see
-    :meth:`~localmelo.melo.memory.retrieval.evaluate.LabelledQuery.candidates`),
+    :meth:`~localmelo.support.memory.retrieval_eval.LabelledQuery.candidates`),
     and none may be in ``exclude_ids``. A relevant id given twice counts
     once.
     """
@@ -280,8 +281,9 @@ def docs_from_calls(calls: Iterable[RawCall]) -> list[Doc]:
       a file named before them, else ``recent_path``), titled
       ``<target or "no target">, <lines> lines: <first code line>``.
     - A ``reflect`` call gives a reflection, ``<task_id>:r<seq>``, built
-      as a note of kind ``reflection``, when its reply holds one (see
-      :func:`_find_reflection`), and no draft.
+      as a note of kind ``reflection``, when its reply holds one as a run
+      reads it (see :func:`~localmelo.melo.agent.agent._read_reflection`,
+      which repairs a small JSON slip), and no draft.
     - Both then give the thought chunks of the reasoning,
       ``<task_id>:t<seq>.<i>`` with i from 1.
     - ``retrieve`` and ``estimate`` calls give nothing.
@@ -335,7 +337,8 @@ def _task_docs(calls: Sequence[RawCall]) -> list[Doc]:
         }
         if call.kind in ("plan", "reflect"):
             reflection = call.kind == "reflect"
-            found = _find_reflection(call.content) if reflection else None
+            read = _read_reflection(call.content) if reflection else None
+            found = None if read is None else read[0]
             note, rest = note_from_reply(
                 call.content,
                 call.thinking,
@@ -466,65 +469,6 @@ def _recent_path(call: RawCall, recent_path: str) -> str:
 
 
 # ── Reflections ──
-#
-# The test of a reflect reply: copies of _json_values and _find_reflection in
-# melo/agent/agent.py (lines 105-193 at c295ce2), with REFLECTION_ACTIONS
-# above and _strip_code_fences from llm.py, itself a copy. melo/memory does
-# not import melo.agent; a parity test holds the copies to the originals
-# until R5 moves the test to one place.
-
-
-def _json_values(text: str) -> Iterator[object]:
-    """The JSON values of a reflect reply, in the order they are read.
-
-    A Markdown code fence around the reply is stripped first. When the
-    rest is JSON as a whole, that value is the only one. Otherwise each
-    balanced ``{...}`` in it that parses as a JSON object is one. After a
-    ``{`` that does not start one, the search goes on from where the
-    decoder gave up, and after an object, from its end. Nesting deeper
-    than the decoder's recursion limit ends the search.
-    """
-    body = _strip_code_fences(text)
-    try:
-        value = json.loads(body)
-    except (ValueError, RecursionError):
-        pass
-    else:
-        yield value
-        return
-    decoder = json.JSONDecoder()
-    start = body.find("{")
-    while start != -1:
-        try:
-            value, end = decoder.raw_decode(body, start)
-        except json.JSONDecodeError as exc:
-            start = body.find("{", max(exc.pos, start + 1))
-            continue
-        except RecursionError:
-            return
-        yield value
-        start = body.find("{", end)
-
-
-def _find_reflection(text: str) -> dict[str, Any] | None:
-    """The reflection a reflect reply holds, or ``None``.
-
-    That is the first JSON value of the reply (see :func:`_json_values`)
-    that is an object whose ``recommended_action``, as a string, is one of
-    :data:`REFLECTION_ACTIONS`. An object without one is passed over for
-    the objects after it, but an object nested inside it is not looked at.
-    JSON that is not an object holds no reflection.
-    """
-    try:
-        for value in _json_values(text):
-            if not isinstance(value, dict):
-                continue
-            action = value.get("recommended_action")
-            if ("" if action is None else str(action)) in REFLECTION_ACTIONS:
-                return value
-    except ValueError:  # a number the decoder cannot convert ends the search
-        pass
-    return None
 
 
 def _reflection_note(reflection: Mapping[str, Any]) -> ReasoningNote:
@@ -543,18 +487,18 @@ def _reflection_note(reflection: Mapping[str, Any]) -> ReasoningNote:
         value = reflection.get(key)
         if not isinstance(value, list):
             return []
-        texts = (_collapse(item) for item in value if isinstance(item, str))
-        return [_shorten(prefix + text, NOTE_ITEM_CHARS) for text in texts if text]
+        texts = (collapse(item) for item in value if isinstance(item, str))
+        return [shorten(prefix + text, NOTE_ITEM_CHARS) for text in texts if text]
 
-    # _find_reflection admits only a recommended_action in REFLECTION_ACTIONS.
+    # _read_reflection admits only a valid recommended_action.
     plan = str(reflection.get("recommended_action"))
     summary = reflection.get("summary")
-    if isinstance(summary, str) and _collapse(summary):
-        plan = f"{plan}: {_collapse(summary)}"
+    if isinstance(summary, str) and collapse(summary):
+        plan = f"{plan}: {collapse(summary)}"
     return ReasoningNote(
         kind="reflection",
         source="model",
-        plan=_shorten(plan, NOTE_PLAN_CHARS),
+        plan=shorten(plan, NOTE_PLAN_CHARS),
         found=items("useful_evidence")[:4],
         decided=items("next_promising_directions", "next: ")[:3],
         hypotheses=[

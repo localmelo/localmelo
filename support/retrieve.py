@@ -50,28 +50,30 @@ from localmelo.melo.memory.long.sqlite import (
 )
 from localmelo.melo.memory.retrieval import (
     RETRIEVER_NAMES,
-    CorpusError,
     Doc,
-    EvalReport,
-    LabelledQuery,
-    RawCall,
     Retriever,
     build_retriever,
-    doc_to_dict,
-    docs_from_calls,
-    evaluate,
-    load_corpus,
-    load_queries,
-    load_raw_calls,
     send_from_provider,
-)
-from localmelo.melo.memory.retrieval.corpus import (
-    SQLITE_HEADER,
-    NoCallsTableError,
-    load_history_calls,
 )
 from localmelo.melo.memory.retrieval.llm import RETRIEVE_TIMEOUT_S
 from localmelo.melo.schema import new_record_id
+from localmelo.support.memory.retrieval_corpus import (
+    SQLITE_HEADER,
+    CorpusError,
+    NoCallsTableError,
+    RawCall,
+    doc_to_dict,
+    docs_from_calls,
+    load_corpus,
+    load_history_calls,
+    load_queries,
+    load_raw_calls,
+)
+from localmelo.support.memory.retrieval_eval import (
+    EvalReport,
+    LabelledQuery,
+    evaluate,
+)
 from localmelo.support.providers._http import attempt_headers, post_json
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm._protocol import prepare_extra_body

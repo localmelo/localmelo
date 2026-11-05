@@ -560,7 +560,7 @@ def _connect_read_only(path: Path, immutable: bool) -> sqlite3.Connection:
     """A read-only connection to *path* that never writes the database.
 
     The twin of ``load_history_calls()`` in
-    ``melo/memory/retrieval/corpus.py`` (R3); kept apart because S1
+    ``support/memory/retrieval_corpus.py`` (R3); kept apart because S1
     imports nothing from ``melo/`` (spec Requirement 8), and the two may
     merge in a follow-up. ``immutable=1`` reads the main file alone and
     creates no ``-wal`` or ``-shm``; with a ``-wal`` file, plain
