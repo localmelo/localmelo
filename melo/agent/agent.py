@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -11,7 +12,15 @@ import logging
 import os
 import sqlite3
 import time
-from collections.abc import Callable, Collection, Coroutine, Iterable, Mapping, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Coroutine,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from typing import TYPE_CHECKING, Any, Literal
 
 from localmelo.melo.agent._answer_format import (
@@ -3534,6 +3543,46 @@ class Agent(_RecallLoop, _NotesLoop):
         outcome = await self.run_task(query)
         return outcome.result or f"[{outcome.status}] {outcome.error}"
 
+    @contextlib.contextmanager
+    def _run_scope(self, run: _RunState, task_id: str) -> Iterator[None]:
+        """Set the context variables that one run's requests and tools read.
+
+        ``PREFIX_RUN`` (the date line of the fixed prefix), ``BUDGET_ACCOUNTING``
+        and ``BUDGET_HOOK`` (the context budget), ``RETRY_HOOK`` (the retry
+        notices, only with a sink), ``CALL_RECORDER`` and ``RECALL_RUN`` (the run
+        a ``recall`` tool call belongs to). Leaving the scope, also when the run
+        raises, resets them in the order ``PREFIX_RUN``, ``BUDGET_HOOK``,
+        ``BUDGET_ACCOUNTING``, ``RETRY_HOOK``, ``CALL_RECORDER``, ``RECALL_RUN``.
+        """
+        prefix_run = self.chat.begin_prefix()
+        budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
+        budget_hook = BUDGET_HOOK.set(
+            (self.chat, run.events.context_budget)
+            if self.options.context_window is not None
+            else None
+        )
+        # The retry notices of this run's model requests; only with a sink.
+        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
+        # Every response of this run's model requests becomes a row of
+        # history's llm_calls table, when the history keeps model calls,
+        # with or without a sink. Read at each run, so a history set after
+        # the Agent was built records too.
+        history = self.hippo.history
+        recorder = CALL_RECORDER.set(
+            CallLog(history, task_id, run) if isinstance(history, CallHistory) else None
+        )
+        recall_run = RECALL_RUN.set(run)
+        try:
+            yield
+        finally:
+            PREFIX_RUN.reset(prefix_run)
+            BUDGET_HOOK.reset(budget_hook)
+            BUDGET_ACCOUNTING.reset(budget_accounting)
+            if retries is not None:
+                RETRY_HOOK.reset(retries)
+            CALL_RECORDER.reset(recorder)
+            RECALL_RUN.reset(recall_run)
+
     async def run_task(
         self,
         query: str,
@@ -3843,221 +3892,204 @@ class Agent(_RecallLoop, _NotesLoop):
             )
         if chat_started is not None:
             self._reviewer.since = chat_started
-        prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
-        budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
-        budget_hook = BUDGET_HOOK.set(
-            (self.chat, run.events.context_budget)
-            if self.options.context_window is not None
-            else None
-        )
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
-        # The retry notices of this run's model requests; only with a sink.
-        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
-        # Every response of this run's model requests becomes a row of
-        # history's llm_calls table, when the history keeps model calls,
-        # with or without a sink. Read at each run, so a history set after
-        # the Agent was built records too.
-        history = self.hippo.history
-        recorder = CALL_RECORDER.set(
-            CallLog(history, task.task_id, run)
-            if isinstance(history, CallHistory)
-            else None
-        )
-        recall_run = RECALL_RUN.set(run)
-        self._active_runs += 1
-        try:
-            run.events.run_started(
-                query,
-                max_steps=self.options.max_steps,
-                workspace_root=self.executor.workspace_root,
-                approval=approval is not None,
-            )
+        with self._run_scope(run, task.task_id):
+            self._active_runs += 1
             try:
-                if run.inbox is not None:
-                    run.inbox.validate(self.executor.workspace_root or os.getcwd())
-                if run.brief:
-                    assert self.options.brief_probe is not None
-                    run.workspace_digest = await asyncio.to_thread(
-                        self.options.brief_probe, self._workspace_for_brief()
-                    )
-                    run.step_digest = run.workspace_digest
-                    run.check_digest = run.workspace_digest
-                    self.hippo.working.on_drop = lambda gone: self._note_dropped(
-                        run, gone
-                    )
-                    if self.options.brief_items:
-                        run.items = parse_items(query)
-                        if run.items:
-                            run.items_baseline = await asyncio.to_thread(
-                                workspace_stamps, self._workspace_for_brief()
-                            )
-                if self.options.brief_check is not None:
-                    run.check_commands = check_commands(query)
-                async with deadline:
-                    try:
-                        await self._look_up(run, query)
-                    finally:
-                        # Also when a timeout or a stop cuts the lookup
-                        # short: the first run.progress follows run.started.
-                        run.report_progress()
-                    await self.hippo.save_task(task)
-                    try:
-                        await self._ensure_tools()
-                    except Exception as exc:
-                        raise _ToolSetupError(str(exc) or exception_text(exc)) from exc
-                    query_msg = Message(
-                        role="user",
-                        content=query,
-                        images=self._tool_images.keep_user(pictures),
-                    )
-                    run.window_had_turns = any(
-                        msg.role != "system" for msg in self.hippo.working.get_window()
-                    )
-                    self.hippo.working.append(query_msg)
-                    run.task_query_msg = query_msg
-                    run.query_in_memory = True
-                    if self.options.reasoning != "legacy" and from_person:
-                        # Only the user's own text gives a user signal: a
-                        # direct statement is admitted at once, while the
-                        # fact a remember request carries is staged and
-                        # admitted with the digest at flush. A query the
-                        # person did not write gives none.
-                        signals = classify_user_text(query)
-                        for candidate in user_candidates(
-                            query,
-                            task_id=run.task_id,
-                            provenance={
-                                "task_text": run.task_text[:300],
-                                "source_ids": [],
-                            },
-                        ):
-                            checked = self._checked_candidate_text(
-                                candidate.text, "user", run
-                            )
-                            if checked is None:
-                                continue
-                            candidate.text = checked
-                            self.hippo.propose(candidate)
-                            decisions = await self.hippo.admit(
-                                candidate.candidate_id, "user_statement"
-                            )
-                            self._drain_decisions(decisions, run)
-                        for candidate in request_candidates(
-                            query,
-                            task_id=run.task_id,
-                            provenance={
-                                "task_text": run.task_text[:300],
-                                "source_ids": [],
-                            },
-                        ):
-                            checked = self._checked_candidate_text(
-                                candidate.text, "user", run
-                            )
-                            if checked is None:
-                                continue
-                            candidate.text = checked
-                            self.hippo.propose(candidate)
-                        run.remember_request = signals.remember
-                    await self._run_attempts(task, query, run)
-                    if self.options.answer_on_stop:
-                        await self._answer_on_stop(task, run)
-                        await self._restore_closing_line(task, run)
-                    self._keep_best_effort(run)
-            except _ToolSetupError as exc:
-                # Reported in the result, not a crash: no traceback.
-                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
-                run.end("setup_error", error=str(exc))
-            except InboxError as exc:
-                # An inbox that became unreadable mid-run is a setup failure,
-                # not a crash: report its message without a class prefix.
-                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
-                run.end("setup_error", error=str(exc))
-            except ContextFitError as exc:
-                run.end("context_budget_exceeded", error=str(exc))
-            except ProviderError as exc:
-                # Reported in the result, not a crash: no traceback.
-                logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-                error = str(exc) or exception_text(exc)
-                if self._refused_pictures(exc):
-                    error = PICTURES_REFUSED_ERROR
-                run.end("provider_error", error=error)
-            except Exception as exc:
-                if (
-                    isinstance(exc, TimeoutError)
-                    and timeout_s is not None
-                    and deadline.expired()
-                ):
-                    # This run's own deadline; any other TimeoutError is a crash.
-                    logger.info("Task %s timed out after %g s", task.task_id, timeout_s)
-                    run.end("timeout", error=f"Timed out after {timeout_s:g} s")
-                else:
-                    logger.exception("Task %s crashed", task.task_id)
-                    run.end("crashed", error=exception_text(exc))
-            except BaseException as exc:
-                if run.interactive and is_cancellation(exc):
-                    # A caller stopped a run that it follows.
-                    await self._on_cancelled(query, run, exc)
-                else:
-                    if (
-                        isinstance(exc, asyncio.CancelledError)
-                        and self._exit is not None
-                    ):
-                        error = self._exit.reason  # cancelled for an exit
-                    else:
-                        error = exception_text(exc)
-                    run.end("crashed", error=error)
-                raise
-            finally:
-                if run.running:
-                    # Every path above ends the run; this keeps the record
-                    # terminal should a later change miss one.
-                    run.end("crashed", error="The run ended without a status")
-                self._record_answer(run)
-                if run.status == "cancelled":
-                    # Only _on_cancelled ends a run so. Its finalizer saves the
-                    # run and reports run.finished, in place of the lines below.
-                    await self._finalize_in_task(task, run, stats, started)
-                else:
-                    try:
-                        if self._exit is not None:
-                            await self._finish_task_for_exit(task, run, self._exit)
-                        else:
-                            try:
-                                await self._finish_task(task, run)
-                            except asyncio.CancelledError:
-                                # An exit that began during the final save
-                                # cancelled it, perhaps before it was committed:
-                                # save again, within the exit's time.
-                                if self._exit is None:
-                                    raise
-                                await self._finish_task_for_exit(task, run, self._exit)
-                                raise
-                    finally:
-                        # Built here, so that run.finished carries it on every
-                        # path, also when run_task raises.
-                        outcome = self._run_result(
-                            task, run, stats, time.perf_counter() - started
+                run.events.run_started(
+                    query,
+                    max_steps=self.options.max_steps,
+                    workspace_root=self.executor.workspace_root,
+                    approval=approval is not None,
+                )
+                try:
+                    if run.inbox is not None:
+                        run.inbox.validate(self.executor.workspace_root or os.getcwd())
+                    if run.brief:
+                        assert self.options.brief_probe is not None
+                        run.workspace_digest = await asyncio.to_thread(
+                            self.options.brief_probe, self._workspace_for_brief()
                         )
-                        run.outcome = outcome
-                        run.report_progress(ended=run.status)
-                        run.events.run_finished(outcome, _reviews_of(run))
-            await self._learn(run, query, outcome)
-            return outcome
-        finally:
-            if run.brief:
-                self.hippo.working.on_drop = None
-            PREFIX_RUN.reset(prefix_run)
-            BUDGET_HOOK.reset(budget_hook)
-            BUDGET_ACCOUNTING.reset(budget_accounting)
-            if run.finalizer is None:
-                # Else the finalizer counts the run out when it ends.
-                self._active_runs -= 1
-            if retries is not None:
-                RETRY_HOOK.reset(retries)
-            CALL_RECORDER.reset(recorder)
-            RECALL_RUN.reset(recall_run)
+                        run.step_digest = run.workspace_digest
+                        run.check_digest = run.workspace_digest
+                        self.hippo.working.on_drop = lambda gone: self._note_dropped(
+                            run, gone
+                        )
+                        if self.options.brief_items:
+                            run.items = parse_items(query)
+                            if run.items:
+                                run.items_baseline = await asyncio.to_thread(
+                                    workspace_stamps, self._workspace_for_brief()
+                                )
+                    if self.options.brief_check is not None:
+                        run.check_commands = check_commands(query)
+                    async with deadline:
+                        try:
+                            await self._look_up(run, query)
+                        finally:
+                            # Also when a timeout or a stop cuts the lookup
+                            # short: the first run.progress follows run.started.
+                            run.report_progress()
+                        await self.hippo.save_task(task)
+                        try:
+                            await self._ensure_tools()
+                        except Exception as exc:
+                            raise _ToolSetupError(
+                                str(exc) or exception_text(exc)
+                            ) from exc
+                        query_msg = Message(
+                            role="user",
+                            content=query,
+                            images=self._tool_images.keep_user(pictures),
+                        )
+                        run.window_had_turns = any(
+                            msg.role != "system"
+                            for msg in self.hippo.working.get_window()
+                        )
+                        self.hippo.working.append(query_msg)
+                        run.task_query_msg = query_msg
+                        run.query_in_memory = True
+                        if self.options.reasoning != "legacy" and from_person:
+                            # Only the user's own text gives a user signal: a
+                            # direct statement is admitted at once, while the
+                            # fact a remember request carries is staged and
+                            # admitted with the digest at flush. A query the
+                            # person did not write gives none.
+                            signals = classify_user_text(query)
+                            for candidate in user_candidates(
+                                query,
+                                task_id=run.task_id,
+                                provenance={
+                                    "task_text": run.task_text[:300],
+                                    "source_ids": [],
+                                },
+                            ):
+                                checked = self._checked_candidate_text(
+                                    candidate.text, "user", run
+                                )
+                                if checked is None:
+                                    continue
+                                candidate.text = checked
+                                self.hippo.propose(candidate)
+                                decisions = await self.hippo.admit(
+                                    candidate.candidate_id, "user_statement"
+                                )
+                                self._drain_decisions(decisions, run)
+                            for candidate in request_candidates(
+                                query,
+                                task_id=run.task_id,
+                                provenance={
+                                    "task_text": run.task_text[:300],
+                                    "source_ids": [],
+                                },
+                            ):
+                                checked = self._checked_candidate_text(
+                                    candidate.text, "user", run
+                                )
+                                if checked is None:
+                                    continue
+                                candidate.text = checked
+                                self.hippo.propose(candidate)
+                            run.remember_request = signals.remember
+                        await self._run_attempts(task, query, run)
+                        if self.options.answer_on_stop:
+                            await self._answer_on_stop(task, run)
+                            await self._restore_closing_line(task, run)
+                        self._keep_best_effort(run)
+                except _ToolSetupError as exc:
+                    # Reported in the result, not a crash: no traceback.
+                    logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                    run.end("setup_error", error=str(exc))
+                except InboxError as exc:
+                    # An inbox that became unreadable mid-run is a setup failure,
+                    # not a crash: report its message without a class prefix.
+                    logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                    run.end("setup_error", error=str(exc))
+                except ContextFitError as exc:
+                    run.end("context_budget_exceeded", error=str(exc))
+                except ProviderError as exc:
+                    # Reported in the result, not a crash: no traceback.
+                    logger.info(
+                        "Task %s ended with provider_error: %s", task.task_id, exc
+                    )
+                    error = str(exc) or exception_text(exc)
+                    if self._refused_pictures(exc):
+                        error = PICTURES_REFUSED_ERROR
+                    run.end("provider_error", error=error)
+                except Exception as exc:
+                    if (
+                        isinstance(exc, TimeoutError)
+                        and timeout_s is not None
+                        and deadline.expired()
+                    ):
+                        # This run's own deadline; any other TimeoutError is a crash.
+                        logger.info(
+                            "Task %s timed out after %g s", task.task_id, timeout_s
+                        )
+                        run.end("timeout", error=f"Timed out after {timeout_s:g} s")
+                    else:
+                        logger.exception("Task %s crashed", task.task_id)
+                        run.end("crashed", error=exception_text(exc))
+                except BaseException as exc:
+                    if run.interactive and is_cancellation(exc):
+                        # A caller stopped a run that it follows.
+                        await self._on_cancelled(query, run, exc)
+                    else:
+                        if (
+                            isinstance(exc, asyncio.CancelledError)
+                            and self._exit is not None
+                        ):
+                            error = self._exit.reason  # cancelled for an exit
+                        else:
+                            error = exception_text(exc)
+                        run.end("crashed", error=error)
+                    raise
+                finally:
+                    if run.running:
+                        # Every path above ends the run; this keeps the record
+                        # terminal should a later change miss one.
+                        run.end("crashed", error="The run ended without a status")
+                    self._record_answer(run)
+                    if run.status == "cancelled":
+                        # Only _on_cancelled ends a run so. Its finalizer saves the
+                        # run and reports run.finished, in place of the lines below.
+                        await self._finalize_in_task(task, run, stats, started)
+                    else:
+                        try:
+                            if self._exit is not None:
+                                await self._finish_task_for_exit(task, run, self._exit)
+                            else:
+                                try:
+                                    await self._finish_task(task, run)
+                                except asyncio.CancelledError:
+                                    # An exit that began during the final save
+                                    # cancelled it, perhaps before it was committed:
+                                    # save again, within the exit's time.
+                                    if self._exit is None:
+                                        raise
+                                    await self._finish_task_for_exit(
+                                        task, run, self._exit
+                                    )
+                                    raise
+                        finally:
+                            # Built here, so that run.finished carries it on every
+                            # path, also when run_task raises.
+                            outcome = self._run_result(
+                                task, run, stats, time.perf_counter() - started
+                            )
+                            run.outcome = outcome
+                            run.report_progress(ended=run.status)
+                            run.events.run_finished(outcome, _reviews_of(run))
+                await self._learn(run, query, outcome)
+                return outcome
+            finally:
+                if run.brief:
+                    self.hippo.working.on_drop = None
+                if run.finalizer is None:
+                    # Else the finalizer counts the run out when it ends.
+                    self._active_runs -= 1
 
     # ── Procedural memory ──
 
