@@ -515,7 +515,6 @@ async def test_a_load_is_a_wait_that_stop_and_time_end(
     retry_after, then follows the 409 of the model served. Stop ends the wait at once;
     past the bound the error stands, and is not retried again."""
     import asyncio
-    import time
 
     import httpx
 
@@ -523,7 +522,7 @@ async def test_a_load_is_a_wait_that_stop_and_time_end(
     from localmelo.melo.schema import Message
     from localmelo.support.providers.llm import openai_compat
 
-    loading = {"left": 2}
+    loading = {"left": 2, "retry_after": 0.01}
     asked: list[str] = []
 
     def serve(request: httpx.Request) -> httpx.Response:
@@ -531,7 +530,7 @@ async def test_a_load_is_a_wait_that_stop_and_time_end(
         asked.append(model)
         if loading["left"]:
             loading["left"] -= 1
-            error = {"type": "switching", "message": "wait", "retry_after": 0.01}
+            error = {"type": "switching", "message": "wait", **loading}
             return httpx.Response(503, json={"error": error})
         if model == "old":
             error = {"type": "model_switched", "message": "no", "current": "new"}
@@ -547,15 +546,16 @@ async def test_a_load_is_a_wait_that_stop_and_time_end(
         assert (await llm.chat(hi)).content == "new here"
         assert asked == ["old", "old", "old", "new"]
 
-        loading["left"] = 1000  # a load that does not end
+        loading.update(left=1000, retry_after=600)  # a load that does not end
         task = asyncio.create_task(llm.chat(hi))
-        await asyncio.sleep(0.05)
-        started = time.monotonic()
+        while len(asked) == 4:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.01)  # now in its wait of ten minutes
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
-        assert time.monotonic() - started < 0.05
+            await asyncio.wait_for(task, 10)
 
+        loading["retry_after"] = 0.01
         monkeypatch.setattr(openai_compat, "SWITCH_WAIT_S", 0.15)
         with pytest.raises(ProviderError) as ended:
             async for _ in llm.stream_chat(hi):
