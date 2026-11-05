@@ -139,7 +139,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const answerBox = doc.createElement('section');
   answerBox.className = 'task-answer';
   const {nodes: liveNodes, result: liveResult, ...follow} = liveOptions ?? {};
-  const live = liveOptions ? taskLive({api, changed: drawLive, statusRow, doc, ...follow}) : null;
+  const live = liveOptions ? taskLive({api, changed: drawLive, statusRow, ...follow}) : null;
 
   function node(tag, text, className) {
     const element = doc.createElement(tag);

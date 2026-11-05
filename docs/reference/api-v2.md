@@ -1288,7 +1288,9 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   the chat's card. With none open, Auto blocks the step at once, as for a
   script that reads the stream without `watch`. A card nobody answers within
   1 minute, or whose last viewer is gone for 5 seconds, is declined:
-  `approval.resolved` with `outcome` `denied` and `origin` `timeout`.
+  `approval.resolved` with `outcome` `denied` and `origin` `timeout`. The
+  console keeps its stream open while its page is hidden, so a hidden page
+  still counts as a viewer.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it

@@ -46,6 +46,7 @@ import {
   declinedLine,
   declinedStep,
   dropNote,
+  followEvents,
   formatBytes,
   formatDuration,
   formatPast,
@@ -80,7 +81,6 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const KEY = "localmelo-console";
-const STREAM_DELAYS_S = [1, 2, 4, 8, 16, 30];
 const PRESENCE_MS = 2500;
 const LIST_POLL_MS = 4000;
 const BROWSER_HIDDEN_MS = 20000;
@@ -105,7 +105,7 @@ const S = {
   outbox: {},
   media: {}, // The pictures and files waiting in the composer of each chat that is not open, by slot.
   cancelling: new Set(),
-  stream: { source: null, sessionId: null, status: "idle", attempt: 0, retryAt: 0, timer: null },
+  stream: null, // The follower of the open chat's events (`followEvents`), while there is one.
   view: null,
   online: true,
   levelsOpen: false,
@@ -880,61 +880,56 @@ function newChat({ saveCurrent = true } = {}) {
 
 // ── The event stream ──
 
-// `watch=true`: this page shows the chat to the person, so a step Auto stops
-// asks on the card while it is open (#465).
-function eventsUrl(id) {
-  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}&watch=true`;
-}
+// How every view of this page follows events (`followEvents`): its EventSource and its timers.
+const followOptions = {
+  open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
+  schedule: (fn, ms) => setTimeout(fn, ms),
+  cancel: (id) => clearTimeout(id),
+};
 
 function startStream(id) {
   // A chat opened and then left before its load finished keeps no stream:
   // one bound to this id would ignore every frame of the chat now open.
-  if (!S.authenticated || S.activeId !== id || workerMode) return;
+  if (!S.authenticated || S.activeId !== id || workerMode || !S.view) return;
   closeStream();
   chatStatus.follow(id);
   browser.follow(id);
-  if (typeof EventSource !== "function") return;
-  S.stream.sessionId = id;
-  const source = new EventSource(eventsUrl(id));
-  S.stream.source = source;
-  S.stream.status = "live";
-  source.onmessage = (message) => {
-    if (S.activeId !== id || !S.view) return;
-    let frame;
-    try {
-      frame = JSON.parse(message.data);
-    } catch {
-      return;
-    }
-    applyOutcome(applyEvent(S.view, frame));
-    // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
-    if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
-    if (frame.type === "attention.card") holdOrShow(S.view, frame);
-    if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
-    if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
-    if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
-    noteFrame(frame);
-    browser.note(frame);
-    chatStatus.bump();
-    renderMessages(false);
-    syncUI();
-  };
-  source.onopen = () => {
-    S.stream.status = "live";
-    S.stream.attempt = 0;
-    S.stream.retryAt = 0;
-    if (S.noticeKind === "stream") notify("");
-    syncUI();
-  };
-  source.onerror = () => {
-    if (!S.authenticated || S.stream.source !== source || S.activeId !== id || S.view === null) return;
-    // EventSource cannot expose a 401. Stop its automatic retry and check
-    // authentication before opening another stream.
-    source.close();
-    S.stream.status = "paused";
-    scheduleReconnect();
-    refreshStreamNotice();
-  };
+  S.stream = followEvents({
+    ...followOptions,
+    id,
+    view: S.view,
+    // This page shows the chat to the person, so a step Auto stops asks on the card while it is open (#465).
+    watch: true,
+    onFrame: (frame, outcome) => {
+      applyOutcome(outcome);
+      // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
+      if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
+      if (frame.type === "attention.card") holdOrShow(S.view, frame);
+      if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
+      if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
+      if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
+      noteFrame(frame);
+      browser.note(frame);
+      chatStatus.bump();
+      renderMessages(false);
+      syncUI();
+    },
+    onStatus: refreshStreamNotice,
+    // The chat may be gone (closed in another tab, or the gateway restarted):
+    // a stream reopened on it would only 404 for ever. A 401 locks the page
+    // (`api`), which closes the stream.
+    onEnd: async () => {
+      try {
+        await api(`/sessions/${encodeURIComponent(id)}`);
+      } catch (error) {
+        if (error.status === 404 && S.activeId === id) {
+          forgetSession(id);
+          notify(t("chat.expired"), { sticky: true });
+          return false;
+        }
+      }
+    },
+  });
 }
 
 async function refreshApproval(id, requestId) {
@@ -953,47 +948,8 @@ async function refreshApproval(id, requestId) {
 
 function closeStream() {
   chatStatus.clear();
-  if (S.stream.source) {
-    try {
-      S.stream.source.close();
-    } catch {
-      /* A closed source is fine. */
-    }
-  }
-  S.stream.source = null;
-  S.stream.sessionId = null;
-  S.stream.status = "idle";
-  S.stream.retryAt = 0;
-  if (S.stream.timer !== null) {
-    clearTimeout(S.stream.timer);
-    S.stream.timer = null;
-  }
-  if (S.noticeKind === "stream") notify("");
-}
-
-function scheduleReconnect() {
-  const id = S.activeId;
-  if (!S.authenticated || !id || S.stream.timer !== null) return;
-  const delay = STREAM_DELAYS_S[Math.min(S.stream.attempt, STREAM_DELAYS_S.length - 1)];
-  S.stream.attempt += 1;
-  S.stream.retryAt = nowSeconds() + delay;
-  S.stream.timer = setTimeout(async () => {
-    S.stream.timer = null;
-    if (S.activeId !== id) return;
-    // The chat may be gone (closed in another tab, or the gateway
-    // restarted): a stream reopened on it would only 404 for ever.
-    try {
-      await api(`/sessions/${encodeURIComponent(id)}`);
-    } catch (error) {
-      if (error.status === 404) {
-        forgetSession(id);
-        notify(t("chat.expired"), { sticky: true });
-        return;
-      }
-    }
-    if (!S.authenticated || S.activeId !== id) return;
-    startStream(id);
-  }, delay * 1000);
+  S.stream?.close();
+  S.stream = null;
 }
 
 /** Mirror what a frame changed outside the view: title, model, the outbox. */
@@ -1049,7 +1005,7 @@ function noteFrame(frame) {
 /** Keep the stream's banner honest while it is down. */
 function refreshStreamNotice() {
   const banner = $("stream-banner");
-  banner.hidden = S.stream.status !== "paused";
+  banner.hidden = S.stream?.status !== "paused";
   if (banner.hidden) return;
   const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
   setTextIfChanged($("stream-banner-text"), t("chat.reconnecting", { n: seconds }));
@@ -3069,10 +3025,7 @@ const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); }, (
   return () => globalThis.clearInterval?.(timer);
 }, {
   statusRow: workerStatus,
-  doc: document,
-  open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-  schedule: (fn, ms) => setTimeout(fn, ms),
-  cancel: (id) => clearTimeout(id),
+  ...followOptions,
 });
 /** Where the panel's link back goes: the chat that is open. */
 function homeHash() {
@@ -3113,9 +3066,7 @@ const tasks = setupTasks({
   live: {
     nodes: taskLiveNodes,
     result: taskResultNodes,
-    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-    schedule: (fn, ms) => setTimeout(fn, ms),
-    cancel: (id) => clearTimeout(id),
+    ...followOptions,
   },
   approvalCard,
   // The task is shown in the panel beside the chat; its link back is the chat's own address.
@@ -3432,11 +3383,7 @@ const panel = setupPanel({
   home: homeHash,
   navigate: leaveTask,
   hasTasks: () => sections.tasks,
-  live: {
-    open: (url) => (typeof EventSource === "function" ? new EventSource(url) : null),
-    schedule: (fn, ms) => setTimeout(fn, ms),
-    cancel: (id) => clearTimeout(id),
-  },
+  live: followOptions,
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 
@@ -4049,22 +3996,7 @@ $("offline-retry").addEventListener("click", async () => {
   syncUI();
   if (S.online && document.activeElement === retry) input.focus();
 });
-$("reconnect-btn").addEventListener("click", async () => {
-  const id = S.activeId;
-  if (!id || S.stream.status !== "paused") return;
-  if (S.stream.timer !== null) clearTimeout(S.stream.timer);
-  S.stream.timer = null;
-  try {
-    await api(`/sessions/${encodeURIComponent(id)}`);
-  } catch (error) {
-    if (S.activeId === id && error.status === 404) {
-      forgetSession(id);
-      notify(t("chat.expired"), {sticky: true});
-      return;
-    }
-  }
-  if (S.activeId === id && S.stream.status === "paused") startStream(id);
-});
+$("reconnect-btn").addEventListener("click", () => S.stream?.retryNow());
 $("approval-go").addEventListener("click", goToApproval);
 $("header-parent").addEventListener("click", () => {
   if (S.main) openSession(S.main.id);
@@ -4194,7 +4126,9 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (S.authenticated && !document.hidden) refreshList();
 });
-// Nobody watches a page that is hidden for a while or kept for Back: its stream stops, and starts when it returns.
+// The Browser panel's picture stream stops while a page is hidden for a while or kept for Back, and starts when
+// it returns. The chat's event stream does not: a hidden page still shows its chat, so a card Auto shows can be
+// answered when the person comes back within its wait.
 let hiddenTimer = null;
 document.addEventListener("visibilitychange", () => {
   clearTimeout(hiddenTimer);
