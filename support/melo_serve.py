@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -132,12 +133,37 @@ def _loopback(url: str) -> str | None:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
 
 
+def _private(path: Path) -> bool:
+    """Whether *path* is this user's own socket in a folder only this user can change.
+
+    ``lstat`` does not follow a link, so a symlink is not a socket. A socket
+    that another user could have put there is not melo_serve's.
+    """
+    try:
+        sock, folder = os.lstat(path), os.stat(path.parent)
+    except (OSError, ValueError):
+        return False
+    uid = os.getuid()
+    return (
+        stat.S_ISSOCK(sock.st_mode)
+        and sock.st_uid == uid
+        and folder.st_uid == uid
+        and not folder.st_mode & 0o022
+    )
+
+
 def _answers() -> bool:
-    """Whether something accepts a connection on the control socket."""
+    """Whether something accepts a connection on the control socket.
+
+    Nothing connects to a socket that :func:`_private` refuses.
+    """
+    path = socket_path()
+    if not _private(path):
+        return False
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
             probe.settimeout(CONNECT_TIMEOUT_S)
-            probe.connect(str(socket_path()))
+            probe.connect(str(path))
     except (OSError, ValueError):  # no socket, refused, timed out; a NUL in the path
         return False
     return True
@@ -187,9 +213,42 @@ class MeloServeError(Exception):
     """melo_serve cannot answer for a model; the message says what to run."""
 
 
+def _executable(path: str) -> str | None:
+    """*path* when it is a regular file this user owns and can run, else None."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or not info.st_mode & stat.S_IXUSR
+    ):
+        return None
+    return path
+
+
+def _find_command() -> str | None:
+    """Where ``melo-serve`` is: on PATH (an absolute hit), else in the uv tool folder.
+
+    A launchd login item has no ``~/.local/bin`` on its PATH, where
+    ``uv tool install`` puts it: ``$UV_TOOL_BIN_DIR``, else ``$XDG_BIN_HOME``,
+    else ``~/.local/bin``. Either way the file must be the user's own.
+    """
+    found = shutil.which(COMMAND)
+    if found is None or not os.path.isabs(found):
+        folder = (
+            os.environ.get("UV_TOOL_BIN_DIR")
+            or os.environ.get("XDG_BIN_HOME")
+            or str(Path.home() / ".local" / "bin")
+        )
+        found = os.path.join(os.path.expanduser(folder), COMMAND)
+    return _executable(found)
+
+
 def command() -> str | None:
     """The installed ``melo-serve`` command, or None."""
-    return shutil.which(COMMAND)
+    return _find_command()
 
 
 def start_hint() -> str:
@@ -209,10 +268,10 @@ def unavailable(snap: Snapshot, role: str) -> MeloServeError:
 
 
 def _clean(text: str) -> str:
-    """*text* as a terminal shows it; a state's words never move the cursor."""
-    from localmelo.support.sessions.display import clean_output
+    """*text* as a terminal shows it: the cursor stays and the home folder is ``~``."""
+    from localmelo.support.sessions.display import clean_output, home_labelled
 
-    return clean_output(text)
+    return home_labelled(clean_output(text))
 
 
 def role_text(role: Role | None) -> str:
@@ -254,8 +313,9 @@ def ensure_running(role: str = "chat") -> str:
     up`` starts it (through launchd when its login item is installed, otherwise
     detached) and the state is then waited for, all within one budget of
     :data:`UP_WAIT_S` (15 s); a non-zero exit of ``up`` returns at once with the
-    last line it printed (its stderr, else its stdout). Not installed: the line
-    says how to install it. It never raises, so the gateway starts either way.
+    last line it printed (its stderr, else its stdout), the home folder shown as
+    ``~``. Not installed: the line says how to install it. It never raises, so
+    the gateway starts either way.
     """
     snap = snapshot()
     if snap.running:

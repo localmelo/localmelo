@@ -802,10 +802,14 @@ class TestGatewayMode:
             assert calls.read_text() == "up\n"
 
             (melo_serve_home / "state.json").unlink()  # stopped
-            script.write_text("#!/bin/sh\necho first >&2\necho last >&2\nexit 3\n")
+            script.write_text(
+                "#!/bin/sh\necho first >&2\n"
+                'echo "last: see $HOME/.cache/melo_serve/daemon.log" >&2\nexit 3\n'
+            )
             assert (
-                melo_serve.ensure_running() == "melo_serve did not start: last"
-            )  # at once
+                melo_serve.ensure_running()
+                == "melo_serve did not start: last: see ~/.cache/melo_serve/daemon.log"
+            )  # at once, the home folder as ~
             monkeypatch.setattr(melo_serve, "command", lambda: None)  # not installed
             _start_gateway(cfg)
         assert "uv tool install git+https://github.com/localmelo/melo_serve" in (

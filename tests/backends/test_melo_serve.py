@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -192,3 +193,107 @@ def test_validation_reads_no_state_so_melo_serve_can_be_started() -> None:
     cfg = _cfg()
     cfg.memory.retriever = "embedding"  # nothing is served and melo_serve is down
     assert cfg.has_embedding and cfg.validate() == []
+
+
+def _fake_command(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "melo-serve"
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture
+def real_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The real lookup of ``melo-serve`` (the suite stubs ``command``), with an empty PATH."""
+    monkeypatch.setattr(melo_serve, "command", melo_serve._find_command)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    for name in ("UV_TOOL_BIN_DIR", "XDG_BIN_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    return tmp_path
+
+
+def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
+    real_command: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert melo_serve.command() is None
+    fake = _fake_command(real_command / "home" / ".local" / "bin")
+    assert melo_serve.command() == str(fake)  # the launchd login item's case
+    xdg = _fake_command(real_command / "xdg")
+    monkeypatch.setenv("XDG_BIN_HOME", str(xdg.parent))
+    assert melo_serve.command() == str(xdg)
+    uv = _fake_command(real_command / "uv")
+    monkeypatch.setenv("UV_TOOL_BIN_DIR", str(uv.parent))
+    assert melo_serve.command() == str(uv)
+    uv.chmod(0o644)  # not executable
+    assert melo_serve.command() is None
+
+
+def test_a_melo_serve_found_by_a_relative_path_entry_is_refused(
+    real_command: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_command(real_command / "bin")
+    monkeypatch.chdir(real_command)
+    monkeypatch.setenv("PATH", "bin")  # `which` answers bin/melo-serve
+    assert melo_serve.command() is None
+
+
+def test_a_melo_serve_another_user_owns_is_refused(
+    real_command: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = _fake_command(real_command / "home" / ".local" / "bin")
+    assert melo_serve.command() == str(fake)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(fake).st_uid + 1)
+    assert melo_serve.command() is None
+    monkeypatch.setenv("PATH", str(fake.parent))  # on PATH it is refused too
+    assert melo_serve.command() is None
+
+
+def _symlink(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    link = sock.with_name("link.sock")
+    link.symlink_to(sock)
+    monkeypatch.setenv(melo_serve.SOCKET_ENV, str(link))
+
+
+def _regular_file(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    plain = sock.with_name("plain.sock")
+    plain.write_text("")
+    monkeypatch.setenv(melo_serve.SOCKET_ENV, str(plain))
+
+
+def _other_owner(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = os.lstat
+
+    def lstat(path: Any, **kwargs: Any) -> os.stat_result:
+        info = real(path, **kwargs)
+        if str(path) != str(sock):
+            return info
+        return os.stat_result((*info[:4], info.st_uid + 1, *info[5:]))
+
+    monkeypatch.setattr(os, "lstat", lstat)
+
+
+def _shared_folder(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sock.parent.chmod(0o777)
+
+
+REFUSED = {
+    "a symlink to a real socket": _symlink,
+    "a regular file": _regular_file,
+    "a socket another user owns": _other_owner,
+    "a folder others can write": _shared_folder,
+}
+
+
+@pytest.mark.parametrize("spoil", REFUSED.values(), ids=REFUSED.keys())
+def test_a_control_socket_that_is_not_the_users_own_is_not_connected_to(
+    spoil: Callable[[Path, pytest.MonkeyPatch], None],
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_state(melo_serve_home, chat=role("model-a"))
+    assert melo_serve.snapshot().running  # the fixture's socket passes the checks
+    spoil(melo_serve_socket, monkeypatch)
+    assert melo_serve.snapshot() == melo_serve.Snapshot()
