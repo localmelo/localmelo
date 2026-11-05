@@ -778,18 +778,17 @@ class SetupJob:
 
     def _download(self) -> str | None:
         """``melo-serve get`` without the skipped items; its events become the job's."""
-        failure = ""
+        failed: ItemEvent | None = None
 
         def on_line(raw: bytes | None) -> None:
-            nonlocal failure
+            nonlocal failed
             event = _parse_event(raw)
             if event is None:
                 return
-            if event.state == "failed":
-                failure = event.line
-                if self._cancelled:  # ``get`` reports a stop as a failure
-                    event = replace(event, state="skipped")
-            self._emit(event)
+            if event.state == "failed":  # ``get`` reports a stop as a failure too
+                failed = event  # its exit code says which, below
+            else:
+                self._emit(event)
 
         ran = _run(
             [
@@ -801,12 +800,15 @@ class SetupJob:
             hold=self._hold,
             on_line=on_line,
         )
-        if ran.ok:
-            return None
         if ran.code in (130, -signal.SIGTERM):  # stopped by a TERM or an INT
             self._cancelled = True
-        if failure:
-            return failure
+        if failed:
+            state = "skipped" if self._cancelled else "failed"
+            self._emit(replace(failed, state=state))
+        if ran.ok:
+            return None
+        if failed:
+            return failed.line
         if ran.code == 2 and not ran.why:  # cannot start: nothing was touched
             return self._fail(DOWNLOAD, _failed(ran.reason, NOTHING))
         return self._fail(DOWNLOAD, _failed(ran.reason, "what was downloaded is kept"))

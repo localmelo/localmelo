@@ -500,6 +500,18 @@ def test_ctrl_c_waits_for_get_to_finish_and_ends_the_job_cancelled(
     assert fakes.calls("melo-serve", "use") == []
 
 
+def test_a_get_stopped_by_the_terminal_is_a_stop_not_a_failure(fakes: Fakes) -> None:
+    fakes.installed("0.4.0")
+    line = "Stopped at 2.1 GB / 4.9 GB. The finished files are kept."
+    stopped = {"item": "model:" + CHAT, "state": "failed", "line": line}
+    fakes.put("get.jsonl", json.dumps(stopped))
+    fakes.put("get_exit", "130")
+    job, events = _job()
+    assert job.run() == "cancelled"
+    assert job.items["model:" + CHAT] == run.ItemEvent("model:" + CHAT, "skipped", line)
+    assert events[-1] == run.Finished("cancelled")
+
+
 def test_a_process_get_leaves_behind_neither_holds_the_job_nor_speaks_after_it(
     fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
