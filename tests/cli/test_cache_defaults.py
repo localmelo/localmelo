@@ -136,7 +136,13 @@ def test_a_chat_session_keeps_the_settings_of_the_config_file(
 
 
 def _gateway_options(cfg: Config) -> AgentOptions:
-    with mock.patch("localmelo.support.gateway.session.Agent") as agent_cls:
+    with (
+        mock.patch(
+            "localmelo.support.gateway.session.providers_for",
+            return_value=(mock.Mock(), None),
+        ),
+        mock.patch("localmelo.support.gateway.session.Agent") as agent_cls,
+    ):
         SessionManager(config=cfg)._create_agent()
     options: AgentOptions = agent_cls.call_args.kwargs["options"]
     return options

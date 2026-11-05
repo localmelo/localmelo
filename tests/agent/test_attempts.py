@@ -10,7 +10,6 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._reflection import _reflection_from_object
-from localmelo.melo.agent.agent import _providers_from_config  # noqa: F401
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,

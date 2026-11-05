@@ -94,10 +94,9 @@
             Markdown pages and the website.
           </li>
         </ul>
-        <p><strong>The core does not import <code>support/</code>.</strong> The one bridge is <code>Agent(config=...)</code>.</p>
+        <p><strong>The core does not import <code>support/</code>.</strong> Callers build the providers from a config (<code>providers_for</code> in <code>support/backends</code>) and pass them to <code>Agent</code>.</p>
         <ul>
           <li><code>tests/test_layering.py</code> fails on any import of <code>support/</code> under <code>melo/</code>: plain, relative or through <code>importlib</code>.</li>
-          <li>It allows two: <code>Config</code> for type checking, and <code>get_backend</code> inside <code>_providers_from_config</code>.</li>
           <li><code>prompt_toolkit</code> and <code>rich</code> stay out of the core and the backends; sessions and the terminal UI stay clear of the gateway.</li>
           <li>Need code from <code>support/</code> in the core? Push a contract into <code>melo/contracts/</code>.</li>
         </ul>

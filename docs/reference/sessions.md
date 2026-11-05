@@ -48,9 +48,9 @@ the provider its `Chat` holds is the wrapped one, and every model call goes
 through the wrapper. Non-replay OpenAI-compatible providers have their
 reasoning key cleared before wrapping; Ollama keeps its native field.
 
-Legacy without hooks keeps the original `Agent(config=cfg)` path. Explicit
-modes own their providers before construction so a refused mode/provider
-pair closes them without disabling MCP.
+The providers of a config come from `providers_for(cfg, reasoning)` before the
+Agent is made, so a refused mode/provider pair closes them without disabling
+MCP.
 
 An embedding that was not built is
 not wrapped.

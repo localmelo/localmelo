@@ -22,7 +22,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from localmelo.melo.agent._answer_format import (
     closing_line_of,
@@ -233,9 +233,6 @@ from localmelo.melo.schema import (
     thinking_answer,
     unfinished_as_thinking,
 )
-
-if TYPE_CHECKING:
-    from localmelo.support.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -606,29 +603,6 @@ NO_CHANGE_PUSH = (
     "Nothing has changed in the workspace yet. Start this attempt by writing the "
     "part of the task you can already write, then continue."
 )
-
-
-def _providers_from_config(
-    cfg: Config,
-) -> tuple[BaseLLMProvider, BaseEmbeddingProvider | None]:
-    """Build LLM and embedding providers from a Config object.
-
-    Uses the split backend model: ``cfg.chat_backend`` selects the chat
-    provider and ``cfg.embedding_backend`` selects the embedding provider.
-    The two may refer to different backend adapters.
-    """
-    from localmelo.support.backends import get_backend
-
-    chat_backend = get_backend(cfg.chat_backend)
-    llm = chat_backend.build_chat_provider(cfg)
-
-    embedding = None
-    if cfg.has_embedding:
-        emb_key = cfg.embedding_backend  # direct key, no mapping needed
-        emb_backend = get_backend(emb_key)
-        embedding = emb_backend.build_embedding_provider(cfg)
-
-    return llm, embedding
 
 
 # SQLite directory when LOCALMELO_PERSIST_MEMORY is set without
@@ -1117,20 +1091,15 @@ class _ToolSetupError(Exception):
 class Agent(_RecallLoop, _NotesLoop):
     """Task-solving agent with tool use and memory.
 
-    Two construction modes:
-
-    1. **Config-based** (gateway / full app)::
-
-        from localmelo.support.config import load
-        agent = Agent(config=load())
-
-    2. **Direct provider injection** (testing / custom setups)::
+    It is built from providers::
 
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
-    Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, tool exposure, the built-in tools, memory and a run
-    timeout; the defaults keep the behavior from before options existed,
+    The providers of a config file come from
+    :func:`localmelo.support.backends.providers_for`. ``options=AgentOptions(...)``
+    sets step budgets, the attempt policy, tool exposure, the built-in tools,
+    memory and a run timeout; the defaults keep the behavior from before
+    options existed,
     except that every step now offers all registered built-ins and runs only
     the tools it offered, and that a reflection decides on its own checks
     whether the next attempt starts, a reply without a reflection does not
@@ -1157,20 +1126,14 @@ class Agent(_RecallLoop, _NotesLoop):
 
     def __init__(
         self,
-        config: Config | None = None,
         *,
-        llm: BaseLLMProvider | None = None,
+        llm: BaseLLMProvider,
         embedding: BaseEmbeddingProvider | None = None,
         options: AgentOptions | None = None,
         tool_providers: Sequence[BaseToolProvider] = (),
     ) -> None:
-        if llm is not None:
-            self._llm = llm
-            self._embedding = embedding
-        elif config is not None:
-            self._llm, self._embedding = _providers_from_config(config)
-        else:
-            raise TypeError("Agent requires either config= or llm= to be provided")
+        self._llm = llm
+        self._embedding = embedding
 
         self.options = options if options is not None else AgentOptions()
         if self.options.reasoning == "compress" and bool(
@@ -1186,17 +1149,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 replay_turns=None,
                 replay_scope="task",
             )
-        if (
-            config is not None
-            and llm is None
-            and self.options.reasoning not in ("replay", "compress+replay")
-            and config.chat_backend != "ollama"
-        ):
-            # The section's key is only for replay: legacy and drop send no
-            # reasoning, and the gateway, a configured UI session and a
-            # Python caller all build their provider here. Ollama keeps its
-            # fixed "thinking" field, whose native wire legacy already uses.
-            self._llm.reasoning_field = None
         # The API user's error; the CLI refuses the same pairs before it
         # builds an Agent, so direct mode never reaches this traceback.
         refusal = reasoning_refusal(

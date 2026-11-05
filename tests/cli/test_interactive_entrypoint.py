@@ -280,7 +280,7 @@ def test_model_override_applies_to_config_without_saving() -> None:
         cli._build_direct_mode_agent(
             argparse.Namespace(base_url=None, chat_model="selected-model")
         )
-    assert constructor.call_args.kwargs["config"].mlc.chat_model == "selected-model"
+    assert constructor.call_args.kwargs["llm"].model == "selected-model"
     save.assert_not_called()
 
 

@@ -22,6 +22,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.support.backends import providers_for
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.tests.agent.test_reflection_gate import _prefix_scope
@@ -983,7 +984,7 @@ async def test_a_replay_required_answer_keeps_its_thinking() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_config_clears_the_section_field_outside_replay(
+async def test_config_providers_clear_the_section_field_outside_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from localmelo.support.backends.openai_family import VllmBackend
@@ -1007,7 +1008,8 @@ async def test_agent_config_clears_the_section_field_outside_replay(
             reasoning_field="reasoning_content",
         ),
     )
-    agent = Agent(config=cfg)
+    llm, embedding = providers_for(cfg)
+    agent = Agent(llm=llm, embedding=embedding)
     agent.hippo.register_tool(_echo())
     agent.executor.register("echo", _run_echo)
     result = await agent.run_task("q")
@@ -1019,7 +1021,7 @@ async def test_agent_config_clears_the_section_field_outside_replay(
 
 
 @pytest.mark.asyncio
-async def test_agent_config_keeps_the_section_field_in_replay(
+async def test_config_providers_keep_the_section_field_in_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from localmelo.support.backends.openai_family import VllmBackend
@@ -1043,7 +1045,8 @@ async def test_agent_config_keeps_the_section_field_in_replay(
             reasoning_field="reasoning_content",
         ),
     )
-    agent = Agent(config=cfg, options=_options(reasoning="replay"))
+    llm, embedding = providers_for(cfg, "replay")
+    agent = Agent(llm=llm, embedding=embedding, options=_options(reasoning="replay"))
     agent.hippo.register_tool(_echo())
     agent.executor.register("echo", _run_echo)
     result = await agent.run_task("q")
