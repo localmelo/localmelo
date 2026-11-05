@@ -35,7 +35,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from localmelo.support.browser import addresses, safari, sites
+from localmelo.support.browser import addresses, pagescript, sites
 from localmelo.support.browser import provider as provider_module
 from localmelo.support.browser.driver import Act, Element, RawPage, StaleElementError
 from localmelo.support.browser.provider import BrowserToolProvider
@@ -212,9 +212,9 @@ def two_origins() -> Iterator[tuple[str, str]]:
 @pytest.fixture
 def real_timing(monkeypatch: pytest.MonkeyPatch) -> None:
     """A real page takes real time: the look after an act waits as it does for a person."""
-    monkeypatch.setattr(safari, "LOOK_STEP_S", 0.1)
-    monkeypatch.setattr(safari, "QUIET_S", 0.3)
-    monkeypatch.setattr(safari, "LOOK_CAP_S", 2.0)
+    monkeypatch.setattr(pagescript, "LOOK_STEP_S", 0.1)
+    monkeypatch.setattr(pagescript, "QUIET_S", 0.3)
+    monkeypatch.setattr(pagescript, "LOOK_CAP_S", 2.0)
     monkeypatch.setattr(provider_module, "SETTLE_S", 0.3)
 
 
