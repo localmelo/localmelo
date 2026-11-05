@@ -2636,14 +2636,12 @@ def _set_retrieval_extra_body(
 
 def _print_melo_serve_status() -> None:
     """The ``melo serve status`` block for melo_serve, when it is in use or installed."""
-    import shutil
-
     from localmelo.support import config, melo_serve
 
     state = melo_serve.read_state()
     cfg = config.load()
     uses = "melo_serve" in (cfg.chat_backend, cfg.embedding_backend)
-    if state is not None or uses or shutil.which(melo_serve.COMMAND):
+    if state is not None or uses or melo_serve.command():
         print()
         print("\n".join(melo_serve.status_lines(state)))
 

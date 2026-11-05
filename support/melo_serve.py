@@ -212,10 +212,15 @@ def role_text(entry: dict[str, Any] | None) -> str:
     return " · ".join(part for part in parts if part)
 
 
+def command() -> str | None:
+    """The installed ``melo-serve`` command, or None."""
+    return shutil.which(COMMAND)
+
+
 def status_lines(state: dict[str, Any] | None) -> list[str]:
     """The ``melo serve status`` block: running or not, address, roles, login item."""
     if not running(state):
-        how = f"{COMMAND} up" if shutil.which(COMMAND) else INSTALL_HINT
+        how = f"{COMMAND} up" if command() else INSTALL_HINT
         return ["melo_serve:", "  running: False", f"  start: {how}"]
     assert state is not None  # running() is False without one
     login = (state.get("service") or {}).get("login")
@@ -251,12 +256,12 @@ def ensure_running(role: str = "chat") -> str:
     if running(state):
         assert state is not None
         return _line(state, role)
-    command = shutil.which(COMMAND)
-    if command is None:
+    path = command()
+    if path is None:
         return f"melo_serve is not installed: {INSTALL_HINT}"
     try:
         up = subprocess.run(
-            [command, "up"],
+            [path, "up"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

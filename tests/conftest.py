@@ -129,12 +129,16 @@ def melo_serve_home(
     """melo_serve's home is an empty temporary folder: no test reads this Mac's own.
 
     The state file and the control socket of the melo_serve that may run here
-    are never read or sent to. A test writes a fake ``state.json`` in the folder
+    are never read or sent to, and no test finds this Mac's own ``melo-serve``
+    command either: ``melo_serve.command()`` is None. A test writes a fake ``state.json`` in the folder
     (``tests/fixtures/melo_serve.py``).
     """
+    from localmelo.support import melo_serve
+
     home = tmp_path_factory.mktemp("melo-serve")
     monkeypatch.setenv("MELO_SERVE_HOME", str(home))
     monkeypatch.delenv("MELO_SERVE_SOCKET", raising=False)
+    monkeypatch.setattr(melo_serve, "command", lambda: None)
     return home
 
 

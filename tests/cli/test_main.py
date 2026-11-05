@@ -25,6 +25,7 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.schema import RunResult
+from localmelo.support import melo_serve
 from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
 from localmelo.tests.fixtures.melo_serve import URL as MELO_SERVE_URL
 from localmelo.tests.fixtures.melo_serve import role, write_state
@@ -690,7 +691,7 @@ class TestGatewayMode:
             f'cp {ready / "state.json"} "$MELO_SERVE_HOME/state.json"\n'
         )
         script.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.defpath}")
+        monkeypatch.setattr(melo_serve, "command", lambda: str(script))
         cfg = Config(
             chat_backend="melo_serve",
             embedding_backend="none",
@@ -713,10 +714,10 @@ class TestGatewayMode:
 
             (melo_serve_home / "state.json").unlink()  # stopped
             script.write_text("#!/bin/sh\necho first >&2\necho last >&2\nexit 3\n")
-            from localmelo.support.melo_serve import ensure_running
-
-            assert ensure_running() == "melo_serve did not start: last"  # at once
-            monkeypatch.setenv("PATH", os.defpath)  # and not installed
+            assert (
+                melo_serve.ensure_running() == "melo_serve did not start: last"
+            )  # at once
+            monkeypatch.setattr(melo_serve, "command", lambda: None)  # not installed
             _start_gateway(cfg)
         assert "uv tool install git+https://github.com/localmelo/melo_serve" in (
             capsys.readouterr().out
