@@ -1439,6 +1439,7 @@
   },
   "schedule.once": "once, {at}",
   "schedule.weekdays": "every weekday at {time}",
+  "serve.chipLabel": "Model: {model}. Choose another.",
   "serve.errors.cannotLoad": "{name} cannot load: {reason}",
   "serve.errors.loading": "{name} is loading; the load goes on in melo_serve.",
   "serve.errors.noSwitch": "No switch is waiting.",
@@ -1457,7 +1458,9 @@
   "serve.pick.needs": "needs {need} GB",
   "serve.pick.noRoom": "needs {need} GB, more than is free",
   "serve.pick.short": "needs {need} GB, {free} GB free",
+  "serve.serverKind": "Local models on this Mac, one chat model at a time",
   "serve.stale": "The model changed to {name} meanwhile; choose again.",
+  "serve.still": "Still using {name}.",
   "serve.stillWorking": {
     "one": "{n} chat is still working; try again when it finishes",
     "other": "{n} chats are still working; try again when they finish"

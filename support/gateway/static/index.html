@@ -118,10 +118,14 @@
           <button type="button" class="secondary-button browser-chip" id="browser-chip" aria-controls="browser-panel" aria-expanded="false" hidden><span class="browser-dot" aria-hidden="true"></span><span id="browser-chip-text" data-i18n="browser.title">Browser</span></button>
           <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled data-i18n="html.detailsTrigger">Details</button>
           <button type="button" class="panel-chip" id="panel-chip" aria-controls="panel" aria-expanded="false" hidden></button>
-          <button class="connection-chip" id="connection-btn">
-            <span class="status-dot" id="connection-dot"></span
-            ><span id="connection-label" data-i18n="html.connectionLabel">Set up model</span>
-          </button>
+          <div class="model-picker">
+            <button class="connection-chip" id="connection-btn" aria-controls="model-menu">
+              <span class="status-dot" id="connection-dot"></span
+              ><span id="connection-label" data-i18n="html.connectionLabel">Set up model</span
+              ><span class="chip-caret" id="connection-caret" aria-hidden="true" hidden>⌄</span>
+            </button>
+            <div class="mode-menu model-menu" id="model-menu" role="menu" hidden></div>
+          </div>
         </header>
         <div class="banner" id="store-banner" role="status" hidden></div>
         <div class="banner" id="model-banner" role="status" hidden></div>
@@ -207,8 +211,9 @@
                   <button type="button" class="folder-action" id="folder-finder" hidden data-i18n="html.folderFinder">Show in Finder</button>
                 </div>
               </div>
-              <button type="button" id="model-btn" class="model-button">
+              <div class="model-picker composer-models"><button type="button" id="model-btn" class="model-button" aria-controls="model-menu-composer">
                 <span data-i18n="html.chooseModel">Choose a model</span> <span aria-hidden="true">⌄</span></button
+              ><div class="mode-menu" id="model-menu-composer" role="menu" hidden></div></div
               ><div class="mode-picker" id="mode-picker" hidden>
                 <button type="button" class="mode-chip" id="mode-btn" data-mode="ask" aria-haspopup="menu" aria-expanded="false" aria-controls="mode-menu">
                   <span class="mode-glyph" aria-hidden="true"></span><span id="mode-text" data-i18n="auto.mode.ask">Ask</span><span aria-hidden="true">⌄</span>
@@ -312,14 +317,19 @@
               <h3 id="settings-head-model" data-i18n="settings.section.model">Model server</h3>
               <p class="st-help" id="settings-description" data-i18n="html.settingsDescription">The models Melo runs on, and the server that serves them. Changes apply to your next message.</p>
               <ul class="st-group">
-                <li class="st-row"><div class="st-text"><span class="st-label" data-i18n="html.chatModel">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
+                <li class="st-row" id="s-chat-row"><div class="st-text"><span class="st-label" data-i18n="html.chatModel">Chat model</span><p class="st-state" id="s-chat-state"></p></div></li>
+                <li class="st-row" id="s-picks-row" data-stack hidden>
+                  <div class="st-text"><span class="st-label" id="s-picks-legend" data-i18n="html.chatModel">Chat model</span></div>
+                  <div class="st-choices" id="s-picks" role="radiogroup" aria-labelledby="s-picks-legend" aria-describedby="s-picks-foot"></div>
+                  <p class="st-hint st-pick-foot" id="s-picks-foot"></p>
+                </li>
                 <li class="st-row"><div class="st-text"><span class="st-label" data-i18n="html.embeddingModel">Embedding model</span><p class="st-state" id="s-embed-state"></p></div></li>
                 <li class="st-row">
                   <div class="st-text"><span class="st-label" id="s-server-label" data-i18n="html.sServerLabel">Server</span><span class="st-mono" id="s-server-address"></span><p class="st-hint" id="s-server-kind"></p></div>
                   <div class="st-actions"><button type="button" class="outline-button" id="s-change" aria-expanded="false" aria-controls="s-editor" data-i18n="html.sChange">Change…</button></div>
                 </li>
               </ul>
-              <div class="st-test">
+              <div class="st-test" id="s-test-row">
                 <button type="button" class="outline-button" id="settings-test" disabled data-i18n="html.settingsTest">Test connection</button>
                 <p id="settings-test-status" role="status" aria-live="polite"></p>
               </div>

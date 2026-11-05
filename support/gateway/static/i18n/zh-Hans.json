@@ -1362,6 +1362,7 @@
   "schedule.hours": "每 {n} 小时",
   "schedule.once": "仅一次，{at}",
   "schedule.weekdays": "每个工作日 {time}",
+  "serve.chipLabel": "模型：{model}。换一个。",
   "serve.errors.cannotLoad": "{name} 无法加载：{reason}",
   "serve.errors.loading": "{name} 正在加载；加载会在 melo_serve 中继续。",
   "serve.errors.noSwitch": "没有在等待的切换。",
@@ -1380,7 +1381,9 @@
   "serve.pick.needs": "需要 {need} GB",
   "serve.pick.noRoom": "需要 {need} GB，超过可用内存",
   "serve.pick.short": "需要 {need} GB，可用 {free} GB",
+  "serve.serverKind": "这台 Mac 上的本地模型，一次一个对话模型",
   "serve.stale": "模型已在此期间换成 {name}；请重新选择。",
+  "serve.still": "仍在用 {name}。",
   "serve.stillWorking": {
     "other": "还有 {n} 个对话在工作；等它们结束后再试"
   },

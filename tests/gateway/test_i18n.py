@@ -68,6 +68,7 @@ CONVERTED_JS = (
     "pictures.mjs",
     "running.mjs",
     "scheduled-tab.mjs",
+    "serve.mjs",
     "settings.mjs",
     "setup-card.mjs",
     "slash-actions.mjs",
@@ -115,6 +116,8 @@ JS_ENGLISH = {
     "Dead",
     "Process",
     "Reservation",
+    # The hold of a turn that waits for a switch of melo_serve's model (serve_switch.py).
+    "Switching",
     "melo did not finish an answer",
     "tool call written as text",
     "cannot reach the model server at",

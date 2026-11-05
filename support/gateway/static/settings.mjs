@@ -3,6 +3,7 @@ import { folderChoices, folderName } from "./folder.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { setupPermissionsTab } from "./permissions-tab.mjs";
 import { whenWords } from "./scheduled-tab.mjs";
+import { activeSwitch, wordNodes } from "./serve.mjs";
 
 // A message that tells the user to run a melo command ("... (run 'melo setup')") is advice for a
 // terminal. This dialog is where the user fixes it, so the advice is left out.
@@ -78,7 +79,7 @@ export function keyWords(key) {
  * Returns `open(section)`.
  */
 export function setupSettings({
-  api, onSaved, developer = () => false, health = () => null, sessions = () => [], openTab = () => {},
+  api, onSaved, serve = () => null, developer = () => false, health = () => null, sessions = () => [], openTab = () => {},
   desktop = () => null, folders = () => null, narrow = () => globalThis.matchMedia?.("(max-width: 700px)")?.matches === true,
   clock = Date.now, reloadPage = () => globalThis.location?.reload(),
 }) {
@@ -530,7 +531,62 @@ export function setupSettings({
     $("s-server-address").textContent = !backend ? t("settings.server.none") : hosted ? saved.base_url || hosted.base_url || t("settings.server.ownAddress") : saved.chat_url || "";
     $("s-server-kind").textContent = !choice ? t("settings.server.chooseBelow")
       : hosted ? hostedKind(hosted, saved) : choice.label;
+    // melo_serve: its chat models in place of the state row; a list that loads shows the connection works,
+    // so there is no test, and the address stays behind Change… (a developer sees it).
+    const models = backend === "melo_serve" && serve()?.serves() ? serve() : null;
+    $("s-chat-row").hidden = !!models;
+    $("s-picks-row").hidden = !models;
+    $("s-test-row").hidden = !!models;
+    $("s-server-address").hidden = !!models && !isDeveloper;
+    if (models) {
+      $("s-server-kind").textContent = t("serve.serverKind");
+      picks(models);
+    }
     notes();
+  }
+
+  // The chat models melo_serve offers, as radios: the current one checked, one that cannot load dimmed with its
+  // reason, and while a switch runs the others disabled and the one it switches to saying what it waits for.
+  let listening = false;
+  function picks(models) {
+    const {node, button} = maker(document);
+    if (!listening) {
+      listening = true;
+      models.onChange(() => { if (dialog.open && settings) model(); });
+    }
+    if (models.rows() === null) models.load();
+    const sw = activeSwitch(health());
+    const choices = (models.rows() ?? []).map((pick) => {
+      const target = sw?.pick === pick.id;
+      const blocked = !pick.loadable || (!!sw && !target);
+      const choice = node("label", "st-choice");
+      const input = node("input");
+      input.type = "radio";
+      input.name = "s-pick";
+      input.checked = sw ? target : !!pick.current;
+      input.disabled = blocked || !!sw;
+      if (blocked) choice.setAttribute("aria-disabled", "true");
+      input.addEventListener("change", () => switchTo(models, pick));
+      const hint = node("span", "st-hint");
+      if (target) hint.textContent = sw.detail || sw.title;
+      else hint.append(...wordNodes(document, pick, blocked));
+      choice.append(input, node("span", "st-label", pick.name), hint);
+      return choice;
+    });
+    $("s-picks").replaceChildren(...choices);
+    const foot = $("s-picks-foot");
+    foot.replaceChildren(sw ? sw.title : t("serve.foot"));
+    if (sw?.state === "waiting") foot.append(button("link-button", t("common.cancel"), () => models.cancel()));
+  }
+
+  async function switchTo(models, pick) {
+    showError("");
+    try {
+      await models.switchTo(pick.id);
+    } catch (error) {
+      showError(error.message);
+      model();
+    }
   }
 
   // "DeepSeek · key in the keychain", "OpenAI · key in OPENAI_API_KEY" or "DeepSeek · no key yet".
