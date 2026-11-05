@@ -195,7 +195,7 @@ def test_spec_normalizes_retained_fields_and_defaults() -> None:
             "test only checks that the word appears on screen."
         }
     ).title
-    assert title == "Fix this today: in tests/cli/test_e2e_pty.py…"
+    assert title == "Fix this today: in test_e2e_pty.py…"
 
 
 @pytest.mark.parametrize(

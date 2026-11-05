@@ -733,10 +733,10 @@ _OPENING: Final = re.compile(
     re.IGNORECASE,
 )
 # A sentence ends at a full stop, "!" or "?" before a space (but "1." is a list
-# number), or at a Chinese sentence end.
-_SENTENCE_END: Final = re.compile(r"(?<=[^\d][.!?])\s|[。！？；;]")
+# number), or at a Chinese sentence end. A question keeps its "?" (or "？").
+_SENTENCE_END: Final = re.compile(r"(?<=[^\d][.!?])\s|[。！；;]|(?<=？)")
 _CLAUSE_END: Final = re.compile(r"(?<=,)\s|(?<=，)")
-_TITLE_TAIL: Final = " ,;:.!?-–—·，；：。！？"
+_TITLE_TAIL: Final = " ,;:.!-–—·，；：。！"
 # A path reads as its file's name.
 _IN_FOLDER: Final = re.compile(r"(?:~/|\.{0,2}/)?(?:[\w.-]+/)+([\w-]+\.\w+)")
 # Words a cut title does not end on: "fix the failing test in…".
@@ -778,12 +778,12 @@ def short_title(text: str) -> str:
     the same wherever it was typed. The title is the person's own first words,
     from the first non-blank line with whitespace collapsed. A polite word or a
     level word that opens it goes, and a path reads as its file's name (a link
-    stays whole). The title ends at the first sentence end, or at a comma when
-    what comes before it is a clause on its own (at least 16 wide). A clause
-    that is still too long is cut at the last word (or, in Chinese or Japanese,
-    character) that fits, without a "the" or "in" left hanging, and ends in
-    ``…``; one long word with no break is cut where it must be. An empty
-    request reads ``Task``.
+    stays whole). The title ends at the first sentence end (a question keeps
+    its mark), or at a comma when what comes before it is a clause on its own
+    (at least 16 wide). A clause that is still too long is cut at the last word
+    (or, in Chinese or Japanese, character) that fits, without a "the" or "in"
+    left hanging, and ends in ``…``; one long word with no break is cut where it
+    must be. An empty request reads ``Task``.
     """
     line = next((row for row in text.splitlines() if row.strip()), "")
     line = " ".join(line.split())

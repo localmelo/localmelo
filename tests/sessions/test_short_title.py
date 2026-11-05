@@ -14,6 +14,9 @@ from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_w
         ("Fix the login bug", "Fix the login bug"),
         ("  Fix   the\tlogin bug.  ", "Fix the login bug"),
         ("Plan the trip!", "Plan the trip"),
+        # A question keeps its mark.
+        ("What is the capital of France?", "What is the capital of France?"),
+        ("哪个提交了几个文件？简单说。", "哪个提交了几个文件？"),
         # The first non-blank line, and its first sentence.
         ("\n\n  Second line here\nthird", "Second line here"),
         ("Run the tests. Then commit.", "Run the tests"),
@@ -79,7 +82,7 @@ from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_w
         # Chinese counts two columns a character and breaks between characters.
         (
             "刚才那几个任务里，哪个提交了几个文件？简单说。",
-            "刚才那几个任务里，哪个提交了几个文件",
+            "刚才那几个任务里，哪个提交了几个文件？",
         ),
         (
             "请把这个仓库里所有测试文件的名字都列出来然后统计每个文件有多少个测试函数",

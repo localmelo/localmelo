@@ -766,7 +766,7 @@ async def test_save_chore_keeps_it_and_undo_removes_it(tmp_path: Path) -> None:
         assert saved.status_code == 200, saved.text
         card = saved.json()["echo"]
         assert card["echo"] == "chore_saved" and card["of"] == proposal["id"]
-        assert card["line"] == "Saved: urgent: back up notes.md · every day at 21:00"
+        assert card["line"] == "Saved: back up notes.md · every day at 21:00"
         [chore] = (await client.get("/api/chores")).json()["chores"]
         assert (chore["when"], chore["level"], chore["front_id"], chore["id"]) == (
             "every day at 21:00", 1, console.main_id, card["chore_id"]
@@ -779,10 +779,7 @@ async def test_save_chore_keeps_it_and_undo_removes_it(tmp_path: Path) -> None:
         )
         undone = await tap(client, card["id"], "undo")
         assert undone.json()["echo"]["echo"] == "undone"
-        assert (
-            undone.json()["echo"]["line"]
-            == "Undone: urgent: back up notes.md is not saved"
-        )
+        assert undone.json()["echo"]["line"] == "Undone: back up notes.md is not saved"
         assert (await client.get("/api/chores")).json()["chores"] == []
 
 
