@@ -34,16 +34,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from localmelo.support.gateway.guard import (
     _SECURITY_HEADERS,
-    _TOO_LARGE_ERROR,
-    _UNSUPPORTED_MEDIA_TYPE_ERROR,
-    _UPLOAD_MEDIA_TYPE_ERROR,
-    _UPLOAD_TOO_LARGE_ERROR,
     API_CSP,
-    BODY_BYTES_LIMIT,
-    UPLOAD_BYTES_LIMIT,
-    _content_length_too_large,
-    is_json_content_type,
-    is_upload_content_type,
+    is_api_path,
     is_upload_request,
 )
 from localmelo.support.gateway.i18n import t
@@ -106,12 +98,6 @@ def api_error_response(exc: ApiError) -> JSONResponse:
     return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
-def is_api_path(path: str) -> bool:
-    """Whether *path* is ``/api`` or below it, also with leading slashes."""
-    path = "/" + path.lstrip("/")
-    return path == "/api" or path.startswith("/api/")
-
-
 def validation_message(exc: RequestValidationError) -> str:
     """``field: problem`` for the first invalid value, without the value."""
     errors = exc.errors()
@@ -125,16 +111,23 @@ def validation_message(exc: RequestValidationError) -> str:
 
 
 def _utf8_problem(value: Any, path: str) -> str | None:
-    """``field: problem`` for the first string with a lone surrogate, else ``None``."""
+    """``field: problem`` for the first string, a key included, with a lone surrogate, else ``None``.
+
+    SQLite stores text, and a lone surrogate (``"\\ud800"``, which a JSON body
+    can carry and Python accepts) encodes to nothing: written, it fails the
+    turn after the route answered. A key is named by the object it is in.
+    """
     if isinstance(value, str):
-        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
             return f"{path or 'request'}: the text must be valid UTF-8"
         return None
     if isinstance(value, Mapping):
         for key, inner in value.items():
-            if isinstance(key, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in key):
-                return f"{path or 'request'}: the text must be valid UTF-8"
-            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
+            found = _utf8_problem(key, path) or _utf8_problem(
+                inner, f"{path}.{key}" if path else str(key)
+            )
             if found is not None:
                 return found
         return None
@@ -146,26 +139,42 @@ def _utf8_problem(value: Any, path: str) -> str | None:
     return None
 
 
+def _body_problem(body: bytes) -> str | None:
+    """Why a JSON body is a 400, or ``None``: not UTF-8, not JSON, or a lone surrogate."""
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return "Request body must be valid UTF-8."
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return "Malformed JSON request body."
+    return _utf8_problem(parsed, "")
+
+
 def _query_is_valid_utf8(scope: Scope) -> bool:
     """Whether the raw query string decodes as UTF-8 after percent-decoding."""
-    raw = scope.get("query_string", b"")
-    if not raw:
-        return True
     try:
-        decoded = unquote_to_bytes(raw).decode("utf-8")
+        unquote_to_bytes(scope.get("query_string", b"")).decode("utf-8")
     except UnicodeDecodeError:
         return False
-    return _utf8_problem(decoded, "query") is None
+    return True
 
 
 class ApiMiddleware:
     """Add ``no-store`` and security headers to ``/api`` responses and validate bodies.
 
-    A request outside ``/api`` passes through untouched. Inside it, body size
-    (1 MiB), ``Content-Type: application/json`` on non-empty bodies, UTF-8
-    encoding and lone surrogates are checked before any route runs, and an
-    exception that no handler caught becomes the 500 shape, unless the
-    response has already started, when it is re-raised.
+    A request outside ``/api`` passes through untouched. Inside it, the query
+    string and a JSON body (not a picture's bytes) must be UTF-8, the body must
+    parse as JSON, and none of its strings may hold a lone surrogate; all of
+    that is judged before any route runs. An exception that no handler caught
+    becomes the 500 shape, unless the response has already started, when it is
+    re-raised.
+
+    The size and the Content-Type of a body are
+    :class:`~localmelo.support.gateway.guard.LoopbackGuard`'s, which wraps the
+    console in the gateway and has refused a body that is too large or of
+    another type by now.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -200,83 +209,20 @@ class ApiMiddleware:
             await response(scope, receive, send_with_headers)
             return
 
-        req_headers: dict[bytes, list[str]] = {}
-        for name, value in scope.get("headers", ()):
-            req_headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
-
-        # A picture's bytes go to one route, with their own limit and types.
-        upload = is_upload_request(scope)
-        limit = UPLOAD_BYTES_LIMIT if upload else BODY_BYTES_LIMIT
-        too_large = _UPLOAD_TOO_LARGE_ERROR if upload else _TOO_LARGE_ERROR
-        content_type_ok = (is_upload_content_type if upload else is_json_content_type)(
-            req_headers.get(b"content-type", [])
-        )
-        content_lengths = req_headers.get(b"content-length", [])
-        if _content_length_too_large(content_lengths, limit):
-            response = error_response(413, "too_large", too_large)
-            await response(scope, receive, send_with_headers)
-            return
-        if (
-            any(
-                raw.strip().isdigit() and int(raw.strip()) > 0
-                for raw in content_lengths
-            )
-            and not content_type_ok
-        ):
-            response = error_response(
-                415,
-                "unsupported_media_type",
-                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
-            )
-            await response(scope, receive, send_with_headers)
-            return
-
         chunks: list[bytes] = []
-        total = 0
         disconnected = False
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 disconnected = True
                 break
-            chunk = message.get("body", b"")
-            if chunk:
-                total += len(chunk)
-                if total > limit:
-                    response = error_response(413, "too_large", too_large)
-                    await response(scope, receive, send_with_headers)
-                    return
-                chunks.append(chunk)
+            chunks.append(message.get("body", b""))
             if not message.get("more_body", False):
                 break
-
         full_body = b"".join(chunks)
-        if total > 0 and not content_type_ok:
-            response = error_response(
-                415,
-                "unsupported_media_type",
-                _UPLOAD_MEDIA_TYPE_ERROR if upload else _UNSUPPORTED_MEDIA_TYPE_ERROR,
-            )
-            await response(scope, receive, send_with_headers)
-            return
-        if total > 0 and not upload:
-            try:
-                text = full_body.decode("utf-8")
-            except UnicodeDecodeError:
-                response = error_response(
-                    400, "invalid_request", "Request body must be valid UTF-8."
-                )
-                await response(scope, receive, send_with_headers)
-                return
-            try:
-                parsed = json.loads(text)
-            except ValueError:
-                response = error_response(
-                    400, "invalid_request", "Malformed JSON request body."
-                )
-                await response(scope, receive, send_with_headers)
-                return
-            problem = _utf8_problem(parsed, "")
+        # A picture's bytes go to one route and are not JSON.
+        if full_body and not is_upload_request(scope):
+            problem = _body_problem(full_body)
             if problem is not None:
                 response = error_response(400, "invalid_request", problem)
                 await response(scope, receive, send_with_headers)

@@ -35,7 +35,11 @@ from localmelo.support.config import (  # noqa: E402
 from localmelo.support.gateway import GatewayServer  # noqa: E402
 from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
-from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
+from localmelo.support.gateway.guard import (  # noqa: E402
+    LoopbackGuard,
+    is_json_content_type,
+    is_loopback,
+)
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
 
 PORT = 8401
@@ -871,6 +875,57 @@ def test_a_non_empty_api_body_without_json_content_type_is_415(
     assert resp.status_code == 415
     assert resp.headers["cache-control"] == "no-store"
     assert resp.json()["error"]["code"] == "unsupported_media_type"
+
+
+@pytest.mark.parametrize(
+    ("values", "accepted"),
+    [
+        (["application/json"], True),
+        (["Application/JSON; charset=UTF-8"], True),
+        (['application/json; charset="utf-8"'], True),
+        ([], False),
+        (["text/plain"], False),
+        (["application/json", "application/json"], False),
+        (["application/json;"], False),
+        (["application/json; charset"], False),
+        (["application/json; charset=utf-16"], False),
+    ],
+)
+def test_only_one_json_content_type_is_json(values: list[str], accepted: bool) -> None:
+    assert is_json_content_type(values) is accepted
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "headers", "status"),
+    [
+        ("PUT", "/api/settings", [(b"content-length", b"1048577")], 413),
+        ("POST", "/v1/agent/run", [(b"content-length", b"1048577")], 413),
+        ("POST", "/api/uploads", [(b"content-length", b"20971521")], 413),
+        ("PUT", "/api/settings", [(b"content-length", b"5")], 415),
+        ("POST", "//api/uploads", [(b"content-length", b"5")], 415),
+    ],
+)
+async def test_a_body_its_headers_refuse_is_never_read(
+    method: str, path: str, headers: list[tuple[bytes, bytes]], status: int
+) -> None:
+    inner = InnerApp()
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        raise AssertionError("the body was read")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "headers": [(b"host", f"127.0.0.1:{PORT}".encode()), *headers],
+    }
+    await LoopbackGuard(inner, port=PORT)(scope, receive, send)
+    assert sent[0]["status"] == status
+    assert inner.scopes == []
 
 
 def test_an_empty_api_body_needs_no_content_type(gateway: Gateway) -> None:

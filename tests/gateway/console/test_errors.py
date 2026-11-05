@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -206,3 +208,35 @@ async def test_require_session_returns_the_row_or_404(
     with pytest.raises(ApiError) as gone:
         await console.require_session("0123456789ab")
     assert (gone.value.status_code, gone.value.code) == (404, "not_found")
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({"a": "x\ud800"}, "a: the text must be valid UTF-8"),
+        ({"k\udc00": "x"}, "request: the text must be valid UTF-8"),
+        ({"a": {"b\ud801": 1}}, "a: the text must be valid UTF-8"),
+        ({"a": [1, [2, "\udfff"]]}, "a.1.1: the text must be valid UTF-8"),
+    ],
+)
+def test_a_text_that_is_not_utf8_is_a_400_before_any_route(
+    console: Console, body: dict[str, object], message: str
+) -> None:
+    app = FastAPI()
+
+    @app.post("/api/echo")
+    async def echo() -> None:
+        raise AssertionError("the route was reached")
+
+    console.mount(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8401")
+
+    resp = client.post(
+        "/api/echo",
+        content=json.dumps(body),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_request"
+    assert resp.json()["error"]["message"] == message
