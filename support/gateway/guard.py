@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import os
 import re
+import sys
 from http.cookies import CookieError, SimpleCookie
 
 from starlette.responses import JSONResponse
@@ -183,15 +184,23 @@ def is_json_content_type(values: list[str]) -> bool:
     return True
 
 
+def _declared_length(raw: str) -> int | None:
+    """The size a ``Content-Length`` header says, or ``None`` when it is not plain digits.
+
+    ``str.isdigit`` accepts ``"²"`` and other digits ``int`` refuses, so the
+    text must be ASCII too. More digits than any limit is as large as it gets,
+    and ``int`` is not asked to read it.
+    """
+    text = raw.strip()
+    if not (text.isascii() and text.isdigit()):
+        return None
+    digits = text.lstrip("0")
+    return int(digits or "0") if len(digits) <= 18 else sys.maxsize
+
+
 def _content_length_too_large(values: list[str], limit: int = BODY_BYTES_LIMIT) -> bool:
     """Whether any ``Content-Length`` header exceeds *limit* (:data:`BODY_BYTES_LIMIT`)."""
-    for raw in values:
-        text = raw.strip()
-        if not text.isdigit():
-            continue
-        if int(text) > limit:
-            return True
-    return False
+    return any((n := _declared_length(raw)) is not None and n > limit for raw in values)
 
 
 class LoopbackGuard:
@@ -555,7 +564,7 @@ class LoopbackGuard:
             if (
                 api
                 and any(
-                    raw.strip().isdigit() and int(raw.strip()) > 0
+                    (n := _declared_length(raw)) is not None and n > 0
                     for raw in content_lengths
                 )
                 and not (

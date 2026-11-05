@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.types import Message, Receive, Scope, Send
 
 from localmelo.support.gateway.chore_store import (
     ChoreError,
@@ -18,7 +19,11 @@ from localmelo.support.gateway.chore_store import (
     ChoreStaleError,
 )
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.errors import INTERNAL_ERROR, ApiError
+from localmelo.support.gateway.console.errors import (
+    INTERNAL_ERROR,
+    ApiError,
+    ApiMiddleware,
+)
 from localmelo.support.gateway.task_store import (
     TaskConflictError,
     TaskNotFoundError,
@@ -399,6 +404,45 @@ def test_a_body_nested_past_the_recursion_limit_is_a_400(
     assert resp.status_code == 400
     assert resp.json()["error"]["message"] == "Malformed JSON request body."
     assert resp.headers["cache-control"] == "no-store"
+
+
+async def test_the_body_is_replayed_once_and_the_servers_disconnect_follows() -> None:
+    """The route reads the whole body in one message, then hears the client go."""
+    received: list[Message] = []
+
+    async def reads_twice(scope: Scope, receive: Receive, send: Send) -> None:
+        received.append(await receive())
+        received.append(await receive())
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    pieces = [b'{"a"', b":1}"]
+
+    async def receive() -> Message:
+        if pieces:
+            return {
+                "type": "http.request",
+                "body": pieces.pop(0),
+                "more_body": bool(pieces),
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        pass
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/echo",
+        "query_string": b"",
+        "headers": [(b"content-type", b"application/json")],
+    }
+    await ApiMiddleware(reads_twice)(scope, receive, send)
+
+    assert received == [
+        {"type": "http.request", "body": b'{"a":1}', "more_body": False},
+        {"type": "http.disconnect"},
+    ]
 
 
 def test_a_picture_body_and_a_query_that_is_utf8_reach_the_route(
