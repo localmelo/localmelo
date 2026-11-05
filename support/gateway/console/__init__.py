@@ -120,6 +120,18 @@ def store_message(exc: SessionStoreError) -> str:
     return display.home_label(str(exc))
 
 
+def store_unavailable(exc: SessionStoreError) -> ApiError:
+    """The 503 of a store call that failed: one fixed message, the cause in the log.
+
+    The failure's own text can name a folder or repeat the database's words, so
+    it is logged and never answered.
+    """
+    logger.warning("A session store call failed: %s", store_message(exc))
+    if isinstance(exc, StoreOwnedError):
+        return ApiError(503, "store_unavailable", STORE_OWNED_MESSAGE)
+    return ApiError(503, "store_unavailable", t("errors.storeUnavailable"))
+
+
 @dataclass(frozen=True)
 class ConsoleOptions:
     """What a test may replace; production reads every default.
@@ -702,6 +714,8 @@ class Console:
         that is in neither the gateway's file nor the worker history is
         404 ``This session was deleted.``, anything else 503. A worker or
         terminal session is never in the gateway's file, so its failure is 503.
+        A 503 says one fixed thing; the failure's own text, which can name a
+        folder, goes to the log.
         """
         if self.store.failed is not None:
             return ApiError(503, "store_unavailable", FAILED_ERROR)
@@ -711,16 +725,10 @@ class Console:
                 if info is None:
                     info = await self.worker_history.get_session(session_id)
             except SessionStoreError:
-                return ApiError(
-                    503, "store_unavailable", self._store_error or store_message(exc)
-                )
+                return store_unavailable(exc)
             if info is None:
                 return ApiError(404, "not_found", t("errors.sessionDeleted"))
-        return ApiError(
-            503,
-            "store_unavailable",
-            self._store_error or store_message(exc),
-        )
+        return store_unavailable(exc)
 
     # ── Event streams ──
 

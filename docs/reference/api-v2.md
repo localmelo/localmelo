@@ -76,8 +76,10 @@ every route below:
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
 
 The gateway logs the cause of a 500, whose response carries a fixed
-message. A 503 repeats the store's reason with the home folder written as
-`~`; it never carries a traceback, a lease holder or a key.
+message. A 503 from a store call that failed says "The session store is not
+available." and the gateway logs the cause; a store that could not open repeats
+its reason with the home folder written as `~`. A 503 never carries a
+traceback, a lease holder or a key.
 
 The legacy `/v1/*` routes keep their own bodies, including FastAPI's `422` and
 `{"detail": ...}`.

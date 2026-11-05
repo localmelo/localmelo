@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -174,6 +176,24 @@ async def test_a_store_error_nobody_caught_is_the_503_envelope(
         assert resp.status_code == 503, path
         assert resp.json()["error"]["code"] == "store_unavailable"
         assert resp.headers["cache-control"] == "no-store"
+
+
+async def test_a_store_error_answer_never_carries_the_failure_text(
+    console: Console, workspace: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A path under the home folder and the database's own words stay in the log."""
+    turn = await seed_turn(console.store, workspace)
+    detail = f"unable to open {Path.home()}/secret-folder/sessions.db: disk I/O error"
+    client = _app_raising(console, SessionStoreError(detail))
+    caplog.set_level(logging.WARNING)
+
+    for path in (f"/api/sessions/{turn.session_id}/raises", "/api/raises"):
+        resp = client.get(path)
+        assert resp.status_code == 503, path
+        message = resp.json()["error"]["message"]
+        assert message == "The session store is not available.", path
+        assert "secret-folder" not in resp.text and "disk I/O" not in resp.text
+    assert "secret-folder" in caplog.text
 
 
 async def test_a_store_error_in_a_session_that_is_gone_is_404(

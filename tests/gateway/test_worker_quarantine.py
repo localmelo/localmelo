@@ -433,7 +433,7 @@ async def test_finalization_store_failure_retains_runner_until_recovery(
     assert workers._runners.get(task_id) is runner
     assert task_id in workers._runs
     assert not calls
-    console = SimpleNamespace(store=workers.store, _store_error=None)
+    console = SimpleNamespace(store=workers.store)
     for state in ("resume", "stop"):
         with pytest.raises(SessionStoreError) as exc:
             async with asyncio.timeout(2):
