@@ -2,7 +2,9 @@
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-# The packages and package_dir are in setup.py: this folder is the package, whatever it is called.
+# setup.py sets the packages: this folder is the package, whatever the clone is called.
+[tool.setuptools]
+include-package-data = false  # package data is only what package-data lists
 
 [tool.setuptools.package-data]
 "localmelo.support.gateway" = ["static/*", "static/**/*"]
