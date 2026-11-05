@@ -1151,7 +1151,6 @@ class CandidateItem:
 
     text: str
     source_ids: tuple[str, ...] | None = None
-    evidence: str | None = None
 
 
 @dataclass

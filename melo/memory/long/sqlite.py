@@ -20,17 +20,17 @@ from localmelo.melo.memory._sqlite import (
     prepare_connection,
     secure_deletes,
 )
-from localmelo.melo.memory.assertions import decide_assertion
 from localmelo.melo.memory.bm25 import BM25Index
 from localmelo.melo.memory.long import (
-    ACTIONS,
-    KINDS,
-    SOURCES,
-    STORE_SIGNALS,
+    MAX_REASON_CHARS,
     LongTerm,
     LongTermSchemaError,
     StoredEntry,
-    _history_order,
+    _Entry,
+    _tie_key,
+    _typed_meta,
+    check_write,
+    plan_write,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,32 +139,28 @@ def _row_meta(row: tuple[Any, ...]) -> dict[str, Any]:
         provenance = {}
     if not isinstance(provenance, dict):
         provenance = {}
-    origin = provenance.get("origin_task_ids")
-    if isinstance(origin, list) and all(isinstance(i, str) for i in origin):
-        origin_task_ids = origin
-    elif task_id:
-        origin_task_ids = [task_id]
-    else:
-        origin_task_ids = []
-    return {
-        **metadata,
-        "id": int(row_id),
-        "kind": str(kind),
-        "source": str(source),
-        "status": str(status),
-        "admitted_by": str(admitted_by or ""),
-        "provenance": provenance,
-        "task_id": str(task_id or ""),
-        "session_id": str(session_id or ""),
-        "uses": int(uses),
-        "created_at": float(created_at or 0.0),
-        "last_used_at": float(last_used_at or 0.0),
-        "supersedes": None if supersedes is None else int(supersedes),
-        "links": [int(link) for link in links],
-        "embed_model": str(embed_model or ""),
-        "embed_dim": int(embed_dim or 0),
-        "origin_task_ids": origin_task_ids,
-    }
+    return _typed_meta(
+        _Entry(
+            id=int(row_id),
+            text=str(text),
+            vector=np.empty(0, dtype=np.float32),
+            metadata=metadata,
+            kind=str(kind),
+            source=str(source),
+            status=str(status),
+            admitted_by=str(admitted_by or ""),
+            supersedes=None if supersedes is None else int(supersedes),
+            links=tuple(int(link) for link in links),
+            provenance=provenance,
+            task_id=str(task_id or ""),
+            session_id=str(session_id or ""),
+            uses=int(uses),
+            created_at=float(created_at or 0.0),
+            last_used_at=float(last_used_at or 0.0),
+            embed_model=str(embed_model or ""),
+            embed_dim=int(embed_dim or 0),
+        )
+    )
 
 
 def _stored(row: tuple[Any, ...]) -> StoredEntry:
@@ -342,8 +338,6 @@ class SqliteLongTerm(LongTerm):
         source_ids: Any,
         keep_text: bool,
         candidate_id: str,
-        typed_assertion: bool = False,
-        decision_details: dict[str, Any] | None = None,
         record: dict[str, str] | None = None,
     ) -> tuple[int | None, str]:
         """Write one decision, its entry and its decision row, in one transaction.
@@ -351,14 +345,7 @@ class SqliteLongTerm(LongTerm):
         *record* (a records file only) sets the new row's ``topic``,
         ``quote`` and ``embed_model`` columns.
         """
-        for name, value, allowed in (
-            ("kind", kind, KINDS),
-            ("source", source, SOURCES),
-            ("admitted_by", admitted_by, STORE_SIGNALS),
-            ("action", action, ACTIONS),
-        ):
-            if value not in allowed:
-                raise ValueError(f"Unknown long-term {name}: {value!r}")
+        check_write(kind, source, admitted_by, action)
         conn = await self._ensure_ready()
         vector = (
             b""
@@ -369,69 +356,34 @@ class SqliteLongTerm(LongTerm):
         async with self._write_lock:
             await conn.execute("BEGIN IMMEDIATE")
             try:
-                actual = action
-                assertion = provenance.get("assertion")
-                if typed_assertion and isinstance(assertion, dict) and task_id:
-                    async with conn.execute(
-                        "SELECT id, provenance_json, created_at FROM long_term "
-                        "WHERE status = 'active' AND kind = ? AND task_id = ?",
-                        (kind, task_id),
-                    ) as cur:
-                        existing = await cur.fetchall()
-                    typed_rows = []
-                    for existing_id, raw, observed_at in existing:
-                        try:
-                            other = json.loads(raw).get("assertion")
-                        except (ValueError, AttributeError, TypeError):
-                            continue
-                        if isinstance(other, dict):
-                            typed_rows.append(
-                                (int(existing_id), other, float(observed_at))
-                            )
-                    actual, target_id, reason = decide_assertion(
-                        assertion, typed_rows, created_at
-                    )
-                target_status = ""
+                target_status: str | None = None
                 if target_id is not None:
                     async with conn.execute(
                         "SELECT status FROM long_term WHERE id = ?", (target_id,)
                     ) as cur:
                         row = await cur.fetchone()
-                    target_status = str(row[0]) if row else ""
-                if actual == "UPDATE" and target_status != "active":
-                    actual = "NEW"
-                    target_id = None
+                    target_status = str(row[0]) if row else None
+                plan = plan_write(
+                    kind=kind,
+                    action=action,
+                    target_id=target_id,
+                    target_status=target_status,
+                    reason=reason,
+                    provenance=provenance,
+                    task_id=task_id,
+                    session_id=session_id,
+                    created_at=created_at,
+                    now=now,
+                )
                 entry_id: int | None = None
-                if actual == "IGNORE":
-                    if target_id is not None:
+                if plan.action == "IGNORE":
+                    if target_status is not None:
                         await conn.execute(
                             "UPDATE long_term SET uses = uses + 1, last_used_at = ? "
                             "WHERE id = ?",
-                            (now, target_id),
+                            (now, plan.target_id),
                         )
                 else:
-                    links = (
-                        [target_id]
-                        if actual in ("UPDATE", "RELATED", "CONFLICT")
-                        and target_id is not None
-                        else []
-                    )
-                    supersedes = (
-                        target_id
-                        if actual == "UPDATE" and target_id is not None
-                        else None
-                    )
-                    origin = provenance.get("origin_task_ids") or (
-                        [task_id] if task_id else []
-                    )
-                    metadata: dict[str, Any] = {
-                        "task_id": task_id,
-                        "session_id": session_id,
-                        "created_at": created_at or now,
-                        "origin_task_ids": list(origin),
-                    }
-                    if kind == "reflection":
-                        metadata["type"] = "reflection"
                     embed_dim = 0 if embedding is None else len(embedding)
                     cursor = await conn.execute(
                         "INSERT INTO long_term (text, vector, metadata, kind, source, "
@@ -442,16 +394,16 @@ class SqliteLongTerm(LongTerm):
                         (
                             text,
                             vector,
-                            json.dumps(metadata, ensure_ascii=False),
+                            json.dumps(plan.metadata, ensure_ascii=False),
                             kind,
                             source,
                             admitted_by,
-                            supersedes,
-                            json.dumps(links),
+                            plan.supersedes,
+                            json.dumps(list(plan.links)),
                             json.dumps(provenance, ensure_ascii=False),
                             task_id,
                             session_id,
-                            created_at or now,
+                            plan.created_at,
                             embed_dim,
                         ),
                     )
@@ -467,10 +419,10 @@ class SqliteLongTerm(LongTerm):
                                 entry_id,
                             ),
                         )
-                    if supersedes is not None:
+                    if plan.supersedes is not None:
                         await conn.execute(
                             "UPDATE long_term SET status = 'superseded' WHERE id = ?",
-                            (supersedes,),
+                            (plan.supersedes,),
                         )
                 await conn.execute(
                     "INSERT INTO decisions (candidate_id, action, kind, admitted_by, "
@@ -478,12 +430,12 @@ class SqliteLongTerm(LongTerm):
                     "timestamp, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         candidate_id,
-                        actual,
+                        plan.action,
                         kind,
                         admitted_by,
                         entry_id,
-                        target_id,
-                        reason[:500],
+                        plan.target_id,
+                        plan.reason,
                         json.dumps(list(source_ids)),
                         hashlib.sha256(text.encode("utf-8")).hexdigest(),
                         text if keep_text else None,
@@ -497,9 +449,7 @@ class SqliteLongTerm(LongTerm):
                     await conn.rollback()
                 raise
         self._index = None
-        if decision_details is not None:
-            decision_details.update(target_id=target_id, reason=reason)
-        return entry_id, actual
+        return entry_id, plan.action
 
     async def search(
         self,
@@ -548,15 +498,13 @@ class SqliteLongTerm(LongTerm):
         kinds: Any = None,
         exclude_task_ids: Any = (),
         task_key: str = "",
-        include_history: bool = False,
     ) -> list[tuple[str, float, dict[str, Any]]]:
         conn = await self._ensure_ready()
         filtered = bool(kinds) or bool(tuple(exclude_task_ids))
-        if include_history or self._db_path == ":memory:":
-            statuses = "('active', 'superseded')" if include_history else "('active')"
+        if self._db_path == ":memory:":
             async with conn.execute(
                 f"SELECT {_SELECT_COLUMNS} FROM long_term "
-                f"WHERE status IN {statuses} ORDER BY created_at, id"
+                "WHERE status = 'active' ORDER BY created_at, id"
             ) as cur:
                 rows = [tuple(row) for row in await cur.fetchall()]
             metas, texts = _index_rows(
@@ -601,7 +549,7 @@ class SqliteLongTerm(LongTerm):
                 for item in scored
                 if item[0]["provenance"].get("task_key") == task_key
             ]
-        scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
+        scored.sort(key=_by_tie_key, reverse=True)
         return [
             (str(meta["text"]), score, _strip_index_meta(meta))
             for meta, score in scored[:top_k]
@@ -642,21 +590,6 @@ class SqliteLongTerm(LongTerm):
             )
         async with conn.execute(sql, (session_id,)) as cur:
             return [_stored(tuple(row)) for row in await cur.fetchall()]
-
-    async def history_entries(self, task_id: str) -> list[StoredEntry]:
-        """Return a task's entries, including superseded rows, newest first."""
-        if not task_id:
-            return []
-        conn = await self._ensure_ready()
-        async with conn.execute(
-            f"SELECT {_SELECT_COLUMNS} FROM long_term WHERE task_id = ? "
-            "ORDER BY created_at DESC, id DESC",
-            (task_id,),
-        ) as cur:
-            rows = [tuple(row) for row in await cur.fetchall()]
-        entries = [_stored(row) for row in rows]
-        entries.sort(key=_history_order, reverse=True)
-        return entries
 
     async def decisions(self) -> list[dict[str, Any]]:
         conn = await self._ensure_ready()
@@ -853,7 +786,13 @@ class SqliteLongTerm(LongTerm):
                         "admitted_by, entry_id, target_id, reason, source_ids_json, "
                         "text_sha256, timestamp) SELECT '', 'UPDATE', kind, ?, ?, "
                         "id, ?, '[]', '', ? FROM long_term WHERE id = ?",
-                        (admitted_by, keeper, reason[:500], time.time(), entry_id),
+                        (
+                            admitted_by,
+                            keeper,
+                            reason[:MAX_REASON_CHARS],
+                            time.time(),
+                            entry_id,
+                        ),
                     )
                 await conn.commit()
             except BaseException:
@@ -970,14 +909,10 @@ class SqliteLongTerm(LongTerm):
         self._conn = None
 
 
-def _tie_key(meta: dict[str, Any], score: float) -> tuple[float, bool, float]:
-    # The sort is stable, so the final tie keeps the rows' own order (id
-    # ascending): a legacy file's equal scores stay in the order it wrote.
-    return (
-        score,
-        meta.get("admitted_by") == "rehearsal",
-        float(meta.get("created_at") or 0.0) if meta.get("admitted_by") else 0.0,
-    )
+def _by_tie_key(item: tuple[Any, ...]) -> tuple[float, bool, float]:
+    """The sort key of a ``(meta, score, ...)`` row; see :func:`_tie_key`."""
+    meta, score = item[0], item[1]
+    return _tie_key(score, meta["admitted_by"], meta["created_at"])
 
 
 def _strip_index_meta(meta: dict[str, Any]) -> dict[str, Any]:
@@ -1002,7 +937,7 @@ def _rank_rows(
         if task_key and meta["provenance"].get("task_key") != task_key:
             continue
         scored.append((meta, float(np.dot(q_unit, vector / norm)), str(row[1])))
-    scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
+    scored.sort(key=_by_tie_key, reverse=True)
     return [(text, score, meta) for meta, score, text in scored[:top_k]]
 
 

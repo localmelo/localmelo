@@ -201,9 +201,6 @@ class AgentOptions:
       use on a cloud vendor's backend when the config sets none (see
       ``support.config.default_window_messages``); a Python caller sets it
       here.
-    - ``typed_assertions``: opt into conservative, evidence-checked typed
-      memory updates and historical recall in explicit reasoning modes. The
-      default is false; this experimental option is available through Python.
     - ``brief_probe``: set only by the ``--brief`` worker path. A function of
       the workspace root that returns a digest of the workspace's changes
       (``None`` outside a git tree). Setting it marks the run as a brief run:
@@ -362,7 +359,6 @@ class AgentOptions:
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
     captured_history: bool = False
-    typed_assertions: bool = False
     window_eviction: WindowEviction = "chunk"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
@@ -505,7 +501,6 @@ class AgentOptions:
         for name in (
             "keep_decision_text",
             "captured_history",
-            "typed_assertions",
             "brief_items",
             "lean_output",
             "answer_on_stop",

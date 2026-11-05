@@ -37,7 +37,7 @@ def root(tmp_path: Path) -> Path:
     return Path(os.path.realpath(path))
 
 
-def _executor(root: Path | None, *, rooted_tools: bool = True) -> Executor:
+def _executor(root: Path | None) -> Executor:
     hippo = Hippo()
     workspace_root = None if root is None else str(root)
     executor = Executor(
@@ -48,7 +48,7 @@ def _executor(root: Path | None, *, rooted_tools: bool = True) -> Executor:
         hippo,
         names=builtin_names(),
         mode="interactive",
-        workspace_root=workspace_root if rooted_tools else None,
+        workspace_root=workspace_root,
     )
     return executor
 

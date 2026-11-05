@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker._stream_redaction import LineRedactor, snapshot_rules
+from localmelo.melo.checker._stream_redaction import LineRedactor
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import (
     ReasoningTags,
     split_leading_thinking,
@@ -101,10 +102,8 @@ class StreamFilter:
         self._parts: list[str] = []
         self._length = 0
         self._finished = False
-        self._snapshot = snapshot_rules()
-        self._redact = self._snapshot[0]
-        self._raw = LineRedactor(self._snapshot)
-        self._content = LineRedactor(self._snapshot)
+        self._raw = LineRedactor()
+        self._content = LineRedactor()
         self._thinking: list[str] = []
         self._pending = ""
         self._looked = 0
@@ -202,8 +201,8 @@ class StreamFilter:
         self._parts.clear()
         self._thinking.clear()
         self._pending = ""
-        self._raw = LineRedactor(self._snapshot)
-        self._content = LineRedactor(self._snapshot)
+        self._raw = LineRedactor()
+        self._content = LineRedactor()
         self._finished = True
 
     def feed(self, fragment: str) -> tuple[str, str]:
@@ -220,10 +219,10 @@ class StreamFilter:
         if self._hint is None:
             text = "".join(self._parts)
             self._parts.clear()
-            thinking, content = _split_for_display(self._redact(text)[0])
-            return self._redact(thinking)[0], self._redact(content)[0]
+            thinking, content = _split_for_display(redact_secrets(text)[0])
+            return redact_secrets(thinking)[0], redact_secrets(content)[0]
         content = self._accept(self._raw.finish(), final=True)
         content += self._content.finish()
-        thinking = self._redact("".join(self._thinking).strip())[0]
+        thinking = redact_secrets("".join(self._thinking).strip())[0]
         self._thinking.clear()
         return thinking, content

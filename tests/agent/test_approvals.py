@@ -371,6 +371,19 @@ def _approval(
     return approval
 
 
+def _tool_ask(
+    request: ApprovalRequest, *, origin: str, reason: str = ""
+) -> dict[str, Any]:
+    """The ``tool_asks`` entry of a question that ended without an answer."""
+    return {
+        "request_id": request.request_id,
+        "tool": request.tool_name,
+        "allowed": False,
+        "origin": origin,
+        "reason": reason,
+    }
+
+
 def check_events(recorder: Recorder) -> None:
     """Pinned keys, JSON envelopes, and one tool.finished per tool.started."""
     open_call: str | None = None
@@ -864,18 +877,6 @@ class TestDecisions:
                 id="raises",
             ),
             pytest.param(
-                lambda: None,
-                "TypeError: the approval policy returned NoneType, not an "
-                "ApprovalDecision",
-                id="returns_no_decision",
-            ),
-            pytest.param(
-                asyncio.CancelledError(),
-                "RuntimeError: the approval policy raised CancelledError while the "
-                "run was not cancelled",
-                id="spurious_cancelled_error",
-            ),
-            pytest.param(
                 lambda: ApprovalDecision(False, origin="session"),
                 "ValueError: ApprovalDecision.origin 'session' needs allow=True: a "
                 "grant or an earlier approval only allows",
@@ -917,6 +918,64 @@ class TestDecisions:
             policy.requests[0], origin="error", reason=failure
         )
         check_events(recorder)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("answer", "failure"),
+        [
+            pytest.param(
+                RuntimeError("the policy is down"),
+                "RuntimeError: the policy is down",
+                id="raises",
+            ),
+            pytest.param(
+                asyncio.CancelledError(),
+                "RuntimeError: the approval policy raised CancelledError while the "
+                "run was not cancelled",
+                id="spurious_cancelled_error",
+            ),
+        ],
+    )
+    async def test_a_tools_own_question_fails_closed_like_a_call(
+        self, answer: object, failure: str
+    ) -> None:
+        provider = SelfAskingTools("browser_select", {"readOnlyHint": False}, True)
+        llm = ScriptedLLM([_calls(("browser_select", {}, "c1")), _answer("ok")])
+        policy = Policy(answer)
+        agent, _ = _agent(llm, providers=[provider])
+        recorder = Recorder()
+
+        result = await agent.run_task("poke", on_event=recorder, approval=policy)
+
+        # The tool's question is refused and kept, and the run goes on.
+        assert (result.status, result.result) == ("completed", "ok")
+        assert provider.ran == []
+        [finished] = recorder.of("tool.finished")
+        assert finished.data["status"] == "error"
+        assert finished.data["tool_asks"] == [
+            _tool_ask(policy.requests[0], origin="error", reason=failure)
+        ]
+        check_events(recorder)
+
+    @pytest.mark.asyncio
+    async def test_a_tools_own_question_is_withdrawn_when_the_run_is_cancelled(
+        self,
+    ) -> None:
+        provider = SelfAskingTools("browser_select", {"readOnlyHint": False}, True)
+        llm = ScriptedLLM([_calls(("browser_select", {}, "c1"))])
+        policy = Policy(ApprovalDecision(True), wait=asyncio.Event())
+        agent, _ = _agent(llm, providers=[provider], timeout_s=0.3)
+        recorder = Recorder()
+
+        result = await agent.run_task("poke", on_event=recorder, approval=policy)
+
+        assert result.status == "timeout"
+        assert policy.withdrawn
+        [finished] = recorder.of("tool.finished")
+        assert finished.data["status"] == "cancelled"
+        assert finished.data["tool_asks"] == [
+            _tool_ask(policy.requests[0], origin="withdrawn")
+        ]
 
     @pytest.mark.asyncio
     async def test_remember_is_reported_not_acted_on(self) -> None:

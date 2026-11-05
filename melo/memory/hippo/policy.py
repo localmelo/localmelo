@@ -24,8 +24,7 @@ from localmelo.melo.memory.notes import (
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
-# The reason for an IGNORE of identical text. Under the typed-assertion gate only this
-# IGNORE stands; a near-duplicate with different content is kept as a distinct note.
+# The reason for an IGNORE of identical text.
 EXACT_DUPLICATE_REASON = "exact duplicate"
 
 # A short fact is noise: fewer than this many normalised characters.
