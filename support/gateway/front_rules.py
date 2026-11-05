@@ -32,7 +32,12 @@ from datetime import datetime
 from typing import Final, Literal
 
 from localmelo.support.gateway.reminder_time import parse_reminder
-from localmelo.support.sessions.display import EASY_WORDS, URGENT_WORDS, short_title
+from localmelo.support.sessions.display import (
+    EASY_WORDS,
+    GREETING,
+    URGENT_WORDS,
+    short_title,
+)
 
 # Levels P0 to P5. People read the P-code, with its meaning where there is room
 # (``P1 · today``). The words stay what people may type and what the API's
@@ -1082,10 +1087,6 @@ ASK_TEXT_ZH: Final = "这件事不是一句话能答完的。要把它作为任�
 HANDOFF_TEXTS: Final = frozenset({STARTED_TEXT, ASK_TEXT, STARTED_TEXT_ZH, ASK_TEXT_ZH})
 
 
-_GREETING: Final = re.compile(
-    r"^(?:hi|hello|hey|yo|thanks|thank you|thx|good (?:morning|afternoon|evening|night)|"
-    r"你好|您好|嗨|哈喽|谢谢|早上好|早安|晚安|晚上好)(?:\s+(?:there|melo|all))?[\s!.,！。~]*$"
-)
 _NAMES_THING: Final = re.compile(
     r"https?://|www\.|[~/][\w.-]|\b[\w-]+\.[a-z0-9]{1,5}\b|\b(?:file|folder|directory)\b|文件|目录"
 )
@@ -1173,7 +1174,7 @@ def route(
             return Routed("follow", task=named[0])
         if named:
             return Routed("choose", pick="send", matches=tuple(named))
-    if _GREETING.match(text) or brief_question(stripped):
+    if GREETING.match(text) or brief_question(stripped):
         return Routed("answer")
     if work_request(stripped) and not (
         cue is not None

@@ -34,6 +34,26 @@ from localmelo.tests.linear import assert_linear
         ("Can your team review this", "Can your team review this"),
         ("请假三天怎么写", "请假三天怎么写"),
         ("Please", "Please"),
+        # A first line that is only a greeting, or the fence that opens a code block,
+        # says nothing about the request: the next line names it.
+        (
+            "Hi\nCan you help me plan a three day trip to Kyoto?",
+            "help me plan a three day trip to Kyoto?",
+        ),
+        ("Good morning,\n\nFix the login bug", "Fix the login bug"),
+        ("hello!\nhey there\nsummarize the notes", "summarize the notes"),
+        ("你好\n帮我整理一下会议记录", "整理一下会议记录"),
+        ("您好，\n请问怎么重置密码", "怎么重置密码"),
+        ("```python\ndef add(a, b):\n    return a + b\n```", "def add(a, b)"),
+        ("```\nwhy does this fail?", "why does this fail?"),
+        (
+            "Hi there, can you help me plan a trip",
+            "Hi there, can you help me plan a trip",
+        ),
+        # With nothing else to name it, the first line stays.
+        ("Hi", "Hi"),
+        ("Hello!\n\n", "Hello"),
+        ("```\n```", "```"),
         # A level word that opens the request and is followed by a colon or comma
         # goes; anywhere else, or with nothing after it, it stays.
         ("不急：主对话里英文的提示语要改成中文", "主对话里英文的提示语要改成中文"),

@@ -718,6 +718,14 @@ EASY_WORDS: Final = (
     "慢慢来",
 )
 _TODAY_WORDS: Final = ("今天", "today", "tonight", "今晚")
+# A line that is only a greeting ("Hi,", "Good morning!", "你好") or thanks, and a
+# line that is only the fence opening a code block: neither names the request.
+GREETING: Final = re.compile(
+    r"^(?:hi|hello|hey|yo|thanks|thank you|thx|good (?:morning|afternoon|evening|night)|"
+    r"你好|您好|嗨|哈喽|谢谢|早上好|早安|晚安|晚上好)(?:\s+(?:there|melo|all))?[\s!.,，！。~]*$",
+    re.IGNORECASE,
+)
+_FENCE: Final = re.compile(r"^```\w*$")
 # What opens a request and is no part of its title: a polite word ("please",
 # "请", "帮我": "请问" is a word of its own, and "请假" or "请求" are not polite),
 # "/task", or a level word followed by a colon or comma ("no rush: tidy the
@@ -758,22 +766,39 @@ def title_width(text: str) -> int:
     return sum(2 if _wide(char) else 1 for char in text)
 
 
+def _title_line(text: str) -> str:
+    """The line of *text* that names the request, cut to :data:`_READ_CHARS`.
+
+    The first non-blank line, unless it is only a greeting or a code fence: then
+    the next such line. With every line skipped, the first line.
+    """
+    first = ""
+    for row in text.splitlines():
+        row = row.strip()[:_READ_CHARS]
+        if not row:
+            continue
+        if not (GREETING.match(row) or _FENCE.match(row)):
+            return row
+        first = first or row
+    return first
+
+
 def short_title(text: str) -> str:
     """A short title from a request, at most :data:`TITLE_WIDTH` wide.
 
     Every task and every chat is named by this one function, so a request reads
     the same wherever it was typed. The title is the person's own first words,
-    from the first non-blank line with whitespace collapsed. A polite word or a
-    level word that opens it goes, and a path reads as its file's name (a link
-    stays whole). The title ends at the first sentence end (a question keeps
-    its mark), or at a comma when what comes before it is a clause on its own
-    (at least 16 wide). A clause that is still too long is cut at the last word
-    (or, in Chinese or Japanese, character) that fits, without a "the" or "in"
-    left hanging, and ends in ``…``; one long word with no break is cut where it
-    must be. An empty request reads ``Task``.
+    from the first non-blank line (not one that is only a greeting or a code
+    fence), with whitespace collapsed. A polite word or a level word that opens
+    it goes, and a path reads as its file's name (a link stays whole). The title
+    ends at the first sentence end (a question keeps its mark), or at a comma
+    when what comes before it is a clause on its own (at least 16 wide). A
+    clause that is still too long is cut at the last word (or, in Chinese or
+    Japanese, character) that fits, without a "the" or "in" left hanging, and
+    ends in ``…``; one long word with no break is cut where it must be. An empty
+    request reads ``Task``.
     """
-    line = next((row for row in text.splitlines() if row.strip()), "")
-    line = " ".join(line.lstrip()[:_READ_CHARS].split())
+    line = " ".join(_title_line(text).split())
     opening = _OPENING.match(line)
     # A request that is nothing but its opening keeps it.
     line = (line[opening.end() :] if opening else "") or line
