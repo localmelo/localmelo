@@ -719,7 +719,7 @@ EASY_WORDS: Final = (
 )
 _TODAY_WORDS: Final = ("今天", "today", "tonight", "今晚")
 # A line that is only a greeting ("Hi,", "Good morning!", "你好") or thanks, and a
-# line that is only the fence opening a code block: neither names the request.
+# line that opens a code block (its lines are code, not the request).
 GREETING: Final = re.compile(
     r"^(?:hi|hello|hey|yo|thanks|thank you|thx|good (?:morning|afternoon|evening|night)|"
     r"你好|您好|嗨|哈喽|谢谢|早上好|早安|晚安|晚上好)(?:\s+(?:there|melo|all))?[\s!.,，！。~]*$",
@@ -769,17 +769,23 @@ def title_width(text: str) -> int:
 def _title_line(text: str) -> str:
     """The line of *text* that names the request, cut to :data:`_READ_CHARS`.
 
-    The first non-blank line, unless it is only a greeting or a code fence: then
-    the next such line. With every line skipped, the first line.
+    The first non-blank line, unless it is only a greeting or opens a code block:
+    then the first such line after the greeting, or after the block's closing
+    fence. With nothing left to name the request, the first line.
     """
     first = ""
+    in_code = False
     for row in text.splitlines():
         row = row.strip()[:_READ_CHARS]
         if not row:
             continue
-        if not (GREETING.match(row) or _FENCE.match(row)):
-            return row
         first = first or row
+        if in_code:
+            in_code = row != "```"
+        elif _FENCE.match(row):
+            in_code = True
+        elif not GREETING.match(row):
+            return row
     return first
 
 
@@ -788,8 +794,8 @@ def short_title(text: str) -> str:
 
     Every task and every chat is named by this one function, so a request reads
     the same wherever it was typed. The title is the person's own first words,
-    from the first non-blank line (not one that is only a greeting or a code
-    fence), with whitespace collapsed. A polite word or a level word that opens
+    from the first non-blank line (not one that is only a greeting, and not a
+    code block), with whitespace collapsed. A polite word or a level word that opens
     it goes, and a path reads as its file's name (a link stays whole). The title
     ends at the first sentence end (a question keeps its mark), or at a comma
     when what comes before it is a clause on its own (at least 16 wide). A
