@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
@@ -1996,13 +1997,13 @@ def main() -> None:
             kwargs: dict = {}
             if args.port is not None:
                 kwargs["port"] = args.port
-            path = daemon.install(**kwargs)
-            print(f"Daemon installed: {path}")
+            try:
+                print(daemon.install(**kwargs).line)
+            except RuntimeError as exc:
+                print(f"melo: error: {exc}", file=sys.stderr)
+                raise SystemExit(EXIT_CRASHED) from None
         elif args.daemon == "uninstall":
-            if daemon.uninstall():
-                print("Daemon uninstalled")
-            else:
-                print("Daemon not installed")
+            _uninstall_services(parser)
         elif args.daemon == "status":
             info = daemon.status()
             for k, v in info.items():
@@ -2179,6 +2180,7 @@ def main() -> None:
 
     # validate before anything else — fail fast with actionable errors
     from localmelo.support.config import ConfigError
+    from localmelo.support.gateway import daemon
 
     if allow_unconfigured:
         if not cfg.gateway_port_ok:
@@ -2197,7 +2199,28 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
+    if _asks_for_no_gateway_in_particular(args) and daemon.is_installed():
+        if code := _serve_with_service(cfg):
+            raise SystemExit(code)
+        return
     _start_gateway(cfg)
+
+
+def _asks_for_no_gateway_in_particular(args: argparse.Namespace) -> bool:
+    """Bare ``melo serve``: no flag or setting asks for another host, port or setup.
+
+    The login service runs ``--serve --port N``, so it never takes the service
+    path itself.
+    """
+    from localmelo.support import config
+
+    return not (
+        args.host is not None
+        or args.port is not None
+        or args.reconfigure
+        or getattr(args, "allow_unconfigured", False)
+        or config.overrides()
+    )
 
 
 def _on_a_terminal() -> bool:
@@ -2683,6 +2706,17 @@ def _model_line(cfg: Config) -> str:
     return clean_output(f"{model} on {label}" if model else label)
 
 
+def _url_host(host: str) -> str:
+    """*host* as a URL writes it: an IPv6 address in brackets."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def _melo_serve_role(cfg: Config) -> str:
+    """The role (chat or embedding) that uses melo_serve, else an empty string."""
+    uses = (("chat", cfg.chat_backend), ("embedding", cfg.embedding_backend))
+    return next((role for role, key in uses if key == "melo_serve"), "")
+
+
 def _start_gateway(cfg: Config) -> None:
     """Thin seam for gateway startup — keeps the lazy import local."""
     from localmelo.support import console_link
@@ -2690,11 +2724,8 @@ def _start_gateway(cfg: Config) -> None:
 
     # --port 0: bind first, so every line below names the port in use.
     sockets = [bind_free_port(cfg)] if cfg.gateway.port == 0 else None
-    host = cfg.gateway.host
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
-    uses = (("chat", cfg.chat_backend), ("embedding", cfg.embedding_backend))
-    if role := next((role for role, key in uses if key == "melo_serve"), ""):
+    host = _url_host(cfg.gateway.host)
+    if role := _melo_serve_role(cfg):
         from localmelo.support import melo_serve
 
         print(f"\n  {melo_serve.ensure_running(role)}")
@@ -2723,6 +2754,104 @@ def _start_gateway(cfg: Config) -> None:
         start_gateway(cfg, allow_unconfigured=True, **extra)
     else:
         start_gateway(cfg, **extra)
+
+
+def _serve_with_service(cfg: Config) -> int:
+    """``melo serve`` with the gateway's login service: make sure both run, open the console.
+
+    One line per service. The gateway is started through launchd only when none
+    is live, so a second ``melo serve`` never runs a second gateway.
+    """
+    from localmelo.support import console_link, gateway_endpoint, melo_serve
+    from localmelo.support.cli.theme import symbols_for
+    from localmelo.support.gateway import daemon
+
+    symbols = symbols_for(sys.stdout.encoding)
+
+    def say(name: str, state: str, *, ok: bool = True) -> None:
+        mark = symbols.ok if ok else symbols.failed
+        print(f"{mark} {name}   {state}", file=sys.stdout if ok else sys.stderr)
+
+    if role := _melo_serve_role(cfg):
+        line = melo_serve.ensure_running(role)
+        if melo_serve.snapshot().running:
+            say("melo_serve", "running")
+        else:
+            print(line, file=sys.stderr)
+    found = gateway_endpoint.live()
+    if found is not None:
+        say("gateway", "running")
+    else:
+        try:
+            daemon.start()
+            deadline = time.monotonic() + daemon.START_WAIT_S
+            while (found := gateway_endpoint.live()) is None:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.2)
+        except RuntimeError as exc:
+            say("gateway", f"could not be started: {exc}", ok=False)
+            return EXIT_CRASHED
+        if found is None:
+            say(
+                "gateway",
+                f"did not start in {daemon.START_WAIT_S:g} s; log: {daemon.LOG_HINT}",
+                ok=False,
+            )
+            return EXIT_CRASHED
+        say("gateway", "started")
+    host = _url_host(found.host)
+    if console_link.can_open():
+        console_link.open_console(host, found.port)
+    else:
+        print(f"  Web UI:  http://{host}:{found.port}/")
+        print(f"  Sign in: run melo console -p {found.port}")
+    return 0
+
+
+def _uninstall_services(parser: argparse.ArgumentParser) -> None:
+    """``melo serve uninstall``: name the login services, ask once, remove them."""
+    from localmelo.support import melo_serve
+    from localmelo.support.gateway import daemon
+
+    serve_command = melo_serve.command()
+    services = [
+        *([(daemon.LABEL, "the gateway")] if daemon.is_installed() else []),
+        *([("ai.localmelo.melo_serve", "melo_serve")] if serve_command else []),
+    ]
+    if not services:
+        print("No login service is installed.")
+        return
+    print("This removes the login services and stops them:")
+    for label, what in services:
+        print(f"  {label}   {what}")
+    if not _on_a_terminal():
+        parser.exit(
+            EXIT_NOT_COMPLETED,
+            f"{parser.prog}: error: melo serve uninstall asks before it removes "
+            "these; run it in a terminal\n",
+        )
+    if input("Remove them? [y/N]: ").strip().lower() not in ("y", "yes"):
+        print("Nothing was removed.")
+        return
+    if daemon.is_installed():
+        daemon.uninstall()
+        print(f"Removed {daemon.LABEL}.")
+    if serve_command:
+        try:
+            done = subprocess.run(
+                [serve_command, "uninstall"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"melo-serve uninstall failed: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_CRASHED) from None
+        print((done.stdout or done.stderr).strip())
+        if done.returncode:
+            raise SystemExit(EXIT_CRASHED)
 
 
 if __name__ == "__main__":

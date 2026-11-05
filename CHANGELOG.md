@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `melo serve` just works after the first run. With the gateway's login service installed, a bare `melo serve` (no
+  `--port`, `--host`, `--force`, `--reconfigure` or `-X` setting) no longer starts a second gateway that fights for the
+  port: it starts melo_serve when the config uses it, starts the gateway service when no gateway is live (up to 20 s),
+  opens the web console where the terminal allows (else it prints the address and `melo console -p PORT`) and returns,
+  with one line per service (`✓ melo_serve   running`, `✓ gateway   started` or `✓ gateway   running`). A gateway that
+  does not come up gives `✗ gateway   did not start in 20 s; log: ~/.localmelo/logs/gateway.stderr.log` and exit 1. The
+  service now stays stopped after `melo serve stop` (`KeepAlive` is `{SuccessfulExit: false}`, and the gateway exits 0
+  on SIGTERM; before, uvicorn sent the signal on again and the process ended as killed). `melo serve install` is
+  idempotent and says what it did: `installed ai.localmelo.gateway (starts at login)`, `already installed, skipped`
+  (the same plist, already loaded: no restart), or `updated ai.localmelo.gateway; the gateway restarted`; next to a
+  gateway that is not the service's own (the app's, or `melo serve` in a terminal) it writes the plist and loads
+  nothing (`installed ai.localmelo.gateway; it takes over at next login`), so two gateways never run. Every
+  `launchctl` call has a time limit, and `LOCALMELO_LAUNCH_AGENTS` moves the plist folder (tests). `melo serve
+  uninstall` lists both login services (the gateway's and melo_serve's), asks once at a terminal, removes the
+  gateway's and runs `melo-serve uninstall`; from a pipe it exits 2 and removes nothing. In the terminal chat, Esc while
+  the session moves to a new melo_serve model now stops the turn before it is sent (the message comes back) instead of
+  being ignored (#NNN).
 - The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`; no screen yet). `plan()`
   asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.3.0, otherwise
   `uv tool run --python <this interpreter> --from <archive of a pinned melo_serve commit>`, which fetches melo_serve's

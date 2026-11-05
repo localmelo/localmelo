@@ -359,6 +359,22 @@ async def test_a_message_during_a_turn_is_queued_and_sent_when_it_completes(
     assert session.queued is None
 
 
+async def test_esc_while_the_session_moves_to_a_new_model_sends_nothing(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+
+    async def esc_during_the_move() -> None:
+        assert session.stop()
+
+    monkeypatch.setattr(session, "_follow_served", esc_during_the_move)
+    session.enter("never sent")
+    await setup.idle()
+    assert await setup.rows() == []
+    assert "Stopped" in setup.out.text() and "nothing was sent" in setup.out.text()
+    assert setup.app.buffer.text == "never sent"
+
+
 async def test_a_queued_message_comes_back_when_the_turn_is_stopped(
     setup: Setup,
 ) -> None:
