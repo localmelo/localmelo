@@ -13,9 +13,11 @@ from localmelo.melo.checker.redaction import redact_secrets
 # after its whitespace and token. The bearer keyword and whitespace can span
 # lines. A PEM block starts at a BEGIN marker for a PRIVATE KEY label,
 # anywhere in a line, and ends at the next END marker, or at the end of the
-# text; it spans lines. Every other rule stays within one line, and a test
-# (tests/checker/test_stream_redaction.py) fails the build when a rule can
-# match across lines or a new rule appears, so this list cannot go stale.
+# text; it spans lines. Every other rule stays within one line. Tests in
+# tests/checker/test_stream_redaction.py fail the build when a rule can match
+# across lines, when redaction.py matches with a regex they do not inspect, or
+# when a streamed split gives other text than the whole redaction, so this
+# list cannot go stale.
 
 # A bearer keyword (and any white space) at the end of the text: its token is
 # still to come, so its line is held back.
