@@ -48,7 +48,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final, TypeVar
 
@@ -706,10 +706,18 @@ def _ran_out(reply: Message) -> bool:
 
 
 async def _ask(
-    send: Send, prompt: str, stats: Stats, *, splittable: bool = False
+    send: Send,
+    prompt: str,
+    stats: Stats,
+    *,
+    splittable: bool = False,
+    system_prompt: str = SYSTEM_PROMPT,
+    parse_reply: Callable[[str], dict[str, Any] | None] = read_reply,
+    attempts: int = 2,
 ) -> tuple[dict[str, Any] | None, str]:
     """Ask for a window's items, twice at most: the reply's JSON, or ``None`` and
-    why not. Every request is counted.
+    why not. Every request is counted. Other short JSON jobs can supply their
+    own system prompt, reply reader and attempt count through this same path.
 
     An unreadable reply that ran out of room (:func:`_ran_out`) is not asked for
     again: the same prompt at temperature 0 is cut at the same place. It gives the
@@ -717,19 +725,19 @@ async def _ask(
     ``None``.
     """
     why = ""
-    for _ in range(2):
+    for _ in range(attempts):
         stats.calls += 1
         try:
             async with asyncio.timeout(ENCODE_TIMEOUT_S):
                 reply: Message = await send(
-                    [Message("system", SYSTEM_PROMPT), Message("user", prompt)]
+                    [Message("system", system_prompt), Message("user", prompt)]
                 )
         except Exception as exc:
             why = f"the model failed: {exc or type(exc).__name__}"
             logger.warning("Hippo encoder: %s", why)
             continue
         stats.add(reply.usage)
-        value = read_reply(reply.content)
+        value = parse_reply(reply.content)
         if value is not None:
             return value, ""
         if _ran_out(reply):
