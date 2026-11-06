@@ -4,8 +4,11 @@ Items a chat model encoded from the chats take the place of the turns: recall ra
 bars, picks and shows them as it does turns, a list line is ``[m12] …`` under its own
 guide, ``open_memory`` opens an item (and, with ``open_sources``, the turns it came
 from), a replaced item reads as older, a conflicting one names its partner, and the
-turn's memory event says which items were used, searched and opened. With the default
-source, ``turns``, nothing changes. Synthetic items, words and fixed vectors, no model.
+turn's memory event says which items were used, searched and opened. A chat's turns
+past its progress mark (the last turn encoded) stay in the same list, so a chat nobody
+encoded is not lost; an encoded chat reads as it did before marks, and a store with no
+marks reads as the turns source. With the default source, ``turns``, nothing changes.
+Synthetic items, words and fixed vectors, no model.
 """
 
 from __future__ import annotations
@@ -20,12 +23,13 @@ import numpy as np
 import pytest
 
 from localmelo.support.memory import ChatMemory
-from localmelo.support.memory.index import MemoryItem
+from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
     OLDER_ITEM,
+    PREMISE_GUIDE,
     Corpus,
     Item,
     day,
@@ -55,12 +59,15 @@ from localmelo.tests.memory.test_recall_list import (
     add_turn,
     ask,
     config,
+    filled,
 )
 
 NOTHING_FOUND = "Nothing in melo's memory matches that."
 TITLE = "Tomato garden stakes"
 TEXT = "The user stakes the tomato garden with bamboo."
 TURN = ("Which tomato garden bed gets the sun?", "Bed one faces south all day.")
+# A later turn of the same chat, which no item holds.
+LATER = ("Which tomato garden pot needs water?", "Pot two needs water daily.")
 
 
 @pytest.fixture()
@@ -83,10 +90,13 @@ async def put(
     kind: str = "semantic",
     at: float | None = None,
     cosine: float | None = None,
+    encoded: bool = True,
 ) -> int:
-    """Store a memory item of chat *session_id* and give its number."""
+    """Store a memory item of chat *session_id* and give its number. As the encoder
+    does (:meth:`ChatMemory.compress_chat`), it also marks the chat encoded up to the
+    item's last source turn, unless *encoded* is off."""
     _, index = memory.stores()
-    return await index.add_item(
+    number = await index.add_item(
         MemoryItem(
             session_id=session_id,
             title=title,
@@ -99,28 +109,53 @@ async def put(
             encoder="1:stub",
         )
     )
+    if encoded:
+        await index.mark_encoded(session_id, max(turns))
+    return number
 
 
 class Held:
-    """A memory with one chat whose turn and item both speak of the tomato garden."""
+    """A memory with one chat whose turn and item both speak of the tomato garden;
+    the turn is encoded (the chat's mark is on it). With *later*, the chat has a
+    second turn (``later`` is its document) that no item holds."""
 
-    def __init__(self, memory: ChatMemory, session_id: str, doc: int, item: int):
-        self.memory, self.session_id, self.doc, self.item = (
+    def __init__(
+        self, memory: ChatMemory, session_id: str, doc: int, item: int, later: int = 0
+    ):
+        self.memory, self.session_id, self.doc, self.item, self.later = (
             memory,
             session_id,
             doc,
             item,
+            later,
         )
 
 
-async def held(tmp_path: Path, store: SessionStore, cfg: Any, **item: Any) -> Held:
+async def held(
+    tmp_path: Path,
+    store: SessionStore,
+    cfg: Any,
+    later: tuple[str, str] | None = None,
+    **item: Any,
+) -> Held:
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     when = time.time() - 3 * DAY
     session_id, (doc,) = await add_turn(
         memory, store, TURN[0], TURN[1], at=when, title="Garden"
     )
     number = await put(memory, session_id, TITLE, TEXT, at=when, **item)
-    return Held(memory, session_id, doc, number)
+    after = 0
+    if later is not None:
+        _, (after,) = await add_turn(
+            memory,
+            store,
+            *later,
+            at=when + 60,
+            session_id=session_id,
+            turn=2,
+            title="Garden",
+        )
+    return Held(memory, session_id, doc, number, after)
 
 
 def lines_of(text: str) -> list[str]:
@@ -130,6 +165,12 @@ def lines_of(text: str) -> list[str]:
 
 def has_item_line(text: str) -> bool:
     return bool(lines_of(text))
+
+
+def refs_of(text: str) -> list[str]:
+    """The ids of the list lines of a block or a search result, items and turns:
+    ``["m12", "t34"]``."""
+    return re.findall(r"^\[([mt]\d+)\] ", text, re.MULTILINE)
 
 
 # ── The default is unchanged ──
@@ -359,7 +400,7 @@ async def test_the_tools_of_the_item_list_form_are_ascii_and_name_the_ids(
             assert str(tool.parameters).isascii()
             assert "memory item" in tool.description.lower()
         ids = opened.definition.parameters["properties"]["ids"]
-        assert ids["description"] == "Ids from the list, such as m12."
+        assert ids["description"] == "Ids from the list, such as m12 or t123."
         assert "came from" not in opened.definition.description
         assert "came from" in open_memory_items(True).description
         assert open_memory_items(True).description.isascii()
@@ -400,13 +441,13 @@ async def test_open_memory_says_why_an_id_opens_nothing(
     try:
         tools = MemoryTools(memory)
         assert await tools.open_memory(ids=[]) == OPEN_USAGE_ITEMS
-        assert OPEN_USAGE_ITEMS == "Pass 1 to 5 ids from the list, such as m12."
-        reply = await tools.open_memory(ids=["m99999", f"t{fill.doc}", "r1", "nope"])
+        assert OPEN_USAGE_ITEMS == "Pass 1 to 5 ids from the list, such as m12 or t123."
+        reply = await tools.open_memory(ids=["m99999", "t99999", "r1", "nope"])
         assert reply.split("\n\n") == [
             f"m99999: {NO_SUCH_TURN}",
-            f"t{fill.doc}: not an id from the list; ids look like m12.",
+            f"t99999: {NO_SUCH_TURN}",
             "r1: that is a note, which is shown in full already.",
-            "nope: not an id from the list; ids look like m12.",
+            "nope: not an id from the list; ids look like m12 or t123.",
         ]
     finally:
         await memory.aclose()
@@ -729,6 +770,210 @@ def test_an_item_reads_as_json_with_its_sources() -> None:
     assert turn.ref == "t12" and turn.is_turn and not turn.is_memory
 
 
+# ── Turns not encoded yet ──
+
+
+@pytest.mark.parametrize("form", ["list", "excerpt"])
+async def test_with_nothing_encoded_recall_reads_what_the_turns_source_reads(
+    tmp_path: Path, store: SessionStore, form: str
+) -> None:
+    cfg = config(recall_form=form)
+    fill = await filled(tmp_path, store, cfg)
+    memory = fill.memory
+    try:
+        before = await ask(memory, store)
+        search = await MemoryTools(memory).search(query=QUESTION)
+        assert any(i.is_record for i in before.used)
+        assert any(i.is_turn for i in before.used)
+        cfg.memory.recall_source = "items"
+        after = await ask(memory, store)
+        assert after.block == before.block
+        assert [i.key for i in after.used] == [i.key for i in before.used]
+        assert await MemoryTools(memory).search(query=QUESTION) == search
+        assert not memory._corpus.keys("m:") and len(memory._corpus.keys("d:")) == 3
+        assert (LIST_GUIDE in after.block) == (form == "list")
+        assert ITEM_LIST_GUIDE not in after.block
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize("form", ["list", "excerpt"])
+async def test_a_half_encoded_chat_recalls_its_later_turns_beside_its_items(
+    tmp_path: Path, store: SessionStore, form: str
+) -> None:
+    cfg = config(recall_source="items", recall_form=form)
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        found = await ask(memory, store)
+        assert {i.key for i in found.used} == {f"m:{fill.item}", f"d:{fill.later}"}
+        reply = await MemoryTools(memory).search(query=QUESTION)
+        # The earlier turn is in the item; only the later one is listed or shown.
+        if form == "list":
+            assert sorted(refs_of(found.block)) == sorted(refs_of(reply))
+            assert sorted(refs_of(reply)) == [f"m{fill.item}", f"t{fill.later}"]
+            assert ITEM_LIST_GUIDE in found.block and LIST_GUIDE not in found.block
+            assert reply.split("\n")[0].startswith(ITEM_LIST_GUIDE[:20])
+        else:
+            for text in (found.block, reply):
+                assert TEXT in text and LATER[0] in text and TURN[0] not in text
+        assert f"d:{fill.doc}" not in memory._corpus.items
+    finally:
+        await memory.aclose()
+
+
+async def test_a_list_of_turns_and_items_has_one_guide_line_with_the_premise_sentence(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list", premise_check="on")
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        found = await ask(memory, store)
+        guide = f"{ITEM_LIST_GUIDE} {PREMISE_GUIDE}"
+        assert found.block.count(guide) == 1 and LIST_GUIDE not in found.block
+        reply = await MemoryTools(memory).search(query=QUESTION)
+        assert reply.count(guide) == 1 and LIST_GUIDE not in reply
+    finally:
+        await memory.aclose()
+
+
+async def test_a_mark_that_advances_takes_those_turns_out_at_the_next_sync(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        assert f"t{fill.later}" in refs_of((await ask(memory, store)).block)
+        _, index = memory.stores()
+        await index.mark_encoded(fill.session_id, 2)
+        found = await ask(memory, store)
+        assert [i.key for i in found.used] == [f"m:{fill.item}"]
+        assert not memory._corpus.keys("d:")
+        # The progress mark never moves back.
+        await index.mark_encoded(fill.session_id, 1)
+        assert await index.encoded_turn(fill.session_id) == 2
+    finally:
+        await memory.aclose()
+
+
+async def test_a_chat_with_no_mark_is_not_encoded_whatever_the_items_say(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, encoded=False)
+    memory = fill.memory
+    try:
+        found = await ask(memory, store)
+        assert {i.key for i in found.used} == {f"m:{fill.item}", f"d:{fill.doc}"}
+    finally:
+        await memory.aclose()
+
+
+async def test_a_summary_stays_recalled_when_its_chat_has_a_mark(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg)
+    memory = fill.memory
+    try:
+        await memory.side_summary(
+            fill.session_id, "Garden", "The tomato garden is staked with bamboo."
+        )
+        _, index = memory.stores()
+        assert await index.encoded_turn(fill.session_id) == 1
+        found = await ask(memory, store)
+        (summary,) = (i for i in found.used if i.is_turn)
+        # The summary (turn -1) is recalled beside the item; the encoded turn is not.
+        assert summary.turn == SUMMARY_TURN and summary.key != f"d:{fill.doc}"
+        assert {i.key for i in found.used} == {f"m:{fill.item}", summary.key}
+        assert f"d:{fill.doc}" not in memory._corpus.items
+    finally:
+        await memory.aclose()
+
+
+async def test_open_memory_opens_an_item_and_a_turn_in_one_call(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        when = day(time.time() - 3 * DAY)
+        reply = await MemoryTools(memory).open_memory(
+            ids=[f"m{fill.item}", f"T{fill.later}", f"t{fill.doc}"]
+        )
+        item, turn, encoded = reply.split("\n\n")
+        assert item == f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}"
+        assert turn.startswith(f"[t{fill.later}] {when} · chat “Garden”\n")
+        assert LATER[0] in turn and LATER[1] in turn
+        # An encoded turn is no longer listed, but the index has it, so it opens.
+        assert encoded.startswith(f"[t{fill.doc}] {when} · chat “Garden”\n")
+        assert TURN[0] in encoded and TURN[1] in encoded
+        # Without the items source a turn id still opens a turn and an item id does not.
+        cfg.memory.recall_source = "turns"
+        again = await MemoryTools(memory).open_memory(
+            ids=[f"m{fill.item}", f"t{fill.doc}"]
+        )
+        assert again.split("\n\n")[0] == (
+            f"m{fill.item}: not an id from the list; ids look like t123."
+        )
+        assert again.split("\n\n")[1].startswith(f"[t{fill.doc}] ")
+    finally:
+        await memory.aclose()
+
+
+async def test_the_event_names_items_and_turns_used_searched_and_opened(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        emitted: list[dict[str, Any]] = []
+        await memory.before_turn(
+            store, await _turn(store, QUESTION), QUESTION, emit=emitted.append
+        )
+        chat = CHAT_TURN.get()
+        assert chat is not None
+        data = chat.event()
+        assert data is not None
+        assert {(u["kind"], u["id"]) for u in data["used"]} == {
+            ("item", fill.item),
+            ("chat", fill.later),
+        }
+        tools = MemoryTools(memory)
+        await tools.search(query=QUESTION)
+        assert {(s["kind"], s["id"]) for s in emitted[-1]["searched"]} == {
+            ("item", fill.item),
+            ("chat", fill.later),
+        }
+        await tools.open_memory(ids=[f"t{fill.later}", f"m{fill.item}"])
+        assert emitted[-1]["opened"] == [
+            {"session_id": fill.session_id, "turn": 2, "id": fill.later},
+            {"item": fill.item, "sources": [[fill.session_id, 1]]},
+        ]
+    finally:
+        CHAT_TURN.set(None)
+        await memory.aclose()
+
+
+async def test_forgetting_one_turn_keeps_the_chats_mark(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, later=LATER)
+    memory = fill.memory
+    try:
+        _, index = memory.stores()
+        await memory.forget_session(fill.session_id, 2)
+        assert await index.encoded_turn(fill.session_id) == 1
+        assert [i.key for i in (await ask(memory, store)).used] == [f"m:{fill.item}"]
+    finally:
+        await memory.aclose()
+
+
 # ── Forgetting ──
 
 
@@ -750,10 +995,13 @@ async def test_forgetting_a_chat_or_everything_takes_the_items_and_a_reindex_kee
         _, index = memory.stores()
         await memory.reindex(None)
         assert await index.count_items() == 2
+        assert [await index.encoded_turn(s) for s in (first, second)] == [1, 1]
         await memory.forget_session(second)
         assert [i.id for i in await index.fetch_items([kept, gone])] == [kept]
+        assert [await index.encoded_turn(s) for s in (first, second)] == [1, None]
         await memory.forget_all()
         assert await index.count_items() == 0
+        assert await index.encoded_turn(first) is None
         assert not memory._corpus.keys("m:")
         assert (await ask(memory, store, "tomatoes in bed one")).block == ""
     finally:

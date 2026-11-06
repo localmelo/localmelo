@@ -75,6 +75,7 @@ from . import (
     routes_tasks,
     routes_turns,
     serve_switch,
+    setup_flow,
     uploads,
 )
 from .asks import OwnerAsks
@@ -84,11 +85,14 @@ from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
+from .idle_encode import IdleEncode
+from .idle_gates import IdleOptions
 from .idle_sleep import IdleSleep, IdleSleepOptions
 from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .serve_switch import ServeSwitch
+from .setup_flow import SetupFlow
 from .shapes import session_json
 from .uploads import PictureStage
 from .vision import Vision
@@ -146,6 +150,8 @@ class ConsoleOptions:
     explainer: Explainer | None = None
     # The idle sleep's clock, beats and readers of the GPU lock and the power; a test replaces them.
     idle_sleep: IdleSleepOptions | None = None
+    # The same for the idle encoder, which writes memory items from the chats.
+    idle_encode: IdleOptions | None = None
     # Whether the chat model reads pictures; None asks the model's provider.
     # A test passes one, so no request leaves the machine.
     vision: Vision | None = None
@@ -225,6 +231,8 @@ class Console:
         # A switch of melo_serve's chat model holds every chat's turns first.
         self.serve = ServeSwitch(self)
         self.sessions.hold = self.serve.hold
+        # The welcome card's first-run setup: the plan and the one job.
+        self.setup = SetupFlow(self)
         # Pictures uploaded and not yet sent, and whether the model reads them.
         self.pictures = PictureStage()
         self.vision: Vision = self.options.vision or Vision(self)
@@ -237,6 +245,11 @@ class Console:
         self.chore_runner = ChoreRunner(self, self.options.chores)
         # Tidies the notes while the computer is idle (``[memory] sleep``, off by default).
         self.idle_sleep = IdleSleep(self, self.options.idle_sleep)
+        # Writes memory items from the chats while it is idle (``recall_source = "items"``);
+        # it and the sleep take turns on the memory.
+        self.idle_encode = IdleEncode(
+            self, self.options.idle_encode, busy=self.idle_sleep.busy
+        )
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
@@ -477,6 +490,7 @@ class Console:
         routes_chores.add_routes(app, self)
         routes_commands.add_routes(app, self)
         serve_switch.add_routes(app, self)
+        setup_flow.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
@@ -521,6 +535,7 @@ class Console:
                 )
             self.chore_runner.start()
             self.idle_sleep.start()
+            self.idle_encode.start()
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_open_reason = (
@@ -571,8 +586,9 @@ class Console:
                 logger.exception("The console's idle sweep failed")
 
     def begin_shutdown(self) -> None:
-        """End every event stream; the uvicorn server calls this first."""
+        """End every event stream and stop the setup job; the uvicorn server calls this first."""
         self._shutdown.set()
+        self.setup.begin_shutdown()
 
     async def aclose(self) -> None:
         """Close the sessions, the hub and the store, releasing the owner lock last."""
@@ -591,7 +607,9 @@ class Console:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
         await self.serve.aclose()
+        await self.setup.aclose()
         await self.idle_sleep.aclose()
+        await self.idle_encode.aclose()
         await self.explanations.aclose()
         for each in (self.front, *self._side_fronts.values()):
             await each.aclose()

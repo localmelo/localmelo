@@ -19,7 +19,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import Message, ToolCall, ToolResult
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.cards import CARD_EVENT
@@ -32,6 +32,7 @@ from localmelo.support.gateway.console.front import (
     front_options,
     thinking_off,
 )
+from localmelo.support.memory.service import NO_MORE_TRIES, TRY_ONCE_MORE
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
@@ -659,3 +660,16 @@ async def test_the_gateway_builds_the_front_for_the_main_chat(tmp_path: Path) ->
         }
     finally:
         await console.aclose()
+
+
+def test_a_refused_note_is_a_free_step_and_the_final_line_is_not() -> None:
+    refused = "Not remembered: the note is empty."
+    agent: Any = object.__new__(FrontAgent)
+    call = ToolCall("remember", {"text": "x"})
+    for text, free in [
+        (refused, True),
+        (refused + TRY_ONCE_MORE, True),
+        # A model that goes on calling after the final line spends its steps.
+        (NO_MORE_TRIES, False),
+    ]:
+        assert agent.refused_by_tool(call, ToolResult("remember", output=text)) is free

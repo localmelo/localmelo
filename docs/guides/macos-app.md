@@ -20,7 +20,7 @@ uv run python scripts/build_macos_app.py --install
 
 - Open localmelo from Spotlight or `~/Applications`: the app is `~/Applications/LocalMelo.app`, and an earlier copy is replaced only when its bundle id is `org.localmelo.app`.
 - `~/.local/bin/melo` links to the app's launcher only when no other `melo` is on `PATH` (the checkout's own `.venv/bin/melo` does not count); an existing `melo` is never replaced.
-- To upgrade, quit localmelo and run the same command again; the pinned Python is cached in `~/Library/Caches/LocalMelo`.
+- To upgrade, quit localmelo and run the same command again; the pinned Python and uv are cached in `~/Library/Caches/LocalMelo`.
 
 To remove the app and the link, and nothing else (settings and chats stay in `~/.cache/localmelo`):
 
@@ -34,7 +34,7 @@ To build without installing, give a new path; the builder never overwrites an ex
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-The pinned Python archive and the wheels are checked against their hashes. The build leaves out parts of the Python runtime that nothing needs (36 MB; the app is about 147 MB). Code on the bundled interpreter, such as the `python_exec` tool, cannot import them, and `python -m venv` needs `--without-pip`.
+The pinned Python and uv archives and the wheels are checked against their hashes. The app carries uv 0.13.4 beside its Python (about 28 MB), so the first-run setup works on a Mac with no uv; it is one file, owned by the builder and writable by no one else, and nothing is written to `~/.local/bin`. The build leaves out parts of the Python runtime that nothing needs (36 MB; the app is about 175 MB). Code on the bundled interpreter, such as the `python_exec` tool, cannot import them, and `python -m venv` needs `--without-pip`.
 
 ## The window
 

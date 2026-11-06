@@ -137,7 +137,8 @@ No model server is running yet.
   [set up a server for you](../guides/model-servers.md#first-run-setup) instead
   of printing this. Pipes and `TERM=dumb` are told to run melo in a terminal for
   that. Already saved a backend? With none found, `melo setup` opens the full
-  backend menu instead. The web/app setup card keeps its manual commands and
+  backend menu instead. The web/app setup card offers the same setup on a
+  supported Mac; where it cannot, it says why, keeps its manual commands and
   checks again automatically.
 
 ### A model server cannot be used at the first run
