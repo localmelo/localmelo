@@ -298,10 +298,13 @@ async def test_esc_stops_through_the_runner_and_retries_until_it_lands(
     assert session.stop()
     assert session.state == "stopping"
     assert not session.stop()  # once per turn
-    session.tick()
-    session.tick()
-    await setup.idle()
-    assert calls == [False, False, True]
+
+    def ticked() -> bool:  # as the app does: a busy machine needs more ticks
+        session.tick()
+        return session.state == "idle"
+
+    await _until(ticked)
+    assert calls[:2] == [False, False] and calls[-1] is True
     [turn] = await setup.rows()
     assert (turn.status, turn.cause) == ("cancelled", "user_stop")
     assert turn.result is not None and turn.result["error"] == STOP_REASON

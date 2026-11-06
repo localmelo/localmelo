@@ -149,6 +149,10 @@ class Findings:
     started: set[str] = field(default_factory=set)
     site: str = ""
     hits: list[tuple[str, str, str]] = field(default_factory=list)
+    # The characters the review may still read again (a line a wrapper hands to
+    # a shell, the words after ``find -exec``): a short step has them all read,
+    # and each command adds in proportion to itself (see ``shell._unwrap``).
+    room: int = 4096
 
     def take(self, path: str, *, key: bool = True) -> str | None:
         """*path*'s text when the review may read it (once, at most
