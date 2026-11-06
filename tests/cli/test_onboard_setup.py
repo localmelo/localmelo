@@ -2258,40 +2258,53 @@ class _Menu:
         return next(i for i, row in enumerate(rows) if row.startswith(want))
 
 
-class _Jobs:
-    """``run.SetupJob`` that ends as scripted: ``done``, ``chat-left-out``, ``failed`` or ``cancelled``."""
+class _Job:
+    """One ``run.SetupJob`` that ends as scripted."""
 
-    def __init__(self, *outcomes: str) -> None:
-        self.outcomes = list(outcomes)
-        self.made: list[_Jobs] = []
-
-    def __call__(
-        self, plan: run.Plan, pick: str, skip: Any = (), **kwargs: Any
-    ) -> _Jobs:
-        job = _Jobs(*self.outcomes)
-        job.plan, job.pick, job.skip, job.kwargs = plan, pick, set(skip), kwargs
-        self.made.append(job)
-        job.outcome = self.outcomes.pop(0)
-        job.items = {}
-        return job
+    def __init__(
+        self,
+        plan: run.Plan,
+        pick: str,
+        skip: set[str],
+        kwargs: dict[str, Any],
+        outcome: str,
+    ) -> None:
+        self.plan, self.pick, self.skip, self.kwargs = plan, pick, skip, kwargs
+        self.outcome = outcome
+        self.items: dict[str, run.ItemEvent] = {}
 
     def run(self) -> str:
         emit = self.kwargs["on_event"]
-        state = {"chat-left-out": "done"}.get(self.outcome, self.outcome)
         if self.outcome == "failed":
             line = "failed: network is down; what was downloaded is kept"
             emit(run.ItemEvent(f"model:{self.pick}", "failed", line))
             emit(run.Finished("failed", line))
-        elif self.outcome != "cancelled":
-            emit(run.ItemEvent("backend:omlx", "done", "installed 0.7.3 into ~/A.app"))
-            saved = "done" if self.outcome == "done" else "skipped"
-            self.items[run.SAVE] = run.ItemEvent(run.SAVE, saved)
-            if EMBEDDING not in self.skip:
-                self.items[run.LOAD_EMBEDDING] = run.ItemEvent("l", "done")
-            emit(run.Finished("done"))
-        else:
+            return "failed"
+        if self.outcome == "cancelled":
             emit(run.Finished("cancelled"))
-        return state
+            return "cancelled"
+        emit(run.ItemEvent("backend:omlx", "done", "installed 0.7.3 into ~/A.app"))
+        saved = "done" if self.outcome == "done" else "skipped"
+        self.items[run.SAVE] = run.ItemEvent(run.SAVE, saved)
+        if EMBEDDING not in self.skip:
+            self.items[run.LOAD_EMBEDDING] = run.ItemEvent("l", "done")
+        emit(run.Finished("done"))
+        return "done"
+
+
+class _Jobs:
+    """``run.SetupJob``, each job ending as scripted: ``done``, ``chat-left-out``, ``failed`` or ``cancelled``."""
+
+    def __init__(self, *outcomes: str) -> None:
+        self.outcomes = list(outcomes)
+        self.made: list[_Job] = []
+
+    def __call__(
+        self, plan: run.Plan, pick: str, skip: Any = (), **kwargs: Any
+    ) -> _Job:
+        job = _Job(plan, pick, set(skip), kwargs, self.outcomes.pop(0))
+        self.made.append(job)
+        return job
 
 
 class _Screen:

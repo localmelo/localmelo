@@ -33,7 +33,7 @@ def _plan(**states: str) -> run.Plan:
         | {"dest": "~/models/huggingface", "backend": "omlx"},
     ]
     for item in items:
-        item["state"] = states.get(item["id"], "todo")
+        item["state"] = states.get(str(item["id"]), "todo")
     return run._parse(
         {
             "schema": "melo_serve.plan/1",
