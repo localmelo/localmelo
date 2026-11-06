@@ -28,6 +28,7 @@ from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.onboard import FirstSetup, run_backend_setup, run_first_setup
 from localmelo.support.onboard_probe import ProbeError
 from localmelo.support.server_setup import run
+from localmelo.support.words import t_in
 
 URL = "http://127.0.0.1:8500/v1"
 
@@ -2502,6 +2503,6 @@ def test_without_a_plan_the_screen_shows_the_manual_way(
     out = capsys.readouterr().out
     how = discovery.how_to_start()
     assert all(command in out for command in how.commands)
-    assert how.note in out and discovery.GUIDE_URL in out
+    assert t_in("en", how.note) in out and discovery.GUIDE_URL in out
     assert ("This Mac is an Intel Mac." in out) is not raising
     assert "Try a hosted service." in out or raising

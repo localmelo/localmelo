@@ -18,7 +18,8 @@
 - `Choose what to install` 会逐项询问尚未安装的项。melo_serve 本身不提供跳过：不想用它就选 `Use a server I already run`。没有对话模型或它的后端，melo_serve 暂时无法对话，之后用 `melo-serve get <pick>` 补齐。没有嵌入模型或它的后端，记忆只按字词查找。没有登录项，`melo serve` 会在需要时启动 melo_serve。`Choose another model` 会从同一目录规划另一个选择，并重新显示列表。
 - 同意之后，每一步打印一行，下载带进度条。按 Ctrl-C 会停下并保留已下载的内容；再选 `Set up` 即可继续。某一步失败时会说明原因并回到列表。对话模型能回答后，melo 会把 melo_serve 保存为对话服务器并进入对话。
 - 管道和 `TERM=dumb` 只会看到列表和 `Run melo in a terminal to set this up.`：同意必须来自真人，所以管道从不开始设置。其他系统、Intel Mac、内存太小的 Mac 以及检查失败时，会用一行说明原因，并给出手动方式：下面的命令，加上 `Check again`、`Enter an address`、`Use a hosted service` 和 `Quit`。
-- 直接指向快照时，服务器提供的模型 ID 可能是修订哈希，而不是仓库名称，请使用服务器实际列出的 ID。重新检查地址只列出模型，不会加载模型。网页/应用设置卡片以及已有配置或显式指定地址的运行保持原有行为。
+- 直接指向快照时，服务器提供的模型 ID 可能是修订哈希，而不是仓库名称，请使用服务器实际列出的 ID。重新检查地址只列出模型，不会加载模型。已有配置或显式指定地址的运行保持原有行为。
+- 网页控制台和应用的欢迎卡片运行同一个设置，清单和用词都相同：一次确认、每一步一行并显示进度、**Stop**（已下载的部分保留）和 **Continue**。macOS 应用在自己的 Python 旁带有固定版本、经校验和检查的 `uv`，所以这台 Mac 上不需要另装 `uv`；设置先用内置的那个，也不会为它往 `~/.local/bin` 里装任何东西。
 
 <a id="serve-a-model-with-omlx"></a>
 

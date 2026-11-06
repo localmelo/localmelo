@@ -19,7 +19,7 @@ from localmelo.support.backends.openai_family import (
     USUAL_URL,
 )
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
-from localmelo.support.server_setup import run, terminal
+from localmelo.support.server_setup import listing, run, terminal
 from localmelo.support.words import t_in
 
 
@@ -756,7 +756,7 @@ def _manual_way(plan: run.Plan | None) -> None:
     _say(f"To start one yourself, run {how.name}:")
     for command in how.commands:
         print(command)
-    _say(how.note)
+    _say(t_in("en", how.note))
     print(discovery.GUIDE_URL)
 
 
@@ -812,7 +812,7 @@ def _ask_what_to_install(plan: run.Plan, skip: set[str]) -> set[str]:
 def _another_model(plan: run.Plan) -> run.Plan | None:
     """The plan for a model chosen from the pick and its alternatives; None to keep this one."""
     picks = [pick for pick in (plan.pick, *plan.alternatives) if pick]
-    rows = [f"{p.name} on {terminal.backend_name(plan, p.backend)}" for p in picks]
+    rows = [f"{p.name} on {listing.backend_name(plan, p.backend)}" for p in picks]
     chosen = _choose_from("Choose a model", rows, 0, 0)
     if chosen == 0:
         return None
@@ -869,7 +869,7 @@ def _offer_setup(plan: run.Plan, urls: Sequence[str]) -> _Waited:
             return _manual_choice(urls)
         rows = (
             [("set up", terminal.setup_row(plan, skip))]
-            if (plan.enough_disk or skip)
+            if listing.can_set_up(plan, skip)
             else []
         )
         rows += [("install", "Choose what to install")]

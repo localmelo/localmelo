@@ -649,6 +649,86 @@ setup card calls it, and only while the card is shown.
   elsewhere, `commands` are the lines to run, `note` is the one thing to do besides
   running them, and `guide` is the model servers guide. The card shows them while
   `state` is `none`.
+- `job` is in every answer: the setup job the card started, or `null` before the
+  first one (a gateway restart forgets it). It has the shape of the `job` in
+  [`POST /api/setup/start`](#post-apisetupstart), so the card follows a setup with
+  this one request and there is no route for the job alone.
+
+## GET /api/setup/plan
+
+What this Mac can run and what the first-run setup would do: the list the terminal
+prints before its one OK, in the language of the request. It asks melo_serve, which
+takes seconds, so one asker serves every caller at once and the answer is kept for
+60 s (5 s when there was nothing to offer): that is how often melo_serve is asked again, not how long a person may read the list (see the start below); it is not part of `GET /api/setup/detect`.
+It writes nothing. There is one plan at a time, the last one asked for: it is dropped
+when a job starts or ends (what is here has changed), and an answer that was asked
+before that is not kept. Where setup is not offered, `available` is `false` and
+`code`, `reason`, `detail` and `hint` say why.
+
+```json
+{"available": true, "code": "", "reason": "", "detail": "", "hint": "", "pick": {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx", "backend_name": "oMLX"}, "mac": "This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free", "intro": "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.", "rows": [{"id": "model:qwen3-8b-omlx", "name": "Qwen3 8B", "kind": "chat model", "size": "4.9 GB", "where": "Hugging Face → ~/models/huggingface", "state": "todo", "off": true}], "download": "Download about 6.6 GB.", "free": "83 GB free.", "notes": [], "action": "Set up Qwen3 8B (6.6 GB)", "can_set_up": true}
+```
+
+- `skip` (optional, comma-separated) words the list for what the person left out:
+  `rows`, `download`, `notes`, `action` and `can_set_up` change. It may hold only the
+  ids of rows whose `off` is `true`; any other id (a row that has to be set up, one that
+  is here already, the gateway's login item, an unknown id) is 400 `invalid_request`.
+- Each row has `id`, `name`, `kind` (`chat backend`, `chat model`, ...), `size`
+  (empty when nothing downloads), `where`, `state` (`todo`, `partial` for a
+  download that goes on, `here` for what is already here, `skipped`) and `off`, whether the
+  person may turn it off. The words are the terminal's, from the same table.
+- `action` is the button: `Set up <model> (<size>)`, `Continue (<size> left)` after
+  a stop, or `Set up <model> (nothing to download)`. `can_set_up` is `false` only
+  when the pick does not fit the free disk space and nothing is left out. Leaving out
+  any row makes it `true`, whether or not that row would have saved space, because
+  melo_serve checks the disk again before it downloads.
+- When `available` is `false` only `code`, `reason`, `detail` and `hint` are said; the
+  card keeps its commands then. `code` is `not_mac`, `uv` (not installed), `uv_refused`
+  (found, but not run: it, or its folder, is not the user's alone), `unsupported`
+  (melo_serve says no model runs on this Mac) or `failed` (the check did not answer or
+  its answer was no plan). `reason` is localmelo's sentence for the `code`, in the
+  language of the request. `detail` is the words of whoever said no (melo_serve's
+  `reason`, the failed command's last line, the refusal that names the file), and
+  `hint` is melo_serve's `reason_hint`: both are shown as they are, not translated,
+  and are empty when there are none.
+
+## POST /api/setup/start
+
+Start the setup of the plan the person said yes to, the one `GET /api/setup/plan`
+answered last: the terminal's job (`melo-serve` through argv, never a shell), in a
+thread of its own, with no login item for the gateway (installing it would restart
+the gateway that runs the job). Answers 202 `{"job": ...}`.
+
+```json
+{"pick": "qwen3-8b-omlx", "skip": ["model:embed"]}
+```
+
+- `pick` must be the plan's `pick.id` (the list offers no other model); `skip` may hold only the ids of rows whose `off` is `true`,
+  so a row that has to be set up, one that is here already and the gateway's login item
+  cannot be left out. Other fields are refused.
+- 400 `invalid_request`: another pick, or an id that cannot be left out. 409 `no_plan`:
+  there is no plan to say yes to: none was asked for, it is older than 15 minutes, it has
+  nothing to offer, or a job started or ended since. Ask `GET /api/setup/plan` again and
+  look at the list before the next start (the card starts at once when the new list is
+  the same as the one on screen). 409 `no_room`: the list does not fit the disk
+  and nothing is left out (`can_set_up` is `false`). 409 `setup_running`: a job runs. It
+  needs the same sign-in and origin check as the other routes under `/api`.
+- The job has `id`, `state` (`running`, `done`, `failed` or `cancelled`),
+  `stopping`, `error`, `pick`, `name`, `saved` (the chat model answered and
+  melo_serve was saved as the chat server) and `rows`, each with `id`, `name`,
+  `state` (`waiting`, `running`, `done`, `skipped` for what the person left out,
+  `stopped` for a row the stop ended, `failed`), `line`, `done_bytes`, `total_bytes`
+  and `progress` (for example `310 of 881 MB`). The `state` is the stable word: a screen
+  words it in its language. `line` is the job's or melo_serve's own text, in English
+  and as it is (empty for `skipped` and `stopped`), and `error` is the last line of a
+  failure: a screen shows them as detail, smaller, and does not translate them.
+- A gateway that shuts down ends the job `cancelled`: the running command gets SIGTERM,
+  and SIGKILL after 5 s if it is still there; what was downloaded stays. The gateway does this at the start of its shutdown, before it waits for connections, so it fits inside the 8 s the macOS app gives a gateway it quits. A command that handles SIGTERM goes on with its own cleanup (melo_serve gives it 30 s), even if the gateway is gone by then.
+
+## POST /api/setup/cancel
+
+Stop the job that runs, keeping what it downloaded; answers `{"job": ...}` (the job
+says `stopping` until it ends as `cancelled`). 409 `no_setup`: none runs.
 
 ## Scheduler tasks (S3a.2)
 

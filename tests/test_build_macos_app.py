@@ -5,6 +5,7 @@ import importlib.metadata
 import importlib.util
 import io
 import os
+import platform
 import plistlib
 import shutil
 import struct
@@ -14,6 +15,9 @@ import tarfile
 from pathlib import Path
 
 import pytest
+
+from localmelo.support import melo_serve
+from localmelo.support.server_setup import run as setup_run
 
 MP = pytest.MonkeyPatch
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build_macos_app.py"
@@ -257,6 +261,71 @@ def test_verified_archive_before_extraction(
     assert (build_app.fetch_python(good) / "bin/python3").read_bytes() == b"fake python"
 
 
+def uv_archive(*members: tarfile.TarInfo, content: bytes = b"#!/bin/sh\n") -> bytes:
+    """A gzip tarball like uv's release asset: the members, each holding *content*."""
+    data = io.BytesIO()
+    with tarfile.open(fileobj=data, mode="w:gz") as archive:
+        for member in members:
+            if member.isfile():
+                member.size = len(content)
+            archive.addfile(member, io.BytesIO(content) if member.isfile() else None)
+    return data.getvalue()
+
+
+def serve_uv(monkeypatch: MP, payload: bytes, digest: str | None = None) -> None:
+    """Pin *payload* as the uv archive, and let the download be that and nothing else."""
+    monkeypatch.setattr(
+        build_app.urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(payload)
+    )
+    monkeypatch.setattr(
+        build_app, "UV_SHA256", digest or hashlib.sha256(payload).hexdigest()
+    )
+
+
+def test_the_bundled_uv_is_checked_and_found_by_the_setup(
+    tmp_path: Path, monkeypatch: MP
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    python = tmp_path / "python"
+    (python / "bin").mkdir(parents=True)
+    interpreter = python / "bin/python3"
+    interpreter.touch()
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    good = uv_archive(tarfile.TarInfo(build_app.UV_MEMBER), content=b"#!/bin/sh\n")
+    serve_uv(monkeypatch, good, digest="0" * 64)
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        build_app.install_uv(stage, python)
+    assert not (python / "bin/uv").exists()
+    serve_uv(monkeypatch, good)
+    build_app.install_uv(stage, python)
+    uv = python / "bin/uv"
+    assert uv.read_bytes() == b"#!/bin/sh\n"
+    assert (
+        uv.stat().st_mode & 0o777 == 0o755
+    )  # the user's, and nobody else can write it
+    assert melo_serve._check(str(uv)) == ""
+    # What the app does: its interpreter is bundled, and so is the uv beside it.
+    monkeypatch.setattr(setup_run.sys, "executable", str(interpreter))
+    assert setup_run.find_uv() == os.path.realpath(uv)
+
+
+@pytest.mark.parametrize("what", ["other", "link"])
+def test_an_uv_archive_without_the_file_is_refused(
+    tmp_path: Path, monkeypatch: MP, what: str
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    python = tmp_path / "python"
+    (python / "bin").mkdir(parents=True)
+    member = tarfile.TarInfo(build_app.UV_MEMBER if what == "link" else "uv/other")
+    if what == "link":
+        member.type, member.linkname = tarfile.SYMTYPE, "/bin/sh"
+    serve_uv(monkeypatch, uv_archive(member))
+    with pytest.raises(ValueError, match="unexpected layout"):
+        build_app.install_uv(tmp_path, python)
+    assert not (python / "bin/uv").exists()
+
+
 def use_developer_tools(tmp_path: Path, monkeypatch: MP, installed: str) -> str:
     """Make the full Xcode, only the Command Line Tools, or neither look installed.
 
@@ -318,6 +387,7 @@ def test_build_assembles_locked_runtime_and_swift(
         encoding="utf-8",
     )
     monkeypatch.setattr(build_app, "ROOT", root)
+    platform.machine()  # platform caches uname: fill it before os.uname is faked
     monkeypatch.setattr(build_app.sys, "platform", "darwin")
     monkeypatch.setattr(
         build_app.os, "uname", lambda: type("Uname", (), {"machine": "arm64"})()
@@ -336,6 +406,7 @@ def test_build_assembles_locked_runtime_and_swift(
         return python
 
     monkeypatch.setattr(build_app, "fetch_python", fake_fetch)
+    serve_uv(monkeypatch, uv_archive(tarfile.TarInfo(build_app.UV_MEMBER)))
 
     def fake_run(args: list[str], *, env: dict[str, str] | None = None) -> None:
         commands.append(args)
@@ -353,6 +424,7 @@ def test_build_assembles_locked_runtime_and_swift(
     build_app.build(output)
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
+    assert (runtime / "python/bin/uv").is_file()  # beside the bundled Python
     # The committed icon and menu-bar logo are copied, the icon under the name the plist gives.
     resources = output / "Contents/Resources"
     assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"

@@ -13,11 +13,14 @@ from localmelo.tests._cache_guard import RealCacheGuard, real_cache_dir
 
 if TYPE_CHECKING:
     from localmelo.tests.fixtures.melo_serve import FakeServe
+    from localmelo.tests.fixtures.setup_tools import Fakes
 
 # The home the test process started with, before any fixture redirects it.
 _REAL_HOME = os.environ.get("HOME")
 # Refuses writes to, and resolutions of, the user's real cache.
 _REAL_CACHE_GUARD = RealCacheGuard(real_cache_dir())
+# The setup plan's own functions, kept before ``_no_setup_plan`` replaces them.
+_REAL_SETUP: dict[str, Any] = {}
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +137,7 @@ def melo_serve_home(
     The state file and the control socket of the melo_serve that may run here
     are never read or connected to, and no test finds this Mac's own
     ``melo-serve`` command either: ``melo_serve.command()`` and
-    ``melo_serve.refusal()`` are None. A test
+    ``melo_serve.refusal()`` (of ``melo-serve``) are None. A test
     writes a fake ``state.json`` in the folder (``tests/fixtures/melo_serve.py``)
     and asks for ``melo_serve_socket`` to make it running.
     """
@@ -144,7 +147,14 @@ def melo_serve_home(
     monkeypatch.setenv("MELO_SERVE_HOME", str(home))
     monkeypatch.delenv("MELO_SERVE_SOCKET", raising=False)
     monkeypatch.setattr(melo_serve, "command", lambda: None)
-    monkeypatch.setattr(melo_serve, "refusal", lambda: None)
+    refused = melo_serve.refusal
+    monkeypatch.setattr(
+        melo_serve,
+        "refusal",
+        lambda name=melo_serve.COMMAND, *args, **kwargs: (
+            None if name == melo_serve.COMMAND else refused(name, *args, **kwargs)
+        ),
+    )
     return home
 
 
@@ -156,10 +166,46 @@ def _no_setup_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from localmelo.support.server_setup import run
 
+    _REAL_SETUP.setdefault("plan", run.plan)
+    _REAL_SETUP.setdefault("installed_version", run.installed_version)
     monkeypatch.setattr(
         run, "plan", lambda timeout=0.0, pick="": run.Plan(False, "no plan in tests")
     )
     monkeypatch.setattr(run, "installed_version", lambda: "")
+
+
+@pytest.fixture
+def real_setup_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This test runs the real setup plan, over the fake ``uv`` and ``melo-serve`` of ``setup_fakes``."""
+    from localmelo.support.server_setup import run
+
+    monkeypatch.setattr(run, "plan", _REAL_SETUP["plan"])
+    monkeypatch.setattr(run, "installed_version", _REAL_SETUP["installed_version"])
+
+
+@pytest.fixture
+def setup_fakes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+    real_setup_plan: None,
+) -> Fakes:
+    """Fake ``uv`` and ``melo-serve`` on PATH, and a melo_serve that runs, as ``use`` leaves it.
+
+    The first-run setup job and plan run for real over them; nothing is installed,
+    downloaded or started.
+    """
+    from localmelo.tests.fixtures.melo_serve import role, write_state
+    from localmelo.tests.fixtures.setup_tools import Fakes
+
+    fake = Fakes(tmp_path / "fake", monkeypatch)
+    write_state(
+        melo_serve_home,
+        chat=role("Qwen3 8B", "omlx", "oMLX"),
+        embedding=role("Qwen3-Embedding-0.6B", "omlx", "oMLX"),
+    )
+    return fake
 
 
 @pytest.fixture

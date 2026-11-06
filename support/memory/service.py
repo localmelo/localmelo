@@ -50,7 +50,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
@@ -437,11 +437,14 @@ class Compressed:
     secret), for each item it kept in the order they were routed, the item and where
     the routing put it, and how many items were not kept because they held a secret
     (*refused*: those the encoder refused and those the gate before embedding or the
-    router did; none is in *routed*)."""
+    router did; none is in *routed*). *forgotten* says the *guard* of
+    :meth:`~ChatMemory.compress_chat` refused the result: nothing was stored and no
+    mark was set."""
 
     encoding: hippo_encode.Encoding
     routed: list[tuple[hippo_encode.Piece, Route]] = field(default_factory=list)
     refused: int = 0
+    forgotten: bool = False
 
 
 @dataclass(frozen=True)
@@ -2255,6 +2258,7 @@ class ChatMemory:
         router: Router | None = None,
         cache: hippo_encode.Cache | None = None,
         encoding: hippo_encode.Encoding | None = None,
+        guard: Callable[[], Awaitable[bool]] | None = None,
     ) -> Compressed:
         """Encode the exchanges *turns* of chat *session_id* into memory items and
         route each against the items kept (developer setting, #428).
@@ -2276,7 +2280,10 @@ class ChatMemory:
         failed, or the last of them when none did
         (:meth:`.index.ConversationIndex.mark_encoded`): recall reads the turns past
         it too. An item refused for its secret does not hold the mark back, since the
-        turn's own document is already cleaned.
+        turn's own document is already cleaned. The routing and the mark happen under
+        one hold of the memory lock, the lock a forget takes. With *guard*, it is awaited
+        first, under that lock (it must not take it): when it says ``False`` nothing is
+        routed or stored, no mark is set and the result has *forgotten* set.
         """
         if encoding is None:
             encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
@@ -2296,32 +2303,142 @@ class ChatMemory:
         _, index = self.stores()
         router = router or Router(index)
         out = Compressed(encoding, refused=encoding.refused)
-        for piece, vector in zip(pieces, vectors, strict=True):
-            item = MemoryItem(
-                session_id=session_id,
-                title=piece.title,
-                text=piece.text,
-                kind=piece.kind,
-                created_at=piece.created_at,
-                sources=tuple((session_id, turns[n].turn) for n in piece.sources),
-                vector=None if vector is None else tuple(vector),
-                embed_model=model if vector is not None else "",
-                encoder=piece.encoder,
-            )
-            async with self._lock:
-                route = await router.route(item)
-            if route.action == REFUSE:  # the router's own check, after the gate's
-                out.refused += 1
-            else:
-                out.routed.append((piece, route))
-        if out.refused:  # the count only, never the text
-            logger.info("Memory items: %d held a secret and were not kept", out.refused)
         # The mark does not pass a window that failed: its turns stay recalled.
         done = turns if encoding.failed_from is None else turns[: encoding.failed_from]
-        if done:
-            async with self._lock:
+        # One hold of the lock for the routing and the mark: a forget cannot come between.
+        async with self._lock:
+            if guard is not None and not await guard():
+                out.forgotten = True
+                return out
+            for piece, vector in zip(pieces, vectors, strict=True):
+                item = MemoryItem(
+                    session_id=session_id,
+                    title=piece.title,
+                    text=piece.text,
+                    kind=piece.kind,
+                    created_at=piece.created_at,
+                    sources=tuple((session_id, turns[n].turn) for n in piece.sources),
+                    vector=None if vector is None else tuple(vector),
+                    embed_model=model if vector is not None else "",
+                    encoder=piece.encoder,
+                )
+                route = await router.route(item)
+                if route.action == REFUSE:  # the router's own check, after the gate's
+                    out.refused += 1
+                else:
+                    out.routed.append((piece, route))
+            if done:
                 await index.mark_encoded(session_id, max(t.turn for t in done))
+        if out.refused:  # the count only, never the text
+            logger.info("Memory items: %d held a secret and were not kept", out.refused)
         return out
+
+    async def waiting_turns(
+        self, chats: SessionStore, session_id: str
+    ) -> list[TurnInfo]:
+        """The turns of chat *session_id* that wait to be encoded into items, oldest
+        first: those past its progress mark (none counts as nothing encoded) that
+        the live index holds, or would, as :meth:`reindex` does: completed, not
+        undone, the person's own (:func:`is_owner_question`), with an answer, and
+        ended after the last time the user forgot everything. A turn below 1 is
+        never one. A turn that ended in a status other than completed is skipped (it
+        is no document either); the list stops before a turn that still runs, and
+        nothing after it waits yet.
+        """
+        async with self._lock:
+            index = self.stores()[1]
+            mark = await index.encoded_turn(session_id) or 0
+            since = await index.forgotten_at()
+        newest = await chats.list_turns(session_id, limit=1)
+        if not newest or newest[0].turn <= mark:
+            return []
+        waiting: list[TurnInfo] = []
+        for turn in await chats.list_turns(session_id, limit=newest[0].turn - mark):
+            if turn.turn <= mark or turn.turn < 1 or turn.undone:
+                continue
+            if turn.status == "running":
+                break
+            if (
+                turn.status == "completed"
+                and (turn.finished_at or 0) > since
+                and not is_owner_question(turn)
+                and split_thinking(turn.answer)[1].strip()
+            ):
+                waiting.append(turn)
+        return waiting
+
+    async def encode_window(
+        self,
+        chats: SessionStore,
+        session_id: str,
+        title: str,
+        waiting: Sequence[TurnInfo],
+    ) -> Compressed | None:
+        """Encode the first window of the turns *waiting* of a chat
+        (:meth:`waiting_turns`) with :meth:`compress_chat`; ``None`` when none of
+        them holds anything to remember (:func:`turn_document`).
+
+        Each turn is built as the live index holds it (the words and the answer,
+        :func:`turn_document`; the encoder cleans them as it renders them), and
+        :func:`~.hippo_encode.pack` with the window size of the settings says which
+        turns the first window holds: those, and no others, go to
+        :meth:`compress_chat`, so the chat's mark moves at most to that window's
+        end. A turn longer than the window is a window of its own, read in its
+        parts. The encoder's replies are kept in memory for this call only: nothing
+        is written to the cache file, which holds raw replies a forget does not clear.
+
+        A forget that comes while the chat model reads the window keeps it out:
+        nothing is stored and no mark is set when the user forgot everything, or the
+        chat is gone, since the turns were read (the result has ``forgotten`` set;
+        :meth:`compress_chat` checks this under the lock a forget takes). Turns that
+        ended before the last forget, and a chat that is gone, are not read at all.
+        """
+        _, index = self.stores()
+        async with self._lock:
+            since = await index.forgotten_at()
+        if await chats.get_session(session_id) is None:
+            return None
+
+        async def unchanged() -> bool:
+            return (
+                await index.forgotten_at() == since
+                and await chats.get_session(session_id) is not None
+            )
+
+        limit = self.compress_window()
+        turns: list[hippo_encode.Turn] = []
+        size = 0
+        for info in waiting:
+            if (info.finished_at or 0) <= since:
+                continue
+            held = await turn_document(
+                chats, info, _typed_words(info), split_thinking(info.answer)[1]
+            )
+            if held is None:
+                continue
+            typed, answer = held[0], held[1] or ""
+            turns.append(
+                hippo_encode.Turn(
+                    info.turn,
+                    info.started_at,
+                    info.finished_at or info.started_at,
+                    typed,
+                    answer,
+                )
+            )
+            size += len(typed) + len(answer)
+            if size >= limit:  # the first window is closed: no need to read on
+                break
+        if not turns:
+            return None
+        first = hippo_encode.pack(turns, limit)[0]
+        return await self.compress_chat(
+            session_id,
+            title,
+            [turns[n] for n in first.positions],
+            cache=hippo_encode.Cache(""),
+            guard=unchanged,
+        )
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
