@@ -17,6 +17,7 @@ import pytest
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.support.web.fetch import USER_AGENT, WebFetcher
 from localmelo.support.web.tool import NOTE, NOTE_BROWSER, WebFetchProvider
+from localmelo.tests.memory.test_note_gate import finished, read, started
 from localmelo.tests.web import pages
 
 URL = f"http://{pages.HOST}"
@@ -272,7 +273,6 @@ async def test_no_cookie_or_login_is_sent_and_the_user_agent_names_localmelo(
 @pytest.mark.parametrize(
     ("path", "words"),
     [
-        ("/pdf", "a PDF file; web_fetch does not read PDFs yet"),
         ("/image", "an image (image/png)"),
         ("/binary", "application/octet-stream"),
     ],
@@ -281,6 +281,89 @@ async def test_files_that_are_not_pages_are_refused_with_why(
     server: dict[str, Any], path: str, words: str
 ) -> None:
     assert words in _error(await _call(_provider(server), f"{URL}{path}"))
+
+
+# ── PDF files ──
+
+
+@pytest.mark.parametrize("path", ["/pdf", "/pdf-untyped"])
+async def test_a_pdf_reads_like_a_page_of_text_with_a_picture_for_a_page_without(
+    server: dict[str, Any], path: str
+) -> None:
+    result = await _call(_provider(server), f"{URL}{path}")
+    # A page with no text comes with its picture, so the result carries it.
+    assert isinstance(result, ToolOutput) and not result.is_error, result
+    head, body = _block(result.text)
+    assert result.text.startswith(f"Read {URL}{path}: a PDF file.")
+    assert "type=pdf" in head
+    assert "--- page 1 of 2 ---" in body and "Experience: Acme Corp" in body
+    # The words are the file's, cleaned as a page's are: they cannot close the block.
+    assert "<<end page" not in body and "< <end page" in body
+    assert result.text.count("<<end page") == 1
+    assert "[page 2: no text, picture attached]" in body
+    assert len(result.images) == 1 and result.images[0].mime_type == "image/png"
+    assert "Page 2 has no text; its picture is attached" in result.text
+
+
+@pytest.mark.parametrize("path", ["/pdf-as-text", "/pdf-as-html"])
+async def test_a_pdf_is_known_by_its_first_bytes_whatever_readable_type_the_server_gives(
+    server: dict[str, Any], path: str
+) -> None:
+    result = await _call(_provider(server), f"{URL}{path}")
+    assert isinstance(result, ToolOutput) and not result.is_error, result
+    head, body = _block(result.text)
+    assert "type=pdf" in head and "Experience: Acme Corp" in body
+    assert len(result.images) == 1
+
+
+async def test_a_pdf_of_many_pages_without_text_comes_in_parts_that_each_carry_their_pictures(
+    server: dict[str, Any],
+) -> None:
+    provider = _provider(server)
+    attached: list[int] = []
+    part, total = 1, 1
+    while part <= total:
+        result = await _call(provider, f"{URL}/pdf-scans", part=part)
+        assert isinstance(result, ToolOutput) and not result.is_error, result
+        head, body = _block(result.text)
+        found = re.search(r"part=\d+/(\d+)", head)
+        total = int(found.group(1)) if found else 1
+        pages = [
+            int(n)
+            for n in re.findall(r"\[page (\d+): no text, picture attached\]", body)
+        ]
+        # No part promises a page its own picture does not bring.
+        assert len(result.images) == len(pages) <= 3
+        assert "no picture came" not in result.text
+        attached += pages
+        part += 1
+        assert part <= 6
+    assert attached == [2, 3, 4, 5, 6, 7, 8]
+
+
+async def test_a_fetched_pdf_is_material_for_the_note_gate_as_a_page_is(
+    server: dict[str, Any],
+) -> None:
+    result = await _call(_provider(server), f"{URL}/pdf")
+    assert isinstance(result, ToolOutput)
+    url = f"{URL}/pdf"
+    events = [
+        started("a", "web_fetch", url=url),
+        finished("a", "web_fetch", result.text),
+    ]
+    (found,) = read(events, {1: f"Read {url} and tell me what it says."})
+    assert (found.kind, found.ref) == ("page", url)
+    assert "Experience: Acme Corp" in found.text and "<<page" not in found.text
+    assert read(events, {1: "Read the file I sent you."}) == []
+
+
+async def test_a_pdf_that_is_too_large_or_not_a_pdf_gives_one_plain_line(
+    server: dict[str, Any],
+) -> None:
+    large = _error(await _call(_provider(server, max_bytes=1000), f"{URL}/pdf"))
+    assert "The PDF is larger than" in large and "file_read" in large
+    bad = _error(await _call(_provider(server), f"{URL}/pdf-bad"))
+    assert "damaged or is not a PDF" in bad and "Traceback" not in bad
 
 
 async def test_a_refused_type_is_not_downloaded(server: dict[str, Any]) -> None:

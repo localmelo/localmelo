@@ -26,6 +26,7 @@ from localmelo.melo.executor.models import (
 )
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import RAW_ARGUMENTS_KEY, CheckResult, ToolCall, ToolDef
+from localmelo.tests.executor.text_tool import text_tool
 
 
 def _with_builtins(checker: Checker | None = None) -> Executor:
@@ -48,7 +49,7 @@ class _BlockEverything(Checker):
 
 async def test_builtin_tool_is_not_called() -> None:
     executor = _with_builtins()
-    python_exec = builtin_callables(None)["python_exec"][0]
+    python_exec = text_tool(builtin_callables(None)["python_exec"][0])
     calls: list[dict[str, Any]] = []
 
     async def spy(**arguments: Any) -> str:

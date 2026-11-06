@@ -32,11 +32,12 @@ from localmelo.melo.executor import (
     register_builtins,
 )
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.tests.executor.text_tool import text_tool
 
 
 def _shell_exec(command: str) -> Coroutine[Any, Any, str]:
     """A call of shell_exec as a run without a workspace makes it."""
-    return builtin_callables(None)["shell_exec"][0](command)
+    return text_tool(builtin_callables(None)["shell_exec"][0])(command)
 
 
 def _command(pid_file: Path) -> str:
