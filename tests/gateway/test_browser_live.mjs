@@ -906,6 +906,29 @@ test('a card watches only while it is on screen, the dock takes over when it lea
   assert.equal(t.cards.nodeOf('s1:run-1'), null, 'a card of another chat is let go');
 });
 
+test('the gateway ends a run\'s stream just before its card says Done: the card shows the stop, then keeps the last picture', async () => {
+  const t = together();
+  t.cards.sync([readBrowser(row())]);
+  t.see('s1:run-1', true);
+  const socket = FakeSocket.all[0];
+  socket.open();
+  socket.say(message());
+  socket.say(new Uint8Array([5]).buffer);
+  t.decodes.shift()();
+  await settle();
+  const node = t.cards.nodeOf('s1:run-1');
+  assert.equal(node.children[1].hidden, false, 'the page shows');
+  socket.say(message({state: 'closed', tab: '', reason: 'browser'}));
+  socket.drop(1000);
+  assert.equal(FakeSocket.all.length, 1, 'a view the gateway ended on purpose is not tried again');
+  assert.equal(node.children[1].hidden, true, 'for a moment: the browser stopped, and the card says so');
+  assert.equal(node.children[2].textContent, "melo's browser stopped.");
+  t.cards.sync([readBrowser(row({id: 12, state: 'done', action: ''}))]);
+  assert.equal(node.dataset.size, 'kept');
+  assert.equal(node.children[1].hidden, false, 'the picture the person already saw stays');
+  assert.equal(node.children[2].hidden, true);
+});
+
 test('a picture still being decoded when the page changes under it is not painted, nor taken for one of the new page', async () => {
   const changes = {
     'a tab switch': (t) => t.socket.say(message({tab: 't2', url: 'https://other.test/'})),
