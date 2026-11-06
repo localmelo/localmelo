@@ -2754,16 +2754,19 @@ test('after a Stop the panel says Stopping at once, and reads the health again w
   }));
   await h.run('init()');
   h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}});
-  await h.run('stop()');
-  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel is told a Stop is under way');
+  const stopping = h.run('stop()');
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel says Stopping on the press, before the gateway answers');
+  await stopping;
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'and still after the answer, until the turn ends');
   assert.equal(h.run('activity(S.view.turns.at(-1), {now: 100, cancelling: S.view.turns.at(-1).stopping})'), 'Stopping');
   const reads = () => h.net.callsTo('/health').length;
   const before = reads();
   h.stream().emit({id: 21, turn: 2, ts: 52, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', cause: 'user_stop', error: ''}});
   assert.equal(reads(), before, 'the gateway gets a moment to finish the turn it announced');
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel does not go back to Working while the health is old');
   await h.timers.findLast((timer) => !timer.interval && timer.ms === 300).handler();
   assert.equal(reads(), before + 1, 'then the health is read, not left to the poll');
-  assert.equal(h.run('panel.stopped.at(-1)'), 0, 'no Stopping once the turn has ended');
+  assert.equal(h.run('panel.stopped.at(-1)'), 0, 'no Stopping once the health is read again');
 });
 
 // ── Words added while melo works ──
