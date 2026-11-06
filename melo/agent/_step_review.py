@@ -226,9 +226,10 @@ class RunReviews:
     # review of a later step is told of them.
     refused_sites: list[str] = field(default_factory=list)
     # The steps declined on auto mode's card in this run (#465), by each of
-    # their keys: the person's Don't allow, or a card nobody answered. The
-    # same step, or one alike, is refused again without asking until the run
-    # ends.
+    # their keys: the person's Don't allow, or a card nobody answered (no
+    # answer, not a no: the model is told to go on and melo asks again in the
+    # next run). The same step, or one alike, is refused again without asking
+    # until the run ends, so a card that waits is not shown again and again.
     declined: dict[str, Chosen] = field(default_factory=dict)
 
     def decline(self, keys: Iterable[str], decision: Chosen) -> None:

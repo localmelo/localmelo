@@ -373,7 +373,7 @@ async def test_a_grant_or_a_withdrawn_card_stays_what_it_is(
     assert decided is answer
 
 
-async def test_a_card_nobody_answered_counts_as_dont_allow() -> None:
+async def test_a_card_nobody_answered_is_no_answer_and_not_a_no() -> None:
     policy = AutoPolicy(
         asking=_Asking(ApprovalDecision(False, NO_ANSWER, origin="timeout"))
     )
@@ -381,18 +381,25 @@ async def test_a_card_nobody_answered_counts_as_dont_allow() -> None:
     decided = await policy.decide(_request(review=BEYOND))
 
     assert decided == Chosen(False, NO_ANSWER, origin="timeout", unanswered="time")
-    assert denial_text(decided).split("\n")[0] == (
-        "The user did not answer the card for this step (no answer within 1 "
-        "minute), so it counts as Don't allow and the step did not run."
+    first = denial_text(decided)
+    assert first.split("\n")[0] == (
+        "The user has not answered the card for this step yet (no answer within 1 "
+        "minute), so it did not run. That is not a no: they may be away."
     )
     again = denial_text(
         Chosen(False, LEFT_UNANSWERED, origin="timeout", again=True, unanswered="left")
     )
     assert again.startswith(
-        "The user did not answer the card for this step earlier in this turn (the "
-        "chat was closed before an answer), so it did not run and they were not "
-        "asked again.\n"
+        "The user has not answered the card for this step yet (the chat was closed "
+        "before an answer), so it did not run, and melo did not ask again in this "
+        "turn.\n"
     )
+    # The model is never told to give the approach up: it goes on with the rest
+    # and melo asks again when the person is back. Only a Don't allow says so.
+    for text in (first, again):
+        assert "another way" not in text and "will not ask" not in text
+        assert "try the step again in their next turn" in text
+    assert "another way" in denial_text(Chosen(False, "", origin="user"))
 
 
 class _Watch:
