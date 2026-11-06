@@ -7,7 +7,9 @@ reachability comes from the cached probe without waiting for the network.
 ``GET /api/settings/key-status`` and ``GET /api/models`` read and update
 ``config.toml`` without ever returning, accepting or logging an API key value.
 ``GET /api/setup/detect`` looks for a model server on this machine, as the
-terminal's first run does, for the welcome's setup card.
+terminal's first run does, for the welcome's setup card, and carries the
+first-run setup job it started (``/api/setup/plan``, ``start`` and ``cancel`` are
+in :mod:`.setup_flow`).
 
 The console's Settings saves one change at a time: each ``PUT /api/settings``
 carries the revision it read, so a change made elsewhere meanwhile is a 409,
@@ -309,6 +311,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
     the one to offer: null when several are served and none is known loaded, so
     the user picks.
     ``start`` is how to start a server on this computer, for the card that finds none.
+    ``job`` is the first-run setup the card started (:class:`SetupFlow`), or null.
     """
     transport = console.options.detect_transport
     urls = discovery.detect_urls()
@@ -321,7 +324,8 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
         models=[],
         loaded=[],
         suggested=None,
-        start=discovery.how_to_start().to_json(),
+        start=discovery.how_to_start().to_json(t),
+        job=console.setup.json(),
     )
     if found is None:
         return body

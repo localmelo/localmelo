@@ -75,6 +75,7 @@ from . import (
     routes_tasks,
     routes_turns,
     serve_switch,
+    setup_flow,
     uploads,
 )
 from .asks import OwnerAsks
@@ -91,6 +92,7 @@ from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
 from .serve_switch import ServeSwitch
+from .setup_flow import SetupFlow
 from .shapes import session_json
 from .uploads import PictureStage
 from .vision import Vision
@@ -229,6 +231,8 @@ class Console:
         # A switch of melo_serve's chat model holds every chat's turns first.
         self.serve = ServeSwitch(self)
         self.sessions.hold = self.serve.hold
+        # The welcome card's first-run setup: the plan and the one job.
+        self.setup = SetupFlow(self)
         # Pictures uploaded and not yet sent, and whether the model reads them.
         self.pictures = PictureStage()
         self.vision: Vision = self.options.vision or Vision(self)
@@ -486,6 +490,7 @@ class Console:
         routes_chores.add_routes(app, self)
         routes_commands.add_routes(app, self)
         serve_switch.add_routes(app, self)
+        setup_flow.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
@@ -581,8 +586,9 @@ class Console:
                 logger.exception("The console's idle sweep failed")
 
     def begin_shutdown(self) -> None:
-        """End every event stream; the uvicorn server calls this first."""
+        """End every event stream and stop the setup job; the uvicorn server calls this first."""
         self._shutdown.set()
+        self.setup.begin_shutdown()
 
     async def aclose(self) -> None:
         """Close the sessions, the hub and the store, releasing the owner lock last."""
@@ -601,6 +607,7 @@ class Console:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
         await self.serve.aclose()
+        await self.setup.aclose()
         await self.idle_sleep.aclose()
         await self.idle_encode.aclose()
         await self.explanations.aclose()

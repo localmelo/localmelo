@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from localmelo.support.backends import discovery
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.i18n import t
 
 URL = "http://127.0.0.1:18001/v1"
 OLLAMA = {
@@ -94,6 +95,7 @@ def test_detect(
     body, _ = detect(client, console, monkeypatch, answers)
     keys = ("state", "name", "backend", "url", "models", "loaded", "suggested")
     assert tuple(body[key] for key in keys) == expected
+    assert body["job"] is None  # no first-run setup was started
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
@@ -107,11 +109,16 @@ def test_every_answer_says_how_to_start_a_server_on_this_system(
     monkeypatch.setattr(discovery.sys, "platform", platform)
     for answers in ({}, {f"{URL}/models": listing("a-7b")}):
         body, _ = detect(client, console, monkeypatch, answers)
-        assert body["start"] == discovery.how_to_start().to_json()
+        assert body["start"] == discovery.how_to_start().to_json(t)
         assert body["start"]["name"] == ("oMLX" if platform == "darwin" else "Ollama")
         assert body["start"]["commands"] and body["start"]["guide"].startswith(
             "https://"
         )
+    # The note is ours, so it is in the request's language; the commands are not words.
+    zh = {"X-LocalMelo-Language": "zh-Hans"}
+    chinese = client.get("/api/setup/detect", headers=zh).json()["start"]
+    assert chinese["commands"] == body["start"]["commands"]
+    assert chinese["note"] != body["start"]["note"]
 
 
 def test_a_server_that_cannot_be_used_says_why(
