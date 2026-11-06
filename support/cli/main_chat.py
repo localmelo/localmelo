@@ -500,7 +500,7 @@ class GatewayClient:
         """Words for a running turn: its run reads them at its next step."""
         await self.call(
             "POST",
-            f"/api/turns/{quote(turn_id, safe='')}/notes",
+            "/".join(["/api/turns", quote(turn_id, safe=""), "notes"]),
             json={"text": text, "client_request_id": uuid.uuid4().hex},
         )
 

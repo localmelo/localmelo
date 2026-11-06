@@ -397,7 +397,7 @@ asyncio.run(main())
 
 若查找失败或耗时更长，则为第 0 级。进度跟踪器内部的失败只会结束运行的 `run.progress` 事件，而不会结束运行本身。
 
-<a id="runfinished"></a>
+<a id="runpaused"></a>
 
 ### run.paused：运行暂停
 
@@ -406,11 +406,15 @@ asyncio.run(main())
 
 暂停期间，运行不调用模型，不开始工具调用，运行自己的时限（`timeout_s`）和正在进行的调用的时限都不计时。停止（取消）会立刻生效。
 
+<a id="runresumed"></a>
+
 ### run.resumed：运行继续
 
 - `what`：同 `run.paused`。
 - `how`：`done`（用户说完成了：按“完成”，或在终端空行按回车）、`closed`（用户关掉了交给他的窗口）、`stopped`（暂停期间运行被停止）或 `ended`（运行以其他方式结束）。
 - `held_s`：暂停的秒数，精确到十分之一秒。
+
+<a id="runfinished"></a>
 
 ### run.finished：运行结束
 
