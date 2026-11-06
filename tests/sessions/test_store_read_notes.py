@@ -101,3 +101,38 @@ async def test_only_inbox_accepted_events_count_as_notes(tmp_path: Path) -> None
         holder=HOLDER,
     )
     assert await store.read_notes(turn.session_id, turn.turn) == ["read"]
+
+
+async def test_all_read_notes_give_every_turn_s_notes_in_read_order(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    first = await _run(store, None, ["one", "", "two"])
+    second = await _run(store, first.session_id, ["only"])
+    await _run(store, None, ["elsewhere"])
+    assert await store.all_read_notes(first.session_id) == [
+        (first.turn, "one"),
+        (first.turn, "two"),
+        (second.turn, "only"),
+    ]
+    assert await store.all_read_notes("no-such-session") == []
+
+
+async def test_queued_words_are_the_typed_text_of_the_chat_s_queued_messages(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    turn = await _run(store, None, [])
+    other = await _run(store, None, [])
+    assert await store.queued_words(turn.session_id) == []
+    kept = [
+        {"typed": "first one", "composed": "first one (with a file)", "key": "a"},
+        {"typed": "  ", "composed": "", "key": "b"},
+        {"typed": "second", "composed": "second", "key": "c"},
+    ]
+    await store.update_session(turn.session_id, meta_update={"queued": kept})
+    assert await store.queued_words(turn.session_id) == ["first one", "second"]
+    assert await store.queued_words(other.session_id) == []
+    await store.update_session(turn.session_id, meta_update={"queued": None})
+    assert await store.queued_words(turn.session_id) == []
+    assert await store.queued_words("no-such-session") == []
