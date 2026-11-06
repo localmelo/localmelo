@@ -5,10 +5,11 @@ rule refuses a note and :func:`cjk_only_refusal` says only Chinese or Japanese
 wording is missing; the chat's model then checks that no name, place, number or
 date changed. Arm ``J`` of ``scripts/eval_note_gate.py`` measures the same path.
 
-Code decides first, whatever the model would say: an order to the assistant, a
-number, a weekday or relative date, a quoted phrase, a Latin value and Korean never
-reach the model (:func:`cjk_only_refusal`), and what does reach it is redacted and
-bounded (:func:`judge`).
+Code decides first, whatever the model would say: a sentence that is not a
+statement about the user (the allow-list of :func:`gives_order`), a number, a
+weekday or date word, a quoted phrase, a Latin value and Korean never reach the
+model (:func:`cjk_only_refusal`), and what does reach it is redacted and bounded
+(:func:`judge`).
 """
 
 from __future__ import annotations
@@ -33,32 +34,40 @@ MAX_TYPED_CHARS: Final = 8000
 
 # Never left to the model, so a number or a date cannot change: the number
 # characters (the rule's own, 一 too, and the formal, colloquial and traditional
-# forms), the weekday and relative date words, and Korean, which was never measured.
+# forms), the weekday, relative and recurring date words, ひとり and ふたり, and Korean,
+# which was never measured.
 _NUMBER_CHARS: Final = records._CJK_NUMBERS | frozenset(
     "一壹贰叁肆伍陆柒捌玖拾佰仟廿卅半几双俩仨貳參叄陸萬億兆兩幾雙倆"
 )
 _DATES: Final = re.compile(  # a lookahead, so "上周日" holds 上周 and 周日
     "(?=(周日|周天|周末|星期|礼拜|曜日|今天|明天|昨天|后天|前天|今年|明年|去年|上周|下周"
-    "|本周|上个月|下个月|月底|月初|年底|年初|今日|明日|昨日|来週|先週|来月|先月|来年))"
+    "|本周|上个月|下个月|月底|月初|年底|年初|今日|明日|昨日|来週|先週|来月|先月|来年"
+    "|今晚|明晚|昨晚|本月|上月|下月|这周|前年|后年|今週|今月|月曜|火曜|水曜|木曜|金曜"
+    "|土曜|日曜|每周|每月|每年|ひとり|ふたり))"
 )
 _HANGUL: Final = re.compile("[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
 
-# A sentence of a note that gives an order, in Chinese or Japanese. Chinese: one that
-# opens with a word of command, or says what the assistant or the system prompt must
-# do. Japanese: one that ends as a request or a rule, or opens with 必ず, 常に or 無視.
-# What the note says the user likes or wants ("你喜欢…", "你希望…") is no order.
+# What a note may say, a sentence at a time, in Chinese or Japanese: a statement
+# about the user. An allow-list that fails closed: every sentence must open, after
+# optional quotes and brackets, with 你, 您 or あなた, so a bare verb, a name or
+# leading markup reads as an order and is never sent. Besides that, 你 or 您 followed
+# by a word of command, a sentence that says what the assistant or the system prompt
+# must do, and a Japanese sentence that ends as a request or a rule. What the note
+# says the user likes or wants ("你喜欢…", "你希望…") is no order.
 _SENTENCES: Final = re.compile(r"[。！？!?；;\n]+|(?<=\.)\s+")
-_OPENING: Final = "[\\s\"'“”‘’「」『』（(【\\[]*"
-_ORDER_OPENS: Final = re.compile(
-    _OPENING + "(?:请|务必|必须|一定要|不要|别|不得|禁止|忽略|无视|永远|始终|总是"
-    "|以后|今后|此后|从现在起|从现在开始|每次|删除|执行|运行|发送|转发|打开|调用"
-    "|[你您](?:要|必须|应该)|必ず|常に|無視)"
+_QUOTES: Final = " \t\r\n\"'“”‘’「」『』()（）【】[]"
+_AROUND: Final = f"[{re.escape(_QUOTES)}]*"
+_STATES_OF_USER: Final = re.compile(_AROUND + "(?:你|您|あなた)")
+_ORDER_TO_USER: Final = re.compile(
+    "[你您](?:要|必须|应该|不要|别|不得|永远|始终|每次|以后)"
 )
 _ORDER_AIMED: Final = re.compile(
     "(?:助手|模型|melo|系统提示|系统指令).{0,4}(?:要|必须|应该|需要|不得)",
     re.IGNORECASE,
 )
-_ORDER_ENDS: Final = re.compile("(?:ください|なさい|すること)[\\s\"'”’」』）)]*$")
+_ORDER_ENDS: Final = re.compile(
+    "(?:ください|なさい|すること|ないこと|てはいけない|ないで)" + _AROUND + "$"
+)
 
 SYSTEM_PROMPT: Final = """\
 Judge whether a proposed memory note faithfully restates what the user typed.
@@ -78,17 +87,20 @@ yes to the question above; otherwise {"supported": false}. If uncertain, say fal
 
 
 def gives_order(note: str) -> bool:
-    """Whether *note* is an order to the assistant, in English
-    (:func:`note_gate.is_instruction`) or in Chinese or Japanese (one of its
-    sentences matches the patterns above). The rule reads the note without its
-    invisible characters, in NFKC form."""
+    """Whether *note* is, or may be, an order to the assistant: it is one in English
+    (:func:`note_gate.is_instruction`), or one of its sentences does not open with
+    你, 您 or あなた, or says what the assistant must do, or is one of the other
+    shapes of command above. An allow-list that fails closed. The rule reads the
+    note without its invisible characters, in NFKC form."""
     folded = unicodedata.normalize("NFKC", note)
     folded = "".join(c for c in folded if not note_gate._invisible(c))
     return note_gate.is_instruction(note) or any(
-        _ORDER_OPENS.match(sentence)
+        _STATES_OF_USER.match(sentence) is None
+        or _ORDER_TO_USER.search(sentence)
         or _ORDER_AIMED.search(sentence)
         or _ORDER_ENDS.search(sentence)
         for sentence in _SENTENCES.split(folded)
+        if sentence.strip(_QUOTES)
     )
 
 
@@ -109,8 +121,8 @@ def _never_judged(note: str, missing: Sequence[str]) -> bool:
 def cjk_only_refusal(note: str, said: Sequence[str]) -> bool:
     """Whether a typed-rule refusal can be sent to the wording judge.
 
-    Only Chinese or Japanese terms may be missing. An order to the assistant
-    (:func:`gives_order`), a quoted span, a number (including number characters,
+    Only Chinese or Japanese terms may be missing. A note that is or may be an
+    order to the assistant (:func:`gives_order`), a quoted span, a number (including number characters,
     weekdays and relative dates), Korean and a Latin value stay hard refusals, even
     beside CJK wording. The value check with the note itself as evidence removes
     only the rule's untyped-character classification, retaining its quote check.

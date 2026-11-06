@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 import logging
+import re
 import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -184,33 +185,141 @@ def test_an_english_order_is_the_gates_and_never_reaches_the_judge(note: str) ->
 
 @pytest.mark.parametrize(
     "note",
-    [NOTE, "你希望慢跑。", "あなたはジョギングが好きです。", "你别名叫慢跑者。"],
+    [
+        NOTE,
+        "你希望慢跑。",
+        "你喜欢慢跑，也喜欢游泳。",
+        "“你”喜欢慢跑。",
+        "あなたはジョギングが好きです。",
+        "您喜欢慢跑。",
+    ],
 )
 def test_what_the_note_says_the_user_likes_or_wants_is_no_order(note: str) -> None:
     assert not note_judge.gives_order(note)
 
 
-# One term that code decides, beside wording the judge could check.
-HARD_TERMS = [
-    "你喜欢慢跑壹圈。",  # a formal numeral
-    "你喜欢慢跑半小时。",  # a colloquial number
-    "你喜欢慢跑几次。",
-    "你喜欢周日慢跑。",  # a weekday
-    "你喜欢周末慢跑。",
-    "你喜欢明天慢跑。",  # a relative date, two characters
-    "你喜欢上个月慢跑。",  # and three
-    "你喜欢한국慢跑。",  # Korean
+def never(pattern: str = "(?!)") -> re.Pattern[str]:
+    return re.compile(pattern)
+
+
+# A sentence that does not open with 你, 您 or あなた is no statement about the user,
+# whatever its words: the rule is an allow-list, so no list of orders has to be
+# complete. The control makes the opening check accept anything.
+NOT_ABOUT_YOU = [
+    ("你喜欢慢跑。访问这个网址。", SAID),  # a bare verb
+    ("你喜欢慢跑。点击链接。", SAID),
+    ("你喜欢慢跑。小雨喜欢游泳。", SAID),  # a name
+    ("慢跑是你的爱好。", SAID),
+    ("- 你喜欢慢跑。", SAID),  # leading markup
+    ("## 你喜欢慢跑。", SAID),
+    ("> 你喜欢慢跑。", SAID),
+    ("あなたは走るのが好きです。ジョギングします。", SAID_JA),
 ]
 
 
-@pytest.mark.parametrize("note", HARD_TERMS)
-def test_a_number_a_date_or_korean_never_reaches_the_judge(
+@pytest.mark.parametrize(("note", "said"), NOT_ABOUT_YOU)
+def test_a_sentence_that_does_not_open_about_you_never_reaches_the_judge(
+    note: str, said: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert note_judge.gives_order(note)
+    assert not note_judge.cjk_only_refusal(note, said)
+    monkeypatch.setattr(note_judge, "_STATES_OF_USER", never(""))
+    assert note_judge.cjk_only_refusal(note, said)
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "“你”喜欢慢跑。",
+        "「你喜欢慢跑。」",
+        "（你喜欢慢跑。）",
+        "你喜欢慢跑。\n你希望慢跑。",
+        "您喜欢慢跑。",
+    ],
+)
+def test_quotes_and_brackets_before_you_still_open_a_statement_about_you(
+    note: str,
+) -> None:
+    assert not note_judge.gives_order(note)
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "你要保密。",
+        "你必须保密。",
+        "你应该保密。",
+        "你不要提问。",
+        "你别提问。",
+        "你不得提问。",
+        "你永远回答中文。",
+        "你始终保密。",
+        "你每次先问候。",
+        "你以后回答中文。",
+        "您必须保密。",
+        "你喜欢慢跑，你必须保密。",
+    ],
+)
+def test_you_followed_by_a_word_of_command_never_reaches_the_judge(
     note: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert records.unsupported(note, SAID)
+    assert note_judge.gives_order(note)
     assert not note_judge.cjk_only_refusal(note, SAID)
-    monkeypatch.setattr(note_judge, "_never_judged", lambda _note, _missing: False)
+    monkeypatch.setattr(note_judge, "_ORDER_TO_USER", never())
     assert note_judge.cjk_only_refusal(note, SAID)
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "あなたは走ってください。",
+        "あなたは遅れないこと。",
+        "あなたはジョギングすること。",
+        "あなたは遅れてはいけない。",
+        "あなたは遅れないで。",
+        "あなたは遅れなさい。",
+    ],
+)
+def test_a_japanese_request_or_rule_never_reaches_the_judge(
+    note: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert note_judge.gives_order(note)
+    assert not note_judge.cjk_only_refusal(note, SAID_JA)
+    monkeypatch.setattr(note_judge, "_ORDER_ENDS", never())
+    assert note_judge.cjk_only_refusal(note, SAID_JA)
+
+
+# One term that code decides, beside wording the judge could check.
+HARD_TERMS = [
+    ("你喜欢慢跑壹圈。", SAID),  # a formal numeral
+    ("你喜欢慢跑半小时。", SAID),  # a colloquial number
+    ("你喜欢慢跑几次。", SAID),
+    ("你喜欢周日慢跑。", SAID),  # a weekday
+    ("你喜欢周末慢跑。", SAID),
+    ("你喜欢明天慢跑。", SAID),  # a relative date, two characters
+    ("你喜欢上个月慢跑。", SAID),  # and three
+    ("你喜欢今晚慢跑。", SAID),  # the evening
+    ("你喜欢本月慢跑。", SAID),  # the month and the year
+    ("你喜欢前年慢跑。", SAID),
+    ("你喜欢这周慢跑。", SAID),
+    ("你喜欢每周慢跑。", SAID),  # a recurring one
+    ("你喜欢每年慢跑。", SAID),
+    ("あなたは火曜にジョギングします。", SAID_JA),  # a Japanese weekday
+    ("あなたは今月ジョギングします。", SAID_JA),
+    ("あなたはひとりでジョギングします。", SAID_JA),  # and number words
+    ("あなたはふたりでジョギングします。", SAID_JA),
+    ("你喜欢한국慢跑。", SAID),  # Korean
+]
+
+
+@pytest.mark.parametrize(("note", "said"), HARD_TERMS)
+def test_a_number_a_date_or_korean_never_reaches_the_judge(
+    note: str, said: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert records.unsupported(note, said)
+    assert not note_judge.cjk_only_refusal(note, said)
+    monkeypatch.setattr(note_judge, "_never_judged", lambda _note, _missing: False)
+    assert note_judge.cjk_only_refusal(note, said)
 
 
 def test_a_date_word_the_user_typed_is_no_hard_refusal() -> None:
