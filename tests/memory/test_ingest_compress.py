@@ -11,6 +11,7 @@ stub chat model and temporary stores: no model server.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from localmelo.support.config import (
     MemoryConfig,
 )
 from localmelo.support.memory import ChatMemory, hippo_encode, ingest
+from localmelo.support.memory.index import cleaned
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
@@ -32,6 +34,7 @@ from localmelo.tests.memory.hippo_helpers import (
     StubEncoder,
     by_label,
     item,
+    labels,
     says,
     turn,
 )
@@ -56,6 +59,23 @@ JUNE = {
         {"role": "assistant", "text": "Utrecht is a canal city."},
     ],
 }
+# A documented test card number (it passes the Luhn check) and a made-up password.
+SECRET: dict[str, Any] = {
+    "id": "pay",
+    "title": "Card 4242 4242 4242 4242",
+    "date": "2023-05-22T10:00:00",
+    "turns": [
+        {
+            "role": "user",
+            "text": "My password is hunter2. My card is 4242 4242 4242 4242. I like tea.",
+        },
+        {
+            "role": "assistant",
+            "text": "Noted. The card 4242424242424242 is saved. Tea it is.",
+        },
+    ],
+}
+TEA = "The user said they like drinking green tea in the evening."
 PITTSBURGH = "The user said they live in Pittsburgh."
 UTRECHT = "The user said they now live in Utrecht."
 BOOK = "The user asked for a book about trains and melo suggested a railroad history."
@@ -271,6 +291,216 @@ async def test_each_item_is_embedded_when_an_embedding_model_is_set(
         assert f"Home city\n{PITTSBURGH}" in sent and f"Train book\n{BOOK}" in sent
         stored = await memory.stores()[1].fetch_items([1, 2])
         assert all(i.embed_model == "fake-embed" and i.vector for i in stored)
+    finally:
+        await close(chats, memory)
+
+
+# ── Secrets ──
+
+
+@pytest.mark.parametrize("parallel", [1, 2])
+async def test_a_password_and_a_card_number_reach_the_encoder_as_the_index_keeps_them(
+    tmp_path: Path, parallel: int
+) -> None:
+    stub = StubEncoder(says([item("Tea", TEA, "profile", [0])]))
+    cfg = settings(tmp_path, compress_parallel=parallel)
+    report, chats, memory = await compress(
+        tmp_path, {"sessions": [SECRET]}, stub, cfg=cfg
+    )
+    try:
+        (prompt,) = stub.prompts
+        typed, answer = (message["text"] for message in SECRET["turns"])
+        assert cleaned(typed) in prompt and cleaned(answer) in prompt
+        # The chat's title is cleaned the same way.
+        assert prompt.startswith(f"Chat title: {cleaned(SECRET['title'])}\n\n")
+        assert "hunter2" not in prompt and "4242" not in prompt
+        # The same text the chat's turn is indexed with.
+        index = memory.stores()[1]
+        (document,) = await index.fetch(await index.ids())
+        assert cleaned(typed) in document.text and cleaned(answer) in document.text
+        assert report.items == 1 and report.refused == 0
+    finally:
+        await close(chats, memory)
+
+
+async def test_an_item_that_holds_a_secret_is_not_kept_and_the_report_counts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = hippo_encode.encode
+
+    async def leaky(provider: Any, title: str, turns: Any, **kwargs: Any) -> Any:
+        """What the encoder gives, and an item the checks let a secret through."""
+        encoding = await real(provider, title, turns, **kwargs)
+        encoding.pieces.append(
+            hippo_encode.Piece(
+                title="Payment card",
+                text="The user said their card number is 4111 1111 1111 1111.",
+                kind="profile",
+                sources=(0,),
+                created_at=turns[0].answered_at,
+                encoder=encoding.pieces[0].encoder,
+            )
+        )
+        return encoding
+
+    monkeypatch.setattr(hippo_encode, "encode", leaky)
+    caplog.set_level(logging.DEBUG)
+    stub = StubEncoder(says([item("Tea", TEA, "profile", [0])]))
+    embedding = FakeEmbedding()
+    report, chats, memory = await compress(
+        tmp_path, {"sessions": [SECRET]}, stub, embedding=embedding
+    )
+    try:
+        index = memory.stores()[1]
+        # The clean item is stored exactly as ever; the other is not stored at all.
+        assert report.items == 1 and report.refused == 1
+        assert await index.count_items() == 1
+        (stored,) = await index.fetch_items([1])
+        assert (stored.title, stored.text, stored.kind, stored.status) == (
+            "Tea",
+            TEA,
+            "profile",
+            "active",
+        )
+        assert stored.sources == ((report.ids["pay"], 1),)
+        assert stored.encoder == "3:stub-encoder" and stored.embed_model == "fake-embed"
+        # A refused item does not hold the chat's mark back.
+        assert await index.encoded_turn(report.ids["pay"]) == 1
+        # It was never embedded or routed, and nothing of it is in a log line (4111 1111
+        # 1111 1111 is another documented test card number, not the chat's).
+        assert all("4111" not in text for call in embedding.calls for text in call)
+        data = report.to_json()
+        assert data["refused"] == 1 and data["compress"]["pay"]["refused"] == 1
+        assert [r["title"] for r in data["compress"]["pay"]["routes"]] == ["Tea"]
+        assert "4111" not in json.dumps(data)
+        assert report.summary().endswith(
+            "Encoded 1 item from 1 chat (1 model call, 0 from the cache). "
+            "1 item held a secret and was not kept."
+        )
+        assert "4111" not in caplog.text and "Payment card" not in caplog.text
+        assert any("1 held a secret" in line for line in caplog.messages)
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_run_with_no_refused_item_says_nothing_of_it_in_the_summary(
+    tmp_path: Path,
+) -> None:
+    stub = StubEncoder(reply)
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, stub)
+    try:
+        assert report.refused == 0 and report.to_json()["refused"] == 0
+        assert "secret" not in report.summary()
+    finally:
+        await close(chats, memory)
+
+
+@pytest.mark.parametrize(
+    ("title", "text"),
+    [
+        ("Card 4242 4242 4242 4242", "The user said they have a card."),
+        ("Login", "The user said their password is private."),
+        ("Card", "The user said their card number is 4111 1111 1111 1111."),
+    ],
+    ids=["title only", "words only", "value in the text"],
+)
+async def test_compress_chat_refuses_what_it_is_handed_and_the_report_follows(
+    tmp_path: Path, title: str, text: str
+) -> None:
+    # The encoding comes from outside, as the ingest's parallel path hands it over.
+    _, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, None, mode="turns")
+    try:
+        turns = [turn(0, "I live in Utrecht.", "Nice."), turn(1, "Bye.", "Bye!")]
+        clean = hippo_encode.Piece("Tea", TEA, "profile", (0,), 1.0, "3:x")
+        secret = hippo_encode.Piece(title, text, "profile", (1,), 2.0, "rules", True)
+        encoding = hippo_encode.Encoding(
+            pieces=[clean, secret], kept=[0, 1], forced=[1]
+        )
+        done = await memory.compress_chat("s2", "T", turns, encoding=encoding)
+        index = memory.stores()[1]
+        assert done.refused == 1 and [p.title for p, _ in done.routed] == ["Tea"]
+        assert await index.count_items() == 1
+        # The report reads what became of each exchange from the items kept.
+        data = ingest._chat_report("s2", done)
+        assert data["refused"] == 1
+        assert data["gate"] == {
+            "kept": [0],
+            "ignored": [],
+            "unmentioned": [1],
+            "forced": [],
+        }
+        assert [r["title"] for r in data["routes"]] == ["Tea"]
+        assert text not in json.dumps(data)
+        # The turn's own document is cleaned already: the mark still reaches it.
+        assert await index.encoded_turn("s2") == turns[-1].turn
+        assert encoding.pieces == [clean, secret] and encoding.refused == 0
+    finally:
+        await close(chats, memory)
+
+
+async def test_the_router_refuses_what_the_gate_before_it_let_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, None, mode="turns")
+    try:
+        # The gate's check is switched off here; the router keeps its own.
+        monkeypatch.setattr(hippo_encode, "holds_secret", lambda title, text: False)
+        card = "The user said their card number is 4111 1111 1111 1111."
+        pieces = [
+            hippo_encode.Piece("Card", card, "profile", (0,), 1.0, "3:x"),
+            hippo_encode.Piece("Tea", TEA, "profile", (1,), 2.0, "3:x"),
+        ]
+        turns = [turn(0, "Hi.", "Hello."), turn(1, "Tea.", "Nice.")]
+        done = await memory.compress_chat(
+            "s2", "T", turns, encoding=hippo_encode.Encoding(pieces=pieces)
+        )
+        assert done.refused == 1 and [p.title for p, _ in done.routed] == ["Tea"]
+        assert await memory.stores()[1].count_items() == 1
+    finally:
+        await close(chats, memory)
+
+
+@pytest.mark.parametrize(
+    ("bad", "mark"), [(None, 4), (2, 2), (0, None)], ids=["none", "third", "first"]
+)
+async def test_the_mark_does_not_pass_a_window_that_failed(
+    tmp_path: Path, bad: int | None, mark: int | None
+) -> None:
+    # One exchange to a window: four long exchanges, the window of exchange *bad*
+    # fails. The turns before it are marked encoded and the ones from it on stay
+    # recalled as turns; the items of the windows that went through are kept.
+    data = {
+        "id": "long",
+        "date": "2023-05-20T13:40:00",
+        "turns": [
+            part
+            for n in range(4)
+            for part in (
+                {"role": "user", "text": f"Question {n}?"},
+                {"role": "assistant", "text": f"Answer {n}. " + "x" * 2500},
+            )
+        ],
+    }
+
+    def reply(prompt: str) -> str:
+        return "RAISE" if bad in labels(prompt) else by_label(prompt)
+
+    cfg = settings(tmp_path, compress_at_chars=4000)
+    report, chats, memory = await compress(
+        tmp_path, {"sessions": [data]}, StubEncoder(reply), cfg=cfg
+    )
+    try:
+        index = memory.stores()[1]
+        assert await index.encoded_turn(report.ids["long"]) == mark
+        windows = report.to_json()["compress"]["long"]["windows"]
+        assert [w["failed"] for w in windows] == [bad == n for n in range(4)]
+        unencoded, every = await index.ids(unencoded=True), await index.ids()
+        if mark == 4:
+            assert unencoded == set()
+        elif mark is None:
+            assert unencoded == every
+        else:
+            assert unencoded and unencoded < every
     finally:
         await close(chats, memory)
 

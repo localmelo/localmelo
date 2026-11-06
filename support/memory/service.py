@@ -99,7 +99,7 @@ from localmelo.support.memory.digest import (
     Digest,
     make_digest,
 )
-from localmelo.support.memory.hippo_route import Route, Router
+from localmelo.support.memory.hippo_route import REFUSE, Route, Router
 from localmelo.support.memory.importer import (
     ImportPlan,
     build_plan,
@@ -433,11 +433,15 @@ class OpenedItem(NamedTuple):
 @dataclass
 class Compressed:
     """What :meth:`ChatMemory.compress_chat` did for one chat: what the encoder
-    made of it (:class:`~.hippo_encode.Encoding`) and, for each item it made in the
-    order they were routed, the item and where the routing put it."""
+    made of it (:class:`~.hippo_encode.Encoding`, without the items that held a
+    secret), for each item it kept in the order they were routed, the item and where
+    the routing put it, and how many items were not kept because they held a secret
+    (*refused*: those the encoder refused and those the gate before embedding or the
+    router did; none is in *routed*)."""
 
     encoding: hippo_encode.Encoding
     routed: list[tuple[hippo_encode.Piece, Route]] = field(default_factory=list)
+    refused: int = 0
 
 
 @dataclass(frozen=True)
@@ -2263,13 +2267,22 @@ class ChatMemory:
         turns changes. *router* and *cache* are shared across the chats of one run
         (the settings' otherwise). With *encoding* (what :meth:`encode_chat` gave
         for these *turns*), the chat is not encoded again: it goes straight to
-        embedding and routing. Once the items are stored the chat's mark moves to the
-        last of *turns* (:meth:`.index.ConversationIndex.mark_encoded`): recall reads
-        the turns past it too.
+        embedding and routing. An item whose title or text holds a secret
+        (:func:`~.index.holds_secret`, the test a note passes) is not embedded, routed
+        or stored, and is counted in :attr:`Compressed.refused`: the encoder refuses
+        such an item where it reads the reply, and this gate and the router check
+        again what any caller hands them. Once the items are stored the chat's mark
+        moves to the last of *turns* before the first exchange of a window that
+        failed, or the last of them when none did
+        (:meth:`.index.ConversationIndex.mark_encoded`): recall reads the turns past
+        it too. An item refused for its secret does not hold the mark back, since the
+        turn's own document is already cleaned.
         """
         if encoding is None:
             encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
-        texts = [f"{piece.title}\n{piece.text}" for piece in encoding.pieces]
+        encoding = encoding.without_secrets()
+        pieces = encoding.pieces
+        texts = [f"{piece.title}\n{piece.text}" for piece in pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
         model = ""
         for start in range(0, len(texts), _BATCH):
@@ -2282,8 +2295,8 @@ class ChatMemory:
             model = found
         _, index = self.stores()
         router = router or Router(index)
-        out = Compressed(encoding)
-        for piece, vector in zip(encoding.pieces, vectors, strict=True):
+        out = Compressed(encoding, refused=encoding.refused)
+        for piece, vector in zip(pieces, vectors, strict=True):
             item = MemoryItem(
                 session_id=session_id,
                 title=piece.title,
@@ -2296,10 +2309,18 @@ class ChatMemory:
                 encoder=piece.encoder,
             )
             async with self._lock:
-                out.routed.append((piece, await router.route(item)))
-        if turns:
+                route = await router.route(item)
+            if route.action == REFUSE:  # the router's own check, after the gate's
+                out.refused += 1
+            else:
+                out.routed.append((piece, route))
+        if out.refused:  # the count only, never the text
+            logger.info("Memory items: %d held a secret and were not kept", out.refused)
+        # The mark does not pass a window that failed: its turns stay recalled.
+        done = turns if encoding.failed_from is None else turns[: encoding.failed_from]
+        if done:
             async with self._lock:
-                await index.mark_encoded(session_id, max(t.turn for t in turns))
+                await index.mark_encoded(session_id, max(t.turn for t in done))
         return out
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:

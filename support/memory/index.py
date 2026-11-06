@@ -254,6 +254,13 @@ def cleaned(text: str) -> str:
     return _clean(text)
 
 
+def holds_secret(title: str, text: str) -> bool:
+    """Whether a memory item's *title* or *text* holds a secret, as a note would be
+    refused for (:func:`~.records.sensitive`). The one test every step of the item
+    path uses: the encoder's reply check, the gate before embedding and the router."""
+    return sensitive(title) or sensitive(text)
+
+
 def _parts(typed: str, answer: str, title: str) -> tuple[str, str, str]:
     """A turn's task line (``""`` for a chat), typed text and answer, each cleaned
     (:func:`_clean`). Each is cleaned whole, before any cut, so no half of a key

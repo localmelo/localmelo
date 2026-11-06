@@ -10,6 +10,7 @@ stored). Synthetic items, no model.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -17,7 +18,8 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.memory.hippo.policy import decide
-from localmelo.support.memory.hippo_route import POOL, Router
+from localmelo.support.memory import hippo_route
+from localmelo.support.memory.hippo_route import POOL, REFUSE, Router
 from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
@@ -353,6 +355,45 @@ async def test_a_new_fact_is_stored_as_new(index: ConversationIndex) -> None:
     )
     assert (second.action, second.item) == ("NEW", 2)
     assert [i.status for i in await index.fetch_items([1, 2])] == ["active", "active"]
+
+
+@pytest.mark.parametrize(
+    ("text", "title"),
+    [
+        ("The user said their card number is 4111 1111 1111 1111.", ""),
+        ("The user said their password is private.", ""),
+        ("The user said they have a card.", "Card 4111 1111 1111 1111"),
+    ],
+    ids=["value in the text", "words only", "title only"],
+)
+async def test_an_item_that_holds_a_secret_is_refused_and_stores_nothing(
+    index: ConversationIndex, text: str, title: str
+) -> None:
+    router = Router(index)
+    refused = await route(router, text, title=title)
+    assert (refused.action, refused.item, refused.target) == (REFUSE, None, None)
+    assert refused.reason == "holds a secret" and await index.count_items() == 0
+    # Nothing was taken from the router's run: the next item is the first stored.
+    clean = await route(router, PITTSBURGH, kind="profile")
+    assert (clean.action, clean.item) == ("NEW", 1)
+
+
+def test_the_router_is_the_only_way_into_the_items_table() -> None:
+    """``add_item`` is the one statement that writes an item's title and text, and
+    the router, which refuses an item that holds a secret first, is its only caller
+    outside the tests; no statement changes a stored item's title, text or kind."""
+    root = Path(hippo_route.__file__).parents[2]
+    writers: set[str] = set()
+    callers: set[str] = set()
+    for folder in ("support", "melo"):
+        for path in (root / folder).rglob("*.py"):
+            code = path.read_text(encoding="utf-8")
+            if re.search(r"(?:INSERT|REPLACE)\b[^;]*?\bINTO\s+items\b", code, re.I):
+                writers.add(path.name)
+            if ".add_item(" in code:
+                callers.add(path.name)
+            assert not re.search(r"UPDATE\s+items\s+SET\s+(?:title|text|kind)\b", code)
+    assert writers == {"index.py"} and callers == {"hippo_route.py"}
 
 
 async def test_an_update_stores_the_new_item_and_marks_the_old_one_replaced(
