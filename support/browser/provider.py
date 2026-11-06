@@ -2705,8 +2705,13 @@ _DIALOG_WORDS = {
 }
 
 
-def _dialog_line(dialog: Dialog) -> str:
-    """A box the page put up, as "what changed" says it: page words, cleaned there."""
+def _dialog_line(dialog: Dialog, origin: str) -> str:
+    """A box the page put up, as "what changed" says it: page words, cleaned there.
+
+    Its words are told only when the page that put it up is the one *origin*
+    approved: a box that came late, from a page melo has since left or refused
+    (or from a frame of another site), is told without them.
+    """
     what = _DIALOG_WORDS.get(dialog.kind, "a box")
     if dialog.kind == "alert":
         answer = "melo closed it"
@@ -2714,6 +2719,11 @@ def _dialog_line(dialog: Dialog) -> str:
         answer = "melo left the page" if dialog.accepted else "melo stayed"
     else:
         answer = "melo answered OK" if dialog.accepted else "melo answered Cancel"
+    if not origin or sites.origin_of(dialog.url) != origin:
+        return (
+            f"a page of another address showed {what} ({answer}); "
+            "its words are not told"
+        )
     return f'the page showed {what}: "{dialog.message}" ({answer})'
 
 
@@ -2773,7 +2783,7 @@ def _change_lines(
         )
     changes = result.changes if result is not None else None
     if result is not None:
-        lines.extend(_dialog_line(dialog) for dialog in result.dialogs)
+        lines.extend(_dialog_line(dialog, origin) for dialog in result.dialogs)
     if changes is not None:
         lines.extend(f'new text: "{text}"' for text in changes.texts)
         if changes.target:

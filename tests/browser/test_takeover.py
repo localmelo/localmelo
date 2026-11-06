@@ -1080,6 +1080,11 @@ CHECK = "https://newassets.hcaptcha.com/captcha/v1/box"
         ("https://www.cloudflare.com/", False, False),
         ("https://example.com/hcaptcha.com", False, False),
         ("https://hcaptcha.com.example.net/x", False, False),
+        # What stands before an "@" is a user part, not the host.
+        ("https://newassets.hcaptcha.com:pw@evil.example/x", False, False),
+        ("https://hcaptcha.com@evil.example/x", False, False),
+        ("https://user@newassets.hcaptcha.com/x", True, True),
+        ("https://newassets.hcaptcha.com./x", True, True),
         ("https://accounts.example.org/box", False, False),
         ("not an address", False, False),
     ],

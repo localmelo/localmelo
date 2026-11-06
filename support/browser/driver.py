@@ -235,12 +235,15 @@ class Dialog:
 
     ``kind`` is ``alert``, ``confirm``, ``prompt`` or ``beforeunload``;
     ``message`` is the page's own words (data, cut short); ``accepted`` is
-    whether melo answered OK (or Leave), as against Cancel.
+    whether melo answered OK (or Leave), as against Cancel; ``url`` is the
+    address of the page that put it up, as the browser says (``""``: unknown),
+    which decides whether its words are told.
     """
 
     kind: str
     message: str
     accepted: bool
+    url: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

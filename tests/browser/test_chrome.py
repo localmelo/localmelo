@@ -572,6 +572,7 @@ async def test_a_confirm_during_an_act_is_put_to_the_person(
     )
     assert asked == [("confirm", "Delete the draft?", APP)]
     assert result.dialogs == (Dialog("confirm", "Delete the draft?", answer),)
+    assert result.dialogs[0].url == APP, "the page that put it up, as the browser says"
     answered = peer.calls("Page.handleJavaScriptDialog")[0]["params"]
     assert answered == {"accept": answer}
     landed = await driver.location(None)

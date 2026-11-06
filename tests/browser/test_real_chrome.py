@@ -146,6 +146,27 @@ for (const [id, host] of [['b', 'plain.localhost'], ['a', 'www.recaptcha.net']])
   root.appendChild(box);
 }
 </script></body>"""
+# A check's frame in a closed shadow root that the page swaps for a button of its own the
+# moment melo marks where it is about to press (a node with ``aria-hidden`` added to the page).
+SWAP = """<!doctype html><meta charset="utf-8"><title>Verify</title>
+<body style="margin:0"><div id="host" style="position:absolute;left:100px;top:100px;width:300px;height:65px"></div>
+<script>
+const root = document.getElementById('host').attachShadow({mode: 'closed'});
+const box = document.createElement('iframe');
+box.src = 'http://www.recaptcha.net:%(port)s/inner';
+box.style.cssText = 'width:300px;height:65px;border:0';
+root.appendChild(box);
+new MutationObserver((records) => {
+  const marked = records.some((r) => [...r.addedNodes].some(
+    (n) => n.nodeType === 1 && n.getAttribute('aria-hidden') === 'true'));
+  if (!marked) return;
+  const pay = document.createElement('button');
+  pay.style.cssText = 'width:300px;height:65px';
+  pay.textContent = 'Pay now';
+  pay.onclick = () => { document.title = 'clicked'; };
+  root.replaceChildren(pay);
+}).observe(document.body, {childList: true});
+</script></body>"""
 # What the box shows: a button that answers a trusted click only.
 INNER = """<!doctype html><title>Box</title><body style="margin:0">
 <button style="width:300px;height:65px" onclick="if (event.isTrusted) parent.postMessage('pressed', '*')">I am human</button>
@@ -169,7 +190,10 @@ class Site(BaseHTTPRequestHandler):
         elif self.path == "/mixed":
             port = cast(tuple[str, int], self.server.server_address)[1]
             self._send(MIXED % {"port": port})
-        elif self.path in ("/shadowed", "/invisible", "/other-box"):
+        elif self.path == "/swap":
+            port = cast(tuple[str, int], self.server.server_address)[1]
+            self._send(SWAP % {"port": port})
+        elif self.path in ("/shadowed", "/invisible", "/other-box", "/edge"):
             port = cast(tuple[str, int], self.server.server_address)[1]
             shown = "width:300px;height:65px"
             self._send(
@@ -178,10 +202,18 @@ class Site(BaseHTTPRequestHandler):
                     "port": port,
                     # The same box, in a host that is not shown, or from an address that no
                     # check provider uses.
-                    "host": "display:none" if self.path == "/invisible" else shown,
+                    "host": (
+                        "display:none"
+                        if self.path == "/invisible"
+                        else (
+                            "position:absolute;left:100px;top:100px;width:300px;height:65px"
+                            if self.path == "/edge"
+                            else shown
+                        )
+                    ),
                     "spacer": (
                         ""
-                        if self.path == "/invisible"
+                        if self.path in ("/invisible", "/edge")
                         else '<div id="spacer" style="width:300px;height:90px"></div>'
                     ),
                     "frame": (
@@ -379,6 +411,7 @@ async def test_a_box_that_comes_after_an_act_returned_is_told_by_the_next_one(
         None, Act("click", raw.url, named(raw, "Check in"), doc=raw.doc)
     )
     assert second.dialogs == (Dialog("confirm", "Late question?", False),)
+    assert second.dialogs[0].url.startswith(base), "the page that put it up"
 
 
 async def test_an_address_of_another_app_asked_for_after_an_act_returned_is_told_never_its_own(
@@ -630,3 +663,67 @@ async def test_a_box_in_a_closed_shadow_root_from_another_address_is_a_box_melo_
     assert hit.site.startswith("http://plain.localhost")
     assert hit.element is not None and not hit.element.label
     assert not (await driver.page(None)).aims
+
+
+async def test_a_page_that_swaps_the_frame_when_melo_arms_gets_no_press(
+    mapped: ChromeBackgroundDriver, base: str
+) -> None:
+    """The proof is made after everything the page gets before a click, so a swap in between goes stale."""
+    driver = mapped
+    await driver.open(base + "swap", new_tab=True)
+    shot = await driver.screenshot(None)
+    assert shot.view is not None
+    view = shot.view
+    await listed_check(driver)
+    hit = await driver.hit(None, view, 150, 130)
+    assert hit.check and hit.element, "the frame is a check's when melo looks"
+    press = Act(
+        "click",
+        view.url,
+        hit.element,
+        doc=view.doc,
+        point=(150, 130),
+        view=view,
+        proof=hit.site,
+    )
+    with pytest.raises(StaleElementError):
+        await driver.act(None, press)
+    assert await driver._read("document.title") == "Verify", "nothing was pressed"
+    assert not await driver._read(
+        "document.querySelector('[aria-hidden]')"
+    ), "melo's mark is taken down"
+
+
+async def test_the_proof_is_made_at_the_pixel_that_is_pressed(
+    mapped: ChromeBackgroundDriver, base: str
+) -> None:
+    """A frame's left edge at x = 100: a point on either side of it is rounded once, and the click goes where the proof was."""
+    driver = mapped
+    await driver.open(base + "edge", new_tab=True)
+    shot = await driver.screenshot(None)
+    assert shot.view is not None
+    view = shot.view
+    await listed_check(driver)
+    hit = await driver.hit(None, view, 150, 130)
+    assert hit.check and hit.element
+
+    def press(x: float) -> Act:
+        return Act(
+            "click",
+            view.url,
+            hit.element,  # type: ignore[arg-type]
+            doc=view.doc,
+            point=(x, 130),
+            view=view,
+            proof=hit.site,
+        )
+
+    # 99.4 is the pixel 99, left of the frame: nothing is pressed.
+    with pytest.raises(StaleElementError):
+        await driver.act(None, press(99.4))
+    assert not (await driver.page(None)).solved
+    # 99.6 is the pixel 100, in the frame: the press lands in the frame that was proved.
+    await driver.act(None, press(99.6))
+    async with asyncio.timeout(10):
+        while not (await driver.page(None)).solved:
+            await asyncio.sleep(0.1)

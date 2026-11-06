@@ -1000,7 +1000,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 )
         target = self._targets.get(session, "")
         said = self._said.setdefault(target, [])
-        said.append(Dialog(kind, message, accept))
+        said.append(Dialog(kind, message, accept, str(params.get("url") or "")[:500]))
         del said[:-MAX_LATE_DIALOGS]
 
     async def _attach(self, target: str) -> str:
@@ -1498,6 +1498,12 @@ class ChromeBackgroundDriver(PageScriptActs):
         target = self._targets[session]
         if act.element.frame.startswith("x"):
             raise BrowserError(STALE["reach"])
+        if act.proof and act.point is not None:
+            # One whole pixel for the arming, the proof and the click: the proof is
+            # about the very place pressed.
+            act = dataclasses.replace(
+                act, point=(float(round(act.point[0])), float(round(act.point[1])))
+            )
         # What the page asked for before this act is told, never opened.
         late = browser.handoffs.pop(session, [])
         self._acting.add(session)
@@ -1545,16 +1551,20 @@ class ChromeBackgroundDriver(PageScriptActs):
             if isinstance(aimed, str):
                 return aimed, False
             x, y = aimed
-            if act.proof and not _same_frame(await self._frame_at(x, y), act.proof):
-                # What was proved a check at that point is not there now.
-                raise StaleElementError(STALE["point"], "point")
             key = new_key()
             armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
             try:
                 if act.kind == "type" and act.point is None:
                     await self._type_at(session, x, y, act.text, act.enter)
+                elif act.proof:
+                    await self._press_proved(session, x, y, act.proof)
                 else:
                     await self._click_at(session, x, y)
+            except StaleElementError:
+                # The proof failed: nothing was pressed, and the guards come down.
+                with contextlib.suppress(BrowserError):
+                    await self._finish(key, spec["doc"])
+                raise
             except BrowserError:
                 if self._browser is None or self._browser.closed:
                     raise
@@ -1576,6 +1586,20 @@ class ChromeBackgroundDriver(PageScriptActs):
             "",
             observed(data, quiet),
         )
+
+    async def _press_proved(self, session: str, x: float, y: float, proof: str) -> None:
+        """A trusted click on the frame that was proved a check's (*proof*): the mouse moves there first, the frame is proved at that moment, and only then is it pressed.
+
+        The page has had everything it gets before a click (the arming, the
+        pointer arriving) by the time the proof is made; only a timer can still
+        change what is there. A frame that is not the proved one raises
+        :class:`StaleElementError`, with nothing pressed.
+        """
+        await self._mouse(session, "mouseMoved", x, y)
+        if not _same_frame(await self._frame_at(x, y), proof):
+            raise StaleElementError(STALE["point"], "point")
+        for kind in ("mousePressed", "mouseReleased"):
+            await self._mouse(session, kind, x, y)
 
     async def _frame_at(self, x: float, y: float) -> str | None:
         """The address, as Chrome has it, of the frame Chrome puts topmost at (*x*, *y*) of the view; ``""`` when none is.

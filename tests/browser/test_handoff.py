@@ -278,9 +278,9 @@ def test_an_address_of_another_apps_kind_is_told_from_a_page_and_the_browsers_ow
 
 async def test_the_boxes_a_page_put_up_are_told_in_the_page_block_only() -> None:
     boxes = (
-        Dialog("confirm", "Delete the draft?", True),
-        Dialog("alert", "Saved", True),
-        Dialog("prompt", "Your name?", False),
+        Dialog("confirm", "Delete the draft?", True, HOME),
+        Dialog("alert", "Saved", True, HOME),
+        Dialog("prompt", "Your name?", False, HOME),
     )
     driver = handing_off(world(button("Delete")), boxes={"Delete": boxes})
     provider, found = await tools(driver, Opener())
@@ -298,6 +298,29 @@ async def test_the_boxes_a_page_put_up_are_told_in_the_page_block_only() -> None
         "the page showed a box that asks for text: 'Your name?' (melo answered Cancel)"
         in block
     )
+
+
+async def test_a_box_from_a_page_that_is_not_the_approved_one_leaves_no_word_behind() -> (
+    None
+):
+    boxes = (
+        Dialog("confirm", "Wire it now?", True, "https://refused.example.net/x"),
+        Dialog("alert", "Old words", True),
+        Dialog("alert", "Fine", True, HOME + "other"),
+    )
+    driver = handing_off(world(button("Go")), boxes={"Go": boxes})
+    provider, found = await tools(driver, Opener())
+    try:
+        with asking(Asks()):
+            await run(found, "browser_open", url=HOME)
+            out = await run(found, "browser_click", ref="e1")
+    finally:
+        await provider.close()
+    for words in ("Wire it now", "Old words"):
+        assert words not in out.text
+    assert out.text.count("a page of another address showed") == 2
+    assert "its words are not told" in out.text
+    assert "the page showed a message: 'Fine' (melo closed it)" in out.text
 
 
 async def test_ok_to_a_confirm_is_the_persons_every_time() -> None:

@@ -48,6 +48,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 
 Owner = Literal["melo", "you"]
 MELO: Final = "melo"
@@ -712,6 +713,11 @@ def _path(url: str) -> str:
     return match.group(1) if match else url
 
 
-def _host(origin: str) -> str:
-    match = re.match(r"^[a-z][a-z0-9+.-]*://([^/:?#]+)", origin.strip().lower())
-    return match.group(1) if match else ""
+def _host(address: str) -> str:
+    """The host of *address* as the browser reads it (lower case, one final dot dropped); never a user part or a port. ``""`` for what has none."""
+    try:
+        parts = urlsplit(address.strip())
+        host = parts.hostname or "" if parts.netloc else ""
+    except ValueError:
+        return ""
+    return host[:-1] if host.endswith(".") else host
