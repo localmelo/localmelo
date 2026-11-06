@@ -65,6 +65,7 @@ from prompt_toolkit.widgets import SearchToolbar
 from rich.text import Text
 
 from localmelo.melo.contracts.review import offers_grant
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.cli.approvals import (
     BODY_LINES,
     ESCAPED_WARNING,
@@ -437,6 +438,18 @@ def terminal_input(stdin: TextIO, on_close: Callable[[], None] | None = None) ->
     return reading
 
 
+class _PrivateHistory(FileHistory):
+    """The history file, with a password a line gives cut out of it (#547).
+
+    The person's own prompt keeps what they typed for the up arrow in this
+    session; the file, which outlives it, keeps the handle (``[password-1]``)
+    where a password was.
+    """
+
+    def store_string(self, string: str) -> None:
+        super().store_string(hide_passwords(string))
+
+
 def open_history(path: str) -> FileHistory:
     """The input history at *path*: private (0600), and kept under a size.
 
@@ -458,7 +471,7 @@ def open_history(path: str) -> FileHistory:
                 for line in entry.split("\n"):
                     file.write(f"+{line}\n")
         os.replace(temporary, path)
-    return FileHistory(path)
+    return _PrivateHistory(path)
 
 
 class InteractiveApp:

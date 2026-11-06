@@ -300,6 +300,62 @@ async def test_an_auto_call_cannot_write_outside_its_folder_even_unreviewed(
             os.rmdir(outside)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="writes are confined on macOS")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["auto", "ask"])
+async def test_a_step_the_person_allowed_may_write_the_path_it_names(
+    tmp_path: Path, mode: str
+) -> None:
+    # Outside the workspace, the user's temporary folder (writable already) and
+    # the running source (which melo never lets a step change): the folder that
+    # holds the clone.
+    outside = Path(__file__).resolve().parents[3]
+    target = outside / f"t448-allowed-{uuid.uuid4().hex}"
+    other = outside / f"t448-other-{uuid.uuid4().hex}"
+    # The path is written in the code, so the rules find it (a review's
+    # ``paths``); the second one only the environment names, so they do not.
+    code = (
+        f"import os\nopen({str(target)!r}, 'w').write('x')\n"
+        "open(os.environ['OTHER'], 'w').write('x')"
+    )
+    asked: list[str] = []
+
+    async def allow(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request.call_id)
+        return ApprovalDecision(True, origin="user")
+
+    try:
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        agent = Agent(
+            llm=FakeModel(_plans_of(code), [verdict()]),
+            options=AgentOptions(
+                builtins=frozenset({"python_exec"}),
+                tool_exposure="all",
+                workspace_root=str(ws),
+                tool_env={"OTHER": str(other)},
+                confine_writes=True,
+            ),
+        )
+        agent.chat.sleep = _no_wait
+        recorder = Recorder()
+        await agent.run_task(
+            "write the note",
+            on_event=recorder,
+            approval=ChatPolicy(allow, mode),  # type: ignore[arg-type]
+        )
+        [finished] = recorder.of("tool.finished")
+        # Allow takes effect: the path the card named is written; a path the
+        # review did not name is still refused by the sandbox.
+        assert asked == ["call_1"]
+        assert target.exists() and not other.exists(), finished.data
+        assert "Operation not permitted" in str(finished.data)
+        await agent.close()
+    finally:
+        target.unlink(missing_ok=True)
+        other.unlink(missing_ok=True)
+
+
 # ── "The user allowed one exact step" only for a block of that tool ──
 
 

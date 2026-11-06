@@ -38,8 +38,14 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from collections.abc import Iterable
 
-from localmelo.support.browser.driver import BrowserError, FieldAttrs, Sensitive
+from localmelo.support.browser.driver import (
+    BrowserError,
+    Element,
+    FieldAttrs,
+    Sensitive,
+)
 
 _PASSWORD_AUTOCOMPLETE = frozenset({"current-password", "new-password"})
 PASSWORD_WORDS = (
@@ -215,6 +221,39 @@ def form_pairs(rows: list[object]) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+# "search" in what names a box, but not "research".
+_SEARCH_WORDS = re.compile(r"(?<!re)search|搜索")
+
+
+def is_search(attrs: FieldAttrs | None) -> bool:
+    """Whether the page describes a text box as a search box: ``type=search``, or "search" in the words that name it (#547).
+
+    A page can describe any box so; the person's own words must also ask to
+    search before it counts for anything
+    (:meth:`~localmelo.melo.agent._step_review.StepReviewer.searching`).
+    """
+    if attrs is None:
+        return False
+    return attrs.type.lower() == "search" or bool(
+        _SEARCH_WORDS.search(normalized(attrs.words))
+    )
+
+
+def searches(item: Element, elements: Iterable[Element]) -> bool:
+    """Whether what *item* types or sends is a search: every text box of its form is a search box, or it is a search box in no form (#547).
+
+    One box that is no search box (a comment next to a search field) makes the
+    form a message, so it is reviewed like one.
+    """
+    if item.form:
+        boxes = [
+            box for box in elements if box.kind == "textbox" and box.form == item.form
+        ]
+    else:
+        boxes = [item] if item.kind == "textbox" else []
+    return bool(boxes) and all(is_search(box.attrs) for box in boxes)
+
+
 # Words of a control that agrees to something for the person: terms, consent, a
 # newsletter, or a sign-in with another account. A click on one by a point is asked
 # about, whatever was allowed before.
@@ -230,6 +269,22 @@ _CONSENT = re.compile(CONSENT_WORDS, re.IGNORECASE)
 def consent(words: str) -> bool:
     """Whether a control's *words* agree to terms, consent, marketing or a sign-in with another account."""
     return bool(_CONSENT.search(words))
+
+
+# Words of a box that makes what the person does public or shares it: "make my
+# activity public", "share to social media". A page may tick one before the person
+# sees the form; melo does not send the form with it ticked unless the person asked
+# to share (#547).
+PUBLIC_WORDS = (
+    r"\bpublic(ly)?\b|\bshar(e|es|ed|ing)\b|\bsocial\b|\bfacebook\b|\btwitter\b"
+    r"|\bcross-?post|\bpost (to|on) |公开|分享|朋友圈|同步到|社交"
+)
+_PUBLIC = re.compile(PUBLIC_WORDS, re.IGNORECASE)
+
+
+def public(words: str) -> bool:
+    """Whether a box's *words* make what the person does public or share it."""
+    return bool(_PUBLIC.search(words))
 
 
 def _js(pattern: str) -> str:
@@ -282,6 +337,7 @@ var secretKind = function (a) {
 
 __all__ = [
     "CONSENT_WORDS",
+    "PUBLIC_WORDS",
     "HIDDEN",
     "consent",
     "JS_RULES",

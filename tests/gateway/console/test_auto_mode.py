@@ -463,8 +463,9 @@ async def test_a_card_its_viewer_leaves_or_nobody_answers_is_declined(
         # The same step later in the turn is not asked about again.
         assert again["declined"] is True and await requested(console, sid) == 1
         first_note, again_note = llm.tool_messages()
-        assert "did not answer the card" in first_note and "Don't allow" in first_note
-        assert "not asked again" in again_note
+        assert "not answered the card" in first_note and "not a no" in first_note
+        assert "Don't allow" not in first_note and "another way" not in first_note
+        assert "did not ask again" in again_note
 
 
 # ── Allow once, end to end ──

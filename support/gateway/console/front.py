@@ -57,6 +57,7 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import AgentEvent
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
     ProvidedTool,
@@ -2423,7 +2424,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
             if info is None or info.kind != "chat":
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
         echo = await console.front_for(body.session_id).act(
-            echo_id, body.do, body.level, body.text
+            echo_id,
+            body.do,
+            body.level,
+            hide_passwords(body.text),
         )
         return JSONResponse(content={"echo": echo})
 

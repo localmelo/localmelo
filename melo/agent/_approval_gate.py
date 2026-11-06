@@ -17,10 +17,15 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.melo.agent._step_review import StepReviewer, plain_page_key
+from localmelo.melo.agent._step_review import (
+    StepReviewer,
+    holds_secret,
+    plain_page_key,
+)
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.posting import is_message, personal_data, sent_texts
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -48,7 +53,7 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_key,
 )
-from localmelo.melo.contracts.folders import OutsideAccess, home_label
+from localmelo.melo.contracts.folders import NAMED_FOLDER, OutsideAccess, home_label
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
@@ -177,6 +182,9 @@ class _ApprovalGate:
                     destructive=self._destructive,
                 ),
             )
+        if self._reviewer is not None and self.review is not None:
+            # A key or a script the person's words name asks on a card (#547).
+            self.review = self._reviewer.name(self.review)
         asking = self._asking(request, review=self.review)
         preview = asking.preview
         self._mode = review_mode(self._policy, asking)
@@ -293,6 +301,10 @@ class _ApprovalGate:
             self._confinement.on = self._mode == "auto"
             if self._confinement.on:
                 await asyncio.to_thread(self._confinement.ready)
+            # An allowed step may write the paths its review found in it, as
+            # allowed: its sandbox lets them through, so "Allow" takes effect
+            # instead of the operating system refusing the write (#547).
+            self._confinement.allow(() if self.review is None else self.review.paths)
         self._record(
             asking,
             origin=decided.origin,
@@ -389,7 +401,22 @@ class _ApprovalGate:
         if self.review is not None and "self" in self.review.categories:
             self._record(asking, origin="policy", reason=SELF_DENIAL)
             return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-        decided = await self._ask(asker.decide_folder, asking)
+        if (
+            self._reviewer is not None
+            and review_mode(self._policy, asking) == "auto"
+            and (self.review is None or _only_outside_write(self.review))
+            and self._reviewer.names_folder(outside.path)
+        ):
+            # In Auto, a folder the person wrote in their own words needs no
+            # card (#547), for a read or a plain write there. A write the rules
+            # also call something else (a launch agent, a shell startup file, a
+            # key) or could not read keeps its card: naming a folder is not
+            # asking for that.
+            decided: ApprovalDecision = ApprovalDecision(
+                True, NAMED_FOLDER, origin="user"
+            )
+        else:
+            decided = await self._ask(asker.decide_folder, asking)
         if decided.allow and decided.origin in ("auto", "earlier"):
             # Only a person, a grant of the folder or the settings allow it.
             refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
@@ -571,10 +598,17 @@ def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> Actio
     )
 
 
+def _only_outside_write(review: ActionReview) -> bool:
+    """Whether *review* of a write outside the workspace finds nothing but that: no other category, no doubt."""
+    return review.categories == ("outside_write",) and not review.doubts
+
+
 def _folder_scope(decision: ApprovalDecision) -> str:
-    """What allowed a call outside the workspace: once, chat, always, or "" (denied)."""
+    """What allowed a call outside the workspace: once, chat, always, named (the person wrote the folder), or "" (denied)."""
     if not decision.allow:
         return ""
+    if decision.reason == NAMED_FOLDER:
+        return "named"
     if decision.origin == "session":
         return "chat"
     if decision.origin == "policy":
@@ -612,6 +646,8 @@ _TYPING_DOUBT = (
 )
 # A click on a site the person's words name: still reviewed, by what it is on.
 _NAMED_SITE = " The user's words name this site."
+# What the text holds that code found of the person (#547).
+_PERSONAL = " The text holds the user's {kinds}."
 # A click whose target melo cannot tell (#465): the person is asked.
 _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # The site questions that carry no value of melo's (#465): a click or a choice
@@ -619,6 +655,16 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # ``credentials`` into no category; a read (its address can hold a key), a
 # search, typing, a form sent, or any access not listed never does.
 _VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
+
+
+def _personal(
+    reviewer: StepReviewer, tool_name: str, arguments: Mapping[str, Any]
+) -> str:
+    """What of the person's own the text a step sends holds, in words (``phone number and address``), or ``""``."""
+    found = personal_data(
+        "\n".join(sent_texts(tool_name, arguments)), reviewer.person_names
+    )
+    return " and ".join(found)
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
@@ -680,6 +726,33 @@ class _ToolAsk:
     def names_host(self, host: str) -> bool:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
+
+    def sign_in_value(self, handle: str, site: str) -> str | None:
+        """The password *handle* stands for in a password box on *site*, or None (#547).
+
+        Only for a password the person gave in their newest message, on a site
+        their own words name; see :meth:`StepReviewer.sign_in_value`.
+        """
+        reviewer = self._reviewer
+        return None if reviewer is None else reviewer.sign_in_value(handle, site)
+
+    def asks_to_share(self) -> bool | None:
+        """Whether the person's own words speak of sharing or making something public; None when nothing reads them (#547)."""
+        return None if self._reviewer is None else self._reviewer.asks_to_share()
+
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        """The servers on this computer the person's own words write, as ``(address, port)``; none when nothing reads them or the run is over (#547).
+
+        The browser keeps this reader for the pages it lets reach those
+        servers, so the end of the run ends what they may reach.
+        """
+        if self._reviewer is None or not self._run.running:
+            return frozenset()
+        return self._reviewer.written_sites()
+
+    def signs_in(self, site: str) -> bool:
+        """Whether melo has sign-in details of the person's to try on *site*."""
+        return self._reviewer is not None and self._reviewer.signs_in(site)
 
     def granted(self, name: str) -> bool:
         """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
@@ -852,10 +925,34 @@ class _ToolAsk:
                     review = ActionReview(
                         "routine", (), (f"Opens {site}, which you named.",)
                     )
+                elif (
+                    typing
+                    and reviewer.names_host(site)
+                    and not holds_secret(arguments, preview)
+                    and (
+                        reviewer.searching(arguments)
+                        or not is_message([str(arguments.get("text") or "")])
+                    )
+                    and not _personal(reviewer, tool_name, arguments)
+                ):
+                    # The rules judge it: a field's worth of text (not a message
+                    # by the one reading the posting check has, or a search the
+                    # person asked for, of any length) with no secret in it and
+                    # nothing of the person's own, typed on a site the person
+                    # wrote themselves. Nothing leaves the page until a form is
+                    # sent, and that is reviewed on its own, so a long form does
+                    # not use up the turn's reviews (#547). A message is a post:
+                    # it is reviewed whole, with all its words, before any of it
+                    # is typed.
+                    review = ActionReview(
+                        "routine", (), (f"Types on {site}, which you named.",)
+                    )
                 else:
                     doubt = _site_doubt(access, site, preview)
                     if site and not reading and reviewer.names_host(site):
                         doubt += _NAMED_SITE
+                    if kinds := _personal(reviewer, tool_name, arguments):
+                        doubt += _PERSONAL.format(kinds=kinds)
                     review = await reviewer.review(
                         self._run.reviews,
                         tool_name=tool_name,

@@ -17,9 +17,14 @@ When the model is asked:
   of the same kind or names something the call acts on.
 
 It is never asked about a routine call or a ``self`` one, nor when a person
-will be asked anyway. A review that times out, fails or cannot be read, one
-past the turn's :data:`~localmelo.melo.checker.review.model.REVIEWS_PER_TURN`,
-and a call too long to review all leave the call high (fail closed).
+will be asked anyway. A request that times out, fails or cannot be read is
+sent once more; a review that still has no answer, one past the turn's
+:data:`~localmelo.melo.checker.review.model.REVIEWS_PER_TURN` (counted for the
+steps the rules could not judge only; a high-impact step the model only
+checks against the user's words has a count of its own), and a call too long
+to review all leave the call high with the category ``unreviewed``. Auto mode
+shows a person that step on a card instead of blocking it without a word
+(``ASKS_IN_AUTO``); with nobody to ask it stays blocked (fail closed).
 
 The goal decides (#465): an undecided call the model finds on the goal of the
 chat, with no high-impact category, runs; the user's words only ever add to
@@ -48,6 +53,7 @@ from localmelo.melo.checker.review.model import (
     MAX_ACTION_CHARS,
     MAX_REQUEST_CHARS,
     REVIEW_TIMEOUT_S,
+    REVIEW_TRIES,
     REVIEWS_PER_TURN,
     SYSTEM_PROMPT,
     ReviewInputs,
@@ -59,17 +65,36 @@ from localmelo.melo.checker.review.model import (
     step_names,
     user_message,
 )
+from localmelo.melo.checker.review.named import (
+    folder_named,
+    key_named,
+    local_sites,
+    loopback_site,
+    script_named,
+)
+from localmelo.melo.checker.review.posting import (
+    account_names,
+    asks_to_search,
+    asks_to_share,
+    is_message,
+    is_post,
+    post_stop,
+    sent_texts,
+)
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
+    DIRENV_SUBJECT,
     MODEL_CAN_ALLOW,
     TITLES,
     WORDS_CAN_ALLOW,
     ActionReview,
     ModelAnswer,
     because,
+    named_by,
     step_key,
 )
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in, hide_passwords
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -203,7 +228,10 @@ class _Block:
 class RunReviews:
     """One run's reviews: what ``run.finished`` reports, and the stop rule's state."""
 
+    # Reviews of steps the rules could not judge, of high-impact steps the
+    # rules judged (the model reads only the user's words), and of runners.
     used: int = 0
+    consent_used: int = 0
     runner_used: int = 0
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     blocks: list[tuple[str, str]] = field(default_factory=list)
@@ -217,9 +245,10 @@ class RunReviews:
     # review of a later step is told of them.
     refused_sites: list[str] = field(default_factory=list)
     # The steps declined on auto mode's card in this run (#465), by each of
-    # their keys: the person's Don't allow, or a card nobody answered. The
-    # same step, or one alike, is refused again without asking until the run
-    # ends.
+    # their keys: the person's Don't allow, or a card nobody answered (no
+    # answer, not a no: the model is told to go on and melo asks again in the
+    # next run). The same step, or one alike, is refused again without asking
+    # until the run ends, so a card that waits is not shown again and again.
     declined: dict[str, Chosen] = field(default_factory=dict)
 
     def decline(self, keys: Iterable[str], decision: Chosen) -> None:
@@ -347,6 +376,9 @@ class StepReviewer:
         self._chat = chat
         self._clock = clock
         self._wall = wall
+        # What code can match of the person in a post: the account's real name
+        # (a test may set it). See :func:`~localmelo.melo.checker.review.posting.personal_data`.
+        self.person_names: tuple[str, ...] = account_names()
         # When the chat began: the rules count a file changed after it as
         # written in this chat. A session runner sets the stored start.
         self.since = wall()
@@ -372,6 +404,9 @@ class StepReviewer:
         # Addresses each site verdict let through since the user's last message.
         self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
+        # The handles of passwords the person's messages of this run hold
+        # (#547): only they can be typed, and none in a run they did not begin.
+        self._live: frozenset[str] = frozenset()
         if new_chat:
             self.since = self._wall()
 
@@ -395,6 +430,8 @@ class StepReviewer:
             recalled = recalled_part(text) or self._recalled
         self._recalled = recalled
         text = own_words(text)
+        # A password this message holds can be typed in this run (#547).
+        self._live |= handles_in(text)
         # A message counts even with no words (an attachment): a review
         # settled for the last message is asked again, with the new words.
         self._marker += 1
@@ -432,6 +469,53 @@ class StepReviewer:
         for text in texts:
             self._add(text)
 
+    # ── Sign-in details the person gives (#547) ──
+
+    def hide_passwords(self, text: str) -> str:
+        """*text*, the person's message, with each password it gives replaced by its handle.
+
+        Called where a message of the person's comes in (a session's runner,
+        :meth:`~localmelo.melo.agent.Agent.run_task`, a note read mid-run),
+        before any model, record, log or memory sees it: the value stays in
+        this process's vault and the handle (``[password-1]``) takes its
+        place (see :mod:`localmelo.melo.contracts.sign_in`). The recalled
+        notes a message may carry (:func:`own_words`) are not the person's
+        words: nothing is taken from them. The same text hidden again
+        changes nothing.
+        """
+        own = own_words(text)
+        return hide_passwords(own) + text[len(own) :]
+
+    def begin_run(self) -> None:
+        """A run starts: no password can be typed in it until the person's message of the run holds one (#547).
+
+        A run the person did not begin (a task's follow-up, a chore) never
+        types one, whatever an earlier message held.
+        """
+        self._live = frozenset()
+
+    def sign_in_value(self, handle: str, site: str) -> str | None:
+        """The password *handle* stands for, for a password box on *site*, or ``None``.
+
+        Only a handle a message of the person's run holds, and only on a site their
+        own words name (:meth:`names_host`): the model, a page or an earlier
+        message never makes melo type one. The browser tool asks this and
+        types the value; nothing else ever gets it.
+        """
+        if (
+            not HANDLE.fullmatch(handle)
+            or handle not in self._live
+            or not self.names_host(site)
+        ):
+            return None
+        return VAULT.value(handle)
+
+    def signs_in(self, site: str) -> bool:
+        """Whether a message of the person's run holds a password and their words name *site*."""
+        return any(VAULT.value(h) is not None for h in self._live) and self.names_host(
+            site
+        )
+
     @property
     def requests(self) -> tuple[str, ...]:
         """The person's newest messages: :data:`EARLIER_REQUESTS` and the latest."""
@@ -456,14 +540,131 @@ class StepReviewer:
         under it: naming ``example.com`` does not name ``docs.example.com``,
         so a site under a shared domain (``vercel.app``) is not named by
         it. See :func:`named_sites` for what counts as naming. An address
-        on this computer (:func:`local_address`) is never named: its host
-        is not its port, and a page may have steered the model to another.
+        on this computer (:func:`local_address`) is named only by its host
+        and its port together, as the person wrote them: a host alone is not
+        its port, and a page may have steered the model to another.
         """
+        local = loopback_site(host)
+        if local is not None:
+            # A server on this computer is named by its host and its port
+            # together, as the person wrote them (#547); the port a page or the
+            # model picked is another site.
+            return local in self.written_sites()
         if local_address(host):
             return False
         wanted = _site_host(host)
         return bool(wanted) and any(
             wanted in named_sites(text) for text in self.requests
+        )
+
+    def name(self, review: ActionReview) -> ActionReview:
+        """*review* with the categories the person's own words name (#547).
+
+        A key file the person wrote the path or the specific name of, a
+        script they wrote the whole address of: for those auto mode shows a
+        card instead of stopping the step (:func:`~localmelo.melo.contracts.approvals.asks_in_auto`).
+        Decided here by code from the rules' evidence and the person's words
+        (:attr:`requests`): the model and a page never name anything.
+        """
+        named = named_by(review, self._names)
+        return dataclasses.replace(review, named=named) if named else review
+
+    def _names(self, category: str, subject: str) -> bool:
+        if category == "credentials":
+            return key_named(subject, self.requests, os.path.expanduser("~"))
+        if category == "persistence":
+            return subject == DIRENV_SUBJECT  # a card whatever the words say
+        return category == "remote_code" and script_named(subject, self.requests)
+
+    def names_folder(self, path: str) -> bool:
+        """Whether the person's own words name *path* (canonical, outside the workspace) or a folder above it.
+
+        The home folder and the folders above it never count (see
+        :func:`~localmelo.melo.checker.review.named.folder_named`); a place
+        melo never opens does not reach here at all.
+        """
+        return folder_named(path, self.requests, os.path.expanduser("~"))
+
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        """The servers on this computer the person's own words write, as ``(address, port)``.
+
+        ``localhost`` is read as ``127.0.0.1``. The browser and web_fetch let
+        exactly these through (see :func:`~localmelo.support.local_ports.written_sites`);
+        a page's text, a tool's result and the model's own address never count.
+        """
+        return local_sites(self.requests)
+
+    @property
+    def all_words(self) -> tuple[str, ...]:
+        """Every message of the person's the reviewer keeps: the chat's first, the older ones and the newest."""
+        return (*self.earlier, *self.requests)
+
+    def asks_to_share(self) -> bool:
+        """Whether the person's own words speak of sharing or making something public (#547)."""
+        return asks_to_share(self.requests)
+
+    def searching(self, arguments: Mapping[str, Any]) -> bool:
+        """Whether a step types or sends a search of the person's (#547).
+
+        The browser says ``field: "search"`` when the box, or every text box of
+        the form, is described as a search box
+        (:func:`~localmelo.support.browser.fields.searches`); a page can
+        describe a box so, so it counts only when the person's own words ask to
+        search too (:func:`~localmelo.melo.checker.review.posting.asks_to_search`).
+        A search is no post whatever its length: a query is not a message.
+        """
+        return (
+            arguments.get("access") in ("type", "submit")
+            and arguments.get("field") == "search"
+            and asks_to_search(self.requests)
+        )
+
+    def _posting(
+        self,
+        settled: ActionReview,
+        rules: ActionReview,
+        answer: ModelAnswer,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        workspace: str,
+    ) -> ActionReview:
+        """A post that the model or the person's words let through, asked about when code finds a reason (#547).
+
+        A post is a step that types or sends text on a page or posts or sends a
+        message (:func:`is_post`) and that either holds a message
+        (:func:`is_message`, whatever category the model gave) or is called
+        ``send_out`` by the rules or the model. It runs without a card only if
+        the person's own words ask for a send or the person wrote the text, the
+        text holds none of their phone, address or real name, a review or
+        rating is their own text, and the task does not repeat
+        (:func:`~localmelo.melo.checker.review.posting.post_stop`): whatever
+        else the model said, a page cannot make these true. The step is
+        then high ``send_out`` with that reason, which a card shows when a
+        person watches.
+        """
+        sent = sent_texts(tool_name, arguments, workspace)
+        if (
+            settled.verdict != "routine"
+            or settled.by != "model"
+            or self.searching(arguments)
+            or not is_post(arguments, rules.evidence)
+            or not (
+                is_message(sent)
+                or "send_out" in rules.categories
+                or answer.category == "send_out"
+            )
+        ):
+            return settled
+        stop = post_stop(
+            self.all_words,
+            sent,
+            self.person_names,
+            typing=arguments.get("access") == "type",
+        )
+        if not stop:
+            return settled
+        return dataclasses.replace(
+            settled, verdict="high", categories=("send_out",), reasons=(stop,)
         )
 
     # ── Reviews ──
@@ -551,7 +752,8 @@ class StepReviewer:
             self._shared_used[shared] = self._shared_used.get(shared, 0) + 1
             return kept[0]
         runner = bool(review.changed)
-        used = run.runner_used if runner else run.used
+        goal = purpose == "undecided"
+        used = run.runner_used if runner else run.used if goal else run.consent_used
         if len(action) > MAX_ACTION_CHARS:
             answer = ModelAnswer(error="the call is too long to review")
         elif used >= (RUNNER_REVIEWS_PER_TURN if runner else REVIEWS_PER_TURN):
@@ -559,10 +761,11 @@ class StepReviewer:
         else:
             if runner:
                 run.runner_used += 1
-            else:
+            elif goal:
                 run.used += 1
+            else:
+                run.consent_used += 1
             run.counts["model"] += 1
-            goal = purpose == "undecided"
             inputs = ReviewInputs(
                 workspace=workspace or "",
                 requests=self.requests,
@@ -579,6 +782,9 @@ class StepReviewer:
             )
             answer = await self._ask(inputs)
         settled = _settle(review, answer, purpose, secret_free=secret_free)
+        settled = self._posting(
+            settled, review, answer, tool_name, arguments, workspace or ""
+        )
         if not answer.error:
             self._keep(key, (settled, self._marker, purpose))
             if shared and purpose == "undecided" and settled.verdict == "routine":
@@ -599,13 +805,27 @@ class StepReviewer:
             self._cache.popitem(last=False)
 
     async def _ask(self, inputs: ReviewInputs) -> ModelAnswer:
-        """One review request; any failure is an answer with an ``error``."""
+        """One review: up to :data:`REVIEW_TRIES` requests; any failure is an answer with an ``error``.
+
+        A request that timed out, failed or came back unreadable is sent
+        once more (a busy local model often answers the second time); the
+        answer of the last one stands. ``ms`` spans all of them.
+        """
         messages = [
             Message(role="system", content=SYSTEM_PROMPT),
             Message(role="user", content=user_message(inputs)),
         ]
         started = self._clock()
+        answer = ModelAnswer(error="the review did not run")
+        for _ in range(REVIEW_TRIES):
+            answer = await self._request_once(messages, started)
+            if not answer.error:
+                break
+        return answer
 
+    async def _request_once(
+        self, messages: list[Message], started: float
+    ) -> ModelAnswer:
         def ms() -> int:
             return int((self._clock() - started) * 1000)
 

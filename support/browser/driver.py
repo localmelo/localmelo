@@ -234,6 +234,22 @@ class Changes:
 
 
 @dataclass(frozen=True)
+class Download:
+    """A file a page made the browser download, and where melo's driver saved it (#547).
+
+    ``name`` is the name the page suggested (the page's own words: shown
+    cleaned and never used as the saved name), ``size`` the bytes received,
+    ``state`` ``done``, ``failed`` or ``too big`` (stopped at the limit) and
+    ``folder`` the folder melo saves downloads in.
+    """
+
+    name: str
+    size: int
+    state: str
+    folder: str = ""
+
+
+@dataclass(frozen=True)
 class Dialog:
     """A box the page put up while melo acted, and how melo answered it.
 

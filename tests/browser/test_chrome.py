@@ -116,9 +116,15 @@ async def test_chrome_starts_headless_on_the_pipe_with_melos_own_private_profile
     assert "Chrome/156.0.0.0" in agent and "Headless" not in agent
     assert argv[-1] == "about:blank"
     assert stat.S_IMODE(os.stat(peer.profile).st_mode) == 0o700
+    # A page's download is saved by id in melo's own downloads folder (#547).
     assert peer.calls("Browser.setDownloadBehavior")[0]["params"] == {
-        "behavior": "deny"
+        "behavior": "allowAndName",
+        "downloadPath": str(Path(peer.profile).parent / "downloads"),
+        "eventsEnabled": True,
     }
+    assert (
+        stat.S_IMODE(os.stat(Path(peer.profile).parent / "downloads").st_mode) == 0o700
+    )
     created = peer.calls("Target.createTarget")[0]["params"]
     assert created["newWindow"] is True and created["background"] is True
     # The page Chrome started with is nobody's: it goes once melo has its own.

@@ -33,9 +33,9 @@ With ``[memory] recall_source = "items"`` recall draws on memory items in place 
 turns: items a chat model encoded from the chats (:meth:`ChatMemory.compress_chat`,
 :mod:`.hippo_encode`) and routed against the items kept (:mod:`.hippo_route`), shown
 as lines, or in the list form opened with ``open_memory`` (:meth:`ChatMemory.open_item`).
-The turns of a chat past its progress mark (the last turn encoded, set by
-:meth:`ChatMemory.compress_chat`; none counts as nothing encoded) stay recallable in
-the same list, so a chat nobody has encoded yet is not lost.
+A turn stays recallable, in the same list, until a stored item cites it as a source
+(:meth:`.index.ConversationIndex.ids`), so a chat nobody has encoded yet, or a turn
+the encoder left out, is not lost.
 Every recall reports its timings in a :class:`Recall`. Nothing leaves the computer except
 the embedding and chat requests to the user's own model server.
 """
@@ -90,7 +90,13 @@ from localmelo.support.config import (
     MEMORY_RECALL_OPEN_CHARS,
     MEMORY_RECALL_RECORDS,
 )
-from localmelo.support.memory import blocked, hippo_encode, note_gate, records
+from localmelo.support.memory import (
+    blocked,
+    hippo_encode,
+    note_gate,
+    note_judge,
+    records,
+)
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.digest import (
     DIGEST_KINDS,
@@ -115,6 +121,7 @@ from localmelo.support.memory.index import (
     ItemState,
     MemoryItem,
     document_chunks,
+    loses_source,
     plain_text,
     typed_of,
 )
@@ -179,6 +186,10 @@ _SELECT_FAILURES: Final = {
     "parse": "unreadable",
 }
 PINNED_CHARS: Final = 600
+# How long a deleted memory item can be put back, and how many at most. The deleted
+# item is held in this process only: nothing of it stays on disk, as for a note.
+ITEM_UNDO_S: Final = 600
+ITEM_UNDO_MAX: Final = 20
 # The one line a block carries when nothing was recalled and ``[memory]
 # search_when_empty`` is ``hint``; the model decides whether to search.
 SEARCH_HINT: Final = (
@@ -712,6 +723,11 @@ def _memory_item(
     )
 
 
+def _embed_text(title: str, text: str) -> str:
+    """What a memory item is embedded as: its title, then its text."""
+    return f"{title}\n{text}"
+
+
 def _item_state(item: Item) -> ItemState:
     """What an item in the corpus knows of what :meth:`ConversationIndex.item_states`
     reports, to tell whether the stored item changed."""
@@ -956,6 +972,8 @@ class ChatMemory:
         self._llm_key: tuple[str, ...] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._plans: dict[str, ImportPlan] = {}
+        # Deleted memory items an undo can bring back: id to (when, item), oldest first.
+        self._trash: dict[int, tuple[float, MemoryItem]] = {}
         self.last_error = ""
         self._warned = False
 
@@ -1161,10 +1179,9 @@ class ChatMemory:
             if key not in corpus.items:
                 corpus.add(_record_item(entry))
         if self.recall_settings().items:
-            # Recall draws on memory items, and on the turns that no item holds yet:
-            # those past their chat's mark.
+            # Recall draws on memory items, and on the turns that no item cites.
             await self._sync_items(corpus, index)
-            await self._sync_turns(corpus, index, await index.ids(unencoded=True))
+            await self._sync_turns(corpus, index, await index.ids(uncited=True))
             return corpus
         for key in corpus.keys("m:"):
             corpus.remove(key)
@@ -1686,7 +1703,10 @@ class ChatMemory:
         once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
         answers :data:`NO_MORE_TRIES` with no check run (:attr:`ChatTurn.refusals`).
 
-        That is the rule at ``[memory] note_gate = "typed"``, the default. Above it
+        That is the rule at ``[memory] note_gate = "typed"``, the default. A note it
+        refuses only for Chinese or Japanese wording goes once to the chat's model
+        (:meth:`_judged`), which keeps it when no name, place, number or date
+        changed; a refusal it does not lift counts as any other. Above it
         (:meth:`_admit`) a page or file the user pointed to is a source too, a note
         may say the same in other words, and an instruction to the assistant is
         refused; the note is then kept with where it came from, and the reply and
@@ -1729,12 +1749,17 @@ class ChatMemory:
             note = records.second_person(note, protect=True, keep=typed)
         gate = self.note_settings()
         admission: Admission | None = None
+        judged = False
         if gate.level == note_gate.TYPED:
             admitted = "user_statement"
             missing = records.unsupported(note, said)
             if missing:
                 admitted = "outcome"
                 missing = records.unsupported(note, said + await self._results(turn))
+            if missing and await self._judged(note, said):
+                # A restatement the chat's model confirmed: from here on it is a
+                # note the typed rule passed.
+                admitted, missing, judged = "user_statement", [], True
             if missing:
                 return (
                     "Not remembered: not something the user said. "
@@ -1763,6 +1788,8 @@ class ChatMemory:
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)
+        if judged:
+            source["judged"] = True
         if admission is not None and admission.source in (
             note_gate.POINTED,
             note_gate.INFERRED,
@@ -1791,6 +1818,30 @@ class ChatMemory:
         turn.kept.extend(written)
         turn.publish()
         return f"Remembered{label}: {note} The user sees it and can undo it."
+
+    async def _judged(self, note: str, said: list[str]) -> bool:
+        """Whether the chat's model confirms a note the typed rule refused.
+
+        Asked only when nothing but Chinese or Japanese wording is missing
+        (:func:`note_judge.cjk_only_refusal`) and a chat model is set up: one
+        request, within :data:`note_judge.JUDGE_TIMEOUT_S`, with *said* (the user's
+        own typed words) as the only evidence. No memory lock is held meanwhile.
+        A no, an unreadable reply, a timeout or an error leaves the refusal; one
+        log line says which and how long it took, never the note.
+        """
+        if not note_judge.cjk_only_refusal(note, said):
+            return False
+        provider = self.chat_provider()
+        if provider is None:
+            return False
+        started = time.perf_counter()
+        confirmed = await note_judge.judge(provider, note, said, self._llm_backend())
+        logger.info(
+            "Note judge: %s in %.1f s",
+            "yes" if confirmed else "no",
+            time.perf_counter() - started,
+        )
+        return confirmed
 
     async def _admit(
         self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings
@@ -2324,18 +2375,20 @@ class ChatMemory:
         again what any caller hands them. Once the items are stored the chat's mark
         moves to the last of *turns* before the first exchange of a window that
         failed, or the last of them when none did
-        (:meth:`.index.ConversationIndex.mark_encoded`): recall reads the turns past
-        it too. An item refused for its secret does not hold the mark back, since the
-        turn's own document is already cleaned. The routing and the mark happen under
-        one hold of the memory lock, the lock a forget takes. With *guard*, it is awaited
-        first, under that lock (it must not take it): when it says ``False`` nothing is
-        routed or stored, no mark is set and the result has *forgotten* set.
+        (:meth:`.index.ConversationIndex.mark_encoded`): the turns the encoder has
+        read, which :meth:`waiting_turns` skips. The mark says nothing about what
+        recall reads: a turn is recalled until a stored item cites it, so a turn the
+        encoder left out, or whose items were all refused, stays. The routing and the
+        mark happen under one hold of the memory lock, the lock a forget takes. With
+        *guard*, it is awaited first, under that lock (it must not take it): when it
+        says ``False`` nothing is routed or stored, no mark is set and the result has
+        *forgotten* set.
         """
         if encoding is None:
             encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
         encoding = encoding.without_secrets()
         pieces = encoding.pieces
-        texts = [f"{piece.title}\n{piece.text}" for piece in pieces]
+        texts = [_embed_text(piece.title, piece.text) for piece in pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
         model = ""
         for start in range(0, len(texts), _BATCH):
@@ -2349,7 +2402,7 @@ class ChatMemory:
         _, index = self.stores()
         router = router or Router(index)
         out = Compressed(encoding, refused=encoding.refused)
-        # The mark does not pass a window that failed: its turns stay recalled.
+        # The mark does not pass a window that failed: its turns are read again.
         done = turns if encoding.failed_from is None else turns[: encoding.failed_from]
         # One hold of the lock for the routing and the mark: a forget cannot come between.
         async with self._lock:
@@ -2383,7 +2436,8 @@ class ChatMemory:
         self, chats: SessionStore, session_id: str
     ) -> list[TurnInfo]:
         """The turns of chat *session_id* that wait to be encoded into items, oldest
-        first: those past its progress mark (none counts as nothing encoded) that
+        first: those past its progress mark (the last turn the encoder read; none
+        counts as nothing read) that
         the live index holds, or would, as :meth:`reindex` does: completed, not
         undone, the person's own (:func:`is_owner_question`), with an answer, and
         ended after the last time the user forgot everything. A turn below 1 is
@@ -2434,22 +2488,17 @@ class ChatMemory:
         is written to the cache file, which holds raw replies a forget does not clear.
 
         A forget that comes while the chat model reads the window keeps it out:
-        nothing is stored and no mark is set when the user forgot everything, or the
-        chat is gone, since the turns were read (the result has ``forgotten`` set;
-        :meth:`compress_chat` checks this under the lock a forget takes). Turns that
-        ended before the last forget, and a chat that is gone, are not read at all.
+        nothing is stored and no mark is set when the user forgot everything, the
+        chat is gone, or a turn of the window was undone since it was read (the result
+        has ``forgotten`` set; :meth:`compress_chat` checks this under the lock a
+        forget takes). Turns that ended before the last forget, and a chat that is
+        gone, are not read at all.
         """
         _, index = self.stores()
         async with self._lock:
             since = await index.forgotten_at()
         if await chats.get_session(session_id) is None:
             return None
-
-        async def unchanged() -> bool:
-            return (
-                await index.forgotten_at() == since
-                and await chats.get_session(session_id) is not None
-            )
 
         limit = self.compress_window()
         turns: list[hippo_encode.Turn] = []
@@ -2477,13 +2526,26 @@ class ChatMemory:
                 break
         if not turns:
             return None
-        first = hippo_encode.pack(turns, limit)[0]
+        window = [turns[n] for n in hippo_encode.pack(turns, limit)[0].positions]
+        wanted = {t.turn for t in window}
+
+        async def unchanged() -> bool:
+            """Nothing the window was built from is gone: no forget, the chat is
+            there, and each of its turns is still completed and not undone."""
+            if (
+                await index.forgotten_at() != since
+                or await chats.get_session(session_id) is None
+            ):
+                return False
+            now = await chats.list_turns(
+                session_id, limit=max(wanted) - min(wanted) + 1, before=max(wanted) + 1
+            )
+            return wanted <= {
+                t.turn for t in now if t.status == "completed" and not t.undone
+            }
+
         return await self.compress_chat(
-            session_id,
-            title,
-            [turns[n] for n in first.positions],
-            cache=hippo_encode.Cache(""),
-            guard=unchanged,
+            session_id, title, window, cache=hippo_encode.Cache(""), guard=unchanged
         )
 
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
@@ -2494,6 +2556,7 @@ class ChatMemory:
             for note in await store.session_entries(session_id, undone_only=True):
                 if turn is None or note.provenance.get("turn") == turn:
                     await store.delete_entry(note.id, versions=False)
+            self._forget_trash(session_id, turn)
             return await index.delete(session_id, turn)
 
     async def forget_all(self) -> tuple[int, int]:
@@ -2509,6 +2572,7 @@ class ChatMemory:
             await records_store.forget_all()
             turns = await index.forget_all()
             self._corpus = Corpus()
+            self._forget_trash()
         return notes, turns
 
     async def forget_chat_notes(self, session_id: str) -> int:
@@ -2542,6 +2606,7 @@ class ChatMemory:
                 async with self._lock:
                     await records_store.set_vector(entry.id, vectors[0], model)
                 notes += 1
+        await self._reembed_items(model)
         found: list[tuple[dict[str, Any], int, str, str | None, float]] = []
         if chats is not None:
             since = await index.forgotten_at()
@@ -2597,6 +2662,42 @@ class ChatMemory:
         async with self._lock:
             self._corpus = Corpus()
         return notes, len(found)
+
+    async def _reembed_items(self, model: str) -> None:
+        """Give every stored memory item a vector of the embedding model *model*, in
+        batches as the encoder embeds them. An item the model could not embed keeps
+        its old vector (it is not compared under the new model, but is found by its
+        words); the log says how many."""
+        if not model or self.retriever() in ("bm25", "llm"):
+            return  # no model, or a retriever that makes no embedding calls
+        index = self.stores()[1]
+        async with self._lock:
+            stale = [
+                item
+                for item in await index.fetch_items(await index.item_states())
+                if item.embed_model != model
+            ]
+        failed = 0
+        for start in range(0, len(stale), _BATCH):
+            batch = stale[start : start + _BATCH]
+            vectors, found, _ = await self._embed(
+                [_embed_text(item.title, item.text) for item in batch],
+                INDEX_EMBED_TIMEOUT_S,
+                query=False,
+            )
+            if not vectors:
+                failed += len(batch)
+                continue
+            async with self._lock:
+                await index.set_item_vectors(
+                    [(item.id, vec) for item, vec in zip(batch, vectors, strict=True)],
+                    found,
+                )
+        if failed:
+            logger.warning(
+                "Reindex: %d memory items kept the vector of the old embedding model",
+                failed,
+            )
 
     # ── Side-chat summaries and a task's questions ──
 
@@ -2819,6 +2920,55 @@ class ChatMemory:
     async def delete_record(self, record_id: int, *, undo: bool = False) -> bool:
         async with self._lock:
             return await self.stores()[0].delete_entry(record_id, restore=undo)
+
+    async def items(self) -> list[MemoryItem]:
+        """Every memory item of any status, newest first, without vectors."""
+        async with self._lock:
+            return await self.stores()[1].all_items()
+
+    async def delete_item(self, item_id: int) -> bool:
+        """Delete a memory item; ``False`` when there is none.
+
+        Recall stops showing it at the next search and the turns it cited, if no other
+        item cites them, are recalled as turns again. The item is held in memory for
+        :data:`ITEM_UNDO_S` seconds for :meth:`restore_item`; a forget of its chat or
+        of everything, or a restart, drops it.
+        """
+        async with self._lock:
+            gone = await self.stores()[1].delete_item(item_id)
+            if gone is None:
+                return False
+            self._prune_trash()
+            self._trash[item_id] = (time.monotonic(), gone)
+            return True
+
+    async def restore_item(self, item_id: int) -> bool:
+        """Put back an item deleted less than :data:`ITEM_UNDO_S` seconds ago; ``False``
+        when there is none to put back."""
+        async with self._lock:
+            self._prune_trash()
+            held = self._trash.pop(item_id, None)
+            return held is not None and await self.stores()[1].restore_item(held[1])
+
+    def _prune_trash(self) -> None:
+        """Drop the deleted items whose undo has run out, and the oldest beyond the cap."""
+        now = time.monotonic()
+        for number, (at, _) in list(self._trash.items()):
+            if now - at >= ITEM_UNDO_S:
+                del self._trash[number]
+        while len(self._trash) > ITEM_UNDO_MAX:
+            del self._trash[next(iter(self._trash))]
+
+    def _forget_trash(
+        self, session_id: str | None = None, turn: int | None = None
+    ) -> None:
+        """Drop the deleted items an undo could bring back: every one, or only those a
+        forgotten chat (or one turn of it) takes along, as a stored item would go."""
+        for number, (_, item) in list(self._trash.items()):
+            if session_id is None or loses_source(
+                item.session_id, item.sources, session_id, turn
+            ):
+                del self._trash[number]
 
     async def edit_record(self, record_id: int, text: str) -> StoredEntry | None:
         """Reword a note; ``None`` when it is gone. Raises ``ValueError`` (a plain
@@ -3181,6 +3331,7 @@ class ChatMemory:
                     await closer.aclose()
         self._records = self._index = None
         self._corpus = Corpus()
+        self._forget_trash()
 
     def tools(self) -> MemoryTools:
         return MemoryTools(self)
@@ -3349,7 +3500,7 @@ OPEN_MEMORY: Final = ToolDef(
 
 def open_memory_items(sources: bool) -> ToolDef:
     """``open_memory`` for ``recall_source = "items"``: it opens memory items, by ids
-    such as m12, and the turns of chats not encoded yet, by ids such as t123; with
+    such as m12, and the turns no item cites, by ids such as t123; with
     *sources* (``open_sources = "on"``) the turns an item came from come with it."""
     return ToolDef(
         name=OPEN_MEMORY.name,

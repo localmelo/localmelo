@@ -5,14 +5,18 @@ list of test servers (:mod:`localmelo.support.web_local`) and the background
 browser's sign-in helpers (:mod:`localmelo.support.browser.local_apps`) both
 refuse them. This module reads only the config and the running gateway's
 endpoint file, so the browser can use it without reading web_fetch's setting.
+It also reads which servers on this computer the person wrote the address of
+(:func:`written_sites`, #547), which both tools let through, and the browser
+in the background (Chrome) too.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
+from localmelo.melo.contracts.approvals import TOOL_ASK
 from localmelo.support import gateway_endpoint
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 
@@ -22,6 +26,8 @@ if TYPE_CHECKING:
 GATEWAY = "the port of melo's own gateway and console"
 MODEL = "the port of a model server"
 _SCHEME_PORTS = {"http": 80, "https": 443}
+# The addresses of this computer a written server can have (``localhost`` is read as the first).
+LOOPBACK = ("127.0.0.1", "::1")
 
 
 def _url_port(url: object) -> int | None:
@@ -84,4 +90,56 @@ def own_ports(
     return ports
 
 
-__all__ = ["GATEWAY", "MODEL", "own_ports", "urls_of"]
+def written_reader() -> Callable[[], Iterable[tuple[str, int]]] | None:
+    """What says, for the run asking now, which servers on this computer the person wrote; ``None`` when no policy can say (#547).
+
+    The browser keeps this reader, not what it says: a step's answer ends with
+    its run (the policy of a run that is over says none), so what a page may
+    reach is never older than the run that was allowed it.
+    """
+    found = getattr(TOOL_ASK.get(), "written_sites", None)
+    return found if callable(found) else None
+
+
+def written_sites() -> frozenset[tuple[str, int]]:
+    """The servers on this computer the person's own words write in this run, as ``(address, port)`` (#547).
+
+    The run's question policy says it from the person's messages
+    (``written_sites``): the address is ``127.0.0.1`` or ``::1`` (``localhost``
+    is read as the first) and the port is the one they wrote. A page's or a
+    model's address never counts, and with no policy (or one that cannot say)
+    the answer is none. The ports of melo's own gateway and model servers are
+    the callers' to refuse: none is ever let through, written or listed
+    (:func:`own_ports`).
+    """
+    found = written_reader()
+    return frozenset(found()) if found is not None else frozenset()
+
+
+def written_site(parts: SplitResult) -> tuple[str, int] | None:
+    """The server on this computer *parts* names, when the person's own words wrote it (#547).
+
+    The host is ``localhost``, ``127.0.0.1`` or ``[::1]``, the port is in the
+    address, and :func:`written_sites` has that host and port: ``(address,
+    port)`` with ``localhost`` read as ``127.0.0.1``. Anything else is ``None``.
+    """
+    try:
+        host, port = (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return None
+    host = "127.0.0.1" if host == "localhost" else host
+    if host not in LOOPBACK or port is None or (host, port) not in written_sites():
+        return None
+    return host, port
+
+
+__all__ = [
+    "GATEWAY",
+    "LOOPBACK",
+    "MODEL",
+    "own_ports",
+    "urls_of",
+    "written_reader",
+    "written_site",
+    "written_sites",
+]

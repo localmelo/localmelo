@@ -12,11 +12,12 @@ changes and not edited after) is a note, the texts the user typed, and whether t
 should admit it: ``restate`` (the note says what the user typed in other words: admit),
 ``swap`` (the same with one detail changed), ``added`` (a detail the user never said)
 and ``inferred`` (a conclusion the user did not state), all refuse. ``crosslang`` cases
-(a note in the other language) are reported on their own. No chat model is called.
+(a note in the other language) are reported on their own. A chat model is called
+only when both ``--judge-url`` and ``--judge-model`` are supplied.
 
 The arms, as the chat's ``remember`` tool applies them (``T0``, ``T1`` and ``T1b`` are
-the typed rule, the default; the others are the ``meaning`` level, which needs
-``--model``):
+the typed rule, the default; the meaning arms need ``--model``, and ``J`` needs
+``--judge-url`` and ``--judge-model``):
 
 ``T0``   every Chinese or Japanese character or pair must be found, no slack (the rule
          before CJK wording was told from details).
@@ -33,26 +34,37 @@ the typed rule, the default; the others are the ``meaning`` level, which needs
          (``unheld_cjk_values``) are found, before the cosine. A candidate: it is
          measured here and is not part of the shipped ``meaning`` level.
 ``M2b``  ``M2`` with ``T1b`` as its words check.
+``J``    ``T1b``, then a chat judge only for refusals due solely to untyped CJK
+         terms, never an order, a missing quoted span, number, weekday or relative
+         date, Latin value or Korean word. Reports how many notes reached the
+         judge. The prompt is frozen before measurement.
+
+Ship rule for ``J`` on the held-out set: admit at least 85% of zh restatements
+and refuse zh swaps no less often than ``T1b``'s 85%. ``ChatMemory.remember`` applies
+this arm at the default level, with the chat's own model as the judge.
 
 The embedding model is read from a local directory, nothing is downloaded or
-written, and no model server is called. Texts are embedded as the chat embeds a
-note and its windows (``query=False``: the text as it is, no instruction).
+written, and no model server is called unless the judge is explicitly enabled.
+Texts are embedded as the chat embeds a note and its windows (``query=False``:
+the text as it is, no instruction).
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import importlib
 import json
 import os
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from localmelo.support.memory import note_gate, records
+from localmelo.support.memory import note_gate, note_judge, records
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 DATA = [
     Path(__file__).resolve().parent.parent / f"tests/memory/data/note_gate_{name}.json"
@@ -301,6 +313,28 @@ def run(
     return out
 
 
+async def run_j(
+    cases: list[dict[str, Any]],
+    baseline: dict[str, Verdict],
+    judge: Callable[[str, Sequence[str]], Awaitable[bool]],
+) -> tuple[dict[str, Verdict], int]:
+    """Arm J: keep T1b's decisions unless a CJK-only refusal gets a clear yes.
+
+    Return the verdicts and the number of notes sent to the judge, not the
+    number it admitted. No embedding is needed and the cases run serially.
+    """
+    out = dict(baseline)
+    reached = 0
+    for case in cases:
+        note, said = case["note"], case["said"]
+        if baseline[case["id"]].admitted or not note_judge.cjk_only_refusal(note, said):
+            continue
+        reached += 1
+        admitted = await judge(note, said)
+        out[case["id"]] = Verdict(admitted, "judge: yes" if admitted else "judge: no")
+    return out, reached
+
+
 def right(case: dict[str, Any], verdict: Verdict) -> bool:
     return bool(verdict.admitted == (case["label"] == "admit"))
 
@@ -389,6 +423,48 @@ def mistakes(
     return lines
 
 
+async def evaluate(args: argparse.Namespace) -> None:
+    embedder = Embedder(args.model, args.threads) if args.model else None
+    provider = (
+        OpenAICompatLLM(args.judge_url, args.judge_model) if args.judge_url else None
+    )
+    try:
+        if embedder is None:
+            print("No --model: the meaning arms (M, M2, M2b) skipped.\n")
+        if provider is None:
+            print("No --judge-url/--judge-model: arm J skipped.\n")
+
+        async def judge(note: str, said: Sequence[str]) -> bool:
+            assert provider is not None
+            return await note_judge.judge(provider, note, said)
+
+        everything: dict[str, dict[str, dict[str, list[Any]]]] = {}
+        for path in args.data:
+            cases = json.loads(path.read_text(encoding="utf-8"))
+            results = run(cases, embedder, args.cosine)
+            if provider is not None:
+                results["J"], reached = await run_j(cases, results["T1b"], judge)
+            print(f"## {path.name}: {len(cases)} cases, arms {', '.join(results)}\n")
+            if provider is not None:
+                print(f"J: {reached}/{len(cases)} notes reached the judge.\n")
+            print("\n".join(table(cases, results)))
+            if not args.summary:
+                print("\n".join(mistakes(cases, results)))
+            print()
+            everything[path.name] = {
+                arm: {k: [v.admitted, v.why] for k, v in verdicts.items()}
+                for arm, verdicts in results.items()
+            }
+        if args.json:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            args.json.write_text(
+                json.dumps(everything, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
+    finally:
+        if provider is not None:
+            await provider.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
@@ -397,32 +473,17 @@ def main() -> None:
     parser.add_argument(
         "--model", type=Path, help="embedding model directory (arms M, M2, M2b)"
     )
+    parser.add_argument("--judge-url", help="chat server URL (arm J)")
+    parser.add_argument("--judge-model", help="chat model identifier (arm J)")
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--cosine", type=float, default=note_gate.MIN_COSINE)
     parser.add_argument("--summary", action="store_true", help="the tables only")
     parser.add_argument("--json", type=Path, help="write every verdict here")
     args = parser.parse_args()
 
-    embedder = Embedder(args.model, args.threads) if args.model else None
-    if embedder is None:
-        print("No --model: the meaning arms (M, M2, M2b) skipped.\n")
-    everything: dict[str, dict[str, dict[str, list[Any]]]] = {}
-    for path in args.data:
-        cases = json.loads(path.read_text(encoding="utf-8"))
-        results = run(cases, embedder, args.cosine)
-        print(f"## {path.name}: {len(cases)} cases, arms {', '.join(results)}\n")
-        print("\n".join(table(cases, results)))
-        if not args.summary:
-            print("\n".join(mistakes(cases, results)))
-        print()
-        everything[path.name] = {
-            arm: {k: [v.admitted, v.why] for k, v in verdicts.items()}
-            for arm, verdicts in results.items()
-        }
-    if args.json:
-        args.json.write_text(
-            json.dumps(everything, ensure_ascii=False, indent=1), encoding="utf-8"
-        )
+    if bool(args.judge_url) != bool(args.judge_model):
+        parser.error("--judge-url and --judge-model must be supplied together")
+    asyncio.run(evaluate(args))
 
 
 if __name__ == "__main__":

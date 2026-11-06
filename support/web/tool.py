@@ -32,19 +32,20 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import functools
 import re
 import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK
 from localmelo.melo.contracts.tools import TOOL_MARKS, BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ToolDef
-from localmelo.support import web_local
+from localmelo.support import config, local_ports, web_local
 from localmelo.support.browser import render, sites
 from localmelo.support.browser.driver import BrowserError
 from localmelo.support.web.extract import extract
@@ -243,11 +244,16 @@ def _mark_local() -> None:
         marks["allowed_local"] = True
 
 
+# What a read of a server the person wrote the address of says (#547).
+WRITTEN_NOTE = "[This address is a server on this computer that you wrote.]"
+
+
 class _Local:
     """Whether one call read a listed test server: the fetcher tells it of each."""
 
     def __init__(self) -> None:
         self.used = False
+        self.note = web_local.NOTE
 
     def __call__(self, target: Target) -> None:
         self.used = True
@@ -283,6 +289,7 @@ class WebFetchProvider(BaseToolProvider):
         self.browser = browser
         self.task = task
         self.fetcher = fetcher or web_local.fetcher(cfg, protect=protect)
+        self._cfg, self._protect = cfg, tuple(protect)
         self._kept: OrderedDict[str, tuple[float, Reading]] = OrderedDict()
         self._n = 0
 
@@ -326,7 +333,7 @@ class WebFetchProvider(BaseToolProvider):
             try:
                 reading = await self._read(address, local)
             except (AddressError, FetchError) as exc:
-                text = f"{exc} {web_local.NOTE}" if local.used else str(exc)
+                text = f"{exc} {local.note}" if local.used else str(exc)
                 return ToolOutput(text=text, is_error=True)
             self._keep(address, reading)
         elif reading.local:
@@ -353,7 +360,30 @@ class WebFetchProvider(BaseToolProvider):
     def _browser_hint(self) -> str:
         return " browser_open can try it in Safari." if self.browser else ""
 
-    async def _admit(self, target: Target) -> None:
+    def _written(self, address: str) -> tuple[str, LocalAllow] | None:
+        """The address and the hook for a server on this computer the person wrote (#547).
+
+        The address is made to name the server by its address, as the guard
+        reads it (``localhost`` becomes ``127.0.0.1``); the hook lets through
+        exactly that address and port, never one of melo's own
+        (:func:`~localmelo.support.local_ports.own_ports`). ``None`` for any
+        other address, whoever wrote it.
+        """
+        try:
+            parts = urlsplit(address)
+        except ValueError:
+            return None
+        site = local_ports.written_site(parts) if "@" not in parts.netloc else None
+        if site is None:
+            return None
+        host, port = site
+        netloc = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        cfg = self._cfg if self._cfg is not None else config.load()
+        urls = self._protect
+        hook = LocalAllow([site], lambda: web_local.own_ports(cfg, urls, running=True))
+        return urlunsplit(parts._replace(netloc=netloc)), hook
+
+    async def _admit(self, target: Target, fetcher: WebFetcher | None = None) -> None:
         """Let *target*'s site be read, or raise why not: before its name is looked up.
 
         A site refused earlier in the task is refused again first (#431). A
@@ -372,8 +402,11 @@ class WebFetchProvider(BaseToolProvider):
         be asked and the developer listed it on purpose, so it is read.
         """
         host = target.host
-        listed = self.fetcher.listed(target)
+        listed = (fetcher or self.fetcher).listed(target)
         ask = TOOL_ASK.get()
+        if listed and (host, target.port) in local_ports.written_sites():
+            # The person wrote this server's address themselves (#547).
+            return
         if ask is None:
             if listed:
                 return
@@ -398,9 +431,14 @@ class WebFetchProvider(BaseToolProvider):
             raise AddressError(str(exc)) from None
 
     async def _read(self, address: str, local: _Local) -> Reading:
-        page = await self.fetcher.fetch(
-            address, accept=readable, admit=self._admit, local=local
-        )
+        fetcher, admit = self.fetcher, self._admit
+        written = self._written(address)
+        if written is not None:
+            address = written[0]
+            fetcher = self.fetcher.allowing(written[1])
+            admit = functools.partial(self._admit, fetcher=fetcher)
+            local.note = WRITTEN_NOTE
+        page = await fetcher.fetch(address, accept=readable, admit=admit, local=local)
         host = urlsplit(page.url).hostname or page.url
         if page.status in _LOGIN or page.status in _BLOCKED:
             what = _LOGIN.get(page.status) or _BLOCKED[page.status]
@@ -438,7 +476,7 @@ class WebFetchProvider(BaseToolProvider):
         else:
             reading.parts = _plain_parts(text)
         if local.used:
-            reading.notes.append(web_local.NOTE)
+            reading.notes.append(local.note)
         if page.cut:
             limit = self.fetcher.max_bytes / 1_000_000
             reading.notes.append(

@@ -29,6 +29,7 @@ from localmelo.melo.checker.review.paths import (
     where,
 )
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.review import DIRENV_SUBJECT
 
 MAX_DEPTH = 3
 # Programs that reach a server, and HTTPie's names (method first: http POST url).
@@ -357,10 +358,11 @@ _BUILDS = {
 }
 _YARN_OWN = set(["add", "install", "remove", "init", "global", "config", "info"])
 # One rule a line: a pattern over "program args…", the category ("?" for
-# undecided) and the reason; {prog} is the program.
+# undecided), the reason ({prog} is the program) and, for a ``send_out`` that
+# posts or sends a message in the person's name, the subject ``post``.
 _RULES = [
-    (re.compile(pattern), category, reason)
-    for pattern, category, reason in (line.split(" ;; ") for line in r"""
+    (re.compile(row[0]), row[1], row[2], row[3] if len(row) > 3 else "")
+    for row in (line.split(" ;; ") for line in r"""
 ^brew (install|reinstall|upgrade|tap)\b ;; install ;; Installs software with Homebrew.
 ^brew services (start|run|restart)\b ;; persistence ;; Starts a background service.
 ^(gem|cargo|go) install\b ;; install ;; Installs software with {prog}.
@@ -387,14 +389,69 @@ _RULES = [
 ^osascript .*(System Events|administrator privileges) ;; system ;; Controls macOS through AppleScript.
 ^(ngrok|cloudflared|lt)\b|^(nc|ncat|netcat) .*-l|^socat .*LISTEN|^ssh .*-R ;; service ;; Lets other computers reach this Mac.
 \s(0\.0\.0\.0|::|\[::\])(\s|$)|=0\.0\.0\.0 ;; service ;; Opens a network service that other computers can reach.
-^(scp|sftp|ftp|mail|mailx|sendmail|ssh|nc|ncat|netcat)\b ;; ? ;; Sends data to another computer ({prog}).
-^git push .*(\s-f\b|--force|\s\+) ;; delete ;; Force-pushes, which can overwrite commits on the server.
-^git push\b ;; ? ;; Pushes commits to a server.
+^(scp|sftp|ftp|ssh|nc|ncat|netcat)\b ;; ? ;; Sends data to another computer ({prog}).
+^(mail|mailx|sendmail)\b ;; send_out ;; Sends a message with {prog}. ;; post
+^git push\b.*(\s-f\b|--force|\s\+) ;; delete ;; Force-pushes, which can overwrite commits on the server.
+^git push\b(?!.*(\s-f\b|--force|\s\+)) ;; send_out ;; Pushes commits to a server. ;; post
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
 ^git config .*--(global|system) ;; persistence ;; Changes your global git settings.
 ^git config .*core\.hookspath|^git config .*core\.hooksPath ;; persistence ;; Points git at hooks that run on later commits.
 """.strip().splitlines())
+]
+
+
+# More rules, built from the pieces above. ``gh`` takes options between its words (``gh issue -R owner/repo create``,
+# ``gh -R owner/repo pr comment``): a word that starts with ``-``, and the value
+# after it when it has one.
+_GH = r"^gh(?:\s+-\S+(?:\s+[^-\s]\S*)?)*"
+_GH_OPT = r"(?:\s+-\S+(?:\s+[^-\s]\S*)?)*"
+_GH_NOUNS = (
+    "issue|pr|discussion|release|gist|repo|workflow|run|label|secret|variable|ssh-key"
+    "|gpg-key|codespace|project|cache|ruleset"
+)
+_GH_WRITES = (
+    "create|comment|review|merge|edit|close|reopen|fork|transfer|rename|archive|unarchive"
+    "|ready|lock|unlock|pin|unpin|upload|sync|develop|set|add|remove|run|rerun|cancel"
+    "|enable|disable|update-branch"
+)
+_GH_METHODS = r"(?i:POST|PUT|PATCH)\b"
+_RULES += [
+    (re.compile(pattern), category, reason, subject)
+    for pattern, category, reason, subject in (
+        (
+            rf"{_GH}\s+(?:{_GH_NOUNS}){_GH_OPT}\s+(?:{_GH_WRITES})\b",
+            "send_out",
+            "Posts to GitHub with gh.",
+            "post",
+        ),
+        (
+            rf"{_GH}\s+(?:{_GH_NOUNS}){_GH_OPT}\s+delete\b",
+            "delete",
+            "Deletes something on GitHub with gh.",
+            "",
+        ),
+        (
+            rf"{_GH}\s+api\b.*(?:\s-X\s*=?\s*{_GH_METHODS}|--method[ =]{_GH_METHODS}"
+            r"|\s-[fF]\b|--(?:raw-)?field\b|--input\b)",
+            "send_out",
+            "Writes to GitHub with gh api.",
+            "post",
+        ),
+        (
+            rf"{_GH}\s+api\b.*(?:\s-X\s*=?\s*|--method[ =])(?i:DELETE)\b",
+            "delete",
+            "Deletes something on GitHub with gh api.",
+            "",
+        ),
+        # The stop that makes a written .envrc safe: a card in auto mode.
+        (
+            r"^direnv (allow|permit|grant)\b",
+            "persistence",
+            "Trusts a .envrc, which then runs whenever its folder is entered.",
+            DIRENV_SUBJECT,
+        ),
+    )
 ]
 
 
@@ -1246,12 +1303,13 @@ def _step(
         and before == "fetch"
         or (op == "<(" and bare_before and prog in ("curl", "wget"))
     ):
-        host = urlparse(url or (links + [""])[0]).netloc or "the internet"
+        download = url or (links + [""])[0]
+        host = urlparse(download).netloc or "the internet"
         # The site is the whole pipeline, its URL with it: a new address
         # in an edit is a new finding.
         site = f.site
         f.site = f"{last_site} {site}"[:600]
-        f.add("remote_code", f"Runs code downloaded from {host}.")
+        f.add("remote_code", f"Runs code downloaded from {host}.", download)
         if "get-pip" in url + " ".join(links):
             f.add("install", "Installs pip with get-pip.py.")
         f.site = site
@@ -1566,10 +1624,10 @@ def run_argv(
             touch(ctx, f, arg.lstrip("@"), "read", cwd)
     plain = args[2:] if prog == "git" and args[:1] in (["-C"], ["-c"]) else args
     line = " ".join([prog, *plain])
-    for pattern, category, reason in _RULES:
+    for pattern, category, reason, subject in _RULES:
         if pattern.search(line):
             text = reason.format(prog=prog)
-            f.doubt(text) if category == "?" else f.add(category, text)
+            f.doubt(text) if category == "?" else f.add(category, text, subject)
     if _PY.match(prog) or prog == "?":
         _python(ctx, f, argv, cwd)
     elif re.fullmatch(r"pip3?(\.\d+)?", prog):

@@ -169,6 +169,67 @@ def test_a_public_address_goes_on(url: str) -> None:
     assert rule().decide(url, "https://example.com").kind == "pass"
 
 
+WROTE = {("127.0.0.1", 3000), ("127.0.0.1", GATEWAY_PORT), ("::1", 4000)}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:3000/",
+        "http://localhost:3000/app?x=http://127.0.0.1:3001/",
+        "https://localhost:3000/",
+        "http://[::1]:4000/a",
+    ],
+)
+def test_the_exact_server_the_person_wrote_goes_on(url: str) -> None:
+    assert rule().decide(url, "https://example.com", WROTE).kind == "pass"
+    assert rule().decide(url, "https://example.com").kind == "block"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:3001/",  # another port
+        "http://127.0.0.2:3000/",  # another address of this computer
+        "http://10.0.0.5:3000/",  # the same port on the network
+        "http://[::1]:3000/",  # the same port, the other loopback address
+        "http://localhost/",  # no port: port 80
+        "http://localhost.:3000/",  # a name that is not the one written
+        f"http://localhost:{GATEWAY_PORT}/",  # melo's own, even written
+        "http://user@localhost:3000/",  # a user part: a browser may read it another way
+        "http://:pw@127.0.0.1:3000/",
+    ],
+)
+def test_nothing_else_on_this_computer_goes_on_even_with_a_server_written(
+    url: str,
+) -> None:
+    assert rule().decide(url, "https://example.com", WROTE).kind == "block"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:99999/",  # a port out of range
+        "http://127.0.0.1:port/",  # a port that is not a number
+        "http://[::1/",  # a broken bracket
+        "http://[::1/]:3000/",
+    ],
+)
+def test_a_url_melo_cannot_read_is_blocked_even_when_the_server_is_written(
+    url: str,
+) -> None:
+    assert rule().decide(url, "https://example.com", WROTE).kind == "block"
+    assert rule().decide(url, "https://example.com").kind == "block"
+
+
+def test_a_server_written_goes_on_only_when_melos_own_ports_can_be_read() -> None:
+    def unreadable() -> dict[int, str]:
+        raise OSError("no config")
+
+    found = LocalRule(own=unreadable)
+    assert found.decide("http://127.0.0.1:3000/", "", WROTE).kind == "block"
+
+
 def _chrome_glob(pattern: str) -> re.Pattern[str]:
     """Chrome's Fetch ``urlPattern``: ``*`` is any run, ``?`` one character, ``\\`` escapes."""
     out, escaped = [], False
@@ -841,6 +902,123 @@ async def test_the_driver_takes_only_its_own_pages_attempts() -> None:
     assert [a.port for a in mine.local_attempts()] == [3000]
     assert mine.local_attempts() == []  # told once
     assert [a.port for a in browser.attempts["PAGE2"]] == [4000]
+
+
+async def test_a_server_the_person_wrote_goes_on_for_the_page_of_that_driver_only() -> (
+    None
+):
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser = browser
+    mine._mine = {"PAGE1"}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    assert set(browser.written) == {"PAGE1"}
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r1")
+    await _pause(browser, "http://127.0.0.1:3001/", frame="PAGE1", ident="r2")
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE2", ident="r3")
+    assert calls.answered() == [
+        ("Fetch.continueRequest", {"requestId": "r1"}),
+        ("Fetch.failRequest", {"requestId": "r2", "errorReason": "BlockedByClient"}),
+        ("Fetch.failRequest", {"requestId": "r3", "errorReason": "BlockedByClient"}),
+    ]
+    # Only the refusals are told, each to its page.
+    assert {k: [a.port for a in v] for k, v in browser.attempts.items()} == {
+        "PAGE1": [3001],
+        "PAGE2": [3000],
+    }
+
+
+async def test_a_frame_inside_the_page_is_judged_by_the_words_of_its_pages_driver() -> (
+    None
+):
+    calls = Calls(
+        {
+            "Target.getTargets": {
+                "targetInfos": [
+                    {"targetId": "FRAME", "type": "iframe", "parentId": "PAGE1"},
+                    {"targetId": "PAGE1", "type": "page"},
+                ]
+            }
+        }
+    )
+    browser = _browser(rule(), calls)
+    browser.written = {"PAGE1": lambda: [("127.0.0.1", 3000)]}
+    await _pause(browser, "http://127.0.0.1:3000/", frame="FRAME")
+    assert calls.answered() == [("Fetch.continueRequest", {"requestId": "r1"})]
+    # A frame melo cannot place gets nothing: no page, no words.
+    calls.made.clear()
+    await _pause(browser, "http://127.0.0.1:3000/", frame="UNKNOWN", ident="r2")
+    assert calls.answered()[0][0] == "Fetch.failRequest"
+
+
+async def test_the_set_follows_the_drivers_tabs_and_ends_with_them() -> None:
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = browser, {"PAGE1"}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    mine._mine.add("PAGE2")  # a tab the driver adopts later gets the set too
+    mine._grant(browser, "PAGE2")
+    assert set(browser.written) == {"PAGE1", "PAGE2"}
+    mine.allow_local(None)  # the next step wrote none: every tab loses it
+    assert browser.written == {}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    mine._drop("PAGE2")
+    assert set(browser.written) == {"PAGE1"}
+    mine._release()
+    assert browser.written == {}
+
+
+async def test_what_the_person_wrote_ends_with_the_run_without_another_step() -> None:
+    """The browser keeps the run's reader, so a page goes on reaching a server only while its run lasts (#547)."""
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = browser, {"PAGE1"}
+    live = [True]
+    mine.allow_local(lambda: [("127.0.0.1", 3000)] if live[0] else [])
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r1")
+    live[0] = False  # the run ended; no browser step has come since
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r2")
+    assert calls.answered() == [
+        ("Fetch.continueRequest", {"requestId": "r1"}),
+        ("Fetch.failRequest", {"requestId": "r2", "errorReason": "BlockedByClient"}),
+    ]
+
+
+async def test_a_grant_that_cannot_be_read_fails_the_request_and_never_lets_it_go() -> (
+    None
+):
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = browser, {"PAGE1"}
+
+    def broken() -> list[tuple[str, int]]:
+        raise RuntimeError("the run is gone")
+
+    mine.allow_local(broken)
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1")
+    assert calls.answered()[0][0] == "Fetch.failRequest"
+
+
+async def test_the_pages_of_a_chrome_started_again_keep_what_the_run_may_reach() -> (
+    None
+):
+    """A take-over restarts Chrome: the new one has no grant of its own, so the driver gives its renamed pages the run's (#547)."""
+    calls = Calls()
+    old, new = _browser(rule(), calls), _browser(rule(), calls)
+    new.claimed = {"PAGE9"}
+    old.successor, old.renamed = new, {"PAGE1": "PAGE9"}
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = old, {"PAGE1"}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    mine._follow()
+    assert mine._browser is new and mine._mine == {"PAGE9"}
+    assert set(new.written) == {"PAGE9"}
+    await _pause(new, "http://127.0.0.1:3000/", frame="PAGE9")
+    assert calls.answered() == [("Fetch.continueRequest", {"requestId": "r1"})]
 
 
 # ── Launch: Chrome's check stays on, and the rule is set up ──

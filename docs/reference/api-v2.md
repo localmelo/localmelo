@@ -2390,6 +2390,14 @@ panel uses these routes.
   `?undo=true` (the "Undo" under a message) the note it replaced is current again.
 - `DELETE /api/memory/records?all=true` forgets every note and empties the chat index, and
   answers `{"notes": 12, "turns": 48}`. Without `all=true` it is 400. Chats are not touched.
+- `GET /api/memory/items` lists the memory items melo wrote from the chats, newest first: `id`, `title`, `text`,
+  `kind` (`profile`, `semantic` or `episodic`), `status` (`active`, `replaced` or `conflict`), `replaced_by` (an item id
+  or `null`), `conflicts`, `from`, `chat_gone`, `link` (`#/s/<chat id>`, `""` when the console has no such chat),
+  `session_id` and `created_at`. `DELETE /api/memory/items/{id}` removes one at once (recall stops showing it and the
+  turns it cited are recalled again) and answers `{"undo_seconds": 600}`; `POST /api/memory/items/{id}/restore` puts it
+  back: 204. Nothing of a deleted item stays on disk, so the undo lives in memory for `undo_seconds` and ends with a
+  restart or a forget; later calls, and unknown items, are 404 `not_found`. A newer item that replaced a deleted one
+  stays, and an older item the deleted one replaced stays replaced (by the deleted item's own replacer when it had one, else its `replaced_by` is `null`).
 - `PUT /api/memory` with `{"on": false}` switches `[memory] across_chats` and saves it; the
   answer is `{"on": false}`. Chats started afterwards use it.
 - `POST /api/memory/reindex` rebuilds the chat index from the chats (turns that ended

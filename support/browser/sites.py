@@ -214,7 +214,9 @@ async def require_act(origin: str, what: str, on: str = "") -> None:
         )
 
 
-async def require_type(origin: str, text: str, on: str = "") -> None:
+async def require_type(
+    origin: str, text: str, on: str = "", search: bool = False
+) -> None:
     """Ask about typing *text* on *origin*'s page; :class:`BrowserError` if refused.
 
     Asked for every text, whatever was allowed before, and never kept for the
@@ -223,7 +225,10 @@ async def require_type(origin: str, text: str, on: str = "") -> None:
     show): it is the model's own words, a person or a reviewer must see what
     goes into the page. *on* is the box in words (``a textbox "Comment"``),
     so the review sees where it goes (#465). Like a click's question it has
-    no ``origin`` argument.
+    no ``origin`` argument. *search*: the box is a search box
+    (:func:`~localmelo.support.browser.fields.searches`), which the question
+    says as ``field: "search"``: with the person's words asking to search, a
+    query of any length is no message.
     """
     ask = TOOL_ASK.get()
     if ask is None:
@@ -232,6 +237,8 @@ async def require_type(origin: str, text: str, on: str = "") -> None:
     arguments = {"site": host, "access": "type", "how": "type", "text": text}
     if on:
         arguments["on"] = on
+    if search:
+        arguments["field"] = "search"
     into = f" into {on}" if on else ""
     decision = await ask(
         TYPE_PREFIX + origin,
@@ -247,6 +254,7 @@ async def require_submit(
     target: str,
     how: str,
     form: Sequence[tuple[str, str]] = (),
+    search: bool = False,
 ) -> None:
     """Ask about sending a form from *origin*'s page to *target*; :class:`BrowserError` if refused.
 
@@ -255,22 +263,27 @@ async def require_submit(
     holds (*form*: each field's name and value, with nothing secret in it), and
     an answer is never kept for the chat. *target* is an absolute address,
     shown cut to :data:`URL_SHOWN` characters, or ``""`` when the page decides
-    where the text goes (Enter in a box that is in no form).
+    where the text goes (Enter in a box that is in no form). *search*: every
+    text box of the form is a search box, which the question says as
+    ``field: "search"`` (see :func:`require_type`).
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return
     host = host_of(origin)
     to = shown_url(target) if target else ""
+    arguments: dict[str, object] = {
+        "site": host,
+        "access": "submit",
+        "to": to,
+        "how": how,
+        "fields": [[name, value] for name, value in form][:FORM_SHOWN],
+    }
+    if search:
+        arguments["field"] = "search"
     decision = await ask(
         SUBMIT_PREFIX + origin,
-        {
-            "site": host,
-            "access": "submit",
-            "to": to,
-            "how": how,
-            "fields": [[name, value] for name, value in form][:FORM_SHOWN],
-        },
+        arguments,
         (
             f"send a form on {host} to {to}"
             if to

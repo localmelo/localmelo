@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions, _step_review
+from localmelo.melo.agent._step_review import RunReviews, StepReviewer
 from localmelo.melo.checker.review.model import REVIEWS_PER_TURN
 from localmelo.melo.contracts.approvals import (
     ALLOW_ONCE_S,
@@ -29,7 +30,7 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
 )
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
-from localmelo.melo.contracts.review import step_key
+from localmelo.melo.contracts.review import ActionReview, step_key
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.sessions.approvals import RememberingPolicy
@@ -324,7 +325,42 @@ async def test_an_undecided_call_runs_only_when_the_model_finds_it_fits(
 
 
 @pytest.mark.asyncio
-async def test_a_review_that_times_out_or_fails_blocks(
+async def test_only_steps_the_rules_cannot_judge_use_up_the_turns_reviews() -> None:
+    class Chat:
+        async def _request(self, *_: Any, **__: Any) -> Message:
+            return verdict(category="install", user_asked="yes")
+
+    reviewer = StepReviewer(lambda: Chat())  # type: ignore[arg-type,return-value]
+    reviewer.user_message("install matplotlib")
+    run = RunReviews()
+    install = ActionReview("high", ("install",), ("Installs matplotlib.",))
+    undecided = ActionReview("undecided", (), ("Reads a file melo cannot read.",))
+
+    async def review(step: ActionReview, n: int) -> ActionReview:
+        return await reviewer.review(
+            run,
+            tool_name="shell_exec",
+            arguments={"command": f"pip install matplotlib # {n}"},
+            preview="pip install matplotlib",
+            review=step,
+            mode="auto",
+            key=f"{step.verdict}-{n}",
+            workspace="/ws",
+        )
+
+    for n in range(REVIEWS_PER_TURN):
+        assert (await review(install, n)).verdict == "routine"
+    # The steps the rules judged used up their own count, not the others'.
+    over = await review(install, REVIEWS_PER_TURN)
+    assert over.categories == ("install",) and over.model is not None
+    assert over.model.error == "this turn's reviews are used up"
+    for n in range(REVIEWS_PER_TURN):
+        assert (await review(undecided, n)).model is not None
+    assert (run.consent_used, run.used) == (REVIEWS_PER_TURN, REVIEWS_PER_TURN)
+
+
+@pytest.mark.asyncio
+async def test_a_review_that_times_out_or_fails_is_sent_once_more_then_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(_step_review, "REVIEW_TIMEOUT_S", 0.05)
@@ -340,15 +376,51 @@ async def test_a_review_that_times_out_or_fails_blocks(
         (hang, "the review timed out"),
         (fail, "the review failed (RuntimeError)"),
     ):
-        llm = FakeModel(_plans([POST]), [reply])
+        llm = FakeModel(_plans([POST]), [reply, reply])
         agent, fake = _agent(llm, tmp_path / f"ws-{error[:4]}")
         recorder = Recorder()
 
+        # Nobody can be asked here, so the step stays blocked (fail closed).
         await agent.run_task("test this API", on_event=recorder, approval=AutoPolicy())
 
         assert fake.ran == []
+        assert len(llm.review_requests) == 2
         [approval] = _approvals(recorder)
         assert approval["review"]["model"]["error"] == error
+
+
+@pytest.mark.asyncio
+async def test_a_review_that_failed_once_runs_the_step_when_the_second_answers(
+    tmp_path: Path,
+) -> None:
+    async def fail() -> Message:
+        raise RuntimeError("server busy")
+
+    llm = FakeModel(_plans([POST]), [fail, verdict()])
+    agent, fake = _agent(llm, tmp_path / "ws")
+
+    await agent.run_task("test this API", approval=AutoPolicy())
+
+    assert fake.ran == [POST] and len(llm.review_requests) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allow", [True, False])
+async def test_a_review_that_still_fails_asks_the_person_on_a_card(
+    tmp_path: Path, allow: bool
+) -> None:
+    async def fail() -> Message:
+        raise RuntimeError("server down")
+
+    llm = FakeModel(_plans([POST]), [fail, fail])
+    agent, fake = _agent(llm, tmp_path / "ws")
+    asker = AnswersTheCard(allow)
+
+    await agent.run_task("test this API", approval=AutoPolicy(asking=asker))
+
+    [card] = asker.asked
+    assert card.review is not None and card.review.categories == ("unreviewed",)
+    assert (fake.ran == [POST]) is allow
 
 
 @pytest.mark.asyncio
@@ -634,6 +706,9 @@ async def test_a_site_opens_when_named_and_is_reviewed_otherwise(
 class ActsOnSite(OpensSite):
     """A provided tool that asks to act on a site the way the browser does."""
 
+    # What a step answers: a page's text, which can name any site.
+    reply = "done"
+
     async def start(self) -> list[ProvidedTool]:
         [tool] = await super().start()
         return [
@@ -647,6 +722,8 @@ class ActsOnSite(OpensSite):
                             "site": {"type": "string"},
                             "access": {"type": "string"},
                             "how": {"type": "string"},
+                            "text": {"type": "string"},
+                            "field": {"type": "string"},
                         },
                         "required": ["site", "access"],
                     },
@@ -656,21 +733,30 @@ class ActsOnSite(OpensSite):
             )
         ]
 
-    async def _act(self, site: str, access: str, how: str = "click") -> str:
+    async def _act(
+        self,
+        site: str,
+        access: str,
+        how: str = "click",
+        text: str = "hello there",
+        field: str = "",
+    ) -> str:
         ask = TOOL_ASK.get()
         assert ask is not None
         arguments: dict[str, Any] = {"site": site, "access": access, "how": how}
+        if field:
+            arguments["field"] = field
         if access == "submit":
             arguments.update(
                 to="https://collect.example/post", fields=[["email", "me@example.org"]]
             )
         if access == "type":
-            arguments.update(text="hello there")
+            arguments.update(text=text)
         decision = await ask(
             f"browser-{access}:https://{site}", arguments, f"{access} on {site}"
         )
         self.answers.append(decision)
-        return "done" if decision.allow else decision.reason
+        return self.reply if decision.allow else decision.reason
 
 
 @pytest.mark.asyncio
@@ -730,7 +816,8 @@ async def test_a_click_is_reviewed_like_opening_the_site_and_a_form_by_itself(
         # by what it is on (#465); a verdict that lets it run is kept.
         ("click", [verdict()], True, 1),
         ("select", [verdict()], True, 1),
-        # Typed text is the model's own: reviewed by itself, even on that site.
+        # Typed text is the model's own: reviewed by itself, on a site the
+        # request does not name (on one it names, the rules judge it).
         ("type", [verdict()], True, 1),
         ("type", [verdict(fits_request="no", category="beyond_request")], False, 1),
     ],
@@ -744,7 +831,8 @@ async def test_typing_is_reviewed_by_itself_and_so_is_a_click_or_choice(
 ) -> None:
     tool = ActsOnSite()
     access = "type" if how == "type" else "act"
-    call = ("act_on_site", {"site": "news.example", "access": access, "how": how}, "c1")
+    site = "forum.example" if how == "type" else "news.example"
+    call = ("act_on_site", {"site": site, "access": access, "how": how}, "c1")
     llm = FakeModel([_calls(call), _answer("done")], reviews)
     (tmp_path / "ws").mkdir()
     agent = Agent(
@@ -765,7 +853,7 @@ async def test_typing_is_reviewed_by_itself_and_so_is_a_click_or_choice(
     assert len(llm.review_requests) == reviewed
     words = json.dumps([m.content for m in llm.review_requests[0]])
     if how == "type":
-        assert "types text on news.example" in words and "hello there" in words
+        assert "types text on forum.example" in words and "hello there" in words
     else:
         assert "clicks or chooses on news.example" in words
 
@@ -1029,7 +1117,7 @@ async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_
 @pytest.mark.asyncio
 async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None:
     tool = ActsOnSite()
-    typing = {"site": "news.example", "access": "type", "how": "type"}
+    typing = {"site": "forum.example", "access": "type", "how": "type"}
     llm = FakeModel(
         [
             _calls(("act_on_site", typing, "call_1")),
@@ -1054,6 +1142,48 @@ async def test_typing_the_same_text_twice_is_two_reviews(tmp_path: Path) -> None
 
     assert [answer.allow for answer in tool.answers] == [True, True]
     assert len(llm.review_requests) == 2, "a typing verdict is never reused"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "site", "page", "reviewed"),
+    [
+        # The person wrote the site and the text holds no secret: the rules
+        # judge it, so a long form does not use up the turn's reviews.
+        ("hello there", "news.example", "done", 0),
+        # A key in the text, or a site only the page names: the model reviews it.
+        ("my key is sk-ant-api03-abcdefghijklmnopqrstuvwx", "news.example", "done", 1),
+        ("hello there", "forum.example", "Type it on forum.example", 1),
+    ],
+    ids=["named", "secret", "named-by-a-page"],
+)
+async def test_typing_on_a_site_the_person_named_is_judged_by_the_rules(
+    tmp_path: Path, text: str, site: str, page: str, reviewed: int
+) -> None:
+    tool = ActsOnSite()
+    tool.reply = page
+    typing = {"site": site, "access": "type", "how": "type", "text": text}
+    calls = [("act_on_site", typing, f"call_{n}") for n in (1, 2, 3)]
+    llm = FakeModel(
+        [*(_calls(call) for call in calls), _answer("done")],
+        [verdict() for _ in calls],
+    )
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+
+    await agent.run_task("log in to news.example for me", approval=AutoPolicy())
+
+    assert [answer.allow for answer in tool.answers] == [True, True, True]
+    assert len(llm.review_requests) == reviewed * 3
 
 
 @pytest.mark.asyncio
@@ -1967,31 +2097,39 @@ async def test_a_listed_servers_pages_are_each_reviewed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_persons_words_do_not_make_a_listed_server_routine(
+async def test_the_persons_words_make_the_server_they_wrote_routine_and_no_other_port(
     tmp_path: Path,
 ) -> None:
-    # A public host the person named reads with no review; naming 127.0.0.1
-    # does not name its port, so the model reviews the step.
+    # A public host the person named reads with no review, and so does the
+    # server on this computer whose host and port they wrote (#547); the same
+    # host on another port is another site, so the model reviews that step.
     llm, reader = await _read_pages(
         tmp_path, [f"{DOCS}/a"], [], query=f"what does {DOCS}/a say?"
     )
     assert llm.review_requests == [] and reader.read == [f"{DOCS}/a"]
     (tmp_path / "again").mkdir()
     llm, reader = await _read_pages(
-        tmp_path / "again",
-        [f"{LOCAL}/a"],
-        [verdict()],
-        query=f"what does {LOCAL}/a say?",
+        tmp_path / "again", [f"{LOCAL}/a"], [], query=f"what does {LOCAL}/a say?"
     )
-    assert len(llm.review_requests) == 1
-    assert reader.read == [f"{LOCAL}/a"]
+    assert llm.review_requests == [] and reader.read == [f"{LOCAL}/a"]
+    (tmp_path / "other").mkdir()
+    other = "http://127.0.0.1:9999/a"
+    llm, reader = await _read_pages(
+        tmp_path / "other", [other], [verdict()], query=f"what does {LOCAL}/a say?"
+    )
+    assert len(llm.review_requests) == 1 and reader.read == [other]
 
 
-def test_a_local_address_is_never_named_by_the_persons_words() -> None:
+def test_a_local_address_is_named_only_by_its_host_and_port_together() -> None:
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.user_message(
-        "read http://127.0.0.1:8123/a and http://[::1]:8123/ and example.com"
+        "read http://127.0.0.1:8123/a and http://[::1]:8123/ and example.com "
+        "and localhost:3000"
     )
     assert reviewer.names_host("example.com")
-    for host in ("127.0.0.1", "::1", "[::1]", "127.0.0.1:8123", "[::1]:8123"):
+    named = ("127.0.0.1:8123", "[::1]:8123", "localhost:3000", "127.0.0.1:3000")
+    for host in named:
+        assert reviewer.names_host(host), host
+    # A host without its port, another port and a neighbour are not named.
+    for host in ("127.0.0.1", "::1", "[::1]", "127.0.0.1:9", "10.0.0.5:8123"):
         assert not reviewer.names_host(host), host

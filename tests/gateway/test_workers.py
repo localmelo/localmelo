@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,10 +16,10 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
-from localmelo.support.gateway.task_policy import WorkspaceError
+from localmelo.support.gateway.task_policy import TaskSpec, WorkspaceError
 from localmelo.support.gateway.task_store import TaskConflictError
 from localmelo.support.gateway.workers import TaskWorkers
-from localmelo.support.scheduler.model import Machine
+from localmelo.support.scheduler.model import Machine, Origin
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
@@ -588,3 +589,39 @@ def test_a_tool_call_written_as_text_is_not_a_running_tasks_last_note() -> None:
     said("<tool_call>\n<function=remember>\n<parameter=text>\nx")
     said("<think>no call</think>[TOOL_CALLS][{}]")
     assert workers._live["task"]["left"] == "Reading the file first."
+
+
+async def test_a_task_nobody_typed_is_not_the_persons_message(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another agent's or a channel's objective counts as no words of the person's (#547)."""
+    workers, workspace, _ = setup
+    seen: dict[str, dict[str, Any]] = {}
+
+    class Recording(FakeRunner):
+        async def start_turn(self, text: str, **kwargs: Any) -> None:
+            seen[text] = kwargs
+            await super().start_turn(text, approval=kwargs["approval"])
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.SessionRunner", Recording)
+    for origin, words in [
+        ("agent", ""),
+        ("channel", ""),
+        ("front", "what the person typed"),  # words kept by trusted code
+        ("user", ""),
+    ]:
+        job = workspace / origin
+        job.mkdir()
+        spec = TaskSpec.from_payload(
+            {"objective": f"task of {origin}", "workspace": str(job)}
+        )
+        spec = dataclasses.replace(spec, user_words=words)
+        await workers.create_spec(spec, origin=cast(Origin, origin))
+    await eventually(lambda: len(seen) == 4)
+    assert {text: "from_person" in k for text, k in seen.items()} == {
+        "task of agent": True,
+        "task of channel": True,
+        "task of front": False,
+        "task of user": False,
+    }
+    assert seen["task of agent"]["from_person"] is False

@@ -1270,6 +1270,7 @@ melo 对用户保存的笔记，以及打开或关闭跨对话记忆的开关（
 - `PATCH /api/memory/records/{id}`，请求体 `{"text": "..."}`，原地改写一条笔记，并返回上述形式的笔记。旧文字被覆盖（不保留），新文字重新嵌入，笔记的决策行中的文字被清空。空文字、超过 300 个字符或看起来像密码或密钥的文字返回 400 `invalid_request` 并给出原因；未知笔记返回 404 `not_found`。
 - `DELETE /api/memory/records/{id}` 删除一条笔记、它的向量和它取代过的旧文字，并清空其决策行中的文字：204，或 404 `not_found`。带 `?undo=true`（消息下方的 “Undo”）时，被它替换的笔记恢复为当前。
 - `DELETE /api/memory/records?all=true` 忘记所有笔记并清空对话索引，返回 `{"notes": 12, "turns": 48}`。没有 `all=true` 时返回 400。对话本身不受影响。
+- `GET /api/memory/items` 按时间从新到旧列出 melo 根据对话写下的记忆条目：`id`、`title`、`text`、`kind`（`profile`、`semantic` 或 `episodic`）、`status`（`active`、`replaced` 或 `conflict`）、`replaced_by`（条目 id 或 `null`）、`conflicts`、`from`、`chat_gone`、`link`（`#/s/<chat id>`；控制台没有这个对话时为 `""`）、`session_id` 和 `created_at`。`DELETE /api/memory/items/{id}` 立即删除一条（召回不再显示它，它引用的轮次重新可以被召回），返回 `{"undo_seconds": 600}`；`POST /api/memory/items/{id}/restore` 把它放回来：204。被删除的条目在磁盘上不留任何东西，所以撤销只存在于内存里，持续 `undo_seconds` 秒，重启或忘记后就没有了；之后的调用以及未知条目返回 404 `not_found`。取代了被删条目的较新条目保留，被删条目取代过的较旧条目仍然是被取代的（被删条目自己有取代者时改由那个取代者取代，否则它的 `replaced_by` 为 `null`）。
 - `PUT /api/memory`，请求体 `{"on": false}`，切换并保存 `[memory] across_chats`；返回 `{"on": false}`。此后开始的对话会使用它。
 - `POST /api/memory/reindex` 从对话重建对话索引（上次“忘记全部”之前结束的轮次不会进入），并给每条笔记补上当前嵌入模型的向量：`{"notes": 0, "turns": 48}`。
 - `[memory] sleep` 不是 `off` 时，网关也会自己运行整理，并在主对话里加一条 `sleep` 回执（它的撤销见[主对话中的回执行](#echoes-in-the-main-chat)）；见[跨对话记忆](../concepts/memory.md#tidying-notes-while-you-are-away)。

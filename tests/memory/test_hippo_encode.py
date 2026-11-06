@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import stat
 import time
@@ -428,6 +429,23 @@ async def test_a_second_try_that_reads_gives_the_items_and_a_failed_call_is_retr
     down = StubEncoder("RAISE")
     result = await hippo.encode(down, "T", chat(1), window_chars=12000)
     assert len(down.prompts) == 2 and result.windows[0].failed
+
+
+async def test_a_failed_request_names_only_the_error_class_in_the_reason_and_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A provider error can carry part of the server's reply, which may echo the
+    request and so the user's texts: nothing of it is kept or logged."""
+    caplog.set_level(logging.DEBUG)  # every logger, whatever its name
+
+    async def send(_messages: list[Message]) -> Message:
+        raise RuntimeError("server echoed: my gate is 9F")
+
+    value, why = await hippo._ask(send, "prompt", Stats())
+    assert value is None and why == "the model failed: RuntimeError"
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines == ["Hippo encoder: the model failed: RuntimeError"] * 2
+    assert not any(r.exc_info for r in caplog.records)
 
 
 async def test_a_window_that_failed_does_not_stop_the_next_one() -> None:

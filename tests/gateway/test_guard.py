@@ -1075,6 +1075,9 @@ def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
         ("GET", "/api/setup/plan"),
         ("POST", "/api/setup/start"),
         ("POST", "/api/setup/cancel"),
+        ("GET", "/api/memory/items"),
+        ("DELETE", "/api/memory/items/1"),
+        ("POST", "/api/memory/items/1/restore"),
     ],
 )
 @pytest.mark.parametrize(
@@ -1089,7 +1092,7 @@ def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
     ],
     ids=str,
 )
-def test_the_routes_that_choose_or_set_up_the_model_are_behind_the_guard(
+def test_the_routes_that_set_up_the_model_or_delete_memory_items_are_behind_the_guard(
     gateway: Gateway, method: str, path: str, headers: dict[str, str], status: int
 ) -> None:
     response = gateway.client.request(method, path, headers=headers, json={})
