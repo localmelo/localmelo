@@ -2254,6 +2254,7 @@ class Agent(_RecallLoop, _NotesLoop):
         if switch is not None:
             # A call auto mode decides runs confined; the gate settles it.
             switch.on = run.approval is not None and find_auto(run.approval) is not None
+            switch.allow()  # the gate adds the paths of a step it lets run
             if switch.on:
                 await asyncio.to_thread(switch.ready)
         if run.approval is not None:

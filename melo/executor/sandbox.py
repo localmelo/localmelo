@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from localmelo.melo.contracts.folders import never_offered
 from localmelo.melo.contracts.own_gateway import OwnGateway, current
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -173,6 +174,36 @@ def _inside(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder.rstrip("/") + "/")
 
 
+# The most paths one allowed step adds to the profile.
+MAX_ALLOWED_PATHS = 8
+
+
+def allowed_for_step(paths: Sequence[str]) -> tuple[str, ...]:
+    """The paths of a step that was allowed (``ActionReview.paths``) that its children may write.
+
+    The rules found them in the call itself (the model adds none), and a
+    person or the person's own words allowed the step, so the profile of
+    this one call lets them be written (#547): "Allow" then takes effect
+    instead of the operating system refusing the write. Only an absolute,
+    canonical path that melo would offer a person at all
+    (:func:`~localmelo.melo.contracts.folders.never_offered`: not keys,
+    melo's own data, a system folder or the home folder itself) and has no
+    control character; at most :data:`MAX_ALLOWED_PATHS`. Anything else
+    stays refused.
+    """
+    out: list[str] = []
+    for path in paths:
+        if (
+            len(out) < MAX_ALLOWED_PATHS
+            and os.path.isabs(path)
+            and not any(ord(char) < 0x20 or ord(char) == 0x7F for char in path)
+            and never_offered(path) is None
+            and path not in out
+        ):
+            out.append(path)
+    return tuple(out)
+
+
 def quote(path: str) -> str:
     """*path* as a string of the profile language, quoted safely.
 
@@ -228,10 +259,21 @@ class WriteConfinement:
     refused: int = 0
     # The gateway's files the profile closes (auto mode); none otherwise.
     guarded: tuple[str, ...] = ()
+    # What closes them, for the profile of a call that adds paths (``allow``).
+    guard: OwnGateway | None = None
+    # Paths the next calls may write too: those of a step that was allowed
+    # (:func:`allowed_for_step`); set for each call, empty for the rest.
+    extra: tuple[str, ...] = ()
+
+    def text(self) -> str:
+        """The profile of the call now: the folders it always has, and its *extra* paths."""
+        if not self.extra:
+            return self.profile
+        return profile((*self.paths, *self.extra), self.guard)
 
     def argv(self, argv: Sequence[str]) -> list[str]:
         """*argv* started under the profile."""
-        return [SANDBOX_EXEC, "-p", self.profile, *argv]
+        return [SANDBOX_EXEC, "-p", self.text(), *argv]
 
     def env(self) -> dict[str, str]:
         """The variables that point a child's temporary files at the run's folder."""
@@ -258,7 +300,7 @@ class WriteConfinement:
             if real and any(_inside(real, g) for g in self.guarded):
                 closed += 1
                 continue
-            if real and any(_inside(real, p) for p in self.paths):
+            if real and any(_inside(real, p) for p in (*self.paths, *self.extra)):
                 continue
             count += 1
             if path and path not in paths:
@@ -315,10 +357,29 @@ class AutoConfinement:
         self.root = root
         self.on = False
         self.base = base
+        # The paths of the step now running that a person (or their words)
+        # allowed: its profile lets them be written (see ``allow``).
+        self._extra: tuple[str, ...] = ()
         self._env = env
         self._made: WriteConfinement | None = None
         self._error = ""
         self._tried = False
+
+    def allow(self, paths: Sequence[str] = ()) -> None:
+        """Let the next call write *paths* (:func:`allowed_for_step`) too; none by default.
+
+        Set for each call the gate lets run: an allowed step is not refused
+        by the operating system for the path it was allowed to write. The
+        call's own confinement, the Agent's or auto mode's, takes them.
+        """
+        self._extra = allowed_for_step(paths)
+
+    def _active(self) -> WriteConfinement | None:
+        """The confinement of the call now, with the paths its step was allowed."""
+        found = self._made if self.on else self.base
+        if found is not None:
+            found.extra = self._extra
+        return found
 
     def ready(self) -> None:
         """Make the profile, the first time only (off macOS there is none)."""
@@ -335,25 +396,26 @@ class AutoConfinement:
         return 0 if self._made is None else self._made.refused
 
     def argv(self, argv: Sequence[str]) -> list[str]:
-        if not self.on:
-            return list(argv) if self.base is None else self.base.argv(argv)
-        if self._error or not self._tried:
+        if self.on and (self._error or not self._tried):
             raise ConfinementError(
                 self._error or "auto mode's confinement is not ready"
             )
-        return list(argv) if self._made is None else self._made.argv(argv)
+        found = self._active()
+        return list(argv) if found is None else found.argv(argv)
 
     def env(self) -> dict[str, str]:
-        if not self.on:
-            return {} if self.base is None else self.base.env()
-        return self._made.env() if self._made is not None else {}
+        found = self._active()
+        return {} if found is None else found.env()
 
     def note(self, text: str) -> str:
-        if not self.on:
-            return "" if self.base is None else self.base.note(text)
-        if self._made is None:
+        found = self._active()
+        if found is None:
             return ""
-        return self._made.note(text).replace("in this run", "in auto mode")
+        return (
+            found.note(text).replace("in this run", "in auto mode")
+            if self.on
+            else found.note(text)
+        )
 
 
 def _refused_path(line: str, at: int) -> str | None:
@@ -425,5 +487,5 @@ def _confine(
         raise ConfinementError(f"sandbox-exec refused the profile: {why}")
     guarded = guard.files if guard is not None else ()
     return WriteConfinement(
-        root=root, tmp=tmp, paths=paths, profile=text, guarded=guarded
+        root=root, tmp=tmp, paths=paths, profile=text, guarded=guarded, guard=guard
     )

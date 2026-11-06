@@ -297,6 +297,10 @@ class _ApprovalGate:
             self._confinement.on = self._mode == "auto"
             if self._confinement.on:
                 await asyncio.to_thread(self._confinement.ready)
+            # An allowed step may write the paths its review found in it, as
+            # allowed: its sandbox lets them through, so "Allow" takes effect
+            # instead of the operating system refusing the write (#547).
+            self._confinement.allow(() if self.review is None else self.review.paths)
         self._record(
             asking,
             origin=decided.origin,

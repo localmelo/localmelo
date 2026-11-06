@@ -33,6 +33,7 @@ from localmelo.melo.executor.sandbox import (
     TMP_DIR,
     ConfinementError,
     WriteConfinement,
+    allowed_for_step,
     allowed_paths,
     cache_dirs,
     confine,
@@ -389,6 +390,22 @@ class TestReal:
         assert not (home / "outside.txt").exists() and not (home / "p.txt").exists()
         assert c.refused == 2
 
+    async def test_the_paths_of_an_allowed_step_are_written_and_no_others(
+        self, ws: Path, home: Path
+    ) -> None:
+        c, shell, python = _tools(ws, {"HOME": str(home)})
+        c.extra = (str(home / "allowed.txt"), str(home / "dir"))
+        out = await shell(
+            "touch ~/allowed.txt ~/other.txt; mkdir ~/dir; touch ~/dir/in"
+        )
+        assert (home / "allowed.txt").exists() and (home / "dir" / "in").exists()
+        assert not (home / "other.txt").exists()
+        assert out.count("Operation not permitted") == 1 and c.refused == 1
+        # The next call without them is confined as before.
+        c.extra = ()
+        assert "Operation not permitted" in await shell("touch ~/allowed2.txt")
+        assert not (home / "allowed2.txt").exists()
+
     async def test_a_quoted_path_cannot_add_a_rule(self, tmp_path: Path) -> None:
         root = tmp_path / 'w") (allow file-write* (subpath "/'
         root.mkdir()
@@ -495,6 +512,32 @@ class TestReal:
                 for left in pid_file.read_text().split():
                     with contextlib.suppress(OSError):
                         os.kill(int(left), signal.SIGKILL)
+
+
+@pytest.mark.parametrize(
+    ("path", "kept"),
+    [
+        ("/Users/x/Documents/a.txt", True),
+        ("relative/a.txt", False),
+        ("~/.ssh/id_ed25519", False),  # keys: never offered
+        ("~/.cache/localmelo/gateway/auth/token", False),  # melo's own data
+        ("/etc/hosts", False),  # a system folder
+        ("~", False),  # the home folder itself
+        ("/Users/x/a\n.txt", False),  # a control character
+    ],
+)
+def test_only_a_path_melo_would_offer_is_added_for_an_allowed_step(
+    path: str, kept: bool
+) -> None:
+    found = allowed_for_step([os.path.expanduser(path)])
+    assert found == ((os.path.expanduser(path),) if kept else ())
+
+
+def test_an_allowed_step_adds_few_paths_each_once() -> None:
+    paths = [f"/Users/x/Documents/{n}.txt" for n in range(20)]
+    found = allowed_for_step([paths[0], paths[0], *paths])
+    assert len(found) == sandbox.MAX_ALLOWED_PATHS and found[0] == paths[0]
+    assert len(set(found)) == len(found)
 
 
 # ── Auto mode closes melo's own gateway (#339) ──
