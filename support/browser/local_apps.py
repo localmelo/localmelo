@@ -252,7 +252,8 @@ class LocalRule:
         ``127.0.0.1``): a request to exactly one of them goes on, if the
         address has no user part and the port is none of melo's own. It is the
         only local address that does; every other one, a redirect's or a
-        subresource's included, is still blocked.
+        subresource's included, is still blocked. A URL that cannot be read
+        (a port out of range, a broken bracket) is blocked too.
         """
         try:
             parts = urlsplit(url)
@@ -260,7 +261,7 @@ class LocalRule:
             host = parts.hostname or ""
             port = parts.port or _SCHEME_PORTS.get(scheme, 0)
         except ValueError:
-            return _PASS
+            return Verdict("block")  # a URL melo cannot read is never let go on
         if scheme not in _SCHEME_PORTS or not host:
             return _PASS
         for helper in self.helpers:

@@ -206,6 +206,22 @@ def test_nothing_else_on_this_computer_goes_on_even_with_a_server_written(
     assert rule().decide(url, "https://example.com", WROTE).kind == "block"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:99999/",  # a port out of range
+        "http://127.0.0.1:port/",  # a port that is not a number
+        "http://[::1/",  # a broken bracket
+        "http://[::1/]:3000/",
+    ],
+)
+def test_a_url_melo_cannot_read_is_blocked_even_when_the_server_is_written(
+    url: str,
+) -> None:
+    assert rule().decide(url, "https://example.com", WROTE).kind == "block"
+    assert rule().decide(url, "https://example.com").kind == "block"
+
+
 def test_a_server_written_goes_on_only_when_melos_own_ports_can_be_read() -> None:
     def unreadable() -> dict[int, str]:
         raise OSError("no config")

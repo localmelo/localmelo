@@ -559,7 +559,8 @@ class _Chrome:
             else:
                 answer["errorReason"] = "BlockedByClient"
                 named = verdict.helper.name if verdict.helper is not None else None
-                blocked = LocalAttempt(verdict.host, verdict.port, origin, named)
+                if verdict.port:  # a URL melo could not read has no port to tell
+                    blocked = LocalAttempt(verdict.host, verdict.port, origin, named)
         except local_apps.RelayError as exc:
             answer["errorReason"] = exc.reason
         except Exception:  # never leave a request paused: it fails instead

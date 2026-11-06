@@ -363,6 +363,8 @@ LOCAL = {("127.0.0.1", 3000)}
         ("open http://localhost:3000/app, then stop.", LOCAL),
         ("use `127.0.0.1:3000` and [::1]:80", LOCAL | {("::1", 80)}),
         ('open "localhost:3000"\nand LOCALHOST:3000', LOCAL),
+        # Chinese, Japanese and Korean run into the address with no space: a boundary.
+        ("打开localhost:3000看看，再用[::1]:80。", LOCAL | {("::1", 80)}),
         # A host and port inside another address is that address's, not a server written.
         ("open https://site.example/?to=localhost:3000", set()),
         ("open https://site.example/localhost:3000", set()),
@@ -371,6 +373,12 @@ LOCAL = {("127.0.0.1", 3000)}
         ("open http://localhost:3000@site.example/", set()),
         ("open user@localhost:3000", set()),
         ("open site.example:localhost:3000", set()),
+        # A Latin letter or a digit next to it is not a boundary, nor does a
+        # Chinese word before another address make one a server written.
+        (
+            "open élocalhost:3000 or 9localhost:3000 or 打开https://a.example/?to=localhost:3000",
+            set(),
+        ),
         # A longer name, a longer port, another port after it, or no port.
         ("open mylocalhost:3000 or localhost:3000.site.example", set()),
         ("open localhost:30001x or localhost:3000:80", set()),

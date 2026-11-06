@@ -30,6 +30,13 @@ __all__ = ["folder_named", "key_named", "local_sites", "loopback_site", "script_
 _SPECIFIC = re.compile(r"[0-9_.-]")
 MIN_NAME = 5
 _LOOPBACK = {"localhost": "127.0.0.1", "127.0.0.1": "127.0.0.1", "[::1]": "::1"}
+# Chinese, Japanese and Korean are written with no space between words, so a
+# character of them next to an address is a boundary: the texts are read with
+# each one as a space. A Latin letter, a digit or ``_`` is not one.
+_CJK = re.compile(
+    "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
+    "\U00020000-\U0002fa1f]"
+)
 # A server is written on its own: not inside a longer word or address (a
 # query string, a path, a user part, a longer host or a longer port).
 _SERVER = re.compile(
@@ -112,13 +119,14 @@ def local_sites(texts: Iterable[str]) -> frozenset[tuple[str, int]]:
     """The servers on this computer the texts write, as ``(address, port)``.
 
     ``localhost`` is read as ``127.0.0.1``. Only an explicit port counts; a
-    bare ``localhost`` or an address on the network names nothing, and neither
-    does a ``host:port`` inside another address (``https://site.example/?to=localhost:3000``,
-    ``https://site.example/localhost:3000``, ``localhost:3000@site.example``).
+    bare ``localhost`` or an address on the network names nothing. A ``host:port``
+    inside another address does not count either (``https://site.example/?to=localhost:3000``,
+    ``https://site.example/localhost:3000``, ``localhost:3000@site.example``),
+    but a Chinese, Japanese or Korean character next to it is only a boundary.
     """
     found: set[tuple[str, int]] = set()
     for text in texts:
-        for host, port in _SERVER.findall(text):
+        for host, port in _SERVER.findall(_CJK.sub(" ", text)):
             if 0 < int(port) < 65536:
                 found.add((_LOOPBACK[host.lower()], int(port)))
     return frozenset(found)
