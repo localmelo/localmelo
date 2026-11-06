@@ -159,7 +159,7 @@ Older chat turns that may hold the answer, closest first. Open the ones you need
 [t17] Sep 27, 2025 · Main chat · “Plan the vegetable garden.” · words
 ```
 
-- 一行包括这一轮的编号（`t41`）、日期和对话（写法同上）、标题（这一轮中你的话的第一句，最多 80 个字符），以及它与消息有多接近：靠语义找到时是两位小数的相似度，靠共有的字词找到时是 `words`。被更新的一轮取代的那一轮，行尾带有 `(older; replaced by a newer message)`。
+- 一行包括这一轮的编号（`t41`）、日期和对话（写法同上）、标题（这一轮中与你提问用词共有最多的那一句，最多 80 个字符；没有哪一句共有字词时，是你的话的第一句），以及它与消息有多接近：靠语义找到时是两位小数的相似度，靠共有的字词找到时是 `words`。被更新的一轮取代的那一轮，行尾带有 `(older; replaced by a newer message)`。
 - 笔记的显示不变。列表不受 `recall_docs` 和 `recall_chars` 限制，同一个对话的轮次数也不设上限：最多 `recall_list_max` 轮，最好的在前。`search_memory` 返回同样的行。
 - `open_memory` 接收这些行里的一到五个编号，把每一轮完整返回：你说的话和 melo 的回复，附上日期和对话，最多 `recall_open_chars` 个字符（更长的一轮在句末截断，并以 `… (cut)` 结尾）。编号不存在、属于你已删除的对话，或不是对话轮次的编号（例如笔记的编号），都不会打开任何内容，并会说明这一点。这一轮的 `turn.memory` 事件用 `opened` 列出打开过的轮次。
 - 在列表形式下，当问题提到 melo 没有任何笔记的事物时，它会先说明没有记录，而不是用相似的内容来回答。这由开发者设置 `[memory] premise_check` 控制（默认 `"on"`；用 `-X memory.premise_check=off` 只对一次运行关闭）。
