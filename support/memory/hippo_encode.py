@@ -714,10 +714,12 @@ async def _ask(
     system_prompt: str = SYSTEM_PROMPT,
     parse_reply: Callable[[str], dict[str, Any] | None] = read_reply,
     attempts: int = 2,
+    timeout_s: float | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     """Ask for a window's items, twice at most: the reply's JSON, or ``None`` and
     why not. Every request is counted. Other short JSON jobs can supply their
-    own system prompt, reply reader and attempt count through this same path.
+    own system prompt, reply reader, attempt count and request timeout
+    (default :data:`ENCODE_TIMEOUT_S`) through this same path.
 
     An unreadable reply that ran out of room (:func:`_ran_out`) is not asked for
     again: the same prompt at temperature 0 is cut at the same place. It gives the
@@ -728,7 +730,9 @@ async def _ask(
     for _ in range(attempts):
         stats.calls += 1
         try:
-            async with asyncio.timeout(ENCODE_TIMEOUT_S):
+            async with asyncio.timeout(
+                ENCODE_TIMEOUT_S if timeout_s is None else timeout_s
+            ):
                 reply: Message = await send(
                     [Message("system", system_prompt), Message("user", prompt)]
                 )

@@ -90,7 +90,13 @@ from localmelo.support.config import (
     MEMORY_RECALL_OPEN_CHARS,
     MEMORY_RECALL_RECORDS,
 )
-from localmelo.support.memory import blocked, hippo_encode, note_gate, records
+from localmelo.support.memory import (
+    blocked,
+    hippo_encode,
+    note_gate,
+    note_judge,
+    records,
+)
 from localmelo.support.memory import sleep as sleeping
 from localmelo.support.memory.digest import (
     DIGEST_KINDS,
@@ -1686,7 +1692,10 @@ class ChatMemory:
         once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
         answers :data:`NO_MORE_TRIES` with no check run (:attr:`ChatTurn.refusals`).
 
-        That is the rule at ``[memory] note_gate = "typed"``, the default. Above it
+        That is the rule at ``[memory] note_gate = "typed"``, the default. A note it
+        refuses only for Chinese or Japanese wording goes once to the chat's model
+        (:meth:`_judged`), which keeps it when no name, place, number or date
+        changed; a refusal it does not lift counts as any other. Above it
         (:meth:`_admit`) a page or file the user pointed to is a source too, a note
         may say the same in other words, and an instruction to the assistant is
         refused; the note is then kept with where it came from, and the reply and
@@ -1729,12 +1738,17 @@ class ChatMemory:
             note = records.second_person(note, protect=True, keep=typed)
         gate = self.note_settings()
         admission: Admission | None = None
+        judged = False
         if gate.level == note_gate.TYPED:
             admitted = "user_statement"
             missing = records.unsupported(note, said)
             if missing:
                 admitted = "outcome"
                 missing = records.unsupported(note, said + await self._results(turn))
+            if missing and await self._judged(note, said):
+                # A restatement the chat's model confirmed: from here on it is a
+                # note the typed rule passed.
+                admitted, missing, judged = "user_statement", [], True
             if missing:
                 return (
                     "Not remembered: not something the user said. "
@@ -1763,6 +1777,8 @@ class ChatMemory:
         cand = records.Candidate(note, quote, topic, admitted)
         vectors, model, _ = await self._embed([note], EMBED_TIMEOUT_S, query=False)
         source = await self._source(turn.store, turn.info)
+        if judged:
+            source["judged"] = True
         if admission is not None and admission.source in (
             note_gate.POINTED,
             note_gate.INFERRED,
@@ -1791,6 +1807,30 @@ class ChatMemory:
         turn.kept.extend(written)
         turn.publish()
         return f"Remembered{label}: {note} The user sees it and can undo it."
+
+    async def _judged(self, note: str, said: list[str]) -> bool:
+        """Whether the chat's model confirms a note the typed rule refused.
+
+        Asked only when nothing but Chinese or Japanese wording is missing
+        (:func:`note_judge.cjk_only_refusal`) and a chat model is set up: one
+        request, within :data:`note_judge.JUDGE_TIMEOUT_S`, with *said* (the user's
+        own typed words) as the only evidence. No memory lock is held meanwhile.
+        A no, an unreadable reply, a timeout or an error leaves the refusal; one
+        log line says which and how long it took, never the note.
+        """
+        if not note_judge.cjk_only_refusal(note, said):
+            return False
+        provider = self.chat_provider()
+        if provider is None:
+            return False
+        started = time.perf_counter()
+        confirmed = await note_judge.judge(provider, note, said)
+        logger.info(
+            "Note judge: %s in %.1f s",
+            "yes" if confirmed else "no",
+            time.perf_counter() - started,
+        )
+        return confirmed
 
     async def _admit(
         self, turn: ChatTurn, note: str, said: list[str], gate: NoteSettings

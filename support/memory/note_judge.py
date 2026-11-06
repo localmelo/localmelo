@@ -1,6 +1,9 @@
 """A fail-closed judge for typed notes refused only for CJK wording.
 
-Evaluation only: this module is not wired into the note-writing path.
+``ChatMemory.remember`` asks it, at ``[memory] note_gate = "typed"``, when the typed
+rule refuses a note and :func:`cjk_only_refusal` says only Chinese or Japanese
+wording is missing; the chat's model then checks that no name, place, number or
+date changed. Arm ``J`` of ``scripts/eval_note_gate.py`` measures the same path.
 """
 
 from __future__ import annotations
@@ -13,6 +16,9 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.retrieval.llm import send_from_provider
 from localmelo.melo.schema import split_thinking
 from localmelo.support.memory import hippo_encode, note_gate, records
+
+# One request per refused note, so a slow model never holds the chat's turn long.
+JUDGE_TIMEOUT_S: Final = 20.0
 
 SYSTEM_PROMPT: Final = """\
 Judge whether a proposed memory note faithfully restates what the user typed.
@@ -66,8 +72,8 @@ def cjk_only_refusal(note: str, said: Sequence[str]) -> bool:
 async def judge(provider: BaseLLMProvider, note: str, said: Sequence[str]) -> bool:
     """Ask once through the encoder's quiet request path; only a clear yes admits.
 
-    A no, unreadable response, timeout or provider error refuses without retry.
-    Cancellation by the caller still propagates.
+    A no, unreadable response, timeout (:data:`JUDGE_TIMEOUT_S`) or provider error
+    refuses without retry. Cancellation by the caller still propagates.
     """
 
     def read_reply(content: str) -> dict[str, Any] | None:
@@ -87,6 +93,7 @@ async def judge(provider: BaseLLMProvider, note: str, said: Sequence[str]) -> bo
             system_prompt=SYSTEM_PROMPT,
             parse_reply=read_reply,
             attempts=1,
+            timeout_s=JUDGE_TIMEOUT_S,
         )
     except Exception:
         return False

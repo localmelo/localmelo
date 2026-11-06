@@ -34,6 +34,7 @@ from localmelo.support.memory.service import (
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.support.web.extract import extract
 from localmelo.tests.memory.test_note_gate import HIDING_FORMS, SHEET_FORMS, hide
+from localmelo.tests.memory.test_note_judge import FakeProvider
 
 HOLDER = "test-host:1:note-gate"
 MODEL = "stub-embed"
@@ -584,6 +585,20 @@ async def test_pointed_alone_refuses_the_same_chinese_note_by_its_words(
     assert reply.startswith(note_gate.NOT_SUPPORTED)
     assert gate.provider.calls == []  # type: ignore[union-attr]
     assert await gate.notes() == []
+
+
+@pytest.mark.parametrize("level", LEVELS)
+async def test_a_chinese_wording_refusal_above_typed_never_asks_the_chat_model(
+    make: Any, level: str
+) -> None:
+    """The wording judge belongs to the ``typed`` rule; the other levels keep theirs."""
+    judge = FakeProvider('{"supported": true}')
+    gate = make(level)
+    gate.memory.chat_provider = lambda: judge
+    await gate.turn("我喜欢跑步。")
+    reply = await gate.remember("你喜欢慢跑。")
+    assert reply.startswith(note_gate.NOT_SUPPORTED)
+    assert judge.calls == [] and await gate.notes() == []
 
 
 async def test_a_note_with_a_number_no_source_holds_is_refused_and_names_it(

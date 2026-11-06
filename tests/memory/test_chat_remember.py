@@ -10,6 +10,7 @@ note under ``remembered``.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,7 +19,8 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.tiers import tier_of
-from localmelo.support.memory import ChatMemory, records
+from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.memory import ChatMemory, note_judge, records
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.service import (
     CHAT_TURN,
@@ -33,6 +35,7 @@ from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 from localmelo.tests.memory.test_chat_records import STATEMENTS
 from localmelo.tests.memory.test_note_check import EXPLAIN, LISTS, PARKING, SUMMARIES
+from localmelo.tests.memory.test_note_judge import FakeProvider
 from localmelo.tests.sessions.helpers import core_event
 
 HOLDER = "test-host:1:remember"
@@ -908,3 +911,183 @@ async def test_a_secret_is_refused_and_counts_as_a_refusal(
     assert turn is not None and turn.refused and turn.refusals == 1
     assert await memory.remember(secret.replace("hunter2-", "")) == NO_MORE_TRIES
     assert await memory.records() == []
+
+
+# ── a Chinese or Japanese note worded differently: the chat's model judges it ──
+
+SAID_ZH = "我喜欢跑步。"
+WORDED_ZH = "你喜欢慢跑。"
+YES = '{"supported": true}'
+LOG = "localmelo.support.memory.service"
+
+
+def _judge(memory: ChatMemory, reply: str | BaseException | None) -> FakeProvider:
+    provider = FakeProvider(reply)
+    memory.chat_provider = lambda: provider  # type: ignore[method-assign]
+    return provider
+
+
+async def test_a_chinese_paraphrase_the_typed_rule_refuses_is_kept_on_a_yes(
+    memory: ChatMemory,
+    store: SessionStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOG)
+    judge = _judge(memory, YES)
+    await _begin(memory, store, SAID_ZH)
+    assert records.unsupported(WORDED_ZH, [SAID_ZH])
+    answer = await memory.remember(WORDED_ZH, "preferences")
+    assert answer == f"Remembered: {WORDED_ZH} The user sees it and can undo it."
+    (entry,) = await memory.records()
+    assert entry.text == WORDED_ZH
+    assert entry.admitted_by == "user_statement" and entry.provenance["judged"] is True
+    assert entry.provenance["quote"] == SAID_ZH
+    # One request, with the user's typed words as the only evidence.
+    ((messages, _),) = judge.calls
+    assert SAID_ZH in messages[-1].content
+    # One log line: the answer and the time, never the note.
+    lines = [r.getMessage() for r in caplog.records if r.name == LOG]
+    assert len(lines) == 1 and lines[0].startswith("Note judge: yes in ")
+    assert WORDED_ZH not in lines[0] and SAID_ZH not in lines[0]
+
+
+async def test_the_memory_lock_is_free_while_the_model_judges(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    held: list[bool] = []
+
+    class Watching(FakeProvider):
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            held.append(memory._lock.locked())
+            return await super().chat(messages, tools)
+
+    provider = Watching(YES)
+    memory.chat_provider = lambda: provider  # type: ignore[method-assign]
+    await _begin(memory, store, SAID_ZH)
+    assert (await memory.remember(WORDED_ZH, "preferences")).startswith("Remembered")
+    assert held == [False]
+
+
+async def test_a_note_the_typed_rule_passes_is_not_judged_and_not_marked(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    judge = _judge(memory, YES)
+    await _begin(memory, store, SAID_ZH)
+    assert (await memory.remember("你喜欢跑步。", "preferences")).startswith(
+        "Remembered"
+    )
+    (entry,) = await memory.records()
+    assert "judged" not in entry.provenance and judge.calls == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '{"supported": false}',
+        "not readable",
+        '{"supported": "true"}',
+        TimeoutError("timed out"),
+        RuntimeError("the model is down"),
+        None,  # never answers: the request's own timeout ends it
+    ],
+)
+async def test_a_no_an_unreadable_reply_a_failure_or_a_timeout_keeps_the_refusal(
+    memory: ChatMemory,
+    store: SessionStore,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    reply: str | BaseException | None,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOG)
+    monkeypatch.setattr(note_judge, "JUDGE_TIMEOUT_S", 0.05)
+    judge = _judge(memory, reply)
+    await _begin(memory, store, SAID_ZH)
+    answer = await memory.remember(WORDED_ZH, "preferences")
+    # The refusal is today's, and it counts: the first of two.
+    assert answer.startswith(NOT_SAID) and answer.endswith(TRY_ONCE_MORE)
+    turn = CHAT_TURN.get()
+    assert turn is not None and turn.refusals == 1
+    assert await memory.records() == [] and len(judge.calls) == 1
+    lines = [r.getMessage() for r in caplog.records if r.name == LOG]
+    assert len(lines) == 1 and lines[0].startswith("Note judge: no in ")
+
+
+async def test_without_a_chat_model_the_refusal_stands(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    assert memory.chat_provider() is None
+    await _begin(memory, store, SAID_ZH)
+    answer = await memory.remember(WORDED_ZH, "preferences")
+    assert answer.startswith(NOT_SAID) and answer.endswith(TRY_ONCE_MORE)
+    assert await memory.records() == []
+
+
+@pytest.mark.parametrize(
+    ("said", "note"),
+    [
+        # A number, a quoted span and a Latin value are never left to the model.
+        ("我每天跑步五圈。", "你每天慢跑六圈。"),
+        (SAID_ZH, "你喜欢“慢跑”。"),
+        ("我和 Nuvra 喜欢跑步。", "你和 Zevra 喜欢慢跑。"),
+        # English words are not the judge's job.
+        ("My seat is 4A.", "Your seat is 9F."),
+        ("I like running.", "You like jogging."),
+    ],
+)
+async def test_a_note_with_a_hard_refusal_never_reaches_the_judge(
+    memory: ChatMemory, store: SessionStore, said: str, note: str
+) -> None:
+    judge = _judge(memory, YES)
+    await _begin(memory, store, said)
+    assert (await memory.remember(note, "about")).startswith(NOT_SAID)
+    assert await memory.records() == [] and judge.calls == []
+
+
+async def test_a_sensitive_note_never_reaches_the_judge(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    judge = _judge(memory, YES)
+    said = "我的无线网络密码是 hunter2-lighthouse。"
+    note = "你的网络登录口令是 hunter2-lighthouse。"
+    assert note_judge.cjk_only_refusal(note, [said]) and records.sensitive(note)
+    await _begin(memory, store, said)
+    answer = await memory.remember(note, "about")
+    assert answer.startswith(f"Not remembered: {records.NOT_KEPT}.")
+    assert await memory.records() == [] and judge.calls == []
+
+
+async def test_a_yes_does_not_skip_the_owner_or_the_duplicate_check(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    judge = _judge(memory, YES)
+    # The sentence is about Marco; the note says it of the user.
+    await _begin(memory, store, "马可的爱好是跑步。")
+    swapped = await memory.remember("你的爱好是慢跑。", "about")
+    assert swapped.startswith("Not remembered: that is about 马可, not the user.")
+    assert await memory.records() == [] and len(judge.calls) == 1
+    # The same note again is kept once.
+    info = await _begin(memory, store, SAID_ZH)
+    await _finish(store, info)
+    await _begin(memory, store, SAID_ZH, info.session_id)
+    assert (await memory.remember(WORDED_ZH, "about")).startswith("Remembered")
+    again = await memory.remember(WORDED_ZH, "about")
+    assert again == f"Already remembered: {WORDED_ZH}"
+    assert len(await memory.records()) == 1 and len(judge.calls) == 3
+
+
+async def test_the_cap_of_two_refusals_holds_across_judged_notes(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    judge = _judge(memory, '{"supported": false}')
+    await _begin(memory, store, SAID_ZH)
+    notes = [WORDED_ZH, "你喜爱跑步。", "你喜欢长跑。"]
+    assert all(note_judge.cjk_only_refusal(note, [SAID_ZH]) for note in notes)
+    first = await memory.remember(notes[0], "about")
+    assert first.startswith(NOT_SAID) and first.endswith(TRY_ONCE_MORE)
+    assert await memory.remember(notes[1], "about") == NO_MORE_TRIES
+    # The turn's attempts are over: the third note is not even sent to the model.
+    judge.reply = YES
+    assert await memory.remember(notes[2], "about") == NO_MORE_TRIES
+    assert len(judge.calls) == 2 and await memory.records() == []

@@ -16,7 +16,7 @@ import pytest
 
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.memory import hippo_encode, note_judge
+from localmelo.support.memory import ChatMemory, hippo_encode, note_judge, records
 
 NOTE = "你喜欢慢跑。"
 SAID = ["我喜欢跑步。"]
@@ -71,10 +71,15 @@ async def test_only_a_clear_yes_admits(reply: str | Exception, admitted: bool) -
 
 
 async def test_an_expired_request_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hippo_encode, "ENCODE_TIMEOUT_S", 0.001)
+    monkeypatch.setattr(note_judge, "JUDGE_TIMEOUT_S", 0.001)
     provider = FakeProvider(None)
     assert not await note_judge.judge(provider, NOTE, SAID)
     assert len(provider.calls) == 1
+
+
+def test_the_wait_is_short_and_shorter_than_the_encoders() -> None:
+    assert note_judge.JUDGE_TIMEOUT_S <= 20
+    assert note_judge.JUDGE_TIMEOUT_S < hippo_encode.ENCODE_TIMEOUT_S
 
 
 async def test_cancellation_propagates() -> None:
@@ -196,6 +201,58 @@ async def test_arm_j_keeps_the_baseline_except_selected_refusals(
     assert not baseline["wording"].admitted
 
 
+@pytest.mark.parametrize("mode", ["mixed", "no", "unreadable"])
+async def test_the_library_path_is_arm_j_for_the_same_answers(
+    script: ModuleType, tmp_path: Path, mode: str
+) -> None:
+    """``ChatMemory`` asks the judge for exactly the notes arm J does, with the
+    same evidence, and admits exactly the ones arm J admits."""
+    data = Path(__file__).parent / "data"
+    rows = [
+        case
+        for name in ("restate", "heldout")
+        for case in json.loads((data / f"note_gate_{name}.json").read_text("utf-8"))
+    ]
+
+    class Answering(FakeProvider):
+        """Says yes to the notes of odd length in ``mixed`` mode: an answer that
+        depends on the note alone, not on who asks."""
+
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            odd = len(json.loads(messages[-1].content)["note"]) % 2
+            self.reply = {
+                "mixed": '{"supported": true}' if odd else '{"supported": false}',
+                "no": '{"supported": false}',
+                "unreadable": "not readable",
+            }[mode]
+            return await super().chat(messages, tools)
+
+    arm_provider, library_provider = Answering(None), Answering(None)
+    baseline = script.run(rows, None, 0.55)["T1b"]
+
+    async def judge(note: str, said: Sequence[str]) -> bool:
+        return await note_judge.judge(arm_provider, note, said)
+
+    verdicts, reached = await script.run_j(rows, baseline, judge)
+    memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
+    memory.chat_provider = lambda: library_provider  # type: ignore[method-assign]
+    try:
+        library = {
+            case["id"]: not records.unsupported(case["note"], case["said"])
+            or await memory._judged(case["note"], case["said"])
+            for case in rows
+        }
+    finally:
+        await memory.aclose()
+    assert library == {case["id"]: verdicts[case["id"]].admitted for case in rows}
+    assert reached == len(arm_provider.calls) == len(library_provider.calls) > 0
+    assert [m[0][-1].content for m in arm_provider.calls] == [
+        m[0][-1].content for m in library_provider.calls
+    ]
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_cli_skips_or_reports_the_judge_and_closes_it(
     script: ModuleType,
@@ -206,7 +263,7 @@ def test_cli_skips_or_reports_the_judge_and_closes_it(
 ) -> None:
     data = tmp_path / "synthetic.json"
     data.write_text(json.dumps(cases()), encoding="utf-8")
-    output = tmp_path / "verdicts.json"
+    output = tmp_path / "missing" / "folder" / "verdicts.json"
     provider = FakeProvider('{"supported": true}')
 
     def make_provider(url: str, model: str) -> FakeProvider:

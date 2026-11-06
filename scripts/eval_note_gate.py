@@ -39,8 +39,8 @@ the typed rule, the default; the meaning arms need ``--model``, and ``J`` needs
          many notes reached the judge. The prompt is frozen before measurement.
 
 Ship rule for ``J`` on the held-out set: admit at least 85% of zh restatements
-and refuse zh swaps no less often than ``T1b``'s 85%. This evaluation arm is not
-wired into ``remember``.
+and refuse zh swaps no less often than ``T1b``'s 85%. ``ChatMemory.remember`` applies
+this arm at the default level, with the chat's own model as the judge.
 
 The embedding model is read from a local directory, nothing is downloaded or
 written, and no model server is called unless the judge is explicitly enabled.
@@ -455,6 +455,7 @@ async def evaluate(args: argparse.Namespace) -> None:
                 for arm, verdicts in results.items()
             }
         if args.json:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
             args.json.write_text(
                 json.dumps(everything, ensure_ascii=False, indent=1), encoding="utf-8"
             )
