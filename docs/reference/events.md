@@ -810,7 +810,7 @@ and `"run_id": ""`.
   card (`source_id`, `source_kind`, `title`, `state`, `line`, `at`, and `request_id` on a waiting or answered one), stored in
   the main chat with no turn when a side chat's run or a task comes back; see
   [Cards in the main chat](api-v2.md#cards-in-the-main-chat).
-- **`attention.browser`** is a chat's card for the run's browser (`card_key`, `owner_chat_id`, `source_session_id`, `source_turn`, `run_id`, `browser_session_id`, `state`, `action`, `site`, and `by` on a stopped one), stored in the chat that owns it with no turn; it holds words the program wrote and never a picture, typed value, full address or query. See [Browser cards](api-v2.md#browser-cards).
+- **`attention.browser`** is a chat's card for the run's browser (`card_key`, `owner_chat_id`, `source_session_id`, `source_turn`, `run_id`, `browser_session_id`, `state`, `action`, `site`, `by` on a stopped one, and `source_kind` and `goal` for a task's browser), stored in the chat that owns it with no turn; it holds words the program wrote and never a picture, typed value, full address or query. See [Browser cards](api-v2.md#browser-cards).
 - **`attention.echo`** is the main chat's line about a task it started,
   changed or sent a message to (`echo`, `line`, and `task_id`, `title`,
   `level`, `action`, `undo`, `of`, `typed`, `text`, `turn_id`, `how` as the

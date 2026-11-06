@@ -338,7 +338,9 @@ async def build_session_agent(
     retrieval_extra_body: Mapping[str, Any] | None = None,
     mcp_config: str | None = None,
     browser_driver: str = "off",
+    desktop: bool = True,
     web_fetch: bool = False,
+    web_task: bool = False,
     web_search: bool = False,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
@@ -364,9 +366,12 @@ async def build_session_agent(
     extra body applies only to retrieve requests and is never saved.
     *browser_driver* names the browser the Agent may read web pages in (see
     :mod:`localmelo.support.browser`); ``off`` gives it no browser tools. Only
-    the surfaces that ask a person (the terminal chat and the console) pass it.
-    *web_fetch* gives it the ``web_fetch`` tool (see
-    :mod:`localmelo.support.web`): the chats and the console's tasks pass
+    the surfaces that ask a person (the terminal chat and a console task a
+    person's chat owns) pass it. *desktop* false keeps it out of other apps'
+    windows whatever ``[browser] app_windows`` says (work that runs in the
+    background). *web_fetch* gives it the ``web_fetch`` tool (see
+    :mod:`localmelo.support.web`), and *web_task* says it is a task's, which
+    reads no site with nobody to ask: the chats and the console's tasks pass
     ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
     *web_search* gives it ``web_search`` (see :mod:`localmelo.support.web.search_tool`):
     the same surfaces pass ``[web] search``, and the tool may use the browser
@@ -424,7 +429,8 @@ async def build_session_agent(
         browser = provider_for(
             browser_driver,
             keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
-            app_windows=cfg is None or cfg.browser.app_windows is True,
+            app_windows=desktop and (cfg is None or cfg.browser.app_windows is True),
+            opens_apps=desktop,
             live=cfg is None or cfg.browser.live is True,
             live_fps=cfg.browser.live_fps if cfg is not None else 15,
             chat_id=chat_id,
@@ -449,6 +455,7 @@ async def build_session_agent(
         providers.append(
             WebFetchProvider(
                 browser=browser_driver != "off",
+                task=web_task,
                 cfg=cfg,
                 protect=(
                     base_url,

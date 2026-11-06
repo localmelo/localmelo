@@ -154,8 +154,8 @@ async def test_the_terminal_and_the_tasks_pass_the_setting(
     )
     source = inspect.getsource(workers)
     # A task's provider asks the chat that owns it about a site, or refuses.
-    assert "[WebFetchProvider(task=True, cfg=self.settings())]" in source
-    assert "if self.settings().tools.web_fetch is True" in source
+    assert "web_task=True" in source
+    assert "web_fetch=settings.tools.web_fetch is True" in source
 
 
 def test_direct_runs_never_get_it() -> None:

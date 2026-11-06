@@ -455,6 +455,7 @@
   "browser.dialog.title": "网页询问",
   "browser.failed": "Chrome 打不开窗口，所以网页在这里。",
   "browser.finishing": "melo 正在做完这一步，网页马上交给你。",
+  "browser.forThisChat": "正在为这个聊天工作",
   "browser.formHere": "你填的表单留在这里。",
   "browser.giveBack": "完成",
   "browser.giveBackLabel": "完成：把网页交还给 melo",

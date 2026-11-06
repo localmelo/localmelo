@@ -307,7 +307,7 @@ function panel({wide = true, state = {available: true, open: true, browsing: tru
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 // The state of a chat's browser card, as the page tells the panel.
-const card = (extra = {}) => ({gen: 'a1b2c3d4', run: 'run-1', state: 'working', ...extra});
+const card = (extra = {}) => ({session: 's1', gen: 'a1b2c3d4', run: 'run-1', state: 'working', ...extra});
 const SOURCE = 'ws://gw.test/api/sessions/s1/browser/live?gen=a1b2c3d4&run=run-1';
 
 test('the panel never opens by itself: the chip opens it, on the source of the chat\'s card', async () => {
@@ -807,7 +807,7 @@ function page() {
 }
 
 /** The card manager, the panel and one transport on fake sockets, with decodes the test releases by hand. */
-function together({state = {available: true, open: true}} = {}) {
+function together({state = {available: true, open: true}, acts = {}} = {}) {
   FakeSocket.all = [];
   const decodes = [];
   const streams = createStreams({
@@ -828,7 +828,7 @@ function together({state = {available: true, open: true}} = {}) {
   const dock = {root: make('div'), canvas: make('canvas'), mark: make('span'), text: make('span'), jump: make('button'), open: make('button')};
   dock.root.hidden = true;
   const cards = setupBrowserCards({
-    doc, streams, open: (card) => browser.open(card), dock,
+    doc, streams, open: (card) => browser.open(card), dock, ...acts,
     observe: (onChange) => { report = onChange; return {add: (target) => sight.set(target, null), remove: (target) => sight.delete(target)}; },
   });
   return {
@@ -873,6 +873,48 @@ test('the card and the panel share one socket and one decode, and a late picture
   await settle();
   assert.deepEqual([canvas.drawn, t.els.canvas.drawn], [[1], [1]], 'the late picture is painted nowhere');
   assert.equal(FakeSocket.all.at(-1).url, 'ws://gw.test/api/sessions/s1/browser/live?gen=e5f6a7b8&run=run-2');
+});
+
+test('a task\'s card says who it works for and its goal, and every action names that task\'s run and chat', async () => {
+  const stopped = [];
+  const given = [];
+  const t = together({acts: {stop: async (found) => { stopped.push(found.session); }, done: async (found) => { given.push(found); return false; }}});
+  const task = {source_kind: 'task', source_session_id: 'task1', owner_chat_id: 's1', card_key: 'task1:run-1', goal: 'Find ML jobs in Boston'};
+  const working = readBrowser(row(task));
+  t.cards.sync([working]);
+  t.see('task1:run-1', true);
+  await t.browser.follow('s1');
+  t.browser.card(working);
+  const owned = 'ws://gw.test/api/sessions/task1/browser/live?gen=a1b2c3d4&run=run-1&owner=s1';
+  assert.deepEqual(FakeSocket.all.map((socket) => socket.url), [owned]);
+  t.open('task1:run-1').press();
+  await settle();
+  assert.equal(FakeSocket.all.length, 1, 'the panel shows the same source on the same socket');
+  assert.equal(t.els.pop.hidden, true, 'a task\'s browser stays beside the chat it works for');
+  const shown = t.cards.nodeOf('task1:run-1');
+  const words = (found) => [found.textContent ?? '', ...found.children.flatMap(words)];
+  const text = words(shown).join(' ');
+  assert.match(text, /Working for this chat/);
+  assert.match(text, /Find ML jobs in Boston/);
+  assert.doesNotMatch(text, /task1|P2/, 'never a worker id or a priority code');
+  const buttons = () => t.all(shown, 'button').filter((found) => found.className.includes('-button') && !found.hidden);
+  assert.deepEqual(buttons().map((found) => found.textContent), ['Open browser', 'Stop']);
+  buttons().at(-1).press();
+  await settle();
+  assert.deepEqual(stopped, ['task1'], 'Stop names the task, not its chat');
+  // The person has the page: Done is on the card, for this run; a press that did nothing can be pressed again.
+  const yours = readBrowser(row({...task, id: 11, state: 'you', action: ''}));
+  t.cards.sync([yours]);
+  const done = buttons().find((found) => found.textContent === 'Done');
+  done.press();
+  await settle();
+  assert.deepEqual(given.map((found) => [found.session, found.run, found.owner]), [['task1', 'run-1', 's1']]);
+  assert.equal(done.disabled, false);
+  // Over: no action is left, and the goal names what it was.
+  t.cards.sync([readBrowser(row({...task, id: 12, state: 'done', action: ''}))]);
+  assert.deepEqual(buttons().map((found) => found.textContent), []);
+  assert.match(words(shown).join(' '), /Find ML jobs in Boston/);
+  assert.doesNotMatch(words(shown).join(' '), /Working for this chat/);
 });
 
 test('a card watches only while it is on screen, the dock takes over when it leaves, and a finished run lets go', async () => {

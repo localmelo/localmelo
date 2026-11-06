@@ -700,10 +700,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     }
     const epoch = state.epoch;
     if (!state.again) state.again = newId();
-    const task = state.task;
-    const spec = task.spec || {};
-    const body = {objective: spec.objective, title: spec.title, workspace: text, request_key: state.again};
-    if (task.front_id) body.front_id = task.front_id;
+    const body = {...againBody(), workspace: text};
     const outcome = await act('folder', () => api('/tasks', {method: 'POST', body}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
@@ -716,13 +713,19 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     render();
   }
 
+  /** A new task of this one's request, in this one's chat. */
+  function againBody() {
+    const {spec, front_id: front} = state.task;
+    const body = {objective: spec?.objective, title: spec?.title, request_key: state.again};
+    if (front) body.front_id = front;
+    return body;
+  }
+
   async function startAgain() {
     const epoch = state.epoch;
     if (!state.again) state.again = newId();
-    const key = state.again;
-    const spec = state.task.spec || {};
-    const body = {objective: spec.objective, title: spec.title, request_key: key};
-    if (spec.workspace) body.workspace = spec.workspace;
+    const body = againBody();
+    if (state.task.spec?.workspace) body.workspace = state.task.spec.workspace;
     const outcome = await act('again', () => api('/tasks', {method: 'POST', body}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {

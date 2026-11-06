@@ -26,7 +26,7 @@ import { setupPanel } from "./panel.mjs";
 import { stepWords } from "./step-words.mjs";
 import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { createStreams } from "./browser-stream.mjs";
-import { mergeBrowsers, setupBrowserCards } from "./browser-card.mjs";
+import { ACTIVE as BROWSING, mergeBrowsers, setupBrowserCards, sourceOf as browserSource } from "./browser-card.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
@@ -1114,11 +1114,22 @@ function syncBrowser() {
   browser.card(cards.at(-1) ?? null);
 }
 
-/** The nodes of the browser cards of the runs of *turn*. */
+/** The nodes of the browser cards of the runs of *turn*: a task's card is no reply of this chat. */
 function browserNodes(turn) {
   return (S.view?.browsers ?? [])
-    .filter((card) => card.turn === turn.turn)
+    .filter((card) => !card.task && card.turn === turn.turn)
     .map((card) => browserCards.nodeOf(card.key))
+    .filter(Boolean);
+}
+
+/** The nodes of the browser cards of task *id* (all tasks' with none), for where its line shows; each one once, by *placed*. */
+function taskBrowserNodes(view, placed, id = null) {
+  return (view?.browsers ?? [])
+    .filter((card) => card.task && (id === null || card.session === id) && !placed.has(card.key))
+    .map((card) => {
+      placed.add(card.key);
+      return browserCards.nodeOf(card.key);
+    })
     .filter(Boolean);
 }
 
@@ -1152,7 +1163,10 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   liveNodes.clear();
   runningCards.clear();
   syncBrowser();
-  const nodes = showsItems(view) ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
+  const placed = new Set();
+  const nodes = showsItems(view) ? mainNodes(view, turns, placed) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
+  // A task's card whose Started line is not on this page still says where the work stands.
+  nodes.push(...taskBrowserNodes(view, placed));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);
     earlier.disabled = earlierLoading;
@@ -1232,7 +1246,7 @@ async function loadEarlier() {
 }
 
 /** A chat's turns, the cards side chats and tasks sent back, and its echoes, under day dividers (the main chat; a side chat with tasks). */
-function mainNodes(view, turns) {
+function mainNodes(view, turns, placed) {
   const newest = turns[turns.length - 1];
   const echoes = view?.echoes ?? [];
   const done = answered(echoes);
@@ -1248,7 +1262,9 @@ function mainNodes(view, turns) {
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = echoDone(echo, done, ended) || dismissed.has(echo.id);
-      return echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
+      const line = echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
+      // The page a task browses shows under the line that started it.
+      return echo.kind === "started" ? [...line, ...taskBrowserNodes(view, placed, echo.task_id)] : line;
     }
     return [el("div", "day-divider", item.label)];
   });
@@ -1355,7 +1371,48 @@ function taskApprovalNode(card) {
     reload: () => readTaskApproval(String(request.request_id)),
     workspace: request.workspace_label,
     scope: "task",
+    takeOver: () => takeTaskPage(card.sourceId),
+    takeOverWindow: async () => {
+      if (await takeTaskPage(card.sourceId)) browser.showWindow();
+    },
   });
+}
+
+/** The person agreed to take over a task's page: the panel opens on that task's browser, and the chat stays. */
+async function takeTaskPage(id) {
+  const card = (S.view?.browsers ?? []).filter((found) => found.session === id && BROWSING.has(found.state)).at(-1);
+  // Never the page the panel happens to show: with no card of this task, nothing is taken.
+  if (!card || !(await browser.open(card))) {
+    notify(t("errors.staleBrowser"));
+    return false;
+  }
+  browser.takeOver();
+  return true;
+}
+
+/** Stop on a task's browser card: that task ends, if the run the card shows is the one going. False when it did not take. */
+async function stopBrowsingTask(card) {
+  const { session, ...source } = browserSource(card);
+  try {
+    await api(`/tasks/${encodeURIComponent(session)}`, { method: "PATCH", body: { state: "stop", source } });
+    return true;
+  } catch (error) {
+    notify(error.message || t("panel.taskChangeFailed"));
+    return false;
+  }
+}
+
+/** Done on a browser card: the page the person has goes back to that card's run alone. False when it did not take. */
+async function givePageBack(card) {
+  const { session, ...pin } = browserSource(card);
+  const query = new URLSearchParams(pin).toString();
+  try {
+    const { ok } = await api(`/sessions/${encodeURIComponent(session)}/browser/done?${query}`, { method: "POST" });
+    return ok === true;
+  } catch (error) {
+    notify(error.message || t("panel.taskChangeFailed"));
+    return false;
+  }
 }
 
 async function readTaskApproval(id, tries = 0) {
@@ -3099,6 +3156,8 @@ const browserCards = setupBrowserCards({
   doc: document,
   streams: browserStreams,
   open: (card) => browser.open(card),
+  stop: stopBrowsingTask,
+  done: givePageBack,
   observe: typeof IntersectionObserver === "function"
     ? (onChange) => {
       const watcher = new IntersectionObserver(

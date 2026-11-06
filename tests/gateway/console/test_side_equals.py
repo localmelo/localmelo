@@ -29,15 +29,14 @@ from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
+    CHAT_NOTE,
     ECHO_EVENT,
+    FRONT_TEXT,
     SIDE_SUMMARY_EVENT,
-    SIDE_TEXT,
     FrontAgent,
-    SideAgent,
     front_options,
 )
 from localmelo.support.sessions.agents import session_options
-from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import StoredEvent
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
@@ -58,7 +57,7 @@ async def chats_console(
     sides: list[list[Message]] | None = None,
     chores: ChoreOptions | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, ScriptedLLM]]]:
-    """A console whose main chat runs a FrontAgent and whose side chats run SideAgents.
+    """A console whose main chat and side chats each run a FrontAgent.
 
     *sides* are the scripts of the side chats in the order they are built; the
     returned dict holds each Agent's model by session id, the main chat's under
@@ -81,7 +80,7 @@ async def chats_console(
         mine = holder[0].front_for(session_id)
         llm = models[session_id] = ScriptedLLM(scripts.pop(0) if scripts else [OPENING])
         options = session_options(AgentOptions(mode="gateway"), workspace)
-        agent = SideAgent(llm=llm, options=options, tool_providers=[mine.tools])
+        agent = FrontAgent(llm=llm, options=options, tool_providers=[mine.tools])
         agent.front = mine
         await agent.start()
         return agent
@@ -172,7 +171,7 @@ def _hear(console: Console, session: str, kind: str, data: dict[str, Any]) -> No
 
 def _asked(llm: ScriptedLLM, request: int = -1) -> str:
     """The user message the model was last sent, without the chat's reminder."""
-    return str(llm.requests[request][-1].content).removesuffix("\n\n" + ACTING_NOTE)
+    return str(llm.requests[request][-1].content).removesuffix("\n\n" + CHAT_NOTE)
 
 
 # ── 1. The task tools and code's rules ──
@@ -206,8 +205,8 @@ async def test_a_side_chat_starts_a_task_with_the_task_tools_and_owns_it(
         assert entry is not None and entry.agent is not None
         offered = {tool.name for tool in entry.agent.list_tools()}
         assert {"task_create", "task_list", "task_control", "task_message"} <= offered
-        assert "search_files" not in offered, "that one is the main chat's"
-        assert SIDE_TEXT in models[side].requests[0][0].content
+        assert "search_files" in offered
+        assert FRONT_TEXT in models[side].requests[0][0].content
         result = str(models[side].requests[1][-1].content)
         assert result.startswith(f"Started task {record.task_id}: Slides (P1)")
 
@@ -784,24 +783,23 @@ async def test_the_whole_days_activity_names_the_side_chat_that_started_a_task(
         assert all("from" not in r for r in own)
 
 
-# ── The builder: a side chat gets the tools and the class ──
+# ── The builder: every chat gets the same class, tools and options ──
 
 
-async def test_the_default_builder_gives_a_side_chat_its_front_s_tools(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", ["main", "side"])
+async def test_every_chat_is_built_the_same_on_its_own_front(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake(
-        settings: Any, workspace: str, mcp: Any, session_id: str, **kw: Any
-    ) -> Any:
+    async def fake(settings: Any, workspace: str, session_id: str, **kw: Any) -> Any:
         seen.update(kw, session_id=session_id)
-        return SideAgent(
+        return FrontAgent(
             llm=ScriptedLLM([]),
             options=session_options(front_options(settings), workspace),
         )
 
-    monkeypatch.setattr("localmelo.support.gateway.console.default_builder", fake)
+    monkeypatch.setattr("localmelo.support.gateway.console.build_front_agent", fake)
     console = Console(
         make_cfg(),
         port=PORT,
@@ -813,35 +811,40 @@ async def test_the_default_builder_gives_a_side_chat_its_front_s_tools(
     )
     await console.start()
     try:
-        agent = await console._side_agent(console.cfg, str(tmp_path), None, "side-1")
-        front = console.front_for("side-1")
-        assert (seen["tools"], seen["agent_class"]) == ([front.tools], SideAgent)
-        assert isinstance(agent, SideAgent) and agent.front is front
-        assert console.front_for("side-1") is front
-        assert console.front_for(console.main_id) is console.front
-        assert type(front.tools).__name__ == "TaskTools"
-        assert type(console.front.tools).__name__ == "FrontTools"
+        chat = console.main_id if kind == "main" else "side-1"
+        assert chat is not None
+        agent = await console._chat_agent(console.cfg, str(tmp_path), None, chat)
+        front = console.front_for(chat)
+        assert seen["tools"] is front.tools
+        assert isinstance(agent, FrontAgent) and agent.front is front
+        assert (front is console.front) is (kind == "main")
     finally:
         await console.aclose()
 
 
-async def test_a_side_agent_is_not_handed_off_when_it_runs_out_of_steps(
-    tmp_path: Path,
+@pytest.mark.parametrize("kind", ["main", "side"])
+async def test_a_chat_that_reads_past_four_steps_goes_on_and_starts_nothing(
+    tmp_path: Path, kind: str
 ) -> None:
-    steps = [tool_call("task_list", {}, call_id=f"c{i}") for i in range(1, 6)]
-    async with chats_console(tmp_path, sides=[steps]) as (console, client, models):
-        created = await _open(client, "think about the trip")
-        side = created["session"]["id"]
-        await asyncio.wait_for(_until_blocked(models, side), timeout=10)
-        # Five steps, past the main chat's cap of four, and no task was started for it.
-        assert len(models[side].requests) == 6
+    steps = [tool_call("task_list", {"n": i}, call_id=f"c{i}") for i in range(1, 6)]
+    async with chats_console(
+        tmp_path, main=steps if kind == "main" else None, sides=[steps]
+    ) as (console, client, models):
+        if kind == "main":
+            assert console.main_id is not None
+            sent = await _post_turn(client, console.main_id, "think about the trip")
+            turn, chat = sent.json(), "main"
+        else:
+            turn = await _open(client, "think about the trip")
+            chat = turn["session"]["id"]
+        while chat not in models:
+            await asyncio.sleep(0.01)
+        model = models[chat]
+        await asyncio.wait_for(model.blocked.wait(), timeout=10)
+        # Five steps and it still runs: no cap of four, and nothing sent to a task.
+        assert len(model.requests) == 6
         assert await console.workers.tasks.list_tasks() == []
-        await client.post(f"/api/turns/{created['turn_id']}/cancel")
-
-
-async def _until_blocked(models: dict[str, ScriptedLLM], side: str) -> None:
-    while side not in models or not models[side].blocked.is_set():
-        await asyncio.sleep(0.01)
+        await client.post(f"/api/turns/{turn['turn_id']}/cancel")
 
 
 def test_the_front_module_names_what_the_memory_lane_hears() -> None:

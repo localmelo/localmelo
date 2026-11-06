@@ -467,6 +467,7 @@
   "browser.dialog.title": "The page asks",
   "browser.failed": "Chrome could not open a window, so the page is here.",
   "browser.finishing": "melo is finishing a step. The page is yours in a moment.",
+  "browser.forThisChat": "Working for this chat",
   "browser.formHere": "Your form stays here.",
   "browser.giveBack": "Done",
   "browser.giveBackLabel": "Done: give the page back to melo",

@@ -24,6 +24,7 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
     BRIEF_NOTE,
+    BRIEF_STEPS,
     FRONT_TEXT,
     NO_ANSWER_TEXT,
     STARTED_TEXT,
@@ -212,29 +213,10 @@ async def test_the_main_chat_answers_which_file_defines_x_with_its_search(
         assert await _echoes(console) == []
 
 
-async def test_a_quick_question_at_the_cap_answers_and_offers(tmp_path: Path) -> None:
-    found = "I could not find it in the folder's Python files."
-    async with front_console(tmp_path, *_four_steps(), answer(found)) as (
-        console,
-        client,
-        _,
-    ):
-        await _say(
-            client,
-            console,
-            "Quick question: which file defines DEFAULT_WORKSPACE?",
-        )
-        turn = await _wait_turn(client, str(console.main_id))
-        # The answer from what it found, and the work still offered as a task.
-        assert turn["answer"] == found
-        assert [e["echo"] for e in await _echoes(console)] == ["ask"]
-        assert await console.workers.tasks.list_tasks() == []
-
-
 async def test_the_hand_off_sentence_follows_the_messages_script(
     tmp_path: Path,
 ) -> None:
-    async with front_console(tmp_path, *_four_steps()) as (console, client, _):
+    async with front_console(tmp_path, answer("我来查一下。")) as (console, client, _):
         await _say(client, console, "帮我调研三款轻薄笔记本电脑")
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["answer"] == STARTED_TEXT_ZH
@@ -558,7 +540,7 @@ async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) 
         assert len(llm.requests) == 3  # two steps, then the stop answer
         entry = console.sessions.get(str(console.main_id))
         assert entry is not None and entry.agent is not None
-        assert entry.agent.options.answer_on_stop is False  # only this turn asked
+        assert entry.agent.options.max_steps > BRIEF_STEPS  # only this turn had two
         assert entry.agent.conversation()[-1].content == turn["answer"]
 
 
@@ -611,7 +593,9 @@ async def test_a_brief_question_that_keeps_searching_stops_at_two_steps(
         assert await console.workers.tasks.list_tasks() == []
 
 
-async def test_a_question_that_is_not_brief_keeps_four_steps(tmp_path: Path) -> None:
+async def test_a_question_that_is_not_brief_keeps_the_ordinary_steps(
+    tmp_path: Path,
+) -> None:
     searches = [
         tool_call("search_files", {"pattern": pattern}, call_id=f"s{n}")
         for n, pattern in enumerate(NARROWING[:3], start=1)

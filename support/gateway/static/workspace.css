@@ -2815,6 +2815,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bcard-titles { flex: 1; min-width: 0; display: grid; }
 .bcard-name { font-size: var(--text-body); font-weight: 600; line-height: 20px; }
 .bcard-state { overflow: hidden; color: var(--ink-3); font-size: var(--text-small); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.bcard-goal { overflow: hidden; color: var(--ink-2); font-size: var(--text-small); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .bcard-picture { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
 /* The page view is about 16:9 (1280 x 713), so the picture shows its whole width. */
 .bcard-canvas { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; transition: opacity 0.3s, filter 0.3s; }

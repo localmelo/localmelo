@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import never_granted
-from localmelo.support.browser import apps, sites
+from localmelo.support.browser import apps, provider_for, sites
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.desktop import MELO_APPS, DesktopHelper, DesktopWatch
 from localmelo.support.browser.driver import Act, ActResult, Dialog
@@ -112,17 +112,28 @@ def chrome_watch(screen: Screen) -> DesktopWatch:
 
 
 async def tools(
-    driver: FakeDriver, opener: Opener, desk: DesktopWatch | None = None
+    driver: FakeDriver,
+    opener: Opener,
+    desk: DesktopWatch | None = None,
+    opens_apps: bool = True,
 ) -> tuple[BrowserToolProvider, dict[str, Any]]:
-    provider = BrowserToolProvider(driver, desktop=desk, opener=opener)  # type: ignore[arg-type]
+    provider = BrowserToolProvider(
+        driver,
+        desktop=desk,
+        opener=opener,  # type: ignore[arg-type]
+        opens_apps=opens_apps,
+    )
     return provider, {t.definition.name: t for t in await provider.start()}
 
 
 async def clicked(
-    opener: Opener, asks: Asks | None, desk: DesktopWatch | None = None
+    opener: Opener,
+    asks: Asks | None,
+    desk: DesktopWatch | None = None,
+    opens_apps: bool = True,
 ) -> Any:
     driver = handing_off(world(button("Open in Chat")), {"Open in Chat": CHAT})
-    provider, found = await tools(driver, opener, desk)
+    provider, found = await tools(driver, opener, desk, opens_apps)
     try:
         with asking(asks):
             await run(found, "browser_open", url=HOME)
@@ -132,6 +143,38 @@ async def clicked(
 
 
 # ── The hand-off ──
+
+
+def test_every_question_a_browser_asks_is_known_as_one() -> None:
+    prefixes = [v for k, v in vars(sites).items() if k.endswith("PREFIX")]
+    assert len(prefixes) >= 8
+    assert all(sites.is_browser_question(f"{p}https://a.example") for p in prefixes)
+    assert not sites.is_browser_question("python_exec")
+
+
+@pytest.mark.parametrize("driver", ["safari-automation", "chrome"])
+@pytest.mark.parametrize("opens", [True, False], ids=["a chat", "a task"])
+async def test_each_browser_keeps_the_rule_it_was_made_with(
+    driver: str, opens: bool
+) -> None:
+    provider = provider_for(driver, opens_apps=opens)
+    assert provider is not None
+    opener, asks = Opener(), Asks()
+    provider._opener = opener  # type: ignore[assignment]
+    with asking(asks):
+        await provider._hand_off(CHAT, HOME)
+    assert opener.opened == ([CHAT] if opens else [])
+    assert [n for n, *_ in asks.asked if n.startswith("handoff:")] == (
+        ["handoff:chat"] if opens else []
+    )
+
+
+async def test_a_task_opens_no_other_app_and_asks_nobody_about_it() -> None:
+    opener, asks = Opener(), Asks()
+    out = await clicked(opener, asks, opens_apps=False)
+    assert "a task opens no other app" in out.text
+    assert opener.named == [] and opener.opened == []
+    assert not [name for name, *_ in asks.asked if name.startswith("handoff:")]
 
 
 async def test_a_page_that_asks_for_an_app_is_offered_to_the_person_and_opened_on_yes() -> (

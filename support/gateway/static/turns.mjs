@@ -1487,7 +1487,9 @@ export function liveFacts(turn, {plain = false} = {}) {
   }
   const progress = isObject(turn.progress) ? turn.progress : null;
   if (progress === null) {
-    if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 100}));
+    const cap = turn.maxSteps || 100;
+    // A run that goes on past its first steps has no end to count to.
+    if (turn.step > 0) parts.push(turn.step > cap ? t("turns.facts.step", {step: turn.step}) : t("turns.facts.stepOf", {step: turn.step, max: cap}));
     if (turn.attempt >= 2) parts.push(t("turns.facts.attempt", {n: turn.attempt}));
     return parts;
   }
@@ -1495,7 +1497,7 @@ export function liveFacts(turn, {plain = false} = {}) {
   const attempt = int(progress.attempt) ?? 0;
   // The run's step cap (`limits.max_steps`, else the turn's own): `step 4 of 100`, the most it may take.
   const max = int(objectOf(progress.limits).max_steps) ?? (turn.maxSteps > 0 ? turn.maxSteps : null);
-  if (step > 0) parts.push(max > 0 ? t("turns.facts.stepOf", {step, max}) : t("turns.facts.step", {step}));
+  if (step > 0) parts.push(max >= step ? t("turns.facts.stepOf", {step, max}) : t("turns.facts.step", {step}));
   if (attempt >= 2) parts.push(t("turns.facts.attempt", {n: attempt}));
   if (progress.phase) {
     const cycle = int(progress.cycle) ?? 0;

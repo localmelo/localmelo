@@ -196,7 +196,6 @@ from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     EXTEND_WHEN,
-    MAX_EXTENSIONS,
     MAX_REFLECTION_CHARS,
     PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
@@ -837,8 +836,10 @@ class _RunState:
     # last, and the steps of this run that did not count for it.
     call_refused: bool = False
     free_steps: int = 0
-    # How many times the run was given more steps for making progress (#547).
+    # How many times the run was given more steps for making progress (#547),
+    # and the calls it made so far, which progress is read against.
     extensions: int = 0
+    calls_made: set[str] = dataclasses.field(default_factory=set)
     refused_calls: set[str] = dataclasses.field(default_factory=set)
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
@@ -2660,15 +2661,43 @@ class Agent(_RecallLoop, _NotesLoop):
         )
 
     @staticmethod
-    def _progressing(fingerprints: list[tuple[str, str, str]]) -> bool:
-        """Whether the last five steps made progress: three different steps ran with no error.
+    def _new_calls(calls: Sequence[ToolCall], run: _RunState) -> bool:
+        """Whether this step made a call the run had not made before, and keep its calls.
 
-        Two steps that take turns (A, B, A, B, A) are a loop, not progress.
+        A call is its tool and arguments, without what the call returned: the
+        same call again is no next step, whatever it reads this time.
+        """
+        keys = {
+            hashlib.sha256(
+                json.dumps(
+                    [tc.tool_name, _without_words(tc.tool_name, tc.arguments)],
+                    sort_keys=True,
+                    default=str,
+                ).encode()
+            ).hexdigest()[:16]
+            for tc in calls
+        }
+        new = not keys <= run.calls_made
+        run.calls_made |= keys
+        return new
+
+    @staticmethod
+    def _progressing(
+        fingerprints: list[tuple[str, str, str]], fresh: list[bool]
+    ) -> bool:
+        """Whether the last five steps made progress: three different new steps ran with no error.
+
+        *fresh* says of each step whether it made a call the run had not made
+        before (:meth:`_new_calls`). Two steps that take turns (A, B, A, B, A)
+        are a loop, not progress, and so is one call that keeps reading a page
+        that changes, or a round of three calls that comes back.
         """
         done = {
             (name, step_h)
-            for name, step_h, error in fingerprints[-5:]
-            if name and not error
+            for (name, step_h, error), new in zip(
+                fingerprints[-5:], fresh[-5:], strict=True
+            )
+            if name and not error and new
         }
         return len(done) >= 3
 
@@ -2939,6 +2968,7 @@ class Agent(_RecallLoop, _NotesLoop):
         drops the text before ``run.finished``.
         """
         fingerprints: list[tuple[str, str, str]] = []
+        fresh: list[bool] = []
         run.attempt_calls.clear()
         run.read_streak = 0
 
@@ -2952,9 +2982,9 @@ class Agent(_RecallLoop, _NotesLoop):
             if (
                 budget - step == EXTEND_WHEN
                 and run.last_attempt
-                and run.extensions < MAX_EXTENSIONS
                 and self.options.extend_steps > 0
-                and self._progressing(fingerprints)
+                and run.extensions < self.options.max_extensions
+                and self._progressing(fingerprints, fresh)
             ):
                 # Still making progress near the end of the run's last steps:
                 # more steps now, with the last ones still there to finish.
@@ -3129,6 +3159,8 @@ class Agent(_RecallLoop, _NotesLoop):
                 budget += 1
             # Stuck detection (one fingerprint per step)
             fingerprints.append(self._make_fingerprint(calls, inflight.results))
+            if self.options.extend_steps > 0:
+                fresh.append(self._new_calls(calls, run))
             stuck = self._detect_stuck(fingerprints)
             if stuck:
                 run.events.stuck()

@@ -2,7 +2,9 @@
  * The browser card: what a chat's browser says in the conversation, and the dock that keeps it in sight.
  *
  * When melo browses, the chat shows one card for the run, in the reply like a message: the live page, what melo is
- * doing, who has the page, and one button, **Open browser**, which shows the page in the panel beside the chat. The
+ * doing, who has the page, and one button, **Open browser**, which shows the page in the panel beside the chat. A
+ * task's browser shows the same card in the chat that asked, under **Working for this chat** and the task's goal, with
+ * **Stop**, which ends that task; **Done** gives a page the person has back to that run. The
  * gateway writes the card as an `attention.browser` event (support/gateway/console/browser_cards.py): `readBrowser`
  * and `mergeBrowsers` keep the newest row of each card by its key, from `GET /turns` and from the chat's own event
  * stream. The card says only what the program wrote: a state (`working`, `waiting` for the person, `you` while they
@@ -44,9 +46,11 @@ export function readBrowser(row) {
   return {
     id,
     key,
-    // The chat that shows the card, the chat whose browser it is, and the run and browser generation that name its source.
+    // The chat that shows the card, the chat or task whose browser it is, and the run and browser generation that name its source.
     owner: String(data.owner_chat_id ?? ''),
     session: String(data.source_session_id ?? data.owner_chat_id ?? ''),
+    task: data.source_kind === 'task',
+    goal: String(data.goal ?? '').slice(0, 120),
     turn: Number(data.source_turn) || 0,
     run: String(data.run_id ?? ''),
     gen: String(data.browser_session_id ?? ''),
@@ -68,8 +72,8 @@ export function mergeBrowsers(cards, more) {
   return [...byKey.values()].sort((left, right) => left.id - right.id);
 }
 
-/** The source of a card on the stream: its chat's browser, at its run and browser generation. */
-export const sourceOf = (card) => ({session: card.session, gen: card.gen, run: card.run});
+/** The source of a card on the stream: its browser, at its run and browser generation, and for a task the chat it shows in. */
+export const sourceOf = (card) => ({session: card.session, gen: card.gen, run: card.run, ...(card.task ? {owner: card.owner} : {})});
 
 /**
  * What a card shows, from the card (the gateway's words), the stream's state (`{meta, link, picture}`, or null while
@@ -103,6 +107,11 @@ export function browserLook(card, stream = null, {retained = false} = {}) {
     fresh: !active || !picture || fresh,
     size: active ? 'full' : picture ? 'kept' : 'line',
     openable: active && !gone,
+    // A task's card names who it works for while it does; once over, its goal is what it was.
+    name: card.task ? (active ? t('browser.forThisChat') : card.goal || t('browser.title')) : t('browser.title'),
+    goal: card.task && active ? card.goal : '',
+    stoppable: active && card.task,
+    givable: card.state === 'you',
   };
 }
 
@@ -112,12 +121,13 @@ function setText(node, text) {
 }
 
 /**
- * The cards of the open chat. *streams* is the page's transport (browser-stream.mjs) and *open(card)* shows a
- * card's source in the panel. *observe(onChange)* makes a visibility watcher, `{add(node), remove(node)}`, calling
+ * The cards of the open chat. *streams* is the page's transport (browser-stream.mjs), *open(card)* shows a card's
+ * source in the panel, *stop(card)* ends the task it names and *done(card)* gives the person's page back to its run:
+ * each acts on that card's source, and answers whether it went. *observe(onChange)* makes a visibility watcher, `{add(node), remove(node)}`, calling
  * `onChange(node, visible)`; without one every card counts as visible. *dock* is the page's dock bar, `{root,
  * canvas, mark, text, jump, open}`.
  */
-export function setupBrowserCards({doc, streams, open, observe = null, dock = null}) {
+export function setupBrowserCards({doc, streams, open, stop = null, done = null, observe = null, dock = null}) {
   const {node, button} = maker(doc);
   const recs = new Map();
   let order = [];
@@ -136,6 +146,12 @@ export function setupBrowserCards({doc, streams, open, observe = null, dock = nu
     }
   }) : null;
 
+  /** One press of *act* at a time: the button waits for the card to change, and comes back if the press did nothing. */
+  async function press(rec, control, act) {
+    control.disabled = true;
+    if ((await act?.(rec.card)) === false) control.disabled = false;
+  }
+
   function make(card) {
     const root = node('section', 'bcard');
     root.setAttribute('role', 'group');
@@ -146,8 +162,10 @@ export function setupBrowserCards({doc, streams, open, observe = null, dock = nu
     const sub = node('span', 'bcard-sub');
     const line = node('span', 'bcard-state');
     line.append(word, sub);
+    const name = node('span', 'bcard-name', t('browser.title'));
+    const goal = node('span', 'bcard-goal');
     const titles = node('span', 'bcard-titles');
-    titles.append(node('span', 'bcard-name', t('browser.title')), line);
+    titles.append(name, goal, line);
     const head = node('header', 'bcard-head');
     head.append(mark, titles);
     const canvas = node('canvas', 'own-ring bcard-canvas');
@@ -161,10 +179,13 @@ export function setupBrowserCards({doc, streams, open, observe = null, dock = nu
     const now = node('p', 'bcard-now');
     now.append(node('span', 'own-dot'), nowText);
     const actions = node('div', 'bcard-actions');
-    actions.append(button('outline-button wide', t('browser.open'), () => open(rec.card)));
+    const opener = button('outline-button wide', t('browser.open'), () => open(rec.card));
+    const give = button('outline-button', t('browser.giveBack'), () => press(rec, give, done), {label: t('browser.giveBackLabel')});
+    const halt = button('quiet-button', t('common.stop'), () => press(rec, halt, stop));
+    actions.append(opener, give, halt);
     root.append(head, stage, note, now, actions);
     const rec = {
-      card, root, mark, word, sub, canvas, stage, note, now, nowText, actions,
+      card, root, mark, name, word, sub, goal, canvas, stage, note, now, nowText, actions, opener, give, halt,
       stream: null, retained: false, visible: observe ? null : true, unwatch: null,
       sink: {canvas, update: (state) => { rec.stream = state; if (state.picture) rec.retained = true; paint(rec); refreshDock(); }},
     };
@@ -179,15 +200,21 @@ export function setupBrowserCards({doc, streams, open, observe = null, dock = nu
     root.dataset.size = look.size;
     root.dataset.fresh = String(look.fresh);
     setText(rec.mark, look.glyph);
+    setText(rec.name, look.name);
     setText(rec.word, look.word);
     setText(rec.sub, look.sub ? ` · ${look.sub}` : '');
+    rec.goal.hidden = !look.goal;
+    setText(rec.goal, look.goal);
     rec.stage.hidden = !look.picture;
     rec.canvas.setAttribute('aria-label', `${t('browser.picture')}: ${rec.card.site}`);
     rec.note.hidden = !look.note;
     setText(rec.note, look.note);
     rec.now.hidden = !look.now;
     setText(rec.nowText, look.now);
-    rec.actions.hidden = !look.openable;
+    rec.opener.hidden = !look.openable;
+    rec.give.hidden = !(look.givable && done);
+    rec.halt.hidden = !(look.stoppable && stop);
+    rec.actions.hidden = rec.opener.hidden && rec.give.hidden && rec.halt.hidden;
   }
 
   /** Watch the card's source while it is on screen and its run is active, and let go otherwise. */
@@ -239,7 +266,7 @@ export function setupBrowserCards({doc, streams, open, observe = null, dock = nu
     dock.root.dataset.fresh = String(look.fresh);
     dock.canvas.hidden = !look.picture;
     setText(dock.mark, look.glyph);
-    setText(dock.text, [t('browser.title'), look.word, look.now || look.sub].filter(Boolean).join(' · '));
+    setText(dock.text, [docked.rec.card.task ? docked.rec.card.goal || look.name : look.name, look.word, look.now || look.sub].filter(Boolean).join(' · '));
     dock.open.hidden = !look.openable;
   }
   if (dock) {

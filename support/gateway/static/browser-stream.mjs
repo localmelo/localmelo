@@ -2,9 +2,9 @@
  * The transport of melo's live browser view: one WebSocket and one picture decoder for each source the page shows,
  * whoever shows it.
  *
- * A source is one chat's browser, optionally pinned to the run and the browser generation of a card
- * (`{session, gen, run, tab}`: `/api/sessions/<id>/browser/live`, support/gateway/console/routes_browser.py, refuses a
- * source that is not the chat's now). The card in the conversation, the dock above it and the Browser panel each
+ * A source is one browser, a chat's or a running task's, optionally pinned to the run and the browser generation of a
+ * card (`{session, gen, run, owner, tab}`, `owner` being the chat a task's card shows in:
+ * `/api/sessions/<id>/browser/live`, support/gateway/console/routes_browser.py, refuses a source that is not current). The card in the conversation, the dock above it and the Browser panel each
  * `watch(source, sink)` while they are visible and let go when they are not; the first watcher opens the socket and
  * the last one closes it, so a hidden view holds nothing and the gateway stops its stream. JSON `meta` messages say
  * the state of the view (`idle`, `loading`, `live`, `stale`, `closed`), the tab, its address and title, whether melo is
@@ -31,13 +31,13 @@ const words = (value) => (typeof value === 'string' ? value.slice(0, MAX_TEXT) :
 
 /**
  * The WebSocket address of a source on this page's own origin. *pin* is a tab id, or what else the source names:
- * `{tab, gen, run}` (a card's browser generation and run).
+ * `{tab, gen, run, owner}` (a card's browser generation and run, and the chat a task's card shows in).
  */
 export function socketUrl(location, session, pin = '') {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const named = typeof pin === 'string' ? {tab: pin} : pin ?? {};
   const query = new URLSearchParams();
-  for (const key of ['tab', 'gen', 'run']) if (named[key]) query.set(key, named[key]);
+  for (const key of ['tab', 'gen', 'run', 'owner']) if (named[key]) query.set(key, named[key]);
   const text = query.toString();
   return `${scheme}//${location.host}/api/sessions/${encodeURIComponent(session)}/browser/live${text ? `?${text}` : ''}`;
 }
@@ -89,7 +89,7 @@ export function parseMeta(text) {
   return meta;
 }
 
-const keyOf = (source) => [source.session, source.gen ?? '', source.run ?? '', source.tab ?? ''].join('|');
+const keyOf = (source) => [source.session, source.gen ?? '', source.run ?? '', source.owner ?? '', source.tab ?? ''].join('|');
 
 /**
  * The page's streams. *openSocket* opens a WebSocket (so a test can give it a fake) and *decode* turns a picture's

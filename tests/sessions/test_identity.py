@@ -21,9 +21,8 @@ from localmelo.support.backends import discovery
 from localmelo.support.cli.agents import AgentFactory, config_backend, url_backend
 from localmelo.support.config import CloudVendorConfig, Config, LocalBackendConfig
 from localmelo.support.gateway.console.front import (
+    CHAT_NOTE,
     FRONT_TEXT,
-    SIDE_TEXT,
-    SideAgent,
     build_front_agent,
 )
 from localmelo.support.gateway.console.registry import default_builder
@@ -175,17 +174,14 @@ def test_a_worker_acts_for_the_user_too() -> None:
     assert WORKER_GUIDE.endswith(" " + ACTING_RULE)
 
 
-def test_the_main_chat_is_told_to_do_the_work_not_to_talk_about_it() -> None:
-    assert "task_create right away; do not ask whether to" in FRONT_TEXT
-    assert "you also act on a site with them (open, click, type, submit)" in FRONT_TEXT
+def test_every_chat_is_told_to_start_the_work_not_to_talk_about_it() -> None:
+    assert "start it with task_create right away" in FRONT_TEXT
+    assert "Do not ask whether to start it" in FRONT_TEXT
+    assert "You have no browser" in FRONT_TEXT
     assert "find openings and apply" in FRONT_TEXT
     assert "is work, not advice" in FRONT_TEXT
-    assert "do not answer with a list of links" in FRONT_TEXT
-    assert "your next step is a tool call" in FRONT_TEXT
+    assert "with a list of links" in FRONT_TEXT
     assert "Never reply with only what you are about to do" in FRONT_TEXT
-    # A side chat works on the site itself too.
-    assert "you act on a site with them" in SIDE_TEXT
-    assert "is work, not advice" in SIDE_TEXT
 
 
 @pytest.mark.parametrize(
@@ -443,12 +439,7 @@ async def say_hello(surface: str, url: str, workspace: str) -> None:
         finally:
             await factory.close(agent)
     else:
-        if surface == "main":
-            agent = await build_front_agent(cfg, workspace, "s1", tools=NoTools())
-        else:
-            agent = await default_builder(
-                cfg, workspace, None, "s2", tools=[NoTools()], agent_class=SideAgent
-            )
+        agent = await build_front_agent(cfg, workspace, surface, tools=NoTools())
         try:
             await agent.run_task("hello")
         finally:
@@ -470,8 +461,7 @@ async def test_each_chats_system_prompt_has_the_language_rule_once(
     assert system.count(LANGUAGE_RULE) == 1
     assert system.count("Reply in the language") == 1
     assert "latest message" not in system.replace(LANGUAGE_RULE, "")
-    assert (FRONT_TEXT in system) is (surface == "main")
-    assert (SIDE_TEXT in system) is (surface == "side")
+    assert (FRONT_TEXT in system) is (surface != "terminal")
 
 
 @pytest.mark.parametrize("surface", ["terminal", "main", "side"])
@@ -491,7 +481,7 @@ async def test_each_chat_acts_for_the_user_and_the_chats_remind_it_next_to_the_m
     assert system.count(APPROVALS_RULE) == 1
     # The main chat and the side chats carry the reminder after the user's words.
     assert last.startswith("hello")
-    assert last.endswith(ACTING_NOTE) is (surface != "terminal")
+    assert last.endswith(CHAT_NOTE) is (surface != "terminal")
 
 
 def test_the_option_must_be_a_text() -> None:

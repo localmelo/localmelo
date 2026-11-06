@@ -606,6 +606,7 @@ class BrowserToolProvider(BaseToolProvider):
         settle_s: float | None = None,
         desktop: DesktopWatch | None = None,
         opener: apps.AppOpener | None = None,
+        opens_apps: bool = True,
         live: bool = True,
         live_fps: float = DEFAULT_FPS,
         chat_id: str | None = None,
@@ -628,6 +629,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._action = ""
         # Names and opens the app an address of another app's kind is for.
         self._opener = opener or apps.AppOpener()
+        self._opens_apps = opens_apps
         # A driver whose page boxes block the page asks melo about a confirm.
         if hasattr(driver, "on_dialog"):
             setattr(driver, "on_dialog", self._confirm)  # noqa: B010
@@ -2534,6 +2536,12 @@ class BrowserToolProvider(BaseToolProvider):
         right before melo opens it, so the app's window is told on this step.
         """
         shown = apps.shown_scheme(url)
+        if not self._opens_apps:
+            return (
+                f"The page tried to open an app ({shown}); a task opens no other "
+                "app, so nothing opened.",
+                False,
+            )
         try:
             app = await self._opener.name_for(url)
         except Exception:  # which app it is, is a hint

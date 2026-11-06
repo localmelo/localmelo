@@ -415,7 +415,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 - `GET /api/tasks` 返回 `{"tasks": [...]}`；可选的 `state` 和整数 `level` 查询参数用于筛选行。`GET /api/tasks/{task_id}` 返回 `{"task": ...}`，或 404 `not_found`。
 - 任务的 `spec` 还保存 melo 创建它时交给它的内容，每个字段只在有值时出现，请求里也不接受：`context_pack`（笔记）、`own_words`（目标里没有包含时，这个人输入的原话）、`chat_turns`（发起它的对话最近的几轮，每轮一行 `- the user: …` 加一行缩进的 `melo: …`）和 `chat_picked`（那个对话的这一轮打开、搜索到或召回的每样内容一行 `- `）。任务把它们当作资料放在请求之后读；任务页面把它们折叠在“melo 告诉任务的内容”下。
 - `budget_exhausted` 结束的任务存储为 `failed`，`wait_reason` 为 `Out of steps`，每个任务体都有 `out_of_steps`（它为 `true`）。`GET /api/tasks/{task_id}` 还会给这样的任务加上 `left`，即它的最终回答里说明还剩什么的那一句，去掉开头的标签（`Remaining:`、`What's left:`、`剩下：`；没有这样一句则为 `""`）。`POST /api/tasks/{task_id}/continue`（无请求体）让它在自己的会话里从停下的地方再运行，以控制台的话 "Continue the task from where you stopped." 作为下一轮：202 `{"task": ..., "message": "continued"}`；404 `not_found`；没有用完步数的任务返回 409 `invalid_transition`。
-- `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。`first` 会被 400 `invalid_request` 拒绝；目前不支持。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
+- `PATCH /api/tasks/{task_id}` 接受 `level`（0–5、`P0`–`P5` 或 `auto`）和/或 `state`（`pause`、`resume` 或 `stop`）。它返回 `{"task": ...}`。浏览器卡片的“停止”会带上 `source`（卡片自己的 `gen`、`run`、`owner`）：之前某次运行的卡片会被 409 `stale_source` 拒绝，什么也不会停止。`first` 会被 400 `invalid_request` 拒绝；目前不支持。暂停会把任务停放在 P5；恢复会在暂停前恢复优先级，除非提供了新的可运行 level。保存的优先级会在审计日志保留期后仍然保留。如果没有保存的快照（例如，任务创建时或被设为 P5，或者其日志已丢失的 v1 暂停），恢复会回退为计算出的 P2。`auto` 选择计算出的 P2。暂停不能与 level 同用，恢复也不能与 P5 同用。既没有 level 也没有 state 的更新，或任一无效组合，都返回 400 `invalid_request`。恢复一个未被暂停的任务返回 409 `not_paused`。停止会取消正在运行的 worker，或取消排队中的任务。已结束的任务不能再修改（409 `invalid_transition`）。
 
 暂停会关闭 worker 的围栏，并在一个已在运行的提供方或工具结束时记录待处理的暂停。在持有的计划、反思或未送达的审批处，worker 会停放，关闭其资源，并根据已持久化的证据保存一张卡片。
 
@@ -583,13 +583,13 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 
 ### 浏览器卡片
 
-melo 在一个对话里浏览时（一个浏览步骤、在浏览器里读结果的网页搜索，或用户接管的页面），这个对话会为这次运行得到一张浏览器卡片：一个不属于任何轮次的 `attention.browser` 会话事件，存在这个对话里，像它的其他卡片一样由它的事件流送出、由 `GET .../turns` 回放。每次变化都把整张卡片重新写一遍（一阵连续的变化只写一次）；一个 `card_key` 的最新一行说明它的全部。
+melo 浏览时（一个浏览步骤、在浏览器里读结果的网页搜索，或用户接管的页面），拥有这个浏览器的对话会为这次运行得到一张浏览器卡片：一个不属于任何轮次的 `attention.browser` 会话事件，存在这个对话里，像它的其他卡片一样由它的事件流送出、由 `GET .../turns` 回放。每次变化都把整张卡片重新写一遍（一阵连续的变化只写一次）；一个 `card_key` 的最新一行说明它的全部。
 
 ```json
 {"card_key": "3f9c2a7b1d4e:run-7", "owner_chat_id": "3f9c2a7b1d4e", "source_session_id": "3f9c2a7b1d4e", "source_turn": 4, "run_id": "run-7", "browser_session_id": "a1b2c3d4", "state": "working", "action": "open", "site": "example.com"}
 ```
 
-- `card_key` 是对话加运行；`browser_session_id` 是对话的浏览器工具的代次，与 `run_id` 一起就是卡片的 `gen` 和 `run` 查询参数所指明的来源。`owner_chat_id` 是显示这张卡片的对话，`source_session_id` 是浏览器所属的对话（目前相同）。
+- `card_key` 是来源加运行；`browser_session_id` 是浏览器工具的代次，与 `run_id` 一起就是卡片的 `gen` 和 `run` 查询参数所指明的来源。`owner_chat_id` 是显示这张卡片的对话，`source_session_id` 是浏览器所属的会话。任务的浏览器所属的就是任务本身，卡片还带 `source_kind: "task"` 和 `goal`（任务的标题）；`owner_chat_id` 来自任务的记录，它的对话被删除时移到主对话。`source_turn` 是来源的轮次。
 - `state` 为 `working`、`waiting`（接管卡片在等用户回答）、`you`（页面在用户手里）、`done` 或 `stopped`（用户点了停止时 `by` 为 `you`）。`action` 是 melo 这一步的种类，不是 `working` 时为空：`open`、`read`、`press`、`type`、`wait` 或 `search`。`site` 只是主机名。
 - 它不含画面、输入的内容、完整的地址或查询：只有程序写下的文字。实时画面来自 `WS .../browser/live`（带上 `gen` 和 `run`），而且只在有页面显示这张卡片时才传送。
 - 卡片从一次运行的第一个浏览步骤开始（页面开着不算浏览），随它的轮次结束；从不浏览的运行没有卡片。
@@ -768,7 +768,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
 - 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true，`place` 说明在哪里：`window`（真实的 Chrome 窗口，面板显示实时画面）或 `app`（就在浏览器面板里）；其他时候 `place` 为 null。`viewers` 是该对话已打开的实时画面数量。
 - `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
-- **同一个来源。** 这个路由、`POST .../browser/done`、`POST .../browser/window` 和下面的画面流，都向同一个解析器询问请求是针对哪个浏览器的。显示对话浏览器卡片的客户端用查询参数 `gen`（卡片的 `browser_session_id`：对话的浏览器工具的代次，`t1` 这样的标签页编号只在一个代次内有意义）和 `run`（卡片的 `run_id`）来指明它的来源。不是对话当前来源的请求会被拒绝：HTTP 路由返回 409 `stale_source`，画面流在开始前以 1008 和原因 `stale_source` 关闭；绝不会退而使用对话现在拥有的浏览器，所以旧智能体的卡片碰不到新的智能体，已结束的运行也碰不到之后的运行。两者都不带的客户端（旧客户端）照旧提供服务。没有任何路由会启动浏览器。
+- **同一个来源。** 这个路由、`POST .../browser/done`、`POST .../browser/window` 和下面的画面流，都向同一个解析器询问请求是针对哪个浏览器的。显示对话浏览器卡片的客户端用查询参数 `gen`（卡片的 `browser_session_id`：对话的浏览器工具的代次，`t1` 这样的标签页编号只在一个代次内有意义）和 `run`（卡片的 `run_id`）来指明它的来源。不是对话当前来源的请求会被拒绝：HTTP 路由返回 409 `stale_source`，画面流在开始前以 1008 和原因 `stale_source` 关闭；绝不会退而使用对话现在拥有的浏览器，所以旧智能体的卡片碰不到新的智能体，已结束的运行也碰不到之后的运行。两者都不带的客户端（旧客户端）照旧提供服务。运行中任务的浏览器只能带着 `gen`、`run` 和 `owner`（卡片的 `owner_chat_id`）访问：少一个，或任务已不属于这个对话，都同样被拒绝。没有任何路由会启动浏览器。
 
 ## WS /api/sessions/{id}/browser/live
 
