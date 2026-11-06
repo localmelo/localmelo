@@ -139,6 +139,8 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['web_search', {query: 'python asyncio TaskGroup'}, 'Searching the web for “python asyncio TaskGroup”'],
     ['web_search', {query: ` ${'w'.repeat(80)} `}, `Searching the web for “${'w'.repeat(59)}…”`],
     ['web_search', {}, 'Searching the web for …'],
+    ['list_files', {path: '.'}, 'Looking through the folder'],
+    ['list_files', {path: 'src/'}, 'Looking through src'],
     ['browser_follow', {ref: 'e1'}, 'Following a link'],
     ['browser_click', {ref: 'e1'}, 'Clicking on the page'],
     ['browser_click_point', {x: 500, y: 300}, 'Clicking on the page'],

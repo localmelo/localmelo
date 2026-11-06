@@ -17,7 +17,7 @@ export function stepWords(name, args, done = false) {
   const file = base(a.path) || t('steps.aFile');
   if (tool === 'file_read') return say('read', file);
   if (tool === 'file_write') return say('write', file);
-  if (tool === 'list_files') return say('look', base(a.path) || t('steps.theFolder'));
+  if (tool === 'list_files') return say('look', ['', '.'].includes(base(a.path)) ? t('steps.theFolder') : base(a.path));
   if (tool === 'file_edit') return say('edit', file);
   if (tool === 'git_status') return say('read', t('steps.gitState'));
   if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
