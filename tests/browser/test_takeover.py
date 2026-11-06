@@ -10,6 +10,7 @@ question or the live view's messages.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 from collections.abc import Callable
@@ -17,9 +18,17 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.support.browser import provider as provider_mod
 from localmelo.support.browser import takeover
-from localmelo.support.browser.driver import Element, PointHit, View
+from localmelo.support.browser.driver import (
+    Act,
+    ActResult,
+    Element,
+    PointHit,
+    RawPage,
+    View,
+)
 from localmelo.support.browser.live import TAKEN_FPS, Frame, LiveView
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.takeover import (
@@ -486,19 +495,10 @@ def test_a_handshake_header_that_carries_a_credential_is_logged_redacted(
             },
             "qr",
         ),
+        # A human check is melo's to press: the page alone raises no card.
         (
             {"url": HOME, "title": "Just a moment...", "text": "", "sensitive": []},
-            "captcha",
-        ),
-        (
-            {
-                "url": HOME,
-                "title": "Example",
-                "text": "",
-                "sensitive": [],
-                "frames": ["https://newassets.hcaptcha.com"],
-            },
-            "captcha",
+            "",
         ),
         (
             {
@@ -507,7 +507,7 @@ def test_a_handshake_header_that_carries_a_credential_is_logged_redacted(
                 "text": "Please verify you are human",
                 "sensitive": [],
             },
-            "captcha",
+            "",
         ),
         (
             {
@@ -1017,6 +1017,37 @@ async def test_a_sign_in_page_asks_the_person_and_melo_reads_it_again_after() ->
     await provider.close()
 
 
+class Wrote(Asks):
+    """The person wrote to the model while a take-over card waited: their message ended it."""
+
+    async def __call__(
+        self, name: str, arguments: Any, preview: str
+    ) -> ApprovalDecision:
+        self.asked.append((name, arguments, preview))
+        if name.startswith("takeover:"):
+            return ApprovalDecision(False, "", origin="words")
+        return ApprovalDecision(True, remember=True)
+
+
+async def test_a_message_that_ends_a_sign_in_card_is_no_not_now_and_the_card_comes_again() -> (
+    None
+):
+    driver = browser()
+    provider, tools, live = await started(driver)
+    wrote = Wrote()
+    with asking(wrote):
+        first = await run(tools, "browser_open", url=LOGIN)
+        assert not provider._not_now and not provider._asked_you, "nothing was kept"
+        again = await run(tools, "browser_read")
+    assert "sent a message while melo waited" in first.text
+    assert "they did not take it over" not in first.text and "<<page " in first.text
+    assert [n for n in wrote.names if n.startswith("takeover:")] == [
+        "takeover:https://example.com"
+    ] * 2, "the next read of the page offers the card again"
+    assert "sent a message while melo waited" in again.text
+    await provider.close()
+
+
 async def test_a_sign_in_page_asks_once_and_not_again_after_not_now() -> None:
     driver = browser()
     provider, tools, live = await started(driver)
@@ -1055,12 +1086,56 @@ def test_a_human_check_is_found_by_the_address_of_what_the_page_loads(
     assert is_human_check(address) is is_check
 
 
-async def test_a_human_check_is_the_persons_step_by_point_and_by_ref() -> None:
-    """melo never clicks one: the page is offered on the takeover card, and a refusal is told."""
-    inside = Element("button", "", fp="iframe|1")
-    driver = Takeable(
-        page(HOME, "Check in.", button("I am human", site=CHECK, fp="iframe|1"))
+class Solving(Takeable):
+    """A browser whose page shows an answer field filled once ``passes`` presses were made."""
+
+    def __init__(self, *pages: Any, passes: int | None = None) -> None:
+        super().__init__(*pages)
+        self.passes = passes
+
+    async def act(self, tab: str | None, act: Act) -> ActResult:
+        done = await super().act(tab, act)
+        if self.passes is not None and len(self.acts) >= self.passes:
+            self.pages[HOME] = dataclasses.replace(self.pages[HOME], solved=True)
+        return done
+
+
+def check_page() -> RawPage:
+    return page(HOME, "Check in.", button("I am human", site=CHECK, fp="iframe|1"))
+
+
+async def test_melo_presses_a_human_check_like_any_control_and_says_what_it_did() -> (
+    None
+):
+    """By point and by ref: the click's own question, no card; the step says passed or still there."""
+    inside = Element("button", "", at=-1, fp="bare")
+    driver = Solving(check_page(), passes=2)
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK)
+    provider, tools, live = await started(driver)
+    asks = Asks()
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_screenshot")
+        point = await run(tools, "browser_click_point", x=500, y=300)
+        ref = await run(tools, "browser_click", ref="e2")
+    assert len(driver.acts) == 2 and driver.acts[0].point == (500, 150)
+    assert not point.is_error and not ref.is_error
+    assert point.text.startswith(
+        "Clicked a human check box from newassets.hcaptcha.com at (500, 300) (via point)."
     )
+    assert "The check is still there." in point.text
+    assert "Clicked e2" in ref.text and "The check passed." in ref.text
+    # The ordinary click question, named: no take-over card, no "box melo cannot check" card.
+    assert [n for n in asks.names if n.startswith("browser-act:")]
+    assert not [n for n in asks.names if n.startswith(("takeover:", "browser-point:"))]
+    assert "melo never passes" not in point.text + ref.text
+    await provider.close()
+
+
+async def test_a_check_still_there_after_the_presses_is_offered_to_the_person() -> None:
+    inside = Element("button", "", at=-1, fp="bare")
+    driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
     driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK)
     provider, tools, live = await started(driver)
@@ -1070,29 +1145,34 @@ async def test_a_human_check_is_the_persons_step_by_point_and_by_ref() -> None:
         viewer = await live.watch()
         framed(driver)
         the_person(provider, live, viewer)
-        ref = await run(tools, "browser_click", ref="e1")
         await run(tools, "browser_screenshot")
-        point = await run(tools, "browser_click_point", x=500, y=300)
+        steps = [
+            await run(tools, "browser_click_point", x=500, y=300)
+            for _ in range(takeover.CHECK_PRESSES)
+        ]
+    for early in steps[:-1]:
+        assert "The check is still there." in early.text
+    last = steps[-1].text
+    assert f"The check is still there after {takeover.CHECK_PRESSES} presses." in last
+    assert "The user had tab t1 for 1 s and gave it back to melo." in last
     cards = [a for a in asks.asked if a[0].startswith("takeover:")]
     assert [(n, a["need"]) for n, a, _ in cards] == [
         ("takeover:https://example.com", "captcha")
-    ] * 2
-    assert not [
-        n for n in asks.names if n.startswith(("browser-point:", "browser-act:"))
-    ]
-    for out in (point, ref):
-        assert "melo never passes one" in out.text
-        assert "The user had tab t1 for 1 s and gave it back to melo." in out.text
-    assert driver.acts == [], "melo clicked nothing"
+    ], "one card, after the last press, never before"
+    assert len(driver.acts) == takeover.CHECK_PRESSES
     await provider.close()
-    # Not taken: the step says so, and still clicks nothing.
-    driver = Takeable(page(HOME, "Check in.", button("I am human", site=CHECK)))
-    provider, tools, live = await started(driver)
+    # With nobody to ask, the step still says it, and carries on.
+    driver = Solving(check_page())
+    driver.shot_view = View("", "d1", 1000.0, 500.0)
+    driver.hits[(500, 150)] = PointHit("frame", inside, site=CHECK)
+    provider, tools, _ = await started(driver)
     with asking(Asks(deny=("takeover:",))):
         await run(tools, "browser_open", url=HOME)
-        out = await run(tools, "browser_click", ref="e1")
-    assert out.is_error and "they did not take the page over" in out.text
-    assert driver.acts == []
+        await run(tools, "browser_screenshot")
+        for _ in range(takeover.CHECK_PRESSES):
+            out = await run(tools, "browser_click_point", x=500, y=300)
+    assert not out.is_error and "presses" in out.text
+    assert "they did not take it over" in out.text
     await provider.close()
 
 

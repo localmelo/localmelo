@@ -97,7 +97,7 @@ async def test_a_point_on_a_drawing_is_clicked_and_looked_at_again() -> None:
 async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused() -> (
     None
 ):
-    driver = point_world(PointHit("none", text="Verifying..."))
+    driver = point_world(PointHit("none", tag="p", words=True))
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     first = await run(tools, "browser_click_point", x=500, y=300)
@@ -106,10 +106,7 @@ async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused()
     out = await run(tools, "browser_click_point", x=500, y=300)
     assert out.is_error and not driver.acts
     # What is there is told; a point on the 0-1000 scale is never doubted.
-    assert (
-        'nothing to click at that point (what is there is the text "Verifying...")'
-        in out.text
-    )
+    assert "nothing to click at that point (what is there is text (p))" in out.text
     assert "pixel" not in out.text
     bare = point_world(PointHit("none"))
     tools = await tools_of(bare)

@@ -17,6 +17,7 @@ import asyncio
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -27,10 +28,11 @@ from localmelo.support.browser.desktop import Front
 from localmelo.support.browser.driver import Element
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.sessions.approvals import RememberingPolicy
-from localmelo.tests.browser.fakes import button
+from localmelo.tests.browser.fakes import button, page
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_late_windows import SSO, opened, ref_of, window_calls
 from localmelo.tests.browser.test_other_windows import SIGN_IN, Screen, run, watch
+from localmelo.tests.browser.test_provider import Wanders
 
 CHAT = "window-read:com.example.chat"
 SECOND_CHAT = {**SIGN_IN, "window_id": 9, "title": "Pick an account", "z_index": 14}
@@ -449,14 +451,74 @@ async def test_a_card_about_a_window_that_closed_is_withdrawn_and_tells_nothing(
             screen.set(
                 windows=[w for w in windows if w["window_id"] != SIGN_IN["window_id"]]
             )
-            for _ in range(2):  # the next look at the screen (the sampler may take one)
+            for _ in range(
+                6
+            ):  # the next looks at the screen (the sampler may take some)
                 screen.pacer._go.put_nowait(None)
-            await settled(provider)  # gone: the card ended, long before its limit
+            await settled(
+                provider
+            )  # gone twice in a row: the card ended, long before its limit
             read = await run(tools, "browser_read")
     finally:
         await provider.close()
     assert person.withdrawn == [person.cards[0].request_id]
     hidden(person, screen, provider, told(click, read))
+
+
+async def test_one_listing_that_missed_the_window_or_failed_leaves_its_card_up(
+    screen: Screen,
+) -> None:
+    window: Any = SimpleNamespace(pid=1, id=1)
+    # A listing that fails, in any way, says nothing of the window.
+    desk = watch(screen, strict=True)
+    helper = await desk._helper_ready()
+    assert helper is not None
+    calls: list[int] = []
+
+    async def broken(**_: Any) -> list[Any]:
+        calls.append(1)
+        raise ValueError("a malformed row")
+
+    helper.windows = broken  # type: ignore[method-assign]
+    assert await desk.window_gone(window) is False and calls == [1]
+    # Two listings in a row that miss it end the card; one empty listing, not.
+    provider = BrowserToolProvider(world())
+
+    class Looks:
+        def __init__(self, *answers: bool) -> None:
+            self.answers = list(answers)
+
+        async def window_gone(self, _: Any) -> bool:
+            return self.answers.pop(0)
+
+        async def pace(self, _: float) -> None:
+            await asyncio.sleep(0)
+
+    async def card() -> bool:
+        await asyncio.Event().wait()
+        return True
+
+    looks = Looks(True, False, True, True)
+    assert await provider._until_gone(looks, window, card()) is False  # type: ignore[arg-type]
+    assert looks.answers == [], "the lone empty listing did not end it"
+    await provider.close()
+
+
+async def test_a_watched_wait_follows_the_moves_of_the_whole_wait_not_of_each_second(
+    screen: Screen,
+) -> None:
+    driver = Wanders(page(HOME, "Hi", title="Home"))
+    provider, tools = await opened(driver, watch(screen))
+    try:
+        with asking(Asks()):
+            async with asyncio.timeout(10):
+                out = await run(
+                    tools, "browser_wait", until="text", text="x", seconds=30
+                )
+    finally:
+        await provider.close()
+    assert len([c for c in driver.calls if c[0] == "wait"]) == provider_mod.MAX_MOVES
+    assert out.text.startswith("Stopped waiting early:")
 
 
 async def test_an_app_the_person_did_not_allow_is_not_named_when_it_comes_back_to_the_front(

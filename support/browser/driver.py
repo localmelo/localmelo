@@ -120,6 +120,10 @@ class RawPage:
     of the visible frames from another site whose insides melo cannot read or
     act in (a sign-in box from another site, say): the model is told they are
     there and that a picture and a click at a point can still reach them.
+    ``aims`` say where the boxes of a human check are: (address, x, y) on the
+    0-1000 scale of the picture of the view, at the checkbox's spot as the page
+    shows it (beyond that scale when it is out of view). ``solved`` is set when
+    an answer field of a check holds something: the check was passed.
     """
 
     url: str
@@ -132,6 +136,8 @@ class RawPage:
     doc: str = ""
     frames: tuple[str, ...] = ()
     unreached: tuple[str, ...] = ()
+    aims: tuple[tuple[str, int, int], ...] = ()
+    solved: bool = False
 
 
 @dataclass(frozen=True)
@@ -181,10 +187,11 @@ class PointHit:
     nothing melo can name. ``surface`` says what it is: ``control``; ``canvas``
     (a drawing, picture or video that takes clicks itself); ``frame`` (a box
     from another site, ``site`` its origin, whose inside melo cannot see); or
-    ``none`` (plain text or background), with the ``text`` the page holds right
-    there when it is short. A frame the page script cannot see (one in a closed
-    shadow root, known by what the page loaded) is a ``frame`` too, with no
-    ``element`` but its ``site``. ``consent`` is set when the control's
+    ``none`` (plain text or background), with the ``tag`` of the element there
+    (a standard tag, else ``element``) and whether it holds ``words``, never the
+    words themselves. A frame the page script cannot see (one in a closed
+    shadow root, known by what the page loaded) is a ``frame`` too, its
+    ``element`` the empty box that holds it. ``consent`` is set when the control's
     words agree to terms, consent or a sign-in with another account, which
     melo asks the person about. ``at`` is where to click instead (page pixels),
     when the point was on a label and its field can take the click itself.
@@ -195,7 +202,8 @@ class PointHit:
     site: str = ""
     consent: bool = False
     at: tuple[float, float] | None = None
-    text: str = ""
+    tag: str = ""
+    words: bool = False
 
 
 @dataclass(frozen=True)

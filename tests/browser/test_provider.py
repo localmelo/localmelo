@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import json
+import shutil
+import subprocess
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -17,8 +20,10 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
+from localmelo.support.browser import provider as provider_mod
 from localmelo.support.browser import sites
 from localmelo.support.browser.driver import BrowserError, Element, PageMovedError
+from localmelo.support.browser.pagescript import wait_probe
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
 from localmelo.support.browser.sites import origin_of
 from localmelo.tests.browser.fakes import FakeDriver, link, page
@@ -390,6 +395,79 @@ async def test_a_wait_for_text_that_never_shows_names_the_boxes_it_cannot_read()
     await run(tools, "browser_open", url=HOME)
     bare = await run(tools, "browser_wait", until="text", text="never", seconds=1)
     assert bare.text == "Timed out after 1 s: the text did not appear."
+
+
+async def test_the_boxes_note_reads_no_page_nobody_admitted() -> None:
+    """A page that is not the approved site when the note is made tells none of its boxes."""
+    driver = world()
+    boxes = ("https://accounts.example.org/login",)
+    driver.pages[HOME] = dataclasses.replace(
+        driver.pages[HOME], frames=boxes, unreached=boxes
+    )
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    elsewhere = dataclasses.replace(driver.pages[HOME], url=OTHER)
+    original = driver.page
+
+    async def other_page(tab: str | None) -> Any:
+        await original(tab)
+        return elsewhere
+
+    driver.page = other_page  # type: ignore[method-assign]
+    out = await run(tools, "browser_wait", until="text", text="never", seconds=1)
+    assert out.text == "Timed out after 1 s: the text did not appear."
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+@pytest.mark.parametrize(
+    ("page_origin", "said"),
+    [
+        ("https://example.com", "true"),
+        ("https://example.com.", "true"),  # a final dot is the same site
+        ("https://example.com.:8443", "moved"),  # another port is another site
+        ("https://other.org", "moved"),
+    ],
+)
+def test_a_wait_probe_takes_a_final_dot_of_the_host_for_the_same_site(
+    page_origin: str, said: str
+) -> None:
+    probe = wait_probe("load", "", "https://example.com")
+    script = (
+        f"var location = {{origin: {json.dumps(page_origin)}, protocol: 'https:'}};"
+        "var document = {readyState: 'complete', body: {}};"
+        f"console.log(String({probe}));"
+    )
+    ran = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, timeout=30
+    )
+    assert ran.stdout.strip() == said, ran.stderr
+
+
+class Wanders(FakeDriver):
+    """A page whose tab moves to another site at every wait."""
+
+    async def wait(
+        self,
+        tab: str | None,
+        until: str,
+        text: str,
+        seconds: float,
+        *,
+        origin: str = "",
+    ) -> bool:
+        self.calls.append(("wait", origin))
+        raise PageMovedError("The page moved to another site during the wait.")
+
+
+async def test_a_wait_follows_at_most_a_few_moves_and_says_it_stopped_early() -> None:
+    driver = Wanders(page(HOME, "Hi", title="Home"))
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_wait", until="text", text="x", seconds=30)
+    waits = [c for c in driver.calls if c[0] == "wait"]
+    assert len(waits) == provider_mod.MAX_MOVES
+    assert out.text.startswith("Stopped waiting early:")
+    assert "Timed out" not in out.text
 
 
 class Navigates(FakeDriver):

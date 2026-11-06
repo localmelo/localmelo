@@ -58,7 +58,9 @@ with OK; a ``confirm`` during an act is put to the person through
 :attr:`ChromeBackgroundDriver.on_dialog` and is otherwise answered Cancel; a
 ``prompt`` is always answered Cancel (melo types only where it was asked to);
 a page that asks before it is left is left, since the step that leaves it
-was allowed. The act's result lists them (``ActResult.dialogs``).
+was allowed. The act's result lists them (``ActResult.dialogs``), and so does
+the next act's for a box, or a request to open an app, that came after the one
+before had returned: neither is dropped unsaid.
 """
 
 from __future__ import annotations
@@ -141,6 +143,8 @@ STARTUP_S = 20.0
 CALL_S = 60.0
 CLOSE_S = 5.0
 DIALOG_S = 5.0
+# Boxes a page put up that no act has told yet (one that came after an act returned is told by the next one).
+MAX_LATE_DIALOGS = 5
 # The most addresses of other apps' kinds one tab keeps until an act takes them.
 MAX_HANDOFFS = 5
 # The most one streamed picture may hold, and how long starting or stopping a stream may take.
@@ -982,7 +986,9 @@ class ChromeBackgroundDriver(PageScriptActs):
                     "Page.handleJavaScriptDialog", {"accept": accept}, session
                 )
         target = self._targets.get(session, "")
-        self._said.setdefault(target, []).append(Dialog(kind, message, accept))
+        said = self._said.setdefault(target, [])
+        said.append(Dialog(kind, message, accept))
+        del said[:-MAX_LATE_DIALOGS]
 
     async def _attach(self, target: str) -> str:
         """The session melo drives *target* in, attached (and set up) on first use."""
@@ -1477,8 +1483,6 @@ class ChromeBackgroundDriver(PageScriptActs):
         session = await self._focus(tab)
         browser = self._live()
         target = self._targets[session]
-        browser.handoffs.pop(session, None)
-        self._said.pop(target, None)
         if act.element.frame.startswith("x"):
             raise BrowserError(STALE["reach"])
         self._acting.add(session)

@@ -27,8 +27,14 @@ import pytest
 
 from localmelo.support.browser import chrome
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
-from localmelo.support.browser.driver import Act, Dialog, Element, RawPage
-from localmelo.support.browser.takeover import needs_person
+from localmelo.support.browser.driver import (
+    Act,
+    Dialog,
+    Element,
+    RawPage,
+    StaleElementError,
+)
+from localmelo.support.browser.takeover import is_human_check
 from localmelo.tests.fixtures.http_stub import HttpStub
 
 BINARY = os.path.join(chrome.CHROME_APPS[0], chrome.APP_BINARY)
@@ -48,6 +54,7 @@ PAGE = """<!doctype html><meta charset="utf-8"><title>melo fixture</title>
 </form>
 <button id="ask" onclick="said.textContent = confirm('Delete the draft?') ? 'Deleted' : 'Kept'">Delete</button>
 <button id="hi" onclick="alert('Hi there'); said.textContent = 'Greeted'">Hello</button>
+<button id="later" onclick="setTimeout(function () { said.textContent = confirm('Late question?') ? 'Late yes' : 'Late no' }, 3500)">Later</button>
 <a id="app" href="melotest370://sign-in?token=abc">Open the app</a>
 <a id="pop" href="/news" target="_blank" rel="noopener">News in a new tab</a>
 <p>Probe: <span id="probe"></span></p>
@@ -99,19 +106,31 @@ document.addEventListener('mousemove', function () {{
 </script>""",
 }
 NEWS = "<!doctype html><title>News</title><body><p>Today's news.</p></body>"
-# A box from a check provider's address inside a closed shadow root: the page cannot
-# see it, and elementFromPoint answers its bare host. ``captcha.localhost`` is a
-# loopback address whose first label is the name a check provider uses.
+# A box from some address inside a closed shadow root: the page cannot see it, and
+# elementFromPoint answers its bare host. ``captcha.localhost`` is a loopback address
+# whose first label is the name a check provider uses; ``plain.localhost`` is not one. A
+# second empty box (``spacer``, absent where the host is hidden) is not where the box is
+# drawn, and the page's answer field
+# fills when the box's own button is pressed with a trusted click.
 SHADOWED = """<!doctype html><meta charset="utf-8"><title>Verify</title>
 <body style="margin:0"><p id="words">Verifying...</p>
 <div id="host" style="%(host)s"></div>
+%(spacer)s
+<textarea id="answer" name="cf-turnstile-response" style="display:none"></textarea>
 <script>
 const root = document.getElementById('host').attachShadow({mode: 'closed'});
 const box = document.createElement('iframe');
-box.src = 'http://captcha.localhost:%(port)s/news';
+box.src = 'http://%(frame)s:%(port)s/inner';
 box.style.cssText = 'width:300px;height:65px;border:0';
 root.appendChild(box);
+window.addEventListener('message', (e) => {
+  if (e.data === 'pressed') document.getElementById('answer').value = 'a-token';
+});
 </script></body>"""
+# What the box shows: a button that answers a trusted click only.
+INNER = """<!doctype html><title>Box</title><body style="margin:0">
+<button style="width:300px;height:65px" onclick="if (event.isTrusted) parent.postMessage('pressed', '*')">I am human</button>
+</body>"""
 
 
 class Site(BaseHTTPRequestHandler):
@@ -128,12 +147,30 @@ class Site(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path in COVERED:
             self._send(COVERED[self.path])
-        elif self.path == "/shadowed":
+        elif self.path in ("/shadowed", "/invisible", "/other-box"):
             port = cast(tuple[str, int], self.server.server_address)[1]
-            self._send(SHADOWED % {"port": port, "host": "width:300px;height:65px"})
-        elif self.path == "/invisible":  # the same box, in a host that is not shown
-            port = cast(tuple[str, int], self.server.server_address)[1]
-            self._send(SHADOWED % {"port": port, "host": "display:none"})
+            shown = "width:300px;height:65px"
+            self._send(
+                SHADOWED
+                % {
+                    "port": port,
+                    # The same box, in a host that is not shown, or from an address that no
+                    # check provider uses.
+                    "host": "display:none" if self.path == "/invisible" else shown,
+                    "spacer": (
+                        ""
+                        if self.path == "/invisible"
+                        else '<div id="spacer" style="width:300px;height:90px"></div>'
+                    ),
+                    "frame": (
+                        "plain.localhost"
+                        if self.path == "/other-box"
+                        else "captcha.localhost"
+                    ),
+                }
+            )
+        elif self.path == "/inner":
+            self._send(INNER)
         else:
             self._send(NEWS if self.path.startswith("/news") else PAGE)
 
@@ -293,6 +330,23 @@ async def test_a_confirm_goes_to_the_person_and_an_alert_is_closed(
     assert "Greeted" in await text_of(driver)
 
 
+async def test_a_box_that_comes_after_an_act_returned_is_told_by_the_next_one(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    await driver.open(base, new_tab=True)
+    raw = await driver.page(None)
+    first = await driver.act(
+        None, Act("click", raw.url, named(raw, "Later"), doc=raw.doc)
+    )
+    assert first.dialogs == (), "the page asks its question long after the act's look"
+    await asyncio.sleep(4)
+    raw = await driver.page(None)  # the question is answered (Cancel: no act is open)
+    second = await driver.act(
+        None, Act("click", raw.url, named(raw, "Check in"), doc=raw.doc)
+    )
+    assert second.dialogs == (Dialog("confirm", "Late question?", False),)
+
+
 async def test_a_tab_the_page_opens_is_melos_and_tabs_close(
     driver: ChromeBackgroundDriver, base: str
 ) -> None:
@@ -384,44 +438,74 @@ async def test_holds_is_one_look_at_a_condition(
     assert await driver.holds(None, "text", "Nowhere") is False
 
 
-async def test_a_check_box_inside_a_closed_shadow_root_is_a_frame_and_plain_text_is_not(
+async def listed_check(driver: ChromeBackgroundDriver) -> RawPage:
+    """The read of the page once it lists a human check (the page has begun to load the box)."""
+    async with asyncio.timeout(10):
+        while not (raw := await driver.page(None)).aims:
+            await asyncio.sleep(0.1)
+    return raw
+
+
+async def test_a_check_box_inside_a_closed_shadow_root_is_found_aimed_at_and_pressed(
     driver: ChromeBackgroundDriver, base: str
 ) -> None:
     await driver.open(base + "shadowed", new_tab=True)
     shot = await driver.screenshot(None)
     assert shot.view is not None
-
-    async def middle(name: str) -> tuple[float, float]:
-        found = await driver._read(
-            f"(function(){{var r=document.getElementById('{name}')"
-            ".getBoundingClientRect();return [r.left+5,r.top+5]})()"
-        )
-        return float(found[0]), float(found[1])
-
-    async with asyncio.timeout(10):
-        while True:  # the box is listed once the page has begun to load it
-            host = await driver.hit(None, shot.view, *await middle("host"))
-            if host.surface != "none":
-                break
-            await asyncio.sleep(0.1)
-    # The page cannot see into the root, yet the spot reads as the box it is.
-    assert host.surface == "frame" and host.site.startswith("http://captcha.localhost")
-    # Plain text is nothing, and its words are told.
-    words = await driver.hit(None, shot.view, *await middle("words"))
-    assert (words.surface, words.text) == ("none", "Verifying...")
-    # The read lists it too, so the page is offered to the person as a human check.
-    raw = await driver.page(None)
-    assert [b for b in raw.unreached if "captcha.localhost" in b]
-    assert (
-        needs_person(
-            url=raw.url,
-            title=raw.title,
-            text=raw.text,
-            sensitive=[],
-            frames=raw.unreached,
-        )
-        == "captcha"
+    view = shot.view
+    raw = await listed_check(driver)
+    assert not raw.solved and [b for b in raw.unreached if "captcha.localhost" in b]
+    # The read says where the checkbox is, on the 0-1000 scale of the picture.
+    [(address, x, y)] = raw.aims
+    assert "captcha.localhost" in address
+    cx, cy = x / 1000 * view.width, y / 1000 * view.height
+    assert 0 < cx < 60 and 0 < cy < 130, "at the box's checkbox, not elsewhere"
+    hit = await driver.hit(None, view, cx, cy)
+    assert hit.surface == "frame" and is_human_check(hit.site) and hit.element
+    # Another empty box of the page is not where the box is drawn: nothing to press.
+    other = await driver._read(
+        "(function(){var r=document.getElementById('spacer').getBoundingClientRect();"
+        "return [r.left+5,r.top+5]})()"
     )
+    spacer = await driver.hit(None, view, float(other[0]), float(other[1]))
+    assert (spacer.surface, spacer.tag, spacer.words) == ("none", "div", False)
+    # Plain text is nothing, and only its kind is told, never its words.
+    text = await driver._read(
+        "(function(){var r=document.getElementById('words').getBoundingClientRect();"
+        "return [r.left+5,r.top+5]})()"
+    )
+    words = await driver.hit(None, view, float(text[0]), float(text[1]))
+    assert (words.surface, words.tag, words.words) == ("none", "p", True)
+    assert not hasattr(words, "text")
+    # Pressing is an ordinary trusted click: the box's own page saw it, and the answer is in.
+    done = await driver.act(
+        None,
+        Act(
+            "click",
+            view.url,
+            hit.element,
+            doc=view.doc,
+            point=(cx, cy),
+            view=view,
+        ),
+    )
+    assert done.via == "point"
+    async with asyncio.timeout(10):
+        while not (await driver.page(None)).solved:
+            await asyncio.sleep(0.1)
+    # A point that moved off the box is stale, never a click elsewhere.
+    with pytest.raises(StaleElementError):
+        await driver.act(
+            None,
+            Act(
+                "click",
+                view.url,
+                hit.element,
+                doc=view.doc,
+                point=(cx, cy + 200),
+                view=view,
+            ),
+        )
     # A box nobody can see is nothing to offer: no bare box holds it.
     await driver.open(base + "invisible", new_tab=True)
     async with asyncio.timeout(10):  # the page has loaded the frame by now
@@ -431,3 +515,26 @@ async def test_a_check_box_inside_a_closed_shadow_root_is_a_frame_and_plain_text
         ):
             await asyncio.sleep(0.1)
     assert (await driver.page(None)).unreached == ()
+
+
+async def test_a_box_in_a_closed_shadow_root_from_another_address_is_a_box_melo_cannot_check(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    await driver.open(base + "other-box", new_tab=True)
+    shot = await driver.screenshot(None)
+    assert shot.view is not None
+    point = await driver._read(
+        "(function(){var r=document.getElementById('host').getBoundingClientRect();"
+        "return [r.left+5,r.top+5]})()"
+    )
+    async with asyncio.timeout(10):
+        while True:  # the box is listed once the page has begun to load it
+            hit = await driver.hit(None, shot.view, float(point[0]), float(point[1]))
+            if hit.surface != "none":
+                break
+            await asyncio.sleep(0.1)
+    # Not a check: the point follows the card for a box melo cannot check.
+    assert hit.surface == "frame" and not is_human_check(hit.site)
+    assert hit.site.startswith("http://plain.localhost")
+    assert hit.element is not None and not hit.element.label
+    assert not (await driver.page(None)).aims

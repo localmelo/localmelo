@@ -1248,13 +1248,15 @@ class DesktopWatch:
         return Seen(self._adopt(window), window.app, window.title, names)
 
     async def window_gone(self, window: AppWindow) -> bool:
-        """Whether *window* is no longer listed (closed); False when the helper cannot say."""
+        """Whether *window* is no longer listed (closed); False when the helper cannot say, whatever the way it failed."""
         helper = await self._helper_ready()
         if helper is None:
             return False
         try:
             listed = await helper.windows(pid=window.pid)
-        except DesktopError:
+        except (
+            Exception
+        ):  # noqa: BLE001 - a listing that failed says nothing of the window
             return False
         return window.id not in {w.id for w in listed}
 

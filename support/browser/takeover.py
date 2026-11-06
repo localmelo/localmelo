@@ -612,24 +612,11 @@ _QR_WORDS = re.compile(
     re.IGNORECASE,
 )
 _SCAN_WORDS = re.compile(r"scan|扫|掃|スキャン|스캔|読み取", re.IGNORECASE)
-# A check the visitor must pass in person, in its own words (a page that only
-# says it is protected by one is not asking anything yet).
-_HUMAN_WORDS = re.compile(
-    r"i'?m not a robot|verify (that )?you are (a )?human|are you a robot|"
-    r"human verification|confirm you are human|press (and|&) hold|"
-    r"人机验证|人機驗證|我不是机器人|我不是機器人|拖动滑块|向右滑动|安全验证|"
-    r"ロボットではありません",
-    re.IGNORECASE,
-)
-_HUMAN_TITLES = re.compile(
-    r"^(just a moment|attention required|one more step|verify you are human|"
-    r"security check|are you a robot|请稍候|安全验证)",
-    re.IGNORECASE,
-)
 # The addresses a human check loads its box from: a host here, or under one of
-# these, is a box the visitor must pass in person. A box is told by what the
-# page loads, never by the words around it. Any host with a label that starts
-# with "captcha" counts too.
+# these, is a box that checks the visitor is human. melo presses it like any
+# other control, as the person would. A box is told by what the page loads,
+# never by the words around it. Any host with a label that starts with
+# "captcha" counts too.
 CHECK_HOSTS: Final = (
     "recaptcha.net",
     "hcaptcha.com",
@@ -639,6 +626,8 @@ CHECK_HOSTS: Final = (
     "funcaptcha.com",
     "captcha-delivery.com",
 )
+# How many times melo presses inside a check that stays there before it is the person's to pass.
+CHECK_PRESSES: Final = 8
 # A page this small that holds a password field is a sign-in form, whatever its address says.
 SMALL_PAGE: Final = 30
 
@@ -649,18 +638,16 @@ def needs_person(
     title: str,
     text: str,
     sensitive: Iterable[str],
-    frames: Iterable[str] = (),
     elements: int = 0,
 ) -> Need:
     """What on a page needs the person, from one reading of it; ``""`` when nothing does.
 
     *sensitive* are the kinds of the secret fields on it (``password``,
-    ``code``, ``card``), *frames* the origins of boxes from other sites melo
-    cannot read, *text* the page's words and *elements* how many elements the
-    reading numbered. In order:
+    ``code``, ``card``), *text* the page's words and *elements* how many
+    elements the reading numbered. A human check is not here: melo presses it
+    itself, and only a check that stays after :data:`CHECK_PRESSES` presses is
+    offered to the person (``captcha``, by the provider). In order:
 
-    * ``captcha``: a box of a known human check (:data:`CHECK_HOSTS`), a page titled as one, or words
-      that ask the visitor to prove they are human;
     * ``qr``: a QR code to scan, on a page that signs in;
     * ``sign-in``: a password field on a page whose address or title says it
       signs in, or on a page with few elements (a sign-in form); a password
@@ -669,10 +656,6 @@ def needs_person(
     """
     kinds = set(sensitive)
     words = f"{title}\n{text}"
-    if any(is_human_check(origin) for origin in frames) or (
-        _HUMAN_TITLES.match(title.strip()) or _HUMAN_WORDS.search(words)
-    ):
-        return "captcha"
     if (
         _QR_WORDS.search(words)
         and _SCAN_WORDS.search(words)

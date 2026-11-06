@@ -220,6 +220,13 @@ var P = (function () {
     // And the list of what the page loaded: only the boxes in a closed shadow root need it.
     var res = w.Performance ? w.Performance.prototype.getEntriesByType : null;
     fresh.res = typeof res === "function" ? res : null;
+    // And whether a field holds anything (never what): a check's answer field says it was passed.
+    var vget = function (C) {
+      var d = C ? Object.getOwnPropertyDescriptor(C.prototype, "value") : null;
+      return d && typeof d.get === "function" ? d.get : null;
+    };
+    fresh.vi = vget(w.HTMLInputElement);
+    fresh.vt = vget(w.HTMLTextAreaElement);
     return fresh;
   } catch (e) {
     return null;  // never the page's own: nothing is listed or done without the fresh ones
@@ -492,6 +499,18 @@ var bareBox = function (n) {
   var r = P.rect.call(n);
   return r.width >= 40 && r.height >= 40 && P.gcs(n).visibility !== "hidden";
 };
+// Of the bare boxes of the page, the one nearest the size a check's box has (about 300 by
+// 70): where a box in a closed shadow root is most likely drawn. A closed root cannot be
+// looked into, so this is a guess, and a point counts as on that box only when it is on this one.
+var checkBox = function () {
+  var list = P.qsa.call(document, "div,span,section,aside,p"), best = null;
+  for (var i = 0; i < list.length && i < 600; i++) {
+    if (!bareBox(list[i])) continue;
+    var r = P.rect.call(list[i]), off = Math.abs(r.width - 300) + Math.abs(r.height - 70);
+    if (!best || off < best.off) best = {off: off, node: list[i], r: r};
+  }
+  return best;
+};
 // What stands over a point: where it sits (a sticky or fixed bar, a dialog, a frame) and
 // what it is, in words for the model: {what: "a sticky header", detail: "h1"}. Never a word
 // the page wrote: a bar is told by its place in the view, an element by its tag when that is
@@ -556,7 +575,7 @@ PAGE_JS = (
     r"""(function () {"""
     + COMMON_JS
     + r"""
-  var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: [], unreached: []};
+  var out = {url: location.href, doc: docId(), title: document.title || "", text: "", elements: [], skipped: 0, frames: [], unreached: [], spots: []};
   var main = document.querySelector("main,[role=main],article");
   var root = main && (main.innerText || "").length > 300 ? main : document.body;
   out.text = root ? String(root.innerText || "").slice(0, 200000) : "";
@@ -581,19 +600,27 @@ PAGE_JS = (
         if (!path || path.split(".").length < 2) docs.push([sub, (path ? path + "." : "") + k]);
       } else if (/^https?:/i.test(u)) {
         var fr = P.rect.call(f), fs = P.gcs(f);
-        if (fr.width >= 20 && fr.height >= 20 && fs.visibility !== "hidden" && fs.display !== "none") out.unreached.push(u.slice(0, 500));
+        if (fr.width >= 20 && fr.height >= 20 && fs.visibility !== "hidden" && fs.display !== "none") {
+          out.unreached.push(u.slice(0, 500));
+          if (!q) out.spots.push([u.slice(0, 500), fr.left, fr.top, fr.width, fr.height]);
+        }
       }
     }
   }
   // A box a third party draws in a closed shadow root is in no document melo can list: what
   // the page loaded (its frames no iframe element holds) is reported where a bare box could
   // hold one, and the caller keeps the ones a human check loads.
-  var hid = hiddenFrames();
-  if (hid.length) {
-    var bare = P.qsa.call(document, "div,span,section,aside,p");
-    for (var bi = 0; bi < bare.length && bi < 600; bi++) {
-      if (bareBox(bare[bi])) { out.hidden = hid; break; }
-    }
+  var hid = hiddenFrames(), best = hid.length ? checkBox() : null;
+  if (best) {
+    out.hidden = hid;
+    out.spots.push(["", best.r.left, best.r.top, best.r.width, best.r.height]);
+  }
+  out.view = [window.innerWidth || 0, window.innerHeight || 0];
+  // Whether a check's answer field holds something: the check was passed.
+  var answers = P.qsa.call(document, "textarea[name$='-response'],input[name$='-response'],input[name='fc-token'],input[name='geetest_validate']");
+  for (var ai = 0; ai < answers.length && ai < 10; ai++) {
+    var af = answers[ai], got = /^textarea$/i.test(af.tagName) ? P.vt : P.vi;
+    if (got && attr(af, "type").toLowerCase() !== "password" && String(got.call(af) || "").length) { out.solved = true; break; }
   }
   for (var di = 0; di < docs.length; di++) {
     var D = docs[di][0], nodes = P.qsa.call(D, SEL), counts = {};
@@ -684,15 +711,20 @@ def act_script(spec: dict[str, Any]) -> str:
       if (before) { var key = before.kind + "|" + before.label; counts[key] = (counts[key] || 0) + 1; }
     }
   }
-  var hit = null;
+  var hit = null, tail = "";
   if (pt) {
     hit = hitAt(pt.x, pt.y);
-    if (spec.at >= 0 ? hit.node !== n : !hit.node || fingerprint(hit.node, 0) + frameMark(hit.node) !== spec.fp) return say({ok: false, stale: "point"});
+    if (spec.at < 0 && !hit.node && hit.raw && hit.raw.nodeType === 1 && /\|bare$/.test(spec.fp) && bareBox(hit.raw)) {
+      // A box in a closed shadow root: the bare box that most likely holds it, a frame like any other.
+      var held = checkBox();
+      if (held && held.node === hit.raw) { tail = "|bare"; hit.node = hit.raw; hit.surface = "frame"; }
+    }
+    if (spec.at >= 0 ? hit.node !== n : !hit.node || fingerprint(hit.node, 0) + frameMark(hit.node) + tail !== spec.fp) return say({ok: false, stale: "point"});
     if (spec.at < 0) { n = hit.node; D = hit.doc; }
   }
   var W = (D && D.defaultView) || window;
   var same = function () {
-    if (spec.at < 0) return n && n.isConnected && fingerprint(n, 0) + frameMark(n) === spec.fp ? "" : "gone";
+    if (spec.at < 0) return n && n.isConnected && fingerprint(n, 0) + frameMark(n) + tail === spec.fp ? "" : "gone";
     var d = n ? lookAt(n, counts) : {}, el = d.el;
     if (!el || el.fp !== spec.fp || el.kind !== spec.kind || el.label !== spec.label || (el.href || "") !== spec.href) return "gone";
     if ((el.submit || "") !== spec.submit) return "dest";
@@ -979,9 +1011,11 @@ def hit_script(spec: dict[str, Any]) -> str:
     element the point resolves to, as :data:`PAGE_JS` lists elements (with its
     place ``at`` and ``frame``), or a surface known by its place only, and the
     words around it, which melo checks for consent and terms. When it is on
-    nothing melo can name, the answer has the short ``text`` held right there;
-    and on a bare box, ``hidden``: the frames the page loaded that no iframe
-    element holds (a box drawn in a closed shadow root).
+    nothing melo can name, the answer has the ``tag`` of the element there (a
+    standard one, else ``element``) and whether it holds ``words``, never the
+    words themselves; and on the bare box that most likely holds a box drawn in
+    a closed shadow root, ``hidden``: the frames the page loaded that no iframe
+    element holds.
     """
     return r"""(function (at) {""" + COMMON_JS + r"""
   var spec = at;
@@ -996,9 +1030,16 @@ def hit_script(spec: dict[str, Any]) -> str:
     // loaded that no iframe element holds say so.
     var t = h.raw;
     if (t && t.nodeType === 1) {
-      var own = Array.prototype.filter.call(t.childNodes, function (c) { return c.nodeType === 3 && cap(c.nodeValue, 1); });
-      if (own.length) out.text = cap(own.map(function (c) { return c.nodeValue; }).join(" "), 80);
-      if (bareBox(t)) out.hidden = hiddenFrames();
+      // The kind of element, never the words the page wrote there.
+      var tag = t.tagName.toLowerCase();
+      out.tag = COVER_TAGS.test(tag) ? tag : "element";
+      out.hasWords = Array.prototype.some.call(t.childNodes, function (c) { return c.nodeType === 3 && cap(c.nodeValue, 1); });
+      var hf = bareBox(t) ? hiddenFrames() : [], cb = hf.length ? checkBox() : null;
+      if (cb && cb.node === t) {
+        out.hidden = hf;
+        out.bare = true;
+        out.el = {kind: "button", label: "", fp: fingerprint(t, 0) + frameMark(t) + "|bare"};
+      }
     }
     return P.json(out);
   }
@@ -1092,11 +1133,14 @@ def wait_probe(until: str, text: str, origin: str = "") -> str:
         "gone": f"!!document.body && (document.body.innerText || '').indexOf({words}) < 0",
     }[until]
     if origin:
+        # The origin as melo spells it: a final dot of the host is dropped there, and kept
+        # by the page's own, so a site at ``example.com.`` has not moved from itself.
         mine = json.dumps(origin)
         probe = (
-            f"location.origin === {mine} && ({probe}) || "
-            f"(/^https?:$/.test(location.protocol) && location.origin !== {mine} "
-            f"&& {json.dumps(MOVED)})"
+            r"(function () { var o = location.origin.replace(/\.(:\d+)?$/, '$1'); "
+            f"return o === {mine} && ({probe}) || "
+            f"(/^https?:$/.test(location.protocol) && o !== {mine} "
+            f"&& {json.dumps(MOVED)}); }})()"
         )
     return probe
 
@@ -1386,6 +1430,37 @@ def _check_boxes(hidden: Any) -> list[str]:
     return [str(u) for u in hidden if is_human_check(str(u))]
 
 
+# How far in from the left edge of a check's box its checkbox sits, in page pixels.
+CHECKBOX_INSET = 30
+
+
+def _aims(data: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
+    """Where the boxes of a human check on a page read are: (address, x, y) on the 0-1000 scale of the view.
+
+    ``spots`` are the boxes the script measured (address, left, top, width,
+    height); one without an address is the empty box that holds a check in a
+    closed shadow root, and takes the address of the first check the page
+    loaded there. The point is the checkbox: a little in from the left edge,
+    in the middle of the box's height.
+    """
+    spots, view = data.get("spots"), data.get("view")
+    if not isinstance(spots, list) or not isinstance(view, list) or len(view) != 2:
+        return ()
+    width, height = as_number(view[0]), as_number(view[1])
+    hidden = next(iter(_check_boxes(data.get("hidden"))), "")
+    found: dict[str, tuple[str, int, int]] = {}
+    for spot in spots:
+        if not isinstance(spot, list) or len(spot) != 5 or width <= 0 or height <= 0:
+            continue
+        address = str(spot[0]) or hidden
+        left, top, wide, high = (as_number(v) for v in spot[1:])
+        if is_human_check(address) and wide > 0 and high > 0:
+            x = (left + min(CHECKBOX_INSET, wide / 2)) / width * 1000
+            y = (top + high / 2) / height * 1000
+            found.setdefault(address, (address, round(x), round(y)))
+    return tuple(found.values())
+
+
 def _stale(why: str) -> StaleElementError:
     """The error for a page script that found the page or the element not as they were read."""
     return StaleElementError(STALE.get(why, STALE["gone"]), why)
@@ -1475,6 +1550,8 @@ class PageScriptActs:
             doc=str(data.get("doc") or ""),
             frames=tuple(str(f) for f in frames) if isinstance(frames, list) else (),
             unreached=boxes,
+            aims=_aims(data),
+            solved=data.get("solved") is True,
         )
 
     async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
@@ -1487,10 +1564,22 @@ class PageScriptActs:
             raise _stale(str(data["stale"]))
         surface = data.get("surface")
         if surface not in ("control", "canvas", "frame"):
-            box = next(iter(_check_boxes(data.get("hidden"))), "")
-            if box:
-                return PointHit("frame", Element("button", ""), site=box)
-            return PointHit("none", text=str(data.get("text") or ""))
+            hidden, held = data.get("hidden"), _element(data.get("el"))
+            if (
+                data.get("bare") is True
+                and held
+                and isinstance(hidden, list)
+                and hidden
+            ):
+                # The box that most likely holds a frame in a closed shadow root: a
+                # human check when the page loaded one there, else a box melo cannot check.
+                box = next(iter(_check_boxes(hidden)), "") or str(hidden[0])
+                return PointHit("frame", held, site=box)
+            return PointHit(
+                "none",
+                tag=str(data.get("tag") or "")[:20],
+                words=data.get("hasWords") is True,
+            )
         item = _element(data.get("el"))
         site = str(data.get("site") or "") if surface == "frame" else ""
         mx, my = data.get("x"), data.get("y")
