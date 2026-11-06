@@ -35,8 +35,9 @@ the typed rule, the default; the meaning arms need ``--model``, and ``J`` needs
          measured here and is not part of the shipped ``meaning`` level.
 ``M2b``  ``M2`` with ``T1b`` as its words check.
 ``J``    ``T1b``, then a chat judge only for refusals due solely to untyped CJK
-         terms, never a missing quoted span, number or Latin value. Reports how
-         many notes reached the judge. The prompt is frozen before measurement.
+         terms, never an order, a missing quoted span, number, weekday or relative
+         date, Latin value or Korean word. Reports how many notes reached the
+         judge. The prompt is frozen before measurement.
 
 Ship rule for ``J`` on the held-out set: admit at least 85% of zh restatements
 and refuse zh swaps no less often than ``T1b``'s 85%. ``ChatMemory.remember`` applies

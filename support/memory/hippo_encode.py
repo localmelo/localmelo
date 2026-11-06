@@ -737,7 +737,9 @@ async def _ask(
                     [Message("system", system_prompt), Message("user", prompt)]
                 )
         except Exception as exc:
-            why = f"the model failed: {exc or type(exc).__name__}"
+            # The class only: a provider error can carry part of the server's reply,
+            # which may echo the request, and the request holds the user's texts.
+            why = f"the model failed: {type(exc).__name__}"
             logger.warning("Hippo encoder: %s", why)
             continue
         stats.add(reply.usage)

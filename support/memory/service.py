@@ -1824,7 +1824,7 @@ class ChatMemory:
         if provider is None:
             return False
         started = time.perf_counter()
-        confirmed = await note_judge.judge(provider, note, said)
+        confirmed = await note_judge.judge(provider, note, said, self._llm_backend())
         logger.info(
             "Note judge: %s in %.1f s",
             "yes" if confirmed else "no",
