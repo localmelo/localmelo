@@ -11,6 +11,7 @@ stub chat model and temporary stores: no model server.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from localmelo.support.config import (
     MemoryConfig,
 )
 from localmelo.support.memory import ChatMemory, hippo_encode, ingest
+from localmelo.support.memory.index import cleaned
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
@@ -56,6 +58,23 @@ JUNE = {
         {"role": "assistant", "text": "Utrecht is a canal city."},
     ],
 }
+# A documented test card number (it passes the Luhn check) and a made-up password.
+SECRET: dict[str, Any] = {
+    "id": "pay",
+    "title": "Payment",
+    "date": "2023-05-22T10:00:00",
+    "turns": [
+        {
+            "role": "user",
+            "text": "My password is hunter2. My card is 4242 4242 4242 4242. I like tea.",
+        },
+        {
+            "role": "assistant",
+            "text": "Noted. The card 4242424242424242 is saved. Tea it is.",
+        },
+    ],
+}
+TEA = "The user said they like drinking green tea in the evening."
 PITTSBURGH = "The user said they live in Pittsburgh."
 UTRECHT = "The user said they now live in Utrecht."
 BOOK = "The user asked for a book about trains and melo suggested a railroad history."
@@ -271,6 +290,102 @@ async def test_each_item_is_embedded_when_an_embedding_model_is_set(
         assert f"Home city\n{PITTSBURGH}" in sent and f"Train book\n{BOOK}" in sent
         stored = await memory.stores()[1].fetch_items([1, 2])
         assert all(i.embed_model == "fake-embed" and i.vector for i in stored)
+    finally:
+        await close(chats, memory)
+
+
+# ── Secrets ──
+
+
+@pytest.mark.parametrize("parallel", [1, 2])
+async def test_a_password_and_a_card_number_reach_the_encoder_as_the_index_keeps_them(
+    tmp_path: Path, parallel: int
+) -> None:
+    stub = StubEncoder(says([item("Tea", TEA, "profile", [0])]))
+    cfg = settings(tmp_path, compress_parallel=parallel)
+    report, chats, memory = await compress(
+        tmp_path, {"sessions": [SECRET]}, stub, cfg=cfg
+    )
+    try:
+        (prompt,) = stub.prompts
+        typed, answer = (message["text"] for message in SECRET["turns"])
+        assert cleaned(typed) in prompt and cleaned(answer) in prompt
+        assert "hunter2" not in prompt and "4242" not in prompt
+        # The same text the chat's turn is indexed with.
+        index = memory.stores()[1]
+        (document,) = await index.fetch(await index.ids())
+        assert cleaned(typed) in document.text and cleaned(answer) in document.text
+        assert report.items == 1 and report.refused == 0
+    finally:
+        await close(chats, memory)
+
+
+async def test_an_item_that_holds_a_secret_is_not_kept_and_the_report_counts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = hippo_encode.encode
+
+    async def leaky(provider: Any, title: str, turns: Any, **kwargs: Any) -> Any:
+        """What the encoder gives, and an item the checks let a secret through."""
+        encoding = await real(provider, title, turns, **kwargs)
+        encoding.pieces.append(
+            hippo_encode.Piece(
+                title="Payment card",
+                text="The user said their card number is 4111 1111 1111 1111.",
+                kind="profile",
+                sources=(0,),
+                created_at=turns[0].answered_at,
+                encoder=encoding.pieces[0].encoder,
+            )
+        )
+        return encoding
+
+    monkeypatch.setattr(hippo_encode, "encode", leaky)
+    caplog.set_level(logging.DEBUG)
+    stub = StubEncoder(says([item("Tea", TEA, "profile", [0])]))
+    embedding = FakeEmbedding()
+    report, chats, memory = await compress(
+        tmp_path, {"sessions": [SECRET]}, stub, embedding=embedding
+    )
+    try:
+        index = memory.stores()[1]
+        # The clean item is stored exactly as ever; the other is not stored at all.
+        assert report.items == 1 and report.refused == 1
+        assert await index.count_items() == 1
+        (stored,) = await index.fetch_items([1])
+        assert (stored.title, stored.text, stored.kind, stored.status) == (
+            "Tea",
+            TEA,
+            "profile",
+            "active",
+        )
+        assert stored.sources == ((report.ids["pay"], 1),)
+        assert stored.encoder == "3:stub-encoder" and stored.embed_model == "fake-embed"
+        # It was never embedded or routed, and nothing of it is in a log line (4111 1111
+        # 1111 1111 is another documented test card number, not the chat's).
+        assert all("4111" not in text for call in embedding.calls for text in call)
+        data = report.to_json()
+        assert data["refused"] == 1
+        assert [r["title"] for r in data["compress"]["pay"]["routes"]] == ["Tea"]
+        assert "4111" not in json.dumps(data)
+        assert report.summary().endswith(
+            "Encoded 1 item from 1 chat (1 model call, 0 from the cache). "
+            "1 item held a secret and was not kept."
+        )
+        assert "4111" not in caplog.text and "Payment card" not in caplog.text
+        assert any("1 held a secret" in line for line in caplog.messages)
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_run_with_no_refused_item_says_nothing_of_it_in_the_summary(
+    tmp_path: Path,
+) -> None:
+    stub = StubEncoder(reply)
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, stub)
+    try:
+        assert report.refused == 0 and report.to_json()["refused"] == 0
+        assert "secret" not in report.summary()
     finally:
         await close(chats, memory)
 

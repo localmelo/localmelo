@@ -1401,6 +1401,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Developer only: memory items are written from chat text with secrets taken out, and an item that still holds a secret is not kept. Part of #428.
+
 - The review rules no longer pass several kinds of step as routine (part of #456). Auto
   runs a routine step without a review, and Ask shows it as plain code; these now get the
   same treatment as other system-level or destructive steps, and no step became less

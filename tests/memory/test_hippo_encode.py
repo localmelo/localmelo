@@ -26,6 +26,7 @@ import pytest
 from localmelo.melo.schema import Message
 from localmelo.support.memory import hippo_encode as hippo
 from localmelo.support.memory.hippo_encode import Cache, Stats, Turn
+from localmelo.support.memory.index import cleaned
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.tests.memory.hippo_helpers import (
@@ -348,6 +349,23 @@ async def test_a_secret_never_reaches_the_model_and_a_missing_title_is_none() ->
     (prompt,) = stub.prompts
     assert "hunter2" not in prompt and "I like tea." in prompt
     assert prompt.startswith("Chat title: (none)\n\n[0] ")
+
+
+async def test_a_password_and_a_card_number_reach_the_model_as_the_index_keeps_them() -> (
+    None
+):
+    # 4242 4242 4242 4242 is a documented test card number (it passes the Luhn check).
+    typed = "My password is hunter2. My card is 4242 4242 4242 4242. I like tea."
+    answer = "Noted. The card 4242424242424242 is saved. Tea it is."
+    stub = StubEncoder()
+    await hippo.encode(stub, "T", [turn(0, typed, answer)], window_chars=12000)
+    (prompt,) = stub.prompts
+    assert prompt == (
+        f"Chat title: T\n\n[0] 2023-05-20 14:02 User: {cleaned(typed)} "
+        f"/ melo: {cleaned(answer)}"
+    )
+    assert "hunter2" not in prompt and "4242" not in prompt
+    assert "I like tea." in prompt and "Tea it is." in prompt
 
 
 async def test_the_token_counts_the_server_reports_are_added_up() -> None:

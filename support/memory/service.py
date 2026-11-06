@@ -433,11 +433,14 @@ class OpenedItem(NamedTuple):
 @dataclass
 class Compressed:
     """What :meth:`ChatMemory.compress_chat` did for one chat: what the encoder
-    made of it (:class:`~.hippo_encode.Encoding`) and, for each item it made in the
-    order they were routed, the item and where the routing put it."""
+    made of it (:class:`~.hippo_encode.Encoding`), for each item it made in the
+    order they were routed, the item and where the routing put it, and how many
+    items were not kept because they held a secret (*refused*: never embedded or
+    routed, so in no list of *routed*)."""
 
     encoding: hippo_encode.Encoding
     routed: list[tuple[hippo_encode.Piece, Route]] = field(default_factory=list)
+    refused: int = 0
 
 
 @dataclass(frozen=True)
@@ -2263,13 +2266,25 @@ class ChatMemory:
         turns changes. *router* and *cache* are shared across the chats of one run
         (the settings' otherwise). With *encoding* (what :meth:`encode_chat` gave
         for these *turns*), the chat is not encoded again: it goes straight to
-        embedding and routing. Once the items are stored the chat's mark moves to the
-        last of *turns* (:meth:`.index.ConversationIndex.mark_encoded`): recall reads
-        the turns past it too.
+        embedding and routing. An item whose title or text :func:`records.sensitive`
+        flags, as it would a note, is not embedded, routed or stored, and is counted
+        in :attr:`Compressed.refused` (the encoder has taken secrets out of what it
+        reads and writes already: this is the check a note passes, kept for what got
+        through). Once the items are stored the chat's mark moves to the last of
+        *turns* (:meth:`.index.ConversationIndex.mark_encoded`): recall reads the
+        turns past it too.
         """
         if encoding is None:
             encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
-        texts = [f"{piece.title}\n{piece.text}" for piece in encoding.pieces]
+        pieces = [
+            piece
+            for piece in encoding.pieces
+            if not (records.sensitive(piece.title) or records.sensitive(piece.text))
+        ]
+        refused = len(encoding.pieces) - len(pieces)
+        if refused:  # the count only, never the text
+            logger.info("Memory items: %d held a secret and were not kept", refused)
+        texts = [f"{piece.title}\n{piece.text}" for piece in pieces]
         vectors: list[Sequence[float] | None] = [None] * len(texts)
         model = ""
         for start in range(0, len(texts), _BATCH):
@@ -2282,8 +2297,8 @@ class ChatMemory:
             model = found
         _, index = self.stores()
         router = router or Router(index)
-        out = Compressed(encoding)
-        for piece, vector in zip(encoding.pieces, vectors, strict=True):
+        out = Compressed(encoding, refused=refused)
+        for piece, vector in zip(pieces, vectors, strict=True):
             item = MemoryItem(
                 session_id=session_id,
                 title=piece.title,

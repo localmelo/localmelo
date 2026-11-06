@@ -191,7 +191,7 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 | Conflict | 条目入库，双方都被标记；每一条的行尾都有 `(conflicts with m12)`，让模型看到两方面。 |
 | Ignore | 条目重复了已有的条目，或不值得保留（比如太短）；不入库。 |
 
-对话按从旧到新的顺序编码，所以较新的事实可以替换较旧的。已导入对话的轮次、笔记和索引照常写入；条目是在它们之外增加的。它是开发者设置，因为每个窗口要花一次聊天模型请求，也还没有测得召回效果更好。
+对话按从旧到新的顺序编码，所以较新的事实可以替换较旧的。已导入对话的轮次、笔记和索引照常写入；条目是在它们之外增加的。条目由索引保存的同一份文本写成，其中的机密已去掉；含有机密的条目不会保留。它是开发者设置，因为每个窗口要花一次聊天模型请求，也还没有测得召回效果更好。
 
 设置 `[memory] recall_source = "items"`（默认 `"turns"`，不改变任何行为）后，召回用这些条目代替对话轮次。它们按同样的门槛排序、保留或丢弃，在召回块和 `search_memory` 中的显示方式与轮次一样，如 `“Tomato stakes”: The user stakes the tomato garden with bamboo. (chat “Garden”, Oct 29)`。设置 `recall_form = "list"` 时每条是一行，如 `[m12] Oct 29 · chat “Garden” · “Tomato stakes” · 0.71`，上面有一行提示模型用 `open_memory` 打开它需要的条目；此时它接收 `m12` 这样的编号，返回标题和正文，设置 `open_sources = "on"` 后条目所来自的整轮对话也会跟在后面，全部不超过 `recall_open_chars`。在 `turn.memory` 事件中，条目的 `used`、`searched` 和 `opened` 项的类型为 `item`，条目编号写在 `item` 中，来源写在 `sources` 中，格式为 `[chat id, turn]` 对。删除一个对话会删除只来自它的条目，并把它的轮次从其他条目的来源中去掉；不带 ID 的 `melo memory forget` 也会忘记条目；`reindex` 保留它们，因为只有模型能再次写出它们。
 
