@@ -1003,7 +1003,7 @@ class TestPayloads:
         recorder = Recorder()
         result = await _agent(ScriptedLLM([])).run_task(query, on_event=recorder)
         assert result.status == "failed"  # over the planning prompt's cap
-        assert recorder.types == ["run.started", "run.finished"]
+        assert recorder.types == ["run.started", "step.started", "run.finished"]
         assert recorder.events[0].data["query"] == "q" * 100_000 + "… [+20000 chars]"
 
 
@@ -1176,7 +1176,8 @@ class TestEveryStatus:
         agent = _agent(ScriptedLLM([]))
         result = await agent.run_task("q" * 120_000, on_event=recorder)
         assert result.status == "failed"
-        assert recorder.types == ["run.started", "run.finished"]
+        # The step's request was built, fitted and refused: nothing was sent.
+        assert recorder.types == ["run.started", "step.started", "run.finished"]
         await check_guarantees(recorder, result, agent)
 
     @pytest.mark.asyncio

@@ -62,14 +62,8 @@ def _reflection_json(
     action: str = "stop",
     rationale: str = "done",
     best_effort: str = "",
-    progress: bool = False,
     feasible: bool = True,
     summary: str = "tried things",
-    info_gain: float = 0.5,
-    cost: float = 0.1,
-    repeat_risk: float = 0.1,
-    novelty: float = 0.8,
-    feasibility_score: float = 0.8,
     concrete: bool = True,
     novel: bool = True,
     **kwargs: Any,
@@ -78,7 +72,6 @@ def _reflection_json(
         "recommended_action": action,
         "rationale": rationale,
         "best_effort_result": best_effort,
-        "progress_made": progress,
         "task_still_feasible": feasible,
         "summary": summary,
         "next_step_is_concrete": concrete,
@@ -87,11 +80,6 @@ def _reflection_json(
         "useful_evidence": kwargs.get("evidence", []),
         "recommended_avoids": kwargs.get("avoids", []),
         "next_promising_directions": kwargs.get("directions", []),
-        "estimated_info_gain": info_gain,
-        "estimated_cost": cost,
-        "repeat_risk": repeat_risk,
-        "novelty": novelty,
-        "feasibility": feasibility_score,
     }
     return json.dumps(data)
 
@@ -259,7 +247,7 @@ class TestMaxAttemptsExhausted:
         llm.enqueue(
             Message(
                 role="assistant",
-                content=_reflection_json("continue", progress=True),
+                content=_reflection_json("continue"),
             )
         )
         # Attempt 1: 1 tool call → budget exhausted
@@ -444,7 +432,7 @@ class TestReflectionFromObject:
 
     def test_valid_object(self) -> None:
         entry, decision = _reflection_from_object(
-            json.loads(_reflection_json("continue", summary="ok", progress=True)),
+            json.loads(_reflection_json("continue", summary="ok")),
             attempt_id=0,
             failure_type="budget",
         )
@@ -452,14 +440,12 @@ class TestReflectionFromObject:
         assert entry.summary == "ok"
         assert entry.failure_type == "budget"
         assert decision.recommended_action == "continue"
-        assert decision.progress_made is True
 
     def test_malformed_types_coerced(self) -> None:
         """Valid JSON with wrong types should not crash."""
         data = {
             "summary": 123,
             "failed_hypotheses": "single string",
-            "progress_made": "true",
             "confidence": "high",
             "recommended_action": "continue",
             "task_still_feasible": 1,
@@ -470,8 +456,8 @@ class TestReflectionFromObject:
         assert entry.summary == "123"
         assert entry.failed_hypotheses == ["single string"]
         assert entry.confidence == 0.0  # "high" -> default 0.0
-        assert decision.progress_made is True  # "true" -> True
-        assert decision.task_still_feasible is True
+        assert decision.task_still_feasible is True  # 1 -> True
+        assert decision.next_step_is_concrete is True  # "yes" -> True
 
     def test_unknown_action_coerced_to_stop(self) -> None:
         _, decision = _reflection_from_object({"recommended_action": "yolo"}, 0, "")

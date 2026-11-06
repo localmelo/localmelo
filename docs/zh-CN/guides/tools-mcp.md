@@ -142,7 +142,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | 哪些图片保留像素 | 最新的 `tool_images_keep` 张（默认 3）。当图片数超过 `tool_images_keep + tool_images_retire - 1` 时，最旧的 `tool_images_retire` 张（默认 2）一起失去像素：每个请求带 3 到 4 张图片，服务器缓存的提示前缀每两张图片才变化一次，而不是每一步都变。 |
 | 重复的图片 | 与已发送图片摘要相同的图片不会再次发送；它的工具消息以 `[same image as an earlier tool result; its pixels are above]` 结尾。 |
 | 很宽的图片 | 宽于 1,280 像素的图片在保存时一次性缩放为 1,280 像素宽的 JPEG（使用 macOS 的 `sips`；其他系统按原样发送）。此时标签注明的是该 JPEG。 |
-| 提示上限 | 每张发送的图片在 100,000 字符的提示上限中计 4,500 字符，并按像素尺寸计入上下文预算（[上下文记账](../reference/configuration.md#context-accounting)）；较早的轮次会移出窗口以腾出空间。 |
+| 提示上限 | 每张发送的图片在 100,000 字符的提示上限中计 4,500 字符，并按像素尺寸计入上下文预算（[上下文记账](../reference/configuration.md#context-accounting)）；较早的轮次先腾出空间，图片所在的轮次只有在别无可删时才会移除。 |
 | 保存什么 | 发给模型的副本只保存在内存中：历史记录和工作窗口只保留注明图片的那一行（会话仍为控制台保存图片）。会话重新打开后，在工具返回新图片之前不会发送任何图片。 |
 | 没有图片 | 工具不返回图片的运行，在每种模式下发送的请求都完全相同。 |
 

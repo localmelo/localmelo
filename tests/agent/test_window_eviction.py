@@ -1,4 +1,4 @@
-"""``AgentOptions.window_eviction``: the window's eviction, the cap fit and the context fit.
+"""``AgentOptions.window_eviction``: the window's eviction and the request fit.
 
 ``chunk`` and ``boundary`` keep the retained history stable for several steps so a
 server's prompt cache can reuse it. The window itself, used on its own, still slides
@@ -181,71 +181,6 @@ async def test_the_mode_reaches_the_window_and_the_run_config(mode: str) -> None
         # The window's size after the tenth step: a chunk less than full.
         assert sizes[9] == 12
         assert agent._run_config()["window_eviction"] == mode
-    finally:
-        await agent.close()
-
-
-# ── The prompt-cap fit (X2) ──
-
-
-def _bulk_window(agent: Agent, units: int, size: int) -> Message:
-    query = Message("user", "query")
-    agent.hippo.working.append(query)
-    for n in range(units):
-        agent.hippo.working.append_turn(*_turn(n, "x" * size))
-    return query
-
-
-def _window_chars(agent: Agent) -> int:
-    return sum(len(m.content) for m in agent.hippo.working.get_window())
-
-
-@pytest.mark.parametrize("mode", ["chunk", "boundary"])
-async def test_the_cap_fit_drops_to_70_percent_under_chunk_and_boundary(
-    mode: str,
-) -> None:
-    agent = await _agent(mode)
-    try:
-        query = _bulk_window(agent, 9, 12_000)
-        before = agent.hippo.working.get_window()
-        await agent._fit_prompt_cap([], "query", task_query=query)
-        chars = _window_chars(agent)
-        assert chars <= 100_000 * WINDOW_FIT_TARGET
-        assert chars > 100_000 * WINDOW_FIT_TARGET - 12_100  # by one unit
-        # It dropped from the front, whole units.
-        window = agent.hippo.working.get_window()
-        assert window == before[len(before) - len(window) :]
-        assert _whole_units(window)
-    finally:
-        await agent.close()
-
-
-async def test_the_cap_fit_keeps_the_window_when_it_fits() -> None:
-    agent = await _agent("chunk")
-    try:
-        query = _bulk_window(agent, 5, 12_000)  # 60,000 chars
-        before = agent.hippo.working.get_window()
-        await agent._fit_prompt_cap([], "query", task_query=query)
-        assert agent.hippo.working.get_window() == before
-    finally:
-        await agent.close()
-
-
-async def test_the_cap_fit_falls_back_to_the_cap_when_70_percent_is_out_of_reach() -> (
-    None
-):
-    # The newest unit alone is over 70% of the cap but under it: dropping to
-    # 70% is impossible, so the window drops just far enough to fit the cap.
-    agent = await _agent("chunk")
-    try:
-        query = Message("user", "query")
-        agent.hippo.working.append(query)
-        agent.hippo.working.append_turn(*_turn(0, "x" * 20_000))
-        agent.hippo.working.append_turn(*_turn(1, "x" * 80_000))
-        await agent._fit_prompt_cap([], "query", task_query=query)
-        window = agent.hippo.working.get_window()
-        assert [m.content for m in window][-1] == "x" * 80_000
-        assert len(window) == 2  # only the newest unit is left
     finally:
         await agent.close()
 
@@ -602,9 +537,13 @@ async def test_the_cut_resets_after_a_boundary_drop() -> None:
     assert [s for s in collapsed if 13 < s < 25]
     gaps = [b - a for a, b in zip(collapsed, collapsed[1:], strict=False)]
     assert min(gaps) >= 3
-    # The last attempt (six steps) never reaches the limit: no cut is held, though
-    # the first attempts each held one.
-    assert agent.chat._fit_cuts["plan"].key is None
+    # The last attempt (six steps) never reaches the limit, and nothing held from the
+    # first attempts cuts it: each planning request starts with the one before. (Its
+    # closing reflection may cut, and then holds that cut for the plan.)
+    last = plan_bodies[24:]
+    assert len(last) == 6
+    for earlier, later in zip(last, last[1:], strict=False):
+        assert later["messages"][: len(earlier["messages"])] == earlier["messages"]
 
 
 class _Overflowing(BaseLLMProvider):
