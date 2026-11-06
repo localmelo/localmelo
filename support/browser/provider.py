@@ -125,6 +125,8 @@ from localmelo.support.browser.live import DEFAULT_FPS, LiveView
 from localmelo.support.browser.local_apps import LocalAttempt
 from localmelo.support.browser.takeover import (
     CHECK_PRESSES,
+    CHECK_TRIES,
+    CHECK_TRY_PRESSES,
     YOU,
     Owners,
     Place,
@@ -192,7 +194,15 @@ PAGE_NOTE = (
     "a one-time code: ask the user to do that in the window. Each act returns "
     "what changed and the page again. Only for what "
     "the element list lacks (a drawing, a box from another site): "
-    "browser_screenshot, then browser_click_point."
+    "browser_screenshot, then browser_click_point. A picture check (a box from "
+    "another site, then pictures to pick) is one more step of the user's task, "
+    "not a question of whether you may: look with browser_screenshot, press "
+    "each picture it asks for with browser_click_point, then its Verify, Next "
+    "or Skip with confirm=true (that ends a try; three tries). The step result "
+    "says whether the check passed or is still there, and when melo does not "
+    "let you press on, tell the user; melo decides that, not you. Use your own "
+    "eyes only, never an outside service. To give a page's upload field a "
+    "file, use browser_attach."
 )
 # The same note for a browser that runs in the background, which the person sees
 # and takes over in the console's Browser panel: a sign-in is theirs to do there.
@@ -359,11 +369,19 @@ TOOLS: tuple[ToolDef, ...] = (
     _def(
         "browser_click_point",
         "Click a point of the last browser_screenshot, for what the element list "
-        "lacks. x and y run 0-1000 across and down the picture.",
+        "lacks. x and y run 0-1000 across and down the picture. In a picture "
+        "check (pictures to pick, then a Verify, Next or Skip button), set "
+        "confirm=true on the press of that button: it ends one try, and melo "
+        "allows three.",
         ("x", "y"),
         acts=True,
         x=_p("number"),
         y=_p("number"),
+        confirm=_p(
+            "boolean",
+            "Only in a picture check: this press ends a try (Verify, Next or "
+            "Skip). Default false.",
+        ),
         tab=_TAB,
     ),
 )
@@ -623,6 +641,8 @@ class BrowserToolProvider(BaseToolProvider):
         # Presses inside a human check that is still there, per (tab, site of the check),
         # and the tab where they reached CHECK_PRESSES: the person is asked for it next.
         self._presses: dict[tuple[str, str], int] = {}
+        # Tries melo made at a picture check that is still there, by the same key (#551).
+        self._tries: dict[tuple[str, str], int] = {}
         self._stuck: str | None = None
         self._moves = 0  # the moves to another site the step's wait has followed
         self._step_start = 0.0
@@ -981,6 +1001,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._not_now.clear()
         self._signed_in.clear()
         self._presses.clear()
+        self._tries.clear()
         self._stuck = None
         self._tab = None
         self._snaps.clear()
@@ -1641,7 +1662,36 @@ class BrowserToolProvider(BaseToolProvider):
             return "\n".join(back)
         return "\n".join([*back, "The page as it is now:", page])
 
-    async def _pressed(self, tab: str, check: str, doc: str) -> str:
+    def _solves_checks(self) -> bool:
+        """Whether melo may work through a check's pictures itself in this run (#551).
+
+        Only in a run the person started (not a chore, a follow-up or a task's
+        own), with a model that reads pictures: both are the run's to say
+        (``from_person`` and ``sees_pictures`` of its question handle), so a
+        page or the model never turns this on. Anywhere else melo presses only
+        the box, and the check goes to the person after :data:`CHECK_PRESSES`.
+        """
+        ask = TOOL_ASK.get()
+        person, sees = (
+            getattr(ask, "from_person", None),
+            getattr(ask, "sees_pictures", None),
+        )
+        return (
+            callable(person) and person() is True and callable(sees) and sees() is True
+        )
+
+    def _spent(self, key: tuple[str, str]) -> bool:
+        """Whether melo has tried a check as often as it may before it is the person's to pass."""
+        presses = self._presses.get(key, 0)
+        if self._solves_checks():
+            return (
+                self._tries.get(key, 0) >= CHECK_TRIES or presses >= CHECK_TRY_PRESSES
+            )
+        return presses >= CHECK_PRESSES
+
+    async def _pressed(
+        self, tab: str, check: str, doc: str, confirm: bool = False
+    ) -> str:
         """After a press inside a human check (*check*: the address of its box): what it did, in words to add to the step.
 
         melo sees nothing inside the box, so the page says: one of the check
@@ -1650,9 +1700,11 @@ class BrowserToolProvider(BaseToolProvider):
         document the press was made in) is told as changed, not as passed, and
         the count of presses goes on; if neither shows within
         :data:`CHECK_WAIT_S`, the check is still there. Every press that did not
-        pass is counted for the check: at :data:`CHECK_PRESSES` it is the
-        person's, and the step offers them the page (see
-        :meth:`_needs_you_after`).
+        pass is counted for the check. Where melo works through a check's
+        pictures itself (:meth:`_solves_checks`) a press with *confirm* ends a
+        try, and tries are counted (:data:`CHECK_TRIES`); elsewhere presses are
+        (:data:`CHECK_PRESSES`). When the count is used up it is the person's,
+        and the step offers them the page (see :meth:`_needs_you_after`).
         """
         loop = asyncio.get_running_loop()
         end = loop.time() + CHECK_WAIT_S
@@ -1670,26 +1722,55 @@ class BrowserToolProvider(BaseToolProvider):
         key = (tab, sites.origin_of(check) or "")
         if passed:
             self._presses.pop(key, None)
+            self._tries.pop(key, None)
             return " The check passed."
-        count = self._presses[key] = self._presses.get(key, 0) + 1
-        if count >= CHECK_PRESSES:
+        solving = self._solves_checks()
+        if solving and confirm:
+            self._tries[key] = self._tries.get(key, 0) + 1
+            self._presses[key] = 0
+        else:
+            self._presses[key] = self._presses.get(key, 0) + 1
+        spent = self._spent(key)
+        if spent:
             self._stuck = tab
+        count, tries = self._presses[key], self._tries.get(key, 0)
         if moved:
             return f" The page changed (press {count} of this check): the page below is the new one."
-        if count >= CHECK_PRESSES:
+        if solving and spent:
+            return (
+                f" The check is still there after {tries} tries: the user is asked to take the page over."
+                if tries >= CHECK_TRIES
+                else f" The check is still there after {count} presses in one try: the user is asked to take the page over."
+            )
+        if solving and confirm:
+            return (
+                f" The check is still there after try {tries} of {CHECK_TRIES}: "
+                "look at the new picture, press the pictures it asks for, then its "
+                "Verify or Next button with confirm=true."
+            )
+        if solving:
+            return (
+                " The check is still there. Once the pictures it asks for are "
+                "marked, press its Verify, Next or Skip button with confirm=true: "
+                f"that ends a try ({CHECK_TRIES} tries at most)."
+            )
+        if spent:
             return f" The check is still there after {count} presses."
-        return " The check is still there."
+        return (
+            " The check is still there. melo presses only the box itself here, not "
+            "a check's pictures; if it asks for pictures, say so in your reply."
+        )
 
     def _check_spent(self, tab: str, check: str, origin: str) -> None:
-        """Refuse another press in a human check that is still there after :data:`CHECK_PRESSES`, once the person cannot be offered the page.
+        """Refuse another press in a human check that is still there once melo has tried it as often as it may, once the person cannot be offered the page.
 
         The count is kept (a page that loops back to its check does not start
         it again). While the take-over card can still come after the press, the
         press is made; when it was asked already (or they said not now), or
         nobody can take the page over here, melo says so and does nothing.
         """
-        count = self._presses.get((tab, sites.origin_of(check) or ""), 0)
-        if count < CHECK_PRESSES:
+        key = (tab, sites.origin_of(check) or "")
+        if not self._spent(key):
             return
         if not self._can_take():
             why = "nobody can take the page over here"
@@ -1700,10 +1781,15 @@ class BrowserToolProvider(BaseToolProvider):
             why = "the user was already offered the page"
         else:
             return
+        tries = self._tries.get(key, 0)
+        did = (
+            f"tried this human check {tries} times"
+            if tries >= CHECK_TRIES
+            else f"pressed this human check {self._presses.get(key, 0)} times"
+        )
         raise BrowserError(
-            f"melo pressed this human check {count} times and it is still there, "
-            f"so it does not press it again: {why}. Say in your reply what you "
-            "need the user to do."
+            f"melo {did} and it is still there, so it does not press it again: "
+            f"{why}. Say in your reply what you need the user to do."
         )
 
     # ── Acting ──
@@ -2834,6 +2920,7 @@ class BrowserToolProvider(BaseToolProvider):
         x: Any = None,
         y: Any = None,
         tab: str | None = None,
+        confirm: Any = False,
         **rest: Any,
     ) -> ToolOutput:
         tab_id = self._approved(tab)
@@ -2892,7 +2979,12 @@ class BrowserToolProvider(BaseToolProvider):
         said = _said(f"Clicked {what} at ({px:g}, {py:g}) (via point).", result.note)
         boxed = hit.surface == "frame"  # melo sees nothing inside that box
         if check:
-            said += await self._pressed(tab_id, hit.site, view.doc)
+            said += await self._pressed(
+                tab_id,
+                hit.site,
+                view.doc,
+                confirm is True or str(confirm).lower() == "true",
+            )
         elif boxed:
             said += " What it did inside the box shows only in the new picture."
         page = await self._after(

@@ -723,12 +723,14 @@ class _ToolAsk:
         workspace_root: str | None,
         reviewer: StepReviewer | None = None,
         refused: list[dict[str, Any]] | None = None,
+        sees_images: Callable[[], bool] = lambda: False,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
         self._reviewer = reviewer
+        self._sees_images = sees_images
         self.refused: list[dict[str, Any]] = [] if refused is None else refused
 
     def names_host(self, host: str) -> bool:
@@ -743,6 +745,17 @@ class _ToolAsk:
         """
         reviewer = self._reviewer
         return None if reviewer is None else reviewer.sign_in_value(handle, site)
+
+    def from_person(self) -> bool:
+        """Whether the person started this run: their own message, not a chore, a follow-up or a task's own (#551).
+
+        The browser works through a picture check itself only in such a run.
+        """
+        return self._run.from_person
+
+    def sees_pictures(self) -> bool:
+        """Whether the model reads the pictures tools return (#551): the run's own answer, never a page's."""
+        return self._sees_images()
 
     def attachable(self, path: str) -> str | None:
         """Why the file *path* may be attached to a page: ``folder`` or ``named``; None when it may not (#551).

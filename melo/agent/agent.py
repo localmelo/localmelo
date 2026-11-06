@@ -2092,6 +2092,7 @@ class Agent(_RecallLoop, _NotesLoop):
                     self.executor.workspace_root,
                     self._reviewer,
                     refused,
+                    lambda: self._images_on is True,
                 )
             )
         try:
