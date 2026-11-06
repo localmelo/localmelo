@@ -1659,6 +1659,7 @@ class ChatMemory:
             budget.shown(query),
             listing=budget.listing,
             guide=_guide(budget, gathers, candidates),
+            query=query,
         )
         hinted = budget.hint and not used
         if hinted:
@@ -3715,7 +3716,10 @@ class MemoryTools(BaseToolProvider):
         notes = [replace(item, shown=item.line()) for item in notes]
         now, same_day = clock.now(), times(turns)
         turns = [
-            replace(item, shown=item.listed(now, timed=item.key in same_day))
+            replace(
+                item,
+                shown=item.listed(now, timed=item.key in same_day, query=query),
+            )
             for item in turns
         ]
         if chat is not None:

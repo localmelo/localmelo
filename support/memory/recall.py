@@ -385,24 +385,26 @@ class Item:
             day(self.created_at, now, timed=timed),
         )
 
-    def listed(self, now: float | None = None, *, timed: bool = False) -> str:
+    def listed(
+        self, now: float | None = None, *, timed: bool = False, query: str = ""
+    ) -> str:
         """The turn as one line of the list form: ``[t12] Oct 30 · Main chat ·
         “Where do I plant the tomatoes?” · 0.71``; an item's has its own title and
         ``m`` id (``[m12] …``) and ends with the items it conflicts with.
 
         ``t12`` is the document's id (what ``open_memory`` takes), the date and
         chat read as :meth:`line` writes them (the year when it is not *now*'s, the
-        time of day with *timed*), the title is :func:`listed_title`, and the
-        similarity is the cosine to the message with two decimals when a search
-        matched the turn by meaning, else ``words``. A turn a newer one replaced
-        keeps its older mark, as :meth:`line` writes it.
+        time of day with *timed*), the title is :func:`listed_title` (of the *query*
+        the list was made for), and the similarity is the cosine to the message with
+        two decimals when a search matched the turn by meaning, else ``words``. A
+        turn a newer one replaced keeps its older mark, as :meth:`line` writes it.
         """
         chat, date = self._chat_and_date(clock.now() if now is None else now, timed)
         date = date or day(self.created_at)
         meaning = "words" if self.similarity is None else f"{self.similarity:.2f}"
         older = f" ({self.older})" if self.older else ""
         return (
-            f"[{self.ref}] {date} · {chat} · “{listed_title(self)}” · "
+            f"[{self.ref}] {date} · {chat} · “{listed_title(self, query)}” · "
             f"{meaning}{older}{self._conflict()}"
         )
 
@@ -1013,27 +1015,78 @@ def word_cut(text: str, limit: int) -> str:
     return head + "…"
 
 
-def listed_title(item: Item) -> str:
-    """The title of *item*'s line in the list form: the first sentence of the user's
-    words in the turn, cut at a word (:data:`LIST_TITLE_CHARS` at most).
+def listed_title(item: Item, query: str = "") -> str:
+    """The title of *item*'s line in the list form: the sentence of the turn that
+    holds the most of *query*'s content terms, else the turn's first sentence, cut
+    at a word (:data:`LIST_TITLE_CHARS` at most).
+
+    What comes back is the part of the turn that matched, not its beginning. The
+    sentences of the user's words come first and melo's reply is looked at only when
+    none of them holds a term (:func:`gate_terms`, stemmed as the excerpts match
+    them, so a function word never moves the title); a tie goes to the earliest
+    sentence. A sentence longer than the title starts at the first piece that holds a
+    term when its head holds none (:func:`_title_cut`). With no *query*, or no
+    sentence that shares a term, and for a memory item, the title is the first
+    sentence of the user's words.
 
     A document knows only its own text: for a later chunk of a long turn that is
     the head of the user's words it repeats (or, when the user's words were longer
     than a chunk, the window of them it starts in), so every chunk of a turn has
-    the same title unless the user's words ran on. A turn without the user's words
-    takes the first sentence of melo's reply, and a summary or a task's exchange
-    (no ``User:`` part) the first sentence of what there is.
+    the same title unless the user's words ran on or the query matched elsewhere. A
+    turn without the user's words takes the first sentence of melo's reply, and a
+    summary or a task's exchange (no ``User:`` part) the first sentence of what
+    there is.
     """
     if item.is_memory:
         return word_cut(" ".join(item.title.split()), LIST_TITLE_CHARS) or "…"
     text = item.text
     body = text.partition("\n")[2] if text.startswith("Task: ") else text
+    parts: tuple[str, ...] = (body,)
     if body.startswith("User: "):
         typed, marker, answer = body[len("User: ") :].partition("\nmelo: ")
-        body = typed or answer if marker else typed
-    sentences = split_sentences(body)
-    first = sentences[0][1] if sentences else body
+        parts = (typed, answer) if marker else (typed,)
+    terms = gate_terms(query) if query else set()
+    for part in parts:
+        matched = _best_sentence(part, terms) if terms else None
+        if matched is not None:
+            return _title_cut(matched, terms)
+    head = parts[0] or parts[-1]
+    sentences = split_sentences(head)
+    first = sentences[0][1] if sentences else head
     return word_cut(" ".join(first.split()), LIST_TITLE_CHARS) or "…"
+
+
+def _best_sentence(text: str, terms: set[str]) -> str | None:
+    """The sentence of *text* (flat) that holds the most of *terms*, the earliest of
+    those that tie; ``None`` when no sentence holds one."""
+    sentences = [" ".join(sentence.split()) for _, sentence in split_sentences(text)]
+    scores = [len(terms & _stems(sentence)) for sentence in sentences]
+    if not any(scores):
+        return None
+    return sentences[max(range(len(sentences)), key=lambda n: (scores[n], -n))]
+
+
+def _title_cut(sentence: str, terms: set[str]) -> str:
+    """*sentence* (flat text) as a title of :data:`LIST_TITLE_CHARS` at most: its head
+    cut at a word, unless the head holds none of *terms*; then a window with a ``…``
+    in front that starts at the first piece of the sentence that holds one (a window
+    that reaches the sentence's end starts as late as it can, so it never shows a
+    word or two alone). The first piece is always inside the head, so a piece found
+    here starts later."""
+    head = word_cut(sentence, LIST_TITLE_CHARS)
+    if head == sentence or terms & _stems(head):
+        return head
+    room = LIST_TITLE_CHARS - 1  # the … in front
+    for start, end in _spans(sentence, room - 1):  # room for the … behind too
+        if terms & _stems(sentence[start:end]):
+            break
+    else:
+        return head
+    if len(sentence) - start <= room:
+        back = len(sentence) - room
+        start = sentence.find(" ", back - 1) + 1 or back  # at a word, else anywhere
+        return "…" + sentence[start:]
+    return "…" + word_cut(sentence[start:], room)
 
 
 def meaning_of(
@@ -1163,6 +1216,7 @@ def block(
     *,
     listing: bool = False,
     guide: str = LIST_GUIDE,
+    query: str = "",
 ) -> tuple[str, list[Item]]:
     """The recall block a user message carries, and the items that fit in it, each
     a copy that holds the line the model reads (:attr:`Item.shown`).
@@ -1174,7 +1228,9 @@ def block(
 
     With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
     the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),
-    all of them: *chars* does not bound the list, and *guide* is the line above it.
+    all of them: *chars* does not bound the list, *guide* is the line above it and
+    *query* is the message the recall ran for, which a turn's title follows
+    (:func:`listed_title`).
 
     With ``show.ids`` (``[memory] excerpt_open = "on"``) a turn whose excerpt shows
     less than the whole turn starts with its id (:meth:`Item.excerpt`), and
@@ -1223,7 +1279,7 @@ def block(
     if turns:
         lines.append(guide)
         for n in turns:
-            read[n] = used[n].listed(now, timed=used[n].key in same_day)
+            read[n] = used[n].listed(now, timed=used[n].key in same_day, query=query)
             lines.append(read[n])
     text = "\n".join(lines) if used or kept else ""
     return text, [

@@ -347,34 +347,36 @@ def test_word_cut_never_passes_the_limit_and_cuts_at_a_word() -> None:
     assert word_cut("我" * 100, 10) == "我" * 9 + "…"
 
 
-def test_a_title_is_the_first_sentence_of_what_there_is() -> None:
-    def item(text: str, chunk: int = 0) -> Item:
-        return Item("d:1", text, "chat, Oct 30", "s", 1, 1.0, chunk=chunk)
+def doc(text: str, chunk: int = 0) -> Item:
+    """A chat turn's document, as the index holds it."""
+    return Item("d:1", text, "chat, Oct 30", "s", 1, 1.0, chunk=chunk)
 
-    assert listed_title(item("User: Where is it? Not here.\nmelo: Over there.")) == (
+
+def test_a_title_is_the_first_sentence_of_what_there_is() -> None:
+    assert listed_title(doc("User: Where is it? Not here.\nmelo: Over there.")) == (
         "Where is it?"
     )
-    assert listed_title(item("Task: Plan\nUser: Fix the build. Now.\nmelo: Done.")) == (
+    assert listed_title(doc("Task: Plan\nUser: Fix the build. Now.\nmelo: Done.")) == (
         "Fix the build."
     )
-    assert listed_title(item("User: \nmelo: Nothing to say here. Really.")) == (
+    assert listed_title(doc("User: \nmelo: Nothing to say here. Really.")) == (
         "Nothing to say here."
     )
-    assert listed_title(item("Summary of chat “Fix CI”: the port was taken.")) == (
+    assert listed_title(doc("Summary of chat “Fix CI”: the port was taken.")) == (
         "Summary of chat “Fix CI”: the port was taken."
     )
-    assert listed_title(item("User: 我的组会是哪天？别忘了。\nmelo: 周四。")) == (
+    assert listed_title(doc("User: 我的组会是哪天？别忘了。\nmelo: 周四。")) == (
         "我的组会是哪天？"
     )
     # A later chunk repeats the head of the user's words: the same title.
-    later = item("User: Where is it…\nmelo: and then it goes on. And on.", chunk=2)
+    later = doc("User: Where is it…\nmelo: and then it goes on. And on.", chunk=2)
     assert listed_title(later) == "Where is it…"
     # A chunk that starts inside very long user words: its own first sentence.
-    inside = item("User: and then the user goes on. And on.", chunk=1)
+    inside = doc("User: and then the user goes on. And on.", chunk=1)
     assert listed_title(inside) == "and then the user goes on."
 
 
-async def test_a_chunked_turn_is_one_line_with_the_same_title_whichever_chunk_matched(
+async def test_a_chunked_turn_is_one_line_titled_by_what_matched_in_its_chunk(
     tmp_path: Path, store: SessionStore
 ) -> None:
     cfg = config(recall_form="list")
@@ -391,14 +393,150 @@ async def test_a_chunked_turn_is_one_line_with_the_same_title_whichever_chunk_ma
         (line,) = lines_of(head.block)
         assert ids_of(head.block)[0] in ids
         assert line.split(" · ")[2] == "“Tell me about the garden schedule?”"
-        # Words only a later chunk holds find that chunk: still one line, same title.
+        # Words only a later chunk holds find that chunk: still one line, titled
+        # by the sentence of melo's reply that holds them.
         found = await ask(memory, store, "zucchini harvest")
         (line,) = lines_of(found.block)
         assert ids_of(found.block)[0] in ids[1:]
-        assert line.split(" · ")[2] == "“Tell me about the garden schedule?”"
+        assert line.split(" · ")[2] == "“The zucchini harvest peaks in late August.”"
         # Both chunks match a question about both; the turn is still one line.
         both = await ask(memory, store, "garden schedule zucchini harvest")
         assert len(lines_of(both.block)) == 1
+    finally:
+        await memory.aclose()
+
+
+BOOK = "Last week I finished 'The Quiet Orchard' and loved it."
+BOOK_TURN = (
+    "User: I'm interested in learning more about renewable energy, can you "
+    f"recommend some books? {BOOK}\nmelo: Happy to help with both."
+)
+
+
+def test_a_title_follows_the_query_to_the_sentence_that_matches() -> None:
+    turn = doc(BOOK_TURN)
+    first = "I'm interested in learning more about renewable energy, can you recommend some…"
+    assert listed_title(turn) == first
+    assert listed_title(turn, "what book was I reading, The Quiet Orchard?") == BOOK
+    # Words of the question that name nothing (stop words, asking words) do not
+    # move it; neither does a question the turn holds no word of.
+    for query in ("", "what is it of the", "is the one in the", "zebra saxophone"):
+        assert listed_title(turn, query) == first
+    # A word stem finds its plural, as an excerpt's match does.
+    assert listed_title(turn, "which orchards") == BOOK
+
+
+def test_the_best_sentence_wins_and_ties_go_to_the_earliest() -> None:
+    bakes = doc("User: Cy bakes. Ana bakes bread daily. Ben bakes bread daily.")
+    assert listed_title(bakes, "who bakes bread") == "Ana bakes bread daily."
+    assert listed_title(bakes, "bakes") == "Cy bakes."
+    assert listed_title(bakes, "daily") == "Ana bakes bread daily."
+
+
+def test_melos_reply_is_looked_at_only_when_the_users_words_hold_no_term() -> None:
+    reply = doc(
+        "User: Hello there. How are you?\nmelo: Bring a coat. "
+        "The harbour opens at noon, and the harbour office opens at nine."
+    )
+    assert listed_title(reply, "when does the harbour open") == (
+        "The harbour opens at noon, and the harbour office opens at nine."
+    )
+    assert listed_title(reply, "harbour") == (  # no term in what the user said
+        "The harbour opens at noon, and the harbour office opens at nine."
+    )
+    typed = doc(
+        "User: Thinking about the harbour today.\nmelo: The harbour opens at noon, "
+        "and the harbour office opens at nine."
+    )
+    assert listed_title(typed, "harbour opens") == "Thinking about the harbour today."
+    # A turn without the user's words has only the reply to look at.
+    assert listed_title(
+        doc("User: \nmelo: Bring a coat. Harbour at noon."), "harbour"
+    ) == ("Harbour at noon.")
+
+
+def test_a_long_sentence_starts_where_its_first_matching_term_is_inside_it() -> None:
+    sentence = (
+        "Well, "
+        + "the weather was fine and nothing much happened " * 3
+        + "so I planted the zucchini seeds near the east fence after lunch today and "
+        "then went inside for a long cold drink and a rest."
+    )
+    assert len(sentence) > 2 * LIST_TITLE_CHARS
+    turn = doc(f"User: {sentence} Then I slept.")
+    title = listed_title(turn, "zucchini")
+    window = title[1:-1]
+    assert title.startswith("…") and title.endswith("…")
+    assert "zucchini" in window and len(title) <= LIST_TITLE_CHARS
+    assert f" {window} " in f" {sentence} "  # whole words
+    # A term in the head leaves the head, cut as it always was.
+    assert listed_title(turn, "weather") == listed_title(turn)
+    assert listed_title(turn) == word_cut(sentence, LIST_TITLE_CHARS)
+    # A term in the last words: the window ends with the sentence and fills the room.
+    tail = doc("User: " + "word " * 30 + "zucchini.")
+    assert listed_title(tail, "zucchini") == "…" + "word " * 14 + "zucchini."
+
+
+def test_titles_follow_chinese_and_japanese_queries() -> None:
+    chinese = doc("User: 今天天气很好。我的组会在周四下午。\nmelo: 好的，已经记下了。")
+    assert listed_title(chinese, "我的组会是哪天") == "我的组会在周四下午。"
+    assert listed_title(chinese, "你吃饭了吗") == "今天天气很好。"  # fillers only
+    assert (
+        listed_title(doc("User: 你好。\nmelo: 周四下午开组会。"), "组会")
+        == "周四下午开组会。"
+    )
+    japanese = doc(
+        "User: 今日はいい天気です。村上春樹の小説を読みました。\nmelo: そうですか。"
+    )
+    assert listed_title(japanese, "村上春樹の本") == "村上春樹の小説を読みました。"
+    # A long run without spaces is cut anywhere, with the term inside.
+    run = doc("User: " + "今天天气很好" * 20 + "我在学习量子力学。")
+    title = listed_title(run, "量子力学")
+    assert "量子力学" in title and title.startswith("…") and len(title) <= 80
+    assert title.endswith("量子力学。")
+
+
+def test_without_a_query_or_a_match_a_title_reads_as_it_always_did() -> None:
+    for text in (
+        "User: Where is it? Not here.\nmelo: Over there.",
+        "Task: Plan\nUser: Fix the build. Now.\nmelo: Done.",
+        "User: \nmelo: Nothing to say here. Really.",
+        "Summary of chat “Fix CI”: the port was taken.",
+        "User: 我的组会是哪天？别忘了。\nmelo: 周四。",
+        BOOK_TURN,
+    ):
+        for query in ("", "zebra saxophone", "of the"):
+            assert listed_title(doc(text), query) == listed_title(doc(text))
+    # A memory item's title is the item's own, whatever the query says.
+    item = Item("m:3", "Finished a novel.", "item", "s", 1, 1.0, title="Reading list")
+    assert listed_title(item, "novel finished") == "Reading list"
+    assert item.listed(query="novel finished") == item.listed()
+    # A summary is one sentence to look through: the query finds its sentence.
+    summary = doc("Summary of chat “Plans”: the port was taken. The fix was a retry.")
+    assert listed_title(summary, "retry fix") == "The fix was a retry."
+
+
+async def test_the_block_and_the_search_tool_title_a_turn_by_their_own_query(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_form="list")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        typed = f"Thinking about my weekend plans. {BOOK}"
+        await add_turn(memory, store, typed, "Nice.", title="Weekend")
+        found = await ask(memory, store, "which book did I finish last week?")
+        (line,) = lines_of(found.block)
+        assert line.split(" · ")[2] == f"“{BOOK}”"
+        assert found.used[0].shown == line  # the line the model read
+        tools = MemoryTools(memory)
+        # The tool's own query, not the message the turn was recalled for.
+        (by_plan,) = lines_of(await tools.search(query="weekend plans"))
+        assert by_plan.split(" · ")[2] == "“Thinking about my weekend plans.”"
+        (by_book,) = lines_of(await tools.search(query="quiet orchard"))
+        assert by_book.split(" · ")[2] == f"“{BOOK}”"
+        # The default form's lines are not titles at all.
+        cfg.memory.recall_form = "excerpt"
+        assert "[t" not in (await ask(memory, store, "finished orchard")).block
     finally:
         await memory.aclose()
 
