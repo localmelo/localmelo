@@ -100,6 +100,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     if (path.startsWith('/sessions/')) return {turns: [{turn: 1, status: 'running', events: h.turns}], has_earlier: false};
     if (path.startsWith('/tasks/')) return {task: {}};
     if (path === '/memory/records') return {on: h.memoryOn !== false, records: [], documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/items') return {items: []};
     if (path === '/memory/import/scan') return {batch_id: 'b1', sources: [], partial: false, home: '/h'};
     if (path.startsWith('/chores')) {
       const id = new URL(path, 'http://x').searchParams.get('session_id') ?? '';

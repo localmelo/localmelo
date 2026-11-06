@@ -5,10 +5,14 @@ the active items of its kind, by rules and no model call, to one of five actions
 
 - ``NEW``: the item is stored.
 - ``UPDATE``: it is stored and the item it updates is marked replaced by it (that
-  one stays, and reads as older).
+  one stays, and reads as older). An item older than the one it would update is
+  stored as already replaced by it instead: the newer fact stays current, whatever
+  order the chats are encoded in.
 - ``RELATED``: it is stored and the two are linked both ways.
 - ``CONFLICT``: it is stored and both are marked in conflict; both stay recallable.
-- ``IGNORE``: it is not stored; the route names the item it duplicates.
+- ``IGNORE``: it is not stored; the route names the item it duplicates, and that item
+  gains its sources and, when the repeat is newer, its time
+  (:meth:`~.index.ConversationIndex.add_sources`).
 - ``REFUSE``: its title or text holds a secret (:func:`~.index.holds_secret`); it is
   not stored and nothing is compared. :meth:`Router.route` is the only caller of
   :meth:`~.index.ConversationIndex.add_item`, the only writer of the items table, so
@@ -167,19 +171,40 @@ class Router:
             embedding=item.vector,
         )
         action, target = decision.action, decision.target_id
-        if action == "IGNORE" or (action != "NEW" and target is None):
-            return Route("IGNORE", None, target, decision.reason)
-        new_id = await self._index.add_item(item)
-        stored = dataclasses.replace(item, id=new_id)
         kind = active.setdefault(item.kind, {})
-        if action == "UPDATE" and target is not None:
-            await self._index.mark_replaced(target, new_id)
-            kind.pop(target, None)
-        elif action == "RELATED" and target is not None:
-            await self._index.link_items(new_id, target, conflict=False)
+        if action == "IGNORE" or (action != "NEW" and target is None):
+            if target is not None:
+                # The item repeats one kept: that one now cites this item's turns too,
+                # so they stay behind it, whatever replaces it, and come back to
+                # recall if it is forgotten; and it is as new as the repeat.
+                await self._index.add_sources(target, item.sources, item.created_at)
+                entry = kind.get(target)
+                if entry is not None and item.created_at > entry.created_at:
+                    kind[target] = dataclasses.replace(
+                        entry, created_at=item.created_at
+                    )
+            return Route("IGNORE", None, target, decision.reason)
+        replace = target if action == "UPDATE" else None
+        reason = decision.reason
+        if replace is not None and item.created_at < kind[replace].created_at:
+            # Newer always wins, whatever order the chats are encoded in: an older
+            # fact is kept, already replaced by the newer one it would have replaced.
+            item = dataclasses.replace(item, status="replaced", replaced_by=replace)
+            reason += f"; older than entry {replace}, kept as replaced"
+            replace = None
+        # The item and its update or link are one write: a crash between them cannot
+        # leave two current facts, or a replaced one with no replacement.
+        new_id = await self._index.add_item(
+            item,
+            replace=replace,
+            link=target if action in ("RELATED", "CONFLICT") else None,
+            conflict=action == "CONFLICT",
+        )
+        if replace is not None:
+            kind.pop(replace, None)
         elif action == "CONFLICT" and target is not None:
-            await self._index.link_items(new_id, target, conflict=True)
             kind.pop(target, None)  # a conflict is no longer an active item
-            return Route(action, new_id, target, decision.reason)
-        kind[new_id] = _entry(stored, self._model)
-        return Route(action, new_id, target, decision.reason)
+            return Route(action, new_id, target, reason)
+        if item.status == "active":
+            kind[new_id] = _entry(dataclasses.replace(item, id=new_id), self._model)
+        return Route(action, new_id, target, reason)
