@@ -11,7 +11,8 @@ the active items of its kind, by rules and no model call, to one of five actions
 - ``RELATED``: it is stored and the two are linked both ways.
 - ``CONFLICT``: it is stored and both are marked in conflict; both stay recallable.
 - ``IGNORE``: it is not stored; the route names the item it duplicates, and that item
-  gains its sources (:meth:`~.index.ConversationIndex.add_sources`).
+  gains its sources and, when the repeat is newer, its time
+  (:meth:`~.index.ConversationIndex.add_sources`).
 - ``REFUSE``: its title or text holds a secret (:func:`~.index.holds_secret`); it is
   not stored and nothing is compared. :meth:`Router.route` is the only caller of
   :meth:`~.index.ConversationIndex.add_item`, the only writer of the items table, so
@@ -170,14 +171,19 @@ class Router:
             embedding=item.vector,
         )
         action, target = decision.action, decision.target_id
+        kind = active.setdefault(item.kind, {})
         if action == "IGNORE" or (action != "NEW" and target is None):
             if target is not None:
                 # The item repeats one kept: that one now cites this item's turns too,
                 # so they stay behind it, whatever replaces it, and come back to
-                # recall if it is forgotten.
-                await self._index.add_sources(target, item.sources)
+                # recall if it is forgotten; and it is as new as the repeat.
+                await self._index.add_sources(target, item.sources, item.created_at)
+                entry = kind.get(target)
+                if entry is not None and item.created_at > entry.created_at:
+                    kind[target] = dataclasses.replace(
+                        entry, created_at=item.created_at
+                    )
             return Route("IGNORE", None, target, decision.reason)
-        kind = active.setdefault(item.kind, {})
         replace = target if action == "UPDATE" else None
         reason = decision.reason
         if replace is not None and item.created_at < kind[replace].created_at:

@@ -983,12 +983,14 @@ class ConversationIndex:
             }
 
     async def add_sources(
-        self, item_id: int, sources: Iterable[tuple[str, int]]
+        self, item_id: int, sources: Iterable[tuple[str, int]], at: float = 0.0
     ) -> None:
         """Add *sources* to the turns item *item_id* cites, in one write: for an item
         that repeats a kept one, so that its turns stay behind it while it stands, and
         go back to recall with it when it is forgotten. A source it has is not added
-        twice; an unknown item is skipped."""
+        twice. Its time (the newest source's) moves forward to *at* when that is
+        later, so a fact repeated on Wednesday is not older than a change dated
+        Tuesday. An unknown item is skipped."""
         conn = await self._ready()
         try:
             async with conn.execute(
@@ -996,13 +998,12 @@ class ConversationIndex:
             ) as cur:
                 row = await cur.fetchone()
             if row is not None:
-                have = _sources(row[0])
-                merged = tuple(dict.fromkeys((*have, *sources)))
-                if merged != have:
-                    await conn.execute(
-                        "UPDATE items SET sources = ? WHERE id = ?",
-                        (json.dumps([list(src) for src in merged]), item_id),
-                    )
+                merged = tuple(dict.fromkeys((*_sources(row[0]), *sources)))
+                await conn.execute(
+                    "UPDATE items SET sources = ?, created_at = MAX(created_at, ?) "
+                    "WHERE id = ?",
+                    (json.dumps([list(src) for src in merged]), at, item_id),
+                )
             await conn.commit()
         except BaseException:
             await conn.rollback()

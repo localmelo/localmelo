@@ -576,6 +576,35 @@ async def test_a_duplicate_is_ignored_and_not_stored(index: ConversationIndex) -
     }
 
 
+@pytest.mark.parametrize("new_run", [False, True], ids=["same run", "later run"])
+async def test_a_fact_repeated_later_is_not_older_than_an_update_dated_between(
+    index: ConversationIndex, new_run: bool
+) -> None:
+    monday, tuesday, wednesday = 1000.0, 2000.0, 3000.0
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=monday)
+    repeat = await route(
+        router, PITTSBURGH, kind="profile", at=wednesday, session="s2", turns=(4,)
+    )
+    assert (repeat.action, repeat.target) == ("IGNORE", 1)
+    (kept,) = await index.fetch_items([1])
+    assert kept.created_at == wednesday  # the item's time is its newest source's
+    # A change dated Tuesday is encoded last: it is older than Wednesday's repeat of
+    # the first fact, so that fact stays current.
+    late = await route(
+        Router(index) if new_run else router,
+        UTRECHT,
+        kind="profile",
+        at=tuesday,
+        session="s3",
+        turns=(2,),
+    )
+    assert (late.action, late.item, late.target) == ("UPDATE", 2, 1)
+    first, second = await index.fetch_items([1, 2])
+    assert (first.status, first.replaced_by) == ("active", None)
+    assert (second.status, second.replaced_by) == ("replaced", 1)
+
+
 async def test_an_episode_never_replaces_another_episode(
     index: ConversationIndex,
 ) -> None:
