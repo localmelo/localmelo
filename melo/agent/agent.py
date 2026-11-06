@@ -72,15 +72,9 @@ from localmelo.melo.agent._chat import (
     CallTelemetry,
     Chat,
     RequestStats,
-    coalesce_user_messages,
-    lacks_task_query,
 )
-from localmelo.melo.agent._context_fit import ContextFitError
-from localmelo.melo.agent._earlier import (
-    check_earlier_turns,
-    earlier_block,
-    with_earlier,
-)
+from localmelo.melo.agent._context_fit import ContextFitError, PromptCapError
+from localmelo.melo.agent._earlier import check_earlier_turns, earlier_block
 from localmelo.melo.agent._events import _Emitter, check_sink
 from localmelo.melo.agent._notes_loop import _NotesLoop
 from localmelo.melo.agent._pause import Hold
@@ -239,36 +233,6 @@ from localmelo.melo.schema import (
 logger = logging.getLogger(__name__)
 
 
-def _as_planned(
-    window: list[Message], query: str, query_block: str = "", earlier: str = ""
-) -> list[Message]:
-    """*window* as a planning request carries it, for size checks.
-
-    That is with the task *query* in front once the window no longer holds
-    it, as :meth:`Chat.plan_step` puts it back (see
-    :func:`~localmelo.melo.agent._chat.lacks_task_query`). *query_block*,
-    the attempt's boundary recall block, rides on that query message, in
-    the request copy only; so does *earlier*, the chat's earlier turns, once
-    nothing before the query is left (see ``Chat.plan_step``).
-    """
-    text = f"{query}\n\n{query_block}" if query_block else query
-    if lacks_task_query(window, query):
-        return [Message(role="user", content=with_earlier(text, earlier)), *window]
-    out = list(window)
-    matches = [
-        index
-        for index, message in enumerate(out)
-        if message.role == "user" and message.content == query
-    ]
-    if matches:
-        index = matches[-1]
-        first = next(i for i, message in enumerate(out) if message.role != "system")
-        pinned = with_earlier(text, earlier) if index == first else text
-        if pinned != query:
-            out[index] = dataclasses.replace(out[index], content=pinned)
-    return out
-
-
 def _split_inline_reasoning(response: Message) -> Message:
     """Move a ``<think>`` block out of *response*'s content into thinking.
 
@@ -303,14 +267,21 @@ def _replay_plan(
     task_query: Message | None = None,
     requires_replay: bool = False,
 ) -> tuple[list[Message], list[int]]:
-    """The window as an explicit-mode request carries it, and its cap skips.
+    """The window as a request carries it, and its cap skips.
 
-    The first list is the one :func:`_as_sent` returns. The second holds the
-    indexes in *window* of the assistant turns whose thinking was left out
-    because it exceeds :data:`REPLAY_TURN_CAP` (empty on a replay-required
-    provider, and in ``legacy``/``drop``). On a replay-required provider the
-    whole window is replayed: the task scope and ``replay_turns`` do not
-    apply, since a turn the server needs is not one the caller can leave out.
+    The first list is the window to send. In ``legacy`` it is *window*
+    itself, unchanged. Otherwise it is a new list in which an assistant
+    message keeps its thinking only in ``replay`` and ``compress+replay``,
+    in scope (the current task from *task_query* on, or the whole window),
+    among the newest ``replay_turns`` such turns, and within
+    :data:`REPLAY_TURN_CAP`; a message that fails one of these is a copy
+    with an empty thinking, one that passes is the original object. The
+    second list holds the indexes in *window* of the assistant turns whose
+    thinking was left out because it exceeds :data:`REPLAY_TURN_CAP` (empty
+    on a replay-required provider, and in ``legacy``/``drop``). On a
+    replay-required provider the whole window is replayed: the task scope,
+    ``replay_turns`` and the cap do not apply, since a turn the server needs
+    is not one the caller can leave out.
     """
     if options.reasoning == "legacy":
         return window, []
@@ -349,33 +320,6 @@ def _replay_plan(
             continue
         sent.append(msg)
     return sent, skipped
-
-
-def _as_sent(
-    window: list[Message],
-    options: AgentOptions,
-    *,
-    task_query: Message | None = None,
-    requires_replay: bool = False,
-) -> list[Message]:
-    """The window as a request carries it, for send and for size checks.
-
-    In ``legacy`` it is *window* itself, unchanged. Otherwise it is a new
-    list in which an assistant message keeps its thinking only in
-    ``replay`` and ``compress+replay``, in scope (the current task from *task_query* on, or the
-    whole window), among the newest ``replay_turns`` such turns, and within
-    :data:`REPLAY_TURN_CAP` (the cap does not apply to a provider that
-    requires replay). A provider that requires replay gets every assistant
-    turn in the window: the task scope and ``replay_turns`` are ignored
-    there. A message that fails one of these is a copy with an empty
-    thinking; one that passes is the original object.
-    """
-    return _replay_plan(
-        window,
-        options,
-        task_query=task_query,
-        requires_replay=requires_replay,
-    )[0]
 
 
 # Characters of a withheld tool result that stay visible to the model. A
@@ -848,10 +792,10 @@ class _RunState:
     reflection_msg: Message | None = None
     # An opt-in source of parent instructions at planning boundaries.
     inbox: InboxSource | None = None
-    # Replay counters (see memory_stats on RunResult).
+    # Replay counters (see memory_stats on RunResult; replay_stripped is the
+    # chat's RequestStats.thinking_cleared).
     replayed_chars: int = 0
     replay_skipped: int = 0
-    replay_stripped: int = 0
     # R4's counters (see memory_stats on RunResult), kept in every explicit
     # mode so the shape is stable; only the compress modes move them.
     notes: int = 0
@@ -1361,6 +1305,8 @@ class Agent(_RecallLoop, _NotesLoop):
             identity=self.options.identity or "",
             max_calls=self.options.max_calls,
             reserve_answer=self.options.answer_on_stop,
+            # Read at each request, so a checker swapped in later is the one asked.
+            prompt_check=lambda messages, **kw: self.checker.pre_plan(messages, **kw),
         )
         # The user's model reviews steps the rules leave open, under a grant
         # or in auto mode; it keeps this chat's blocks and the user's words.
@@ -1411,11 +1357,6 @@ class Agent(_RecallLoop, _NotesLoop):
     def workspace_root(self) -> str | None:
         """The real path of the agent's workspace root, or ``None``."""
         return self.executor.workspace_root
-
-    @property
-    def _counts_thinking(self) -> bool:
-        """Whether prompt checks count the reasoning a request carries."""
-        return self.options.reasoning in ("replay", "compress+replay")
 
     @property
     def _requires_replay(self) -> bool:
@@ -1537,7 +1478,7 @@ class Agent(_RecallLoop, _NotesLoop):
         as usual. Returns the number of messages kept; ``[]`` clears the
         conversation. Explicit reasoning modes split a legacy inline
         thinking block in the loaded copies; the caller's messages are
-        unchanged, and prompt-cap fitting can strip thinking before facts.
+        unchanged, and a request's fit can leave out thinking before facts.
         What the step review kept of the chat (the user's words, settled
         reviews, blocks) starts over; with ``[]`` the chat also begins now,
         for what the review counts as changed in this chat.
@@ -1559,8 +1500,8 @@ class Agent(_RecallLoop, _NotesLoop):
         self._reviewer.reset(new_chat=not loaded)
         loaded = copy.deepcopy(loaded)
         if self.options.reasoning != "legacy":
-            # Normalize legacy checkpoints once, before prompt-cap fitting
-            # tracks canonical message identities and strips thinking.
+            # Normalize legacy checkpoints once, before any request carries
+            # them (and its fit can leave their thinking out).
             loaded = [
                 _split_inline_reasoning(msg) if msg.role == "assistant" else msg
                 for msg in loaded
@@ -1832,123 +1773,6 @@ class Agent(_RecallLoop, _NotesLoop):
     # short status string when the loop should break, or None to
     # continue to the next stage.
 
-    async def _fit_prompt_cap(
-        self,
-        others: list[Message],
-        query: str,
-        *,
-        task_query: Message | None = None,
-        query_block: str = "",
-        run: _RunState | None = None,
-    ) -> None:
-        """Drop or strip the oldest working memory the planning prompt cannot hold.
-
-        The chat's earlier turns, which a planning request carries once the
-        window holds nothing before the query, count as the request carries
-        them (see :func:`_as_planned`).
-
-        ``Checker.pre_plan`` refuses a step whose prompt, the working-memory
-        window plus *others* (long-term recall and the reflection), is
-        over its cap. The window is measured as the planning request
-        carries it: once the unit that holds the task *query* is dropped,
-        the request puts the query back in front (see :func:`_as_planned`),
-        so dropping that unit saves nothing.
-
-        In ``replay`` on a provider that does not require replay, the
-        oldest units' thinking is cleared first (see
-        :meth:`WorkingMemory.strip_thinking`), and the count that fits is
-        committed. Only when no such strip fits does the whole-unit loop
-        run. On a replay-required provider that loop runs directly, with
-        thinking counted: a unit is dropped whole and no reasoning is ever
-        cut or skipped. ``legacy`` and ``drop`` run the loop as before.
-        The newest unit always stays.
-        """
-        units = group_turns(
-            self.hippo.working.get_window(),
-            empty_prefix=self.hippo.working.empty_prefix,
-        )
-
-        async def fits(kept: list[Message], target: float = 1.0) -> bool:
-            sent = _as_sent(
-                kept,
-                self.options,
-                task_query=task_query,
-                requires_replay=self._requires_replay,
-            )
-            sent = self._tool_images.hydrate(sent)
-            planned = _as_planned(
-                sent, query, query_block, "" if run is None else run.plan_earlier
-            )
-            if run is not None and (run.inbox is not None or run.brief):
-                planned = coalesce_user_messages(planned)
-            check = await self.checker.pre_plan(
-                others + planned,
-                count_thinking=self._counts_thinking,
-                cap_ratio=target,
-            )
-            return check.allowed
-
-        if not await fits(self.hippo.working.get_window()):
-            if (
-                self.options.reasoning in ("replay", "compress+replay")
-                and not self._requires_replay
-            ):
-                carried = {
-                    id(msg)
-                    for msg in _as_sent(
-                        self.hippo.working.get_window(),
-                        self.options,
-                        task_query=task_query,
-                        requires_replay=self._requires_replay,
-                    )
-                    if msg.role == "assistant" and msg.thinking
-                }
-                for first in range(1, len(units)):
-                    kept = [
-                        (
-                            dataclasses.replace(msg, thinking="")
-                            if index < first
-                            and msg.role == "assistant"
-                            and msg.thinking
-                            and id(msg) in carried
-                            else msg
-                        )
-                        for index, unit in enumerate(units)
-                        for msg in unit
-                    ]
-                    if not await fits(kept):
-                        continue
-                    changed = self.hippo.working.strip_thinking(first, only=carried)
-                    if run is not None:
-                        run.replay_stripped += changed
-                    logger.info(
-                        "Cleared the thinking of %d working-memory message(s) "
-                        "so that the planning prompt fits",
-                        changed,
-                    )
-                    return
-            for first in range(len(units)):
-                kept = [msg for unit in units[first:] for msg in unit]
-                if await fits(kept):
-                    break
-            else:
-                return  # not even the newest unit fits: keep the window
-            if first:
-                # Drop to WINDOW_FIT_TARGET of the cap, so the next steps fit
-                # without dropping again (when no such cut fits, keep *first*).
-                for deeper in range(first + 1, len(units)):
-                    kept = [msg for unit in units[deeper:] for msg in unit]
-                    if await fits(kept, WINDOW_FIT_TARGET):
-                        first = deeper
-                        break
-            if first:
-                dropped = self.hippo.working.drop_oldest_units(first)
-                logger.info(
-                    "Dropped the %d oldest working-memory messages so that the "
-                    "planning prompt fits",
-                    dropped,
-                )
-
     async def _long_context(self, query: str, run: _RunState | None) -> list[Message]:
         """The long-term context a legacy planning request carries.
 
@@ -1973,11 +1797,7 @@ class Agent(_RecallLoop, _NotesLoop):
         return list(run.long_context)
 
     async def _do_retrieval(
-        self,
-        query: str,
-        *,
-        task_query: Message | None = None,
-        run: _RunState | None = None,
+        self, query: str, *, run: _RunState | None = None
     ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
@@ -1988,10 +1808,8 @@ class Agent(_RecallLoop, _NotesLoop):
 
         In ``drop`` and ``replay`` no long-term recall is read, so the
         system prompt has no ``[RECALL]`` section; the long-term writes are
-        unchanged. Before anything reads the working-memory window, its
-        oldest units are dropped or stripped when the planning prompt would
-        not fit ``Checker.pre_plan``'s cap otherwise (see
-        :meth:`_fit_prompt_cap`).
+        unchanged. The window is returned whole: the planning request is
+        fitted on a copy when it is sent (see :class:`Chat`).
 
         Returns (long_context, short_window, tools, fail_reason).
         *fail_reason* is non-None when a check fails and the loop must break.
@@ -2016,19 +1834,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 placement="query",
             )
             run.boundary_block = block
-        query_block = "" if run is None else run.boundary_block
-        await self._fit_prompt_cap(
-            long_context,
-            query,
-            task_query=task_query,
-            query_block=query_block,
-            run=run,
-        )
         short_window = self.hippo.working.get_window()
-        if run is not None and run.long_context is not None and short_window:
-            # A drop to fit the cap has changed this request already; the
-            # block it carries stays until the window loses messages again.
-            run.long_head = short_window[0]
 
         tool_hints: list[str] = []
         if self.options.tool_exposure == "all":
@@ -2093,34 +1899,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 (f"Tool resolution failed: {resolution_check.reason}"),
             )
 
-        # As the planning request will carry it: with the query put back.
-        sent = _as_sent(
-            short_window,
-            self.options,
-            task_query=task_query,
-            requires_replay=self._requires_replay,
-        )
-        sent = self._tool_images.hydrate(sent)
-        planned = _as_planned(
-            sent,
-            query,
-            "" if run is None else run.boundary_block,
-            "" if run is None else run.plan_earlier,
-        )
-        if run is not None and (run.inbox is not None or run.brief):
-            planned = coalesce_user_messages(planned)
-        all_msgs = long_context + planned
-        check = await self.checker.pre_plan(
-            all_msgs, count_thinking=self._counts_thinking
-        )
-        if not check.allowed:
-            return (
-                long_context,
-                short_window,
-                tools,
-                (f"Plan check failed: {check.reason}"),
-            )
-
         return long_context, short_window, tools, None
 
     def _thinking_retry_body(self) -> Mapping[str, Any]:
@@ -2142,10 +1920,13 @@ class Agent(_RecallLoop, _NotesLoop):
     ) -> tuple[Message, str | None]:
         """Stage 3: LLM planning step with post-plan check.
 
-        The request carries :func:`_as_sent`'s window. In ``replay`` the
-        characters of thinking it carries are counted, and a turn skipped
-        for the per-turn cap is counted too; in ``drop`` both are zero; in
-        ``legacy`` neither counter is used. An explicit-mode reply's inline
+        The request carries :func:`_replay_plan`'s window, fitted when it is
+        sent (see :class:`Chat`; a request the prompt check refuses raises
+        :class:`PromptCapError`). In ``replay`` the characters of thinking
+        the fitted request carries are counted, and a turn it carries that
+        was skipped for the per-turn cap is counted too (see
+        :meth:`_count_sent`); in ``drop`` both are zero; in ``legacy``
+        neither counter is used. An explicit-mode reply's inline
         ``<think>`` block is moved into thinking before the run reads it,
         so the result and tool-hint scan see the clean answer.
 
@@ -2157,11 +1938,9 @@ class Agent(_RecallLoop, _NotesLoop):
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
+        ready = on_ready
         if run is not None:
-            run.replayed_chars += sum(
-                len(msg.thinking) for msg in sent if msg.role == "assistant"
-            )
-            run.replay_skipped += len(skipped)
+            ready = self._count_sent(run, [sent[i] for i in skipped], on_ready)
         sent = self._tool_images.hydrate(sent)
         recalls = []
         recall_records: list[RecallRecord] = []
@@ -2175,9 +1954,9 @@ class Agent(_RecallLoop, _NotesLoop):
         plan_args: dict[str, Any] = {}
         if run is not None and (run.inbox is not None or run.brief):
             plan_args["coalesce_users"] = True
-        if on_ready is not None:
-            plan_args["on_ready"] = on_ready
-        elif run is not None and run.brief and run.dropped:
+        if ready is not None:
+            plan_args["on_ready"] = ready
+        if on_ready is None and run is not None and run.brief and run.dropped:
             # Not at a step that carries inbox lines: they must end the request.
             plan_args["tail_note"] = render_dropped(run.dropped, sent)
         response = await self.chat.plan_step(
@@ -2672,9 +2451,8 @@ class Agent(_RecallLoop, _NotesLoop):
         :func:`_tool_message_content`); a cut result keeps its images.
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
-        characters, half the 100,000 at which ``Checker.pre_plan`` fails
-        the task, so that one step leaves room in the next planning
-        prompt. The calls keep their share, and so does the assistant
+        characters, half the prompt cap (``PROMPT_CAP_CHARS``), so that one
+        step leaves room in the next planning prompt. The calls keep their share, and so does the assistant
         text when the check allows it and it has at most
         ``ASSISTANT_TEXT_SHARE`` characters. The results share the rest,
         the largest cut first to the room the others leave it, ending
@@ -2866,60 +2644,31 @@ class Agent(_RecallLoop, _NotesLoop):
 
     # ── Reflection ──
 
-    async def _fit_reflection_messages(
-        self,
-        messages: list[Message],
-        run: _RunState | None,
-        *,
-        skipped: list[int] | None = None,
-        sent: list[Message] | None = None,
-    ) -> list[Message] | None:
-        """*messages* with the oldest reflection tail units dropped to fit.
-
-        Keeps the system message and the final user request. ``None`` when
-        even the newest tail unit alone, with them, is over the prompt cap:
-        the reflection is then refused before it is sent. In ``replay``
-        the thinking the kept turns carry is counted in the run's
-        ``replayed_chars``.
-        """
-        if len(messages) <= 2:
-            check = await self.checker.pre_plan(
-                messages, count_thinking=self._counts_thinking
-            )
-            if not check.allowed:
-                return None
-            self._note_reflection_sent(messages, run, skipped, sent)
-            return messages
-        units = group_turns(
-            messages[1:-1], empty_prefix=self.hippo.working.empty_prefix
-        )
-        for first in range(len(units)):
-            kept = [msg for unit in units[first:] for msg in unit]
-            candidate = [messages[0], *kept, messages[-1]]
-            check = await self.checker.pre_plan(
-                candidate, count_thinking=self._counts_thinking
-            )
-            if check.allowed:
-                self._note_reflection_sent(candidate, run, skipped, sent)
-                return candidate
-        return None
-
     @staticmethod
-    def _note_reflection_sent(
-        candidate: list[Message],
-        run: _RunState | None,
-        skipped: list[int] | None,
-        sent: list[Message] | None,
-    ) -> None:
-        """Count what a reflection request that *candidate* sends carries."""
-        if run is None:
-            return
-        run.replayed_chars += sum(
-            len(msg.thinking) for msg in candidate if msg.role == "assistant"
-        )
-        if skipped and sent is not None:
-            kept = {id(msg) for msg in candidate}
-            run.replay_skipped += sum(1 for index in skipped if id(sent[index]) in kept)
+    def _count_sent(
+        run: _RunState,
+        skipped: Sequence[Message],
+        then: Callable[[list[Message]], None] | None = None,
+    ) -> Callable[[list[Message]], None]:
+        """The ``on_ready`` hook that counts the reasoning a request carries.
+
+        Called with the request as it is sent, after its fit: the thinking
+        characters it carries go to ``replayed_chars``, and each of the
+        *skipped* turns (left without thinking for the per-turn cap) that
+        it still carries to ``replay_skipped``. A fit works on copies, so a
+        turn is matched by value. *then*, when given, is called first: a
+        request it refuses is not counted.
+        """
+
+        def count(messages: list[Message]) -> None:
+            if then is not None:
+                then(messages)
+            run.replayed_chars += sum(
+                len(msg.thinking) for msg in messages if msg.role == "assistant"
+            )
+            run.replay_skipped += sum(1 for msg in skipped if msg in messages)
+
+        return count
 
     def _store_reflection_note(
         self, response: Message, task: TaskRecord, run: _RunState
@@ -2987,9 +2736,9 @@ class Agent(_RecallLoop, _NotesLoop):
         rationale stay the model's, and its ``tried_memory`` is the trimmed
         entry.
 
-        A reflection request that ``fit`` refuses (the explicit modes, when
-        even its newest tail unit is over the prompt cap) is a reply that
-        cannot be read: this returns ``None``.
+        A reflection request is fitted when it is sent, as a planning one
+        is (see :class:`Chat`); one that the prompt check still refuses is
+        a reply that cannot be read: this returns ``None``.
         """
         short_window = self.hippo.working.get_window()
         task_query = run.task_query_msg if run is not None else None
@@ -2999,13 +2748,9 @@ class Agent(_RecallLoop, _NotesLoop):
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
-        fit = None
-        if self.options.reasoning != "legacy":
-
-            async def fit(messages: list[Message]) -> list[Message] | None:
-                return await self._fit_reflection_messages(
-                    messages, run, skipped=skipped, sent=sent
-                )
+        on_ready = None
+        if run is not None:
+            on_ready = self._count_sent(run, [sent[i] for i in skipped])
 
         prior_reflections = self.hippo.working.get_reflections()
         note_lines: list[str] = []
@@ -3032,7 +2777,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 failure_type=failure_type,
                 prior_reflections=prior_reflections or None,
                 final=final,
-                fit=fit,
+                on_ready=on_ready,
                 notes=note_lines,
                 draft_titles=draft_titles,
                 earlier=earlier,
@@ -3050,8 +2795,8 @@ class Agent(_RecallLoop, _NotesLoop):
 
         response = await ask()
         if response is None:
-            # The fit refused the request before it was sent; read it as an
-            # unreadable reply (see the docstring).
+            # The prompt check refused the request before it was sent; read
+            # it as an unreadable reply (see the docstring).
             return None
         found = _read_reflection(response.content)
         if found is None:
@@ -3168,7 +2913,7 @@ class Agent(_RecallLoop, _NotesLoop):
             inserted, pending = self._read_inbox(run)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
-                query, task_query=run.task_query_msg, run=run
+                query, run=run
             )
             if fail is not None:
                 run.end("failed", error=fail)
@@ -3202,6 +2947,10 @@ class Agent(_RecallLoop, _NotesLoop):
                     run=run,
                     on_ready=on_ready,
                 )
+            except PromptCapError as exc:
+                # Over the prompt cap even fitted: nothing was sent.
+                run.end("failed", error=f"Plan check failed: {exc}")
+                return step + 1, ""
             finally:
                 if retry_token is not None:
                     LLM_REQUEST_EXTRA_BODY.reset(retry_token)
@@ -4702,7 +4451,7 @@ class Agent(_RecallLoop, _NotesLoop):
             memory_stats = {
                 "replayed_chars": run.replayed_chars,
                 "replay_skipped": run.replay_skipped,
-                "replay_stripped": run.replay_stripped,
+                "replay_stripped": stats.thinking_cleared,
                 "notes": run.notes,
                 "notes_model": run.notes_model,
                 "notes_heuristic": run.notes_heuristic,

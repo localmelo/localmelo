@@ -20,11 +20,13 @@ from localmelo.melo.agent._chat import (
     REFLECTION_RETRY_NOTE,
     Chat,
 )
+from localmelo.melo.checker.checker import PROMPT_CAP_CHARS
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     WINDOW_EVICT_CHUNK,
+    WINDOW_FIT_TARGET,
     Message,
     ToolCall,
     ToolDef,
@@ -356,7 +358,19 @@ def _starts_the_same(earlier: dict[str, Any], later: dict[str, Any]) -> bool:
     return bool(later["messages"][: len(kept)] == kept)
 
 
-async def test_a_large_cap_leaves_the_size_fit_to_drop_history_in_chunks() -> None:
+def _prompt_chars(body: dict[str, Any]) -> int:
+    """What the prompt cap counts of a request body: texts, tool names and arguments."""
+    return sum(
+        len(m.get("content") or "")
+        + sum(
+            len(c["function"]["name"]) + len(c["function"]["arguments"])
+            for c in m.get("tool_calls") or []
+        )
+        for m in body["messages"]
+    )
+
+
+async def test_a_large_cap_leaves_the_size_fit_to_cut_history_in_chunks() -> None:
     steps = 26
     stub = Stub([*(_big_call(n, 4000) for n in range(steps)), _final_reply(_cached(0))])
     await _run(
@@ -369,16 +383,21 @@ async def test_a_large_cap_leaves_the_size_fit_to_drop_history_in_chunks() -> No
     # The count cap is never what drops: the prompt-size fit reaches 100k chars first.
     assert max(len(b["messages"]) for b in bodies) < 64
     assert all(_pairs_whole(b) for b in bodies)
+    assert all(_prompt_chars(b) <= PROMPT_CAP_CHARS for b in bodies)
     resets = [
         i
         for i in range(1, len(bodies))
         if not _starts_the_same(bodies[i - 1], bodies[i])
     ]
-    assert len(resets) >= 2
-    # Each drop is a chunk: down to 70% of the cap, so several units go at once.
+    assert len(resets) >= 3
+    # Each cut is a chunk: old results become previews, then old units go, down
+    # to 70% of the cap, so several steps fit before the next one.
     for i in resets:
-        assert len(bodies[i]["messages"]) <= len(bodies[i - 1]["messages"]) - 4
-    # Between drops the history holds for several steps.
+        assert _prompt_chars(bodies[i]) <= WINDOW_FIT_TARGET * PROMPT_CAP_CHARS
+    assert any(
+        len(bodies[i]["messages"]) < len(bodies[i - 1]["messages"]) for i in resets
+    )
+    # Between cuts the request only grows: each one starts with the one before.
     gaps = [b - a for a, b in zip([0, *resets], resets, strict=False)]
     assert all(gap >= 3 for gap in gaps[1:]), gaps
 

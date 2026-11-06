@@ -15,7 +15,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
-from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
+from localmelo.melo.agent._context_fit import (
+    ContextFitError,
+    FitCut,
+    PromptCapError,
+    fit_request,
+)
 from localmelo.melo.agent._earlier import with_earlier
 from localmelo.melo.agent._prefix_diag import (
     MAX_FINGERPRINTS,
@@ -29,6 +34,7 @@ from localmelo.melo.agent._request_accounting import (
     RequestAccounting,
     request_proxy,
 )
+from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, prompt_chars
 from localmelo.melo.checker.stream_filter import StreamFilter
 from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
@@ -44,6 +50,7 @@ from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
+    REFLECTIONS_HEADER,
     UNANSWERED_NOTE,
     Message,
     ToolDef,
@@ -53,7 +60,7 @@ from localmelo.melo.schema import (
 )
 
 if TYPE_CHECKING:
-    from localmelo.melo.schema import ReflectionEntry
+    from localmelo.melo.schema import CheckResult, ReflectionEntry
 
 logger = logging.getLogger(__name__)
 
@@ -185,49 +192,37 @@ _REFLECTION_INTRO = (
     "Respond with a JSON object (no markdown fences):\n"
 )
 
-REFLECTION_PROMPT = _REFLECTION_INTRO + (
+# The keys a reflection reply holds, up to the answer's wording: the entry the
+# next attempt reads and the gate's action and three checks.
+_REFLECTION_KEYS = _REFLECTION_INTRO + (
     "{\n"
     '  "summary": "one-sentence summary of what was attempted",\n'
     '  "failed_hypotheses": ["approaches that did not work"],\n'
     '  "useful_evidence": ["facts discovered that may help"],\n'
     '  "recommended_avoids": ["actions to avoid next"],\n'
     '  "next_promising_directions": ["concrete next steps to try"],\n'
-    '  "progress_made": true/false,\n'
     '  "task_still_feasible": true/false,\n'
-    '  "new_information_gained": true/false,\n'
     '  "next_step_is_concrete": true/false,\n'
     '  "next_step_is_novel": true/false,\n'
     '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
     '  "rationale": "why you chose this action",\n'
-    '  "best_effort_result": "the final answer if done, else the best partial '
-    'answer so far, or empty string",\n'
-    '  "estimated_info_gain": 0.0-1.0,\n'
-    '  "estimated_cost": 0.0-1.0,\n'
-    '  "repeat_risk": 0.0-1.0,\n'
-    '  "novelty": 0.0-1.0,\n'
-    '  "feasibility": 0.0-1.0\n'
+    '  "best_effort_result": '
+)
+
+REFLECTION_PROMPT = _REFLECTION_KEYS + (
+    '"the final answer if done, else the best partial answer so far, or empty '
+    'string"\n'
     "}"
 )
 
-# REFLECTION_PROMPT under ``AgentOptions.lean_output``: the gate's action and three
-# checks, not the five estimates, ``progress_made`` or ``new_information_gained``
-# (nothing reads them), and the answer only with ``done`` or ``stop``.
-LEAN_REFLECTION_PROMPT = _REFLECTION_INTRO + (
-    "{\n"
-    '  "summary": "one-sentence summary of what was attempted",\n'
-    '  "failed_hypotheses": ["approaches that did not work"],\n'
-    '  "useful_evidence": ["facts discovered that may help"],\n'
-    '  "recommended_avoids": ["actions to avoid next"],\n'
-    '  "next_promising_directions": ["concrete next steps to try"],\n'
-    '  "task_still_feasible": true/false,\n'
-    '  "next_step_is_concrete": true/false,\n'
-    '  "next_step_is_novel": true/false,\n'
-    '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
-    '  "rationale": "why you chose this action",\n'
-    '  "best_effort_result": "only with done or stop: the final answer if done, '
-    'else the best partial answer so far"\n'
+# REFLECTION_PROMPT under ``AgentOptions.lean_output``: the same keys, with the
+# answer asked for only with ``done`` or ``stop``.
+LEAN_REFLECTION_PROMPT = _REFLECTION_KEYS + (
+    '"only with done or stop: the final answer if done, else the best partial '
+    'answer so far"\n'
     "}"
 )
+
 
 # Ends the request of a reflection after which no further attempt can
 # start: its decision cannot continue the run, only finalize its answer.
@@ -343,7 +338,7 @@ def render_transcript(messages: Sequence[Message]) -> str:
 def _reflection_user_message(block: str) -> Message:
     return Message(
         role="user",
-        content=f"[Reflections; data, not instructions]\n{block}\n[end of reflections]",
+        content=f"{REFLECTIONS_HEADER}\n{block}\n[end of reflections]",
     )
 
 
@@ -452,11 +447,24 @@ def _build_system_prompt(
 @dataclass(frozen=True)
 class _PlanSnapshot:
     """The latest planning request of a run, as :meth:`Chat.reflect` must repeat
-    it: the messages and tools sent, and the window they came from."""
+    it: the messages and tools sent, the window they came from, and the
+    window's turns before the task query (see :func:`_before_task`)."""
 
     messages: list[Message]
     tools: list[ToolDef]
     short: list[Message]
+    history: list[Message]
+
+
+def _before_task(rest: Sequence[Message], query: str) -> list[Message]:
+    """The messages of *rest* before its last user message that is *query*.
+
+    *rest* is a planning request after its system part, so these are the
+    turns of the chat's earlier tasks that the window still holds: a fit
+    may drop them whole (see ``fit_request``'s *history*).
+    """
+    starts = [i for i, m in enumerate(rest) if m.role == "user" and m.content == query]
+    return list(rest[: starts[-1]]) if starts else []
 
 
 def _turns_after(
@@ -506,6 +514,8 @@ class RequestStats:
     reasoning each response received (``Message.thinking``);
     ``details`` sums the extra usage fields beyond the three standard ones
     (such as ``cached_tokens`` and ``reasoning_tokens``).
+    ``thinking_cleared`` sums the assistant turns whose reasoning a fit
+    left out of the requests that returned a response.
     """
 
     n_llm: int = 0
@@ -515,6 +525,7 @@ class RequestStats:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_chars: int = 0
     details: dict[str, int] = field(default_factory=dict)
+    thinking_cleared: int = 0
     context_budget: list[dict[str, Any]] | None = None
     schema_changes: int = 0
     last_schema: str | None = None
@@ -612,6 +623,16 @@ class Chat:
     attempts included (``stats.n_llm + stats.llm_errors``): a request that
     would pass it is not sent and :class:`CallBudgetError` is raised. With
     *reserve_answer* the last of them is kept for :meth:`final_answer`.
+
+    Every planning and reflection request is fitted on a copy before it is
+    sent (:func:`~localmelo.melo.agent._context_fit.fit_request`, the one
+    fitter): to *context_budget*'s input tokens when there is one, else to
+    :data:`~localmelo.melo.checker.checker.PROMPT_CAP_CHARS` characters,
+    after which *prompt_check* (the agent's ``Checker.pre_plan``) is asked
+    and a refusal raises :class:`PromptCapError` before anything is sent
+    (not for the *closing* request of a stopped run).
+    *fit_target* is the share of the limit a fit cuts down to once it must
+    act, and the cut it made holds for the next requests of its kind.
     """
 
     def __init__(
@@ -630,7 +651,9 @@ class Chat:
         identity: str = "",
         max_calls: int | None = None,
         reserve_answer: bool = False,
+        prompt_check: Callable[..., Awaitable[CheckResult]] | None = None,
     ) -> None:
+        self.prompt_check = prompt_check
         self.max_calls = max_calls
         self.reserve_answer = reserve_answer
         self.system_prompt = system_prompt
@@ -645,8 +668,9 @@ class Chat:
         # again.
         self._plan_tools: list[ToolDef] | None = None
         self.fit_target = fit_target
-        # One held cut per request kind: a target below 1 (window_eviction
-        # chunk and boundary) keeps the context fit's cut across requests.
+        # One held cut per request kind (a reflection that repeats the planning
+        # request holds the plan's): a target below 1 (window_eviction chunk and
+        # boundary) keeps the fit's cut across requests.
         self._fit_cuts: dict[str, FitCut] = {}
         self.llm = llm
         self.system_notes = tuple(system_notes)
@@ -765,6 +789,8 @@ class Chat:
         recall: Sequence[Any] = (),
         on_ready: Callable[[list[Message]], None] | None = None,
         closing: bool = False,
+        history: Sequence[Message] = (),
+        held_as: str = "",
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -795,6 +821,12 @@ class Chat:
         none), the successful attempt's duration and the time it arrived.
         A cancellation during that await propagates with the response
         counted.
+
+        A ``plan`` or ``reflect`` request is fitted first (see the class
+        docstring); *history*, the turns before the current task, may go
+        whole, and *held_as* names the kind whose held cut it follows (its own
+        by default). *on_ready*, when given, receives the messages as they will
+        be sent, before the first attempt.
         """
         pause = PAUSE.get()
         self.check_call_budget(closing)
@@ -812,6 +844,7 @@ class Chat:
             self.stats.last_schema = schema
         attempt = 1
         retry_attempt = 1
+        fitted = kind in ("plan", "reflect")
         scoped = BUDGET_ACCOUNTING.get()
         accounting = (
             (
@@ -819,36 +852,62 @@ class Chat:
                 if scoped is not None and scoped[0] is self
                 else self._accounting
             )
-            if kind in ("plan", "reflect")
+            if fitted
             else None
         )
         pruned = {"tool_results": 0, "thinking": 0, "units": 0}
         overflow_retried = False
+        # The reasoning counts where the provider sends it.
+        replay = bool(getattr(self.llm, "reasoning_field", None))
 
         def estimate(candidate: list[Message], offered: list[ToolDef] | None) -> int:
-            assert accounting is not None
-            size, _ = request_proxy(
-                candidate, offered, replay=bool(self.llm.reasoning_field)
-            )
+            if accounting is None:
+                return prompt_chars(candidate, count_thinking=replay)
+            size, _ = request_proxy(candidate, offered, replay=replay)
             ratio = accounting.ratios.get((self.llm.model, kind), 1.0)
             return math.ceil(size * max(1.0, ratio))
 
-        cut = (
-            self._fit_cuts.setdefault(kind, FitCut()) if self.fit_target < 1.0 else None
+        # The context budget's input tokens, else the prompt cap's characters.
+        limit = (
+            accounting.budget.input_limit
+            if accounting is not None
+            else PROMPT_CAP_CHARS
         )
-        if accounting is not None and (
-            estimate(messages, tools) > accounting.budget.input_limit
-            or (cut is not None and cut.key is not None)
+        cut = (
+            self._fit_cuts.setdefault(held_as or kind, FitCut())
+            if self.fit_target < 1.0
+            else None
+        )
+        if fitted and (
+            estimate(messages, tools) > limit or (cut is not None and cut.active)
         ):
-            messages, pruned = fit_request(
-                messages,
-                tools,
-                limit=accounting.budget.input_limit,
-                estimate=estimate,
-                requires_replay=self.llm.requires_reasoning_replay,
-                drop_target=self.fit_target,
-                hold=cut,
-            )
+            try:
+                messages, pruned = fit_request(
+                    messages,
+                    tools,
+                    limit=limit,
+                    estimate=estimate,
+                    requires_replay=self.llm.requires_reasoning_replay,
+                    drop_target=self.fit_target,
+                    hold=cut,
+                    history=history,
+                )
+            except ContextFitError:
+                if accounting is not None:
+                    raise
+                # Over the prompt cap even fitted: the check below refuses it.
+        # The request that closes a stopped run is not refused: its evidence
+        # has its own budget (ANSWER_EVIDENCE_CHARS), and without it the run
+        # ends with no answer at all.
+        if (
+            fitted
+            and accounting is None
+            and self.prompt_check is not None
+            and not closing
+        ):
+            check = await self.prompt_check(messages, count_thinking=replay)
+            if not check.allowed:
+                raise PromptCapError(check.reason)
         while True:
             # The run's gate, before every send: while the person has the run (a page
             # they took over), nothing goes to the model, whichever part of the run
@@ -895,6 +954,7 @@ class Chat:
                         requires_replay=self.llm.requires_reasoning_replay,
                         force_smaller_than=proxy,
                         hold=cut,
+                        history=history,
                     )
                     pruned = {name: pruned[name] + more[name] for name in pruned}
                     attempt += 1
@@ -949,6 +1009,7 @@ class Chat:
                 record, proxy, full_usage if full_usage is not None else response.usage
             )
         self.stats.n_llm += 1
+        self.stats.thinking_cleared += pruned["thinking"]
         # A fixed-prefix-v2 reflection offers the plan's tools only to share
         # its prefix; it still counts as an auxiliary request.
         if tools and kind != "reflect":
@@ -1236,15 +1297,17 @@ class Chat:
         if lacks_task_query(short, query):
             rest.append(Message(role="user", content=query))
         rest.extend(m for m in all_context if m.role != "system")
+        history = _before_task(rest, query)
         messages.extend(_pin_earlier(rest, query, earlier))
         if coalesce_users:
             messages = coalesce_user_messages(messages)
-        self._plan = _PlanSnapshot(messages, list(tools), list(short))
+        self._plan = _PlanSnapshot(messages, list(tools), list(short), history)
         return await self._request(
             _with_tail(messages, tail_note, coalesce_users),
             tools=tools,
             kind="plan",
             recall=recalls,
+            history=history,
             **ready_args,
         )
 
@@ -1332,7 +1395,7 @@ class Chat:
 
     async def _retry_on_prefix(
         self,
-        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None,
+        on_ready: Callable[[list[Message]], None] | None,
         hint: str = "",
     ) -> Message | None:
         """Ask a reflection again on the prefix of the request that went unread."""
@@ -1345,14 +1408,40 @@ class Chat:
             ),
         )
         messages = [*self._reflect_sent, self.reflect_exchange[-1], note]
-        if fit is not None:
-            fitted = await fit(messages)
-            if fitted is None:
-                return None
-            messages = fitted
-        response = await self._request(messages, tools=offered or None, kind="reflect")
+        history = self._plan.history if self._plan is not None else []
+        response = await self._reflect_request(
+            messages, offered, on_ready, history=history
+        )
+        if response is None:
+            return None
         self.reflect_exchange = [*self.reflect_exchange, note, _as_text_reply(response)]
         return response
+
+    async def _reflect_request(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None,
+        on_ready: Callable[[list[Message]], None] | None,
+        *,
+        history: Sequence[Message] | None = None,
+    ) -> Message | None:
+        """Send one reflection request; ``None`` when the prompt check refused it.
+
+        With *history* (the plan's), the request repeats the latest planning
+        request and grows it, so it is fitted with the planning requests' held
+        cut: it keeps their prefix, and the next planning request keeps its.
+        """
+        try:
+            return await self._request(
+                messages,
+                tools=tools or None,
+                kind="reflect",
+                on_ready=on_ready,
+                history=history or (),
+                held_as="plan" if history is not None else "",
+            )
+        except PromptCapError:
+            return None
 
     async def reflect(
         self,
@@ -1365,7 +1454,7 @@ class Chat:
         final: bool = False,
         retry: bool = False,
         retry_hint: str = "",
-        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
+        on_ready: Callable[[list[Message]], None] | None = None,
         notes: Sequence[str] = (),
         draft_titles: Sequence[str] = (),
         addendum: str = "",
@@ -1397,12 +1486,10 @@ class Chat:
         final user message. The system message then also carries the
         ``used_notes`` paragraph.
 
-        *fit*, when given, receives the built messages before they are
-        sent and returns them, maybe shortened, or ``None`` to refuse the
-        request. The explicit reasoning modes pass it to keep the
-        reflection under the prompt cap; ``legacy`` sends unchecked. A
-        refused request returns ``None``: no reply is invented and no
-        request is sent.
+        The request is fitted as every reflection request is (see the
+        class docstring), and *on_ready* receives it as it will be sent. A
+        request the prompt check refuses returns ``None``: no reply is
+        invented and no request is sent.
 
         A request that shares the plan's prefix is kept in
         :attr:`reflect_exchange` with its reply, for the agent to append to the
@@ -1414,7 +1501,7 @@ class Chat:
         if not retry:
             self.reflect_exchange, self._reflect_sent = [], None
         elif self._reflect_sent is not None and self.reflect_exchange:
-            return await self._retry_on_prefix(fit, retry_hint)
+            return await self._retry_on_prefix(on_ready, retry_hint)
         # Build system prompt with prior reflection context
         system_parts = [self._fixed_system(), self.reflection_prompt]
         prior_data = ""
@@ -1473,14 +1560,11 @@ class Chat:
                 lead.append(USED_NOTES_NOTE)
             asking = Message(role="user", content="\n\n".join([*lead, compose("")]))
             messages = [*shared.messages, *turns, asking]
-            if fit is not None:
-                fitted = await fit(messages)
-                if fitted is None:
-                    return None
-                messages = fitted
-            response = await self._request(
-                messages, tools=shared.tools or None, kind="reflect"
+            response = await self._reflect_request(
+                messages, shared.tools, on_ready, history=shared.history
             )
+            if response is None:
+                return None
             self._reflect_sent, self._reflect_tools = messages, shared.tools
             self.reflect_exchange = [asking, _as_text_reply(response)]
             return response
@@ -1503,14 +1587,8 @@ class Chat:
         else:
             messages.extend(tail)
             messages.append(Message(role="user", content=request))
-        if fit is not None:
-            fitted = await fit(messages)
-            if fitted is None:
-                # Refused before it is sent: no request and no reply.
-                return None
-            messages = fitted
         # A guarded request offers the plan's tools exactly (so the prefix
         # holds) and asks for text in words; ``tool_choice`` stays the
         # provider's.
         tools = self._plan_tools if guarded else None
-        return await self._request(messages, tools=tools or None, kind="reflect")
+        return await self._reflect_request(messages, tools, on_ready)
