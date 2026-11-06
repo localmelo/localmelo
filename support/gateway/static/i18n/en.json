@@ -452,6 +452,7 @@
   "browser.action.type": "Typing on the page",
   "browser.action.wait": "Waiting for the page",
   "browser.addressLabel": "Address",
+  "browser.back": "Back to chat",
   "browser.browsing": "melo is browsing",
   "browser.busy": "Another chat has melo's Chrome open in a window, so the page is here.",
   "browser.clickToType": "Click the page to type.",

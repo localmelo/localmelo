@@ -2718,20 +2718,28 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .media-remove::after { inset: -10px; }
   .media-chip { min-height: 36px; align-items: center; }
 }
-/* The Browser panel: a view-only window onto the page melo is working in (browser-live.mjs). It takes a column
-   beside the chat while it is shown; where there is not room for it and Melo's panel, it takes Melo's place, and
-   below 900 px it is a sheet over the bottom of the chat, which stays in sight above it. */
-.browser-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border-left: 1px solid var(--line); }
-.app:has(> .browser-panel:not([hidden])) { grid-template-columns: 248px minmax(0, 1fr) clamp(320px, 26vw, 440px) 340px; }
-.bp-head { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-4) var(--space-3) var(--space-3) var(--space-4); }
+/* The Browser view: the page melo is working in, big (browser-live.mjs). One click on a card opens it at once. It covers
+   the work area, the chat and Melo's panel, so the picture is as large as the window allows; the chat stays under it,
+   hidden and still live, and Back to chat or Escape returns to it. On a phone it is the whole screen. The sidebar stays. */
+.browser-panel { position: relative; z-index: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); outline: none; }
+@media (min-width: 701px) {
+  .app > .sidebar { grid-area: 1 / 1; }
+  .app > .chat { grid-area: 1 / 2; }
+  .app > .panel { grid-area: 1 / 3; }
+  .app > .browser-panel { grid-area: 1 / 2 / 2 / -1; }
+}
+.app:has(> .browser-panel:not([hidden])) > :is(.chat, .panel) { visibility: hidden; }
+/* The top bar is the chat header's height, so the page does not jump when the view opens. */
+.bp-head { display: flex; align-items: center; gap: var(--space-3); min-height: 72px; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--line); }
+.bp-back { flex: none; margin-left: 0; border: 0; background: none; }
 .bp-titles { flex: 1; min-width: 0; }
 .bp-title, .bp-address { display: block; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-title { font-size: var(--text-body); font-weight: 650; letter-spacing: -0.01em; }
 .bp-address { margin-top: 2px; color: var(--ink-3); font-size: var(--text-small); }
 .bp-host { color: var(--ink-2); font-weight: 600; }
-.bp-pop { flex: none; margin-top: -2px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font-size: var(--text-caption); }
-.bp-hide { flex: none; margin: -6px 0 0; font-size: var(--text-title); color: var(--ink-2); }
-.bp-stage { flex: 1; min-height: 0; display: flex; padding: 0 var(--space-4) var(--space-3); }
+.bp-pop { flex: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font-size: var(--text-caption); }
+/* The page sits on a mat of the sidebar's tone, so the picture is the one bright thing in the view. */
+.bp-stage { flex: 1; min-height: 0; display: flex; padding: var(--space-4) var(--space-5); background: var(--sidebar); }
 .bp-viewport { position: relative; flex: 1; min-width: 0; min-height: 0; }
 /* The page's picture, in a ring of the web colour while melo is in the middle of a browser step. */
 .bp-canvas { position: absolute; display: block; border-radius: var(--radius-card); background: var(--canvas); box-shadow: 0 0 0 1px var(--line), var(--tab-shadow); transition: opacity 0.3s, filter 0.3s; }
@@ -2741,18 +2749,19 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   50% { box-shadow: 0 0 0 2px var(--kind-web), 0 0 0 8px color-mix(in srgb, var(--kind-web) 28%, transparent); }
 }
 /* Without a picture the note takes the picture's place, as an empty window; over a picture it is a small label. */
-.bp-note { position: absolute; inset: 0 0 auto; display: grid; place-items: center; aspect-ratio: 16 / 10; margin: 0; padding: 28px var(--space-5) var(--space-4); border: 1px dashed var(--control); border-radius: var(--radius-card); background: linear-gradient(var(--raised) 0 24px, transparent 24px); color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; text-align: center; text-wrap: balance; }
-.bp-note[data-over="true"] { inset: var(--space-2) auto auto var(--space-2); display: block; width: max-content; max-width: calc(100% - 16px); aspect-ratio: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); }
+.bp-note { position: absolute; inset: 0 0 auto; display: grid; place-items: center; aspect-ratio: 16 / 10; width: min(100%, 640px); margin: 0 auto; padding: 28px var(--space-5) var(--space-4); border: 1px dashed var(--control); border-radius: var(--radius-card); background: linear-gradient(var(--raised) 0 24px, transparent 24px); color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; text-align: center; text-wrap: balance; }
+.bp-note[data-over="true"] { inset: var(--space-2) auto auto var(--space-2); display: block; margin: 0; width: max-content; max-width: calc(100% - 16px); aspect-ratio: auto; padding: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); }
 .browser-panel[data-state="loading"] .bp-note { border-color: var(--kind-web); animation: bp-wait 2.4s ease-in-out infinite; }
 .browser-panel[data-state="idle"] .bp-note { border-color: var(--line); color: var(--ink-3); }
 @keyframes bp-wait {
   50% { border-color: color-mix(in srgb, var(--kind-web) 35%, var(--line)); }
 }
-.bp-foot { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color 0.2s; }
-.bp-foot-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 30px; }
-.bp-take, .bp-give { flex: none; padding: 5px 12px; font-size: var(--text-small); }
+/* The bar under the picture: what melo is doing now, in the card's words, and the actions: Stop, and Take over or Done. */
+.bp-foot { display: flex; flex-direction: column; gap: 6px; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--line); color: var(--ink-3); font-size: var(--text-small); transition: background-color 0.2s; }
+.bp-foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 36px; }
+.bp-status { display: inline-flex; align-items: center; gap: 7px; min-height: 1.5em; margin-right: auto; color: var(--ink-2); }
+.bp-take, .bp-give, .bp-stop, .bp-window { flex: none; padding: 5px 12px; font-size: var(--text-small); }
 .bp-hint { margin: 0; color: var(--ink-2); line-height: 1.45; text-wrap: pretty; }
-.bp-status { display: inline-flex; align-items: center; gap: 7px; min-height: 1.5em; color: var(--ink-2); }
 .bp-status:not(:empty)::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
 .browser-panel[data-state="live"] .bp-status::before { background: var(--ok); }
 .browser-panel[data-state="loading"] .bp-status::before { background: var(--kind-web); }
@@ -2772,7 +2781,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* In a real Chrome window the picture here is only a copy: a thin ring, and no pointer of its own. The button that
    brings the window to the front (or moves a page with a form there) sits with Done at the end of the bar. */
 .browser-panel[data-place="window"] .bp-canvas { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--line)), var(--tab-shadow); cursor: default; }
-.bp-window { flex: none; margin-left: auto; padding: 5px 12px; font-size: var(--text-small); }
 /* The keys' box: invisible, over the point last clicked, so an input method's window opens where the person types. */
 .bp-keys { position: absolute; left: 0; top: 0; z-index: 1; width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
 /* A box the page put up while the person has it: answered here, over the bottom of the picture. */
@@ -2849,31 +2857,17 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @media (max-width: 899px) { .bcard { width: 100%; } }
 @media (pointer: coarse), (max-width: 700px) { .bcard-actions button, .bdock .outline-button, .bdock-jump { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { [data-own="working"] .own-ring { animation: none; } }
-@media (max-width: 1479px) {
-  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 248px minmax(0, 1fr) clamp(320px, 30vw, 420px); }
-  .app:has(> .browser-panel:not([hidden])) > .panel { display: none; }
-}
-@media (min-width: 900px) and (max-width: 1179px) {
-  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr) clamp(300px, 36vw, 400px); }
-}
-/* The page in the app while the person has it (a form they began, or no window could open): the page takes the room,
-   and the chat narrows to a column beside it. */
-@media (min-width: 1180px) {
-  .app:has(> .browser-panel[data-place="app"]:not([hidden])) { grid-template-columns: 248px clamp(320px, 28vw, 420px) minmax(0, 1fr); }
-  .app:has(> .browser-panel[data-place="app"]:not([hidden])) > .panel { display: none; }
-}
-@media (min-width: 900px) and (max-width: 1179px) {
-  .app:has(> .browser-panel[data-place="app"]:not([hidden])) { grid-template-columns: 64px clamp(280px, 34vw, 360px) minmax(0, 1fr); }
-}
-@media (max-width: 899px) {
-  .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr); }
-  .app:has(> .browser-panel:not([hidden])) > .panel { display: flex; }
-  :root:not([data-view="live"]) .browser-panel { position: fixed; inset: auto 0 0; z-index: 28; height: min(60dvh, 520px); border: 0; border-top: 1px solid var(--line); border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
-  :root:not([data-view="live"]) .browser-panel[data-place="app"] { height: min(88dvh, 860px); }
+/* A phone: the whole screen, above the chat (its sidebar and sheets come back when it closes). */
+@media (max-width: 700px) {
+  :root:not([data-view="live"]) .browser-panel { position: fixed; inset: 0; z-index: 28; height: 100dvh; }
+  .bp-head { min-height: 64px; padding: var(--space-2) var(--space-3); }
+  .bp-stage { padding: var(--space-2); }
+  .bp-foot { padding: var(--space-3); padding-bottom: max(var(--space-3), env(safe-area-inset-bottom)); }
+  .bp-pop { display: none; }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .browser-chip, .bp-pop, .bp-hide, .bp-take, .bp-give, .bp-window, .bp-dialog-actions button { min-height: 44px; }
-  .bp-hide { min-width: 44px; }
+  .browser-chip, .bp-pop, .bp-back, .bp-take, .bp-give, .bp-stop, .bp-window, .bp-dialog-actions button { min-height: 44px; }
+  .bp-foot-row { gap: var(--space-2) var(--space-3); }
 }
 @media (prefers-reduced-motion: reduce) {
   .browser-panel[data-browsing="true"] .bp-canvas, .browser-panel[data-state="loading"] .bp-note, .browser-panel .bp-status::before, .browser-chip .browser-dot { animation: none; }
@@ -2881,16 +2875,13 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 /* `#/live/<chat>`: the panel alone (the macOS app's pop-out window). */
 :root[data-view="live"] .app { display: block; }
 :root[data-view="live"] .app > :not(.browser-panel) { display: none !important; }
-:root[data-view="live"] .browser-panel { height: 100dvh; border: 0; }
+:root[data-view="live"] .browser-panel { height: 100dvh; }
 
 /* melo_serve's chat models (serve.mjs): the header chip and the composer's model button open one list. It
    reuses the mode menu's rules (.mode-menu, .mode-item, .mode-check, .mode-menu-foot); Settings reuses .st-choice. */
 .model-picker { position: relative; }
 .composer-models { min-width: 0; max-width: 65%; }
 .composer-models .model-button { max-width: 100%; }
-/* Beside the Browser panel the chat is a narrow column: the composer keeps what fits. The header chip names the model and the
-   panel's bar the state, so neither squeezes into a letter and an ellipsis here. */
-.app:has(> .browser-panel:not([hidden])) :is(#run-status, .composer-models, .composer-hint) { display: none; }
 /* The chip names the model and its backend, with the caret every list chip has. */
 .connection-chip .chip-backend, .connection-chip .chip-caret { color: var(--ink-3); }
 .connection-chip[aria-expanded="true"] { background: var(--soft); }

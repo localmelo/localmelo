@@ -2,7 +2,9 @@
  * The browser card: what a chat's browser says in the conversation, and the dock that keeps it in sight.
  *
  * When melo browses, the chat shows one card for the run, in the reply like a message: the live page, what melo is
- * doing, who has the page, and one button, **Open browser**, which shows the page in the panel beside the chat. A
+ * doing, who has the page, and one button, **Open browser**, which (like a click on the picture) shows the page big at
+ * once in the Browser view that covers the chat (browser-live.mjs). A finished card's picture opens its last picture the
+ * same way. A
  * task's browser shows the same card in the chat that asked, under **Working for this chat** and the task's goal, with
  * **Stop**, which ends that task; **Done** gives a page the person has back to that run. The
  * gateway writes the card as an `attention.browser` event (support/gateway/console/browser_cards.py): `readBrowser`
@@ -121,8 +123,9 @@ function setText(node, text) {
 }
 
 /**
- * The cards of the open chat. *streams* is the page's transport (browser-stream.mjs), *open(card)* shows a card's
- * source in the panel, *stop(card)* ends the task it names and *done(card)* gives the person's page back to its run:
+ * The cards of the open chat. *streams* is the page's transport (browser-stream.mjs), *open(card, picture)* shows a
+ * card's source in the Browser view (*picture* is the card's canvas: all a finished card has to show), *stop(card)*
+ * ends the task it names and *done(card)* gives the person's page back to its run:
  * each acts on that card's source, and answers whether it went. *observe(onChange)* makes a visibility watcher, `{add(node), remove(node)}`, calling
  * `onChange(node, visible)`; without one every card counts as visible. *dock* is the page's dock bar, `{root,
  * canvas, mark, text, jump, open}`.
@@ -156,6 +159,8 @@ export function setupBrowserCards({doc, streams, open, stop = null, done = null,
     const root = node('section', 'bcard');
     root.setAttribute('role', 'group');
     root.setAttribute('aria-label', t('browser.title'));
+    // The keys come back to a card when the Browser view that opened from it closes.
+    root.tabIndex = -1;
     const mark = node('span', 'own-mark');
     mark.setAttribute('aria-hidden', 'true');
     const word = node('span', 'own-word');
@@ -171,7 +176,7 @@ export function setupBrowserCards({doc, streams, open, stop = null, done = null,
     const canvas = node('canvas', 'own-ring bcard-canvas');
     canvas.setAttribute('role', 'img');
     // The picture opens the browser too; the button below is the one stop on the keyboard.
-    const stage = button('bcard-picture', '', () => open(rec.card), {label: t('browser.open')});
+    const stage = button('bcard-picture', '', () => open(rec.card, rec.canvas), {label: t('browser.open')});
     stage.tabIndex = -1;
     stage.append(canvas);
     const note = node('p', 'bcard-note');
@@ -179,7 +184,7 @@ export function setupBrowserCards({doc, streams, open, stop = null, done = null,
     const now = node('p', 'bcard-now');
     now.append(node('span', 'own-dot'), nowText);
     const actions = node('div', 'bcard-actions');
-    const opener = button('outline-button wide', t('browser.open'), () => open(rec.card));
+    const opener = button('outline-button wide', t('browser.open'), () => open(rec.card, rec.canvas));
     const give = button('outline-button', t('browser.giveBack'), () => press(rec, give, done), {label: t('browser.giveBackLabel')});
     const halt = button('quiet-button', t('common.stop'), () => press(rec, halt, stop));
     actions.append(opener, give, halt);
@@ -270,7 +275,7 @@ export function setupBrowserCards({doc, streams, open, stop = null, done = null,
     dock.open.hidden = !look.openable;
   }
   if (dock) {
-    dock.open.addEventListener('click', () => docked && open(docked.rec.card));
+    dock.open.addEventListener('click', () => docked && open(docked.rec.card, docked.rec.canvas));
     dock.jump.addEventListener('click', () => docked?.rec.root.scrollIntoView?.({block: 'center'}));
   }
 
@@ -303,5 +308,14 @@ export function setupBrowserCards({doc, streams, open, stop = null, done = null,
 
     /** The node of the card with this key (the same node at every redraw), or null. */
     nodeOf: (key) => recs.get(key)?.root ?? null,
+
+    /** Give the keys back to a card: its Open browser button, else its picture, else the card. False when there is no such card. */
+    focus(key) {
+      const rec = recs.get(key);
+      if (!rec) return false;
+      const target = [rec.opener, rec.stage].find((found) => !found.hidden) ?? rec.root;
+      target.focus?.();
+      return true;
+    },
   };
 }

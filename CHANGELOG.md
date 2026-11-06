@@ -18,6 +18,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a refused one included and with no tick beside it, in the console, the app and the terminal. The check-in tells you about a task that has waited
   on you. With browsing off, a website request says so once and how to turn it on, and no chat promises a browser it
   does not have. (#567)
+- One click on a browser card shows the page big. The card's picture or **Open browser** (or the **Browser** button in
+  the header) now opens the Browser panel over the chat at once, live, where it used to open a narrow panel beside
+  it that needed a second click; on a phone it fills the screen. melo keeps working while you watch, the view says
+  what it is doing as the card does, and **Stop**, **Take over** and **Done** are in it and work as before. **Back to
+  chat** or Esc closes it and puts the keys back on the card, which stays live in the chat. A card whose run is over
+  opens its last picture big, with no live controls. The side column, its sheet and the composer's squeezed layout are
+  gone: it is one view at a new size over the same picture stream, and **Pop out** is unchanged (#569).
 - melo reads PDFs. `file_read` and `web_fetch` open a PDF by its first bytes (`%PDF-`), whatever its name or type says,
   and give its pages in order as text, each under a `--- page N of M ---` line, with each row kept whole (a place and a
   date stay on the line of their school or employer). A page with no text (a scan) is a picture in the result when the
@@ -1712,6 +1719,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.
 - melo no longer refuses a note because it quotes a form line you typed, reads the messages you add while it works, and stops after two refused attempts instead of retrying again and again. Part of #442.
 - Developer only: when the chat model fails on a window while memory items are written from a chat, the chat's progress mark no longer passes it, so those turns stay recalled as turns. Part of #428.
