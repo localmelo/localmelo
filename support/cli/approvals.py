@@ -382,7 +382,7 @@ def _tool_panel(
             )
         else:
             said = f"melo does this on {site} {window}, as you would."
-            note = "It asks you again before it types anything."
+            note = "Typing is decided separately, each time."
         body = [("", row) for row in _wrapped([said], width)]
         if sending and goes:
             body += [("", row) for row in _wrapped([shown(goes)], width)]

@@ -321,7 +321,7 @@ test('a form send and typing show what goes, say when the page decides, and offe
     arguments: {site: 'example.com', access: 'act', how: 'click'}, workspace_label: '~/w'};
   const clicking = c.draw(request);
   assert.ok(focuses(clicking).includes('session'));
-  assert.match(findNode(clicking, (node) => node.className === 'approval-warning').textContent, /Typing still asks every time/);
+  assert.match(findNode(clicking, (node) => node.className === 'approval-warning').textContent, /Typing is never covered by this/);
 });
 
 // A file write over a file, as the gateway reports it: `target.diff` (docs/reference/api-v2.md).
@@ -745,7 +745,7 @@ test('the main chat\'s own approval card says each kept answer counts in every c
   assert.equal(rules({tool_name: 'browser:https://a.example', arguments: {site: 'a.example', via: 'web_fetch', url: 'https://a.example/x'}})[1],
     'melo will not ask again before reading or opening a.example in any chat.');
   assert.equal(rules({tool_name: 'browser-act:https://a.example', arguments: {site: 'a.example'}})[1],
-    'melo will not ask again before clicking or choosing on a.example in any chat. Typing still asks every time.');
+    'melo will not ask again before clicking or choosing on a.example in any chat. Typing is never covered by this.');
   // A page that asks for another app: the kept answer covers that kind of address in any chat.
   assert.deepEqual(rules({tool_name: 'handoff:chat', arguments: {site: 'example.com', access: 'handoff', app: 'Chat', scheme: 'chat', url: 'chat://login?x=1'}}),
     ['Allow in every chat', 'In any chat, pages may open Chat again without asking.', EVERYWHERE]);

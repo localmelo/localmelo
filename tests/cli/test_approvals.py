@@ -188,7 +188,7 @@ def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> 
     words = " ".join(line for _, line in acting.body)
     assert "melo does this on example.com" in words
     assert "click, type" not in words, "typing is a question of its own"
-    assert "It asks you again before it types anything." in words
+    assert "Typing is decided separately, each time." in words
     # A control the engine named is in the title: the action and its target.
     for on, how, title in [
         ('a button "Sign in"', "click", "Click “Sign in” on example.com?"),
