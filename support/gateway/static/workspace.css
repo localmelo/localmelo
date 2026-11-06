@@ -754,6 +754,7 @@ button:hover:not(:disabled) {
 .setup-card .setup-total { color: var(--ink); font-weight: 500; }
 .setup-notes { display: grid; gap: var(--space-1); }
 .setup-card .setup-note { color: var(--warn); }
+.setup-card .setup-wait { color: var(--ink-3); }
 .setup-card .setup-fault { color: var(--error); }
 .setup-banner { display: grid; gap: 2px; padding: var(--space-3); border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); font-size: var(--text-small); line-height: 18px; }
 .setup-banner[data-kind="nochat"] { box-shadow: inset 3px 0 0 var(--warn); }

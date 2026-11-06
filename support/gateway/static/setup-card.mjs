@@ -36,6 +36,10 @@ const host = (url) => {
   }
 };
 const firstLine = (error) => String(error.message).split(/\r?\n/)[0];
+// What a person agrees to by pressing the button: the same list again means the same OK.
+const shape = (list) => JSON.stringify([
+  list.pick?.id, list.rows?.map((r) => [r.id, r.state, r.size, r.where, r.off]), list.download, list.notes, list.action, list.can_set_up,
+]);
 
 export function setupModelCard({
   root, api, openSettings, connected, schedule = setTimeout, cancel = clearTimeout,
@@ -56,6 +60,7 @@ export function setupModelCard({
   let off = new Set(); // The ids of the rows the person turned off.
   let startError = "";
   let starting = false;
+  let waiting = false; // melo_serve is being asked again for the list on screen.
   let seen = 0; // The job this card saw run: its model is connected when it ends.
   let joined = 0; // The job whose model was connected.
   let live = null; // The view that is drawn in place: {key, update}.
@@ -181,10 +186,12 @@ export function setupModelCard({
     rows.setAttribute("aria-label", t("setup.rows"));
     const total = el("p", "setup-total");
     const notes = el("div", "setup-notes");
+    const wait = el("p", "setup-wait");
+    wait.setAttribute("role", "status");
     const fault = el("p", "setup-fault");
     fault.setAttribute("role", "alert");
     const made = new Map();
-    const go = button("primary-button", "", start);
+    const go = button("primary-button", "", () => start());
     const update = () => {
       mac.textContent = plan.mac;
       intro.textContent = plan.intro;
@@ -198,13 +205,15 @@ export function setupModelCard({
       }
       total.textContent = [plan.download, plan.free].filter(Boolean).join(" ");
       notes.replaceChildren(...plan.notes.map((line) => el("p", "setup-note", line)));
+      wait.textContent = waiting ? t("setup.planning") : "";
+      wait.hidden = !waiting;
       fault.textContent = startError;
       fault.hidden = !startError;
       go.textContent = plan.action;
       go.disabled = starting || !plan.can_set_up;
     };
     update();
-    return {nodes: [mac, intro, rows, total, notes, fault], go, update};
+    return {nodes: [mac, intro, rows, total, notes, wait, fault], go, update};
   }
 
   /** Turn a row off or on, then ask for the list worded for it: its totals and what it leads to. */
@@ -212,6 +221,8 @@ export function setupModelCard({
     if (on) off.delete(id);
     else off.add(id);
     const mine = version;
+    waiting = true; // After a minute melo_serve is asked again, which takes seconds: say so.
+    live?.update?.();
     try {
       const found = await api(planPath());
       if (mine !== version) return;
@@ -220,6 +231,8 @@ export function setupModelCard({
     } catch (error) {
       if (mine !== version) return;
       startError = firstLine(error);
+    } finally {
+      waiting = false;
     }
     live?.update?.();
   }
@@ -231,8 +244,15 @@ export function setupModelCard({
     plan = null;
     render();
     try {
-      const found = await api(planPath());
+      let found = await api(off.size ? "/setup/plan" : planPath());
       if (mine !== version) return;
+      if (off.size) {
+        // A row stays off only if the new list still lets the person turn it off; the list is then worded for those.
+        const open = new Set((found.rows ?? []).filter((r) => r.off).map((r) => r.id));
+        off = new Set([...off].filter((id) => open.has(id)));
+        if (off.size) found = await api(planPath());
+        if (mine !== version) return;
+      }
       plan = found;
     } catch {
       if (mine !== version) return;
@@ -242,7 +262,7 @@ export function setupModelCard({
   }
 
   /** One OK: start the job for the list on screen. */
-  async function start() {
+  async function start(retried = false) {
     if (starting || !plan?.available) return;
     const mine = version;
     starting = true;
@@ -261,8 +281,17 @@ export function setupModelCard({
     } finally {
       starting = false;
     }
-    if (stale) await askPlan();
-    else render();
+    if (stale) {
+      // The list is out of date: ask again. The same list is the same OK, so it starts at once; a changed one waits for the person.
+      const agreed = shape(plan);
+      await askPlan();
+      if (!retried && mine === version && plan?.available && shape(plan) === agreed) {
+        startError = "";
+        return start(true);
+      }
+    } else {
+      render();
+    }
     watch();
   }
 

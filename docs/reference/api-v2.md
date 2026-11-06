@@ -652,7 +652,7 @@ setup card calls it, and only while the card is shown.
 What this Mac can run and what the first-run setup would do: the list the terminal
 prints before its one OK, in the language of the request. It asks melo_serve, which
 takes seconds, so one asker serves every caller at once and the answer is kept for
-60 s (5 s when there was nothing to offer); it is not part of `GET /api/setup/detect`.
+60 s (5 s when there was nothing to offer): that is how often melo_serve is asked again, not how long a person may read the list (see the start below); it is not part of `GET /api/setup/detect`.
 It writes nothing. There is one plan at a time, the last one asked for: it is dropped
 when a job starts or ends (what is here has changed), and an answer that was asked
 before that is not kept. Where setup is not offered, `available` is `false` and
@@ -700,9 +700,10 @@ the gateway that runs the job). Answers 202 `{"job": ...}`.
   so a row that has to be set up, one that is here already and the gateway's login item
   cannot be left out. Other fields are refused.
 - 400 `invalid_request`: another pick, or an id that cannot be left out. 409 `no_plan`:
-  there is no plan to say yes to: none was asked for, it is older than 60 s, it has
+  there is no plan to say yes to: none was asked for, it is older than 15 minutes, it has
   nothing to offer, or a job started or ended since. Ask `GET /api/setup/plan` again and
-  look at the list before the next start. 409 `no_room`: the list does not fit the disk
+  look at the list before the next start (the card starts at once when the new list is
+  the same as the one on screen). 409 `no_room`: the list does not fit the disk
   and nothing is left out (`can_set_up` is `false`). 409 `setup_running`: a job runs. It
   needs the same sign-in and origin check as the other routes under `/api`.
 - The job has `id`, `state` (`running`, `done`, `failed` or `cancelled`),
@@ -715,7 +716,7 @@ the gateway that runs the job). Answers 202 `{"job": ...}`.
   and as it is (empty for `skipped` and `stopped`), and `error` is the last line of a
   failure: a screen shows them as detail, smaller, and does not translate them.
 - A gateway that shuts down ends the job `cancelled`: the running command gets SIGTERM,
-  and SIGKILL after 10 s if it is still there; what was downloaded stays.
+  and SIGKILL after 5 s if it is still there; what was downloaded stays. The gateway does this at the start of its shutdown, before it waits for connections, so it fits inside the 8 s the macOS app gives a gateway it quits. A command that handles SIGTERM goes on with its own cleanup (melo_serve gives it 30 s), even if the gateway is gone by then.
 
 ## POST /api/setup/cancel
 

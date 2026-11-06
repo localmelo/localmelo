@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
@@ -27,6 +28,7 @@ from localmelo.tests.fixtures.setup_tools import CHAT, EMBED, OMLX_RUNNING, PLAN
 from .conftest import PORT
 
 CHAT_ID, EMBED_ID = f"model:{CHAT}", f"model:{EMBED}"
+ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(autouse=True)
@@ -297,14 +299,27 @@ async def test_a_model_that_is_here_cannot_be_left_out(
     ).status_code == 400
 
 
-async def test_a_start_needs_a_plan_that_is_current_available_and_young(
+async def test_a_list_can_be_read_for_fifteen_minutes_before_it_is_started(
+    setup_fakes: Fakes, client: httpx.AsyncClient, console: Console
+) -> None:
+    now = [0.0]
+    console.setup.clock = lambda: now[0]
+    await client.get("/api/setup/plan")
+    now[
+        0
+    ] += 61  # past the minute melo_serve is asked again in: a person is still reading
+    assert (await start(client)).status_code == 202
+    await ended(client)
+
+
+async def test_a_start_needs_a_plan_that_is_available_and_within_fifteen_minutes(
     setup_fakes: Fakes, client: httpx.AsyncClient, console: Console
 ) -> None:
     now = [0.0]
     console.setup.clock = lambda: now[0]
     refused = lambda r: (r.status_code, r.json()["error"]["code"])  # noqa: E731
     await client.get("/api/setup/plan")
-    now[0] += 61  # older than the cache window: the list on screen may be out of date
+    now[0] += 901  # the list on screen may be out of date
     assert refused(await start(client)) == (409, "no_plan")
     assert (await client.get("/api/setup/plan")).json()["available"] is True
     data = json.loads(PLAN.read_text())
@@ -487,6 +502,9 @@ async def test_a_download_shows_how_far_it_is_and_stop_ends_the_job_keeping_the_
     )
     # The row that was downloading was stopped; what never started waits.
     assert states(stopped)["backend:omlx"] == "stopped"
+    # melo_serve's own stop line names a command the person does not run: it stays off the card.
+    get = next(r for r in stopped["rows"] if r["id"] == "get")
+    assert (get["state"], get["line"]) == ("stopped", "")
     assert states(stopped)["save"] == "waiting" and stopped["saved"] is False
     assert setup_fakes.calls("melo-serve", "use") == []  # nothing after the stop ran
     gone = await client.post("/api/setup/cancel")
@@ -537,7 +555,7 @@ async def test_a_child_that_ignores_the_stop_is_killed_when_the_gateway_shuts_do
     console: Console,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(setup_flow, "STOP_WAIT_S", 0.3)
+    monkeypatch.setattr(setup_flow, "KILL_AFTER_S", 0.3)
     setup_fakes.put("get_deaf", "")
     setup_fakes.put("get.jsonl", json.dumps(OMLX_RUNNING))
     await client.get("/api/setup/plan")
@@ -555,6 +573,43 @@ async def test_a_child_that_ignores_the_stop_is_killed_when_the_gateway_shuts_do
     await console.aclose()
     assert flow.finished is not None and flow.finished.state == "cancelled"
     assert child.poll() is not None and not flow.thread.is_alive()
+
+
+async def test_the_setup_is_stopped_when_the_shutdown_begins_and_killed_inside_the_apps_wait(
+    setup_fakes: Fakes,
+    client: httpx.AsyncClient,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The app kills a gateway 8 s after its SIGTERM: the child of a setup must be gone before."""
+    swift = (ROOT / "macos/LocalMeloApp/main.swift").read_text("utf-8")
+    wait = re.search(
+        r"timeInterval: (\d+), repeats: false\) \{ _ in\s+if child.isRunning "
+        r"\{ kill\(child.processIdentifier, SIGKILL\)",
+        swift,
+    )
+    assert wait and int(wait[1]) > setup_flow.KILL_AFTER_S + setup_flow.KILL_WAIT_S
+    monkeypatch.setattr(setup_flow, "KILL_AFTER_S", 0.3)
+    setup_fakes.put("get_deaf", "")
+    setup_fakes.put("get.jsonl", json.dumps(OMLX_RUNNING))
+    await client.get("/api/setup/plan")
+    assert (await start(client)).status_code == 202
+
+    async def deaf() -> bool:
+        found = await job(client)
+        return found is not None and states(found).get("backend:omlx") == "running"
+
+    await until(deaf)
+    flow = console.setup.job
+    assert flow is not None and flow.job._child is not None
+    child = flow.job._child
+    console.begin_shutdown()  # no aclose: the graceful wait and the other closes come after
+    assert flow.stopping
+    await until(
+        lambda: child.poll() is not None
+    )  # SIGTERM was ignored: the timer killed it
+    await until(lambda: flow.finished is not None)
+    assert flow.finished is not None and flow.finished.state == "cancelled"
 
 
 async def test_a_job_whose_thread_cannot_start_is_not_left_running(

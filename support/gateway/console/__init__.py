@@ -576,8 +576,9 @@ class Console:
                 logger.exception("The console's idle sweep failed")
 
     def begin_shutdown(self) -> None:
-        """End every event stream; the uvicorn server calls this first."""
+        """End every event stream and stop the setup job; the uvicorn server calls this first."""
         self._shutdown.set()
+        self.setup.begin_shutdown()
 
     async def aclose(self) -> None:
         """Close the sessions, the hub and the store, releasing the owner lock last."""

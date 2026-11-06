@@ -19,14 +19,18 @@ melo_serve's or the tool's own words, which are not translated.
 ``POST /api/setup/start`` (202; 409 while a job runs) starts the job in a
 thread of its own, and ``POST /api/setup/cancel`` stops it, keeping what was
 downloaded. A start is checked against that plan, the list the person said yes
-to, and refused (409 ``no_plan``) once it is gone, older than :data:`PLAN_TTL_S`
-or unavailable, or (409 ``no_room``) when the list does not fit the disk and
-nothing is left out. ``pick`` must be the plan's pick, and ``skip`` may hold
-only what the list lets a person turn off. Commands run as an argv, never
-through a shell, and the job registers no login item for the gateway
-(installing it would restart the gateway that runs the job). A gateway that
-shuts down ends the job ``cancelled``: the child gets SIGTERM, then SIGKILL
-after :data:`STOP_WAIT_S`, and the partial files are kept.
+to, and refused (409 ``no_plan``) once it is gone, older than :data:`START_TTL_S`
+(a person may read the list that long; :data:`PLAN_TTL_S` is only how often
+melo_serve is asked again) or unavailable, or (409 ``no_room``) when the list
+does not fit the disk and nothing is left out. ``pick`` must be the plan's
+pick, and ``skip`` may hold only what the list lets a person turn off.
+Commands run as an argv, never through a shell, and the job registers no login
+item for the gateway (installing it would restart the gateway that runs the
+job). A gateway that shuts down ends the job ``cancelled`` and starts at once,
+before any graceful wait: the child gets SIGTERM, then SIGKILL after
+:data:`KILL_AFTER_S`, which fits inside the 8 s the macOS app gives a gateway
+it quits. A child that handles SIGTERM goes on with its own cleanup (its grace
+is 30 s) even if the gateway is gone by then; the partial files are kept.
 
 The job rides on ``GET /api/setup/detect`` as ``job`` (null before the first),
 so the card keeps one loop of asking. The routes are under ``/api``: the
@@ -61,10 +65,15 @@ logger = logging.getLogger(__name__)
 
 PLAN_TTL_S: Final = 60.0
 FAILED_TTL_S: Final = 5.0
-# How long a gateway that shuts down waits for a job it has stopped.
-STOP_WAIT_S: Final = 10.0
+# A plan can be started this long after it was asked for, within its epoch: a person
+# reads the list, and PLAN_TTL_S is only how often melo_serve is asked again.
+START_TTL_S: Final = 900.0
+# From the start of a gateway's shutdown to the SIGKILL of a setup child that ignores
+# SIGTERM. The macOS app kills a gateway 8 s after its SIGTERM (main.swift): this leaves
+# the gateway time to record the job before that.
+KILL_AFTER_S: Final = 5.0
 # How long a gateway that shuts down waits for a child that was killed.
-KILL_WAIT_S: Final = 2.0
+KILL_WAIT_S: Final = 1.0
 
 T = TypeVar("T")
 
@@ -92,6 +101,7 @@ class Job:
         self.skip = frozenset(skip)
         self.finished: run.Finished | None = None
         self.stopping = False
+        self._killer: threading.Timer | None = None
         # The gateway's own login item is not registered: that restarts the gateway.
         self.job = run.SetupJob(
             planned.plan,
@@ -119,6 +129,15 @@ class Job:
         """Ask the job to end ``cancelled``, keeping what it downloaded."""
         self.stopping = True
         self.job.cancel()
+
+    def stop_for_shutdown(self) -> None:
+        """:meth:`stop`, and SIGKILL after :data:`KILL_AFTER_S` for a child that does not listen."""
+        if self.finished is not None or self._killer is not None:
+            return
+        self.stop()
+        self._killer = threading.Timer(KILL_AFTER_S, self.kill)
+        self._killer.daemon = True
+        self._killer.start()
 
     def kill(self) -> None:
         """End the job now: SIGKILL to the child that did not stop."""
@@ -200,6 +219,14 @@ class SetupFlow:
         ttl = PLAN_TTL_S if found.plan.available else FAILED_TTL_S
         return found if self.clock() - found.at < ttl else None
 
+    def _startable(self) -> Planned | None:
+        """The plan a start may use: current in its epoch, available, and asked for within :data:`START_TTL_S`."""
+        found = self._plan
+        if found is None or found.epoch != self.epoch or found.plan.pick is None:
+            return None
+        young = self.clock() - found.at < START_TTL_S
+        return found if found.plan.available and young else None
+
     async def _planned(self) -> Planned:
         """The plan: one asker for every caller, kept for :data:`PLAN_TTL_S`."""
         found = self._current()
@@ -269,20 +296,20 @@ class SetupFlow:
     async def start(self, body: StartBody) -> Job:
         """Start the setup of the plan the person said yes to.
 
-        409 while a job runs, and 409 ``no_plan`` unless the plan is current,
-        young and available (the card asks again), or ``no_room`` when it does
-        not fit the disk and nothing is left out.
+        409 while a job runs, and 409 ``no_plan`` unless the plan is current in
+        its epoch, asked for within :data:`START_TTL_S` and available (the card
+        asks again), or ``no_room`` when it does not fit the disk and nothing is
+        left out.
         """
         if self.running:
             raise ApiError(409, "setup_running", t("setup.errors.running"))
-        planned = self._current()
-        plan = planned.plan if planned else None
-        if planned is None or plan is None or plan.pick is None or not plan.available:
+        planned = self._startable()
+        pick = planned.plan.pick if planned else None
+        if planned is None or pick is None:
             raise ApiError(409, "no_plan", t("setup.errors.noPlan"))
-        if body.pick != plan.pick.id:
-            raise ApiError(
-                400, "invalid_request", t("setup.errors.pick", pick=plan.pick.id)
-            )
+        plan = planned.plan
+        if body.pick != pick.id:
+            raise ApiError(400, "invalid_request", t("setup.errors.pick", pick=pick.id))
         _check_skip(plan, body.skip)
         if not listing.can_set_up(plan, body.skip):
             raise ApiError(409, "no_room", t("setup.errors.noRoom"))
@@ -300,14 +327,26 @@ class SetupFlow:
         job.stop()
         return job
 
+    def begin_shutdown(self) -> None:
+        """Stop the job that runs, now: SIGTERM, and SIGKILL after :data:`KILL_AFTER_S`.
+
+        The gateway calls this when it starts to shut down, before it waits for
+        its connections: that wait, and the other parts that close first, are
+        not spent with a child that could already be stopping.
+        """
+        if self.job is not None:
+            self.job.stop_for_shutdown()
+
     async def aclose(self) -> None:
-        """End the job that runs as ``cancelled``: SIGTERM, then SIGKILL after :data:`STOP_WAIT_S`."""
+        """Wait for the job that was stopped (:meth:`begin_shutdown`, if it was not yet) to end."""
         job = self.job
         if job is None or job.finished is not None:
             return
-        job.stop()
-        await asyncio.to_thread(job.thread.join, STOP_WAIT_S)
-        if job.finished is None:
+        job.stop_for_shutdown()
+        await asyncio.to_thread(job.thread.join, KILL_AFTER_S + KILL_WAIT_S)
+        if (
+            job.finished is None
+        ):  # the timer is a daemon thread: do not rely on it alone
             job.kill()
             await asyncio.to_thread(job.thread.join, KILL_WAIT_S)
 
@@ -336,8 +375,7 @@ class SetupFlow:
         ids += [row for row in items if row not in ids]
         finished = job.finished
         rows = [
-            _row(row, items.get(row), names, row in job.skip, finished is not None)
-            for row in ids
+            _row(row, items.get(row), names, row in job.skip, finished) for row in ids
         ]
         saved = items.get(run.SAVE)
         return {
@@ -357,23 +395,29 @@ def _row(
     event: run.ItemEvent | None,
     names: dict[str, str],
     left_out: bool,
-    over: bool,
+    finished: run.Finished | None,
 ) -> dict[str, Any]:
     """One row of the job: its name, state and line.
 
     The ``state`` is the stable word of the row and the screen words it in its
     language; ``line`` is the job's or melo_serve's own text, shown as it is
     (it is empty when the state says it all). What the person left out reads
-    ``skipped``; a row that was running when the job ended, or was stopped,
-    reads ``stopped``; one that never started stays ``waiting``.
+    ``skipped``; a row that was running when the job ended, or that a stop
+    ended, reads ``stopped`` (melo_serve's line for it names a command, which
+    the card's user does not run, so it is left off); one that never started
+    stays ``waiting``.
     """
     if event is None:
         event = run.ItemEvent(row, "skipped" if left_out else "waiting")
     state, line = event.state, event.line
-    if state == "skipped" and (left_out or line == run.STOPPED):
-        state, line = ("skipped" if left_out else "stopped"), ""
+    cancelled = finished is not None and finished.state == "cancelled"
+    if state == "skipped":
+        if left_out or line == run.SKIPPED:
+            line = ""
+        elif cancelled:
+            state, line = "stopped", ""
     progress = ""
-    if state == "running" and over:
+    if state == "running" and finished is not None:
         state, line = "stopped", ""
     elif state == "running" and event.total_bytes:
         part, whole = listing.amounts(event.done_bytes, event.total_bytes)

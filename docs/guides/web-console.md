@@ -30,8 +30,9 @@ Apple-silicon Mac sets one up from the card, as the terminal's first run does, w
 [the same list and the same job](model-servers.md#first-run-setup): what this Mac can
 run, each item with its size and where it goes, and the total to download. An item
 that is optional has a box to turn it off, and one button (`Set up Qwen3 8B (6.6 GB)`)
-starts it after that one OK; a list left on screen for more than a minute is refreshed
-first, and the button asks for another OK once you have looked. Each step then shows
+starts it after that one OK; a list left on screen for more than 15 minutes is asked
+for again first, and set up starts at once if it is the same, or waits for another OK if
+it changed. Each step then shows
 its own progress and its state in words, **Stop** keeps what was downloaded, and
 **Continue** goes on after a stop or a failure. When the chat model
 answers, the card connects it as **Use this model** does. Where setup is not offered

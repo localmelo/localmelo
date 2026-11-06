@@ -260,6 +260,54 @@ test('a list that went out of date is asked again, and the person looks before t
   assert.equal(h.paths().filter((path) => path === 'POST /setup/start').length, 1, 'nothing runs until the next OK');
 });
 
+test('a list that went out of date and is the same when asked again starts at once, as the same OK', async () => {
+  const stale = Object.assign(new Error('The list of what this Mac can run is out of date.'), {status: 409, code: 'no_plan'});
+  let starts = 0;
+  const h = harness({answers: {'POST /setup/start': () => (++starts === 1 ? stale : {job: job('running', WAITING)})}});
+  await h.open();
+  await h.root.button('Set up Qwen3 8B (6.6 GB)').click();
+  await settle();
+  assert.equal(h.paths().filter((path) => path === 'POST /setup/start').length, 2, 'it started on the second try, with no second press');
+  assert.equal(h.paths().filter((path) => path.startsWith('GET /setup/plan')).length, 2);
+  assert.match(h.text(), /Setting up Qwen3 8B/);
+  assert.doesNotMatch(h.text(), /out of date/);
+});
+
+test('a refreshed list that no longer lets a row stay off keeps the list and its note, not the commands', async () => {
+  const stale = Object.assign(new Error('The list of what this Mac can run is out of date.'), {status: 409, code: 'no_plan'});
+  const h = harness({answers: {}});
+  await h.open();
+  h.plan = WITHOUT_EMBED;
+  h.root.rows('setup-row')[3].findAll((n) => n.type === 'checkbox')[0].toggle(false);
+  await settle();
+  // Meanwhile the memory model arrived: the new list does not offer that row to turn off.
+  h.plan = {...PLAN, rows: PLAN.rows.map((r) => (r.id === 'model:embed' ? {...r, size: '', where: '✓ already here', state: 'here', off: false} : r)), download: 'Download about 5.8 GB.', action: 'Set up Qwen3 8B (5.8 GB)'};
+  h.answers['GET /setup/plan?skip=model%3Aembed'] = Object.assign(new Error('The setup cannot leave out model:embed.'), {status: 400});
+  h.answers['POST /setup/start'] = stale;
+  await h.root.button('Set up Qwen3 8B (5.8 GB)').click();
+  await settle();
+  assert.equal(h.root.rows('setup-row').length, 5, 'the list stays');
+  assert.match(h.text(), /The list was out of date, so it was refreshed\./);
+  assert.doesNotMatch(h.text(), /brew install/);
+  assert.deepEqual(h.calls.at(-1), ['GET', '/setup/plan', undefined], 'asked once, with nothing left off');
+});
+
+test('while melo_serve is asked again for a toggled list the card says so', async () => {
+  let release;
+  const h = harness();
+  await h.open();
+  h.answers['GET /setup/plan?skip=model%3Aembed'] = () => new Promise((resolve) => { release = () => resolve(WITHOUT_EMBED); });
+  h.root.rows('setup-row')[3].findAll((n) => n.type === 'checkbox')[0].toggle(false);
+  await settle();
+  const wait = h.root.find((n) => n.className === 'setup-wait');
+  assert.equal(wait.hidden, false);
+  assert.equal(wait.text(), 'Checking what this Mac can run…');
+  release();
+  await settle();
+  assert.equal(wait.hidden, true);
+  assert.ok(h.root.button('Set up Qwen3 8B (5.8 GB)'));
+});
+
 test('a list that does not fit the disk cannot be started until something is left out', async () => {
   const h = harness({plan: {...PLAN, can_set_up: false, notes: ['There is not enough free space for this. Another model may fit.']}});
   await h.open();
