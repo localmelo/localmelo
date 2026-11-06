@@ -406,6 +406,36 @@ class TestReal:
         assert "Operation not permitted" in await shell("touch ~/allowed2.txt")
         assert not (home / "allowed2.txt").exists()
 
+    async def test_an_allowed_folder_does_not_open_what_runs_later_or_holds_keys(
+        self, ws: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(home))
+        shut = [
+            "Library/LaunchAgents",
+            "Library/Keychains",
+            ".config/fish",
+            ".cache/localmelo",
+            ".ssh",
+        ]
+        for place in shut:
+            (home / place).mkdir(parents=True)
+        c, shell, _ = _tools(ws, {"HOME": str(home)})
+        # The step was allowed to write the folders that hold them.
+        c.extra = (str(home / "Library"), str(home / ".config"), str(home / ".cache"))
+        out = await shell(
+            "touch ~/Library/ok ~/.config/ok ~/.cache/ok ~/.zshrc"
+            + "".join(f" ~/{place}/x" for place in shut)
+        )
+        assert (home / "Library" / "ok").exists() and (home / ".cache" / "ok").exists()
+        assert (home / ".config" / "ok").exists()
+        assert not (home / ".zshrc").exists()
+        assert not any((home / place / "x").exists() for place in shut)
+        assert out.count("Operation not permitted") == 1 + len(shut)
+        # Each refusal is told, though its folder was allowed.
+        assert c.refused == 1 + len(shut) and "melo: writing outside" in out
+        # The run's own folder stays writable.
+        assert await shell("touch in && echo ok") == "ok"
+
     async def test_a_quoted_path_cannot_add_a_rule(self, tmp_path: Path) -> None:
         root = tmp_path / 'w") (allow file-write* (subpath "/'
         root.mkdir()

@@ -341,6 +341,35 @@ HIGH = {
         "gh api repos/a/b/issues -f title=Bug",
         "send_out",
     ),
+    # gh takes options between its words, and writes more than issues.
+    "a GitHub issue with the repo between": (
+        SH,
+        "gh issue -R a/b create --title Bug",
+        "send_out",
+    ),
+    "a GitHub review with the repo after the noun": (
+        SH,
+        "gh pr --repo a/b review 3 --approve",
+        "send_out",
+    ),
+    "a GitHub secret": (SH, "gh secret set TOKEN --body x", "send_out"),
+    "a GitHub workflow": (SH, "gh workflow run ci.yml", "send_out"),
+    "a GitHub write through the API, any case": (
+        SH,
+        "gh api --method=patch repos/a/b -f name=c",
+        "send_out",
+    ),
+    "a GitHub repo deleted": (SH, "gh repo delete a/b --yes", "delete"),
+    "a GitHub release deleted, the repo between": (
+        SH,
+        "gh release -R a/b delete v1",
+        "delete",
+    ),
+    "a GitHub deletion through the API": (
+        SH,
+        "gh api -X DELETE repos/a/b",
+        "delete",
+    ),
     "a mail": (SH, "mail -s hello bob@example.com < note.txt", "send_out"),
     "D26b": (SH, "git reset --hard HEAD~3", "delete"),
     "D27a": (SH, "git config --global user.email a@b.example", "persistence"),

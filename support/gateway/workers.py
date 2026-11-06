@@ -2540,6 +2540,14 @@ class TaskWorkers:
                             own: dict[str, Any] = (
                                 {} if words is None else {"words": words}
                             )
+                            if not (
+                                is_persons_task(record.origin)
+                                or record.spec.get("user_words")
+                            ):
+                                # The objective of a task another agent, a channel
+                                # or melo made, with no words of the person's kept
+                                # by trusted code, is never their message (#547).
+                                own["from_person"] = False
                             await runner.start_turn(
                                 text,
                                 approval=policy,

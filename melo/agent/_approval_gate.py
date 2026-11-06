@@ -25,7 +25,7 @@ from localmelo.melo.agent._step_review import (
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
-from localmelo.melo.checker.review.posting import personal_data, sent_texts
+from localmelo.melo.checker.review.posting import is_field, personal_data, sent_texts
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -404,11 +404,14 @@ class _ApprovalGate:
         if (
             self._reviewer is not None
             and review_mode(self._policy, asking) == "auto"
+            and (self.review is None or _only_outside_write(self.review))
             and self._reviewer.names_folder(outside.path)
         ):
             # In Auto, a folder the person wrote in their own words needs no
-            # card (#547): the path is theirs, the rules above still stop what
-            # is never offered and what changes localmelo itself.
+            # card (#547), for a read or a plain write there. A write the rules
+            # also call something else (a launch agent, a shell startup file, a
+            # key) or could not read keeps its card: naming a folder is not
+            # asking for that.
             decided: ApprovalDecision = ApprovalDecision(
                 True, NAMED_FOLDER, origin="user"
             )
@@ -595,6 +598,11 @@ def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> Actio
     )
 
 
+def _only_outside_write(review: ActionReview) -> bool:
+    """Whether *review* of a write outside the workspace finds nothing but that: no other category, no doubt."""
+    return review.categories == ("outside_write",) and not review.doubts
+
+
 def _folder_scope(decision: ApprovalDecision) -> str:
     """What allowed a call outside the workspace: once, chat, always, named (the person wrote the folder), or "" (denied)."""
     if not decision.allow:
@@ -640,9 +648,6 @@ _TYPING_DOUBT = (
 _NAMED_SITE = " The user's words name this site."
 # What the text holds that code found of the person (#547).
 _PERSONAL = " The text holds the user's {kinds}."
-# The longest text melo types on a site the person named without a review of its
-# own: what the question about sending a form can show of a field (80).
-FIELD_CHARS: Final = 80
 # A click whose target melo cannot tell (#465): the person is asked.
 _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # The site questions that carry no value of melo's (#465): a click or a choice
@@ -918,7 +923,7 @@ class _ToolAsk:
                     typing
                     and reviewer.names_host(site)
                     and not holds_secret(arguments, preview)
-                    and len(str(arguments.get("text") or "")) <= FIELD_CHARS
+                    and is_field(str(arguments.get("text") or ""))
                     and not _personal(reviewer, tool_name, arguments)
                 ):
                     # The rules judge it: a field's worth of text with no secret

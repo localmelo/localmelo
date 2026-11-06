@@ -2856,13 +2856,16 @@ class Agent(_RecallLoop, _NotesLoop):
 
     @staticmethod
     def _progressing(fingerprints: list[tuple[str, str, str]]) -> bool:
-        """Whether the last five steps made progress: two different steps ran with no error."""
+        """Whether the last five steps made progress: three different steps ran with no error.
+
+        Two steps that take turns (A, B, A, B, A) are a loop, not progress.
+        """
         done = {
             (name, step_h)
             for name, step_h, error in fingerprints[-5:]
             if name and not error
         }
-        return len(done) >= 2
+        return len(done) >= 3
 
     @staticmethod
     def _detect_stuck(
@@ -3929,6 +3932,8 @@ class Agent(_RecallLoop, _NotesLoop):
         self._reviewer.earlier_words(
             [words for words, _ in turns_before], first=chat_first or ""
         )
+        # No password is typed in a run the person did not begin (#547).
+        self._reviewer.begin_run()
         if from_person:
             # The notes recalled for this message go along, apart: they count
             # only where the person's words point to them (#465).

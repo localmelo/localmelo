@@ -98,3 +98,28 @@ def test_a_persons_session_has_it_on_and_a_caller_keeps_its_own() -> None:
     assert typed.extend_steps == 0
     with pytest.raises(ValueError, match="extend_steps"):
         AgentOptions(extend_steps=-1)
+
+
+A, B, C, D = ("run", "a", ""), ("run", "b", ""), ("run", "c", ""), ("run", "d", "")
+
+
+@pytest.mark.parametrize(
+    ("steps", "progressing"),
+    [
+        ([A, B, C, D, A], True),
+        ([A, A, A, B, C], True),
+        # Two steps that take turns are a loop, and so is one that repeats.
+        ([A, B, A, B, A], False),
+        ([A, A, A, A, A], False),
+        # Errors are no progress.
+        (
+            [A, ("run", "x", "boom"), ("run", "y", "boom"), ("run", "z", "boom"), B],
+            False,
+        ),
+    ],
+    ids=["new steps", "three kinds", "alternating", "repeating", "errors"],
+)
+def test_two_steps_that_take_turns_are_no_progress(
+    steps: list[tuple[str, str, str]], progressing: bool
+) -> None:
+    assert Agent._progressing(steps) is progressing

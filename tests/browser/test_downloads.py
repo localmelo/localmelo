@@ -123,6 +123,28 @@ async def test_a_download_in_progress_waits_and_one_past_the_limit_is_cut() -> N
     assert item.state == "too big"
 
 
+async def test_a_download_past_the_tracked_limit_is_cancelled_not_left_to_save() -> (
+    None
+):
+    calls = Calls()
+    _, browser = _driver(calls)
+    for n in range(chrome.MAX_DOWNLOADS + 1):
+        _event(
+            browser,
+            "Browser.downloadWillBegin",
+            guid=f"g{n}",
+            frameId="MINE",
+            suggestedFilename="a.bin",
+        )
+    while browser.jobs:
+        await asyncio.gather(*list(browser.jobs))
+    last = f"g{chrome.MAX_DOWNLOADS}"
+    assert len(browser.saving) == chrome.MAX_DOWNLOADS and last not in browser.saving
+    assert [c for c in calls.made if c[0] == "Browser.cancelDownload"] == [
+        ("Browser.cancelDownload", {"guid": last}, None)
+    ]
+
+
 async def test_a_download_whose_page_is_unknown_is_dropped_and_nobody_is_told() -> None:
     driver, browser = _driver(Calls())
     _event(

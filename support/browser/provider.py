@@ -1239,7 +1239,7 @@ class BrowserToolProvider(BaseToolProvider):
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "payment cards or one-time codes, nor a password the user did not give."
         )
-        if kind == "password" and self._signs_in(snap.origin):
+        if kind == "password" and self._signs_in(_box_origin(snap, item)):
             refusal += (
                 " The user gave a sign-in password in their message: type its "
                 "handle ([password-1]) here, not a value."
@@ -1253,22 +1253,23 @@ class BrowserToolProvider(BaseToolProvider):
         """The password *text* stands for, when melo may type it into *item*, else None.
 
         *text* must be exactly the handle of a password the person gave in
-        their newest message (``[password-1]``); *item* a password box (not a
-        card or a one-time code box) on an https page of a site their own words
-        name. The check is the run's (``TOOL_ASK``'s ``sign_in_value``): a page,
+        their message of this run (``[password-1]``); *item* a password box (not
+        a card or a one-time code box) whose own origin, not the page's it sits
+        in, is an https site their own words name. The check is the run's (``TOOL_ASK``'s ``sign_in_value``): a page,
         the model or an earlier message never passes it, and without a policy
         that checks, nothing is typed.
         """
         kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
         handle = text.strip()
+        origin = _box_origin(snap, item)
         if (
             kind != "password"
-            or not snap.origin.startswith("https://")
+            or not origin.startswith("https://")
             or not HANDLE.fullmatch(handle)
         ):
             return None
         find = getattr(TOOL_ASK.get(), "sign_in_value", None)
-        value = find(handle, sites.host_of(snap.origin)) if callable(find) else None
+        value = find(handle, sites.host_of(origin)) if callable(find) else None
         return value if isinstance(value, str) and value else None
 
     def _signs_in(self, origin: str) -> bool:
@@ -1551,6 +1552,7 @@ class BrowserToolProvider(BaseToolProvider):
         what: str,
         typed: str | None = None,
         on: str = "",
+        origin: str | None = None,
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
@@ -1558,7 +1560,10 @@ class BrowserToolProvider(BaseToolProvider):
         for a click or a choice, about the whole text for typing; *on* names
         the element in words), and the window's tabs are listed so the ones
         the action opens are known for what they are. A window that cannot be
-        listed is not acted in.
+        listed is not acted in. Typing is asked about for *origin*, the site
+        of the box itself (:func:`_box_origin`), not the page it sits in:
+        the page's being named by the person says nothing of a box from
+        another site.
         """
         await self._recheck(
             tab_id
@@ -1566,7 +1571,9 @@ class BrowserToolProvider(BaseToolProvider):
         if typed is None:
             await sites.require_act(snap.origin, what, on)
         else:
-            await sites.require_type(snap.origin, typed, on)
+            await sites.require_type(
+                snap.origin if origin is None else origin, typed, on
+            )
         before = await self._tabs_now()
         if before is None:
             raise BrowserError(
@@ -2390,7 +2397,14 @@ class BrowserToolProvider(BaseToolProvider):
                 "does not type it."
             )
         await _ask_foreign(snap.origin, item, "type into")
-        before = await self._acting(tab_id, snap, "type", shown, _control_words(item))
+        before = await self._acting(
+            tab_id,
+            snap,
+            "type",
+            shown,
+            _control_words(item),
+            origin=_box_origin(snap, item),
+        )
         assert before is not None
         done: set[str] = set()
         enter = submit is True or str(submit).lower() == "true"
@@ -2969,6 +2983,14 @@ async def _ask_foreign(origin: str, item: Element, how: str) -> None:
         how,
         known=False,
     )
+
+
+def _box_origin(snap: render.Snapshot, item: Element) -> str:
+    """The origin a text box belongs to: its own, when it is in a box from another site, else its page's.
+
+    ``""`` for a box whose site cannot be read: nothing is typed there.
+    """
+    return (sites.origin_of(item.site) or "") if item.site else snap.origin
 
 
 def _named(item: Element) -> bool:

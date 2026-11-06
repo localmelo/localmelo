@@ -81,6 +81,17 @@ REFUSED: dict[str, tuple[Element, str, Gave | Asks | None]] = {
         "[password-1]",
         Gave(),
     ),
+    # The page is the named site's, the box in it is another site's frame.
+    "a box in another site's frame": (
+        password_box(site="https://accounts.example.org/x"),
+        "[password-1]",
+        Gave(),
+    ),
+    "a box whose site cannot be read": (
+        password_box(site="not a site"),
+        "[password-1]",
+        Gave(),
+    ),
 }
 
 

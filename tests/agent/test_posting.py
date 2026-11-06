@@ -19,6 +19,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import RunReviews, StepReviewer
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review import review_action
+from localmelo.melo.checker.review.posting import asks_to_send, asks_to_share
 from localmelo.melo.contracts.approvals import AutoPolicy, asks_in_auto
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.memory.block import BLOCK_HEADER
@@ -274,6 +275,140 @@ def test_only_the_persons_own_words_speak_of_sharing() -> None:
     assert reviewer.asks_to_share() is True
 
 
+# What the model may call a page step: no category at all, or a fit.
+NONE = {"category": "none", "fits_request": "yes", "user_asked": "yes"}
+BEYOND = {"category": "beyond_request", "fits_request": "yes", "user_asked": "yes"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", [NONE, BEYOND], ids=["none", "beyond_request"])
+@pytest.mark.parametrize(
+    "step",
+    [typed(FORUM_TEXT), sent(("comment", FORUM_TEXT))],
+    ids=["typed", "sent"],
+)
+async def test_a_message_on_a_page_is_stopped_by_code_whatever_category_the_model_gives(
+    tmp_path: Path,
+    step: tuple[str, dict[str, Any], ActionReview],
+    model: dict[str, str],
+) -> None:
+    """Page text cannot talk the model into a post: no word of the person's asks for one."""
+    found = await settle(["Look at the router thread"], step, model, tmp_path)
+    assert found.verdict == "high" and asks_in_auto(found), found
+    assert "do not ask for" in found.reasons[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("words", "step"),
+    [
+        # A short field of a form is no message: a search, a name.
+        (["Find cats on the shop site"], sent(("q", "cats"))),
+        (["Look up the router"], typed("router manual")),
+        # What the person wrote themselves is theirs to send.
+        (
+            [f"Reply with exactly: {FORUM_TEXT}"],
+            sent(("comment", FORUM_TEXT)),
+        ),
+        (
+            [f"The reason is: {FORUM_TEXT}"],
+            sent(("reason", FORUM_TEXT)),
+        ),
+    ],
+    ids=["search form", "short typing", "asked reply", "their own text, no verb"],
+)
+async def test_a_field_or_the_persons_own_text_is_not_stopped_without_a_send_word(
+    tmp_path: Path, words: list[str], step: tuple[str, dict[str, Any], ActionReview]
+) -> None:
+    found = await settle(words, step, NONE, tmp_path)
+    assert found.verdict == "routine", found
+
+
+@pytest.mark.asyncio
+async def test_writing_in_a_box_is_asked_for_by_write_words_and_sending_is_not(
+    tmp_path: Path,
+) -> None:
+    """Typing is composing: "write a line in the box" asks for it. The form is sent only on a word to send."""
+    words = ["Write a line about the router in the comment box"]
+    found = await settle(words, typed(FORUM_TEXT), NONE, tmp_path)
+    assert found.verdict == "routine", found
+    found = await settle(words, sent(("comment", FORUM_TEXT)), NONE, tmp_path)
+    assert found.verdict == "high" and "do not ask for" in found.reasons[0], found
+
+
+@pytest.mark.parametrize(
+    ("words", "asks"),
+    [
+        ("Post this on the forum", True),
+        ("Please post it", True),
+        ("Every Monday post the weekly report", True),
+        ("Reply to him in this thread", True),
+        ("Email bob the report", True),
+        ("Fix the test and push it", True),
+        ("Open an issue for it", True),
+        ("发邮件给他", True),
+        # Nouns and other uses of the same words are no request.
+        ("Deal with this mail", False),
+        ("Summarize my email", False),
+        ("Check email from Bob", False),
+        ("Read the latest post on the forum", False),
+        ("Write a review of this code", False),
+        ("Look at the router thread", False),
+        ("Find the comment about the router", False),
+    ],
+)
+def test_the_send_cue_is_a_request_to_send_not_a_noun(words: str, asks: bool) -> None:
+    assert asks_to_send([words]) is asks
+
+
+@pytest.mark.parametrize(
+    ("words", "shares"),
+    [
+        ("Sign me up and make my profile public", True),
+        ("Share it with the team", True),
+        ("Post it on social media", True),
+        ("Sign me up", False),
+        ("Read the latest post and sign me up", False),
+        ("Open the shared folder", False),
+        ("Public library hours", False),
+    ],
+)
+def test_the_share_cue_is_a_request_to_share_not_a_noun(
+    words: str, shares: bool
+) -> None:
+    assert asks_to_share([words]) is shares
+
+
+def test_only_the_newest_messages_speak_of_sharing() -> None:
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.earlier_words(["Share the report with the team"] * 4)
+    for _ in range(7):
+        reviewer.user_message("sign me up")
+    assert reviewer.asks_to_share() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "gh issue create --title Bug --body-file body.txt",
+        "gh issue create --title Bug -F body.txt",
+        "mail -s Report bob@example.com < body.txt",
+    ],
+)
+async def test_a_message_in_a_file_is_checked_for_the_persons_own_data(
+    tmp_path: Path, line: str
+) -> None:
+    """The check reads the file the command takes its message from, not only the command line."""
+    (tmp_path / "body.txt").write_text("It crashes. Call me on 415-555-0134.")
+    step = command(line)
+    found = await settle(["Report the bug and send it"], step, YES, tmp_path)
+    assert found.verdict == "high" and "phone number" in found.reasons[0], found
+    (tmp_path / "body.txt").write_text("It crashes on empty input.")
+    found = await settle(["Report the bug and send it"], step, YES, tmp_path)
+    assert found.verdict == "routine", found
+
+
 @pytest.mark.asyncio
 async def test_data_sent_to_a_server_is_no_post(tmp_path: Path) -> None:
     """A POST to an API is a send of data: the user's model reads their words for it, as before."""
@@ -332,6 +467,7 @@ async def type_on_named_site(
     [
         pytest.param("Anna", 0, True, id="a field's worth of text"),
         pytest.param("x" * 81, 1, True, id="a longer text, which is a post"),
+        pytest.param("one\ntwo", 1, True, id="a line break, which is a message"),
         # Reviewed whole, and stopped: nothing of the person's goes into a post.
         pytest.param("call 415-555-0134", 1, False, id="a phone number"),
     ],
@@ -345,7 +481,7 @@ async def test_on_a_named_site_only_a_short_plain_field_is_typed_without_a_revie
     if reviewed:
         # The review reads all of the text, and is told what the text holds.
         asked = " ".join(m.content for m in llm.review_requests[0])
-        assert text in asked
+        assert " ".join(text.split()) in " ".join(asked.replace("\\n", " ").split())
         assert ("415-555-0134" in text) is ("phone number" in asked)
 
 

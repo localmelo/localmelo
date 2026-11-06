@@ -33,6 +33,16 @@ def _no_setting_overrides() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _empty_password_vault() -> Iterator[None]:
+    """The passwords a test's person gave stay in that test (#547)."""
+    from localmelo.melo.contracts.sign_in import VAULT
+
+    VAULT.forget()
+    yield
+    VAULT.forget()
+
+
+@pytest.fixture(autouse=True)
 def fake_keychain(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     """No test reaches the real keychain: ``security`` is an in-memory stand-in.
 

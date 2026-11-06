@@ -29,6 +29,7 @@ from localmelo.melo.checker.review.paths import (
     where,
 )
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.review import DIRENV_SUBJECT
 
 MAX_DEPTH = 3
 # Programs that reach a server, and HTTPie's names (method first: http POST url).
@@ -392,14 +393,65 @@ _RULES = [
 ^(mail|mailx|sendmail)\b ;; send_out ;; Sends a message with {prog}. ;; post
 ^git push\b.*(\s-f\b|--force|\s\+) ;; delete ;; Force-pushes, which can overwrite commits on the server.
 ^git push\b(?!.*(\s-f\b|--force|\s\+)) ;; send_out ;; Pushes commits to a server. ;; post
-^gh(\s+(-R|--repo)[ =]?\S+)*\s+(issue|pr|discussion|release|gist|repo)\s+(create|comment|review|merge|edit|close|reopen|delete|fork|transfer|rename|archive)\b ;; send_out ;; Posts to GitHub with gh. ;; post
-^gh(\s+(-R|--repo)[ =]?\S+)*\s+api\b.*(\s-X\s*(POST|PUT|PATCH|DELETE)\b|--method[ =](POST|PUT|PATCH|DELETE)\b|\s-[fF]\b|--(raw-)?field\b|--input\b) ;; send_out ;; Writes to GitHub with gh api. ;; post
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
-^direnv (allow|permit|grant)\b ;; persistence ;; Trusts a .envrc, which then runs whenever its folder is entered.
 ^git config .*--(global|system) ;; persistence ;; Changes your global git settings.
 ^git config .*core\.hookspath|^git config .*core\.hooksPath ;; persistence ;; Points git at hooks that run on later commits.
 """.strip().splitlines())
+]
+
+
+# More rules, built from the pieces above. ``gh`` takes options between its words (``gh issue -R owner/repo create``,
+# ``gh -R owner/repo pr comment``): a word that starts with ``-``, and the value
+# after it when it has one.
+_GH = r"^gh(?:\s+-\S+(?:\s+[^-\s]\S*)?)*"
+_GH_OPT = r"(?:\s+-\S+(?:\s+[^-\s]\S*)?)*"
+_GH_NOUNS = (
+    "issue|pr|discussion|release|gist|repo|workflow|run|label|secret|variable|ssh-key"
+    "|gpg-key|codespace|project|cache|ruleset"
+)
+_GH_WRITES = (
+    "create|comment|review|merge|edit|close|reopen|fork|transfer|rename|archive|unarchive"
+    "|ready|lock|unlock|pin|unpin|upload|sync|develop|set|add|remove|run|rerun|cancel"
+    "|enable|disable|update-branch"
+)
+_GH_METHODS = r"(?i:POST|PUT|PATCH)\b"
+_RULES += [
+    (re.compile(pattern), category, reason, subject)
+    for pattern, category, reason, subject in (
+        (
+            rf"{_GH}\s+(?:{_GH_NOUNS}){_GH_OPT}\s+(?:{_GH_WRITES})\b",
+            "send_out",
+            "Posts to GitHub with gh.",
+            "post",
+        ),
+        (
+            rf"{_GH}\s+(?:{_GH_NOUNS}){_GH_OPT}\s+delete\b",
+            "delete",
+            "Deletes something on GitHub with gh.",
+            "",
+        ),
+        (
+            rf"{_GH}\s+api\b.*(?:\s-X\s*=?\s*{_GH_METHODS}|--method[ =]{_GH_METHODS}"
+            r"|\s-[fF]\b|--(?:raw-)?field\b|--input\b)",
+            "send_out",
+            "Writes to GitHub with gh api.",
+            "post",
+        ),
+        (
+            rf"{_GH}\s+api\b.*(?:\s-X\s*=?\s*|--method[ =])(?i:DELETE)\b",
+            "delete",
+            "Deletes something on GitHub with gh api.",
+            "",
+        ),
+        # The stop that makes a written .envrc safe: a card in auto mode.
+        (
+            r"^direnv (allow|permit|grant)\b",
+            "persistence",
+            "Trusts a .envrc, which then runs whenever its folder is entered.",
+            DIRENV_SUBJECT,
+        ),
+    )
 ]
 
 

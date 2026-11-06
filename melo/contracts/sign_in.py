@@ -5,10 +5,14 @@ it does not stop to ask for what it was handed. The value must never reach a
 model, a record, a log or a memory, so it is cut out of the message the moment
 the message arrives and a handle stands in its place: ``my password is
 hunter2`` reaches the model, the history, the events and the stores as ``my
-password is [password-1]``. :class:`Vault` keeps the value in this process only,
-for the chat, and gives it back only to code that has checked who may use it
+password is [password-1]``. :func:`hide_passwords` is the one function that does
+it, called where the person's text comes in (a gateway route, the terminal's
+prompt, a session's runner, an agent's run): before the text is routed,
+queued, titled, stored or read by a model, and running it again on its own
+output changes nothing. :data:`VAULT` keeps the values in this process only and
+gives one back only to code that has checked who may use it
 (``StepReviewer.sign_in_value``): a text box of a password, on a site the
-person's own words name, in the turn the person gave it. The model types the
+person's own words name, in a turn the person began. The model types the
 handle; the browser tool types the value.
 
 What counts as given is decided here, by code, from the person's text: a
@@ -24,6 +28,7 @@ This module imports only the standard library.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Final
 
 # The words that say a value is a password.
@@ -31,11 +36,12 @@ CUES: Final = ("password", "passwd", "pwd", "pw", "密码", "口令")
 # A value is 4 to 128 characters with no space (a quoted one may hold spaces).
 MIN_CHARS: Final = 4
 MAX_CHARS: Final = 128
-# Passwords one vault keeps; one past that is hidden but cannot be typed.
-MAX_HANDLES: Final = 8
-UNUSABLE: Final = "[password-hidden]"
+# Passwords the vault keeps at once: the newest. A handle is never used for two
+# values (the numbers only go up); the value of an older one is forgotten, and its
+# handle then stands for nothing.
+MAX_KEPT: Final = 16
 
-HANDLE: Final = re.compile(r"\[password-(?:[1-9]\d?|hidden)\]")
+HANDLE: Final = re.compile(r"\[password-[1-9]\d{0,8}\]")
 
 _CUE = "(?:" + "|".join(CUES) + ")"
 _SIZE = "{" + f"{MIN_CHARS},{MAX_CHARS}" + "}"
@@ -90,48 +96,77 @@ def _values(text: str) -> list[tuple[int, int, str]]:
 
 
 class Vault:
-    """The passwords one chat's person gave, by handle; in this process's memory only.
+    """The passwords the person gave, by handle; in this process's memory only.
 
-    :meth:`hide` cuts them out of a message and keeps them; :meth:`value`
-    gives one back by its handle, and :meth:`forget` drops them all. Nothing
-    is written anywhere: a restart forgets them, and ``repr`` shows none.
+    :meth:`hide` cuts them out of a message and keeps them; :meth:`value` gives
+    one back by its handle, and :meth:`forget` drops them all. Nothing is
+    written anywhere: a restart forgets them, and ``repr`` shows none. Safe to
+    call from any thread.
     """
 
     def __init__(self) -> None:
         self._values: dict[str, str] = {}
+        self._made = 0
+        self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"Vault({len(self._values)} password(s))"
 
-    def hide(self, text: str) -> tuple[str, tuple[str, ...]]:
-        """*text* with each password it gives replaced by its handle, and the handles in it.
+    def hide(self, text: str) -> str:
+        """*text* with each password it gives replaced by its handle.
 
-        The same value always has the same handle, so hiding a text again
-        (or the same message twice) changes nothing the second time.
+        The same value always has the same handle while it is kept, so hiding
+        a text again (or the same message twice) changes nothing the second
+        time.
         """
         spans = _values(text)
         if not spans:
-            return text, ()
-        handles = tuple(self._handle(value) for _, _, value in spans)
+            return text
+        with self._lock:
+            handles = [self._handle(value) for _, _, value in spans]
         out = text
         for (start, end, _), handle in reversed(list(zip(spans, handles, strict=True))):
             out = out[:start] + handle + out[end:]
-        return out, handles
+        return out
 
     def _handle(self, value: str) -> str:
         for handle, kept in self._values.items():
             if kept == value:
                 return handle
-        if len(self._values) >= MAX_HANDLES:
-            return UNUSABLE
-        handle = f"[password-{len(self._values) + 1}]"
+        self._made += 1
+        handle = f"[password-{self._made}]"
         self._values[handle] = value
+        while len(self._values) > MAX_KEPT:
+            del self._values[next(iter(self._values))]
         return handle
 
     def value(self, handle: str) -> str | None:
         """The password *handle* stands for, or ``None``."""
-        return self._values.get(handle)
+        with self._lock:
+            return self._values.get(handle)
 
     def forget(self) -> None:
-        """Drop every password."""
-        self._values.clear()
+        """Drop every password and number the handles from 1 again.
+
+        Nothing in melo calls it: a restart forgets them all. A test does, to
+        start from an empty vault.
+        """
+        with self._lock:
+            self._values.clear()
+            self._made = 0
+
+
+# The passwords of the person who uses this process: one vault, so a message is
+# hidden once, at the door, whichever chat or entry it comes in by. Only a
+# handle the person's newest message of the chat holds can be typed there.
+VAULT: Final = Vault()
+
+
+def hide_passwords(text: str) -> str:
+    """*text*, a message of the person's, with each password it gives replaced by its handle."""
+    return VAULT.hide(text)
+
+
+def handles_in(text: str) -> frozenset[str]:
+    """The handles of passwords that *text* holds and the vault still keeps."""
+    return frozenset(h for h in HANDLE.findall(text) if VAULT.value(h) is not None)

@@ -7,9 +7,13 @@ functions are the part code can prove, from the person's messages and the text
 the step sends and never from a page or a tool, so a model that a page talked
 into saying "the user asked" still does not post:
 
-- :func:`asks_to_send`: the words speak of posting or sending at all. A page's
-  instruction to post is in no message of the person's, so it has no such words
-  to lean on.
+- :func:`asks_to_send`: the words ask for a send (a verb of posting or sending
+  in a request, not the noun "email" or "a post"), unless the person wrote the
+  text themselves (:func:`written_by`). A page's instruction to post is in no
+  message of the person's, so it has no such words to lean on.
+- :func:`is_post`: which steps these checks apply to: a text melo typed that is
+  a message rather than a field (:func:`is_message`), or a command that posts,
+  whatever the review model called the step.
 - :func:`personal_data`: the text holds a phone number, a street address, or the
   real name of this Mac's account. Only those three can be matched by code;
   anything else about the person that melo knows (its notes) is not read here.
@@ -34,11 +38,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final
 
 __all__ = [
+    "FIELD_CHARS",
     "POST",
     "account_names",
     "asks_for_review",
     "asks_to_send",
     "asks_to_share",
+    "asks_to_write",
+    "file_bodies",
+    "is_field",
+    "is_message",
     "is_post",
     "personal_data",
     "post_stop",
@@ -51,16 +60,113 @@ __all__ = [
 # message in the person's name (``git push``, ``gh issue create``, ``mail``).
 POST: Final = "post"
 
-# Verbs of posting or sending, and "open an issue / a pull request". A
-# noun alone ("this mail") is no cue: "deal with this mail" does not say to send.
+# Verbs of posting or sending, and "open an issue / a pull request". Only a
+# word used as a request counts: "deal with this mail", "my email", "a post"
+# and "the review" are nouns. A verb that is seldom a noun (``strong``) counts
+# unless a determiner stands before it; one that often is (``weak``: "post",
+# "comment", "email", "message") counts only where a verb stands, at the start
+# of a sentence, after "please", "then", "to"..., or before its object ("post
+# the report"); ``plain`` always counts.
 _SEND = re.compile(
-    r"\b(post(?:ing|ed|s)?|publish\w*|repl(?:y|ies|ied|ying)|comment\w*|send\w*"
-    r"|e-?mail\w*|messag(?:e|ing|ed)"
-    r"|dm|tweet\w*|share|sharing|announce\w*|submit\w*|push\w*|upload\w*|review\w*"
-    r"|rate|rating|forward\w*|respond\w*)\b"
-    r"|\b(?:open|create|file|raise|make|write|log)\w*\s+(?:an?\s+|the\s+|this\s+|new\s+)*"
+    r"\b(?:(?P<strong>send|sending|publish|publishing|tweet|tweeting|announce|announcing"
+    r"|submit|submitting|upload|uploading|forward|forwarding|push|pushing|respond|responding"
+    r"|reply|replying|dm|share|sharing)"
+    r"|(?P<weak>post|posting|comment|commenting|e-?mail|e-?mailing|message|messaging))\b"
+    r"|(?P<plain>\b(?:open|create|file|raise|make|write|log)\w*\s+(?:an?\s+|the\s+|this\s+|new\s+)*"
     r"(?:issue|pull request|pr)\b"
-    r"|发布|发送|发帖|发邮件|发消息|发给|发表|发条|发个|回复|评论|留言|私信|转发|推送|提交|分享|点评|评价|上传|通知",
+    r"|发布|发送|发帖|发邮件|发消息|发给|发表|发条|发个|回复|私信|转发|推送|提交|分享|上传|留言)",
+    re.IGNORECASE,
+)
+# The words before a verb that make it a noun.
+_DETERMINERS: Final = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "these",
+        "those",
+        "my",
+        "your",
+        "his",
+        "her",
+        "their",
+        "our",
+        "its",
+        "new",
+        "another",
+        "each",
+        "every",
+        "any",
+        "no",
+        "some",
+        "same",
+        "of",
+    ]
+)
+# The words that follow a verb of a request and make it a verb: "post the report".
+_OBJECTS: Final = frozenset(
+    [
+        "the",
+        "a",
+        "an",
+        "this",
+        "that",
+        "it",
+        "them",
+        "him",
+        "her",
+        "me",
+        "us",
+        "my",
+        "your",
+        "our",
+        "his",
+        "their",
+    ]
+)
+# The words a verb of a request can follow (besides the start of a sentence).
+_VERB_AFTER: Final = frozenset(
+    [
+        "please",
+        "then",
+        "and",
+        "or",
+        "to",
+        "just",
+        "also",
+        "now",
+        "can",
+        "could",
+        "will",
+        "would",
+        "should",
+        "must",
+        "you",
+        "i",
+        "we",
+        "let's",
+        "lets",
+        "go",
+        "ahead",
+        "kindly",
+        "first",
+        "next",
+        "finally",
+        "too",
+        "not",
+        "don't",
+        "never",
+        "need",
+        "want",
+    ]
+)
+# Typing into a box is writing, not yet sending (a form is sent by its own
+# question): for typed text the words may ask to write, fill in or type.
+_WRITE = re.compile(
+    r"\b(?P<strong>write|writing|type|typing|enter|entering|fill|filling|compose|composing"
+    r"|draft|drafting|leave|leaving|put|putting|add|adding)\b|(?P<plain>填写|输入|写下|写个|写一)",
     re.IGNORECASE,
 )
 _REVIEW = re.compile(
@@ -78,8 +184,9 @@ _REPEAT = re.compile(
     re.IGNORECASE,
 )
 _SHARE = re.compile(
-    r"\bshar(?:e|ed|es|ing)\b|\bpublic(?:ly)?\b|\bpublish\w*|\bpost(?:ing|ed)?\b"
-    r"|\bsocial\b|分享|公开|发布|发帖|朋友圈",
+    r"\b(?:(?P<strong>publish\w*|tweet\w*|announce\w*|share|sharing)|(?P<weak>post|posting))\b"
+    r"|(?P<plain>\bpublicly\b|\b(?:make|set|keep|leave|turn|mark)\b[^.!?\n]{0,30}\bpublic\b"
+    r"|分享|公开|发布|发帖|朋友圈)",
     re.IGNORECASE,
 )
 
@@ -87,8 +194,8 @@ _SHARE = re.compile(
 # Chinese mobile number), never as any run of digits: dates, ports and ids are
 # not phone numbers.
 _PHONE = re.compile(
-    r"(?<![\w.])(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]\d{3,4}[\s.-]\d{3,4}(?![\w.])"
-    r"|(?<![\w.])\+\d{8,14}(?![\w.])"
+    r"(?<![\w.])(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]\d{3,4}[\s.-]\d{3,4}(?!\w)(?!\.\w)"
+    r"|(?<![\w.])\+\d{8,14}(?!\w)(?!\.\w)"
     r"|(?<!\d)1[3-9]\d{9}(?!\d)"
 )
 _STREET = re.compile(
@@ -99,10 +206,28 @@ _STREET = re.compile(
 )
 # The shortest piece of sent text that can prove the person wrote it.
 MIN_PROOF: Final = 12
+# The longest single line melo types into a box as "a field's worth": a search,
+# a name, a title. A longer text, or one with a line break, is a message; so is
+# a shorter one of this many words, which reads as a sentence.
+FIELD_CHARS: Final = 80
+MESSAGE_WORDS: Final = 5
 
 
 def _squash(text: str) -> str:
     return " ".join(text.casefold().split())
+
+
+def is_field(text: str) -> bool:
+    """Whether *text* is a field's worth: one line of at most :data:`FIELD_CHARS` characters."""
+    text = text.strip()
+    return len(text) <= FIELD_CHARS and "\n" not in text and "\r" not in text
+
+
+def is_message(texts: Iterable[str]) -> bool:
+    """Whether a text is a message rather than a field: more than a field's worth, or a sentence of :data:`MESSAGE_WORDS` words or more."""
+    return any(
+        not is_field(text) or len(text.split()) >= MESSAGE_WORDS for text in texts
+    )
 
 
 def is_post(
@@ -119,9 +244,48 @@ def is_post(
     ) in tuple(evidence)
 
 
+def _word_before(text: str, start: int) -> str:
+    """The word before ``text[start]`` in lower case, or ``""`` at the start of a sentence or clause."""
+    head = text[:start].rstrip()
+    if not head or head[-1] in ".!?;:,\n。！？；：，":
+        return ""
+    found = re.search(r"([\w'’-]+)$", head)
+    return found.group(1).casefold() if found else ""
+
+
+def _word_after(text: str, end: int) -> str:
+    """The word after ``text[:end]`` in lower case, or ``""``."""
+    found = re.match(r"\s+([\w'’-]+)", text[end:])
+    return found.group(1).casefold() if found else ""
+
+
+def _asks(pattern: re.Pattern[str], texts: Iterable[str]) -> bool:
+    """Whether a text has a match of *pattern* used as a request (see :data:`_SEND`)."""
+    for text in texts:
+        for found in pattern.finditer(text):
+            before = _word_before(text, found.start())
+            if found.group("plain") is not None:
+                return True
+            if found.group("strong") is not None and before not in _DETERMINERS:
+                return True
+            if found.group("weak") is not None and (
+                not before
+                or before in _VERB_AFTER
+                or before not in _DETERMINERS
+                and _word_after(text, found.end()) in _OBJECTS
+            ):
+                return True
+    return False
+
+
 def asks_to_send(texts: Iterable[str]) -> bool:
-    """Whether the person's words speak of posting, sending, replying or opening an issue or a pull request."""
-    return any(_SEND.search(text) for text in texts)
+    """Whether the person's words ask to post, send, reply or open an issue or a pull request."""
+    return _asks(_SEND, texts)
+
+
+def asks_to_write(texts: Iterable[str]) -> bool:
+    """Whether the person's words ask to write, type or fill something in."""
+    return _asks(_WRITE, texts)
 
 
 def asks_for_review(texts: Iterable[str]) -> bool:
@@ -135,8 +299,8 @@ def repeats(texts: Iterable[str]) -> bool:
 
 
 def asks_to_share(texts: Iterable[str]) -> bool:
-    """Whether the person's words speak of sharing, publishing or making something public."""
-    return any(_SHARE.search(text) for text in texts)
+    """Whether the person's words ask to share, publish or make something public."""
+    return _asks(_SHARE, texts)
 
 
 def account_names() -> tuple[str, ...]:
@@ -186,11 +350,46 @@ def written_by(sent: Sequence[str], texts: Iterable[str]) -> bool:
     )
 
 
-def sent_texts(tool_name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
+# Options and a redirection that take a message from a file: ``--body-file``,
+# ``--notes-file``, ``-F``, ``--input`` (``gh``), ``name=@file`` of a field,
+# ``< file`` (``mail``).
+_BODY_FILE = re.compile(
+    r"""(?:^|\s)(?:--body-file|--notes-file|--input|-F)(?:\s+|=)(?!\w+=@)['"]?([^\s'"|;&<>]+)"""
+    r"""|(?:^|\s)(?:-F|--field)\s+\w+=@['"]?([^\s'"|;&<>]+)"""
+    r"""|(?:^|\s)<\s*['"]?([^\s'"|;&<>]+)"""
+)
+# The most of a message file that is read.
+MAX_BODY_BYTES: Final = 65536
+
+
+def file_bodies(command: str, workspace: str) -> tuple[str, ...]:
+    """The text of the files a post command takes its message from, at most :data:`MAX_BODY_BYTES` each.
+
+    A relative path is the workspace's. A file that is missing, not a regular
+    file or unreadable adds nothing: the command fails on its own.
+    """
+    out: list[str] = []
+    for found in _BODY_FILE.finditer(command):
+        name = next(g for g in found.groups() if g)
+        path = os.path.join(workspace, os.path.expanduser(name))
+        try:
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8", errors="replace") as file:
+                    out.append(file.read(MAX_BODY_BYTES))
+        except OSError:
+            continue
+    return tuple(out)
+
+
+def sent_texts(
+    tool_name: str, arguments: Mapping[str, Any], workspace: str = ""
+) -> tuple[str, ...]:
     """The text a step puts out: what a browser types or sends in a form, or a shell command.
 
     Only the arguments the tool itself chose (``text``; the values of
-    ``fields``; ``command``): never a page's own words.
+    ``fields``; ``command``): never a page's own words. With a *workspace*, the
+    files a shell command takes its message from (:func:`file_bodies`) are read
+    too, so a body in a file is checked like one on the command line.
     """
     out: list[str] = []
     text = arguments.get("text")
@@ -207,29 +406,39 @@ def sent_texts(tool_name: str, arguments: Mapping[str, Any]) -> tuple[str, ...]:
         ]
     command = arguments.get("command")
     if tool_name == "shell_exec" and command:
-        out.append(
+        line = (
             " ".join(map(str, command)) if isinstance(command, list) else str(command)
         )
+        out.append(line)
+        if workspace:
+            out += file_bodies(line, workspace)
     return tuple(out)
 
 
 def post_stop(
-    texts: Sequence[str], sent: Sequence[str], names: Sequence[str] = ()
+    texts: Sequence[str],
+    sent: Sequence[str],
+    names: Sequence[str] = (),
+    *,
+    typing: bool = False,
 ) -> str:
     """Why a post the model let through must ask first, or ``""`` when nothing here stops it.
 
-    In order: the person's words never speak of posting or sending, so whatever
-    told melo to post was not them (a page, a tool, the model's own idea); the
-    text holds their phone number, address or real name; they asked for a
-    review or a rating that they did not write; the task repeats.
+    In order: they asked for a review or a rating that they did not write; their
+    words do not ask for a send (for text being *typed*, to write it) and they
+    did not write the text, so whatever told melo to post was not them (a page, a
+    tool, the model's own idea); the text holds their phone number, address or
+    real name; the task repeats.
     """
-    if not asks_to_send(texts):
+    wrote = written_by(sent, texts)
+    if asks_for_review(texts) and not wrote:
+        return "Posts a review or a rating that speaks for you."
+    asked = asks_to_send(texts) or typing and asks_to_write(texts)
+    if not wrote and not asked:
         return "Posts or sends something your messages do not ask for."
     found = personal_data("\n".join(sent), names)
     if found:
         return f"Sends text that holds your {' and '.join(found)}."
-    if asks_for_review(texts) and not written_by(sent, texts):
-        return "Posts a review or a rating that speaks for you."
     if repeats(texts):
         return "Posts for a task that repeats, which asks each time."
     return ""

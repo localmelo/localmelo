@@ -75,6 +75,7 @@ from localmelo.melo.checker.review.named import (
 from localmelo.melo.checker.review.posting import (
     account_names,
     asks_to_share,
+    is_message,
     is_post,
     post_stop,
     sent_texts,
@@ -82,6 +83,7 @@ from localmelo.melo.checker.review.posting import (
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
+    DIRENV_SUBJECT,
     MODEL_CAN_ALLOW,
     TITLES,
     WORDS_CAN_ALLOW,
@@ -91,7 +93,7 @@ from localmelo.melo.contracts.review import (
     named_by,
     step_key,
 )
-from localmelo.melo.contracts.sign_in import HANDLE, Vault
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in, hide_passwords
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -401,11 +403,8 @@ class StepReviewer:
         # Addresses each site verdict let through since the user's last message.
         self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
-        # The passwords the person gave (#547): in this process only. ``_fresh``
-        # are the handles of the message being taken in, ``_live`` those of
-        # the person's newest message: only they can be typed.
-        self._vault = Vault()
-        self._fresh: set[str] = set()
+        # The handles of passwords the person's messages of this run hold
+        # (#547): only they can be typed, and none in a run they did not begin.
         self._live: frozenset[str] = frozenset()
         if new_chat:
             self.since = self._wall()
@@ -429,9 +428,9 @@ class StepReviewer:
         if recalled is None:
             recalled = recalled_part(text) or self._recalled
         self._recalled = recalled
-        # Only what the person gave in this message can be typed (#547).
-        self._live, self._fresh = frozenset(self._fresh), set()
         text = own_words(text)
+        # A password this message holds can be typed in this run (#547).
+        self._live |= handles_in(text)
         # A message counts even with no words (an attachment): a review
         # settled for the last message is asked again, with the new words.
         self._marker += 1
@@ -484,14 +483,20 @@ class StepReviewer:
         changes nothing.
         """
         own = own_words(text)
-        masked, handles = self._vault.hide(own)
-        self._fresh.update(handles)
-        return masked + text[len(own) :]
+        return hide_passwords(own) + text[len(own) :]
+
+    def begin_run(self) -> None:
+        """A run starts: no password can be typed in it until the person's message of the run holds one (#547).
+
+        A run the person did not begin (a task's follow-up, a chore) never
+        types one, whatever an earlier message held.
+        """
+        self._live = frozenset()
 
     def sign_in_value(self, handle: str, site: str) -> str | None:
         """The password *handle* stands for, for a password box on *site*, or ``None``.
 
-        Only a handle of the person's newest message, and only on a site their
+        Only a handle a message of the person's run holds, and only on a site their
         own words name (:meth:`names_host`): the model, a page or an earlier
         message never makes melo type one. The browser tool asks this and
         types the value; nothing else ever gets it.
@@ -502,11 +507,13 @@ class StepReviewer:
             or not self.names_host(site)
         ):
             return None
-        return self._vault.value(handle)
+        return VAULT.value(handle)
 
     def signs_in(self, site: str) -> bool:
-        """Whether the person gave a password in their newest message and their words name *site*."""
-        return bool(self._live) and self.names_host(site)
+        """Whether a message of the person's run holds a password and their words name *site*."""
+        return any(VAULT.value(h) is not None for h in self._live) and self.names_host(
+            site
+        )
 
     @property
     def requests(self) -> tuple[str, ...]:
@@ -564,6 +571,8 @@ class StepReviewer:
     def _names(self, category: str, subject: str) -> bool:
         if category == "credentials":
             return key_named(subject, self.requests, os.path.expanduser("~"))
+        if category == "persistence":
+            return subject == DIRENV_SUBJECT  # a card whatever the words say
         return category == "remote_code" and script_named(subject, self.requests)
 
     def names_folder(self, path: str) -> bool:
@@ -592,7 +601,7 @@ class StepReviewer:
 
     def asks_to_share(self) -> bool:
         """Whether the person's own words speak of sharing or making something public (#547)."""
-        return asks_to_share(self.all_words)
+        return asks_to_share(self.requests)
 
     def _posting(
         self,
@@ -601,28 +610,39 @@ class StepReviewer:
         answer: ModelAnswer,
         tool_name: str,
         arguments: Mapping[str, Any],
+        workspace: str,
     ) -> ActionReview:
         """A post that the model or the person's words let through, asked about when code finds a reason (#547).
 
-        A post is a step the rules or the model call ``send_out`` that types or
-        sends text on a page or posts or sends a message (:func:`is_post`). It runs
-        without a card only if the person's own words speak of posting or
-        sending, the text holds none of their phone, address or real name,
-        a review or rating is their own text, and the task does not repeat
+        A post is a step that types or sends text on a page or posts or sends a
+        message (:func:`is_post`) and that either holds a message
+        (:func:`is_message`, whatever category the model gave) or is called
+        ``send_out`` by the rules or the model. It runs without a card only if
+        the person's own words ask for a send or the person wrote the text, the
+        text holds none of their phone, address or real name, a review or
+        rating is their own text, and the task does not repeat
         (:func:`~localmelo.melo.checker.review.posting.post_stop`): whatever
         else the model said, a page cannot make these true. The step is
         then high ``send_out`` with that reason, which a card shows when a
         person watches.
         """
+        sent = sent_texts(tool_name, arguments, workspace)
         if (
             settled.verdict != "routine"
             or settled.by != "model"
-            or not ("send_out" in rules.categories or answer.category == "send_out")
             or not is_post(arguments, rules.evidence)
+            or not (
+                is_message(sent)
+                or "send_out" in rules.categories
+                or answer.category == "send_out"
+            )
         ):
             return settled
         stop = post_stop(
-            self.all_words, sent_texts(tool_name, arguments), self.person_names
+            self.all_words,
+            sent,
+            self.person_names,
+            typing=arguments.get("access") == "type",
         )
         if not stop:
             return settled
@@ -745,7 +765,9 @@ class StepReviewer:
             )
             answer = await self._ask(inputs)
         settled = _settle(review, answer, purpose, secret_free=secret_free)
-        settled = self._posting(settled, review, answer, tool_name, arguments)
+        settled = self._posting(
+            settled, review, answer, tool_name, arguments, workspace or ""
+        )
         if not answer.error:
             self._keep(key, (settled, self._marker, purpose))
             if shared and purpose == "undecided" and settled.verdict == "routine":

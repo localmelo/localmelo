@@ -504,6 +504,10 @@ class _Chrome:
                     "size": 0,
                     "state": "started",
                 }
+            elif guid:
+                # One that cannot be tracked is not cut at MAX_DOWNLOAD_BYTES
+                # either, so it is not saved.
+                self._cancel(guid)
         elif method == "Browser.downloadProgress":
             self._downloading(str(params.get("guid") or ""), params)
         elif method == "Fetch.requestPaused" and not session and self.local is not None:
@@ -701,9 +705,12 @@ class _Chrome:
             entry["state"] = state
         elif entry["size"] > MAX_DOWNLOAD_BYTES and not entry.get("cut"):
             entry["cut"] = True
-            job = self.loop.create_task(self._cut(guid))
-            self.jobs.add(job)
-            job.add_done_callback(self.jobs.discard)
+            self._cancel(guid)
+
+    def _cancel(self, guid: str) -> None:
+        job = self.loop.create_task(self._cut(guid))
+        self.jobs.add(job)
+        job.add_done_callback(self.jobs.discard)
 
     async def _cut(self, guid: str) -> None:
         with contextlib.suppress(BrowserError):

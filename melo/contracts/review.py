@@ -130,11 +130,18 @@ CARD_ONLY: Final = frozenset({"money", "account", "open_app"})
 # Categories that stay out of ASKS_IN_AUTO, except for a step whose every
 # finding of that kind is about something the person's own words name: a key
 # they wrote (``credentials``), a script they wrote the address of
-# (``remote_code``). Then auto mode shows a card, with a person watching,
-# instead of stopping the step without one (#547). Only code decides it, by
+# (``remote_code``), or is the trust of a project's ``.envrc``
+# (``persistence``, :data:`DIRENV_SUBJECT`). Then auto mode shows a card, with a
+# person watching, instead of stopping the step without one (#547). Only code decides it, by
 # :func:`named_by` from the rules' evidence and the person's words: never the
 # model, never a page.
-NAMED_CAN_ASK: Final = frozenset({"credentials", "remote_code"})
+NAMED_CAN_ASK: Final = frozenset({"credentials", "remote_code", "persistence"})
+# The subject of the one ``persistence`` finding that is a card in auto mode
+# whatever the person's words say: trusting a project's ``.envrc`` (``direnv
+# allow``), the stop that makes a written ``.envrc`` safe. Only their click
+# allows it (``persistence`` is in :data:`CLICK_ONLY`); every other
+# ``persistence`` finding has no subject and stays blocked.
+DIRENV_SUBJECT: Final = "direnv"
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
 # The tools whose arguments the rules read (melo.checker.review); another

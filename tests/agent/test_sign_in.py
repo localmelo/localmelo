@@ -132,6 +132,33 @@ async def test_only_a_given_handle_on_a_named_site_gives_the_value(
 
 
 @pytest.mark.asyncio
+async def test_a_run_the_person_did_not_begin_never_types_a_password(
+    tmp_path: Path,
+) -> None:
+    box = PasswordBox()
+    llm = FakeModel(
+        [
+            _type_call("forum.example", "[password-1]"),
+            _answer("signed in"),
+            # A task nobody typed (a worker's, a schedule's) names the handle.
+            _type_call("forum.example", "[password-1]", 2),
+            _answer("done"),
+        ],
+        [verdict()] * 6,
+    )
+    agent = _agent(tmp_path, llm, box)
+
+    await agent.run_task(TASK, approval=AutoPolicy())
+    await agent.run_task(
+        "sign in to forum.example with [password-1]",
+        approval=AutoPolicy(),
+        from_person=False,
+    )
+
+    assert box.typed == [PASSWORD, None]
+
+
+@pytest.mark.asyncio
 async def test_a_page_or_a_tool_result_cannot_make_a_password_and_a_later_turn_cannot_use_one(
     tmp_path: Path,
 ) -> None:
@@ -184,7 +211,12 @@ def test_a_note_the_person_sends_mid_run_is_hidden_and_recalled_notes_are_not_re
     assert reviewer.sign_in_value("[password-1]", "forum.example") == "mine-12345"
     assert reviewer.sign_in_value("[password-2]", "forum.example") is None
     assert reviewer.signs_in("forum.example") and not reviewer.signs_in("evil.example")
-    # The next message of the person gives none: nothing can be typed.
+    # Another message of the same run keeps it; a run the person did not begin
+    # (no message of theirs), or the next run, has none to type.
     reviewer.user_message("thanks")
+    assert reviewer.sign_in_value("[password-1]", "forum.example") == "mine-12345"
+    reviewer.begin_run()
     assert reviewer.sign_in_value("[password-1]", "forum.example") is None
     assert not reviewer.signs_in("forum.example")
+    reviewer.user_message("thanks")
+    assert reviewer.sign_in_value("[password-1]", "forum.example") is None

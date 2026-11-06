@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import StrictBool, StrictInt, StrictStr
 
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.chore_schedule import Schedule, ScheduleError
 from localmelo.support.gateway.front_rules import level_number, triage
 from localmelo.support.gateway.i18n import t
@@ -111,7 +112,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/chores")
     async def create(body: CreateChore) -> JSONResponse:
         console.require_store()
-        request = body.request.strip()
+        request = hide_passwords(body.request).strip()
         spec = _check(
             TaskSpec.from_payload, {"objective": request, "title": body.title}
         )
@@ -144,7 +145,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 chore_id,
                 revision=body.revision,
                 title=body.title,
-                request=body.request,
+                request=None if body.request is None else hide_passwords(body.request),
                 schedule=schedule,
                 level=_level(body.level),
                 enabled=body.enabled,

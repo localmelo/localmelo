@@ -17,6 +17,7 @@ from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.folders import (
     CREDENTIAL_PLACES,
     MELO_DATA,
+    PERSISTENCE_PLACES,
     SYSTEM_PLACES,
     canonical_path,
     is_alias,
@@ -52,21 +53,6 @@ _CREDENTIALS = [
     "**/*token.txt",
 ]
 _ANYWHERE = "**/"
-# Writes here make something run later on its own.
-_PERSISTENCE = [
-    "Library/LaunchAgents",
-    ".zshrc",
-    ".zprofile",
-    ".zshenv",
-    ".zlogin",
-    ".bashrc",
-    ".bash_profile",
-    ".profile",
-    ".config/fish",
-    ".ssh/config",
-    ".gitconfig",
-    ".config/git",
-]
 _SYSTEM = list(SYSTEM_PLACES)
 # Writable without asking: temporary folders, a few devices, the tools' caches.
 _HARMLESS = [
@@ -272,7 +258,7 @@ def _places(home: str, root: str, source: str) -> dict[str, tuple[str, ...]]:
     copy of the source or another app is a folder like any other. It does
     not count when the workspace is inside it: the person works on it.
     """
-    later = [*(os.path.join(home, p) for p in _PERSISTENCE), f"{root}/.git/hooks"]
+    later = [*(os.path.join(home, p) for p in PERSISTENCE_PLACES), f"{root}/.git/hooks"]
     running = _running(source)
     own = () if under(root, running) else (running,)
     return {

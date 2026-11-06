@@ -25,8 +25,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from localmelo.melo.contracts.folders import never_offered
-from localmelo.melo.contracts.own_gateway import OwnGateway, current
+from localmelo.melo.contracts.folders import closed_places, never_offered
+from localmelo.melo.contracts.own_gateway import OwnGateway, current, homes
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 # The sockets of container engines (Docker, Podman, Colima, OrbStack, Lima…),
@@ -189,7 +189,8 @@ def allowed_for_step(paths: Sequence[str]) -> tuple[str, ...]:
     (:func:`~localmelo.melo.contracts.folders.never_offered`: not keys,
     melo's own data, a system folder or the home folder itself) and has no
     control character; at most :data:`MAX_ALLOWED_PATHS`. Anything else
-    stays refused.
+    stays refused, and :func:`closed` places inside an allowed folder
+    still are (see :func:`profile`).
     """
     out: list[str] = []
     for path in paths:
@@ -204,6 +205,10 @@ def allowed_for_step(paths: Sequence[str]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _subpaths(paths: Sequence[str]) -> str:
+    return "\n  ".join(f"(subpath {quote(path)})" for path in paths)
+
+
 def quote(path: str) -> str:
     """*path* as a string of the profile language, quoted safely.
 
@@ -215,8 +220,34 @@ def quote(path: str) -> str:
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
-    """The ``sandbox-exec`` profile that allows writes only in *paths*.
+def closed() -> tuple[str, ...]:
+    """The places a step may not write even when it was allowed to write there, as real paths.
+
+    melo's data, the keychains and other credential places, launch agents
+    and shell startup files (:func:`~localmelo.melo.contracts.folders.closed_places`),
+    under this process's home folder and the account's own.
+    """
+    found: list[str] = []
+    for home in homes():
+        for place in closed_places(home):
+            real = os.path.realpath(place)
+            if real not in found:
+                found.append(real)
+    return tuple(found)
+
+
+def profile(
+    paths: Sequence[str],
+    guard: OwnGateway | None = None,
+    extra: Sequence[str] = (),
+) -> str:
+    """The ``sandbox-exec`` profile that allows writes only in *paths* and *extra*.
+
+    *extra* are the paths of an allowed step (:func:`allowed_for_step`). The
+    places of :func:`closed` are denied again after them, and *paths* allowed
+    again after that, so an allowed folder that holds one of those places
+    (``~/Library``, ``~/.config``) does not open it, and the run's own folders
+    stay writable even when they lie inside one.
 
     With *guard* (auto mode, #339) it also denies reading and writing the
     gateway's files, connecting to its port on this computer, and asking
@@ -229,16 +260,18 @@ def profile(paths: Sequence[str], guard: OwnGateway | None = None) -> str:
     rules = [
         *(f"(literal {quote(device)})" for device in DEVICES),
         *_DEVICE_RULES,
-        *(f"(subpath {quote(path)})" for path in paths),
+        *(f"(subpath {quote(path)})" for path in (*paths, *extra)),
     ]
     text = (
         "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  "
         + "\n  ".join(rules)
         + ")\n"
     )
+    if extra:
+        text += f"(deny file-write*\n  {_subpaths(closed())})\n"
+        text += f"(allow file-write*\n  {_subpaths(paths)})\n"
     if guard is not None and guard.files:
-        closed = "\n  ".join(f"(subpath {quote(path)})" for path in guard.files)
-        text += f"(deny file-read* file-write*\n  {closed})\n"
+        text += f"(deny file-read* file-write*\n  {_subpaths(guard.files)})\n"
     if guard is not None:
         text += "(deny lsopen)\n"
         # A container engine's socket: its containers reach every file.
@@ -269,7 +302,7 @@ class WriteConfinement:
         """The profile of the call now: the folders it always has, and its *extra* paths."""
         if not self.extra:
             return self.profile
-        return profile((*self.paths, *self.extra), self.guard)
+        return profile(self.paths, self.guard, self.extra)
 
     def argv(self, argv: Sequence[str]) -> list[str]:
         """*argv* started under the profile."""
@@ -278,6 +311,14 @@ class WriteConfinement:
     def env(self) -> dict[str, str]:
         """The variables that point a child's temporary files at the run's folder."""
         return {"TMPDIR": self.tmp, "TMP": self.tmp, "TEMP": self.tmp}
+
+    def _writable(self, real: str) -> bool:
+        """Whether the profile of the call now lets the real path *real* be written."""
+        if any(_inside(real, p) for p in self.paths):
+            return True
+        return any(_inside(real, p) for p in self.extra) and not any(
+            _inside(real, place) for place in closed()
+        )
 
     def note(self, text: str) -> str:
         """The line, with its line break, for the refused writes *text* reports.
@@ -300,7 +341,7 @@ class WriteConfinement:
             if real and any(_inside(real, g) for g in self.guarded):
                 closed += 1
                 continue
-            if real and any(_inside(real, p) for p in (*self.paths, *self.extra)):
+            if real and self._writable(real):
                 continue
             count += 1
             if path and path not in paths:

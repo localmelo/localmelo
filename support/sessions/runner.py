@@ -156,6 +156,9 @@ class _Turn:
     routine: str | None = None
     # Who began a turn the person did not (``TurnInfo.origin``); "" for theirs.
     origin: str = ""
+    # False for a turn whose text is not the person's message although no
+    # ``origin`` is stored (a task another agent, a channel or melo made).
+    from_person: bool = True
     # The pictures the person added to the message, with their data.
     images: tuple[ImagePart, ...] = ()
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
@@ -532,6 +535,7 @@ class SessionRunner:
         words: str | None = None,
         origin: str = "",
         images: Sequence[ImagePart] = (),
+        from_person: bool = True,
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -540,7 +544,10 @@ class SessionRunner:
         ``routine=``), passed only when given. *words* are the person's own
         words when *text* is not (``Agent.run_task``'s ``user_words=``; the
         typed text otherwise). *origin* marks a turn the person did not
-        begin (``SessionStore.begin_turn``). *images* are the pictures the
+        begin (``SessionStore.begin_turn``); *from_person* false marks one
+        whose text the person did not send though it has none (a task
+        another agent, a channel or melo made): the run counts no message of
+        theirs in it. *images* are the pictures the
         person added: stored with the turn and sent to the model with *text*
         (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
@@ -558,6 +565,7 @@ class SessionRunner:
             words=words,
             origin=origin,
             images=tuple(images),
+            from_person=from_person,
         )
         return turn.turn
 
@@ -587,6 +595,7 @@ class SessionRunner:
         words: str | None = None,
         origin: str = "",
         images: tuple[ImagePart, ...] = (),
+        from_person: bool = True,
     ) -> _Turn:
         self._check_open()
         if images and self._worker:
@@ -597,6 +606,8 @@ class SessionRunner:
             text = self._agent.hide_passwords(text)
             if isinstance(words, str):
                 words = self._agent.hide_passwords(words)
+            if isinstance(title, str):
+                title = self._agent.hide_passwords(title)
         typed_text = text
         if attachments:
             if self._worker:
@@ -650,6 +661,7 @@ class SessionRunner:
                 words,
                 origin,
                 images,
+                from_person,
             )
         )
         self._begin = begin
@@ -694,6 +706,7 @@ class SessionRunner:
         words: str | None = None,
         origin: str = "",
         images: tuple[ImagePart, ...] = (),
+        from_person: bool = True,
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -726,9 +739,10 @@ class SessionRunner:
             approval=approval,
             routine=routine,
             # Another's words are never the person's: memory reads none of them.
-            typed="" if origin else typed_text,
+            typed="" if origin or not from_person else typed_text,
             words=words,
             origin=origin,
+            from_person=from_person,
             images=images,
         )
         turn.writer = asyncio.create_task(self._write_events(turn))
@@ -847,7 +861,7 @@ class SessionRunner:
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
             kwargs["user_words"] = turn.typed if turn.words is None else turn.words
-            if turn.origin:
+            if turn.origin or not turn.from_person:
                 # Not the person's message: no consent, and no note of theirs.
                 kwargs["from_person"] = False
                 if self._memory is not None:
