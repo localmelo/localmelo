@@ -36,6 +36,7 @@ NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["chunk", "boundary"]
 ToolImages = Literal["auto", "on", "off"]
 EmptyReplyFallback = Literal["on", "off"]
+ThinkingSteps = Literal["all", "first_and_failed"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -329,6 +330,14 @@ class AgentOptions:
       of the two happened, and each comes with a ``notice`` event
       (``thinking_off_retry``, ``answer_from_thinking``). ``"off"``: neither;
       the run ends ``failed`` as it did before the fallback existed.
+    - ``thinking_steps``: on which planning steps the model thinks (#551), for
+      comparing the two. ``"all"``, the default: every step, as the provider's
+      requests say. ``"first_and_failed"``: the first plan of an attempt and
+      the plan after a step that failed think; the plan after a tool step that
+      worked goes out with thinking off, where the provider has a switch for
+      that (``thinking_off_body``; the sessions, the console and ``melo`` set
+      it for a local server when this is on). A provider with no switch thinks
+      on every step either way.
     - ``read_folders``: folders outside the workspace that the read tools
       (``file_read``, ``list_files``) may read without a question: the agent's
       own, such as a chat's work folder (:mod:`~localmelo.melo.contracts.work_folder`).
@@ -390,6 +399,7 @@ class AgentOptions:
     refused_steps: int = 0
     extend_steps: int = 0
     empty_reply_fallback: EmptyReplyFallback = "on"
+    thinking_steps: ThinkingSteps = "all"
     read_folders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -464,6 +474,7 @@ class AgentOptions:
             ("window_eviction", get_args(WindowEviction)),
             ("tool_images", get_args(ToolImages)),
             ("empty_reply_fallback", get_args(EmptyReplyFallback)),
+            ("thinking_steps", get_args(ThinkingSteps)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):
