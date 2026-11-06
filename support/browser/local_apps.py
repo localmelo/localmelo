@@ -30,6 +30,13 @@ itself:
   check leaves those alone), and told to the step (:func:`told`). A name
   that only resolves to this computer is not paused: Chrome's own check
   blocks it, and does not say so.
+- One exception, for a server on this computer the person wrote the address
+  of (``localhost:3000``, in their own words in this run, #547): a request to
+  exactly that host and port goes on, and to no other local address, a
+  redirect's or a subresource's included. The page that sent it must have
+  been given that site (``written``, which the browser tool refreshes at each
+  step from the run's question policy), the address must have no user part,
+  and melo's own ports stay blocked even when written.
 - Anything else goes on unchanged.
 
 There is no setting for the list: it is :data:`SIGNIN_HELPERS`, in code.
@@ -41,10 +48,10 @@ import asyncio
 import base64
 import binascii
 import ssl
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 import httpx
 
@@ -235,8 +242,18 @@ class LocalRule:
         )
         return paused
 
-    def decide(self, url: str, origin: str) -> Verdict:
-        """What to do with a request to *url* sent by a page of *origin* (``""`` when it had none)."""
+    def decide(
+        self, url: str, origin: str, written: Collection[tuple[str, int]] = ()
+    ) -> Verdict:
+        """What to do with a request to *url* sent by a page of *origin* (``""`` when it had none).
+
+        *written* are the servers on this computer, as ``(address, port)``,
+        that the person's own words wrote in this run (``localhost`` is
+        ``127.0.0.1``): a request to exactly one of them goes on, if the
+        address has no user part and the port is none of melo's own. It is the
+        only local address that does; every other one, a redirect's or a
+        subresource's included, is still blocked.
+        """
         try:
             parts = urlsplit(url)
             scheme = parts.scheme.lower()
@@ -256,10 +273,28 @@ class LocalRule:
         try:
             check_url(f"{scheme}://{shown}:{port}/")
         except NotPublicError:
+            if self._is_written(parts, host, port, written):
+                return _PASS
             return Verdict("block", host, port)
         except AddressError:
             return _PASS
         return _PASS
+
+    def _is_written(
+        self,
+        parts: SplitResult,
+        host: str,
+        port: int,
+        written: Collection[tuple[str, int]],
+    ) -> bool:
+        """Whether the request goes to a server on this computer the person wrote, and not to one of melo's own."""
+        site = ("127.0.0.1" if host == "localhost" else host, port)
+        return (
+            "@" not in parts.netloc
+            and site[0] in local_ports.LOOPBACK
+            and site in written
+            and not self._is_own(port)
+        )
 
     def _is_own(self, port: int) -> bool:
         try:

@@ -30,8 +30,11 @@ __all__ = ["folder_named", "key_named", "local_sites", "loopback_site", "script_
 _SPECIFIC = re.compile(r"[0-9_.-]")
 MIN_NAME = 5
 _LOOPBACK = {"localhost": "127.0.0.1", "127.0.0.1": "127.0.0.1", "[::1]": "::1"}
+# A server is written on its own: not inside a longer word or address (a
+# query string, a path, a user part, a longer host or a longer port).
 _SERVER = re.compile(
-    r"(?<![\w.-])(?:https?://)?(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})(?![\w:.-]*\w)",
+    r"(?<![\w.:/@?=&#%~+$\\-])(?:https?://)?(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})"
+    r"(?![\w:.-]*\w|@)",
     re.IGNORECASE,
 )
 
@@ -109,7 +112,9 @@ def local_sites(texts: Iterable[str]) -> frozenset[tuple[str, int]]:
     """The servers on this computer the texts write, as ``(address, port)``.
 
     ``localhost`` is read as ``127.0.0.1``. Only an explicit port counts; a
-    bare ``localhost`` or an address on the network names nothing.
+    bare ``localhost`` or an address on the network names nothing, and neither
+    does a ``host:port`` inside another address (``https://site.example/?to=localhost:3000``,
+    ``https://site.example/localhost:3000``, ``localhost:3000@site.example``).
     """
     found: set[tuple[str, int]] = set()
     for text in texts:

@@ -740,9 +740,9 @@ class _ToolAsk:
         """Whether the person's own words speak of sharing or making something public; None when nothing reads them (#547)."""
         return None if self._reviewer is None else self._reviewer.asks_to_share()
 
-    def written_local(self, host: str, port: int) -> bool:
-        """Whether the person's own words write the server ``host:port`` on this computer (#547)."""
-        return self._reviewer is not None and self._reviewer.written_local(host, port)
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        """The servers on this computer the person's own words write, as ``(address, port)``; none when nothing reads them (#547)."""
+        return frozenset() if self._reviewer is None else self._reviewer.written_sites()
 
     def signs_in(self, site: str) -> bool:
         """Whether melo has sign-in details of the person's to try on *site*."""

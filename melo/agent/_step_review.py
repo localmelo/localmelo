@@ -548,7 +548,7 @@ class StepReviewer:
             # A server on this computer is named by its host and its port
             # together, as the person wrote them (#547); the port a page or the
             # model picked is another site.
-            return local in local_sites(self.requests)
+            return local in self.written_sites()
         if local_address(host):
             return False
         wanted = _site_host(host)
@@ -584,15 +584,14 @@ class StepReviewer:
         """
         return folder_named(path, self.requests, os.path.expanduser("~"))
 
-    def written_local(self, host: str, port: int) -> bool:
-        """Whether the person's own words write the server ``host:port`` on this computer.
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        """The servers on this computer the person's own words write, as ``(address, port)``.
 
-        *host* is ``127.0.0.1`` or ``::1`` (``localhost`` is read as the
-        first). The browser and web_fetch ask this before they open such an
-        address; a page's text, a tool's result and the model's own address
-        never count.
+        ``localhost`` is read as ``127.0.0.1``. The browser and web_fetch let
+        exactly these through (see :func:`~localmelo.support.local_ports.written_sites`);
+        a page's text, a tool's result and the model's own address never count.
         """
-        return (host, port) in local_sites(self.requests)
+        return local_sites(self.requests)
 
     @property
     def all_words(self) -> tuple[str, ...]:

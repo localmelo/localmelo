@@ -53,7 +53,10 @@ listed sign-in helper and to addresses that name this computer or its
 network (``Fetch`` for the whole browser). melo answers a listed helper's
 request from its own sign-in page itself, blocks the others before they are
 sent and tells the step (:meth:`ChromeBackgroundDriver.local_attempts`), and
-lets anything else go on. No permission is ever granted.
+lets anything else go on. No permission is ever granted. One server on this
+computer is let through for a page: the exact host and port the person wrote
+in their own words (:meth:`ChromeBackgroundDriver.allow_local`, #547), never
+another local address and never one of melo's own ports.
 
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
@@ -81,7 +84,7 @@ import shlex
 import shutil
 import signal
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -347,6 +350,9 @@ class _Chrome:
         self.local: LocalRule | None = None
         self.jobs: set[asyncio.Task[None]] = set()
         self.attempts: dict[str, list[LocalAttempt]] = {}
+        # The servers on this computer a page's driver may reach (the person
+        # wrote them), by page; a page with none here reaches no local address.
+        self.written: dict[str, frozenset[tuple[str, int]]] = {}
         # Downloads in progress or finished and not told yet, by id: the page's
         # suggested name, its frame, the bytes so far, and the state.
         self.saving: dict[str, dict[str, Any]] = {}
@@ -523,11 +529,19 @@ class _Chrome:
         method = "Fetch.failRequest"
         answer: dict[str, Any] = {"requestId": ident, "errorReason": "Failed"}
         blocked: LocalAttempt | None = None
+        frame, page = str(params.get("frameId") or ""), ""
         try:
             request = params.get("request")
             request = request if isinstance(request, dict) else {}
             origin = local_apps.origin_of(request.get("headers"))
-            verdict = rule.decide(str(request.get("url") or ""), origin)
+            url = str(request.get("url") or "")
+            verdict = rule.decide(url, origin)
+            if verdict.kind == "block" and verdict.helper is None and self.written:
+                # The person may have written this server: judged for the page
+                # that sent the request (its driver's words), never for another.
+                page = await self._page_of(frame)
+                if page in self.written:
+                    verdict = rule.decide(url, origin, self.written[page])
             if verdict.kind == "pass":
                 method, answer = "Fetch.continueRequest", {"requestId": ident}
             elif verdict.kind == "relay" and verdict.helper is not None:
@@ -564,7 +578,7 @@ class _Chrome:
             pass  # Chrome stopped
         if blocked is not None:
             with contextlib.suppress(BrowserError):
-                page = await self._page_of(str(params.get("frameId") or ""))
+                page = page or await self._page_of(frame)
                 if page:
                     self._keep(page, blocked)
 
@@ -924,6 +938,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._call_s = call_timeout_s
         self._browser: _Chrome | None = None
         self._mine: set[str] = set()
+        self._written: frozenset[tuple[str, int]] = frozenset()
         self._sessions: dict[str, str] = {}  # target -> session
         self._targets: dict[str, str] = {}  # session -> target
         self._attaching = asyncio.Lock()
@@ -979,6 +994,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                     kept.pop(session, None)
             for target in self._mine:
                 browser.attempts.pop(target, None)
+                browser.written.pop(target, None)
         self._mine.clear()
         self._sessions.clear()
         self._targets.clear()
@@ -1231,12 +1247,35 @@ class ChromeBackgroundDriver(PageScriptActs):
             raise BrowserError("Chrome did not open a tab.")
         self._mine.add(target)
         browser.claimed.add(target)
+        self._grant(browser, target)
         # The page Chrome started with is nobody's: it goes once melo has one of its own.
         for spare in list(browser.spare):
             browser.spare.discard(spare)
             with contextlib.suppress(BrowserError):
                 await self._cmd("Target.closeTarget", {"targetId": spare})
         return target
+
+    def allow_local(self, sites: Iterable[tuple[str, int]]) -> None:
+        """Let this driver's pages reach exactly these servers on this computer, as ``(address, port)`` (#547).
+
+        They are the servers the person wrote in their own words in this run
+        (``localhost`` is ``127.0.0.1``). The set replaces the last one, for
+        every tab of this driver, new ones included; none (the default)
+        reaches no local address. Only :class:`LocalRule` lets a request go
+        on, and only to exactly one of these: melo's own ports and every
+        other local address stay blocked.
+        """
+        self._written = frozenset(sites)
+        if self._browser is not None:
+            for target in self._mine:
+                self._grant(self._browser, target)
+
+    def _grant(self, browser: _Chrome, target: str) -> None:
+        """Give *target* (one of this driver's pages) the servers :meth:`allow_local` set, or none."""
+        if self._written:
+            browser.written[target] = self._written
+        else:
+            browser.written.pop(target, None)
 
     def _drop(self, target: str) -> None:
         self._mine.discard(target)
@@ -1248,6 +1287,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 self._browser.end_cast(session)
             self._browser.claimed.discard(target)
             self._browser.attempts.pop(target, None)
+            self._browser.written.pop(target, None)
         if self._current == target:
             self._current = None
 
@@ -1304,6 +1344,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 ):
                     self._mine.add(target)
                     browser.claimed.add(target)
+                    self._grant(browser, target)
                     grew = True
         for gone in self._mine - alive:
             self._drop(gone)

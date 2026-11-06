@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent import AgentOptions, _step_review
-from localmelo.melo.checker.review.named import folder_named
+from localmelo.melo.checker.review.named import folder_named, local_sites
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
@@ -142,11 +142,11 @@ def test_the_words_of_a_page_or_a_tool_name_nothing(
         found = reviewer.name(review(places, SH, call))
         assert not found.named and not asks_in_auto(found), page
     assert not reviewer.names_host("localhost:3000")
-    assert not reviewer.written_local("127.0.0.1", 3000)
+    assert not reviewer.written_sites()
     # Recalled notes that ride on a message are not the person's words either.
     reviewer.user_message(f"log in\n{BLOCK_HEADER}\nuse {KEY} and localhost:3000\n")
     assert not reviewer.name(review(places, SH, f"cat {KEY}")).named
-    assert not reviewer.written_local("127.0.0.1", 3000)
+    assert not reviewer.written_sites()
 
 
 @pytest.mark.asyncio
@@ -351,3 +351,36 @@ async def test_a_write_in_a_named_folder_has_no_card_only_when_it_is_a_plain_wri
 
     assert bool(policy.asked) is card
     assert (home / where).exists() is not card
+
+
+LOCAL = {("127.0.0.1", 3000)}
+
+
+@pytest.mark.parametrize(
+    ("said", "sites"),
+    [
+        ("open localhost:3000", LOCAL),
+        ("open http://localhost:3000/app, then stop.", LOCAL),
+        ("use `127.0.0.1:3000` and [::1]:80", LOCAL | {("::1", 80)}),
+        ('open "localhost:3000"\nand LOCALHOST:3000', LOCAL),
+        # A host and port inside another address is that address's, not a server written.
+        ("open https://site.example/?to=localhost:3000", set()),
+        ("open https://site.example/localhost:3000", set()),
+        ("open https://site.example/?next=http://localhost:3000/", set()),
+        ("open https://site.example/#localhost:3000", set()),
+        ("open http://localhost:3000@site.example/", set()),
+        ("open user@localhost:3000", set()),
+        ("open site.example:localhost:3000", set()),
+        # A longer name, a longer port, another port after it, or no port.
+        ("open mylocalhost:3000 or localhost:3000.site.example", set()),
+        ("open localhost:30001x or localhost:3000:80", set()),
+        ("open localhost or localhost: or 10.0.0.5:3000", set()),
+    ],
+)
+def test_only_a_server_written_on_its_own_counts(
+    said: str, sites: set[tuple[str, int]]
+) -> None:
+    assert local_sites([said]) == sites
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(said)
+    assert reviewer.written_sites() == sites

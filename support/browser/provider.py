@@ -77,6 +77,7 @@ from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
+from localmelo.support import local_ports
 from localmelo.support.browser import (
     addresses,
     apps,
@@ -409,6 +410,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                     return busy
                 self._set_busy(True)
                 await self._driver.start()
+                self._allow_local()
                 self._looked, self._handoff, self._stuck = False, False, None
                 back, returned = self._back_lines()
                 stale = (
@@ -1097,6 +1099,7 @@ class BrowserToolProvider(BaseToolProvider):
             named = sites.BROWSER.set(self.browser_name)
             try:
                 await self._driver.start()
+                self._allow_local()  # the search asks no policy: no local address
                 await addresses.require_public(url)
                 info = await self._driver.open(url, new_tab=True)
                 own = self._own(info)
@@ -2258,6 +2261,18 @@ class BrowserToolProvider(BaseToolProvider):
         if isinstance(result, ToolOutput):
             return dataclasses.replace(result, text=f"{result.text}\n{text}")
         return f"{result}\n{text}"
+
+    def _allow_local(self) -> None:
+        """Tell the driver which servers on this computer the person wrote in this run, before a step loads anything (#547).
+
+        The driver's pages reach exactly those and no other local address;
+        none when the run has no policy that says so, or the person wrote none.
+        A driver that blocks nothing by itself (Safari: the address check is
+        melo's own) has nothing to tell.
+        """
+        allow = getattr(self._driver, "allow_local", None)
+        if callable(allow):
+            allow(local_ports.written_sites())
 
     def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""

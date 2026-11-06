@@ -1,7 +1,7 @@
 """A server on this computer whose address the person wrote is read; no other (#547).
 
 The person's own words say it, through the run's question policy
-(``written_local``); a page, a tool result or the model's own address never
+(``written_sites``); a page, a tool result or the model's own address never
 does. The address must be exactly the host and port they wrote, melo's own
 ports stay refused, and a public page cannot send melo there. Each refusal
 also reads the written server in the same test, so a feature that does
@@ -17,11 +17,13 @@ from urllib.parse import urlsplit
 import pytest
 
 from localmelo.support import config
+from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.web.fetch import Response, WebFetcher
 from localmelo.support.web.tool import WRITTEN_NOTE, WebFetchProvider
 from localmelo.tests.browser.fakes import FakeDriver, page
 from localmelo.tests.browser.test_acting import Asks as BrowserAsks
 from localmelo.tests.browser.test_acting import asking
+from localmelo.tests.browser.test_local_addresses import Anywhere
 from localmelo.tests.browser.test_provider import run, tools_of
 from localmelo.tests.web.test_allow_local import (  # noqa: F401
     Asks,
@@ -42,8 +44,8 @@ class Wrote(Asks):
         super().__init__()
         self.sites = set(sites)
 
-    def written_local(self, host: str, port: int) -> bool:
-        return (host, port) in self.sites
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        return frozenset(self.sites)
 
 
 class WroteForBrowser(BrowserAsks):
@@ -51,8 +53,8 @@ class WroteForBrowser(BrowserAsks):
         super().__init__()
         self.sites = set(sites)
 
-    def written_local(self, host: str, port: int) -> bool:
-        return (host, port) in self.sites
+    def written_sites(self) -> frozenset[tuple[str, int]]:
+        return frozenset(self.sites)
 
 
 # ── web_fetch ──
@@ -128,8 +130,6 @@ DEV = "http://localhost:3000/"
 
 
 def local_world() -> FakeDriver:
-    from localmelo.tests.browser.test_local_addresses import Anywhere
-
     return Anywhere(
         page(DEV, "Dev server.", title="Dev"),
         page("http://127.0.0.1:3000/", "Dev server.", title="Dev"),
@@ -182,3 +182,42 @@ async def test_the_browser_still_refuses_every_other_local_address(case: str) ->
         out = await run(tools, "browser_open", url=url)
     assert out.is_error and "does not open local or private addresses" in out.text
     assert not any(call == "open" for call, _ in driver.calls), urlsplit(url)
+
+
+class Recording(Anywhere):
+    """A browser that lets a local address through only when told: it keeps what it was told."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.allowed: list[frozenset[tuple[str, int]]] = []
+
+    def allow_local(self, sites: Any) -> None:
+        self.allowed.append(frozenset(sites))
+
+
+async def test_each_browser_step_tells_the_driver_which_servers_the_person_wrote() -> (
+    None
+):
+    driver = Recording(page(DEV, "Dev server.", title="Dev"))
+    tools = await tools_of(driver)
+    with asking(WroteForBrowser(("127.0.0.1", 3000))):
+        await run(tools, "browser_open", url=DEV)
+    with asking(WroteForBrowser()):  # the next message wrote none
+        await run(tools, "browser_read")
+    with asking(None):  # and a run with no policy never writes one
+        await run(tools, "browser_read")
+    with asking(BrowserAsks()):  # nor a policy that cannot say
+        await run(tools, "browser_read")
+    assert driver.allowed == [frozenset({("127.0.0.1", 3000)})] + [frozenset()] * 3
+
+
+async def test_a_web_search_reads_with_no_local_address_even_when_the_person_wrote_one() -> (
+    None
+):
+    search = "https://93.184.216.34/search?q=tomatoes"
+    driver = Recording(page(search, "Results.", title="Results"))
+    provider = BrowserToolProvider(driver)
+    await provider.start()
+    with asking(WroteForBrowser(("127.0.0.1", 3000))):
+        await provider.read_for_search(search)
+    assert driver.allowed == [frozenset()]

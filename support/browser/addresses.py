@@ -19,9 +19,12 @@ the page loads, and again where a page lands:
 
 One exception, for a server on this computer: an address whose host and port
 the person's own words wrote (``localhost:3000``, ``127.0.0.1:5173``, as
-:meth:`StepReviewer.written_local <localmelo.melo.agent._step_review.StepReviewer.written_local>`
+:meth:`StepReviewer.written_sites <localmelo.melo.agent._step_review.StepReviewer.written_sites>`
 reads them, through the run's question policy) is opened, read as the
-address they wrote and never another port or host. The ports of melo's own
+address they wrote and never another port or host. Chrome in the background
+is told the same sites (:meth:`ChromeBackgroundDriver.allow_local
+<localmelo.support.browser.chrome.ChromeBackgroundDriver.allow_local>`), so
+its own rule for the requests to this computer lets exactly them through. The ports of melo's own
 gateway and console and of the model servers stay refused even when written
 (:func:`localmelo.support.local_ports.own_ports`), and so does everything a
 page or a model wrote.

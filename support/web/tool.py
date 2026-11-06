@@ -404,8 +404,7 @@ class WebFetchProvider(BaseToolProvider):
         host = target.host
         listed = (fetcher or self.fetcher).listed(target)
         ask = TOOL_ASK.get()
-        written = getattr(ask, "written_local", None)
-        if listed and callable(written) and written(host, target.port) is True:
+        if listed and (host, target.port) in local_ports.written_sites():
             # The person wrote this server's address themselves (#547).
             return
         if ask is None:
