@@ -53,12 +53,12 @@ list from [`GET /api/setup/plan`](../reference/api-v2.md#get-apisetupplan)).
 The page opens in default mode, which leaves out what only a developer needs: the chat's
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
 status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
-priority line of a task's page (a running task's priority menu stays). It says things plainly too: a running chat reads
+priority line and menu of a task's page. It has no Workers and no priority codes to learn either: the panel's **Workers** tab, the welcome link to worker runs, **Run as a task** and the `P0` to `P5` chips and lists belong to developer mode, a task shows as what melo is doing (in Now and in the chat that asked), and a priority you changed reads in words (`today`). It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s`, the line under an answer gives its time, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings. With melo_serve it shows the model and its backend and opens the list of models to switch to, as does the model button under the message box ([Switch the model](model-servers.md#switch-the-model)).
-A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are in the
-panel's **Workers** tab and a link in the empty [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows the Workers link in the sidebar. Everything stays in the
+A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are a developer-mode view, the
+panel's **Workers** tab and the sidebar's **Workers** link ([Developer mode](#developer-mode)). Everything stays in the
 page, hidden.
 
 A new chat shows where melo will work before you send anything. The chip in the composer reads
@@ -173,21 +173,21 @@ come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads
 
 Between two of your messages a busy side chat keeps only its newest card. A stop of your own, a shutdown or an approval answered before the main chat was looked at makes no card.
 
-The panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
+In developer mode the panel's **Workers** tab lists the workers of the open chat: a side chat's own, and in
 the main chat all of today's. For runs of earlier days, an empty main chat links **See what
-worker runs did** (once a run or a terminal chat exists, and always in developer mode).
+worker runs did**. Default mode has neither; Activity shows the same tasks as what melo did.
 
 ## Hand work to the main chat
 
 ![The main chat: a question answered, a task that came back done, a task with its priorities open, and a pause with Undo](../assets/img/main-chat-tasks.webp)
 
 - **Ask, or ask for work.** The main chat does what its own tools can: it answers a quick question, searches your folder for "which file defines X?", and reads files and public web pages. A question that says `briefly`, `in short`, `one line`, `简单说一下` or `一句话` is always answered here, after a quick look: it is never offered as a task.
-- **It starts the work itself.** A request it cannot do with its own tools (running commands, changing files, many steps of research or writing) starts as a task right away, with one line and **Stop**: `Started: Plan the trip · P2`. It does not ask first. Your message is the task's request, word for word. Starting is not a risky step: every step inside the task still asks you, or is blocked in Auto, as in the chat. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
+- **It starts the work itself.** A request it cannot do with its own tools (running commands, changing files, many steps of research or writing) starts as a task right away, with one line and **Stop**: `Started: Plan the trip` (developer mode adds `· P2`). It does not ask first. Your message is the task's request, word for word. Starting is not a risky step: every step inside the task still asks you, or is blocked in Auto, as in the chat. Its result comes back as a card. It never answers with only what it is about to do: a reply like "I'll start by looking at the test file" starts the work as a task instead.
 - **A request in steps starts too, in any language.** A message that asks it to look at something outside the chat first (a site, a link, a file, a repo or folder, your own things) and then tell or do something (`look at this site and tell me the latest prices`, `去这个网站看一下，然后告诉我最新的价格`, `分析一下这个仓库，告诉我它的结构`) is a request, even when its last part asks a question, and starts as a task when the chat cannot do it in a step or two. `看看天气然后告诉我`, `look at this and tell me what you think`, a look at one of your tasks, and text given after a colon to translate or explain (`翻译成英文：…`) are answered in the chat.
 - **A go-ahead starts too.** `I authorize you to apply`, `you have my permission` or `我授权你去投简历` asks for the work the chat talked about, so it starts that work (as a task, or with the browser tools in the chat itself) instead of ending in advice or a list of links. `What does authorization mean?` is still a question.
 - **When it does not start one.** A greeting, a short message with nothing to do in it (`thanks`, `今天天气不错`), a short question it can answer, a question about a task (`is it done?`, `what did it find?`, `跑完了吗`; `Is the report ready? If not, write it to report.md` asks for work), or a request to be told something (`please explain what a monad is`, `帮我看看 x.py 是做什么的`) is answered in the chat. A request too unclear to act on gets one short question back. **Start this as a task?** is offered only where starting would be wrong: a question, which asks to know rather than to act (`why do the tests fail?`; a polite request that asks for work, such as `can you run the tests?`, is a request), words that say not to act and ask for nothing else (`just explain how`, `don't change anything`, `no need for a task`, `只解释一下`, `不用开任务`; `fix the login bug without changing anything else` asks for the fix and starts), words that steer a task (`cancel it`, `continue the report task`), a message with no words of its own (an attachment alone), or a repeating chore or a reminder code could not schedule.
-- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button, starts the message as a task at once; no model reads it to decide. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`). A task the main chat starts this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**. A request you forbid or only quote is never read as work: `don't delete a.md` and `不要删除 a.md` start nothing.
-- **Priorities as P0 to P5.** A line shows the code (`P1`); hover it for what it means. Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
+- **Say it in code's words.** `/task …`, or **Run as a task** beside the send button (developer mode), starts the message as a task at once; no model reads it to decide. So does a request to change files it names (`Fix tests/cli/test_e2e_pty.py and commit`). A task the main chat starts this way begins at once under the first words of your message, and is renamed in 3 to 8 words in the language of your message (`Hide the recovery card in default mode`) when the model answers one short request, made at the lowest priority so it never waits ahead of real work; a short message is its own title, a name you gave the task meanwhile stays, and the first words stay when the model does not answer in 6 seconds. `stop`, `pause`, `resume` or `first` with a task's name (`pause the slides`, `暂停 Fix CI`, `先做 slides`) changes that task at once, with **Undo**. A request you forbid or only quote is never read as work: `don't delete a.md` and `不要删除 a.md` start nothing.
+- **Priorities as P0 to P5.** In developer mode a line shows the code (`P1`); hover it for what it means. In default mode a task's start says nothing of it, and a level you change reads in words (`today`). Your words choose: "urgent", "asap", a deadline today (`by 5pm`, `今天下午三点前`) or "today" anywhere in the request (not "not today", "今天不用") make it P1 (today), "no rush" makes it P3 (when there is time), anything else is P2 (normal). In developer mode **Change** on the line opens the list (`P0 · runs first; others wait`, `P1 · today`, `P2 · normal`, `P3 · when there is time`, `P4 · only when the computer is idle`, `P5 · on hold until you start it`) and sets your own priority, which stays.
 - **Follow up on a task.** `finish it`, `commit it` or `继续那个任务` goes to the task you mean: a running task reads it at its next step, and a done or stopped one continues in its own session, with what it did before. The line says where it went: `Sent to: Slides`, `Continued: Fix CI`.
 - **Continue a stopped task by name.** `Continue the recovery card task where it stopped: run the tests` or `继续恢复卡片任务` continues the one stopped task whose title those words name, at once and with no suggestion to tap; the whole message is its next turn. When several stopped tasks match, each is offered as a one-tap `Suggested: send your message to …`. A task that is done or still working says so (`Fix CI is done. There is nothing to continue.`).
 - **What got done.** The main chat reads each task's state and the first lines of its answer, so it can name the commits tasks made. Asked about one task (`is it done?`, `what did it find?`), it reads that task's whole answer and the files it wrote, and answers from them; it never needs the task's page.
@@ -196,8 +196,8 @@ worker runs did** (once a run or a terminal chat exists, and always in developer
 
 ## Side chats start tasks too
 
-- **Same words, same priorities.** In a side chat, `/task …`, **Run as a task**, `pause the slides` and the model's own judgment work as in the main chat, at the same P0 to P5 levels and under the same scheduler. The first message of a new side chat goes to the model, which can start a task itself; the code words work from the second message on.
-- **A task comes back to the chat that started it.** Its line (`Started: Find hotels · P2`, with **Change** and **Undo**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
+- **Same words, same priorities.** In a side chat, `/task …`, **Run as a task** (developer mode), `pause the slides` and the model's own judgment work as in the main chat, at the same P0 to P5 levels and under the same scheduler. The first message of a new side chat goes to the model, which can start a task itself; the code words work from the second message on.
+- **A task comes back to the chat that started it.** Its line (`Started: Find hotels` with **Stop**; developer mode adds `· P2` and **Change**), its card, its approvals and its result appear in that side chat, which reads the tasks that ended before its next answer. The main chat gets no card for them.
 - **The main chat still sees everything.** Activity and Workers list every task; one a side chat started reads `From Trip plan`.
 - **Your own chat first.** `pause the slides` means this chat's slides task before another chat's. Words that fit several tasks of this chat show a one-tap `Suggested: pause …` for each, and never reach another chat's task. A task of another chat can still be named, by its id, its chat or words that fit none of this chat's own: its line reads `From Main chat` or `From Trip plan`. The same holds when the model picks the task.
 - **Only your words start a task.** When the model starts a task, your own message is the task, never the model's wording (the model only names it); a file, a page or a task's report can give the model the idea but never the request. A turn melo began itself (a task's question, a follow-up) starts no task at all. Where starting would be wrong, the chat shows `Start this as a task?` with your own message and starts nothing until you tap. The main chat does the same.
@@ -290,7 +290,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 - **Say it once.** A message such as `every weekday at 8:30, brief me on my calendar` or `每天早上九点 总结我的邮件` makes a card, `Run this every weekday at 8:30?`, with **Save chore**, **Just once** and **Cancel**. Nothing is saved or started until you tap, and no model reads the schedule.
 - **Three schedules.** Every day at a time, every weekday at a time, or every 1 to 24 hours. With no time, a day part sets it (`every morning` is 8:00, `every evening` 18:00), else 9:00. `every Monday` or `every 30 minutes` is not read: it goes to the main chat as any message does.
 - **Runs on time.** While the gateway runs, a chore starts as a task in its own folder of your workspace, within three minutes after its time and never before. A run missed while the computer slept happens once when it wakes, and a chore whose last run has not ended skips its next turn.
-- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to its priority (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
+- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to its priority in developer mode (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
 - **Reminders.** A reminder is a chore that runs once. `remind me to send the report on Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` makes a card, `Remind you on Fri Oct 30 at 9:00?`, with **Remind me** and **Cancel**; it always shows the date and time it understood. Relative words (`tomorrow`, `Friday`, `in 2 hours`, `下周一`, `两小时后`) become that date and time on your computer's clock. A day with no time is 9:00, a bare hour from 1 to 6 is the afternoon, and a time already past today is tomorrow unless you said `today`. `Friday` on a Friday is next week. With no usable time, the main chat asks `When should I remind you?` and never guesses: reply with just a time (`Friday at 9`). At its time, melo says the reminder in a card, `Reminder: send the report`, also when the run did not finish. A reminder missed while the computer slept or the gateway was down runs when melo starts again and says how late it ran (`ran 2 h late`). On the Scheduled tab it shows its date and time, then `Reminded today at 9:01 AM`; **Edit time** takes a date and time and sets a done reminder again. A reminder is at most a year ahead; `every …` still makes a repeating chore.
 - **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task that has waited for you a whole beat. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
 
@@ -385,7 +385,7 @@ Melo in the portrait moves with what it does:
 - With reduced motion each state is a still picture, and a hidden tab or a portrait scrolled out of view draws
   nothing.
 
-Under it are four tabs: **Activity**, **Workers**, **Scheduled** and **Memory**. Arrow keys, Home and
+Under it are the tabs **Activity**, **Scheduled** and **Memory**, and in developer mode **Workers**. Arrow keys, Home and
 End move between them, and the panel opens the tab you used last.
 
 The panel shows what belongs to the chat that is open. A side chat's panel lists that chat's own activity and the
@@ -423,7 +423,7 @@ its steps as they happen (a mark, the step in words and its time) and the last l
 chat** or **Open run** goes to the whole view; a row that waits offers **Review**, which opens the chat or task with
 the approval card. One row is open at a time, and its steps follow the session's event stream while it runs.
 
-**Workers** lists the workers of the scope above: the tasks the open chat started, running ones first, then those
+**Workers** (developer mode) lists the workers of the scope above: the tasks the open chat started, running ones first, then those
 that finished today. Each row has the title, its state in words (`Working`, `Waiting for your approval`, `Waiting to
 start`, `Paused`, `Done`, `Failed`, `Stopped`), the time and, for a finished worker, its result line. Select a task
 to open it in the panel, as in Activity; a worker run opens in place. The main chat's Workers also lists the worker runs recorded as sessions, such as `melo
@@ -488,7 +488,7 @@ While melo browses in Chrome in the background ([Browsing with melo](browsing.md
 
 - The panel never opens by itself; **Hide browser** in its header closes it. Closing it only stops watching: melo goes on, and nothing is stopped or given back.
 - After you switch the browser to Chrome in Settings, it opens at the chat's next browser step. A chat in the middle of a turn finishes it in the browser it has.
-- **Pop out** shows the panel alone and large: in the app in a window of its own, in a browser in a new window.
+- **Pop out** shows the panel alone and large: in the app in a window of its own, in a browser in a new window. A task's browser pops out the same way, showing that run's page and no other.
 - It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
 - On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
 - It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.
@@ -540,8 +540,8 @@ its orange fur does (about 7.5:1 against the dark ones; 3:1 is the bar for a pic
 
 ## Inspect workers
 
-**Workers** (in the sidebar in developer mode; in default mode **See what worker runs did**
-in the empty main chat, or the panel's **All worker runs**) opens
+**Workers** (the sidebar's link and the panel's tab in developer mode; `#/workers` in the address
+in either mode) opens
 read-only worker history from the CLI sessions file. Filter
 by status, source or exact parent run, load more with the server's cursor, and
 open a run to inspect its recorded brief, metadata, work and answer. Every
@@ -586,13 +586,13 @@ card is drawn on its page while the panel shows it, and in the task's card in th
 
 The page shows the task's state, the saved recovery card (shown as plain text), the evidence status when there is
 some and the actions its state allows, and the same status row as a chat (a task has no row until it has run). A task
-that runs or waits to run can be paused (**Pause**) and given another priority (`P0` to `P4`, each with its meaning;
+that runs or waits to run can be paused (**Pause**) and, in developer mode, given another priority (`P0` to `P4`, each with its meaning;
 P5 is Pause), as the terminal's task list offers. A task that is running stops at its next safe point, so after
 **Pause** the page says `Pausing…` until it is parked, and then `Paused.`, as the Activity row reads; a paused one
 offers **Resume**. In default mode the page leaves out
 the scheduler's words and an empty recovery card; developer mode adds them, with the priority line.
 
-**All tasks**, at the foot of the panel's Workers tab (in default mode once a task exists), opens the list of every
+**All tasks**, at the foot of the panel's Activity tab (once a task exists) and Workers tab (developer mode), opens the list of every
 task in the same place: newest update first, with state, priority (developer mode only), title and time, the earlier
 days too, which Activity does not list. Select one to open it. `#/tasks` in the address opens that list. There is no
 Tasks link in the sidebar, and the task page is not a view of its own.
@@ -762,7 +762,7 @@ never what runs. When it is on:
   token usage and cache numbers;
 - the header shows the chat's level chip, **Details**, the GPU-lock line, the **N running** chip and a chip with
   the page's state (`Ready`, `Working`, `Approval needed`), and the sidebar always lists
-  **Workers**;
+  **Workers** and the panel's **Workers** tab;
 - the status row adds the cache, step, phase and queue segments, and a task's page names its
   priority;
 - a running turn shows the tool's name and arguments on each tool card, its step, attempt, phase and test count, the number of tool calls on the work line and the steps and tokens under an answer, and a model server error keeps its own text on the card (default mode words each of these for a person and keeps the raw text under **Details**);

@@ -24,17 +24,23 @@ import {createStreams} from '../../support/gateway/static/browser-stream.mjs';
 
 // ── The pure parts ──
 
-test('Pop out opens the chat\'s live page on this page\'s own origin', () => {
-  assert.equal(liveUrl({origin: 'http://127.0.0.1:9000'}, 'a b'), 'http://127.0.0.1:9000/#/live/a%20b');
-  assert.equal(liveRoute(new URL(liveUrl({origin: 'http://127.0.0.1:9000'}, 's1')).hash), 's1');
+test('Pop out opens the source\'s live page on this page\'s own origin, a task\'s with the run it names', () => {
+  const origin = {origin: 'http://127.0.0.1:9000'};
+  assert.equal(liveUrl(origin, 'a b'), 'http://127.0.0.1:9000/#/live/a%20b');
+  assert.deepEqual(liveRoute(new URL(liveUrl(origin, 's1')).hash), {session: 's1'});
+  const task = {session: 't9', gen: 'a1b2c3d4', run: 'run-1', owner: 'c1'};
+  assert.equal(liveUrl(origin, task), 'http://127.0.0.1:9000/#/live/t9?gen=a1b2c3d4&run=run-1&owner=c1');
+  assert.deepEqual(liveRoute(new URL(liveUrl(origin, task)).hash), task);
 });
 
-test('a #/live address names the chat; anything else names none', () => {
-  assert.equal(liveRoute('#/live/abc-1.2:x'), 'abc-1.2:x');
-  assert.equal(liveRoute('#/live/'), '');
-  assert.equal(liveRoute('#/s/abc'), '');
-  assert.equal(liveRoute('#/live/a/b'), '');
-  assert.equal(liveRoute(undefined), '');
+test('a #/live address names the source; anything else names none', () => {
+  assert.deepEqual(liveRoute('#/live/abc-1.2:x'), {session: 'abc-1.2:x'});
+  assert.deepEqual(liveRoute('#/live/t9?owner=c1&gen=a1b2c3d4&run=r.1&other=1'), {session: 't9', gen: 'a1b2c3d4', run: 'r.1', owner: 'c1'}, 'only the three parts of a source');
+  assert.equal(liveRoute('#/live/'), null);
+  assert.equal(liveRoute('#/s/abc'), null);
+  assert.equal(liveRoute('#/live/a/b'), null);
+  assert.equal(liveRoute('#/live/a?gen=<x>'), null);
+  assert.equal(liveRoute(undefined), null);
 });
 
 test('the socket address is on the page\'s own origin and follows its scheme', () => {
@@ -201,7 +207,7 @@ test('a stream that cannot update says so and keeps the picture', () => {
 });
 
 test('a closed view says why in a sentence, and shows no picture', () => {
-  for (const [reason, words] of [['tab', 'This tab was closed.'], ['browser', "melo's browser stopped."], ['chat', 'This chat ended.'], ['unavailable', 'The live view is not available for this chat.'], ['', 'This tab was closed.']]) {
+  for (const [reason, words] of [['tab', 'This tab was closed.'], ['browser', "melo's browser stopped."], ['chat', 'This chat ended.'], ['unavailable', 'The live view is not available now.'], ['', 'This tab was closed.']]) {
     const v = view(parseMeta(message({state: 'closed', reason, browsing: true})), 'open', {picture: true});
     assert.equal(v.state, 'closed');
     assert.equal(v.note, words);
@@ -589,7 +595,7 @@ test('a refusal closes the view and is not retried', async () => {
   await browser.follow('s1');
   FakeSocket.all[0].drop(1008, 'refused');
   assert.equal(els.root.dataset.state, 'closed');
-  assert.equal(els.note.textContent, 'The live view is not available for this chat.');
+  assert.equal(els.note.textContent, 'The live view is not available now.');
   assert.equal(timers.length, 0);
   assert.equal(calls.denied, 0);
 });
@@ -673,11 +679,29 @@ test('the pop-out button is offered where the page can pop out (the app, or a br
   await app.browser.follow('s1');
   assert.equal(app.els.pop.hidden, false);
   app.browser.popOut();
-  assert.deepEqual(app.calls.popped, ['s1']);
+  assert.deepEqual(app.calls.popped, [{session: 's1'}]);
   app.browser.hide();
   assert.equal(app.els.pop.hidden, true);
   app.browser.popOut();
-  assert.deepEqual(app.calls.popped, ['s1']);
+  assert.deepEqual(app.calls.popped, [{session: 's1'}]);
+});
+
+test('a task\'s browser pops out by its exact run, and its window shows that run alone', async () => {
+  const app = panel({bridge: true, open: false});
+  await app.browser.follow('c1');
+  const task = card({session: 't9', task: true, owner: 'c1'});
+  app.browser.card(task);
+  await app.browser.open(task);
+  assert.equal(app.els.pop.hidden, false, 'a task\'s browser pops out like a chat\'s');
+  app.browser.popOut();
+  assert.deepEqual(app.calls.popped, [{session: 't9', gen: 'a1b2c3d4', run: 'run-1', owner: 'c1'}]);
+  // The window follows the task with the same selector: the probe and the stream both name it, so nothing falls back to a chat.
+  const source = {gen: 'a1b2c3d4', run: 'run-1', owner: 'c1'};
+  const window = panel({bridge: true});
+  await window.browser.follow('t9', {liveOnly: true, pin: source});
+  assert.deepEqual(window.calls.api, ['/sessions/t9/browser?gen=a1b2c3d4&run=run-1&owner=c1']);
+  assert.equal(FakeSocket.all.at(-1).url, 'ws://gw.test/api/sessions/t9/browser/live?gen=a1b2c3d4&run=run-1&owner=c1');
+  assert.equal(window.els.pop.hidden, true, 'the window is the pop-out already');
 });
 
 test('the pop-out window shows the panel alone: no chip, no hide, whatever the chat has open', async () => {
@@ -701,7 +725,7 @@ test('the pop-out window of a chat with no live view says so', async () => {
   const {browser, els} = panel({state: {available: false, open: false}});
   await browser.follow('s1', {liveOnly: true});
   assert.equal(els.root.dataset.state, 'closed');
-  assert.equal(els.note.textContent, 'The live view is not available for this chat.');
+  assert.equal(els.note.textContent, 'The live view is not available now.');
 });
 
 test('the picture follows its box when the panel is resized', async () => {

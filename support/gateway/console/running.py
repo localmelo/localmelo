@@ -6,8 +6,9 @@ and the worker runs and terminal chats that hold a live lease in the CLI file.
 what runs, newest kinds first, for the header's list: it is capped, and the
 counts are not. ``waiting`` lists the chats and tasks that wait for the
 person's answer to a tool approval, for the macOS app's menu bar, and
-``control`` the chats whose run is paused while the person has one of its
-pages (their newest events say so), for the app's pill and its Done. ``recent``
+``control`` the chats and tasks whose run is paused while the person has one of its
+pages (their newest events say so), for the app's pill and its Done. A task's entry
+names its exact source (``owner``, ``gen``, ``run``), so Done reaches that task's run. ``recent``
 says how the newest finished chat turn, task, run or terminal turn ended, what
 it was called and how many seconds ago (``null`` when none did), for the app's
 desktop pet and activity pill.
@@ -251,13 +252,23 @@ async def item_activity(
 _CONTROL_ICON = activity_text(state="control").icon
 
 
-def _control(items: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """The running chats paused while the person has their page ("You're in control")."""
-    return [
-        {"kind": "chat", "id": item["id"]}
-        for item in items
-        if item["kind"] == "chat" and item.get("icon") == _CONTROL_ICON
-    ]
+def _control(console: Console, items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The running chats and tasks paused while the person has their page ("You're in control").
+
+    A task's entry names its exact source: ``owner`` (the chat its card shows in), ``gen`` and ``run``, the three
+    parts ``POST /api/sessions/{id}/browser/done`` takes, so a Done reaches that task's run and no other. A chat's
+    entry carries them too when its browser has a source. A task with no source in a run has no entry: nothing
+    could give its page back.
+    """
+    held: list[dict[str, str]] = []
+    for item in items:
+        if item.get("icon") != _CONTROL_ICON or item["kind"] not in ("chat", "task"):
+            continue
+        source = console.browser_cards.source_of(item["id"])
+        if source is None and item["kind"] == "task":
+            continue
+        held.append({"kind": item["kind"], "id": item["id"], **(source or {})})
+    return held
 
 
 async def _with_activity(
@@ -275,7 +286,7 @@ async def _with_activity(
     if not items:
         return None
     asking = {entry["id"] for entry in waiting}
-    yours = {entry["id"] for entry in _control(items)}
+    yours = {entry["id"] for entry in _control(console, items)}
     first = next((item for item in items if item["id"] in asking), None)
     first = first or next((item for item in items if item["id"] in yours), None)
     return dict(first or max(items, key=lambda item: changed[item["id"]]))
@@ -330,7 +341,7 @@ async def running_status(console: Console) -> dict[str, Any]:
         },
         "items": items,
         "waiting": waiting,
-        "control": _control(items),
+        "control": _control(console, items),
         "recent": await recent_outcome(console),
         "focus": focus,
     }

@@ -259,10 +259,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       // A draft finishes with one tap: the tests (and the commit), through the same continue.
       actions.append(button('', state.busy === 'continue' ? t('common.starting') : finishLabel(ending), () => keepGoing(), {disabled: Boolean(state.busy)}));
     }
-    // A task that runs or waits to run can be put on hold and given another priority from here.
+    // A task that runs or waits to run can be put on hold from here, and a developer can give it another priority.
     if (ACTIVE.has(task.state)) {
       actions.append(button('', t('common.pause'), () => change({state: 'pause'}, 'tasks.pauseAccepted'), {disabled: Boolean(state.busy) || state.pausing}));
-      const menu = levelMenu(task);
+      const menu = developer() ? levelMenu(task) : null;
       if (menu) actions.append(menu);
     }
     if (!FINISHED.has(task.state)) {

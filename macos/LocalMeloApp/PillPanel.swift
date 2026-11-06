@@ -401,8 +401,8 @@ final class PillController: NSObject {
     var openWindow: () -> Void = {}
     var openWaiting: () -> Void = {}
     var openRoute: (String) -> Void = { _ in }
-    /// The person pressed "Done" while they hold the page of this chat.
-    var giveBack: (String) -> Void = { _ in }
+    /// The person pressed "Done" while they hold the page of this source (a chat's or a task's).
+    var giveBack: (BrowserSource) -> Void = { _ in }
     /// Told when the pill appears or goes, and whether the pet that takes its place shows "done" (a "Done" ran out).
     var showingChanged: (_ showing: Bool, _ showsDone: Bool) -> Void = { _, _ in }
     var environment: PetEnvironment { gate.environment }
@@ -448,7 +448,7 @@ final class PillController: NSObject {
         view.onClick = { [weak self] in self?.click() }
         view.onDrop = { [weak self] in self?.drop() }
         view.onGiveBack = { [weak self] in
-            if let chat = self?.model?.giveBack { self?.giveBack(chat) }
+            if let source = self?.model?.giveBack { self?.giveBack(source) }
         }
         view.onDismiss = { [weak self] in
             self?.policy.dismiss()

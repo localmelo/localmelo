@@ -202,11 +202,13 @@ output or log the header; same-user processes can still read the token file.
   `chat` or `task`). The console opens them at `#/s/<id>` and `#/tasks/<id>`, and
   the macOS app's menu bar reads the list at each poll. `sessions.pending_approvals`
   counts the open chats' requests only.
-- `status.control` lists the running chats paused while the person has one of
+- `status.control` lists the running chats and tasks paused while the person has one of
   their pages (their newest events hold a `run.paused` with no `run.resumed`
-  after it), each `{"kind": "chat", "id"}`; their `activity` is "You're in
-  control". The macOS app's pill shows it with a Done button, which sends
-  `POST /api/sessions/{id}/browser/done`.
+  after it), each `{"kind", "id"}` with `kind` `chat` or `task`; their `activity` is "You're in
+  control". An entry names its exact source: a task's also has `owner` (the chat its card shows in), `gen` and `run`
+  (the card's `browser_session_id` and `run_id`), and a chat's has `gen` and `run` when its browser has one. The macOS
+  app's pill shows it with a Done button, which sends
+  `POST /api/sessions/{id}/browser/done` with those queries, so Done releases that run and no newer one.
 - `status.recent` says how the newest finished chat turn, task, run or terminal
   turn ended: `{"kind", "id", "title", "outcome", "ended_s_ago"}`, or `null` when none
   did (or when no store can be read). `kind` is as in `status.items`; `title` is
@@ -1626,7 +1628,7 @@ Done, from anywhere (the app's pill, the terminal, the console): every page the 
 {"ok": true}
 ```
 
-- `ok` is false when the person has no page of the chat (or the chat is not open). An unknown session is 404 `not_found`; a worker run's session refuses it, as every write route does.
+- `ok` is false when the person has no page of the chat (or the chat is not open). For a task, `{id}` is the task's id with `gen`, `run` and `owner` (see **One source** above), and `ok` is false when the person has none of that run's pages. An unknown session is 404 `not_found`; a worker run's session refuses it, as every write route does.
 
 ## POST /api/sessions/{id}/browser/window
 

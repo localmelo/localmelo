@@ -580,8 +580,9 @@ function syncUI() {
     (sending !== null && sending.state !== "failed") ||
     media.busy() ||
     !(input.value.trim() || hasMedia);
-  // Run as a task: a chat starts the message as a task, without asking the model.
-  $("task-btn").hidden = !S.activeId || !!busy || media.hasPictures();
+  // Run as a task: a chat starts the message as a task, without asking the model. Default mode has no task to learn:
+  // a chat starts one itself when the work needs it, and `/task` still works.
+  $("task-btn").hidden = !developerMode || !S.activeId || !!busy || media.hasPictures();
   $("task-btn").disabled = $("send-btn").disabled;
   // The person has a page of the run (take over): one state, the same word as the panel's.
   const working = turn?.control ? "browser.inControl" : developerMode ? "header.runningOnBackend" : "header.workingDots";
@@ -606,8 +607,8 @@ function syncUI() {
         ? t("chat.welcomeReady", { model: session.model || t("chat.yourModel") })
         : t("chat.welcome");
   }
-  // Worker history of earlier days (the panel's Workers tab lists today's): the main chat's empty state links to it.
-  $("welcome-workers").hidden = !mainActive() || !(developerMode || sections.workers);
+  // Worker history of earlier days (the panel's Workers tab lists today's): a developer's link in the main chat's empty state.
+  $("welcome-workers").hidden = !mainActive() || !developerMode;
   setTextIfChanged($("new-label"), newTitle());
   setTextIfChanged($("list-label"), t(S.main ? "chat.sideChats" : "chat.chats"));
 }
@@ -1262,7 +1263,7 @@ function mainNodes(view, turns, placed) {
     if (item.kind === "echo") {
       const echo = item.echo;
       const gone = echoDone(echo, done, ended) || dismissed.has(echo.id);
-      const line = echoNodes({ doc: document, echo, done: gone, act: actOnEcho });
+      const line = echoNodes({ doc: document, echo, done: gone, act: actOnEcho, plain: !developerMode });
       // The page a task browses shows under the line that started it.
       return echo.kind === "started" ? [...line, ...taskBrowserNodes(view, placed, echo.task_id)] : line;
     }
@@ -2709,8 +2710,8 @@ const rowFilter = (segments) => (developerMode ? segments : plainSegments(segmen
 const chatStatus = setupStatusRow({ api, root: $("status-row"), filter: rowFilter });
 const running = setupRunning({ root: $("running-root"), button: $("running-btn"), menu: $("running-menu") });
 
-// The panel's Workers tab offers the list of all tasks once a task exists (a developer always has it).
-const sections = { workers: false, tasks: false };
+// The panel offers the list of all tasks once a task exists (a developer always has it).
+const sections = { tasks: false };
 
 function setHealth(body) {
   S.health = body;
@@ -2719,20 +2720,12 @@ function setHealth(body) {
   panel.update(body);
   serve.update();
   const { running: now, tasks: queue } = body?.status ?? {};
-  sections.workers ||= (now?.runs ?? 0) + (now?.terminal ?? 0) > 0;
   sections.tasks ||= (now?.tasks ?? 0) + (queue?.queued ?? 0) + (queue?.held ?? 0) > 0;
 }
 
-/** Whether a run, a terminal chat or a task exists yet: one question each, none of them fatal. */
+/** Whether a task exists yet; the question is not fatal. */
 async function findSections() {
-  const some = (path, key) => api(path).then((body) => (body[key] ?? []).length > 0, () => false);
-  const [runs, terminals, tasks] = await Promise.all([
-    some("/sessions?kind=worker&limit=1", "sessions"),
-    some("/sessions?kind=terminal&limit=1", "sessions"),
-    some("/tasks", "tasks"),
-  ]);
-  sections.workers ||= runs || terminals;
-  sections.tasks ||= tasks;
+  sections.tasks ||= await api("/tasks").then((body) => (body.tasks ?? []).length > 0, () => false);
 }
 
 let workerMode = false;
@@ -2846,7 +2839,6 @@ function showWorkers(id) {
     showLevelMenu(false);
   }
   workerMode = true;
-  sections.workers = true;
   $("worker-panel").hidden = false;
   $("scroll").hidden = true;
   document.querySelector(".composer-area").hidden = true;
@@ -3148,8 +3140,8 @@ const browser = setupBrowser({
   observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
   wide: () => matchMedia("(min-width: 900px)").matches,
   popOut: browserBridge
-    ? (session) => browserBridge.postMessage({ action: "popOut", session })
-    : (session) => globalThis.open?.(liveUrl(globalThis.location, session), `melo-live-${session}`, "popup,width=1000,height=680"),
+    ? (source) => browserBridge.postMessage({ action: "popOut", ...source })
+    : (source) => globalThis.open?.(liveUrl(globalThis.location, source), `melo-live-${source.session}-${source.run ?? ""}`, "popup,width=1000,height=680"),
 });
 // The browser card in the conversation, and the dock that keeps it in sight at the top of the chat.
 const browserCards = setupBrowserCards({
@@ -3649,7 +3641,8 @@ async function init() {
   const livePopOut = liveRoute(globalThis.location?.hash);
   if (livePopOut) {
     document.documentElement.dataset.view = "live";
-    await browser.follow(livePopOut, { liveOnly: true });
+    const { session, ...pin } = livePopOut;
+    await browser.follow(session, { liveOnly: true, pin });
     document.documentElement.dataset.ready = "1";
     return;
   }

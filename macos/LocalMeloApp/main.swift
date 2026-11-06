@@ -154,7 +154,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         pill.openWindow = { [weak self] in self?.openWindow() }
         pill.openWaiting = { [weak self] in self?.openWaiting() }
         pill.openRoute = { [weak self] route in self?.open(route: route) }
-        pill.giveBack = { [weak self] chat in self?.giveBackPage(of: chat) }
+        pill.giveBack = { [weak self] source in self?.giveBackPage(of: source) }
         pill.view.menu = pet.view.menu
         pill.showingChanged = { [weak self] showing, done in self?.pet.pillShowing(showing, showsDone: done) }
         pet.desktopChanged = { [weak self] mode in self?.pill.desktop(mode) }
@@ -310,10 +310,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         webView?.callAsyncJavaScript(script, arguments: ["route": route], in: nil, in: .page)
     }
 
-    // The pill's Done: the person gives the page they hold back to melo, and the run goes on. The health is read again at
-    // once, so the pill does not keep saying "You're in control" for a poll. A refused or lost request beeps.
-    private func giveBackPage(of chat: String) {
-        guard let request = modelRequest("/api/sessions/\(chat)/browser/done", body: [:]) else { return }
+    // The pill's Done: the person gives the page they hold back to melo, and the run goes on. It names the exact source
+    // (a task's run, not its chat's newest). The health is read again at once, so the pill does not keep saying
+    // "You're in control" for a poll. A refused or lost request beeps.
+    private func giveBackPage(of source: BrowserSource) {
+        guard let request = modelRequest(source.donePath, body: [:]) else { return }
         healthSession.dataTask(with: request) { [weak self] _, response, _ in
             DispatchQueue.main.async {
                 if (response as? HTTPURLResponse)?.statusCode != 200 { NSSound.beep() }
@@ -827,10 +828,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         updateSignInItems()
     }
 
-    // The Browser panel asked to be shown alone in a window of its own.
-    private func popOutBrowser(_ session: String) {
+    // The Browser panel asked to be shown alone in a window of its own: a chat's browser, or a running task's, by its exact source.
+    private func popOutBrowser(_ source: BrowserSource) {
         if browserWindow == nil { browserWindow = BrowserWindowController() }
-        browserWindow?.show(session: session, port: port)
+        browserWindow?.show(source: source, port: port)
     }
 
     // The folders the person picked in the panel: the page may ask to see them in Finder, and nothing else but a chat's folder.

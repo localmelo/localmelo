@@ -45,6 +45,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a task with no person and no chat behind it gets no browser, and no task opens another app. Such a task goes on while it makes real progress, to about 500 steps, and stops honestly
   with **Continue** when it stalls or gets there; `--max-steps` and direct runs are unchanged. Side chats now answer with thinking off and leave file
   changes and code to a task (#536).
+- Nothing to learn in default mode, and every task's browser can be controlled from the app and the terminal. The panel's
+  **Workers** tab, the welcome link to worker runs, **Run as a task** and the P0 to P5 chips and lists show only in
+  developer mode (a task shows as what melo is doing, and a changed priority reads in words); every route stays open.
+  The app's pill and its **Done**, **Pop out** and an empty Enter in the terminal name a task's exact run, so Done frees
+  that task's run and never a newer one; the terminal prints one status line for a task's browser each time its state
+  changes, with no picture. `status.control` now lists tasks, each with `owner`, `gen` and `run` (#536).
 - Set up a model from the welcome card. With no server on a supported Apple-silicon Mac, the console's and the app's
   welcome card shows the terminal's list (what this Mac can run, each item with its size and where it goes, the total
   to download), lets each optional item be turned off, and sets it up after one button: a row per step with its own

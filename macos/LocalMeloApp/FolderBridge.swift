@@ -105,13 +105,13 @@ final class QuitBridge: NSObject, WKScriptMessageHandler {
 }
 
 /// The console's Browser panel can ask to be shown alone in a window of its own, which can float beside other work.
-/// Only the gateway's own page is heard, and only for a chat id the console would open; there is no answer.
+/// Only the gateway's own page is heard, and only for a source the console would open; there is no answer.
 final class BrowserBridge: NSObject, WKScriptMessageHandler {
     static let name = "localmeloBrowser"
     private let gatewayPort: () -> Int
-    private let popOut: (String) -> Void
+    private let popOut: (BrowserSource) -> Void
 
-    init(gatewayPort: @escaping () -> Int, popOut: @escaping (String) -> Void) {
+    init(gatewayPort: @escaping () -> Int, popOut: @escaping (BrowserSource) -> Void) {
         self.gatewayPort = gatewayPort
         self.popOut = popOut
     }
@@ -120,7 +120,7 @@ final class BrowserBridge: NSObject, WKScriptMessageHandler {
         let origin = message.frameInfo.securityOrigin
         guard acceptsBridgeMessage(scheme: origin.protocol, host: origin.host, port: origin.port,
                                    isMainFrame: message.frameInfo.isMainFrame, gatewayPort: gatewayPort()),
-              case .popOut(let session)? = browserRequest(message.body) else { return }
-        popOut(session)
+              case .popOut(let source)? = browserRequest(message.body) else { return }
+        popOut(source)
     }
 }

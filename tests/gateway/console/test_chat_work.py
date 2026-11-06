@@ -249,9 +249,13 @@ async def test_a_page_the_person_takes_holds_that_run_until_done_or_stop(
         assert len(model.requests) == asked, "no model call while the person has it"
         record = await console.workers.tasks.get_task(task)
         assert not console.workers._can_yield(record), "never parked from under them"
+        # Health says whose page it is, with the exact source the app's Done sends.
+        health = (await client.get("/api/health")).json()["status"]["control"]
+        assert health == [{"kind": "task", "id": task, **source(yours)}]
         if how == "done":
+            held_page = {k: health[0][k] for k in ("gen", "run", "owner")}
             answered = await client.post(
-                f"/api/sessions/{task}/browser/done", params=source(yours)
+                f"/api/sessions/{task}/browser/done", params=held_page
             )
             assert answered.json() == {"ok": True}
             await ended(console, task)

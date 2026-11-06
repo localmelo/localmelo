@@ -131,7 +131,7 @@ export function setupPanel({
     ? api(path.replace(/limit=\d+/, 'limit=1'), options).then((page) => ({...page, has_earlier: false}))
     : api(path, options));
   const memory = setupMemoryTab({doc, api, developer});
-  const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat});
+  const scheduled = setupScheduledTab({doc, api, clock, chat: () => state.chat, developer});
   const live = taskLive({api: newest, changed: () => drawBody(), ...stream});
   let reads = 0;
 
@@ -171,11 +171,12 @@ export function setupPanel({
   });
   tablist.append(...tabs);
   tablist.addEventListener('keydown', (event) => {
-    const at = TABS.findIndex(([id]) => id === state.tab);
-    const to = {ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: TABS.length - 1}[event.key];
+    const listed = TABS.filter(([id]) => offered(id));
+    const at = listed.findIndex(([id]) => id === state.tab);
+    const to = {ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: listed.length - 1}[event.key];
     if (to === undefined) return;
     event.preventDefault();
-    select(TABS[(to + TABS.length) % TABS.length][0], {focus: true});
+    select(listed[(to + listed.length) % listed.length][0], {focus: true});
   });
   const body = node('div', 'panel-body');
   body.id = 'panel-body';
@@ -192,13 +193,20 @@ export function setupPanel({
     drawBody();
     if (focus) tabs.find((tab) => tab.dataset.tab === id)?.focus();
   }
+  // Workers is a developer's tab: in default mode the Activity tab lists what melo does, now and today.
+  const offered = (id) => id !== 'workers' || developer();
+  /** Draws the tab strip; true when the open tab is gone (the mode changed under it) and Activity took its place. */
   function drawTabs() {
+    const gone = !offered(state.tab);
+    if (gone) state.tab = 'activity';
     for (const tab of tabs) {
       const on = tab.dataset.tab === state.tab;
+      tab.hidden = !offered(tab.dataset.tab);
       tab.setAttribute('aria-selected', String(on));
       tab.tabIndex = on ? 0 : -1;
     }
     body.setAttribute('aria-labelledby', `panel-tab-${state.tab}`);
+    return gone;
   }
 
   // ── Melo's moves ──
@@ -516,9 +524,11 @@ export function setupPanel({
     if (state.unavailable.length) nodes.push(node('p', 'panel-note', t('panel.partUnread')));
     return nodes;
   }
+  // The list of all tasks, one link: Activity keeps it for default mode, which has no Workers tab.
+  const allTasks = () => ({when: kinds().has('task') || hasTasks(), text: t('panel.allTasks'), href: '#/tasks', stays: true});
   function activityNodes() {
     if (!state.loaded) return [node('p', 'panel-note', state.error || t('panel.loadingToday'))];
-    return dayNodes(state.rows, false, []);
+    return dayNodes(state.rows, false, [allTasks()]);
   }
   // The workers of this scope: the tasks and the worker runs, running ones first. Terminal chats are not workers.
   function workersNodes() {
@@ -526,7 +536,7 @@ export function setupPanel({
     const workers = state.rows.filter((row) => row.kind === 'task' || row.kind === 'run');
     const has = kinds();
     const links = [
-      {when: developer() || has.has('task') || hasTasks(), text: t('panel.allTasks'), href: '#/tasks', stays: true},
+      {...allTasks(), when: developer() || has.has('task') || hasTasks()},
       {when: developer() || has.has('run') || has.has('terminal'), text: t('panel.allRuns'), href: '#/workers'},
     ];
     if (workers.length) return dayNodes(workers, true, links);
@@ -601,6 +611,8 @@ export function setupPanel({
     const moved = follow();
     if (moved) return moved;
     drawHeader();
+    // The mode may have changed since the tabs were drawn (Settings): the strip follows it.
+    if (drawTabs()) drawBody();
     const status = health?.status ?? {};
     const seen = JSON.stringify([status.running, status.tasks, status.items, status.waiting, status.recent?.id, status.recent?.outcome]);
     if (seen !== state.seen || clock() - state.fetchedAt > REFRESH_MS || midnight() !== state.day) {

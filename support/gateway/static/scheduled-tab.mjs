@@ -48,7 +48,7 @@ export function rowLines(chore, now) {
   return lines;
 }
 
-export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now}) {
+export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, developer = () => false}) {
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
   let scope = 0; // which chat the panel follows: rescope() moves it on
@@ -164,7 +164,8 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now})
   function detail(chore) {
     const box = node('div', 'sched-detail');
     box.append(node('p', 'sched-request', chore.request));
-    box.append(node('p', 'sched-line', t('sched.priority', {level: levelLabel(chore.level)})));
+    // A chore's priority is a developer's: default mode names no P-code.
+    if (developer()) box.append(node('p', 'sched-line', t('sched.priority', {level: levelLabel(chore.level)})));
     if (state.edit?.id === chore.id) { box.append(timeForm(chore)); return box; }
     const actions = node('div', 'sched-actions');
     if (state.ask === chore.id) {

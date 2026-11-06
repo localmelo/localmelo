@@ -241,7 +241,7 @@ test('a long day folds behind "Earlier today", and an unreadable day says so and
 test('the tabs are a tablist: arrows, Home and End move and select, and the choice is remembered', async () => {
   const saved = new Map();
   const storage = {getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value)};
-  const h = harness({storage});
+  const h = harness({storage, developer: true});
   await h.panel.update(health());
   const tabs = h.tabs();
   assert.deepEqual(tabs.map((tab) => tab.text()), ['≡ Activity', '⚙ Workers', '◷ Scheduled', '◎ Memory']);
@@ -263,8 +263,25 @@ test('the tabs are a tablist: arrows, Home and End move and select, and the choi
   assert.equal(tabs[0].attributes['aria-selected'], 'true');
   tabs[2].click();
   assert.equal(saved.get('localmelo-panel-tab'), 'scheduled');
-  const again = harness({storage});
+  const again = harness({storage, developer: true});
   assert.equal(again.tabs()[2].attributes['aria-selected'], 'true', 'a reload opens the last tab');
+});
+
+test('default mode has no Workers tab: Activity lists what melo does and links the tasks, and a saved Workers tab opens Activity', async () => {
+  const saved = new Map([['localmelo-panel-tab', 'workers']]);
+  const storage = {getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value)};
+  const day = [task({id: 't1', title: 'Slides', state: 'running', activity: 'Writing slides.md', icon: 'write', at: 4000}),
+    row({id: 'r1', kind: 'run', title: 'Check the build', state: 'done', result: 'All 6 tests passed.', icon: 'run', at: 2000})];
+  const h = harness({rows: day, storage});
+  await h.panel.update(health());
+  assert.deepEqual(h.tabs().filter((tab) => !tab.hidden).map((tab) => tab.text()), ['≡ Activity', '◷ Scheduled', '◎ Memory']);
+  assert.equal(h.tabs()[0].attributes['aria-selected'], 'true', 'the tab saved by a developer falls back to Activity');
+  assert.match(h.body().text(), /Now.*Slides.*Writing slides\.md/);
+  assert.deepEqual(h.root.findAll((node) => node.className === 'panel-link').map((link) => link.href), ['#/tasks'], 'the list of all tasks, not the history of runs');
+  // Arrows skip the tab that is not there.
+  h.root.find((node) => node.attributes.role === 'tablist').dispatch('keydown', {key: 'ArrowRight'});
+  assert.equal(h.tabs()[2].attributes['aria-selected'], 'true');
+  assert.doesNotMatch(h.body().text(), /Worker/);
 });
 
 const ask = (id, what, answer, at = 1000) => ({id, what, answer, at});
@@ -392,7 +409,7 @@ test('Workers lists the tasks and runs of the scope, running first, each with it
     row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.', at: 5000}),
     row({id: 'x1', kind: 'terminal', title: 'Terminal talk', result: 'Hi.', at: 4500}),
   ];
-  const h = harness({rows: day});
+  const h = harness({rows: day, developer: true});
   await h.panel.update(health());
   h.tabs()[1].click();
   const titles = () => h.heads().map((head) => head.find((node) => node.tagName === 'STRONG').textContent);
@@ -418,7 +435,7 @@ test('a task names its folder in Activity and in Workers; a row without one adds
     task({id: 't1', title: 'Sort photos', state: 'failed', result: 'Could not use its folder', icon: 'failed', at: 2000, folder: '/Volumes/Photos'}),
     task({id: 't2', title: 'Notes', state: 'done', result: 'Done.', at: 1000, folder: '~/notes'}),
     row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.', at: 500}),
-  ]});
+  ], developer: true});
   await h.panel.update(health());
   const folders = () => h.root.findAll((node) => node.className === 'activity-folder').map((node) => node.textContent);
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
@@ -441,7 +458,7 @@ test('a held worker says why in the server\'s words, a plain hold keeps the stat
     task({id: 't1', title: 'Slides', state: 'held', activity: 'Waiting for a higher-priority task', icon: 'held', at: 4000}),
     task({id: 't2', title: 'Taxes', state: 'held', activity: '', icon: 'held', at: 3000}),
   ];
-  const h = harness({rows: day});
+  const h = harness({rows: day, developer: true});
   await h.panel.update(health());
   h.tabs()[1].click();
   const lines = h.root.findAll((node) => node.className === 'activity-line').map((line) => line.textContent);
@@ -450,24 +467,19 @@ test('a held worker says why in the server\'s words, a plain hold keeps the stat
 
 test('Workers says when workers appear: for a side chat and for the main chat, and keeps its links in developer mode', async () => {
   const chats = [row({id: 'c1', kind: 'chat', title: 'A chat', result: 'Hello.'})];
-  const side = harness({rows: chats, openChat: 'c1'});
+  const side = harness({rows: chats, openChat: 'c1', developer: true});
   side.scope = 'chat';
   await side.panel.update(health());
   side.tabs()[1].click();
   assert.match(side.body().text(), /This chat has not started any workers\. When it hands a task to one, the worker is listed here/);
-  const all = harness({rows: chats});
+  const all = harness({rows: chats, developer: true});
   await all.panel.update(health());
   all.tabs()[1].click();
   assert.match(all.body().text(), /No workers yet today\. When Melo hands a task to a worker, or you run one yourself, it is listed here/);
-  assert.deepEqual(all.root.findAll((node) => node.tagName === 'A'), [], 'no worker, no history link');
-  const dev = harness({rows: chats, developer: true});
-  await dev.panel.update(health());
-  dev.tabs()[1].click();
-  assert.deepEqual(dev.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers']);
-  // Once a task exists the list of all tasks is offered, as Activity lists only today's.
+  assert.deepEqual(all.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks', '#/workers'], 'a developer always has both lists');
+  // Default mode has no such tab: once a task exists Activity offers the list of all tasks, as it lists only today's.
   const once = harness({rows: chats, hasTasks: true});
   await once.panel.update(health());
-  once.tabs()[1].click();
   assert.deepEqual(once.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks']);
 });
 
@@ -510,7 +522,7 @@ test('a running worker run opens to its live steps, which follow its stream unti
 test('a task that ran out of steps reads Stopped with what is left; its row opens the task, where Continue is', async () => {
   const stopped = row({state: 'stopped', icon: 'stopped', result: 'Remaining: run the tests and commit.', can_continue: true});
   const failed = row({id: 't2', title: 'Broke', state: 'failed', icon: 'failed', result: 'no disk'});
-  const h = harness({rows: [stopped, failed]});
+  const h = harness({rows: [stopped, failed], developer: true});
   await h.panel.update(health());
   h.tabs()[1].click();
   const lines = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
@@ -526,7 +538,7 @@ test('a task code found not finished reads so in amber in its row', async () => 
   const draft = row({state: 'done', icon: 'write', result: 'Fixed it.', can_continue: true,
     ending: {state: 'draft', reasons: ['tests_failed'], question: '', tests: []}});
   const ready = row({id: 't2', title: 'Notes', state: 'done', result: 'Wrote notes.', ending: {state: 'ready', reasons: [], tests: []}});
-  const h = harness({rows: [draft, ready]});
+  const h = harness({rows: [draft, ready], developer: true});
   await h.panel.update(health());
   const lines = h.root.findAll((node) => node.className === 'activity-line').map((node) => node.textContent);
   assert.deepEqual(lines, ['Done, not finished · The last test run failed', 'Wrote notes.'], 'a ready task keeps its result');
@@ -750,7 +762,7 @@ test('Escape leaves a task wherever focus is, except in a box, a menu or a dialo
 
 test('Back returns focus to the control the task was opened from: a chat card, the All tasks link, a Review link', async () => {
   const ask = {id: 'a1', what: 'Run: rm -rf build', at: 1000, answer: 'waiting'};
-  const h = harness({rows: [task({state: 'waiting', icon: 'wait', approvals: [ask]})], hasTasks: true});
+  const h = harness({rows: [task({state: 'waiting', icon: 'wait', approvals: [ask]})], hasTasks: true, developer: true});
   await h.panel.update(health());
   // A card in the chat: a press remembers it (Safari leaves focus where it was); the chat redraws it before Back.
   const card = () => { const open = h.doc.createElement('button'); open.dataset.focusKey = 'card:c1'; h.chat.replaceChildren(open); return open; };

@@ -146,6 +146,20 @@ class BrowserCards:
         source = self._sources.get(task_id)
         return source.owner if source is not None else None
 
+    def source_of(self, session_id: str) -> dict[str, str] | None:
+        """The exact source of *session_id*'s browser in its run now: ``gen`` and ``run``, and ``owner`` for a task.
+
+        The three parts a client names to reach that run alone (``/browser/done?gen=&run=&owner=``). None when the
+        session has no browser source, or none in a run now.
+        """
+        source = self._sources.get(session_id)
+        if source is None or not source.run or source.ended is not None:
+            return None
+        found = {"gen": source.generation, "run": source.run}
+        if source.owner is not None:
+            found["owner"] = source.owner
+        return found
+
     def holds_page(self, task_id: str) -> bool:
         """Whether the person has a page of running task *task_id*'s browser now."""
         browser = self.task_browser(task_id)
