@@ -303,8 +303,8 @@ def attach_source(path: str) -> str | None:
     """How the run vouches for the file *path* (a canonical path) as a file to attach: ``folder`` or ``named``; None when it does not (#551).
 
     The run's question handle answers (``attachable``): the file lies in the
-    chat's folder, or the person's own words name it. Without a run that
-    answers, nothing is vouched for.
+    chat's folder, or the person's own words name this file. Without a run that
+    answers, nothing is vouched for, and the file is asked about as any other.
     """
     check = getattr(TOOL_ASK.get(), "attachable", None)
     found = check(path) if callable(check) else None
@@ -318,15 +318,23 @@ async def require_attach(
 
     Asked every time and never kept for the chat. The question carries the
     file's name, its folder as the person reads it and why melo may use it
-    (``folder``, ``named`` or ``work``), and nothing of what is in it. Auto mode decides it by code alone
+    (``folder``, ``named``, ``work``, or ``other`` for a file nobody vouched
+    for), and nothing of what is in it. Auto mode decides it by code alone
     (:func:`~localmelo.melo.agent._step_review.attach_review`): no card when the
-    person's own words ask for the send, a card naming the file and the site
-    otherwise. Without a policy nobody is asked, as for a form.
+    person's own words ask for the send of a file the run vouches for, a card
+    naming the file and the site otherwise. Without a policy nobody is asked, as
+    for a form, except about a file nobody vouched for: that one is refused,
+    since nobody can say yes to it.
     """
     ask = TOOL_ASK.get()
-    if ask is None:
-        return
     host = host_of(origin)
+    if ask is None:
+        if source == "other":
+            raise BrowserError(
+                f"melo sends {name} to {host} only when the user says yes to that "
+                "file, and nobody can be asked here. Ask the user for the file's path."
+            )
+        return
     arguments = {
         "site": host,
         "access": "attach",

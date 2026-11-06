@@ -758,14 +758,16 @@ class _ToolAsk:
         return self._sees_images()
 
     def attachable(self, path: str) -> str | None:
-        """Why the file *path* may be attached to a page: ``folder`` or ``named``; None when it may not (#551).
+        """Who vouches for the file *path* as one to attach to a page: ``folder`` or ``named``; None when nobody does (#551).
 
         ``folder``: it lies in the chat's folder (the workspace). ``named``:
-        the person's own words name it, or a folder above it (see
-        :meth:`StepReviewer.names_file`). A place never offered, or a file that
-        looks like a key, is neither, however the person worded it. The chat's
-        work folder is the browser's own to vouch for; a page's text, a tool's
-        result and the model's own words name nothing.
+        the person's own words name this file, by its path or its specific name
+        (see :meth:`StepReviewer.names_file`); a folder they named vouches for
+        nothing in it. A place never offered, or a file that looks like a key,
+        is neither, however the person worded it. The chat's work folder is the
+        browser's own to vouch for; a page's text, a tool's result and the
+        model's own words name nothing. A file nobody vouches for is asked
+        about, by name, whoever suggested it.
         """
         real = canonical_path(path)
         if attach_refusal(real) is not None:

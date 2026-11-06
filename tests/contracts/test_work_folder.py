@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -86,3 +87,71 @@ def test_a_link_or_a_name_with_a_path_is_never_moved(tmp_path: Path) -> None:
     assert work_folder.take("abc123", folder, "../downloads/real", "a.pdf") is None
     assert not os.path.exists(work_folder.path_for("abc123")), "nothing was made for it"
     assert (Path(folder) / "real").read_text() == "secret"
+
+
+# ── The folder is checked again before it gives any authority ──
+
+
+def _break(how: str, tmp_path: Path) -> str:
+    """Make the chat's folder (``abc123``) not what ``ensure`` leaves, as *how* says; its path."""
+    path = work_folder.ensure("abc123")
+    base = os.path.dirname(path)
+    if how == "loose":
+        os.chmod(path, 0o755)
+    elif how == "chat folder is a link":
+        (tmp_path / "elsewhere").mkdir()
+        shutil.rmtree(path)
+        os.symlink(tmp_path / "elsewhere", path)
+    elif how == "localmelo is a link":
+        os.rename(base, str(tmp_path / "moved"))
+        os.symlink(tmp_path / "moved", base)
+    elif how == "localmelo is loose":
+        os.chmod(base, 0o755)
+    elif how == "not made yet":
+        shutil.rmtree(path)  # not made at all
+    return path
+
+
+BROKEN = [
+    "loose",
+    "chat folder is a link",
+    "localmelo is a link",
+    "localmelo is loose",
+    "not made yet",
+]
+
+
+def test_a_sound_folder_gives_authority_and_a_path_spelled_another_way_does_not() -> (
+    None
+):
+    path = work_folder.ensure("abc123")
+    assert work_folder.sound(path) and work_folder.holds("abc123", path + "/a.pdf")
+    assert not work_folder.sound(path + "/")
+    assert not work_folder.sound(os.path.join(path, "..", "abc123"))
+    assert not work_folder.sound(
+        os.path.join(os.path.dirname(path), "x", "..", "abc123")
+    )
+    assert not work_folder.sound(
+        os.path.join(path, "sub")
+    ), "a subfolder is no chat's folder"
+
+
+@pytest.mark.parametrize("how", BROKEN)
+def test_a_folder_that_is_no_longer_as_it_was_made_gives_no_authority(
+    tmp_path: Path, how: str
+) -> None:
+    """The check is at use, not only when the folder is made: a link or an opened-up folder gives nothing."""
+    path = _break(how, tmp_path)
+    assert not work_folder.sound(path)
+    assert not work_folder.holds("abc123", os.path.join(path, "a.pdf"))
+    assert not work_folder.holds(
+        "abc123", os.path.realpath(os.path.join(path, "a.pdf"))
+    )
+
+
+@pytest.mark.parametrize("how", ["loose", "localmelo is loose"])
+def test_ensure_makes_a_loose_folder_sound_again(tmp_path: Path, how: str) -> None:
+    path = _break(how, tmp_path)
+    assert work_folder.ensure("abc123") == path
+    assert work_folder.sound(path)
+    assert _mode(path) == 0o700 and _mode(os.path.dirname(path)) == 0o700

@@ -8,10 +8,12 @@ browser download lands here; melo reads files here without asking, and may attac
 them to a page (what such a file says is a page's text, never the person's words).
 
 Every folder on the way is checked before it is used: it must be a real folder
-(never a link) of this user, and is made private if it was not. A chat id is a
-short name of letters, digits, ``_`` and ``-``, so it cannot name another place.
-This module imports only the standard library and
-:mod:`localmelo.melo.contracts.folders`.
+(never a link) of this user, and is made private if it was not. The same check
+(:func:`sound`) stands before any authority the folder gives (reading it
+without a question, attaching from it), not only before a file is saved there:
+a link or a loose folder gives none. A chat id is a short name of letters,
+digits, ``_`` and ``-``, so it cannot name another place. This module imports
+only the standard library and :mod:`localmelo.melo.contracts.folders`.
 """
 
 from __future__ import annotations
@@ -53,18 +55,55 @@ def ephemeral_id() -> str:
 
 
 def _base() -> str:
-    return os.path.join(tempfile.gettempdir(), ROOT)
+    """The folder that holds every chat's work folder: the temporary folder's real path (system links resolved), then ``localmelo`` as it is spelled, never resolved."""
+    return os.path.join(os.path.realpath(tempfile.gettempdir()), ROOT)
 
 
 def path_for(chat_id: str) -> str:
-    """The real path of *chat_id*'s work folder, made or not; ``ValueError`` for an id that is no plain name."""
+    """The path of *chat_id*'s work folder, made or not; ``ValueError`` for an id that is no plain name.
+
+    The two names under the temporary folder are not resolved: when one of them
+    is a link, a file's real path is not under this one, so the link gives
+    nothing (see also :func:`sound`).
+    """
     if not _ID.fullmatch(chat_id):
         raise ValueError(f"{chat_id!r} is not a chat id")
-    return canonical_path(os.path.join(_base(), chat_id))
+    return os.path.join(_base(), chat_id)
+
+
+def _intact(folder: str) -> bool:
+    """Whether *folder* is a real folder (never a link) of this user that nobody else can enter."""
+    try:
+        info = os.lstat(folder)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == os.getuid()
+        and not info.st_mode & 0o077
+    )
+
+
+def sound(path: str) -> bool:
+    """Whether *path* is a chat's work folder as :func:`ensure` leaves it, now (#551).
+
+    It is named ``<chat id>`` under ``$TMPDIR/localmelo``, and both it and
+    ``localmelo`` are real folders of this user, private (no link, no other
+    owner, no group or other access). Anything else, a folder that is not made
+    yet included, gives no authority: no read without a question and no
+    attaching from it.
+    """
+    chat_id = os.path.basename(path)
+    return (
+        usable(chat_id)
+        and path == path_for(chat_id)
+        and _intact(_base())
+        and _intact(path)
+    )
 
 
 def _private(folder: str) -> None:
-    """Make *folder* if it is missing, and require it to be a real folder of this user, mode 0700."""
+    """Make *folder* if it is missing, and require it to be a real folder of this user, mode exactly 0700."""
     old = os.umask(0o077)
     try:
         os.mkdir(folder, 0o700)
@@ -75,12 +114,12 @@ def _private(folder: str) -> None:
     info = os.lstat(folder)  # never through a link
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
         raise WorkFolderError(f"{folder} is not a folder of this user's own")
-    if info.st_mode & 0o077:
+    if stat.S_IMODE(info.st_mode) != 0o700:
         os.chmod(folder, 0o700)
 
 
 def ensure(chat_id: str) -> str:
-    """The real path of *chat_id*'s work folder, made private if it was missing.
+    """The path of *chat_id*'s work folder, made private if it was missing.
 
     ``ValueError`` for an id that is no plain name, :class:`WorkFolderError` when
     a folder on the way is a link, another user's or not a folder.
@@ -137,8 +176,9 @@ def remove(chat_id: str) -> bool:
 
 
 def holds(chat_id: str, path: str) -> bool:
-    """Whether the real path *path* is *chat_id*'s work folder or below it (links and ``..`` resolved first)."""
+    """Whether *path* is in *chat_id*'s work folder, which is :func:`sound` now (links and ``..`` in *path* resolved first)."""
     try:
-        return covers(path_for(chat_id), canonical_path(path))
+        folder = path_for(chat_id)
     except ValueError:
         return False
+    return covers(folder, canonical_path(path)) and sound(folder)

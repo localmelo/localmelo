@@ -8,6 +8,7 @@ problem as :class:`BrowserError`, in words a person and the model can read.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -253,6 +254,20 @@ class Download:
 
 
 @dataclass(frozen=True)
+class Upload:
+    """A file for the file chooser a click opens (#551): its real *path*, and *check*.
+
+    *check* raises :class:`BrowserError` when the file is no longer the one the
+    caller checked (and asked about). A driver calls it right before the browser
+    is given the file, after every wait of its own, so a file swapped while a
+    card or the chooser waited is never sent.
+    """
+
+    path: str
+    check: Callable[[], None]
+
+
+@dataclass(frozen=True)
 class Dialog:
     """A box the page put up while melo acted, and how melo answered it.
 
@@ -441,12 +456,13 @@ class BrowserDriver(Protocol):
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
 
-    async def attach(self, tab: str | None, act: Act, path: str) -> ActResult:
-        """Do the click *act*, and give the file chooser it opens the file *path*, with no dialog on screen (#551).
+    async def attach(self, tab: str | None, act: Act, upload: Upload) -> ActResult:
+        """Do the click *act*, and give the file chooser it opens the *upload*, with no dialog on screen (#551).
 
         Only a driver with ``attaches`` true can; it raises :class:`BrowserError`
-        when the click opens no chooser. *path* is a real file the caller has
-        checked: the driver gives it to the browser as it is.
+        when the click opens no chooser, or when ``upload.check()`` does. The
+        path is a real file the caller has checked: the driver gives it to the
+        browser as it is, after the check, as late as it can.
         """
 
     async def act(self, tab: str | None, act: Act) -> ActResult:

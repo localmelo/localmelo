@@ -369,15 +369,24 @@ def attach_review(arguments: Mapping[str, Any], *, asked: bool) -> ActionReview:
 
     Attaching sends a file to a site. It is routine only when *asked*: Auto
     mode, and the person's own messages ask for the send
-    (:meth:`StepReviewer.asks_to_attach`). Every other case, and every case in
-    Ask, is stopped for a card that names the file and the site. The user's
-    model never sees this question, so a page cannot talk it into a send: a
-    page's text is in no message of the person's.
+    (:meth:`StepReviewer.asks_to_attach`), and the file is one the run vouches
+    for. A file nobody vouched for (``source`` ``other``: the person did not
+    name it, and it is not in the chat's folders) is never routine, whatever
+    the words ask: the card names exactly that file. Every other case, and
+    every case in Ask, is stopped for a card that names the file and the site.
+    The user's model never sees this question, so a page cannot talk it into a
+    send: a page's text is in no message of the person's.
     """
     site = " ".join(str(arguments.get("site") or "this site").split())[:80]
     name = " ".join(str(arguments.get("name") or "a file").split())[:80]
     folder = " ".join(str(arguments.get("folder") or "").split())[:120]
     file = f"{name} from {folder}" if folder else name
+    if arguments.get("source") == "other":
+        return ActionReview(
+            "high",
+            ("send_out",),
+            (f"Sends the file {file} to {site}; you did not name it.",),
+        )
     if asked:
         return ActionReview(
             "routine", (), (f"Attaches {file} to {site}, which you asked for.",)
@@ -609,7 +618,7 @@ class StepReviewer:
         return folder_named(path, self.requests, os.path.expanduser("~"))
 
     def names_file(self, path: str) -> bool:
-        """Whether the person's own words name the file *path* (canonical) or a folder above it (#551).
+        """Whether the person's own words name the file *path* (canonical) itself, by its path or its specific name; a folder above it names nothing (#551).
 
         See :func:`~localmelo.melo.checker.review.named.file_named`; a place
         melo never opens is refused before anything asks this.

@@ -16,6 +16,7 @@ from collections.abc import (
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.checker import HARNESS_CALL, Checker
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
     APPROVAL_FAILED,
     ApprovalDecision,
@@ -105,8 +106,10 @@ class Executor:
         self._default_timeout_ms = timeout_ms
         self._policy = WorkspacePolicy(workspace_root)
         # Folders outside the workspace that the read tools may read without
-        # being asked: the agent's own (a chat's work folder, #551).
-        self._read_roots = tuple(canonical_path(root) for root in read_roots)
+        # being asked: the agent's own work folders (#551), as spelled (never
+        # resolved: a root that is a link leads nowhere), each checked intact
+        # at every read (see _own_read).
+        self._read_roots = tuple(os.path.normpath(root) for root in read_roots)
 
     @property
     def workspace_root(self) -> str | None:
@@ -601,15 +604,26 @@ class Executor:
     def _own_read(self, tool_name: str, root: str, path: str) -> OutsideAccess | None:
         """The read of *path* in one of the agent's own folders (:attr:`_read_roots`), or ``None``.
 
-        Only a read tool, and never a place that is never offered. Such a read
-        needs no question; it is fenced like any read outside the workspace.
+        Only a read tool, never a place that is never offered, and only while the
+        root is a work folder as it was made, now
+        (:func:`~localmelo.melo.contracts.work_folder.sound`: a real, private
+        folder of this user, no link): a root that was swapped for a link or
+        opened up gives no read. Such a read needs no question; it is fenced
+        like any read outside the workspace.
         """
         if tool_name in WRITE_TOOLS or not self._read_roots:
             return None
         access = outside_access(tool_name, os.path.join(root, path))
         if never_offered(access.path, canonical=True) is not None:
             return None
-        return access if any(covers(r, access.path) for r in self._read_roots) else None
+        return (
+            access
+            if any(
+                covers(r, access.path) and work_folder.sound(r)
+                for r in self._read_roots
+            )
+            else None
+        )
 
     def _collect_artifacts(
         self, request: ExecutionRequest, output: str

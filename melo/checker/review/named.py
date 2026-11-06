@@ -120,16 +120,16 @@ def folder_named(path: str, texts: Iterable[str], home: str) -> bool:
 
 
 def file_named(path: str, texts: Iterable[str], home: str) -> bool:
-    """Whether a text names the file *path* (an absolute, canonical path), or a folder above it.
+    """Whether a text names the file *path* (an absolute, canonical path) itself.
 
-    By its path as the person writes it, by a specific file name (``resume.pdf``,
-    not ``notes``), or by a folder that holds it (:func:`folder_named`). A
-    specific name stands for any file of that name, so it proves only that the
-    person spoke of such a file, never where it is: the caller refuses places
-    that are never offered before it asks.
+    By its path as the person writes it, or by a specific file name
+    (``resume.pdf``, not ``notes``). A folder that holds the file does not name
+    it: the person spoke of the folder, not of this file. A specific name
+    stands for any file of that name, so it proves only that the person spoke of
+    such a file, never where it is: the caller refuses places that are never
+    offered before it asks.
     """
-    texts = list(texts)
-    return key_named(path, texts, home) or folder_named(path, texts, home)
+    return key_named(path, texts, home)
 
 
 def script_named(url: str, texts: Iterable[str]) -> bool:

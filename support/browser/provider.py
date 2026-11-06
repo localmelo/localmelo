@@ -68,7 +68,7 @@ import secrets
 import stat
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any, Final, Literal, NoReturn, cast
+from typing import Any, Final, Literal, NamedTuple, NoReturn, cast
 
 from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
@@ -119,6 +119,7 @@ from localmelo.support.browser.driver import (
     PointHit,
     StaleElementError,
     TabInfo,
+    Upload,
     View,
     WindowBusyError,
 )
@@ -581,6 +582,16 @@ _SEARCH_ONE_SITE = (
 async def _no_other_site(name: str, arguments: Any, preview: str) -> ApprovalDecision:
     """The answer to every site question while a search page is read: no."""
     return ApprovalDecision(False, _SEARCH_ONE_SITE, origin="policy")
+
+
+class Attachable(NamedTuple):
+    """A file melo may attach (#551): its real path, name, size, who vouches (``work``, ``folder``, ``named`` or ``other``) and which file it is on disk (device, inode)."""
+
+    path: str
+    name: str
+    size: int
+    source: str
+    identity: tuple[int, int]
 
 
 class BrowserToolProvider(BaseToolProvider):
@@ -2025,7 +2036,7 @@ class BrowserToolProvider(BaseToolProvider):
         ref: str,
         act: Act,
         before: set[str],
-        attach: str | None = None,
+        attach: Upload | None = None,
     ) -> tuple[ActResult, str]:
         """Do *act*, and the ref it was done on; with *attach*, the file it gives the file chooser the click opens.
 
@@ -2079,7 +2090,7 @@ class BrowserToolProvider(BaseToolProvider):
         return result, ref
 
     async def _dispatch(
-        self, raw: str, act: Act, attach: str | None = None
+        self, raw: str, act: Act, attach: Upload | None = None
     ) -> ActResult:
         """Do *act* in the browser; one that can hand off to another app opens the admission deadline.
 
@@ -2813,17 +2824,19 @@ class BrowserToolProvider(BaseToolProvider):
             hands_off=True,
         )
 
-    def _attachable(self, file: object) -> tuple[str, str, int, str]:
-        """The file melo may attach, as ``(real path, name, size, source)``, or :class:`BrowserError` in words for the model (#551).
+    def _attachable(self, file: object) -> Attachable:
+        """The file melo may attach, or :class:`BrowserError` in words for the model (#551).
 
         The path is made canonical first (a link or ``..`` is the place it
         leads to). Never a place that holds keys or passwords, melo's own
         data, a system folder, or a file named like a secret
-        (:func:`~localmelo.melo.contracts.folders.attach_refusal`). Only a file
-        in this chat's work folder (``work``) or one the run vouches for
-        (``folder``: the chat's folder; ``named``: the user's own words name
-        it, :func:`~localmelo.support.browser.sites.attach_source`). A page's
-        text and the model's own words vouch for nothing.
+        (:func:`~localmelo.melo.contracts.folders.attach_refusal`). Its source
+        says who vouches for it: this chat's work folder (``work``, which must
+        be intact now), or the run (``folder``: the chat's folder; ``named``:
+        the user's own words name this file,
+        :func:`~localmelo.support.browser.sites.attach_source`). Any other file
+        is ``other``: the person is asked about exactly that file, whoever
+        suggested it. A page's text and the model's own words vouch for nothing.
         """
         given = str(file or "").strip()
         if not given.startswith(("/", "~/")):
@@ -2840,16 +2853,19 @@ class BrowserToolProvider(BaseToolProvider):
             raise BrowserError(f"{name} is not a file melo can read.") from None
         if not stat.S_ISREG(info.st_mode):
             raise BrowserError(f"{name} is not a file.")
+        identity = (info.st_dev, info.st_ino)
         if work_folder.holds(self.work_id, real):
-            return real, name, info.st_size, "work"
-        source = sites.attach_source(real)
-        if source is None:
+            return Attachable(real, name, info.st_size, "work", identity)
+        source = sites.attach_source(real) or "other"
+        return Attachable(real, name, info.st_size, source, identity)
+
+    def _unchanged(self, file: object, was: Attachable) -> None:
+        """Raise :class:`BrowserError` unless *file* is still the very file that was checked (#551): the same path, the same file there, still allowed."""
+        now = self._attachable(file)
+        if (now.path, now.identity) != (was.path, was.identity):
             raise BrowserError(
-                f"melo attaches only a file the user named in their message, a file "
-                f"in the chat's folder, or one in the chat's work folder, and {name} "
-                "is none of them. Ask the user for the file's path."
+                f"{was.name} changed while melo waited, so nothing was attached."
             )
-        return real, name, info.st_size, source
 
     @_guarded
     async def _attach(
@@ -2860,7 +2876,7 @@ class BrowserToolProvider(BaseToolProvider):
                 f"{self.browser_name} cannot attach a file to a page. Ask the user to "
                 "attach it themselves, or to switch melo's browser to Chrome."
             )
-        real, name, size, source = self._attachable(file)
+        found = self._attachable(file)
         tab_id, snap, item = self._target(ref, tab)
         if item.sensitive or item.site or item.submit or item.kind != "button":
             raise BrowserError(
@@ -2869,27 +2885,32 @@ class BrowserToolProvider(BaseToolProvider):
                 "another site or a secret field)."
             )
         await sites.require_attach(
-            snap.origin, name, home_label(os.path.dirname(real)), size, source
+            snap.origin,
+            found.name,
+            home_label(os.path.dirname(found.path)),
+            found.size,
+            found.source,
         )
-        # The person may have taken a while: the file must be the same place still.
-        if self._attachable(file)[0] != real:
-            raise BrowserError(
-                f"{name} changed while melo waited, so nothing was attached."
-            )
+        # The person may have taken a while: no click when the file is another now.
+        self._unchanged(file, found)
         before = await self._acting(tab_id, snap, "click", on=_control_words(item))
         assert before is not None
+        # The click asks its own question too, and the page's chooser takes its
+        # time: the driver checks again right before the browser gets the file.
+        upload = Upload(found.path, lambda: self._unchanged(file, found))
         result, used = await self._run_act(
             tab_id,
             snap,
             ref,
             Act("click", snap.url, item, doc=snap.doc),
             before,
-            attach=real,
+            attach=upload,
         )
         host = sites.host_of(snap.origin)
         said = (
-            f'Attached "{name}" ({_size_words(size)}) to {used} on {host}. A page may '
-            "upload a file as soon as it is attached, or only when its form is sent."
+            f'Attached "{found.name}" ({_size_words(found.size)}) to {used} on {host}. '
+            "A page may upload a file as soon as it is attached, or only when its "
+            "form is sent."
         )
         return await self._after(
             tab_id,

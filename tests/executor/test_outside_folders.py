@@ -12,6 +12,7 @@ file that was checked.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -527,3 +528,62 @@ async def test_a_link_or_dot_dot_out_of_the_work_folder_is_not_its_own_read(
         letter.error_category == ErrorCategory.APPROVAL_DENIED
     ), "it asks like any outside file"
     assert [r.tool_name for r in gate.requests] == ["file_read"]
+
+
+@pytest.mark.parametrize(
+    "how",
+    ["loose", "chat folder is a link", "localmelo is a link", "localmelo is loose"],
+)
+async def test_a_work_folder_that_is_a_link_or_opened_up_gives_no_read_without_a_question(
+    root: Path, work: Path, tmp_path: Path, how: str
+) -> None:
+    """The folder is checked at every read, not only when it is made: what a link leads to is asked about like any outside file."""
+    base = work.parent
+    if how == "loose":
+        os.chmod(work, 0o755)
+    elif how == "chat folder is a link":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "form.txt").write_text("Dear applicant\n")
+        shutil.rmtree(work)
+        os.symlink(elsewhere, work)
+    elif how == "localmelo is a link":
+        os.rename(base, tmp_path / "moved")
+        os.symlink(tmp_path / "moved", base)
+    else:
+        os.chmod(base, 0o755)
+    executor = _executor(
+        root, str(work)
+    )  # built after: nothing was remembered from before
+    gate = FolderGate(ApprovalDecision(False, "no"))
+
+    outcome = await _run(executor, "file_read", {"path": str(work / "form.txt")}, gate)
+    listing = await _run(executor, "list_files", {"path": str(work)}, gate)
+
+    assert outcome.error_category == ErrorCategory.APPROVAL_DENIED, outcome.output
+    assert listing.error_category == ErrorCategory.APPROVAL_DENIED
+    assert [r.tool_name for r in gate.requests] == ["file_read", "list_files"]
+    assert not outcome.output.startswith(FROM_THE_WEB)
+
+
+async def test_a_work_folder_that_goes_wrong_after_the_executor_was_built_stops_giving_reads(
+    root: Path, work: Path
+) -> None:
+    executor = _executor(root, str(work))
+    gate = FolderGate(ApprovalDecision(False, "no"))
+    first = await _run(executor, "file_read", {"path": str(work / "form.txt")}, gate)
+    os.chmod(work, 0o755)
+    second = await _run(executor, "file_read", {"path": str(work / "form.txt")}, gate)
+    assert first.status == ExecutionStatus.SUCCESS
+    assert second.error_category == ErrorCategory.APPROVAL_DENIED
+    assert [r.tool_name for r in gate.requests] == [
+        "file_read"
+    ], "only the second asked"
+
+
+async def test_a_work_folder_not_made_yet_gives_no_read(root: Path) -> None:
+    unmade = work_folder.path_for("nothere1")
+    executor = _executor(root, unmade)
+    gate = FolderGate(ApprovalDecision(False, "no"))
+    outcome = await _run(executor, "file_read", {"path": unmade + "/a.txt"}, gate)
+    assert outcome.error_category == ErrorCategory.APPROVAL_DENIED

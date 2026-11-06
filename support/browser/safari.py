@@ -60,6 +60,7 @@ from localmelo.support.browser.driver import (
     Shot,
     StaleElementError,
     TabInfo,
+    Upload,
     View,
 )
 from localmelo.support.browser.pagescript import (
@@ -522,7 +523,7 @@ class SafariAutomationDriver(PageScriptActs):
             pass
         await self._call("open", url="about:blank")
 
-    async def attach(self, tab: str | None, act: Act, path: str) -> ActResult:
+    async def attach(self, tab: str | None, act: Act, upload: Upload) -> ActResult:
         raise BrowserError("Safari's automation cannot attach a file to a page.")
 
     async def act(self, tab: str | None, act: Act) -> ActResult:

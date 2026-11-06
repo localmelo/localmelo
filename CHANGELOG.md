@@ -12,8 +12,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - melo finishes web forms itself. `browser_find` searches the whole page and says how many elements match when it cannot
   show them all. Each chat gets a private work folder (`$TMPDIR/localmelo/<chat id>/`, removed with the chat) where a
   page's downloads land, named in the step, and new `browser_attach` gives a page's upload field a file with no file
-  dialog (Chrome only): a file you named, one in the chat's folder or one in the work folder, never a key or a secret,
-  and a card names the file and the site unless your own words ask for the send. In a task you started, with a model
+  dialog (Chrome only): a file you named, one in the chat's folder or one in the work folder, never a key or a secret.
+  A card names the file and the site unless your own words ask for the send; a file you did not name always gets
+  one, and the file is checked again right before the browser gets it. In a task you started, with a model
   that reads pictures, melo works through a picture check itself, in the open and with no outside service, for 3 tries
   and then offers you the page; some sites' terms forbid automated answers to their checks. The developer setting
   `[agent] thinking_steps = "first_and_failed"` (`-X agent.thinking_steps=first_and_failed`, default `"all"`) compares
