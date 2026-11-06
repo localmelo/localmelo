@@ -5,14 +5,17 @@ list of test servers (:mod:`localmelo.support.web_local`) and the background
 browser's sign-in helpers (:mod:`localmelo.support.browser.local_apps`) both
 refuse them. This module reads only the config and the running gateway's
 endpoint file, so the browser can use it without reading web_fetch's setting.
+It also reads which server on this computer the person wrote the address of
+(:func:`written_site`, #547), which both tools let through.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
+from localmelo.melo.contracts.approvals import TOOL_ASK
 from localmelo.support import gateway_endpoint
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 
@@ -84,4 +87,26 @@ def own_ports(
     return ports
 
 
-__all__ = ["GATEWAY", "MODEL", "own_ports", "urls_of"]
+def written_site(parts: SplitResult) -> tuple[str, int] | None:
+    """The server on this computer *parts* names, when the person's own words wrote it (#547).
+
+    The host is ``localhost``, ``127.0.0.1`` or ``[::1]``, the port is in the
+    address, and the run's question policy says the person's messages wrote
+    that host and port (``written_local``): ``(address, port)`` with
+    ``localhost`` read as ``127.0.0.1``. Anything else, a page's or a model's
+    address included, and no policy, is ``None``. The ports of melo's own
+    gateway and model servers are the callers' to refuse: none is ever let
+    through, written or listed (:func:`own_ports`).
+    """
+    try:
+        host, port = (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return None
+    host = "127.0.0.1" if host == "localhost" else host
+    if host not in ("127.0.0.1", "::1") or port is None:
+        return None
+    check = getattr(TOOL_ASK.get(), "written_local", None)
+    return (host, port) if callable(check) and check(host, port) is True else None
+
+
+__all__ = ["GATEWAY", "MODEL", "own_ports", "urls_of", "written_site"]

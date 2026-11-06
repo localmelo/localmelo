@@ -392,6 +392,7 @@ _RULES = [
 ^git push\b ;; ? ;; Pushes commits to a server.
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
+^direnv (allow|permit|grant)\b ;; persistence ;; Trusts a .envrc, which then runs whenever its folder is entered.
 ^git config .*--(global|system) ;; persistence ;; Changes your global git settings.
 ^git config .*core\.hookspath|^git config .*core\.hooksPath ;; persistence ;; Points git at hooks that run on later commits.
 """.strip().splitlines())
@@ -1246,12 +1247,13 @@ def _step(
         and before == "fetch"
         or (op == "<(" and bare_before and prog in ("curl", "wget"))
     ):
-        host = urlparse(url or (links + [""])[0]).netloc or "the internet"
+        download = url or (links + [""])[0]
+        host = urlparse(download).netloc or "the internet"
         # The site is the whole pipeline, its URL with it: a new address
         # in an edit is a new finding.
         site = f.site
         f.site = f"{last_site} {site}"[:600]
-        f.add("remote_code", f"Runs code downloaded from {host}.")
+        f.add("remote_code", f"Runs code downloaded from {host}.", download)
         if "get-pip" in url + " ".join(links):
             f.add("install", "Installs pip with get-pip.py.")
         f.site = site

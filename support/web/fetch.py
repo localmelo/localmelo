@@ -18,6 +18,7 @@ within :data:`TOTAL_S` for the whole fetch.
 from __future__ import annotations
 
 import asyncio
+import copy
 import re
 import zlib
 from collections.abc import Awaitable, Callable
@@ -163,6 +164,16 @@ class WebFetcher:
         self._timeout = httpx.Timeout(read_s, connect=connect_s)
         self.total_s = total_s
         self._verify = verify
+
+    def allowing(self, allow: AllowHook) -> WebFetcher:
+        """A copy of this fetcher whose only difference is *allow* (#547).
+
+        For one call that reads a server on this computer the person wrote the
+        address of: the hook lists exactly that address and port.
+        """
+        other = copy.copy(self)
+        other._allow = allow
+        return other
 
     async def fetch(
         self,

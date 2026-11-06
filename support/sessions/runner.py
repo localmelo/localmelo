@@ -591,6 +591,12 @@ class SessionRunner:
         self._check_open()
         if images and self._worker:
             raise ValueError("worker sessions do not support pictures")
+        if isinstance(text, str) and not self._worker and not origin:
+            # A password the person wrote is cut out here, before the turn is
+            # stored, shown again or read by a model: its handle stays (#547).
+            text = self._agent.hide_passwords(text)
+            if isinstance(words, str):
+                words = self._agent.hide_passwords(words)
         typed_text = text
         if attachments:
             if self._worker:

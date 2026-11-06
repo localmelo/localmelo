@@ -181,6 +181,9 @@ class _ApprovalGate:
                     destructive=self._destructive,
                 ),
             )
+        if self._reviewer is not None and self.review is not None:
+            # A key or a script the person's words name asks on a card (#547).
+            self.review = self._reviewer.name(self.review)
         asking = self._asking(request, review=self.review)
         preview = asking.preview
         self._mode = review_mode(self._policy, asking)
@@ -688,6 +691,23 @@ class _ToolAsk:
     def names_host(self, host: str) -> bool:
         """Whether the user's recent messages name *host* itself (``www.`` aside)."""
         return self._reviewer is not None and self._reviewer.names_host(host)
+
+    def sign_in_value(self, handle: str, site: str) -> str | None:
+        """The password *handle* stands for in a password box on *site*, or None (#547).
+
+        Only for a password the person gave in their newest message, on a site
+        their own words name; see :meth:`StepReviewer.sign_in_value`.
+        """
+        reviewer = self._reviewer
+        return None if reviewer is None else reviewer.sign_in_value(handle, site)
+
+    def written_local(self, host: str, port: int) -> bool:
+        """Whether the person's own words write the server ``host:port`` on this computer (#547)."""
+        return self._reviewer is not None and self._reviewer.written_local(host, port)
+
+    def signs_in(self, site: str) -> bool:
+        """Whether melo has sign-in details of the person's to try on *site*."""
+        return self._reviewer is not None and self._reviewer.signs_in(site)
 
     def granted(self, name: str) -> bool:
         """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""

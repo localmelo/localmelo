@@ -1479,6 +1479,19 @@ class Agent(_RecallLoop, _NotesLoop):
             )
         return tools
 
+    def hide_passwords(self, text: str) -> str:
+        """*text*, a message of the person's, with each password it gives replaced by its handle (#547).
+
+        melo signs in with a password the person gives in a message, but the
+        value never reaches a model, a record, a log or a memory: the handle
+        (``[password-1]``) stands for it, and only the browser tool, asked by
+        code that checked the site and the turn, types the value. A caller
+        that stores or shows the person's message calls this first (a
+        session's runner does); :meth:`run_task` does it again, which changes
+        nothing. See :mod:`localmelo.melo.contracts.sign_in`.
+        """
+        return self._reviewer.hide_passwords(text)
+
     async def run_tool(
         self,
         tool_name: str,
@@ -3330,6 +3343,8 @@ class Agent(_RecallLoop, _NotesLoop):
             return None, []
         assert run.inbox is not None
         pending, shown = _read_notes(run.inbox, pending)
+        if run.from_person:
+            pending = [(offset, self.hide_passwords(text)) for offset, text in pending]
         inserted = Message(
             role="user",
             content="\n\n".join(text for _, text in pending),
@@ -3829,6 +3844,12 @@ class Agent(_RecallLoop, _NotesLoop):
         if on_event is not None and observe is not None:
             raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
+        if from_person and isinstance(query, str):
+            # A password the person gave is cut out before any model, record,
+            # log or memory sees the message (#547): a handle stands for it.
+            query = self.hide_passwords(query)
+            if isinstance(user_words, str):
+                user_words = self.hide_passwords(user_words)
         if routine is not None:
             if not isinstance(routine, str):
                 raise TypeError("routine must be a str")

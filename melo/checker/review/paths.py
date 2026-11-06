@@ -22,7 +22,7 @@ from localmelo.melo.contracts.folders import (
     is_alias,
     never_offered,
 )
-from localmelo.melo.contracts.review import TITLES, ActionReview
+from localmelo.melo.contracts.review import NAMED_CAN_ASK, TITLES, ActionReview
 
 # Under the home folder. Reads count too: passwords, keys and cookies. The
 # places are the ones melo never opens outside the workspace (one list, in
@@ -149,6 +149,10 @@ class Findings:
     started: set[str] = field(default_factory=set)
     site: str = ""
     hits: list[tuple[str, str, str]] = field(default_factory=list)
+    # ``(category, subject)`` for each finding of a category a person's words
+    # may name (``NAMED_CAN_ASK``): the key file, the script's address; ``""``
+    # when the finding has none (see ``ActionReview.evidence``).
+    evidence: list[tuple[str, str]] = field(default_factory=list)
     # The characters the review may still read again (a line a wrapper hands to
     # a shell, the words after ``find -exec``): a short step has them all read,
     # and each command adds in proportion to itself (see ``shell._unwrap``).
@@ -182,8 +186,11 @@ class Findings:
         (self.read if key else self.scanned)[path] = digest
         return text
 
-    def add(self, category: str, reason: str) -> None:
+    def add(self, category: str, reason: str, subject: str = "") -> None:
+        """Record a finding; *subject* is what it is about, for the categories a person's words may name."""
         self.hits.append((category, self.site or reason, reason))
+        if category in NAMED_CAN_ASK:
+            self.evidence.append((category, subject))
         self.high.setdefault(category, [])
         if reason not in self.high[category]:
             self.high[category].append(reason)
@@ -217,6 +224,7 @@ class Findings:
             doubts=unsure,
             inputs=inputs,
             changed=changed,
+            evidence=tuple(self.evidence),
         )
 
 
@@ -269,7 +277,10 @@ def _places(home: str, root: str, source: str) -> dict[str, tuple[str, ...]]:
     own = () if under(root, running) else (running,)
     return {
         "self": (f"{home}/.cache/localmelo", *own),
-        "persistence": (*later, f"{root}/.envrc", f"{root}/.git/config", *_LAUNCHD),
+        # The workspace's own .envrc is not here: the user's convention keeps a
+        # project's variables in it, and direnv runs nothing of it until the
+        # person (or a ``direnv allow``, which the shell rules stop) trusts it.
+        "persistence": (*later, f"{root}/.git/config", *_LAUNCHD),
         "credentials": tuple(
             os.path.join(home, p) for p in _CREDENTIALS if not p.startswith(_ANYWHERE)
         ),
@@ -535,7 +546,7 @@ def touch(ctx: Context, f: Findings, raw: str, op: str, cwd: str | None = None) 
         )
         f.paths.append(path)
     if kind == "credentials":
-        f.add("credentials", f"Uses {name}, which holds passwords or keys.")
+        f.add("credentials", f"Uses {name}, which holds passwords or keys.", path)
     elif op == "read" or kind in ("harmless", "inside"):
         return
     elif kind == "self" and under(path, _SOURCE):

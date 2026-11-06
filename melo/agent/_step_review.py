@@ -65,6 +65,12 @@ from localmelo.melo.checker.review.model import (
     step_names,
     user_message,
 )
+from localmelo.melo.checker.review.named import (
+    key_named,
+    local_sites,
+    loopback_site,
+    script_named,
+)
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
@@ -74,8 +80,10 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     ModelAnswer,
     because,
+    named_by,
     step_key,
 )
+from localmelo.melo.contracts.sign_in import HANDLE, Vault
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -382,6 +390,12 @@ class StepReviewer:
         # Addresses each site verdict let through since the user's last message.
         self._shared_used: dict[str, int] = {}
         self._blocks: deque[_Block] = deque(maxlen=BLOCKS_KEPT)
+        # The passwords the person gave (#547): in this process only. ``_fresh``
+        # are the handles of the message being taken in, ``_live`` those of
+        # the person's newest message: only they can be typed.
+        self._vault = Vault()
+        self._fresh: set[str] = set()
+        self._live: frozenset[str] = frozenset()
         if new_chat:
             self.since = self._wall()
 
@@ -404,6 +418,8 @@ class StepReviewer:
         if recalled is None:
             recalled = recalled_part(text) or self._recalled
         self._recalled = recalled
+        # Only what the person gave in this message can be typed (#547).
+        self._live, self._fresh = frozenset(self._fresh), set()
         text = own_words(text)
         # A message counts even with no words (an attachment): a review
         # settled for the last message is asked again, with the new words.
@@ -442,6 +458,45 @@ class StepReviewer:
         for text in texts:
             self._add(text)
 
+    # ── Sign-in details the person gives (#547) ──
+
+    def hide_passwords(self, text: str) -> str:
+        """*text*, the person's message, with each password it gives replaced by its handle.
+
+        Called where a message of the person's comes in (a session's runner,
+        :meth:`~localmelo.melo.agent.Agent.run_task`, a note read mid-run),
+        before any model, record, log or memory sees it: the value stays in
+        this process's vault and the handle (``[password-1]``) takes its
+        place (see :mod:`localmelo.melo.contracts.sign_in`). The recalled
+        notes a message may carry (:func:`own_words`) are not the person's
+        words: nothing is taken from them. The same text hidden again
+        changes nothing.
+        """
+        own = own_words(text)
+        masked, handles = self._vault.hide(own)
+        self._fresh.update(handles)
+        return masked + text[len(own) :]
+
+    def sign_in_value(self, handle: str, site: str) -> str | None:
+        """The password *handle* stands for, for a password box on *site*, or ``None``.
+
+        Only a handle of the person's newest message, and only on a site their
+        own words name (:meth:`names_host`): the model, a page or an earlier
+        message never makes melo type one. The browser tool asks this and
+        types the value; nothing else ever gets it.
+        """
+        if (
+            not HANDLE.fullmatch(handle)
+            or handle not in self._live
+            or not self.names_host(site)
+        ):
+            return None
+        return self._vault.value(handle)
+
+    def signs_in(self, site: str) -> bool:
+        """Whether the person gave a password in their newest message and their words name *site*."""
+        return bool(self._live) and self.names_host(site)
+
     @property
     def requests(self) -> tuple[str, ...]:
         """The person's newest messages: :data:`EARLIER_REQUESTS` and the latest."""
@@ -466,15 +521,49 @@ class StepReviewer:
         under it: naming ``example.com`` does not name ``docs.example.com``,
         so a site under a shared domain (``vercel.app``) is not named by
         it. See :func:`named_sites` for what counts as naming. An address
-        on this computer (:func:`local_address`) is never named: its host
-        is not its port, and a page may have steered the model to another.
+        on this computer (:func:`local_address`) is named only by its host
+        and its port together, as the person wrote them: a host alone is not
+        its port, and a page may have steered the model to another.
         """
+        local = loopback_site(host)
+        if local is not None:
+            # A server on this computer is named by its host and its port
+            # together, as the person wrote them (#547); the port a page or the
+            # model picked is another site.
+            return local in local_sites(self.requests)
         if local_address(host):
             return False
         wanted = _site_host(host)
         return bool(wanted) and any(
             wanted in named_sites(text) for text in self.requests
         )
+
+    def name(self, review: ActionReview) -> ActionReview:
+        """*review* with the categories the person's own words name (#547).
+
+        A key file the person wrote the path or the specific name of, a
+        script they wrote the whole address of: for those auto mode shows a
+        card instead of stopping the step (:func:`~localmelo.melo.contracts.approvals.asks_in_auto`).
+        Decided here by code from the rules' evidence and the person's words
+        (:attr:`requests`): the model and a page never name anything.
+        """
+        named = named_by(review, self._names)
+        return dataclasses.replace(review, named=named) if named else review
+
+    def _names(self, category: str, subject: str) -> bool:
+        if category == "credentials":
+            return key_named(subject, self.requests, os.path.expanduser("~"))
+        return category == "remote_code" and script_named(subject, self.requests)
+
+    def written_local(self, host: str, port: int) -> bool:
+        """Whether the person's own words write the server ``host:port`` on this computer.
+
+        *host* is ``127.0.0.1`` or ``::1`` (``localhost`` is read as the
+        first). The browser and web_fetch ask this before they open such an
+        address; a page's text, a tool's result and the model's own address
+        never count.
+        """
+        return (host, port) in local_sites(self.requests)
 
     # ── Reviews ──
 

@@ -2089,31 +2089,39 @@ async def test_a_listed_servers_pages_are_each_reviewed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_persons_words_do_not_make_a_listed_server_routine(
+async def test_the_persons_words_make_the_server_they_wrote_routine_and_no_other_port(
     tmp_path: Path,
 ) -> None:
-    # A public host the person named reads with no review; naming 127.0.0.1
-    # does not name its port, so the model reviews the step.
+    # A public host the person named reads with no review, and so does the
+    # server on this computer whose host and port they wrote (#547); the same
+    # host on another port is another site, so the model reviews that step.
     llm, reader = await _read_pages(
         tmp_path, [f"{DOCS}/a"], [], query=f"what does {DOCS}/a say?"
     )
     assert llm.review_requests == [] and reader.read == [f"{DOCS}/a"]
     (tmp_path / "again").mkdir()
     llm, reader = await _read_pages(
-        tmp_path / "again",
-        [f"{LOCAL}/a"],
-        [verdict()],
-        query=f"what does {LOCAL}/a say?",
+        tmp_path / "again", [f"{LOCAL}/a"], [], query=f"what does {LOCAL}/a say?"
     )
-    assert len(llm.review_requests) == 1
-    assert reader.read == [f"{LOCAL}/a"]
+    assert llm.review_requests == [] and reader.read == [f"{LOCAL}/a"]
+    (tmp_path / "other").mkdir()
+    other = "http://127.0.0.1:9999/a"
+    llm, reader = await _read_pages(
+        tmp_path / "other", [other], [verdict()], query=f"what does {LOCAL}/a say?"
+    )
+    assert len(llm.review_requests) == 1 and reader.read == [other]
 
 
-def test_a_local_address_is_never_named_by_the_persons_words() -> None:
+def test_a_local_address_is_named_only_by_its_host_and_port_together() -> None:
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.user_message(
-        "read http://127.0.0.1:8123/a and http://[::1]:8123/ and example.com"
+        "read http://127.0.0.1:8123/a and http://[::1]:8123/ and example.com "
+        "and localhost:3000"
     )
     assert reviewer.names_host("example.com")
-    for host in ("127.0.0.1", "::1", "[::1]", "127.0.0.1:8123", "[::1]:8123"):
+    named = ("127.0.0.1:8123", "[::1]:8123", "localhost:3000", "127.0.0.1:3000")
+    for host in named:
+        assert reviewer.names_host(host), host
+    # A host without its port, another port and a neighbour are not named.
+    for host in ("127.0.0.1", "::1", "[::1]", "127.0.0.1:9", "10.0.0.5:8123"):
         assert not reviewer.names_host(host), host

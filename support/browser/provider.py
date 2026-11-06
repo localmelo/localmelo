@@ -72,6 +72,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ToolAsk,
 )
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
@@ -169,9 +170,14 @@ PAGE_NOTE = (
     "buttons (browser_find, browser_click) before you guess addresses, and work "
     "in one tab: browser_open reuses the tab you opened unless you pass "
     'tab="new". Use the tab ids browser_tabs shows. browser_click, '
-    "browser_type and browser_select act on the page you read, by ref; never "
-    "type a password, card number or one-time code: ask the user to do that in "
-    "the window. Each act returns what changed and the page again. Only for what "
+    "browser_type and browser_select act on the page you read, by ref. Sign in "
+    "with the details the user gave: a password they wrote in their message "
+    "reads [password-1] there (melo keeps the real one out of your sight): "
+    "browser_type that text into the password box (the list says melo never "
+    "types there: that holds for any other password) and melo types the real "
+    "one on a site they named. Never type any other password, a card number or "
+    "a one-time code: ask the user to do that in the window. Each act returns "
+    "what changed and the page again. Only for what "
     "the element list lacks (a drawing, a box from another site): "
     "browser_screenshot, then browser_click_point."
 )
@@ -557,7 +563,10 @@ class BrowserToolProvider(BaseToolProvider):
         # The pages the person was asked to take over (tab, origin, what), once each,
         # and the sites where they said not now: not asked again on a read.
         self._asked_you: set[tuple[str, str, str]] = set()
-        self._not_now: set[str] = set()
+        # What the person said not now to, by site and need: another need on the
+        # site is asked again. Pages melo tried to sign in on itself.
+        self._not_now: set[tuple[str, str]] = set()
+        self._signed_in: set[tuple[str, str, str]] = set()
         # Presses inside a human check that is still there, per (tab, site of the check),
         # and the tab where they reached CHECK_PRESSES: the person is asked for it next.
         self._presses: dict[tuple[str, str], int] = {}
@@ -755,6 +764,7 @@ class BrowserToolProvider(BaseToolProvider):
         self._owners.clear()
         self._asked_you.clear()
         self._not_now.clear()
+        self._signed_in.clear()
         self._presses.clear()
         self._stuck = None
         self._tab = None
@@ -1224,9 +1234,48 @@ class BrowserToolProvider(BaseToolProvider):
         kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
         refusal = (
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
-            "passwords, payment cards or one-time codes."
+            "payment cards or one-time codes, nor a password the user did not give."
         )
+        if kind == "password" and self._signs_in(snap.origin):
+            refusal += (
+                " The user gave a sign-in password in their message: type its "
+                "handle ([password-1]) here, not a value."
+            )
+            raise BrowserError(refusal)
         return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
+
+    def _given_password(
+        self, snap: render.Snapshot, item: Element, text: str
+    ) -> str | None:
+        """The password *text* stands for, when melo may type it into *item*, else None.
+
+        *text* must be exactly the handle of a password the person gave in
+        their newest message (``[password-1]``); *item* a password box (not a
+        card or a one-time code box) on an https page of a site their own words
+        name. The check is the run's (``TOOL_ASK``'s ``sign_in_value``): a page,
+        the model or an earlier message never passes it, and without a policy
+        that checks, nothing is typed.
+        """
+        kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
+        handle = text.strip()
+        if (
+            kind != "password"
+            or not snap.origin.startswith("https://")
+            or not HANDLE.fullmatch(handle)
+        ):
+            return None
+        find = getattr(TOOL_ASK.get(), "sign_in_value", None)
+        value = find(handle, sites.host_of(snap.origin)) if callable(find) else None
+        return value if isinstance(value, str) and value else None
+
+    def _signs_in(self, origin: str) -> bool:
+        """Whether the person gave sign-in details for the site *origin* (https) in their newest message."""
+        check = getattr(TOOL_ASK.get(), "signs_in", None)
+        return (
+            origin.startswith("https://")
+            and callable(check)
+            and check(sites.host_of(origin)) is True
+        )
 
     async def _persons_step(
         self, tab: str, origin: str, need: str, refusal: str, to_do: str
@@ -1278,7 +1327,17 @@ class BrowserToolProvider(BaseToolProvider):
         if stuck == tab:
             need = "captcha"  # a human check that stayed after CHECK_PRESSES presses
         key = (tab, snap.origin, need)
-        if not need or key in self._asked_you or snap.origin in self._not_now:
+        if (
+            need in ("sign-in", "password")
+            and self._signs_in(snap.origin)
+            and key not in self._signed_in
+        ):
+            # The person gave sign-in details in their message: melo signs in
+            # itself and hands the page over only when it is still the page
+            # that needs them after it tried (#547).
+            self._signed_in.add(key)
+            return result
+        if not need or key in self._asked_you or (snap.origin, need) in self._not_now:
             return result
         self._asked_you.add(key)
         try:
@@ -1288,7 +1347,7 @@ class BrowserToolProvider(BaseToolProvider):
             self._asked_you.discard(key)
             return _led([str(ended)], result)
         if said is None:
-            self._not_now.add(snap.origin)
+            self._not_now.add((snap.origin, need))
             line = (
                 f"This page needs the user ({sites.TAKEOVER_NEEDS[need]}); melo "
                 "offered it to them in the Browser panel and they did not take it over."
@@ -1393,7 +1452,10 @@ class BrowserToolProvider(BaseToolProvider):
             return
         if not self._can_take():
             why = "nobody can take the page over here"
-        elif (tab, origin, "captcha") in self._asked_you or origin in self._not_now:
+        elif (tab, origin, "captcha") in self._asked_you or (
+            origin,
+            "captcha",
+        ) in self._not_now:
             why = "the user was already offered the page"
         else:
             return
@@ -1435,8 +1497,9 @@ class BrowserToolProvider(BaseToolProvider):
         """A form is about to be sent: where it goes is checked, then the send is asked about by itself.
 
         The question lists what the form holds (and the text being typed, for
-        Enter in a box). A box that is in no form has no address: the page
-        decides where Enter sends it, and the question says so.
+        Enter in a box: *typed* is what it may show, never a password's value).
+        A box that is in no form has no address: the page decides where Enter
+        sends it, and the question says so.
         """
         if item.submit:
             await self._check_destination(item.submit, snap.origin, done)
@@ -2243,9 +2306,21 @@ class BrowserToolProvider(BaseToolProvider):
         tab_id, snap, item = self._target(ref, tab)
         if item.kind != "textbox":
             raise BrowserError(f"{ref} is a {item.kind}, not a text box.")
-        if item.sensitive or fields.sensitive_kind(item.attrs):
-            return await self._secret_field(tab_id, snap, item)
-        typed = str(text)
+        shown = typed = str(text)
+        secret = bool(item.sensitive or fields.sensitive_kind(item.attrs))
+        if secret:
+            # Melo types a password only when it is one the person gave in their
+            # message, on a site their words name: the model writes its handle
+            # and never sees the value. Any other secret is the person's.
+            given = self._given_password(snap, item, typed)
+            if given is None:
+                return await self._secret_field(tab_id, snap, item)
+            typed = given
+        elif HANDLE.search(typed):
+            raise BrowserError(
+                "That text stands for a password the user gave: it goes only into "
+                "a password box."
+            )
         if len(typed) > MAX_TYPED_CHARS:
             raise BrowserError(
                 f"That text is {len(typed)} characters; melo types at most "
@@ -2258,12 +2333,12 @@ class BrowserToolProvider(BaseToolProvider):
                 "does not type it."
             )
         await _ask_foreign(snap.origin, item, "type into")
-        before = await self._acting(tab_id, snap, "type", typed, _control_words(item))
+        before = await self._acting(tab_id, snap, "type", shown, _control_words(item))
         assert before is not None
         done: set[str] = set()
         enter = submit is True or str(submit).lower() == "true"
         if enter:
-            await self._submit_checks(snap, item, "enter", done, typed)
+            await self._submit_checks(snap, item, "enter", done, shown)
         result, used = await self._run_act(
             tab_id,
             snap,
@@ -2279,7 +2354,11 @@ class BrowserToolProvider(BaseToolProvider):
             ),
             before,
         )
-        verb = f"Typed {len(typed)} character(s) into"
+        verb = (
+            "Typed the password the user gave into"
+            if secret
+            else f"Typed {len(typed)} character(s) into"
+        )
         said = self._done_line(verb, used, ref, result)
         if enter:
             said = said.replace(

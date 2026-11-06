@@ -173,6 +173,9 @@ ROUTINE = {
         "npm test && npm run build && make test && "
         "mkdir -p out && echo hi > out/a.txt && ls -la ~",
     ),
+    # The project's own .envrc is the user's convention for its variables (#547).
+    "the workspace's .envrc by the file tool": (FW, "<ws>/.envrc"),
+    "the workspace's .envrc by a redirect": (SH, "echo 'export A=1' > .envrc"),
     "other: a comment and a heredoc to a file in the workspace": (
         SH,
         "# write notes\ncat > notes.txt <<EOF\nrm -rf ~\nEOF",
@@ -315,6 +318,9 @@ HIGH = {
     "D23": (SH, "nohup python bot.py > bot.log 2>&1 &", "persistence"),
     "D24": (PY, "import base64\nexec(base64.b64decode('cHJpbnQoMSk='))", "opaque"),
     "D25": (FW, "<ws>/.git/hooks/pre-commit", "persistence"),
+    # Writing .envrc runs nothing until direnv trusts it, so trusting it stops.
+    "a direnv allow makes .envrc run": (SH, "direnv allow", "persistence"),
+    "git's own config stays": (FW, "<ws>/.git/config", "persistence"),
     "D26a": (SH, "git push --force origin main", "delete"),
     "D26b": (SH, "git reset --hard HEAD~3", "delete"),
     "D27a": (SH, "git config --global user.email a@b.example", "persistence"),

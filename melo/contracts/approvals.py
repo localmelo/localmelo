@@ -51,6 +51,7 @@ from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
     CARD_ONLY,
     CATEGORY_WORDS,
+    NAMED_CAN_ASK,
     SITE_KEY,
     UNREADABLE_SITE,
     WORDS_CAN_ALLOW,
@@ -613,10 +614,11 @@ ALLOWED_ONCE: Final = "allowed once"
 # card: those the user's words can allow, a step melo could not check, a step
 # whose review failed (it timed out, could not be read or ran out of room: the
 # person decides it instead of the step stopping without a word), and the kinds
-# only a person allows (paying, an account's settings). A step with any other
-# category (credentials, system settings, an app driven by a script, something
-# that runs later, code from the internet, localmelo itself) stays blocked, as
-# before.
+# only a person allows (paying, an account's settings). Credentials and code
+# from the internet count too when every finding is about a key or a script the
+# person's own words name (:data:`NAMED_CAN_ASK`, set by code in the run). A step
+# with any other category (system settings, an app driven by a script,
+# something that runs later, localmelo itself) stays blocked, as before.
 ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque", "unreviewed"} | CARD_ONLY
 
 
@@ -624,14 +626,16 @@ def asks_in_auto(review: ActionReview | None) -> bool:
     """Whether auto mode asks a person about a step it stopped, when one can be asked (#465).
 
     A step whose review is not routine and whose every category is in
-    :data:`ASKS_IN_AUTO`. A step nothing reviewed, or one without a
-    category (undecided and never settled), is not asked about.
+    :data:`ASKS_IN_AUTO`, or one the person's words name
+    (``review.named``, only :data:`NAMED_CAN_ASK` categories count). A step
+    nothing reviewed, or one without a category (undecided and never
+    settled), is not asked about.
     """
     return (
         review is not None
         and review.verdict != "routine"
         and bool(review.categories)
-        and set(review.categories) <= ASKS_IN_AUTO
+        and set(review.categories) <= ASKS_IN_AUTO | set(review.named) & NAMED_CAN_ASK
     )
 
 

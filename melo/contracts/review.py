@@ -19,7 +19,7 @@ import ipaddress
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 from urllib.parse import unquote, urlsplit
@@ -127,6 +127,14 @@ CLICK_ONLY: Final = frozenset(
 # let pages open that kind of address again: that grant is their own answer,
 # shown on the card, and auto mode never rides it.
 CARD_ONLY: Final = frozenset({"money", "account", "open_app"})
+# Categories that stay out of ASKS_IN_AUTO, except for a step whose every
+# finding of that kind is about something the person's own words name: a key
+# they wrote (``credentials``), a script they wrote the address of
+# (``remote_code``). Then auto mode shows a card, with a person watching,
+# instead of stopping the step without one (#547). Only code decides it, by
+# :func:`named_by` from the rules' evidence and the person's words: never the
+# model, never a page.
+NAMED_CAN_ASK: Final = frozenset({"credentials", "remote_code"})
 # The reason a call of the ``self`` category is denied without asking.
 SELF_DENIAL: Final = "melo never lets a call change its own runtime, settings or keys"
 # The tools whose arguments the rules read (melo.checker.review); another
@@ -201,6 +209,14 @@ class ActionReview:
     doubts: tuple[str, ...] = ()
     inputs: tuple[str, ...] = ()
     changed: tuple[str, ...] = ()
+    # What the rules found each :data:`NAMED_CAN_ASK` category about, one
+    # ``(category, subject)`` for every finding of those categories: the key
+    # file a step uses, the address of the script it runs. A finding the
+    # rules could not tie to a subject has ``""``. Not part of the step's key.
+    evidence: tuple[tuple[str, str], ...] = ()
+    # The categories of :data:`NAMED_CAN_ASK` the person's own words name, set
+    # by code in the run (:func:`named_by`) after the rules reviewed the call.
+    named: tuple[str, ...] = ()
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -216,6 +232,24 @@ class ActionReview:
         if self.model is not None:
             out["model"] = self.model.to_json()
         return out
+
+
+def named_by(review: ActionReview, says: Callable[[str, str], bool]) -> tuple[str, ...]:
+    """The categories of *review* that the person's own words name (:data:`NAMED_CAN_ASK`).
+
+    A category counts when the rules tied every finding of it to a subject
+    and *says* (``says(category, subject)``, which reads the person's words,
+    never a page's or a tool's) holds for each: one finding without a subject,
+    or with a subject no word of theirs names, leaves it out.
+    """
+    named = []
+    for category in sorted(NAMED_CAN_ASK & set(review.categories)):
+        subjects = [subject for c, subject in review.evidence if c == category]
+        if subjects and all(
+            subject and says(category, subject) for subject in subjects
+        ):
+            named.append(category)
+    return tuple(named)
 
 
 def covered_by_grant(review: ActionReview | None) -> bool:
