@@ -22,7 +22,7 @@ import pytest
 
 from localmelo.melo.agent._pause import Hold
 from localmelo.melo.contracts.approvals import ApprovalDecision
-from localmelo.melo.contracts.pause import PAUSE
+from localmelo.melo.contracts.pause import PAUSE, Resumed
 from localmelo.support.browser import takeover
 from localmelo.support.browser.driver import (
     Act,
@@ -989,7 +989,7 @@ class Windowed(Takeable):
     async def hide_window(self) -> None:
         self.hidden += 1
 
-    async def unsent_input(self, tab: str) -> bool:
+    async def unsent_input(self) -> bool:
         return self.unsent
 
 
@@ -1190,6 +1190,31 @@ async def test_the_run_stays_held_until_every_page_comes_back() -> None:
     assert said[-1][0] == "paused" and said[-1][1]["tab"] == "t2"
     provider.owners.give("t2", "done")
     assert not hold.held and said[-1] == ("resumed", "done")
+    await provider.close()
+
+
+@pytest.mark.parametrize("ended", ["stopped", "ended"])
+async def test_a_run_that_ends_takes_back_every_page_the_person_had(
+    ended: Resumed,
+) -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    hold = a_hold([])
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            await run(tools, "browser_open", url=HOME, tab="new")
+    finally:
+        PAUSE.reset(token)
+    provider.owners.take("t1")
+    provider.owners.take("t2")
+    await until(lambda: hold.held)
+    await provider._switched()
+    hold.end(ended)
+    assert provider.owners.held == frozenset()
+    await provider._switched()
+    assert driver.hidden, "no page is left in the person's window"
     await provider.close()
 
 

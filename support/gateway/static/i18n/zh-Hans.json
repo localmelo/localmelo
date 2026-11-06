@@ -255,7 +255,7 @@
   "approval.takeoverChrome": "在 Chrome 打开，清空表单",
   "approval.takeoverContent": "在真实的 Chrome 窗口里自己完成这一步，然后交还。这是 melo 自己的 Chrome，不是你平时用的那个。melo 会等你，绝不保留你在密码和私密栏里输入的内容。",
   "approval.takeoverContentSafari": "在 Safari 的窗口里自己完成这一步，然后交还。melo 会等你，绝不保留你在密码和私密栏里输入的内容。",
-  "approval.takeoverForm": "这一页的表单已经填好。在 Chrome 里打开会重新载入网页，清空表单；在这里接管，表单会保留。",
+  "approval.takeoverForm": "melo 打开的网页里有填好的表单。在 Chrome 里打开这一页会重新载入 melo 的网页，清空那份表单；在这里接管，表单会保留。",
   "approval.takeoverHere": "在这里接管",
   "approval.takeoverNo": "暂不",
   "approval.takeoverYes": "接管",

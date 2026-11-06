@@ -5,9 +5,10 @@ sign in on) holds the run with :class:`RunPause`, which the agent sets in
 :data:`PAUSE` around each tool call of a run:
 
 * :meth:`RunPause.hold` puts the run on hold: the run reports ``run.paused``,
-  and no model call of the run starts (each waits in :meth:`RunPause.wait`,
-  the one gate before every request to the model) until
-  :meth:`RunPause.release`, which reports ``run.resumed`` with how it ended.
+  and no model call and no tool of the run starts (each waits in
+  :meth:`RunPause.wait`, the gate before every send to the model and every
+  tool start; a tool already running goes on) until :meth:`RunPause.release`,
+  which reports ``run.resumed`` with how it ended.
   Holding again while held only says what changed (a new ``run.paused``). A
   hold records who set it (*by*): a release that names another holder does
   nothing, so one holder never ends another's hold.

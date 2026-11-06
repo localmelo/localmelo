@@ -1139,8 +1139,9 @@ FOCUS_JS = r"""(function () {
 
 # Whether the page has a form the person began: a field that differs from how the
 # page set it, or words in an editor the page made editable; in open shadow roots
-# and frames of the page's own site too, two frames deep, at most 20,000 elements.
-# Only true or false comes back, never what a field holds.
+# and frames of the page's own site too, two frames deep, at most 100,000 elements:
+# a page longer than that may hold one, so it counts as having one. Only true or
+# false comes back, never what a field holds.
 UNSENT_JS = r"""(function unsent() {
   const skip = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file']);
   const changed = (el) => {
@@ -1157,10 +1158,10 @@ UNSENT_JS = r"""(function unsent() {
   // any words in it count, so a window never clears what may be the person's.
   const written = (el) => el.isContentEditable && el.getAttribute('contenteditable') !== 'false'
     && !(el.parentElement && el.parentElement.isContentEditable) && /\S/.test(el.textContent || '');
-  let left = 20000;
+  let left = 100000;
   const look = (root, depth) => {
     for (const el of root.querySelectorAll('*')) {
-      if (--left < 0) return false;
+      if (--left < 0) return true;
       const tag = el.tagName;
       if ((tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') && changed(el)) return true;
       if (el.hasAttribute('contenteditable') && written(el)) return true;

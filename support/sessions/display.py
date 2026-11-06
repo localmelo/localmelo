@@ -619,37 +619,49 @@ def request_words(
     return said_in("en", request_said(tool, arguments, root=root))
 
 
+def _on_hold(newest_first: Iterable[Mapping[str, Any]]) -> bool:
+    """Whether the newest of these events about a hold left the run held."""
+    for event in newest_first:
+        kind = event.get("type")
+        if kind == "run.paused":
+            return True
+        if kind in ("run.resumed", "turn.finished", "run.finished"):
+            return False
+    return False
+
+
 def event_activity(
     newest_first: Iterable[Mapping[str, Any]], root: str | None = None
 ) -> ActivityText | None:
     """What a session's turn is doing, from its stored events, newest first.
 
     An approval that waits wins, then a hold the person has (``run.paused``
-    not yet resumed: "You're in control"), then a call still running, then a
-    reflection; any other event of a running turn reads ``Thinking``. A turn
-    whose end is among them is doing nothing: ``None``. A step, a turn or a
-    reflection that started last is the model answering (``answering``).
+    not yet resumed: "You're in control", whatever began after it and waits at
+    the run's gate), then a call still running, then a reflection; any other
+    event of a running turn reads ``Thinking``. A turn whose end is among them
+    is doing nothing: ``None``. A step, a turn or a reflection that started
+    last is the model answering (``answering``).
     """
     finished: set[str] = set()
     resolved: set[str] = set()
-    resumed = False
-    for event in newest_first:
+    events = list(newest_first)
+    held = _on_hold(events)
+    for event in events:
         kind = event.get("type")
         data = event.get("data")
         data = data if isinstance(data, Mapping) else {}
         if kind in ("turn.finished", "run.finished"):
             return None
-        if kind == "run.resumed":
-            resumed = True
-        elif kind == "run.paused" and not resumed:
-            return _state("control")
-        elif kind == "tool.finished":
+        if kind == "tool.finished":
             finished.add(str(data.get("call_id", "")))
         elif kind == "approval.resolved":
             resolved.add(str(data.get("request_id", "")))
         elif kind == "approval.requested":
             if str(data.get("request_id", "")) not in resolved:
                 return _state("waiting")
+        elif held:
+            if kind == "run.paused":
+                return _state("control")
         elif kind == "tool.started":
             if str(data.get("call_id", "")) not in finished:
                 return activity_text(

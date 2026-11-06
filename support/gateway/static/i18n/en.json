@@ -267,7 +267,7 @@
   "approval.takeoverChrome": "Open in Chrome, clear the form",
   "approval.takeoverContent": "Do this part yourself in a real Chrome window, then give it back. It is melo's own Chrome, not your everyday one. melo waits, and never keeps what you type in a password or private field.",
   "approval.takeoverContentSafari": "Do this part yourself in Safari's window, then give it back. melo waits, and never keeps what you type in a password or private field.",
-  "approval.takeoverForm": "This page has a filled-in form. Opening it in Chrome reloads the page and clears the form. If you take over here, the form stays.",
+  "approval.takeoverForm": "A page melo has open holds a filled-in form. Opening this one in Chrome reloads melo's pages and clears that form. If you take over here, the form stays.",
   "approval.takeoverHere": "Take over here",
   "approval.takeoverNo": "Not now",
   "approval.takeoverYes": "Take over",

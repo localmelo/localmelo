@@ -35,6 +35,10 @@ PAGES = {
     "/frame": "<iframe srcdoc='<input id=box>'></iframe>",
     "/opener": "<p>opener</p>",
     "/popup": "<p>popup</p>",
+    "/huge": (
+        "<script>document.body.insertAdjacentHTML('beforeend',"
+        "'<i></i>'.repeat(120000))</script>"
+    ),
 }
 FOCUS = {
     "/editor": "document.getElementById('box').focus()",
@@ -85,11 +89,11 @@ async def test_words_typed_in_an_editor_a_shadow_root_or_a_frame_are_a_form_begu
     driver: ChromeBackgroundDriver, base: str, path: str
 ) -> None:
     tab = await driver.open(base + path, new_tab=True)
-    assert await driver.unsent_input(tab.id) is False, "nothing typed yet"
+    assert await driver.unsent_input() is False, "nothing typed yet"
     await _in_page(driver, tab.id, FOCUS[path])
     session = await driver._focus(tab.id)
     await driver._cmd("Input.insertText", {"text": "half a message"}, session)
-    assert await driver.unsent_input(tab.id) is True
+    assert await driver.unsent_input() is True
 
 
 async def _until_told(told: list[str]) -> None:
@@ -126,3 +130,30 @@ async def test_a_window_a_page_closed_itself_is_told_apart_from_one_closed_from_
     await driver._cmd("Target.closeTarget", {"targetId": target})
     await _until_told(closed)
     assert closed == ["closed"]
+
+
+async def test_a_page_too_long_to_read_through_may_hold_a_form(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    await driver.open(base + "/huge", new_tab=True)
+    assert await driver.unsent_input() is True
+
+
+async def test_a_close_chrome_refused_leaves_the_persons_close_their_own(
+    driver: ChromeBackgroundDriver, base: str
+) -> None:
+    page = await driver.open(base + "/opener", new_tab=True)
+    await driver.open(base + "/popup", new_tab=False, tab=page.id)
+    browser = driver._browser
+    assert browser is not None
+    await driver._cmd("Target.setDiscoverTargets", {"discover": True})
+    told: list[str] = []
+    target = driver._resolve(page.id)
+    browser.watch[target] = told.append
+    await driver._hook_close(browser, target)
+    await _in_page(driver, page.id, "window.close()")
+    await asyncio.sleep(0.3)
+    assert not told and page.id in [t.id for t in await driver.tabs()], "refused"
+    await driver._cmd("Target.closeTarget", {"targetId": target})
+    await _until_told(told)
+    assert told == ["closed"]

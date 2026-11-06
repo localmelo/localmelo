@@ -2240,6 +2240,9 @@ class Agent(_RecallLoop, _NotesLoop):
         a new ``TOOL_MARKS`` dict, so a tool can mark its own call.
         """
         events = run.events
+        # The run's gate for tools, beside the one in Chat._request: what the model
+        # chose before the person took a page starts once they give the run back.
+        await run.hold.wait()
         events.tool_started(call)
         # A list for an event, and in the compress modes for the rehearsal
         # signal too; elsewhere, without a sink, the slot stays unset as

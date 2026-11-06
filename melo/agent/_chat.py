@@ -796,11 +796,7 @@ class Chat:
         A cancellation during that await propagates with the response
         counted.
         """
-        # The run's gate: while the person has the run (a page they took over), no
-        # request goes to the model, whichever part of the run asks.
         pause = PAUSE.get()
-        if pause is not None:
-            await pause.wait()
         self.check_call_budget(closing)
         if kind == "plan":
             schema = json.dumps(
@@ -853,9 +849,16 @@ class Chat:
                 drop_target=self.fit_target,
                 hold=cut,
             )
-        if on_ready is not None:
-            on_ready(messages)
         while True:
+            # The run's gate, before every send: while the person has the run (a page
+            # they took over), nothing goes to the model, whichever part of the run
+            # asks, and a take during a failed send stops its retry too. A request
+            # that waits here has accepted nothing yet.
+            if pause is not None:
+                await pause.wait()
+            if on_ready is not None:
+                on_ready(messages)
+                on_ready = None
             record = None
             proxy = 0
             if accounting is not None:

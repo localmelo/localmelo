@@ -741,9 +741,10 @@ class BrowserToolProvider(BaseToolProvider):
         """Put *tab*'s page before the person, then hold the run.
 
         A real window when it can be (Safari's window is one already); the app's
-        Browser panel for a page with a form they began, unless they *chosen* the
-        window, and when the window could not open for any reason (another
-        chat's window is open: ``busy``). The person is never left with nothing.
+        Browser panel while a window would clear a form they began on any page,
+        unless they *chosen* the window, and when the window could not open for
+        any reason (another chat's window is open: ``busy``). The person is never
+        left with nothing.
         """
         where = self._owners.where(tab)
         raw = self._raw.get(tab)
@@ -753,7 +754,7 @@ class BrowserToolProvider(BaseToolProvider):
         form, failed, busy = where.form, False, False
         try:
             if place == "window" and form is None and not chosen:
-                form = await self._unsent(raw)
+                form = await self._unsent()
                 place = "app" if form else "window"
             if place == "window" and not self._windows():
                 place = "app"
@@ -783,7 +784,7 @@ class BrowserToolProvider(BaseToolProvider):
             detail["failed"] = True
         if where.busy:
             detail["busy"] = True
-        pause.hold("browser", detail, functools.partial(self._run_ended, tab), by=self)
+        pause.hold("browser", detail, self._run_ended, by=self)
 
     async def _to_background(self) -> None:
         """After the person: melo's browser without a window again, on the same pages."""
@@ -797,14 +798,15 @@ class BrowserToolProvider(BaseToolProvider):
             tab, "gone" if how == "gone" else "lost" if how == "lost" else "closed"
         )
 
-    def _run_ended(self, tab: str, how: Resumed) -> None:
-        """The run ended while the person had *tab* (a Stop, or its end): melo takes the page back."""
-        self._owners.give(tab, "stopped" if how == "stopped" else "ended")
+    def _run_ended(self, how: Resumed) -> None:
+        """The run ended while the person had its pages (a Stop, or its end): melo takes them all back."""
+        for tab in sorted(self._owners.held):
+            self._owners.give(tab, "stopped" if how == "stopped" else "ended")
 
-    async def _unsent(self, raw: str) -> bool:
-        """Whether the page has a form the person began, which a window would clear (only a browser that starts again for one says)."""
+    async def _unsent(self) -> bool:
+        """Whether a window would clear a form the person began, on any page (only a browser that starts again for one says)."""
         check = getattr(self._driver, "unsent_input", None)
-        return bool(await check(raw)) if callable(check) else False
+        return bool(await check()) if callable(check) else False
 
     def _no_limit(self) -> AbstractAsyncContextManager[None]:
         """No time limit counts inside: the run's and the call's are stopped while melo waits for the person."""
@@ -1484,14 +1486,14 @@ class BrowserToolProvider(BaseToolProvider):
     async def _take_over(self, tab: str, origin: str, need: str) -> str | None:
         """Ask the person to take *tab* over for *need*; None when they do not, :class:`_CardEndedError` when their message ended the card.
 
-        A page with a form they began says so on the card, which then offers the
-        app's Browser panel first (a window would clear the form). The card
+        A form they began, on this page or another, is said on the card, which
+        then offers the app's Browser panel first (a window would clear it). The card
         waits as long as the person needs, and so does this step once they took
         the page: the run is on hold, with no time limit counting. The words say
         how long they had it and how it came back, and the page as it is now.
         """
         raw = self._raw.get(tab)
-        form = raw is not None and await self._unsent(raw)
+        form = raw is not None and await self._unsent()
         self._carded = tab
         try:
             async with self._no_limit():

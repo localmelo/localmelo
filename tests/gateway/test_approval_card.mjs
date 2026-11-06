@@ -225,7 +225,7 @@ test('a page with a form the person began says a window clears it and offers it 
   assert.match(note(draw('chrome', {browser: 'chrome'})), /real Chrome window.*melo's own Chrome/);
   assert.match(note(draw('safari', {})), /Safari's window/);
   const form = draw('form', {browser: 'chrome', form: true});
-  assert.match(note(form), /Opening it in Chrome reloads the page and clears the form/);
+  assert.match(note(form), /Opening this one in Chrome reloads melo.s pages and clears that form/);
   assert.deepEqual(buttons(form).map((node) => node.textContent).filter((text) => text !== 'Send'),
     ['Take over here', 'Open in Chrome, clear the form', 'Not now']);
   c.settle('form');

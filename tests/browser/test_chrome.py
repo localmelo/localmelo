@@ -342,6 +342,35 @@ async def test_a_call_during_the_restart_waits_for_it_and_keeps_its_tabs(
         await second.close()
 
 
+async def test_a_step_during_the_restart_reaches_its_tab_on_the_new_chrome(
+    peer: Peer,
+) -> None:
+    """What the old Chrome called the tab and its session does not outlive it."""
+    driver = make(peer)
+    await driver.start()
+    try:
+        a = await driver.open("https://example.com/news", new_tab=True)
+        b = await driver.open("https://example.com/news", new_tab=True)
+        old = driver._browser
+        assert old is not None
+        stale = driver._resolve(b.id)
+        del driver._sessions[stale]  # a page melo has not spoken to in this Chrome
+        showing = asyncio.ensure_future(driver.show_window(a.id, lambda how: None))
+        await until(lambda: old.closed)
+        assert old.successor is None, "inside the restart"
+        back, attached = await asyncio.gather(
+            driver.back(a.id), driver._attach(stale), return_exceptions=True
+        )
+        assert "no earlier page" in str(back), "the new Chrome answered, not an error"
+        asked = peer.calls("Page.getNavigationHistory")[-1]
+        assert asked["session"] == driver._sessions[driver._resolve(a.id)]
+        assert attached == driver._sessions[driver._resolve(b.id)]
+        await showing
+    finally:
+        await driver.hide_window()
+        await driver.close()
+
+
 async def test_another_chat_ending_leaves_the_persons_window(peer: Peer) -> None:
     from localmelo.support.browser.provider import BrowserToolProvider
 
@@ -516,6 +545,97 @@ async def test_a_take_with_the_panel_open_keeps_the_window_and_every_tab(
         await provider.close()
 
 
+async def test_a_page_taken_beside_another_chats_window_lives_in_the_panel(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The app is really where the page is: pictures come, input goes, the window stays."""
+    from localmelo.melo.agent._pause import Hold
+    from localmelo.melo.contracts.pause import PAUSE
+    from localmelo.support.browser.provider import BrowserToolProvider
+    from localmelo.tests.browser.test_acting import Asks, asking
+    from localmelo.tests.browser.test_provider import run
+
+    monkeypatch.setenv("FAKE_CHROME_FRAMES", "100000")
+    first, second = make(peer), make(peer)
+    other = BrowserToolProvider(second)  # type: ignore[arg-type]
+    tools = {t.definition.name: t for t in await other.start()}
+    said: list[Any] = []
+    hold = Hold(lambda w, d: said.append(d), lambda w, h, s: said.append(h))
+    token = PAUSE.set(hold)
+    try:
+        await first.start()
+        with asking(Asks()):
+            await run(tools, "browser_open", url="https://example.com/news")
+        live = other.live
+        assert live is not None
+        viewer = await live.watch()
+        await until(lambda: viewer.meta.get("state") == "live")
+        a = await first.open("https://example.com/", new_tab=True)
+        assert await first.show_window(a.id, lambda how: None) is True
+        window = first._browser
+        assert await live.take(viewer) is True
+        await until(lambda: bool(said))
+        await other._switched()
+        await until(lambda: viewer.meta.get("state") == "live")
+        assert viewer.meta["owner"] == "you" and viewer.meta["place"] == "app"
+        await until(lambda: viewer.meta.get("w") is not None)
+        click = {
+            "type": "mouse",
+            "action": "down",
+            "x": 10,
+            "y": 10,
+            "button": "left",
+            "buttons": 1,
+        }
+        assert live.send_input(viewer, click) is True
+        await until(lambda: bool(peer.calls("Input.dispatchMouseEvent")))
+        assert first._browser is window and window is not None
+        assert window.windowed and window.owner is first
+    finally:
+        PAUSE.reset(token)
+        other.hand_back()
+        await first.hide_window()
+        await other.close()
+        await first.close()
+
+
+async def test_a_window_clears_no_form_on_another_page_unless_the_person_chooses(
+    peer: Peer,
+) -> None:
+    """Chrome starts again for a window on every page: taking a plain one waits for a choice."""
+    from localmelo.melo.agent._pause import Hold
+    from localmelo.melo.contracts.pause import PAUSE
+    from localmelo.support.browser.provider import BrowserToolProvider
+    from localmelo.tests.browser.test_acting import Asks, asking
+    from localmelo.tests.browser.test_provider import run
+
+    driver = make(peer)
+    provider = BrowserToolProvider(driver)  # type: ignore[arg-type]
+    tools = {t.definition.name: t for t in await provider.start()}
+    hold = Hold(lambda w, d: None, lambda w, h, s: None)
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url="https://example.com/filled")
+            await run(tools, "browser_open", url="https://example.com/news", tab="new")
+        before = driver._browser
+        assert before is not None
+        provider.owners.take("t1")
+        await until(lambda: hold.held)
+        await provider._switched()
+        provider.owners.take("t2")
+        await provider._switched()
+        where = provider.owners.where("t2")
+        assert where is not None and (where.place, where.form) == ("app", True)
+        assert driver._browser is before and not before.closing, "nothing reloaded"
+        assert provider.show_to_person() is True, "the person's choice covers it"
+        await provider._switched()
+        assert driver._browser is not before and driver._browser.windowed
+    finally:
+        PAUSE.reset(token)
+        await provider.close()
+
+
 def test_preferences_save_no_password_and_never_write_through_a_planted_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -546,13 +666,22 @@ def test_preferences_save_no_password_and_never_write_through_a_planted_file(
     assert left == [f"Preferences.melo-{os.getpid()}"], "no temporary file is left"
 
 
-async def test_a_form_the_person_began_is_told_and_nothing_it_holds(
-    driver: ChromeBackgroundDriver,
+async def test_a_form_on_any_page_is_told_and_no_chats_current_tab_moves(
+    peer: Peer,
 ) -> None:
-    filled = await driver.open("https://example.com/filled", new_tab=True)
-    home = await driver.open("https://example.com/", new_tab=True)
-    assert await driver.unsent_input(filled.id) is True
-    assert await driver.unsent_input(home.id) is False
+    first, second = make(peer), make(peer)
+    await first.start()
+    await second.start()
+    try:
+        home = await first.open("https://example.com/", new_tab=True)
+        assert await first.unsent_input() is False
+        await second.open("https://example.com/filled", new_tab=True)
+        here = first._current
+        assert await first.unsent_input() is True, "another chat's page reloads too"
+        assert first._current == here == first._resolve(home.id)
+    finally:
+        await first.close()
+        await second.close()
 
 
 # ── Reading ──

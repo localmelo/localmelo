@@ -638,15 +638,15 @@ ends the run's `run.progress` events, never the run.
 - `what`: what has the run: `browser` (a page the person took over).
 - `detail`: what the surfaces show. For `browser`: `tab`, `place` (`window`, a
   real browser window, or `app`, the console's Browser panel), and when known
-  `site`, `form` (the page has a form the person began, so it stays in the
-  app), `failed` (a window could not open, so the page is in the app) and
+  `site`, `form` (a page melo has open holds a form the person began, which a
+  window would clear, so this one stays in the app), `failed` (a window could not open, so the page is in the app) and
   `busy` (that was because another chat's window is open).
 
 While the run is held no request goes to the model, whichever part of the run
 asks, and neither the run's own time limit (`timeout_s`) nor the running call's
-counts. Tool calls the model already chose are not stopped, but a browser step
-on a page the person has waits for it. Stop (a cancellation) goes through at
-once.
+counts. No tool call starts either, also one the model already chose; a call
+already running when the hold began goes on. Stop (a cancellation) goes through
+at once.
 
 ### run.resumed
 

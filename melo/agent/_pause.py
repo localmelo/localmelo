@@ -1,8 +1,8 @@
 """The run's hold (:class:`~localmelo.melo.contracts.pause.RunPause`): the person has the run.
 
-One per run. Every request of the run to the model waits in :meth:`Hold.wait`
-first (the chat's request path calls it); a tool calls :meth:`Hold.hold` and
-:meth:`Hold.release` (see the contract). While the run waits, or a tool waits inside
+One per run. Every send of the run to the model and every tool start waits in
+:meth:`Hold.wait` first (the chat's request path and the agent's tool step call
+it); a tool calls :meth:`Hold.hold` and :meth:`Hold.release` (see the contract). While the run waits, or a tool waits inside
 :meth:`Hold.suspended`, its time limits are moved on by the time it waited: an
 ``asyncio.Timeout`` is set to no deadline and given back what it had left.
 """
@@ -91,11 +91,13 @@ class Hold:
         self._resumed(held.what, how, max(0.0, self._clock() - held.since))
 
     async def wait(self) -> None:
-        """The gate before a model call: wait while the run is held, with no time limit counting."""
+        """The gate before a model send or a tool: wait while the run is held, with no time limit counting."""
         if self._held is None:
             return
         async with self.suspended():
-            await self._free.wait()
+            # A new take can land before this wakes: being woken is not being free.
+            while self._held is not None:
+                await self._free.wait()
 
     @contextlib.asynccontextmanager
     async def suspended(self) -> AsyncIterator[None]:

@@ -209,7 +209,14 @@ async def test_a_chat_paused_for_the_person_is_in_control_until_it_resumes(
         "You're in control",
         False,
     )
-    resumed = core_event("run.resumed", seq=3, what="browser", how="done", held_s=4.0)
+    # The next step begins and waits at the gate: the person still has the run.
+    await console.store.append_events(
+        turn.session_id, turn.turn, [core_event("step.started", seq=3)], holder=HOLDER
+    )
+    found = status(client)
+    assert found["control"] == [{"kind": "chat", "id": turn.session_id}]
+    assert found["focus"]["activity"] == "You're in control"
+    resumed = core_event("run.resumed", seq=4, what="browser", how="done", held_s=4.0)
     await console.store.append_events(
         turn.session_id, turn.turn, [resumed], holder=HOLDER
     )

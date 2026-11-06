@@ -539,8 +539,9 @@ def _takeover_panel(
 ) -> PanelText:
     """Taking over a page: where it opens, and how melo gets it back (Enter here, or closing the window).
 
-    A page with a form the person began opens in the web console's Browser
-    panel: a Chrome window would reload it and clear the form.
+    While a form the person began is open on any of melo's pages, the page opens
+    in the web console's Browser panel: a Chrome window would reload them all and
+    clear the form.
     """
     site, changed = escape_arguments(str(arguments.get("site") or "a page"))
     what = TAKEOVER_NEEDS.get(
@@ -549,9 +550,9 @@ def _takeover_panel(
     said = f"melo needs you for {what} on {site}. melo is paused until you give the page back."
     if arguments.get("form") is True:
         where = (
-            "This page has a filled-in form, so it opens in the web console's Browser "
-            "panel (melo console), where the form stays. Press Enter on an empty "
-            "line here, or Done there, when you're done."
+            "A page melo has open holds a filled-in form, so this one opens in the web "
+            "console's Browser panel (melo console), and the form stays. Press Enter "
+            "on an empty line here, or Done there, when you're done."
         )
     elif arguments.get("browser") == "chrome":
         where = (
