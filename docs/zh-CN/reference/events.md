@@ -148,6 +148,8 @@ asyncio.run(main())
 | `reflection` | 反思的效果确定之后。 | `attempt`, `action`, `continue_run`, `flags`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | 仅当设置 `progress=True` 时：紧接在 `run.started` 之后；每次 `step.started`、`tool.finished`、`reflection.started` 和 `stuck` 通知之后；以及紧接在 `run.finished` 之前。 | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | 启用上下文记账时，每次规划或反思尝试一次，包括失败的尝试。 | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
+| `run.paused` | 某个工具把运行交给了用户（melo 的浏览器把网页交给用户）：运行等待，不调用模型，也不计任何时限。所说的内容变化时会再发一次。 | `what`, `detail` |
+| `run.resumed` | 这次暂停结束。 | `what`, `how`, `held_s` |
 | `run.finished` | 最后一个。 | `result`, `reviews` |
 
 <a id="runstarted"></a>
@@ -397,6 +399,19 @@ asyncio.run(main())
 
 <a id="runfinished"></a>
 
+### run.paused：运行暂停
+
+- `what`：谁拿着运行：`browser`（用户接管的网页）。
+- `detail`：给各个界面显示的内容。对 `browser`：`tab`、`place`（`window` 是真实的浏览器窗口，`app` 是控制台的浏览器面板），已知时还有 `site`、`form`（网页上有用户填了一半的表单，所以留在应用里）和 `failed`（窗口打不开，所以网页在应用里）。
+
+暂停期间，运行不调用模型，不开始工具调用，运行自己的时限（`timeout_s`）和正在进行的调用的时限都不计时。停止（取消）会立刻生效。
+
+### run.resumed：运行继续
+
+- `what`：同 `run.paused`。
+- `how`：`done`（用户说完成了：按“完成”，或在终端空行按回车）、`closed`（用户关掉了交给他的窗口）、`stopped`（暂停期间运行被停止）或 `ended`（运行以其他方式结束）。
+- `held_s`：暂停的秒数，精确到十分之一秒。
+
 ### run.finished：运行结束
 
 - `result`：运行的 `RunResult`，即 `RunResult.to_dict()`。其中没有任何内容被截断，因此 `RunResult(**event.data["result"])` 可以重建它。
@@ -416,6 +431,7 @@ asyncio.run(main())
   - 回复到达之后，结果检查抛出异常，这使运行以 `crashed` 结束；
   - 反思的第二次请求在第一次返回之后失败；
   - 启用持久化时，取消中断了回复写入历史记录的过程。
+- **暂停在运行结束前结束。** 每个开始暂停的 `run.paused` 之后，在 `run.finished` 之前都有一个 `run.resumed`；暂停期间被停止的运行会收到 `how` 为 `stopped` 的 `run.resumed`。暂停期间的第二个 `run.paused` 只说明变化，不需要第二个 `run.resumed`。
 - **一个 id。** 每个事件的 `run_id` 都是运行的 `task_id`，与 `RunResult` 和任务记录中相同。
 
 <a id="payload-rules"></a>

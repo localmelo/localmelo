@@ -467,9 +467,10 @@ While melo browses in Chrome in the background ([Browsing with melo](browsing.md
 - It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
 - On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
 - It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.
-- **Take over** in its footer makes the page yours: "You are in control", and your clicks, keys, input method and pastes go to the page while melo waits. **Give back to melo** returns it, and melo reads the page again before it acts ([Taking over melo's browser](browsing.md#taking-over-melos-browser)).
-- When melo needs you on a page (a sign-in, a code, a QR code, a check that you are human), a card in the chat says "melo needs you to sign in on example.com" with **Take over** and **Not now**. Take over opens the panel with the page yours.
-- A box the page puts up while you have it (an alert, a confirm, a question) shows in the panel. Leave the panel and the page goes back to melo after 2 minutes.
+- **Take over** in its footer makes the page yours, in a real window of melo's Chrome: the panel says "You're in control", shows a live copy and offers **Show Chrome window**. melo is paused, with no time limit. **Done** gives it back (closing the window does too), and melo reads the page again before it acts ([Taking over melo's browser](browsing.md#taking-over-melos-browser)).
+- When melo needs you on a page (a sign-in, a code, a QR code, a check that you are human), a card in the chat says "melo needs you to sign in on example.com" with **Take over** and **Not now**. A page with a form you began offers **Take over here** first, since a window would clear the form.
+- When the page is in the panel (a form you began, or a window that could not open), your clicks, keys, input method and pastes go to it there. A box the page puts up while you have it (an alert, a confirm, a question) shows in the panel.
+- The chat's record keeps one line of how it ended: "Gave the page back to melo at 10:42.", "You closed the Chrome window, so the page went back to melo." or "melo was stopped while you had the page."
 - Nothing you type is kept, and the picture is not saved anywhere.
 
 ## Melo in the page

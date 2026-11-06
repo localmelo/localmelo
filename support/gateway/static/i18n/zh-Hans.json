@@ -2059,7 +2059,7 @@
   "turns.reflection.unreadable": "第 {n} 次尝试后的反思无法读取，运行继续。",
   "turns.reflection.unreadableEnd": "第 {n} 次尝试后的反思无法读取，本次运行的预算也已用完。",
   "turns.resumed.closed": "你关掉了 Chrome 窗口，所以网页回到了 melo 这里。",
-  "turns.resumed.done": "{time} 交还给了 melo。",
+  "turns.resumed.done": "你在 {time} 把网页交还给了 melo。",
   "turns.resumed.stopped": "你拿着网页时，melo 被停止了。",
   "turns.status.closed.title": "已停止：会话已关闭",
   "turns.status.closed.word": "已停止",

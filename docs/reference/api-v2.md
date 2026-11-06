@@ -119,6 +119,7 @@ output or log the header; same-user processes can still read the token file.
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
     ],
     "waiting": [],
+    "control": [],
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
@@ -193,13 +194,19 @@ output or log the header; same-user processes can still read the token file.
   desktop pet and the console's portrait show Melo thinking only on it. A
   live row of `GET /api/activity` carries it too.
 - `status.focus` is the one item a glance shows (the item as in
-  `status.items`): one that waits for an approval first, else the one whose
-  newest event is the latest; `null` when nothing runs.
+  `status.items`): one that waits for an approval first, then one whose run is
+  paused for the person, else the one whose newest event is the latest; `null`
+  when nothing runs.
 - `status.waiting` lists the chats and tasks with a tool-approval request that
   waits for an answer, chats first, at most 20, each `{"kind", "id"}` (`kind` is
   `chat` or `task`). The console opens them at `#/s/<id>` and `#/tasks/<id>`, and
   the macOS app's menu bar reads the list at each poll. `sessions.pending_approvals`
   counts the open chats' requests only.
+- `status.control` lists the running chats paused while the person has one of
+  their pages (their newest events hold a `run.paused` with no `run.resumed`
+  after it), each `{"kind": "chat", "id"}`; their `activity` is "You're in
+  control". The macOS app's pill shows it with a Done button, which sends
+  `POST /api/sessions/{id}/browser/done`.
 - `status.recent` says how the newest finished chat turn, task, run or terminal
   turn ended: `{"kind", "id", "title", "outcome", "ended_s_ago"}`, or `null` when none
   did (or when no store can be read). `kind` is as in `status.items`; `title` is
@@ -1480,11 +1487,11 @@ Whether the chat has a page open in melo's browser, and which. The console asks 
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "place": null, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
-- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over). The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
+- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over), with `place` where they have it: `window` (a real Chrome window; the panel shows a live copy) or `app` (the Browser panel itself); `place` is null otherwise. The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
 - `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
 
 ## WS /api/sessions/{id}/browser/live
@@ -1496,14 +1503,32 @@ A live picture of the chat's browser: the page melo works in, as JPEG pictures, 
 <binary frame: one JPEG>
 ```
 
-- The server sends text frames and binary frames. A text frame is a `meta` message: `state` is `idle` (no page open), `loading` (a page is open and the first picture has not come), `live`, `stale` (the picture stream failed, so the last picture no longer updates) or `closed`; `reason` explains `closed` (`tab`, `browser`, `chat` or `unavailable`). `tab`, `url`, `title` and `browsing` are as above, `owner` is `melo` or `you` (the person took the tab over), and once a picture came `w` and `h` are the page view in CSS pixels, with `offsetTop` and `scale` (the page's zoom). `takeover: true` says the page may be taken over. While `owner` is `you`, `grace` is how many seconds the tab stays the person's once no viewer watches it (120), and `dialog` (`kind` `alert`, `confirm`, `prompt` or `beforeunload`, `message`, `default`) is a box the page shows, for the person to answer.
+- The server sends text frames and binary frames. A text frame is a `meta` message: `state` is `idle` (no page open), `loading` (a page is open and the first picture has not come), `live`, `stale` (the picture stream failed, so the last picture no longer updates) or `closed`; `reason` explains `closed` (`tab`, `browser`, `chat` or `unavailable`). `tab`, `url`, `title` and `browsing` are as above, `owner` is `melo` or `you` (the person took the tab over), and once a picture came `w` and `h` are the page view in CSS pixels, with `offsetTop` and `scale` (the page's zoom). `takeover: true` says the page may be taken over. While `owner` is `you`, `place` is `window` or `app` (as above), `form: true` says the page stays in the app because it has a form the person began, `failed: true` that a window could not open, and `dialog` (`kind` `alert`, `confirm`, `prompt` or `beforeunload`, `message`, `default`) is a box the page shows, for the person to answer.
 - A binary frame is one JPEG. Only the newest picture is kept for each viewer, so a slow viewer skips pictures and never queues them. A page that does not change sends one picture and then none; moving pages are held to `[browser] live_fps` (15 by default).
 - The optional `tab=tN` query pins the view to one tab of this chat. Without it the view follows the tab melo works in, and a `meta` message tells of each switch. Another chat's tab, an unknown tab and a malformed name are refused.
 - The stream runs only while somebody watches: the browser keeps no picture stream for a chat with no viewer, a chat holds at most 4 viewers at a time, and nothing it carries is written to disk or to the session store.
 - It is behind the same guard as every `/api` route: the Host header, a same-origin Origin when one is sent, and the bearer or the console's cookie. A script sends `Authorization: Bearer <token>` and no Origin.
-- The client sends JSON text messages. `{"type":"take"}` hands the tab it watches to the person and `{"type":"give"}` gives it back to melo. While the person has it, and melo is not in the middle of a step, these are their input: `{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}` (page CSS pixels: the picture's point divided by `scale`, after `offsetTop`), `{"type":"wheel","x","y","dx","dy","mods"}`, `{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`, `{"type":"compose","text","start","end"}` (an input method's text being composed), `{"type":"text","text"}` (its commit) and `{"type":"paste","text"}` (plain text), at most 1,000 characters each; and `{"type":"dialog","accept","text"}` answers the page's box. `mods` is the sum of Alt 1, Control 2, Meta 4 and Shift 8. Input is held to 120 messages a second per viewer. Any other message, and input while melo has the tab, is dropped without an answer. Nothing a message carries is logged, stored or shown to a model.
-- While nobody watches a tab the person has (the last viewer closed, or the token rotated), it stays theirs for 120 seconds, then returns to melo. melo's browser steps on it wait meanwhile, at most 45 seconds each.
+- The client sends JSON text messages. `{"type":"take"}` hands the tab it watches to the person and `{"type":"give"}` gives it back to melo. While the person has it in the app (`place` `app`), and melo is not in the middle of a step, these are their input: `{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}` (page CSS pixels: the picture's point divided by `scale`, after `offsetTop`), `{"type":"wheel","x","y","dx","dy","mods"}`, `{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`, `{"type":"compose","text","start","end"}` (an input method's text being composed), `{"type":"text","text"}` (its commit) and `{"type":"paste","text"}` (plain text), at most 1,000 characters each; and `{"type":"dialog","accept","text"}` answers the page's box. `mods` is the sum of Alt 1, Control 2, Meta 4 and Shift 8. Input is held to 120 messages a second per viewer. Any other message, and input while melo has the tab, is dropped without an answer. Nothing a message carries is logged, stored or shown to a model.
+- A tab the person has stays theirs, with no time limit, until they give it back (`give`, Done, closing the window) or the run ends. Meanwhile the chat's run is paused (`run.paused`): no model call and no time limit counting.
 - The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down.
+
+## POST /api/sessions/{id}/browser/done
+
+Done, from anywhere (the app's pill, the terminal, the console): every page the person has in this chat goes back to melo, Chrome's window closes and the paused run goes on.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -X POST -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser/done
+```
+
+```json
+{"ok": true}
+```
+
+- `ok` is false when the person has no page of the chat (or the chat is not open). An unknown session is 404 `not_found`; a worker run's session refuses it, as every write route does.
+
+## POST /api/sessions/{id}/browser/window
+
+The person's page moves to a real Chrome window, or that window comes to the front. A page with a form they began loses the form. Sent while a take-over card waits, the card's "Take over" opens the window. The answer is `{"ok": bool}`: false when the person has no page and no card waits.
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 

@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Taking over a page is a real pause in a real window. In Chrome, **Take over** opens the page in a window of melo's own
+  Chrome (same page, same sign-ins), and the whole run waits: no model call, no step and no time limit, with no grace or
+  step timers left. **Done** (the Browser panel, the app's pill, or an empty Enter in the terminal) or closing the window
+  gives it back: Chrome goes back to the background on the same page and the chat says how it ended. A page with a form
+  the person began stays in the Browser panel unless they choose the window, and a window that cannot open falls back to
+  the panel. New events `run.paused` and `run.resumed`, `POST /api/sessions/{id}/browser/done` and `/browser/window`,
+  and health `status.control`. melo's Chrome now restores its last session on every start, so session cookies stay in
+  its 0700 profile too (#NNN).
 - Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at

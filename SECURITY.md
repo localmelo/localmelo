@@ -145,6 +145,13 @@ those tools can do.
   only resolves to this Mac (DNS rebinding, `/etc/hosts`) is checked by
   neither, and melo only blanks that tab after it lands and reads nothing
   from it. Safari's automation windows have no such check.
+- **melo's Chrome keeps its sign-ins on disk.** Its profile
+  (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
+  each time Chrome starts, so that a page can move to a window for the person
+  and back: cookies a site means for one session stay on disk too, like
+  lasting ones. Chrome does not use the Keychain there, so they are protected
+  by the folder's permissions and FileVault only. To clear them, quit melo and
+  delete that folder.
 - **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
   See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
   for sign-in and token rotation. Host, Origin and fetch-metadata checks remain
