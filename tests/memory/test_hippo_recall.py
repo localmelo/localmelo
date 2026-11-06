@@ -4,10 +4,11 @@ Items a chat model encoded from the chats take the place of the turns: recall ra
 bars, picks and shows them as it does turns, a list line is ``[m12] …`` under its own
 guide, ``open_memory`` opens an item (and, with ``open_sources``, the turns it came
 from), a replaced item reads as older, a conflicting one names its partner, and the
-turn's memory event says which items were used, searched and opened. A chat's turns
-past its progress mark (the last turn encoded) stay in the same list, so a chat nobody
-encoded is not lost; an encoded chat reads as it did before marks, and a store with no
-marks reads as the turns source. With the default source, ``turns``, nothing changes.
+turn's memory event says which items were used, searched and opened. A turn leaves
+recall only while a stored item cites it (whatever the item's status), whatever the
+chat's progress mark says: a chat nobody encoded, or a turn the encoder left out, is
+not lost, and a store with no items reads as the turns source. With every turn cited,
+recall reads items alone. With the default source, ``turns``, nothing changes.
 Synthetic items, words and fixed vectors, no model.
 """
 
@@ -22,7 +23,9 @@ from typing import Any
 import numpy as np
 import pytest
 
+from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -838,7 +841,7 @@ async def test_a_list_of_turns_and_items_has_one_guide_line_with_the_premise_sen
         await memory.aclose()
 
 
-async def test_a_mark_that_advances_takes_those_turns_out_at_the_next_sync(
+async def test_a_turn_leaves_recall_when_an_item_cites_it_not_when_a_mark_passes_it(
     tmp_path: Path, store: SessionStore
 ) -> None:
     cfg = config(recall_source="items", recall_form="list")
@@ -847,26 +850,29 @@ async def test_a_mark_that_advances_takes_those_turns_out_at_the_next_sync(
     try:
         assert f"t{fill.later}" in refs_of((await ask(memory, store)).block)
         _, index = memory.stores()
+        # The encoder read turn 2 and made nothing of it: a mark says a turn was
+        # read, not that anything stands for it, so it stays recalled.
         await index.mark_encoded(fill.session_id, 2)
         found = await ask(memory, store)
-        assert [i.key for i in found.used] == [f"m:{fill.item}"]
+        assert {i.key for i in found.used} == {f"m:{fill.item}", f"d:{fill.later}"}
+        # An item that cites it takes it out at the next sync.
+        await put(memory, fill.session_id, "Pot", "Pot two needs water.", turns=(2,))
+        await ask(memory, store)
         assert not memory._corpus.keys("d:")
-        # The progress mark never moves back.
-        await index.mark_encoded(fill.session_id, 1)
-        assert await index.encoded_turn(fill.session_id) == 2
     finally:
         await memory.aclose()
 
 
-async def test_a_chat_with_no_mark_is_not_encoded_whatever_the_items_say(
+async def test_a_cited_turn_is_not_recalled_whatever_the_chats_mark_says(
     tmp_path: Path, store: SessionStore
 ) -> None:
     cfg = config(recall_source="items", recall_form="list")
     fill = await held(tmp_path, store, cfg, encoded=False)
     memory = fill.memory
     try:
+        assert await memory.stores()[1].encoded_turn(fill.session_id) is None
         found = await ask(memory, store)
-        assert {i.key for i in found.used} == {f"m:{fill.item}", f"d:{fill.doc}"}
+        assert {i.key for i in found.used} == {f"m:{fill.item}"}
     finally:
         await memory.aclose()
 
@@ -974,6 +980,117 @@ async def test_forgetting_one_turn_keeps_the_chats_mark(
         await memory.aclose()
 
 
+async def test_forgetting_one_source_of_an_item_drops_it_and_frees_the_other_turn(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg, later=LATER, turns=(1, 2))
+    memory = fill.memory
+    try:
+        found = await ask(memory, store)
+        assert [i.key for i in found.used] == [f"m:{fill.item}"]
+        _, index = memory.stores()
+        await memory.forget_session(fill.session_id, 2)
+        # The item rested on both turns: it goes whole, with the text it drew from
+        # the forgotten one. The turn that is left is recalled as a turn again, not
+        # encoded again.
+        assert await index.count_items() == 0
+        assert await index.encoded_turn(fill.session_id) == 2
+        for text in (
+            (await ask(memory, store)).block,
+            await MemoryTools(memory).search(query=QUESTION),
+        ):
+            assert f"t{fill.doc}" in text and TURN[0] in text
+            assert TEXT not in text and LATER[0] not in text and LATER[1] not in text
+    finally:
+        await memory.aclose()
+
+
+HOME = "The user said they live in Pittsburgh."
+MOVED = "The user said they now live in Utrecht."
+
+
+async def repeated(
+    tmp_path: Path, store: SessionStore, cfg: Any
+) -> tuple[ChatMemory, Router, str, str]:
+    """A memory in which a first chat states a fact and a second chat repeats it: the
+    router keeps one item, which cites the turns of both chats."""
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        router = Router(memory.stores()[1])
+        sessions = []
+        for n, typed in enumerate(
+            ("I live in Pittsburgh.", "Yes, I live in Pittsburgh.")
+        ):
+            when = time.time() - (4 - n) * DAY
+            session_id, _ = await add_turn(
+                memory, store, typed, "Noted, Pittsburgh.", at=when, title=f"Chat {n}"
+            )
+            sessions.append(session_id)
+            item = MemoryItem(
+                session_id,
+                "Home",
+                HOME,
+                "profile",
+                when,
+                ((session_id, 1),),
+                encoder="1:x",
+            )
+            assert (await router.route(item)).action == ("NEW" if n == 0 else "IGNORE")
+        first, second = sessions
+        (kept,) = await memory.stores()[1].fetch_items([1])
+        assert kept.sources == ((first, 1), (second, 1))
+    except BaseException:
+        await memory.aclose()
+        raise
+    return memory, router, first, second
+
+
+async def test_a_repeated_fact_that_is_replaced_leaves_no_stale_turn(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory, router, _, _ = await repeated(tmp_path, store, cfg)
+    try:
+        third, _ = await add_turn(
+            memory, store, "I now live in Utrecht.", "Utrecht.", at=time.time() - DAY
+        )
+        moved = MemoryItem(
+            third, "Home", MOVED, "profile", time.time() - DAY, ((third, 1),)
+        )
+        assert (await router.route(moved)).action == "UPDATE"
+        found = await ask(memory, store, "Where do I live now?")
+        # The repeat's turn is behind the replaced item: it is not a second, current
+        # statement of the old fact beside the new one.
+        assert [i.key for i in found.used] == ["m:2"]
+        assert not memory._corpus.keys("d:")
+        assert "Utrecht" in found.block and "Pittsburgh" not in found.block
+    finally:
+        await memory.aclose()
+
+
+async def test_forgetting_the_first_chat_of_a_repeated_fact_brings_the_second_back(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory, _, first, _ = await repeated(tmp_path, store, cfg)
+    try:
+        _, index = memory.stores()
+        before = await ask(memory, store, "Where do I live?")
+        assert [i.key for i in before.used] == ["m:1"]
+        assert not memory._corpus.keys("d:")
+        await memory.forget_session(first)
+        # The item goes whole with its first source; the second chat's turn, which it
+        # also cited, is recalled as a turn, so the fact is still found.
+        assert await index.count_items() == 0
+        (doc,) = await index.ids()
+        found = await ask(memory, store, "Where do I live?")
+        assert [i.key for i in found.used] == [f"d:{doc}"]
+        assert "Pittsburgh" in found.block
+    finally:
+        await memory.aclose()
+
+
 # ── Forgetting ──
 
 
@@ -1004,5 +1121,59 @@ async def test_forgetting_a_chat_or_everything_takes_the_items_and_a_reindex_kee
         assert await index.encoded_turn(first) is None
         assert not memory._corpus.keys("m:")
         assert (await ask(memory, store, "tomatoes in bed one")).block == ""
+    finally:
+        await memory.aclose()
+
+
+class PlantEmbedding(BaseEmbeddingProvider):
+    """A second embedding model: text about plants (tomato, vegetable) is
+    ``[1, 0, 0]``, any other text ``[0, 0, 1]``. With *fail*, it raises."""
+
+    model = "new-embed"
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if self.fail:
+            raise RuntimeError("the embedding server is down")
+        return [
+            [1.0, 0.0, 0.0] if re.search("tomato|vegetable", t) else [0.0, 0.0, 1.0]
+            for t in texts
+        ]
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_a_reindex_gives_the_items_vectors_of_the_new_embedding_model(
+    tmp_path: Path, store: SessionStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = config(recall_source="items", retriever="embedding")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        session_id, _ = await add_turn(
+            memory, store, TURN[0], TURN[1], at=time.time() - 3 * DAY, title="Garden"
+        )
+        number = await put(memory, session_id, TITLE, TEXT, cosine=0.0)
+        provider = PlantEmbedding()
+        memory.embedding = lambda: (provider, provider.model)  # type: ignore[method-assign]
+        _, index = memory.stores()
+        # A question that shares no word with the item, under the new model: the old
+        # vector is of another model, so it is not compared.
+        paraphrase = "How do I prop up my vegetable beds?"
+        assert not [i for i in await memory.search(paraphrase) if i.is_memory]
+        # A model that fails leaves the old vector, and the log says how many.
+        provider.fail = True
+        await memory.reindex(None)
+        (kept,) = await index.fetch_items([number])
+        assert kept.embed_model == MODEL
+        assert any("1 memory items kept" in line for line in caplog.messages)
+        provider.fail = False
+        await memory.reindex(None)
+        (stored,) = await index.fetch_items([number])
+        assert (stored.embed_model, stored.vector) == ("new-embed", (1.0, 0.0, 0.0))
+        found = await memory.search(paraphrase)
+        assert [i.key for i in found if i.is_memory] == [f"m:{number}"]
     finally:
         await memory.aclose()

@@ -14,11 +14,12 @@ table also holds the sleep watermark (``sleep_until``), and ``sleep_runs`` what
 each sleep run changed, by id, for its undo. Its ``items`` table holds the memory
 items a chat model encoded from chats (developer setting, :class:`MemoryItem`):
 each names the turns it came from, and deleting a chat deletes the items that came
-from it alone and takes its turns out of the sources of the rest. Its ``encoded``
-table holds, per chat, the last turn a chat model encoded into items
-(:meth:`mark_encoded`); recall reads the turns past it too (:meth:`ids`), and a chat
-with no mark counts as not encoded; a summary or an exchange (a turn below 1) is never
-encoded and is always read.
+from it alone, and so does deleting one turn an item names (it cannot be shown to
+rest on the others alone). Recall reads a turn until a stored item cites it as a
+source (:meth:`ids`), whatever the item's status; a summary or an exchange (a turn
+below 1) is never cited and is always read. Its ``encoded`` table holds, per chat,
+the last turn a chat model has read for items (:meth:`mark_encoded`): which turns
+still wait for it, not which are represented.
 """
 
 from __future__ import annotations
@@ -549,18 +550,22 @@ class ConversationIndex:
         low = int(row[0]) if row and row[0] is not None else 0
         return min(low, SUMMARY_TURN) - 1
 
-    async def ids(self, *, unencoded: bool = False) -> set[int]:
-        """The id of every document; with *unencoded*, only those of turns past
-        their chat's mark (:meth:`mark_encoded`), every one of a chat with no mark.
-        A document at a turn below 1 (a side chat's summary, a task's exchange) is
-        never encoded, so it always stays."""
+    async def ids(self, *, uncited: bool = False) -> set[int]:
+        """The id of every document; with *uncited*, only those of turns that no
+        stored item cites as a source, whatever its status (a replaced item still
+        stands for its turns). A document at a turn below 1 (a side chat's summary,
+        a task's exchange) is never cited, so it always stays."""
         conn = await self._ready()
         query = "SELECT id FROM documents"
-        if unencoded:
+        if uncited:
+            # EXCEPT, not a join: SQLite does not index the json_each rows, and a
+            # join against them takes seconds on a few thousand items.
             query += (
-                " LEFT JOIN encoded ON encoded.session_id = documents.session_id"
-                " WHERE encoded.turn IS NULL OR documents.turn <= 0"
-                " OR documents.turn > encoded.turn"
+                " WHERE turn <= 0 OR (session_id, turn) IN ("
+                "SELECT session_id, turn FROM documents EXCEPT "
+                "SELECT json_extract(s.value, '$[0]'), json_extract(s.value, '$[1]') "
+                "FROM items, json_each(items.sources) AS s "
+                "WHERE json_valid(items.sources))"
             )
         async with conn.execute(query) as cur:
             return {int(row[0]) for row in await cur.fetchall()}
@@ -683,8 +688,10 @@ class ConversationIndex:
     async def _drop_sources(
         self, conn: aiosqlite.Connection, session_id: str, turn: int | None
     ) -> None:
-        """Take a chat's turn (every turn without *turn*) out of the items' sources;
-        an item left with none is deleted, and the links to it are undone."""
+        """Delete the items that name a chat's turn (every turn without *turn*) as a
+        source, and undo the links to them. An item with any source gone is deleted
+        whole: its text cannot be shown to rest only on the turns that are left,
+        which no longer have an item and are recalled as turns again."""
         async with conn.execute(
             "SELECT id, session_id, sources FROM items "
             "WHERE session_id = ? OR instr(sources, ?) > 0",
@@ -694,38 +701,57 @@ class ConversationIndex:
         gone: set[int] = set()
         for item_id, owner, raw in rows:
             sources = _sources(raw)
-            kept = tuple(
-                src
+            lost = any(
+                src[0] == session_id and (turn is None or src[1] == turn)
                 for src in sources
-                if not (src[0] == session_id and (turn is None or src[1] == turn))
             )
-            if not kept and (sources or (owner == session_id and turn is None)):
+            if lost or (not sources and owner == session_id and turn is None):
                 gone.add(int(item_id))
-            elif kept != sources:
-                await conn.execute(
-                    "UPDATE items SET sources = ? WHERE id = ?",
-                    (json.dumps([list(src) for src in kept]), item_id),
-                )
         if gone:
+            await self._unlink(conn, gone)  # reads the replacement links, then
             marks = ", ".join("?" * len(gone))
             await conn.execute(f"DELETE FROM items WHERE id IN ({marks})", sorted(gone))
-            await self._unlink(conn, gone)
 
     async def _unlink(self, conn: aiosqlite.Connection, gone: set[int]) -> None:
-        """Undo what the items in *gone* did to the others: an item they replaced is
-        current again, an item that disagreed only with them is no longer in
-        conflict, and links to them are dropped."""
+        """Undo what the items in *gone* (still stored) did to the others, and keep
+        the order in which the rest replace one another. An item whose replacer goes
+        is replaced by the replacer's own replacer, and so on to the first one that
+        stays (A, B, C in turn: without B, C replaces A). When none stays, the newest
+        of the items they replaced is current again and replaces the others. An item
+        that disagreed only with them is no longer in conflict, and links to them are
+        dropped."""
         async with conn.execute(
-            "SELECT id, status, replaced_by, related, conflicts FROM items "
+            "SELECT id, status, replaced_by, related, conflicts, created_at FROM items "
             "WHERE replaced_by IS NOT NULL OR related != '[]' OR conflicts != '[]'"
         ) as cur:
             rows = await cur.fetchall()
-        for item_id, status, by, related_raw, conflicts_raw in rows:
+        replacer = {int(row[0]): row[2] for row in rows}
+        made = {int(row[0]): float(row[5]) for row in rows}
+        now: dict[int, int | None] = {}  # a survivor's replacer after the delete
+        orphans: dict[int, list[int]] = {}  # the deleted head -> survivors it replaced
+        for item_id, by in replacer.items():
+            if item_id in gone or by not in gone:
+                continue
+            heir, seen = by, set[int]()
+            while heir in gone and replacer.get(heir) is not None and heir not in seen:
+                seen.add(heir)
+                heir = replacer[heir]
+            if heir in gone:  # no replacer stays: *heir* was the current one
+                orphans.setdefault(heir, []).append(item_id)
+            else:
+                now[item_id] = heir
+        for members in orphans.values():
+            newest = max(members, key=lambda i: (made[i], i))
+            now.update({i: newest for i in members if i != newest})
+            now[newest] = None
+        for item_id, status, by, related_raw, conflicts_raw, _ in rows:
+            if item_id in gone:
+                continue
             related = tuple(i for i in _ids(related_raw) if i not in gone)
             conflicts = tuple(i for i in _ids(conflicts_raw) if i not in gone)
-            replaced_by = None if by in gone else by
+            replaced_by = now.get(item_id, by)
             status_now = status
-            if by in gone and status == "replaced":
+            if by is not None and replaced_by is None and status == "replaced":
                 status_now = "active"
             if status_now == "conflict" and not conflicts:
                 status_now = "active"
@@ -736,12 +762,11 @@ class ConversationIndex:
                 _ids(conflicts_raw),
             ):
                 continue
-            status = status_now
             await conn.execute(
                 "UPDATE items SET status = ?, replaced_by = ?, related = ?, "
                 "conflicts = ? WHERE id = ?",
                 (
-                    status,
+                    status_now,
                     replaced_by,
                     json.dumps(related),
                     json.dumps(conflicts),
@@ -877,8 +902,20 @@ class ConversationIndex:
 
     # ── Memory items ──
 
-    async def add_item(self, item: MemoryItem) -> int:
-        """Store *item* and return its id (its own ``id`` is ignored)."""
+    async def add_item(
+        self,
+        item: MemoryItem,
+        *,
+        replace: int | None = None,
+        link: int | None = None,
+        conflict: bool = False,
+    ) -> int:
+        """Store *item* and return its id (its own ``id`` is ignored).
+
+        With *replace*, that item is marked replaced by it; with *link*, the two are
+        linked as related, or in conflict with *conflict*. The item and what it does
+        to the other are one transaction: either both are stored or neither is.
+        """
         conn = await self._ready()
         vector = None if item.vector is None else np.asarray(item.vector, np.float32)
         try:
@@ -902,12 +939,17 @@ class ConversationIndex:
                     item.encoder,
                 ),
             )
+            assert cur.lastrowid is not None
+            new_id = int(cur.lastrowid)
+            if replace is not None:
+                await self._replace(conn, replace, new_id)
+            if link is not None:
+                await self._link(conn, new_id, link, conflict=conflict)
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
-        assert cur.lastrowid is not None
-        return int(cur.lastrowid)
+        return new_id
 
     async def fetch_items(self, ids: Iterable[int]) -> list[MemoryItem]:
         """The items with these ids, in id order (in batches, as :meth:`fetch`)."""
@@ -939,6 +981,52 @@ class ConversationIndex:
                 )
                 for row in await cur.fetchall()
             }
+
+    async def add_sources(
+        self, item_id: int, sources: Iterable[tuple[str, int]], at: float = 0.0
+    ) -> None:
+        """Add *sources* to the turns item *item_id* cites, in one write: for an item
+        that repeats a kept one, so that its turns stay behind it while it stands, and
+        go back to recall with it when it is forgotten. A source it has is not added
+        twice. Its time (the newest source's) moves forward to *at* when that is
+        later, so a fact repeated on Wednesday is not older than a change dated
+        Tuesday. An unknown item is skipped."""
+        conn = await self._ready()
+        try:
+            async with conn.execute(
+                "SELECT sources FROM items WHERE id = ?", (item_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                merged = tuple(dict.fromkeys((*_sources(row[0]), *sources)))
+                await conn.execute(
+                    "UPDATE items SET sources = ?, created_at = MAX(created_at, ?) "
+                    "WHERE id = ?",
+                    (json.dumps([list(src) for src in merged]), at, item_id),
+                )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+
+    async def set_item_vectors(
+        self, vectors: Iterable[tuple[int, Sequence[float]]], model: str
+    ) -> None:
+        """Replace the vector of each item ``(id, vector)`` with one of *model*, in one
+        write (a reindex). Nothing else of an item changes; an unknown id is skipped."""
+        conn = await self._ready()
+        try:
+            await conn.executemany(
+                "UPDATE items SET vector = ?, embed_model = ? WHERE id = ?",
+                [
+                    (np.asarray(vec, np.float32).tobytes(), model, item_id)
+                    for item_id, vec in vectors
+                ],
+            )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
 
     async def mark_encoded(self, session_id: str, turn: int) -> None:
         """Say chat *session_id*'s turns up to *turn* are encoded into items. The mark
@@ -995,45 +1083,53 @@ class ConversationIndex:
         item disagrees with them)."""
         conn = await self._ready()
         try:
-            _, _, conflicts = await self._links(conn, item_id)
-            await conn.execute(
-                "UPDATE items SET status = 'replaced', replaced_by = ?, "
-                "conflicts = '[]' WHERE id = ?",
-                (by, item_id),
-            )
-            for other in conflicts:
-                _, _, theirs = await self._links(conn, other)
-                left = tuple(i for i in theirs if i != item_id)
-                await conn.execute(
-                    "UPDATE items SET conflicts = ?, status = ? WHERE id = ?",
-                    (json.dumps(left), "conflict" if left else "active", other),
-                )
+            await self._replace(conn, item_id, by)
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
+
+    async def _replace(self, conn: aiosqlite.Connection, item_id: int, by: int) -> None:
+        _, _, conflicts = await self._links(conn, item_id)
+        await conn.execute(
+            "UPDATE items SET status = 'replaced', replaced_by = ?, "
+            "conflicts = '[]' WHERE id = ?",
+            (by, item_id),
+        )
+        for other in conflicts:
+            _, _, theirs = await self._links(conn, other)
+            left = tuple(i for i in theirs if i != item_id)
+            await conn.execute(
+                "UPDATE items SET conflicts = ?, status = ? WHERE id = ?",
+                (json.dumps(left), "conflict" if left else "active", other),
+            )
 
     async def link_items(self, first: int, second: int, *, conflict: bool) -> None:
         """Link two items both ways as related, or with *conflict* as in conflict
         (both ``status`` ``conflict``; each stays recallable)."""
         conn = await self._ready()
         try:
-            for item_id, other in ((first, second), (second, first)):
-                status, related, conflicts = await self._links(conn, item_id)
-                if conflict:
-                    conflicts = tuple(dict.fromkeys((*conflicts, other)))
-                    status = "conflict" if status != "replaced" else status
-                else:
-                    related = tuple(dict.fromkeys((*related, other)))
-                await conn.execute(
-                    "UPDATE items SET status = ?, related = ?, conflicts = ? "
-                    "WHERE id = ?",
-                    (status, json.dumps(related), json.dumps(conflicts), item_id),
-                )
+            await self._link(conn, first, second, conflict=conflict)
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
+
+    async def _link(
+        self, conn: aiosqlite.Connection, first: int, second: int, *, conflict: bool
+    ) -> None:
+        for item_id, other in ((first, second), (second, first)):
+            status, related, conflicts = await self._links(conn, item_id)
+            if conflict:
+                conflicts = tuple(dict.fromkeys((*conflicts, other)))
+                status = "conflict" if status != "replaced" else status
+            else:
+                related = tuple(dict.fromkeys((*related, other)))
+            await conn.execute(
+                "UPDATE items SET status = ?, related = ?, conflicts = ? "
+                "WHERE id = ?",
+                (status, json.dumps(related), json.dumps(conflicts), item_id),
+            )
 
     async def aclose(self) -> None:
         if self._conn is not None:
