@@ -227,8 +227,8 @@ CHAT_NOTE: Final = (
 BROWSING_OFF_NOTE: Final = (
     "[localmelo · browsing is off: a task can read public pages but has no browser, "
     "so it cannot sign in, click or fill in a form. Promise no browser. Set "
-    "uses_website on task_create for work that needs one: code then tells the user "
-    "how to turn browsing on.]"
+    "uses_website on task_create or task_schedule for work that needs one: code "
+    "then tells the user how to turn browsing on.]"
 )
 # What a turn that only said what it would do is asked for at its end (#440): its answer.
 CLOSING_NOTE: Final = (
@@ -806,6 +806,13 @@ TASK_TOOLS: Final = (
                     "every day): what it points at, spelled out. Else empty."
                 ),
             },
+            "uses_website": {
+                "type": "boolean",
+                "description": (
+                    "True when the work needs a website: signing in, clicking, "
+                    "filling in a form, buying."
+                ),
+            },
         },
     ),
     _tool(
@@ -1003,7 +1010,12 @@ class TaskTools(BaseToolProvider):
         return f"{said}Its result comes back to this chat as a card. {_tell(typed)}"
 
     async def schedule(
-        self, title: str = "", run_now: bool = False, reading: str = "", **_: Any
+        self,
+        title: str = "",
+        run_now: bool = False,
+        reading: str = "",
+        uses_website: bool = False,
+        **_: Any,
     ) -> str:
         """Save the running turn's message as a chore, and start it when *run_now* (#567).
 
@@ -1048,6 +1060,8 @@ class TaskTools(BaseToolProvider):
             return f"Not done: {_plain(exc)}"
         front.scheduled(turn)
         said = f"Saved: {chore['title']} · {found.schedule.describe()}. "
+        if uses_website is True and await front.tell_browsing_off():
+            said += "Browsing is off, so its runs have no browser; the user sees how to turn it on. "
         if run_now is not True:
             return f"{said}{_tell(typed)}"
         if front.made.get(turn.id):
@@ -1770,7 +1784,7 @@ class Front:
         if routed.route == "follow" and routed.task:
             record = await self.record(routed.task.task_id)
             if record is None:
-                return await self._failed(typed, "front.echo.gone")
+                return await self.failed(typed, "front.echo.gone")
             return await self.follow(record, composed, typed=typed, show=typed, key=key)
         if routed.route == "reminder" and typed.strip() == composed.strip():
             found = parse_reminder(typed, self._now())
@@ -1848,7 +1862,7 @@ class Front:
                     ref, "resume", show=typed
                 )  # paused: it resumes
             if ref.state not in FINISHED:
-                return await self._failed(
+                return await self.failed(
                     typed, "front.echo.stillWorking", title=ref.title
                 )
         return None
@@ -1994,7 +2008,7 @@ class Front:
             return False
         if not self._told_browsing:
             self._told_browsing = True
-            await self._failed(None, "front.echo.browsingOff")
+            await self.failed(None, "front.echo.browsingOff")
         return True
 
     # ── Tasks: start, change, suggest ──
@@ -2041,7 +2055,7 @@ class Front:
                 }
             )
         except TaskPolicyError as exc:
-            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
+            return await self.failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         # What the chat hands the task (#463): its earlier turns, and what this
@@ -2142,7 +2156,7 @@ class Front:
                 handover=handover,
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
-            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
+            return await self.failed(show, "front.echo.startFailed", problem=str(exc))
         if turn is not None:
             self._count(turn)
         for event in reversed(await self._echoes() if repeated else []):
@@ -2212,7 +2226,7 @@ class Front:
                 automatic=automatic,
             )
         except (SessionStoreError, TaskPolicyError, ValueError, RuntimeError) as exc:
-            return await self._failed(
+            return await self.failed(
                 show, "front.echo.sendFailed", title=record.title, problem=_plain(exc)
             )
         if turn is not None:
@@ -2235,17 +2249,17 @@ class Front:
         """Stop, pause, resume or move *task* first; the echo carries Undo."""
         record = await self.record(task.task_id)
         if record is None:
-            return await self._failed(show, "front.echo.gone")
+            return await self.failed(show, "front.echo.gone")
         if action == "first":
             return await self.set_level(record, 1, show=show, of=of)
         if action == "resume" and record.state not in ("parked", "interrupted"):
             # "Continue the … task" on a task that is not paused: it is going already.
-            return await self._failed(
+            return await self.failed(
                 show, "front.echo.stillWorking", title=record.title
             )
         problem = await self._change(record, state=action)
         if problem:
-            return await self._failed(
+            return await self.failed(
                 show, f"front.echo.{action}Failed", title=record.title, problem=problem
             )
         undo = {"pause": {"state": "resume"}, "resume": {"state": "pause"}}
@@ -2299,7 +2313,7 @@ class Front:
         before: int | str = record.level if record.level_source == "user" else "auto"
         problem = await self._change(record, level=level)
         if problem:
-            return await self._failed(
+            return await self.failed(
                 show, "front.echo.changeFailed", title=record.title, problem=problem
             )
         line = f"{record.title} → {level_code(level)}"
@@ -2472,9 +2486,7 @@ class Front:
             data.update(await self.foreign(record))  # a task of another chat says so
         return await self.echo(data if of is None else {**data, "of": of}, show)
 
-    async def _failed(
-        self, show: str | None, key: str, **params: str
-    ) -> dict[str, Any]:
+    async def failed(self, show: str | None, key: str, **params: str) -> dict[str, Any]:
         """A line that says what could not be done: English, and its words for the reader."""
         line = t_in("en", key, **params)
         return await self.echo(
@@ -2625,7 +2637,7 @@ class Front:
     ) -> dict[str, Any]:
         """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
         title = str(echo.get("title", ""))
-        store = self.console.chore_runner.store
+        runner = self.console.chore_runner
         if do == "once" and echo.get("echo") == "chore" and not echo.get("reminder"):
             text = str(echo.get("text", ""))
             return await self.delegate(text, typed=text, of=echo_id, asked_at=shown_at)
@@ -2647,7 +2659,7 @@ class Front:
                     of=echo_id,
                 )
             if do == "undo" and echo.get("echo") == "chore_saved":
-                await store.delete(str(echo.get("chore_id", "")))
+                await runner.delete(str(echo.get("chore_id", "")))
                 line = f"Undone: {title} is not saved"
                 return await self._echo(
                     "undone", "", title, line, of=echo_id,

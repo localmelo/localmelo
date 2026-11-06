@@ -724,6 +724,7 @@ class _ToolAsk:
         reviewer: StepReviewer | None = None,
         refused: list[dict[str, Any]] | None = None,
         sees_images: Callable[[], bool] = lambda: False,
+        attended: bool = True,
     ) -> None:
         self._policy = policy
         self._run = run
@@ -731,6 +732,7 @@ class _ToolAsk:
         self._workspace_root = workspace_root
         self._reviewer = reviewer
         self._sees_images = sees_images
+        self._attended = attended
         self.refused: list[dict[str, Any]] = [] if refused is None else refused
 
     def names_host(self, host: str) -> bool:
@@ -749,9 +751,12 @@ class _ToolAsk:
     def from_person(self) -> bool:
         """Whether the person started this run: their own message, not a chore, a follow-up or a task's own (#551).
 
-        The browser works through a picture check itself only in such a run.
+        The browser works through a picture check itself only in such a run. A
+        saved chore's words are the person's for every rule that reads them
+        (``run.from_person``), but nobody sent them as they sat there (``attended``
+        false, #570), so this says no.
         """
-        return self._run.from_person
+        return self._run.from_person and self._attended
 
     def sees_pictures(self) -> bool:
         """Whether the model reads the pictures tools return (#551): the run's own answer, never a page's."""

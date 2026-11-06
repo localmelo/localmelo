@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
 from localmelo.support.gateway.console.front import ECHO_EVENT
+from localmelo.support.gateway.task_policy import configured_root
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
 
 from .conftest import HOLDER, run_result, seed_turn
@@ -1307,3 +1309,174 @@ async def test_the_next_time_shown_is_the_schedules_and_the_run_starts_within_th
         brief = [c for c in listed if c["title"].startswith("Brief me")]
         # Planned again from now: the next slot is shown at 8:30 too.
         assert {c["next_at"] for c in brief} == {at("2026-10-29 08:30")}
+
+
+# ── A chore's work folder, and a run that cannot go on (#570) ──
+
+
+async def folder_of(console: Console, task_id: str) -> Path:
+    """The folder task *task_id* works in: its session's workspace."""
+    info = await console.store.get_session(task_id)
+    assert info is not None and info.workspace
+    return Path(info.workspace)
+
+
+async def test_a_chore_keeps_one_folder_across_its_runs_and_it_goes_with_the_chore(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Check in at the shop", BRIEF)
+        other = await add(client, "Another chore", BRIEF)
+        runner = console.chore_runner
+        clock.to("2026-10-28 08:31")
+        first, second_chore = await runner.tick()
+        folder = await folder_of(console, first)
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        assert folder == root / f"chore-{chore['id']}" and folder.is_dir()
+        assert await folder_of(console, second_chore) == root / f"chore-{other['id']}"
+        # What a run leaves is there for the next one: a scheduled run and Run now.
+        (folder / "points.txt").write_text("42")
+        await finish(console, first, clock.now)
+        await finish(console, second_chore, clock.now)
+        clock.to("2026-10-29 08:31")
+        [again, _] = await runner.tick()
+        assert await folder_of(console, again) == folder
+        assert (folder / "points.txt").read_text() == "42"
+        await finish(console, again, clock.now)
+        run = await client.post(f"/api/chores/{chore['id']}/run")
+        assert run.status_code == 202, run.text
+        assert await folder_of(console, run.json()["task"]["task_id"]) == folder
+        # It goes when the chore is deleted; another chore's folder stays.
+        deleted = await client.delete(f"/api/chores/{chore['id']}")
+        assert deleted.status_code == 200, deleted.text
+        assert not folder.exists()
+        assert (root / f"chore-{other['id']}").is_dir()
+
+
+async def test_a_reminders_run_has_a_folder_of_its_own_like_any_run(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        reminder = await add(
+            client,
+            "Reminder: send the report",
+            {"kind": "once", "at": "2026-10-30T09:00"},
+        )
+        clock.to("2026-10-30 09:00")
+        [task_id] = await console.chore_runner.tick()
+        folder = await folder_of(console, task_id)
+        assert folder.name == task_id and f"chore-{reminder['id']}" not in str(folder)
+
+
+async def test_a_chores_run_is_one_its_chat_follows_up_and_a_reminders_is_not(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(client, "Check in at the shop", BRIEF)
+        await add(
+            client,
+            "Reminder: send the report",
+            {"kind": "once", "at": "2026-10-28T08:30"},
+        )
+        clock.to("2026-10-28 08:31")
+        run, reminded = await console.chore_runner.tick()
+        info = await console.store.get_session(run)
+        assert info is not None and info.meta.get("started_by") == "chat"
+        info = await console.store.get_session(reminded)
+        assert info is not None and "started_by" not in info.meta
+
+
+async def test_run_now_is_refused_while_the_last_run_has_not_ended(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        # One run at a time: they share the chore's folder.
+        busy = await client.post(f"/api/chores/{chore['id']}/run")
+        assert busy.status_code == 409, busy.text
+        assert busy.json()["error"]["code"] == "invalid_transition"
+        assert len(await tasks_of(console)) == 1
+        await finish(console, task_id, clock.now)
+        assert (await client.post(f"/api/chores/{chore['id']}/run")).status_code == 202
+
+
+async def skipped(console: Console, chat: str) -> list[dict[str, Any]]:
+    found = await console.store.events_of_type(chat, ECHO_EVENT)
+    return [
+        e.event["data"]
+        for e in found
+        if e.event["data"].get("said", {}).get("key") == "chores.skipped"
+    ]
+
+
+async def test_a_slot_skipped_for_a_run_that_has_not_ended_is_said_once_in_its_chat(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        main = str(console.main_id)
+        side = (await seed_turn(console.store, str(tmp_path))).session_id
+        daily = {"kind": "daily", "at": "08:30"}
+        await add(client, "Check in at the shop", daily, title="Shop check-in")
+        await add(client, "Sort the photos", daily, title="Photo sort", front_id=side)
+        runner = console.chore_runner
+        clock.to("2026-10-28 08:31")
+        shop, photos = await runner.tick()
+        assert await skipped(console, main) == []
+        # Wednesday's runs wait (one on an approval): Thursday's slot is skipped, and said.
+        await set_waiting(console, shop, clock.now)
+        clock.to("2026-10-29 08:31")
+        assert await runner.tick() == []
+        [line] = await skipped(console, main)
+        assert (line["echo"], line["said"]["params"]) == (
+            "failed", {"title": "Shop check-in"}
+        )  # fmt: skip
+        assert "Shop check-in" in line["line"] and "not finished" in line["line"]
+        [side_line] = await skipped(console, side)
+        assert side_line["said"]["params"] == {"title": "Photo sort"}
+        assert await skipped(console, main) == [line]  # each chat hears its own
+        # The same run holding Friday's slot too is not said again.
+        clock.to("2026-10-30 08:31")
+        assert await runner.tick() == []
+        assert len(await skipped(console, main)) == 1
+        assert len(await skipped(console, side)) == 1
+        # Once it ended, the chore runs again, and a later stuck run is said once more.
+        await finish(console, shop, clock.now)
+        await finish(console, photos, clock.now)
+        clock.to("2026-10-31 08:31")
+        [third, _] = await runner.tick()
+        await set_waiting(console, third, clock.now)
+        clock.to("2026-11-01 08:31")
+        await runner.tick()
+        assert len(await skipped(console, main)) == 2
+
+
+async def test_a_reminder_never_waits_for_an_earlier_run_so_nothing_is_skipped(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(
+            client, "Reminder: stretch", {"kind": "once", "at": "2026-10-28T08:30"}
+        )
+        clock.to("2026-10-28 08:31")
+        assert len(await console.chore_runner.tick()) == 1
+        assert await skipped(console, str(console.main_id)) == []
+
+
+async def test_a_chore_run_waiting_on_the_person_is_in_the_checkin_once(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary("Waiting.")) as (
+        console, client, clock, summary, _
+    ):  # fmt: skip
+        await add(client, "Check in at the shop", BRIEF, title="Shop check-in")
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await set_waiting(console, task_id, clock.now)
+        clock.now += CHECKIN_S + 1
+        card = await console.chore_runner.checkin()
+        assert card is not None and summary.facts == [
+            ["Shop check-in: waiting for the user"]
+        ]
+        assert await console.chore_runner.checkin() is None  # said once

@@ -5,10 +5,18 @@ asks the store which chores are due and starts each as a task (origin
 ``user_rule``, owned by the chat the chore belongs to). The tick is code only:
 it never calls a model. A chore that came due while the computer slept runs
 once when the tick next runs, and its next time is planned from then, never
-once per missed slot. A chore whose last run has not ended is skipped. A
+once per missed slot. A chore's runs are one at a time: its next slot is
+skipped while its last run has not ended, and the chat that saved it is told
+once for that run (:meth:`ChoreRunner._skipped`). A run is the person's work in
+that chat as a task they asked for is: it has the browser, works in the chore's
+own folder, which every run shares and which goes with the chore
+(:func:`~localmelo.support.gateway.task_policy.chore_workspace`), and its chat
+follows up on how it ended. Its approvals are not a task's: it neither uses nor
+records the chat's earlier approvals, and Auto blocks what it would ask. A
 one-time chore (a reminder) runs once, late if the computer slept through its
 time, and is then switched off with no next time; it never waits for an earlier
-run to end.
+run to end, and its run only tells the reminder: no browser, no folder of its
+own beyond the run's, no follow-up.
 
 The check-in comes every :data:`CHECKIN_S` seconds while the gateway runs and
 the switch is on. It looks for something to say in code: a chore's finished
@@ -47,6 +55,8 @@ from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
     TaskSpec,
+    chore_workspace,
+    remove_chore_workspace,
 )
 from localmelo.support.gateway.task_store import TaskConflictError, TaskStoreError
 from localmelo.support.sessions.store import SessionStoreError
@@ -110,6 +120,8 @@ class ChoreRunner:
         self._loop_task: asyncio.Task[None] | None = None
         # Waiting tasks a check-in already mentioned (until the gateway restarts).
         self._mentioned: set[str] = set()
+        # Runs whose chat was told a slot was skipped for them (the same).
+        self._skipped_for: set[str] = set()
 
     # ── Lifecycle ──
 
@@ -158,8 +170,9 @@ class ChoreRunner:
         once = chore.schedule.kind == "once"
         next_run = None if once else self.store.plan(chore.schedule, now)
         over = False if once else None
-        if not once and await self._busy(chore):
+        if not once and await self.busy(chore):
             await self.store.advance(chore, next_run=next_run)
+            await self._skipped(chore)
             return None
         slot = int(chore.next_run or now)
         try:
@@ -179,7 +192,20 @@ class ChoreRunner:
         )
         return task
 
-    async def _busy(self, chore: Chore) -> bool:
+    async def _skipped(self, chore: Chore) -> None:
+        """Tell the chat that saved *chore* its slot was skipped: once for each run that holds it up."""
+        if chore.last_task_id in self._skipped_for:
+            return
+        self._skipped_for.add(chore.last_task_id)
+        try:
+            await self.console.front_for(chore.front_id).failed(
+                None, "chores.skipped", title=chore.title
+            )
+        except Exception:
+            logger.exception("Could not tell a chat that a chore's slot was skipped")
+
+    async def busy(self, chore: Chore) -> bool:
+        """Whether *chore*'s last run has not ended: its runs are one at a time."""
         if not chore.last_task_id:
             return False
         try:
@@ -197,16 +223,34 @@ class ChoreRunner:
         )
         reason = REMINDER_REASON if reminder else f"Chore, {chore.schedule.describe()}"
         # A review reads the person's words, never the note or the model's reading.
+        # A chore's runs share one folder; a reminder's run only tells the reminder.
         spec = dataclasses.replace(
             spec,
             level=chore.level,
             reason=reason,
             user_words="" if reminder else chore.words,
+            workspace=(
+                ""
+                if reminder
+                else chore_workspace(self.console.workers.settings(), chore.chore_id)
+            ),
         )
+        # The chat that saved a chore follows up on its runs, as on a task it started.
         task, _ = await self.console.workers.create_spec(
-            spec, front_id=chore.front_id, request_key=key, origin="user_rule"
+            spec,
+            front_id=chore.front_id,
+            request_key=key,
+            origin="user_rule",
+            chat_started=not reminder,
         )
         return str(task["task_id"])
+
+    async def delete(self, chore_id: str, *, revision: int | None = None) -> None:
+        """Delete a chore, and the folder its runs shared with it."""
+        await self.store.delete(chore_id, revision=revision)
+        await asyncio.to_thread(
+            remove_chore_workspace, self.console.workers.settings(), chore_id
+        )
 
     async def run_now(self, chore: Chore) -> dict[str, Any]:
         """The person's Run now: a task at once; the chore's schedule stays as it was."""

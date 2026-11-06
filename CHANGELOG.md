@@ -17,6 +17,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a refused one included, in the console, the app and the terminal. The check-in tells you about a task that has waited
   on you. With browsing off, a website request says so once and how to turn it on, and no chat promises a browser it
   does not have. (#567)
+- A scheduled task can browse and keeps its folder. A chore made from your request ("sign in to that site for me
+  every morning at 9") has the browser as a task you asked for does, and its live view shows in the chat that saved it;
+  with browsing off, the chat says so once, as it does for any task. Each chore keeps one work folder across its runs,
+  so a later run finds what the last one left, and the folder goes when you delete the chore. Approvals are as before.
+  A run that waits for you reaches the chat that saved it and the check-in; when a run has not ended at the next slot,
+  that slot is skipped and the chat says so once, and Run now waits too. The chat hears how each run ended, as it does for
+  a task you started. A reminder is unchanged: it only tells you. (#570)
 - melo reads PDFs. `file_read` and `web_fetch` open a PDF by its first bytes (`%PDF-`), whatever its name or type says,
   and give its pages in order as text, each under a `--- page N of M ---` line, with each row kept whole (a place and a
   date stay on the line of their school or employer). A page with no text (a scan) is a picture in the result when the
@@ -1472,6 +1479,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the line is ignored and `melo config` names it; `-X memory.followup_query=...` exits 2 and says it was removed.
 
 ### Security
+
+- A saved chore's run now has a browser with nobody at its side (#570). Its approvals, Auto and posting rules are those of a task you started, it uses and records no earlier approval, and melo never works through a picture check for it. Each chore has one work folder that deleting the chore removes without following a link. See SECURITY.md.
 
 - Developer only: memory items are written from chat text with secrets taken out, and an item that still holds a secret is not kept. Part of #428.
 

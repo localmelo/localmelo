@@ -8,6 +8,7 @@ what its card says when it ends with only the commit left.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import os
 import subprocess
 import tempfile
@@ -21,13 +22,19 @@ from localmelo.melo.executor.builtins import _run_python
 from localmelo.melo.schema import MAX_EXTENSIONS, TASK_EXTENSIONS
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.chore_store import REMINDER_REASON
 from localmelo.support.gateway.finishing import commit_command, not_committed
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
     WorkspaceError,
     worker_tool_allowlist,
 )
-from localmelo.support.gateway.workers import WORKER_GUIDE, TaskWorkers, task_home
+from localmelo.support.gateway.workers import (
+    NO_BROWSER_NOTE,
+    WORKER_GUIDE,
+    TaskWorkers,
+    task_home,
+)
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.gateway.test_workers import FakeRunner, eventually
@@ -89,7 +96,9 @@ async def setup(
         ("user", True, True),
         # No chat was named when it was made: closed, though it is stored under main.
         ("user", False, False),
-        ("user_rule", True, False),
+        # A chore the person saved runs in the chat that saved it, as their task (#570).
+        ("user_rule", True, True),
+        ("user_rule", False, False),
         ("front", True, False),
         ("harness", True, False),
         ("agent", True, False),
@@ -126,6 +135,110 @@ async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_long_steps(
     assert built[0]["options"].max_extensions == (
         TASK_EXTENSIONS if browses else MAX_EXTENSIONS
     )
+
+
+async def _chore_run(
+    workers: TaskWorkers, chat: str | None, *, reason: str = "Chore, every day at 9:00"
+) -> None:
+    """Start one run of a saved chore for *chat*, as the chore clock does."""
+
+    async def chat_of(front_id: str | None) -> str | None:
+        return front_id
+
+    workers.chat_of = chat_of
+    spec = TaskSpec.from_payload({"objective": "sign in", "title": "Sign in"})
+    await workers.create_spec(
+        dataclasses.replace(spec, reason=reason),
+        origin="user_rule",
+        front_id=chat,
+    )
+
+
+async def test_a_chores_run_browses_in_the_chat_that_saved_it(setup: Setup) -> None:
+    workers, cfg, _, built, _ = setup
+    cfg.browser.driver = "chrome"
+    await _chore_run(workers, workers.front_id)
+    await eventually(lambda: len(built) == 1)
+    assert built[0]["browser_driver"] == "chrome"
+    assert built[0].get("chat_id") == workers.front_id
+    assert built[0]["desktop"] is False
+    assert built[0]["options"].max_extensions == TASK_EXTENSIONS
+    # Nothing wider than a person's task: the same tools.
+    assert built[0]["options"].builtins == worker_tool_allowlist("user").builtins
+
+
+async def test_a_chores_browser_shows_in_the_chat_that_saved_it(setup: Setup) -> None:
+    workers, cfg, _, built, _ = setup
+    cfg.browser.driver = "chrome"
+    shown: list[tuple[str, str]] = []
+
+    class Sources:
+        def attach_task(self, task_id: str, agent: Any, owner: str) -> None:
+            shown.append((task_id, owner))
+
+        def detach_task(self, task_id: str) -> None:
+            pass
+
+        def holds_page(self, task_id: str) -> bool:
+            return False
+
+    workers.browsers = Sources()  # type: ignore[assignment]
+    await _chore_run(workers, workers.front_id)
+    await eventually(lambda: len(built) == 1 and len(shown) == 1)
+    [(task_id, owner)] = shown
+    assert owner == workers.front_id
+    assert (await workers.get(task_id))["origin"] == "user_rule"
+
+
+async def test_a_reminders_run_tells_the_reminder_and_has_no_browser(
+    setup: Setup,
+) -> None:
+    workers, cfg, _, built, _ = setup
+    cfg.browser.driver = "chrome"
+    await _chore_run(workers, workers.front_id, reason=REMINDER_REASON)
+    await eventually(lambda: len(built) == 1)
+    assert built[0]["browser_driver"] == "off" and built[0].get("chat_id") is None
+    assert built[0]["options"].max_extensions == MAX_EXTENSIONS
+    assert built[0]["options"].identity == WORKER_GUIDE
+
+
+@pytest.mark.parametrize(
+    ("origin", "chat_started", "attended"),
+    [("user", True, True), ("user_rule", False, False)],
+)
+async def test_a_chores_run_has_nobody_at_its_side_for_a_picture_check(
+    setup: Setup, origin: str, chat_started: bool, attended: bool
+) -> None:
+    workers, cfg, _, built, home = setup
+    cfg.browser.driver = "chrome"
+    (home / "localmelo-workspace" / "t").mkdir(parents=True)
+
+    async def chat_of(front_id: str | None) -> str | None:
+        return front_id
+
+    workers.chat_of = chat_of
+    spec = TaskSpec.from_payload(
+        {"objective": "browse", "workspace": str(home / "localmelo-workspace" / "t")}
+    )
+    await workers.create_spec(
+        spec,
+        origin=origin,  # type: ignore[arg-type]
+        front_id=workers.front_id,
+        chat_started=chat_started,
+    )
+    await eventually(lambda: len(built) == 1)
+    assert built[0]["options"].attended is attended
+
+
+async def test_a_chore_with_browsing_off_is_told_so_as_any_task_is(
+    setup: Setup,
+) -> None:
+    workers, cfg, _, built, _ = setup
+    cfg.browser.driver = "off"
+    await _chore_run(workers, workers.front_id)
+    await eventually(lambda: len(built) == 1)
+    assert built[0]["browser_driver"] == "off"
+    assert built[0]["options"].identity == f"{WORKER_GUIDE} {NO_BROWSER_NOTE}"
 
 
 async def test_a_main_chat_task_works_in_the_default_folder(setup: Setup) -> None:

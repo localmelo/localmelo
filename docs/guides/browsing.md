@@ -113,7 +113,7 @@ In the web console and the app, melo's browser shows in the chat while melo brow
 - **The panel opens when you ask.** **Open browser** (or the **Browser** button in the header) shows the page in a panel beside the chat. It never opens by itself, and closing it only stops watching: melo goes on.
 - **In the terminal.** The chat shows one line for a task's browser each time its state changes (`Working for this chat: Book the table · example.com`, `You're in control`, `Done`), with `melo console` to open the page. There is no picture; the terminal never draws the page.
 - **It follows Settings.** Switch to Chrome in the middle of a chat, and the next task browses there.
-- **Who may browse.** A task you asked for in a chat. A saved chore, a task given with no chat, or one another agent or channel starts, has no browser. Other apps stay out of a task: it neither reads their windows nor opens them, and a page that asks for one is told no. The terminal's local chat is the one place melo does either.
+- **Who may browse.** A task you asked for in a chat, and a chore you saved there: its runs browse in that chat, with the card in it, though nobody sits beside them, so a picture check on a page is left to you in those runs. A reminder, a task given with no chat, or one another agent or channel starts, has no browser. Other apps stay out of a task: it neither reads their windows nor opens them, and a page that asks for one is told no. The terminal's local chat is the one place melo does either.
 - **Hide browser** closes the panel, and it stays closed in that chat until you open it again. On a narrow window it opens as a sheet when you ask.
 - **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
 - **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops, or "Reconnecting…" while the link is made again; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
@@ -275,7 +275,7 @@ Browsing is built in parts; none of these exists yet.
 
 - Chrome becoming the default browser, an "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
 - Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use, for apps outside the browser) is a separate feature and the next way after a point of a picture.
-- Saved chores that run on a schedule (for example a daily check-in), with steps you approved once.
+- Saved chores that remember the steps you approved once. A chore browses now, but it asks again each time.
 
 ## Troubleshooting
 

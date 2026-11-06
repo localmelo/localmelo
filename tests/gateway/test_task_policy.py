@@ -18,6 +18,8 @@ from localmelo.support.gateway.task_policy import (
     TaskSpecError,
     UnknownOriginError,
     WorkspaceError,
+    chore_workspace,
+    remove_chore_workspace,
     validate_task_workspace,
     worker_tool_allowlist,
 )
@@ -349,3 +351,46 @@ def test_the_person_s_words_are_kept_only_when_trusted_code_sets_them() -> None:
     assert "user_words" not in spec.to_dict()
     typed = dataclasses.replace(spec, user_words="chart my capex")
     assert typed.to_dict()["user_words"] == "chart my capex"
+
+
+def test_a_chore_has_one_folder_under_the_root_made_once_and_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root = tmp_path / "work"
+    first = chore_workspace(cfg(str(root)), "2ab01e8df4f1")
+    assert first == os.path.realpath(root / "chore-2ab01e8df4f1")
+    (Path(first) / "points.txt").write_text("42")
+    assert chore_workspace(cfg(str(root)), "2ab01e8df4f1") == first
+    assert (Path(first) / "points.txt").read_text() == "42"
+    assert chore_workspace(cfg(str(root)), "0123456789ab") != first
+    for bad in ("", "..", "../x", "a/b", ".hidden"):
+        with pytest.raises(WorkspaceError):
+            chore_workspace(cfg(str(root)), bad)
+
+
+def test_deleting_a_chore_removes_its_folder_and_nothing_a_link_points_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    root = tmp_path / "work"
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("mine")
+    folder = Path(chore_workspace(cfg(str(root)), "2ab01e8df4f1"))
+    (folder / "sub").mkdir()
+    (folder / "sub" / "a.txt").write_text("a")
+    (folder / "out").symlink_to(outside)
+    sibling = Path(chore_workspace(cfg(str(root)), "0123456789ab"))
+    remove_chore_workspace(cfg(str(root)), "2ab01e8df4f1")
+    assert not folder.exists() and sibling.is_dir()
+    assert (outside / "keep.txt").read_text() == "mine"
+    remove_chore_workspace(cfg(str(root)), "2ab01e8df4f1")  # nothing left: no error
+    # A chore folder that was replaced by a link is unlinked, never followed.
+    other = root / "chore-feedfacefeed"
+    other.symlink_to(outside)
+    remove_chore_workspace(cfg(str(root)), "feedfacefeed")
+    assert not other.is_symlink() and (outside / "keep.txt").read_text() == "mine"
+    # A refused id names no folder: the root and its other children stay.
+    remove_chore_workspace(cfg(str(root)), "..")
+    assert sibling.is_dir()

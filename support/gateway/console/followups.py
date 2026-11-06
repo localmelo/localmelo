@@ -38,8 +38,9 @@ Code holds the limits, not the prompt:
   message the person sent after the task ended wins: that turn read the
   ending in its news, and the follow-up is skipped;
 - ``[tasks] follow_up = false`` turns it off. Tasks the chat did not start
-  (a chore's, one started from the task page, another chat's) keep the card
-  alone, as before.
+  (one started from the task page, another chat's) keep the card alone, as
+  before. A run of a chore the chat saved is the chat's to follow up as a task
+  it started (#570); a reminder's run is not, its card says the reminder.
 
 Until nothing more can run for a task (#431), its started row keeps Stop:
 the card of an end its chat follows up on says so (``follow_up``, see
@@ -79,6 +80,7 @@ from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import FINISHED, reply_language
 from ..task_endings import job_finished, shown
 from ..task_files import files_line
+from ..task_policy import is_persons_task
 from ..task_store import TaskRecord, TaskStoreError
 from .asks import FOLLOWUP_ORIGIN
 
@@ -315,8 +317,8 @@ class TaskFollowups:
         record = await console.workers.tasks.get_task(task_id)
         info = await store.get_session(task_id)
         meta = (info.meta or {}) if info is not None else {}
-        if meta.get("started_by") != "chat" or record.origin != "user":
-            return None  # a chore's task, one from the task page: the card alone
+        if meta.get("started_by") != "chat" or not is_persons_task(record.origin):
+            return None  # one from the task page, another chat's: the card alone
         chat = record.front_id or console.main_id
         if not chat or await console.effective_owner(chat) != chat:
             return None  # its chat is gone: the main chat keeps the card alone

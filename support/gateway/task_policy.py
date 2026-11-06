@@ -11,6 +11,8 @@ Three pieces of policy live here, all in code and never in a model's JSON:
   ``~/Library``; for every other origin a folder strictly inside
   ``[gateway] workspace`` (``~/localmelo-workspace`` when that key is unset
   or empty). ``/`` and the home folder are never a worker's root.
+- :func:`chore_workspace` is the one folder a saved chore works in, run after
+  run (:func:`remove_chore_workspace` deletes it with the chore).
 - :func:`worker_tool_allowlist` gives the origin's built-ins and says which
   grants the worker may have. Tasks of a non-user origin get no unmarked MCP
   tools and no session grants, and their approvals are never remembered.
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
@@ -334,6 +337,22 @@ def _default_task_workspace(root: str, task_id: str | None) -> str:
     return path
 
 
+def _root_and_home(cfg: object) -> tuple[str, str]:
+    """The configured workspace root and the home folder, both resolved; a root that may not be one raises."""
+    home = os.path.realpath(os.path.expanduser("~"))
+    configured = _configured_workspace(cfg)
+    if not (os.path.isabs(configured) or configured.startswith("~/")):
+        raise WorkspaceError(
+            "The configured workspace must be an absolute path or start with ~/."
+        )
+    root = os.path.realpath(os.path.expanduser(configured))
+    if root == "/" or _relative_parts(root, home) == []:
+        raise WorkspaceError(
+            "The configured workspace may not be / or your home folder"
+        )
+    return root, home
+
+
 def validate_task_workspace(
     workspace: str | None,
     cfg: object,
@@ -351,17 +370,7 @@ def validate_task_workspace(
     absolute or ``~/`` path, and cannot resolve to / or the home directory.
     """
     checked_origin = check_origin(origin)
-    home = os.path.realpath(os.path.expanduser("~"))
-    configured = _configured_workspace(cfg)
-    if not (os.path.isabs(configured) or configured.startswith("~/")):
-        raise WorkspaceError(
-            "The configured workspace must be an absolute path or start with ~/."
-        )
-    root = os.path.realpath(os.path.expanduser(configured))
-    if root == "/" or _relative_parts(root, home) == []:
-        raise WorkspaceError(
-            "The configured workspace may not be / or your home folder"
-        )
+    root, home = _root_and_home(cfg)
     defaulted = workspace is None or (
         isinstance(workspace, str) and not workspace.strip()
     )
@@ -407,6 +416,48 @@ def validate_task_workspace(
                 f"Could not create the default workspace {path}: {exc}"
             ) from exc
     return path
+
+
+_CHORE_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
+
+def _chore_folder(chore_id: str) -> str:
+    """The name of chore *chore_id*'s folder, or :class:`WorkspaceError` for an id that is no plain one."""
+    if not isinstance(chore_id, str) or not _CHORE_ID.fullmatch(chore_id):
+        raise WorkspaceError("A safe chore id is required for a chore's folder")
+    return f"chore-{chore_id}"
+
+
+def chore_workspace(cfg: object, chore_id: str) -> str:
+    """The one folder every run of chore *chore_id* works in (#570).
+
+    A child of the workspace root named for the chore, made the first time and
+    kept after it, so a later run finds what the last one left. It is the
+    folder a default one is (:func:`validate_task_workspace`): one non-link
+    child, strictly inside the root, and the chore's id is the only thing that
+    names it.
+    """
+    return validate_task_workspace(
+        None, cfg, origin="user_rule", task_id=_chore_folder(chore_id)
+    )
+
+
+def remove_chore_workspace(cfg: object, chore_id: str) -> None:
+    """Delete chore *chore_id*'s folder with what its runs left; nothing when it has none.
+
+    Only that one child of the root goes. A link is unlinked, never followed,
+    and so are the links inside it; a folder that cannot be deleted whole is
+    left as far as it goes.
+    """
+    try:
+        root, _ = _root_and_home(cfg)
+        path = os.path.join(root, _chore_folder(chore_id))
+    except WorkspaceError:
+        return
+    if os.path.islink(path):
+        os.unlink(path)
+    elif os.path.isdir(path) and _inside(os.path.realpath(path), root):
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _user_refusal(path: str, home: str) -> str:
@@ -493,9 +544,11 @@ __all__ = [
     "WorkerToolPolicy",
     "WorkspaceError",
     "check_origin",
+    "chore_workspace",
     "configured_root",
     "folder_problem",
     "is_persons_task",
+    "remove_chore_workspace",
     "validate_task_workspace",
     "worker_tool_allowlist",
 ]

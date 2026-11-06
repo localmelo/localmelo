@@ -59,6 +59,7 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     SessionClient,
 )
+from localmelo.support.gateway.chore_store import REMINDER_REASON
 from localmelo.support.gateway.finishing import (
     OUT_OF_STEPS,
     could_not_continue,
@@ -361,9 +362,10 @@ EXPLAINED_ORIGINS: Final = frozenset({"user", "user_rule"})
 def _remembers(origin: str) -> bool:
     """Whether a task of *origin* uses and records the person's approvals in its chat.
 
-    Only a task the person started: not a chore (``user_rule``), which runs
-    unwatched on a rule the person set before, nor any task another agent,
-    a channel or melo itself started.
+    Only a task the person started: not a chore (``user_rule``), which runs on a
+    rule the person set before with nobody at its side (it asks, and Auto
+    blocks, as it always did, browser or not), nor any task another agent, a
+    channel or melo itself started.
     """
     try:
         return origin == "user" and worker_tool_allowlist(origin).remember_approvals
@@ -2416,7 +2418,8 @@ class TaskWorkers:
             task_session = await self.store.get_session(task_id)
             task_mode = chat_mode(task_session.meta if task_session else None)
             # The chat this is a person's work for, if it is: only that work has
-            # a browser and the longer step bound.
+            # a browser and the longer step bound. A chore the person saved is
+            # theirs too, and works for the chat that saved it (#570).
             chat = await self._person_chat(record)
             settings = self.settings()
             driver = "off" if chat is None else configured_driver(settings)
@@ -2442,6 +2445,8 @@ class TaskWorkers:
                                 tool_env=tool_env,
                                 identity=guide,
                                 task_aids=True,
+                                # Nobody sits beside a saved chore's run (#570).
+                                attended=record.origin != "user_rule",
                                 max_extensions=(
                                     MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
                                 ),
@@ -2877,13 +2882,19 @@ class TaskWorkers:
     async def _person_chat(self, record: TaskRecord) -> str | None:
         """The chat *record* is work of, when a person asked for it there; else ``None``.
 
-        The task's own record says so, never a model: origin ``user``, a chat
-        named when it was made (``meta.in_chat``), and an owner that stands as
-        a console chat. Anything else (a chore, a channel, another agent, melo
-        itself, a task given directly with no chat, a console that names no
-        owners) is ``None``, and such a task gets no browser.
+        The task's own record says so, never a model: a person's own origin (the
+        task they asked for, or the chore they saved: :func:`is_persons_task`), a
+        chat named when it was made (``meta.in_chat``), and an owner that stands
+        as a console chat. Anything else (a channel, another agent, melo itself,
+        a task given directly with no chat, a console that names no owners) is
+        ``None``, and such a task gets no browser. So does a reminder's run
+        (#570): it only tells the reminder, and a note to act would contradict it.
         """
-        if record.origin != "user" or self.chat_of is None:
+        if (
+            not is_persons_task(record.origin)
+            or record.reason == REMINDER_REASON
+            or self.chat_of is None
+        ):
             return None
         session = await self.store.get_session(record.task_id)
         if session is None or not (session.meta or {}).get("in_chat"):

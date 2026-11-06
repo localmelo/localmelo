@@ -502,6 +502,48 @@ async def test_a_chore_never_uses_or_records_the_chats_approvals(
         assert await echoes(s, main, "earlier") == []
 
 
+async def test_a_chore_run_waiting_on_an_approval_asks_in_the_chat_that_saved_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A saved chore's run asks like any task: a card in the chat that saved it (#570)."""
+    from localmelo.support.gateway.console.cards import CARD_EVENT
+
+    async with chat_console(tmp_path, monkeypatch, plan("print(1)")) as s:
+        main = s.console.main_id or ""
+        created = await s.client.post(
+            "/api/sessions", json={"workspace": str(s.folder)}
+        )
+        side = str(created.json()["session"]["id"])
+        made = await s.client.post(
+            "/api/chores",
+            json={
+                "request": "print one",
+                "schedule": {"kind": "daily", "at": "09:00"},
+                "front_id": side,
+            },
+        )
+        assert made.status_code == 201, made.text
+        run = await s.client.post(f"/api/chores/{made.json()['chore']['id']}/run")
+        assert run.status_code == 202, run.text
+        task = str(run.json()["task"]["task_id"])
+        request = await waiting(s, task)
+        assert request["remembered"] is False
+        await s.console.cards.flush()
+        cards = {
+            chat: [
+                e.event["data"]
+                for e in await s.console.store.events_of_type(chat, CARD_EVENT)
+                if e.event["data"].get("source_id") == task
+            ]
+            for chat in (side, main)
+        }
+        assert [c["state"] for c in cards[side]] == ["waiting"]
+        assert cards[main] == []
+        await answer(s, request["request_id"])
+        await ended(s, task)
+        assert [a["origin"] for a in await approvals_of(s, task)] == ["user"]
+
+
 async def test_an_allow_answered_after_its_chat_was_deleted_records_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

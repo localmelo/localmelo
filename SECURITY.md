@@ -191,6 +191,21 @@ those tools can do.
   What else they change in it (an extension, a setting) stays for melo's later
   background browsing, and melo's other open pages, from every chat, come back
   in it as minimized windows.
+- **A saved chore's run browses like a task you asked for.** A chore made from
+  your request (not a one-time reminder) has the browser, in the chat that
+  saved it, so it can use any page a Chrome sign-in on that profile opens, with
+  nobody at its side. Nothing is wider than a task you started: its steps ask
+  in that chat's cards on every run, as before, use and record no earlier
+  approval or chat grant, Auto blocks what it would ask, a post, send or
+  purchase is reviewed from your saved words as they stand, and melo never
+  works through a picture check for a chore (a run nobody attends leaves it to
+  you). Each chore keeps one work folder, `chore-<id>` inside the gateway
+  workspace, which every run shares and deleting the chore removes (a link
+  there is unlinked, never followed); a run that has not ended makes the next
+  slot skip and blocks Run now, so two runs never share that folder at once.
+  What a run leaves in its folder, and a page it keeps open, stay until then.
+  The saved text is what a run is told to do whenever it fires: edit or
+  delete the chore when it should stop.
 - **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
   See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
   for sign-in and token rotation. Host, Origin and fetch-metadata checks remain

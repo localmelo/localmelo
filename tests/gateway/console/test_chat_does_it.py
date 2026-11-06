@@ -655,6 +655,31 @@ async def test_browsing_off_is_said_once_with_how_to_turn_it_on(
         assert "browsing is off" in tool_results(models["main"], 1)[-1].casefold()
 
 
+async def test_a_saved_chore_that_needs_a_website_says_browsing_is_off_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same words as for a task: a chore's runs have no browser either (#570)."""
+    args = {"title": "Invoice", "run_now": False, "uses_website": True}
+    saves = tool_call("task_schedule", args, "s-web")
+    main: list[Reply] = [saves, OK, web_task(), OK]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        await say(
+            client, console, "download my invoice from example.com every day at 9"
+        )
+        assert len(await chores(console)) == 1
+        [line] = await off_lines(console)
+        assert "/browser chrome" in line["line"] and "Settings" in line["line"]
+        assert "browsing is off" in tool_results(models["main"], 1)[-1].casefold()
+        # Once for the chat: a task that needs a website after it adds no second line.
+        await say(client, console, "buy it on example.com")
+        assert len(await off_lines(console)) == 1
+
+
 async def test_with_browsing_on_nothing_is_said(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

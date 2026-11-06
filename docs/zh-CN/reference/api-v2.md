@@ -465,7 +465,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 
 ## Chores
 
-按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，在工作区下属于它自己的文件夹中运行，归定时事项所属的对话（`front_id`：主对话或某个旁支对话）。每个定时事项带有 `revision`，每次更改都会使它加一。
+按时间表运行的已保存请求（见[定时事项](../guides/web-console.md#chores-that-repeat)）；面板的 Scheduled 标签页使用这些路由。一次运行是一个来源为 `user_rule` 的任务，归定时事项所属的对话（`front_id`：主对话或某个旁支对话），并像你要求的任务一样为那个对话工作：它有浏览器（`[browser] driver`），对话会跟进它是怎么结束的。同一个定时事项的每次运行都在同一个文件夹里工作，即工作区下的 `chore-<id>`，第一次运行时创建，随事项一起删除；提醒的运行有自己的文件夹，没有浏览器，也没有跟进。运行的批准和任务一样是所属对话里的卡片；它既不使用也不记录对话之前的批准，图片验证留给本人。每个定时事项带有 `revision`，每次更改都会使它加一。
 
 ```json
 {"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
@@ -475,8 +475,8 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 - `GET /api/chores` 返回 `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`，最早的在前。传旁支对话的 `?session_id=ID` 只保留该对话自己的，并给出 `"scope": "chat"`；主对话的 id、空值或不传 `session_id` 则列出全部。未知或不是对话的 id 返回 404 `not_found`。
 - `POST /api/chores` 接受 `request`（必填，不超过 100,000 个字符）、`schedule`，以及可选的 `title`（不超过 200 个字符；默认从请求派生）、`level`（`P1` 到 `P4`、1 到 4，或旧的词 `Today`、`Normal`、`Whenever`、`If idle`；默认按请求中的用词，与任务相同）和 `front_id`（某个对话；默认主对话）。`schedule` 是 `{"kind": "daily" | "weekdays", "at": "HH:MM"}`（本地时间）、`{"kind": "hours", "every": 1..24}`，或者用于提醒的 `{"kind": "once", "at": "YYYY-MM-DDTHH:MM"}`（精确到分钟的本地日期和时间；必须在未来、且不超过 366 天，否则 400 `invalid_request`）；其他键会被拒绝。无效的请求体返回 400 `invalid_request`；最多保存 50 个（409 `chore_limit`）。返回 201 `{"chore"}`；第一次 `next_run` 是该时间表的下一个时间再加最多 120 秒的抖动。
 - `PATCH /api/chores/{id}` 接受读到的 `revision`，以及 `title`、`request`、`schedule`、`level` 和 `enabled`（至少一个）。过期的 revision 返回 409 `stale_revision`，未知的定时事项返回 404 `not_found`。新的 `schedule` 或 `enabled: true` 会从现在起重新计划 `next_run`（错过的日子不补跑）；`enabled: false` 把它置为 null。新的 `once` 时间表也会把已完成的提醒重新打开；对时间已过的提醒设 `enabled: true` 返回 400 `invalid_request`。
-- `DELETE /api/chores/{id}` 返回 `{"deleted": id}`；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
-- `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。
+- `DELETE /api/chores/{id}` 返回 `{"deleted": id}`，并删除该事项的文件夹；带 `?revision=N` 时，过期的 revision 返回 409 `stale_revision`。
+- `POST /api/chores/{id}/run` 立刻开始一个任务，时间表保持不变：202 `{"chore", "task"}`。该事项上一次运行还没结束时返回 409 `invalid_transition`：同一个事项的运行一次只有一个。
 - `PUT /api/checkin` 配合 `{"on": false}` 切换 check-in（保存在文件中），返回 `{"checkin": {...}}`；关闭期间 `next_at` 为 null。
 - `next_at` 是时间表为下一次运行定的时间（`08:30`），控制台显示的是它；`next_run` 是运行真正开始的时间，最多晚 120 秒，免得所有定时事项都在整点同时开始。每 N 小时的定时事项没有指定时刻，两者相等。事项关闭时两者都为 `null`。
 - `when_said` 是 `when` 的词形式：一个词库键和它的参数，其中一天里的时刻写成 `{"clock": minutes after midnight}`（午夜后的分钟数）。页面用自己的语言和钟点写它（`8:30 AM`、`上午 8:30`）；`when` 始终用 24 小时制（`8:30`），语言随请求。
@@ -486,7 +486,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 
 `request` 以 `Reminder: ` 开头的一次性事项是提醒。它的运行目标是这条请求加上一句说明，让模型用一句简短的话说出这条提醒、不要去做那件事；任务的 `reason` 是 `Reminder`，它在主对话里的卡片带 `reminder: true`（控制台写作 `Reminder: <title>`，运行失败时卡片的一行是完整的原话）。
 
-`last` 是该事项最近一次运行的任务当前状态（`state` 取任务的状态：`queued`、`running`、`held`、`waiting`、`parked`、`interrupted`、`done`、`failed`、`cancelled` 或 `expired`；`line` 是结果的第一句话，或没有完成的原因）。网关用每 30 秒一次、不调用模型的检查来启动到期的事项；电脑睡眠期间到期的事项在下一次检查时只运行一次，上一次运行还没结束的事项跳过这一次，崩溃后重复的启动是同一个任务（键为 `chore:<id>:<planned time>`）。
+`last` 是该事项最近一次运行的任务当前状态（`state` 取任务的状态：`queued`、`running`、`held`、`waiting`、`parked`、`interrupted`、`done`、`failed`、`cancelled` 或 `expired`；`line` 是结果的第一句话，或没有完成的原因）。网关用每 30 秒一次、不调用模型的检查来启动到期的事项；电脑睡眠期间到期的事项在下一次检查时只运行一次，上一次运行还没结束的事项跳过这一次（所属对话为这次运行得到一行 `failed`，`said` 的键为 `chores.skipped`），崩溃后重复的启动是同一个任务（键为 `chore:<id>:<planned time>`）。
 
 ## GET /api/sessions
 

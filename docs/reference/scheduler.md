@@ -350,13 +350,14 @@ HTML. Stop is the task API, never `POST /api/turns/{id}/cancel`.
 ### A chat's follow-up on its tasks
 
 A task a chat starts from the person's message (`Front._start`, through
-`TaskWorkers.create_spec(chat_started=True)`) carries `started_by: "chat"` in
-its session's `meta`. `support/gateway/console/followups.py` hears each
+`TaskWorkers.create_spec(chat_started=True)`), and each run of a chore the
+chat saved (`ChoreRunner._start`, a reminder's run excepted), carries
+`started_by: "chat"` in its session's `meta`. `support/gateway/console/followups.py` hears each
 `sched.finished` and, with `[tasks] follow_up` on, queues one follow-up for the
 owner chat when the task ran out of steps, ended `draft`, `blocked` or `failed`
 by its own report, or failed with a run status the chat can act on (`failed`,
 `gate_stopped`, `stuck`, `context_budget_exceeded`, `timeout`); never for a
-chore's task, one from `POST /api/tasks`, a Stop, a refused folder, a continue
+reminder's run, one from `POST /api/tasks`, a Stop, a refused folder, a continue
 that could not start, or a provider or setup failure. `meta.followup` keeps
 `person_turn` (the id of the person's newest turn in that chat), `runs`,
 `continued`, `ending_at` and `stage`: at most two follow-ups per task for one
