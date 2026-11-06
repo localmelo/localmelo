@@ -4,17 +4,21 @@ import copy
 
 import pytest
 
-from localmelo.melo.agent._context_fit import ContextFitError, fit_request
+from localmelo.melo.agent._chat import PREFIX_RUN, Chat
+from localmelo.melo.agent._context_fit import ContextFitError, FitCut, fit_request
 from localmelo.melo.agent._request_accounting import request_proxy
+from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, Checker, prompt_chars
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
+    REFLECTIONS_HEADER,
     ImagePart,
     Message,
     ToolCall,
     ToolDef,
     ToolResult,
 )
+from localmelo.tests.agent.test_reflection_gate import FakeLLM
 
 
 def estimate(messages: list[Message], tools: list[ToolDef] | None) -> int:
@@ -188,17 +192,20 @@ def test_retry_strict_and_impossible_schemas() -> None:
         fit([Message("user", "task")], 1, tools=tools)
 
 
-def test_user_text_that_looks_like_recall_is_pinned() -> None:
+def test_user_text_that_looks_like_recall_goes_only_whole_and_last() -> None:
     from localmelo.melo.memory.notes import RECALL_START
 
     messages = [
         Message("user", "original"),
+        *pair(0, "old " * 100),
         *pair(1, "short"),
         Message("user", RECALL_START + " important instruction"),
         *pair(2, "latest"),
     ]
-    with pytest.raises(ContextFitError):
-        fit(messages, estimate([messages[0], *messages[-2:]], None))
+    roomy, _ = fit(messages, estimate(messages, None) - 1)
+    assert messages[5].content in [m.content for m in roomy]
+    tight, _ = fit(messages, estimate([messages[0], *messages[-2:]], None))
+    assert [m.content for m in tight] == ["original", "", "latest"]
 
 
 def test_two_fits_do_not_repreview_or_recount() -> None:
@@ -285,5 +292,84 @@ def test_preview_preserves_embedded_current_recall() -> None:
 def test_error_metadata_preserved() -> None:
     messages = [Message("user", "task"), *pair(1, "a" * 2000), *pair(2, "latest")]
     messages[2].tool_result = ToolResult("shell", error="important")
-    with pytest.raises(ContextFitError):
-        fit(messages, estimate(messages, None) - 100)
+    # A failure is never previewed: it goes whole, and only at the last level.
+    result, counts = fit(messages, estimate(messages, None) - 100)
+    assert counts == {"tool_results": 0, "thinking": 0, "units": 1}
+    assert [m.content for m in result] == ["task", "", "latest"]
+
+
+# The shapes a 20,000-character prompt cap refused while the earlier fit sent
+# them: each request is as Chat built it, the size as the cap counts it.
+
+
+def chars(messages: list[Message], tools: list[ToolDef] | None) -> int:
+    return prompt_chars(messages)
+
+
+def cap_fit(
+    messages: list[Message], hold: FitCut | None = None
+) -> tuple[list[Message], dict[str, int]]:
+    return fit_request(
+        messages,
+        None,
+        limit=20_000,
+        estimate=chars,
+        requires_replay=False,
+        drop_target=0.7,
+        hold=hold,
+    )
+
+
+def test_a_finished_attempt_goes_when_the_task_and_the_newest_need_the_room() -> None:
+    task = "t" * 4_300
+    messages = [
+        Message("system", "s" * 400),
+        Message("user", task),
+        *pair(1, "x" * 2_000),
+        Message("user", "The attempt has ended. Reflect on it.\n" + task),
+        Message("assistant", '{"summary": "' + "y" * 1_800 + '"}'),
+        Message("user", f"{REFLECTIONS_HEADER}\n" + "z" * 1_100),
+        *pair(2, "Traceback (most recent call last):\n" + "f" * 9_500),
+    ]
+    cut = FitCut()
+    first, _ = cap_fit(messages, cut)
+    assert chars(first, None) <= 20_000
+    kept = [m.content for m in first]
+    assert kept[:2] == ["s" * 400, task] and kept[-1] == messages[-1].content
+    assert messages[6].content in kept  # the newest reflections block
+    assert messages[4].content not in kept  # the attempt's reflect prompt
+    # The next request repeats the cut byte for byte.
+    second, _ = cap_fit([*messages, *pair(3, "ok")], cut)
+    assert second[: len(first)] == first
+
+
+def test_the_latest_failing_check_goes_when_the_newest_call_needs_the_room() -> None:
+    write = ToolCall("file_write", {"path": "game.py", "content": "c" * 10_000}, id="w")
+    messages = [
+        Message("system", "s" * 400),
+        Message("user", "t" * 3_900),
+        *pair(1, "a" * 3_000),
+        *pair(2, "Traceback (most recent call last):\n" + "f" * 9_900),
+        Message("assistant", tool_calls=[write]),
+        Message("tool", "Wrote 10000 characters", tool_call_id="w"),
+    ]
+    result, _ = cap_fit(messages)
+    assert chars(result, None) <= 20_000
+    assert [m.content for m in result][:2] == ["s" * 400, "t" * 3_900]
+    assert result[-2].tool_calls == [write]
+
+
+async def test_the_answer_on_stop_is_sent_over_the_prompt_cap() -> None:
+    # Its evidence has its own budget; the task alone fills most of the cap.
+    llm = FakeLLM([Message("assistant", "the answer")])
+    checker = Checker()
+    chat = Chat(llm, prompt_check=checker.pre_plan, fit_target=0.7)
+    turns = [m for n in range(30) for m in pair(n, "o" * 1_000)]
+    query = "q" * (PROMPT_CAP_CHARS - 10_000)
+    token = chat.begin_prefix()
+    try:
+        reply = await chat.final_answer(turns, query)
+    finally:
+        PREFIX_RUN.reset(token)
+    assert reply.content == "the answer"
+    assert prompt_chars(llm.calls[0]["messages"]) > PROMPT_CAP_CHARS

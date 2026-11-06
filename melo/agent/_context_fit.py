@@ -8,7 +8,12 @@ from collections.abc import Callable, Sequence
 
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
-from localmelo.melo.schema import Message, ToolDef, starts_with_reply_label
+from localmelo.melo.schema import (
+    REFLECTIONS_HEADER,
+    Message,
+    ToolDef,
+    starts_with_reply_label,
+)
 
 
 class ContextFitError(Exception):
@@ -90,13 +95,15 @@ def _message_key(message: Message) -> tuple[object, ...]:
 class FitCut:
     """What a fit cut, held across a run's requests of one kind.
 
-    *key* is the oldest unit it kept after its last drop; *shortened* holds the
-    steps it shortened a message with (a preview, cleared thinking, removed
-    recall), each with the message's key as it came in.
+    *key* is the oldest unit it kept after its last drop, and *level* how far
+    the drops had to go (see ``fit_request``); *shortened* holds the steps it
+    shortened a message with (a preview, cleared thinking, removed recall),
+    each with the message's key as it came in.
     """
 
     def __init__(self) -> None:
         self.key: tuple[object, ...] | None = None
+        self.level = 0
         self.shortened: set[tuple[object, ...]] = set()
 
     @property
@@ -131,13 +138,15 @@ def fit_request(
     """Fit copies using the caller's assembled-request estimate.
 
     Counts are ``tool_results``, ``thinking`` and ``units``. A retry must
-    additionally estimate strictly below ``force_smaller_than``. Failure is
-    conservative: malformed/in-flight pairs and user turns stay, and images
-    and failure evidence go only when the cut cannot do without them, oldest
-    first and never the latest failing check. Once the fit must act, it
-    shortens (old results to previews, old thinking, old recall) and then
-    drops whole units down to *drop_target* of *limit* (as far as the pinned
-    context allows), so the next requests fit as they are.
+    additionally estimate strictly below ``force_smaller_than``. Once the fit
+    must act, it shortens (old results to previews, old thinking, old recall)
+    and then drops whole units, oldest first, down to *drop_target* of
+    *limit*, so the next requests fit as they are. The drops go in three
+    levels, each only when the one before cannot reach the target: plain old
+    turns; then images and failure evidence too, but the latest failing
+    check; then any unit but the system prompt, the task's own message, the
+    newest reflections block and the last unit, so the floor is those alone.
+    Only when they do not fit does the fit fail.
 
     *history* names, by identity, messages of *messages* from the turns
     before the current task (a chat's earlier tasks): a unit made only of
@@ -146,9 +155,10 @@ def fit_request(
     With a *hold*, the held cut is repeated first: the units that its unit
     follows are dropped (those the fit may drop) and the messages it shortened
     are shortened the same way, so the request is byte for byte the last one
-    up to where it grew. Only when that is over *limit* does the fit cut
-    again, down to *drop_target*. A held unit or message no longer in the
-    request is forgotten. The cut then holds what this fit did.
+    up to where it grew; the units dropped before it are the ones its level
+    allowed. Only when that is over *limit* does the fit cut again, down to
+    *drop_target*. A held unit or message no longer in the request is
+    forgotten. The cut then holds what this fit did.
     """
     copies = copy.deepcopy(messages)
     earlier = {id(m) for m in history}
@@ -183,16 +193,39 @@ def fit_request(
         None,
     )
 
-    def droppable(unit: list[Message], *, keep_evidence: bool = True) -> bool:
-        if unit is newest or unit is units[-1]:
+    # What the last level keeps: the task's own message (the first user turn
+    # after the earlier tasks) and the newest block of reflections.
+    task = next(
+        (unit for unit in units if not before_task(unit) and unit[0].role == "user"),
+        None,
+    )
+    lesson = next(
+        (
+            unit
+            for unit in reversed(units)
+            if unit[0].role == "user" and unit[0].content.startswith(REFLECTIONS_HEADER)
+        ),
+        None,
+    )
+
+    def droppable(unit: list[Message], level: int = 0) -> bool:
+        if unit is units[-1]:
+            return False
+        if level >= 2:
+            return before_task(unit) or (
+                unit is not task
+                and unit is not lesson
+                and all(m.role != "system" for m in unit)
+            )
+        if unit is newest:
             return False
         if before_task(unit):
             return True
         if unit is failing or not _removable(unit):
             return False
-        if keep_evidence and any(m.role == "tool" and _failed(m) for m in unit):
+        if level == 0 and any(m.role == "tool" and _failed(m) for m in unit):
             return False
-        if keep_evidence and any(
+        if level == 0 and any(
             m.images or (m.tool_result and m.tool_result.images) for m in unit
         ):
             return False
@@ -217,10 +250,13 @@ def fit_request(
     keys = {id(m): _message_key(m) for unit in units for m in unit}
     done: set[tuple[object, ...]] = set()
 
+    level = 0
+
     def finish() -> tuple[list[Message], dict[str, int]]:
         if hold is not None:
             if (key := held()) is not None:
                 hold.key = key
+                hold.level = level
             hold.shortened = done
         return flatten(), counts
 
@@ -229,7 +265,8 @@ def fit_request(
         if start is None:
             hold.key = None
         else:
-            before = [unit for unit in units[:start] if droppable(unit)]
+            level = hold.level
+            before = [unit for unit in units[:start] if droppable(unit, level)]
             units = [unit for unit in units if not any(unit is d for d in before)]
             counts["units"] += len(before)
 
@@ -302,24 +339,27 @@ def fit_request(
         if fits(drop_target):
             return finish()
 
-    fitting: tuple[list[Message], dict[str, int], tuple[object, ...] | None] | None
-    fitting = None
-    # Evidence (a failed check, images) goes only when the cut cannot reach
-    # its target, or fit at all, without it.
-    for keep_evidence in (True, False):
+    fitting: (
+        tuple[list[Message], dict[str, int], tuple[object, ...] | None, int] | None
+    ) = None
+    # Each level goes only when the cut cannot reach its target, or fit at
+    # all, without it; the cut holds the deepest level it used.
+    for depth in range(3):
         for unit in list(units):
-            if not droppable(unit, keep_evidence=keep_evidence):
+            if not droppable(unit, depth):
                 continue
             units = [candidate for candidate in units if candidate is not unit]
             counts["units"] += 1
+            level = max(level, depth)
             if fits(drop_target):
                 return finish()
             if fitting is None and fits():
-                fitting = (flatten(), dict(counts), held())
+                fitting = (flatten(), dict(counts), held(), level)
     if fitting is not None:
         if hold is not None:
             if fitting[2] is not None:
                 hold.key = fitting[2]
+                hold.level = fitting[3]
             hold.shortened = done
         return fitting[0], fitting[1]
 

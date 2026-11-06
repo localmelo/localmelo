@@ -664,13 +664,13 @@ async def test_do_reflect_counts_an_over_cap_turn_it_actually_sends() -> None:
 
 
 @pytest.mark.asyncio
-async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
+async def test_do_reflect_leaves_out_a_tail_that_cannot_fit() -> None:
     server = Scripted(_reflection("stop"))
     agent = _agent(
         server.llm(reasoning_field="auto"),
         _options(reasoning="replay"),
     )
-    # A failed check is never shortened, and it is the newest unit.
+    # A failed check is never shortened: it goes whole, the last thing to go.
     failed = "Traceback (most recent call last):\n" + "x" * 120_000
     agent.load_conversation([*_unit("a", failed, thinking="t" * 50_000)])
     task = TaskRecord(query="q")
@@ -679,9 +679,10 @@ async def test_do_reflect_refuses_a_tail_that_cannot_fit() -> None:
         reflection = await agent._do_reflect(task, 0, "budget", run=run)
     await agent.close()
 
-    assert reflection is None
-    assert server.bodies == []
-    assert run.replay_skipped == 0  # nothing was sent, so nothing skipped
+    assert reflection is not None
+    [body] = server.bodies
+    assert [m["role"] for m in body["messages"]] == ["system", "user"]
+    assert run.replay_skipped == 0  # a unit the fit leaves out is not a skip
 
 
 class CountingEmbedding(BaseEmbeddingProvider):

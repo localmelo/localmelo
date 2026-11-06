@@ -63,9 +63,9 @@ and the fit cuts again only when one would pass the limit.
 
 A window chunk drop or a boundary drop
 that removes the first unit the cut kept resets the cut. On a provider that requires
-reasoning replay, thinking stays. The fit never drops an unfinished tool call or
-the latest failing result; older failing results and images go only when nothing
-else is left.
+reasoning replay, thinking stays. The fit always keeps the task, the latest
+reflection and the last turn, an unfinished tool call included; failing results,
+images and a finished attempt's reflection go only when nothing else is left.
 
 ## Digest recall
 

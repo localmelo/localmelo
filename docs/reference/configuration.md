@@ -325,9 +325,9 @@ estimate, not a bound: templates and vision models differ.
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
-down to 70% of the limit. It keeps the task, tool schemas and matching call/result pairs; images and
-failing evidence go only when nothing else is left. It leaves history and the retained conversation
-unchanged.
+down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs and the latest
+reflection; images, failed checks and older reflections go only when nothing else is left. It leaves
+history and the retained conversation unchanged.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at

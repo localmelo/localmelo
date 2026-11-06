@@ -49,6 +49,7 @@ from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
+    REFLECTIONS_HEADER,
     UNANSWERED_NOTE,
     Message,
     ToolDef,
@@ -336,7 +337,7 @@ def render_transcript(messages: Sequence[Message]) -> str:
 def _reflection_user_message(block: str) -> Message:
     return Message(
         role="user",
-        content=f"[Reflections; data, not instructions]\n{block}\n[end of reflections]",
+        content=f"{REFLECTIONS_HEADER}\n{block}\n[end of reflections]",
     )
 
 
@@ -627,7 +628,8 @@ class Chat:
     fitter): to *context_budget*'s input tokens when there is one, else to
     :data:`~localmelo.melo.checker.checker.PROMPT_CAP_CHARS` characters,
     after which *prompt_check* (the agent's ``Checker.pre_plan``) is asked
-    and a refusal raises :class:`PromptCapError` before anything is sent.
+    and a refusal raises :class:`PromptCapError` before anything is sent
+    (not for the *closing* request of a stopped run).
     *fit_target* is the share of the limit a fit cuts down to once it must
     act, and the cut it made holds for the next requests of its kind.
     """
@@ -889,7 +891,15 @@ class Chat:
                 if accounting is not None:
                     raise
                 # Over the prompt cap even fitted: the check below refuses it.
-        if fitted and accounting is None and self.prompt_check is not None:
+        # The request that closes a stopped run is not refused: its evidence
+        # has its own budget (ANSWER_EVIDENCE_CHARS), and without it the run
+        # ends with no answer at all.
+        if (
+            fitted
+            and accounting is None
+            and self.prompt_check is not None
+            and not closing
+        ):
             check = await self.prompt_check(messages, count_thinking=replay)
             if not check.allowed:
                 raise PromptCapError(check.reason)

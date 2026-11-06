@@ -63,8 +63,16 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
 
 
 def prompt_chars(messages: Sequence[Message], *, count_thinking: bool = False) -> int:
-    """Characters *messages* count toward :data:`PROMPT_CAP_CHARS`."""
-    return sum(_prompt_chars(m, count_thinking=count_thinking) for m in messages)
+    """Characters *messages* count toward :data:`PROMPT_CAP_CHARS`.
+
+    The system prompt does not count: the cap bounds what a run adds (task,
+    history, recall, reflections), and the fixed prompt never grows.
+    """
+    return sum(
+        _prompt_chars(m, count_thinking=count_thinking)
+        for m in messages
+        if m.role != "system"
+    )
 
 
 # True while the executor checks a call of the harness itself (see
