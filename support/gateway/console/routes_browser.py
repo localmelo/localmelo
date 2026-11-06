@@ -41,8 +41,12 @@ generation, so a card of an old Agent can never reach a new one, nor an ended ru
 a later one. A source that is not the chat's now is refused: ``409
 stale_source`` on the HTTP routes, and a close with 1008 and the reason
 ``stale_source`` before the stream starts. Nothing falls back to the chat's
-current browser. A client that names neither (an older one) is served as before.
-None of the routes starts a browser: a ``GET`` only reads what is open.
+current browser. A stream that names a ``run`` is for that run alone: when the run
+ends, the chat begins another or its Agent is rebuilt, the gateway sends the meta
+``closed`` with the reason ``browser`` and ends the stream (1000), and the stream
+never carries a picture or takes a message for the next run. A client that names no
+run (an older one, or the generation alone) keeps following the chat's browser, as
+before. None of the routes starts a browser: a ``GET`` only reads what is open.
 
 The client sends JSON text messages of at most :data:`MAX_CLIENT_MESSAGE` bytes
 (more ends the stream, 1009): ``take`` and ``give`` hand the tab to the person
@@ -262,6 +266,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         except StaleSourceError:
             await websocket.close(code=_POLICY, reason="stale_source")
             return
+        # A stream for a run ends with it: pinned before anything is awaited, so no end goes unheard.
+        ends = console.browser_cards.pin(session_id, run) if run is not None else None
         live = resolved.live if resolved is not None else None
         if live is None:
             # The chat has no streaming browser (yet): say so and end calmly.
@@ -278,30 +284,50 @@ def add_routes(app: FastAPI, console: Console) -> None:
             return
         try:
             await websocket.accept()
-            await _serve(websocket, viewer, live)
+            await _serve(websocket, viewer, live, ends)
         finally:
             await live.release(viewer)
 
 
-async def _serve(websocket: WebSocket, viewer: Viewer, live: LiveView) -> None:
-    """Send the viewer's meta and pictures until it ends or the client goes; act on what the client sends."""
-    sender = asyncio.ensure_future(_send(websocket, viewer))
-    receiver = asyncio.ensure_future(_receive(websocket, viewer, live))
+async def _serve(
+    websocket: WebSocket,
+    viewer: Viewer,
+    live: LiveView,
+    ends: asyncio.Event | None = None,
+) -> None:
+    """Send the viewer's meta and pictures until it ends or the client goes; act on what the client sends.
+
+    *ends* is set when the run the stream is for is over: the stream then says so and ends, and serves nothing more.
+    """
+    sender = asyncio.ensure_future(_send(websocket, viewer, ends))
+    receiver = asyncio.ensure_future(_receive(websocket, viewer, live, ends))
+    tasks: set[asyncio.Future[Any]] = {sender, receiver}
+    if ends is not None:
+        tasks.add(asyncio.ensure_future(ends.wait()))
     try:
-        await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
-        for task in (sender, receiver):
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(sender, receiver, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
     if websocket.application_state == WebSocketState.CONNECTED:
         with contextlib.suppress(Exception):
+            if ends is not None and ends.is_set():
+                async with asyncio.timeout(SEND_TIMEOUT_S):
+                    await websocket.send_text(
+                        json.dumps(
+                            {"type": "meta", "state": "closed", "reason": "browser"}
+                        )
+                    )
             await websocket.close(code=_NORMAL)
 
 
-async def _send(websocket: WebSocket, viewer: Any) -> None:
+async def _send(
+    websocket: WebSocket, viewer: Any, ends: asyncio.Event | None = None
+) -> None:
     while True:
         item = await viewer.next()
-        if item is None:
+        if item is None or (ends is not None and ends.is_set()):
             return
         kind, payload = item
         try:
@@ -316,7 +342,12 @@ async def _send(websocket: WebSocket, viewer: Any) -> None:
             return
 
 
-async def _receive(websocket: WebSocket, viewer: Viewer, live: LiveView) -> None:
+async def _receive(
+    websocket: WebSocket,
+    viewer: Viewer,
+    live: LiveView,
+    ends: asyncio.Event | None = None,
+) -> None:
     """Read what the client sends until it goes, and act on it (see the module docstring).
 
     Nothing a message carries is logged: a message that is not one the panel
@@ -324,7 +355,9 @@ async def _receive(websocket: WebSocket, viewer: Viewer, live: LiveView) -> None
     """
     while True:
         message = await websocket.receive()
-        if message["type"] == "websocket.disconnect":
+        if message["type"] == "websocket.disconnect" or (
+            ends is not None and ends.is_set()
+        ):
             return
         text = message.get("text")
         size = len((text or "").encode("utf-8")) + len(message.get("bytes") or b"")

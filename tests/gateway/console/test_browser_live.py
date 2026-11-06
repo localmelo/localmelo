@@ -697,6 +697,64 @@ async def test_a_source_that_is_not_the_chats_now_is_refused_on_every_route_and_
         assert (await client.get(base)).status_code == 200
 
 
+PINS = {
+    "a card's source (generation and run)": ({"gen": True, "run": True}, True),
+    "a run": ({"run": True}, True),
+    "a generation only": ({"gen": True}, False),
+    "no source (an older client)": ({}, False),
+}
+
+
+@pytest.mark.parametrize("ending", ["the run ends", "the agent is rebuilt"])
+@pytest.mark.parametrize("pin", list(PINS))
+async def test_a_stream_pinned_to_a_run_ends_with_it_and_never_follows_the_next_run(
+    console: Console,
+    builder: Builder,
+    workspace: Path,
+    served: Served,
+    pin: str,
+    ending: str,
+) -> None:
+    named, ends = PINS[pin]
+    session_id = await chat(console, builder, workspace)
+    turn = await begin_run(console, session_id)
+    agent = await browse(builder, session_id, HOME)
+    query = {
+        key: {"gen": agent.provider.generation, "run": "run-2"}[key] for key in named
+    }
+    cast_ = agent.driver.cast
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        await until_card(client, served, session_id, state="working")
+        text = "?" + str(httpx.QueryParams(query)) if query else ""
+        async with connect(
+            served.url(session_id, text), additional_headers=served.bearer
+        ) as ws:
+            await messages(ws, 1)
+            cast_.push("t1", Frame(MARKER, width=1280.0, height=713.0))
+            await messages(ws, 2)
+            if ending == "the run ends":
+                await end_run(console, session_id, turn)
+                await until_card(client, served, session_id, state="done")
+                await begin_run(console, session_id, "run-3")
+            else:
+                console.browser_cards.attach(session_id, agent)
+            if ends:
+                # It ends calmly, as a view of a browser that is not the card's: the next thing it gets is its end.
+                told = json.loads(str((await messages(ws, 1))[0]))
+                assert (told["state"], told["reason"]) == ("closed", "browser")
+                with pytest.raises(ConnectionClosed) as closed:
+                    await asyncio.wait_for(ws.recv(), 5)
+                assert closed.value.rcvd is not None and closed.value.rcvd.code == 1000
+            else:
+                # What names no run keeps following the chat's browser, as documented, and gets the next run's pictures.
+                later = b"\xff\xd8the-next-runs-picture"
+                cast_.push("t1", Frame(later, width=1280.0, height=713.0))
+                assert (await messages(ws, 1))[0] == later
+    view = agent.provider.live
+    assert view is not None
+    await until(lambda: view.viewers == 0)
+
+
 async def test_a_card_says_only_the_words_the_program_wrote(
     console: Console, builder: Builder, workspace: Path, served: Served
 ) -> None:

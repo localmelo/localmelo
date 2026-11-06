@@ -14,7 +14,8 @@
  * A sink is `{canvas, update(state)}`; `state` is `{meta, link, picture}`: the latest `meta` (null before the first),
  * the link to the gateway (`off`, `connecting`, `open` or `retry`) and whether a picture has been painted since the
  * source was first watched. A lost link is tried again, later and later; a refusal, and a view the gateway ended on
- * purpose, are not. A picture that arrives after its source was let go is never painted.
+ * purpose, are not. A picture is painted only if what it belongs to still shows when it is decoded: one that arrives
+ * after its source was let go, or whose tab, view or connection changed while it was decoding, is dropped.
  */
 
 export const RETRY_S = [1, 2, 4, 8, 16, 30];
@@ -114,7 +115,14 @@ export function createStreams({
     for (const sink of [...entry.sinks]) sink.update?.(state);
   }
 
+  /** What a picture still being decoded belongs to is over (another tab, a closed view, another connection). */
+  function fence(entry) {
+    entry.epoch += 1;
+    entry.latest = null;
+  }
+
   function dropSocket(entry) {
+    fence(entry);
     if (entry.timer !== null) {
       cancel(entry.timer);
       entry.timer = null;
@@ -122,7 +130,6 @@ export function createStreams({
     const socket = entry.socket;
     entry.socket = null;
     entry.link = 'off';
-    entry.latest = null;
     if (socket) {
       socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
       try {
@@ -168,7 +175,10 @@ export function createStreams({
       if (typeof event.data === 'string') {
         const meta = parseMeta(event.data);
         if (!meta) return;
-        if (meta.tab !== (entry.meta?.tab ?? '') || meta.state === 'idle' || meta.state === 'closed') entry.picture = false;
+        if (meta.tab !== (entry.meta?.tab ?? '') || meta.state === 'idle' || meta.state === 'closed') {
+          entry.picture = false;
+          fence(entry);
+        }
         entry.meta = meta;
         notify(entry);
         return;
@@ -180,6 +190,7 @@ export function createStreams({
       if (entry.socket !== socket) return;
       entry.socket = null;
       entry.link = 'off';
+      fence(entry);
       if (event?.code === REFUSED) {
         if (event.reason === 'token_rotated') {
           denied();
@@ -211,6 +222,7 @@ export function createStreams({
     try {
       while (entry.latest !== null) {
         const data = entry.latest;
+        const epoch = entry.epoch;
         entry.latest = null;
         let bitmap;
         try {
@@ -222,6 +234,11 @@ export function createStreams({
         if (!entry.alive) {
           bitmap?.close?.();
           return;
+        }
+        // Nor is a picture of a page that changed meanwhile: only a picture that came after the change is of what shows.
+        if (entry.epoch !== epoch) {
+          bitmap?.close?.();
+          continue;
         }
         for (const sink of entry.sinks) paint(sink.canvas, bitmap);
         bitmap.close?.();
@@ -258,7 +275,7 @@ export function createStreams({
       if (!entry) {
         entry = {
           key, source: {...source}, sinks: new Set(), meta: null, link: 'off', attempt: 0, socket: null, timer: null,
-          latest: null, drawing: false, picture: false, alive: true,
+          latest: null, drawing: false, picture: false, alive: true, epoch: 0,
         };
         entries.set(key, entry);
       }

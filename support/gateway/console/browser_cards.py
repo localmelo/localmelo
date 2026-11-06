@@ -43,6 +43,13 @@ ACTIVE: Final = frozenset({"working", "waiting", "you"})
 BROWSER_ROWS: Final = 400
 
 
+def _retire(source: _Source) -> None:
+    """The run of *source* is over: every stream pinned to it is told."""
+    for ends in list(source.pins):
+        ends.set()
+    source.pins.clear()
+
+
 @dataclass(eq=False)
 class _Source:
     """One open chat's browser tools and the run they work in."""
@@ -57,6 +64,10 @@ class _Source:
     ended: tuple[str, str] | None = None
     dirty: bool = False
     task: asyncio.Task[None] | None = field(default=None, repr=False)
+    # What is pinned to the run (see :meth:`BrowserCards.pin`); a stream that is gone is dropped from it by itself.
+    pins: weakref.WeakSet[asyncio.Event] = field(
+        default_factory=weakref.WeakSet, repr=False
+    )
 
 
 class BrowserCards:
@@ -83,8 +94,10 @@ class BrowserCards:
             ),
             None,
         )
+        old = self._sources.pop(session_id, None)
+        if old is not None:
+            _retire(old)
         if provider is None:
-            self._sources.pop(session_id, None)
             return
         source = _Source(session_id, weakref.ref(provider), provider.generation)
         self._sources[session_id] = source
@@ -94,6 +107,20 @@ class BrowserCards:
         """Whether *run* is the run that session *session_id*'s browser works for now."""
         source = self._sources.get(session_id)
         return source is not None and source.run == run and source.ended is None
+
+    def pin(self, session_id: str, run: str) -> asyncio.Event:
+        """An event that is set once *run* is no longer the run of *session_id*'s browser, and is set already if it is not.
+
+        A stream a card opened is for the card's run: the run's end, the next run of the chat and a rebuilt Agent
+        set it, so the stream ends with its run and never carries the pictures of the next one.
+        """
+        ends = asyncio.Event()
+        source = self._sources.get(session_id)
+        if source is None or source.run != run or source.ended is not None:
+            ends.set()
+        else:
+            source.pins.add(ends)
+        return ends
 
     async def close_orphans(self, rows: list[StoredEvent]) -> list[StoredEvent]:
         """*rows* (each the newest of its card) with a card left active by a run that is gone closed as stopped.
@@ -137,6 +164,7 @@ class BrowserCards:
             return
         kind = stored.event.get("type")
         if kind == "run.started":
+            _retire(source)
             source.run = str(stored.event.get("run_id") or "")
             source.turn = stored.turn or 0
             source.card, source.ended = None, None
@@ -145,6 +173,7 @@ class BrowserCards:
             data = data if isinstance(data, dict) else {}
             if source.card is None:
                 source.run = ""  # the run never browsed
+                _retire(source)
                 return
             done = data.get("status") == "completed"
             by = "you" if data.get("cause") == "user_stop" else ""
@@ -174,6 +203,9 @@ class BrowserCards:
                 logger.debug("No browser card: %s", exc)
         if source.ended is not None:
             source.run = ""
+            _retire(
+                source
+            )  # after the card says the run is over: the card and the stream's end arrive in that order
 
     def _card(self, source: _Source) -> dict[str, Any] | None:
         """The card for the run now, or None when there is nothing to say yet."""

@@ -363,7 +363,8 @@ test('a settings change is checked at once: the chip follows the browser now cho
   browser.card(card());
   setApi({available: true, open: false});
   await browser.recheck();
-  assert.deepEqual(calls.api, ['/sessions/s1/browser', '/sessions/s1/browser']);
+  // Asked when followed, again for the run's new card (the chat was found unwatchable), and by the recheck.
+  assert.deepEqual(calls.api, ['/sessions/s1/browser', '/sessions/s1/browser', '/sessions/s1/browser']);
   assert.equal(els.root.hidden, true, 'nothing opens by itself');
   assert.equal(els.chip.hidden, false);
   browser.toggle();
@@ -903,4 +904,89 @@ test('a card watches only while it is on screen, the dock takes over when it lea
   assert.equal(FakeSocket.all[0].closed, 1000, 'the run ended: nobody watches');
   t.cards.sync([]);
   assert.equal(t.cards.nodeOf('s1:run-1'), null, 'a card of another chat is let go');
+});
+
+test('a picture still being decoded when the page changes under it is not painted, nor taken for one of the new page', async () => {
+  const changes = {
+    'a tab switch': (t) => t.socket.say(message({tab: 't2', url: 'https://other.test/'})),
+    'an idle view': (t) => t.socket.say(message({state: 'idle', tab: ''})),
+    'a closed view': (t) => t.socket.say(message({state: 'closed', tab: '', reason: 'tab'})),
+    'a lost link': (t) => { t.socket.drop(); t.timers.splice(0).forEach((fn) => fn()); },
+    'a page that went away and came back': (t) => { t.streams.suspend(); t.streams.resume(); },
+  };
+  for (const [what, change] of Object.entries(changes)) {
+    FakeSocket.all = [];
+    const decodes = [];
+    const timers = [];
+    const streams = createStreams({
+      openSocket: (url) => new FakeSocket(url),
+      decode: (bytes) => new Promise((resolve) => decodes.push(() => resolve({width: 64, height: 36, tag: new Uint8Array(bytes)[0], close() {}}))),
+      location: {protocol: 'http:', host: 'gw.test'},
+      schedule: (fn) => timers.push(fn),
+      cancel: () => {},
+    });
+    const canvas = {drawn: [], width: 0, height: 0, getContext() { return {drawImage: (bitmap) => canvas.drawn.push(bitmap.tag)}; }};
+    const seen = [];
+    streams.watch({session: 's1'}, {canvas, update: (state) => seen.push(state)});
+    const t = {streams, timers, socket: FakeSocket.all[0]};
+    t.socket.open();
+    t.socket.say(message());
+    t.socket.say(new Uint8Array([1]).buffer);
+    change(t);
+    decodes.shift()();
+    await settle();
+    assert.deepEqual(canvas.drawn, [], `${what}: the old page is not painted`);
+    assert.equal(seen.at(-1).picture, false, `${what}: and no picture is promised`);
+    // The first picture of what shows now is painted as usual, on the socket that carries it.
+    const now = FakeSocket.all.at(-1);
+    now.open();
+    now.say(message({tab: 't2'}));
+    now.say(new Uint8Array([2]).buffer);
+    decodes.shift()();
+    await settle();
+    assert.deepEqual(canvas.drawn, [2], `${what}: the new page is`);
+    assert.equal(seen.at(-1).picture, true);
+  }
+});
+
+test('Open browser works for a chat that was unavailable when it was followed and is watchable now, without a reload', async () => {
+  const {browser, els, setApi} = panel({open: false, state: {available: false, open: false}});
+  await browser.follow('s1');
+  assert.equal(els.chip.hidden, true);
+  setApi({available: true, open: true}); // another page saved Settings: this chat's next browser is Chrome
+  browser.card(card());
+  await settle();
+  assert.equal(els.chip.hidden, false, 'the chip follows the browser the run has');
+  browser.open(card());
+  assert.equal(els.root.hidden, false);
+  assert.equal(FakeSocket.all.at(-1).url, SOURCE);
+});
+
+test('after a reload an ended card is its words alone: the picture of the page was never kept anywhere', () => {
+  const t = together();
+  t.cards.sync([readBrowser(row({state: 'done', action: ''}))]);
+  const done = t.cards.nodeOf('s1:run-1');
+  assert.equal(done.dataset.size, 'line');
+  assert.equal(done.dataset.own, 'done');
+  assert.equal(done.children[1].hidden, true, 'no picture');
+  assert.equal(FakeSocket.all.length, 0, 'and nothing is asked for one');
+  t.cards.sync([readBrowser(row({id: 12, card_key: 's1:run-2', run_id: 'run-2', state: 'stopped', action: '', by: 'you'}))]);
+  assert.equal(t.cards.nodeOf('s1:run-2').dataset.size, 'line');
+  assert.equal(t.cards.nodeOf('s1:run-2').children[1].hidden, true);
+});
+
+test('Open browser asks again when the chat was last found unwatchable: it opens if Chrome is watchable now, and does nothing if not', async () => {
+  const {browser, els, calls, setApi} = panel({open: false, state: {available: false, open: false}});
+  await browser.follow('s1');
+  await browser.open(card());
+  assert.equal(els.root.hidden, true, 'still Safari: nothing to open');
+  assert.equal(FakeSocket.all.length, 0);
+  setApi({available: true, open: true});
+  await browser.open(card());
+  assert.equal(els.root.hidden, false, 'Chrome now: the panel opens without a reload');
+  assert.equal(FakeSocket.all.at(-1).url, SOURCE);
+  assert.equal(calls.api.length, 3, 'asked when followed and by each click on an unwatchable chat, never again once it is watchable');
+  browser.hide();
+  await browser.open(card());
+  assert.equal(calls.api.length, 3);
 });

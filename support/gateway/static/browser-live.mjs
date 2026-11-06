@@ -11,8 +11,9 @@ export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-strea
  * conversation (and of the dock above it) opens it on that card's source (`open(card)`), and the chat's header chip,
  * which names the state of the chat's browser, shows or hides it. Hiding it only stops watching: the page, melo's
  * run and the card stay as they are, and the panel is never Done or Stop. Whether the chat can be watched
- * (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed and on `recheck()`
- * (this page saved Settings). The pictures come from the page's one stream of the card's source
+ * (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, on `recheck()`
+ * (this page saved Settings), and again when a chat marked unwatchable has a new browser card or is asked to open one
+ * (another page may have saved Settings since). The pictures come from the page's one stream of the card's source
  * (browser-stream.mjs): a panel that is hidden holds no watcher, and the card, the dock and the panel of one source
  * share one socket and one decoder.
  *
@@ -771,6 +772,8 @@ export function setupBrowser({
       S.pin = pin;
       if (moved && S.shown) show();
       render();
+      // A chat last found unwatchable may browse in another browser now (Settings saved elsewhere): ask once for the run.
+      if (moved && S.available === false) probe();
     },
 
     /**
@@ -784,8 +787,11 @@ export function setupBrowser({
     },
 
     /** Open browser, on a card or the dock: the panel shows that card's source (`{gen, run}`). */
-    open(card) {
-      if (!S.session || S.liveOnly || S.available === false) return;
+    async open(card) {
+      if (!S.session || S.liveOnly) return;
+      const id = S.session;
+      if (S.available === false) await probe(); // the browser may have changed since this page last asked
+      if (S.session !== id || S.available === false) return;
       S.pin = {gen: card.gen, run: card.run};
       S.available = S.available ?? true;
       show();

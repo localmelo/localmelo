@@ -16,7 +16,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bar and the panel share one picture stream, which runs only while one of them is on screen. New event
   `attention.browser` (words only: no picture, typed value, full address or query), `browser` on `GET .../turns`, and
   `gen` and `run` queries on the browser routes, which refuse a source that is not the chat's now (409
-  `stale_source`). Also fixed: the turn box's heading now follows the live row while you have the page, the
+  `stale_source`); a picture stream for a run ends when the run does and never carries the next run's page. Also fixed: the turn box's heading now follows the live row while you have the page, the
   composer's model name no longer shrinks to a letter beside the open panel, and a `remember` step reads "Kept a
   note", or "Could not keep a note" when refused, instead of "Remembering" (#529).
 - Taking over a page is a real pause in a real window. In Chrome, **Take over** opens the page in a window of melo's own
