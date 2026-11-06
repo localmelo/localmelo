@@ -12,7 +12,8 @@ made with umask 077), never the person's Chrome profile. ``--use-mock-keychain``
 keeps Chrome off the login keychain, so its cookies at rest are protected by
 the file mode and FileVault only. Sign-ins whose cookies persist are kept from
 one chat to the next and across restarts; a cookie that lasts only for the
-session is gone once Chrome stops. Downloads are refused.
+session is gone once Chrome stops. A page's download is saved in melo's own downloads folder
+(:func:`downloads_folder`), never opened or run, and the next step says so.
 
 One Chrome serves every chat in the process (a profile can be open in one
 Chrome only). Each driver sees only the tabs it opened and the tabs those
@@ -94,6 +95,7 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Dialog,
+    Download,
     Shot,
     StaleElementError,
     TabInfo,
@@ -256,6 +258,18 @@ def launch_args(profile: str, version: str, *, gpu: bool = False) -> list[str]:
     return args
 
 
+# A page's download is saved by an id, not by the name the page chose: no name or
+# extension of the page's is on this disk. A download past this size is cut, and
+# at most this many are followed at once (#547).
+MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
+MAX_DOWNLOADS = 50
+
+
+def downloads_folder(profile: str) -> str:
+    """Where a page's downloads are saved: ``downloads`` next to the profile, private like it."""
+    return os.path.join(os.path.dirname(profile.rstrip("/")), "downloads")
+
+
 def make_profile(path: str) -> None:
     """Make melo's profile folder, private to this user (0700, umask 077); never a link."""
     if os.path.islink(path):
@@ -333,6 +347,9 @@ class _Chrome:
         self.local: LocalRule | None = None
         self.jobs: set[asyncio.Task[None]] = set()
         self.attempts: dict[str, list[LocalAttempt]] = {}
+        # Downloads in progress or finished and not told yet, by id: the page's
+        # suggested name, its frame, the bytes so far, and the state.
+        self.saving: dict[str, dict[str, Any]] = {}
         self.relays = asyncio.Semaphore(local_apps.MAX_RELAYS)
 
     @classmethod
@@ -388,7 +405,16 @@ class _Chrome:
             chrome._reader = asyncio.ensure_future(chrome._read(reader))
             async with asyncio.timeout(timeout_s):
                 await chrome.request("Browser.getVersion")
-            await chrome.request("Browser.setDownloadBehavior", {"behavior": "deny"})
+            folder = downloads_folder(profile)
+            make_profile(folder)
+            await chrome.request(
+                "Browser.setDownloadBehavior",
+                {
+                    "behavior": "allowAndName",
+                    "downloadPath": folder,
+                    "eventsEnabled": True,
+                },
+            )
             if local is not None:
                 # For the whole browser: every tab, frame and worker, before any loads.
                 chrome.local = local
@@ -469,6 +495,17 @@ class _Chrome:
         elif method == "Page.navigatedWithinDocument":
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
+        elif method == "Browser.downloadWillBegin":
+            guid = str(params.get("guid") or "")
+            if guid and len(self.saving) < MAX_DOWNLOADS:
+                self.saving[guid] = {
+                    "name": str(params.get("suggestedFilename") or "")[:200],
+                    "frame": str(params.get("frameId") or ""),
+                    "size": 0,
+                    "state": "started",
+                }
+        elif method == "Browser.downloadProgress":
+            self._downloading(str(params.get("guid") or ""), params)
         elif method == "Fetch.requestPaused" and not session and self.local is not None:
             job = self.loop.create_task(self._paused(self.local, params))
             self.jobs.add(job)
@@ -651,6 +688,26 @@ class _Chrome:
             stream.cancel()
             with contextlib.suppress(Exception):
                 stream.on_end()
+
+    def _downloading(self, guid: str, params: dict[str, Any]) -> None:
+        """A download's progress: its size, its end, and a stop at :data:`MAX_DOWNLOAD_BYTES`."""
+        entry = self.saving.get(guid)
+        if entry is None:
+            return
+        got = params.get("receivedBytes")
+        entry["size"] = got if isinstance(got, int) and got >= 0 else entry["size"]
+        state = str(params.get("state") or "")
+        if state in ("completed", "canceled"):
+            entry["state"] = state
+        elif entry["size"] > MAX_DOWNLOAD_BYTES and not entry.get("cut"):
+            entry["cut"] = True
+            job = self.loop.create_task(self._cut(guid))
+            self.jobs.add(job)
+            job.add_done_callback(self.jobs.discard)
+
+    async def _cut(self, guid: str) -> None:
+        with contextlib.suppress(BrowserError):
+            await self.request("Browser.cancelDownload", {"guid": guid})
 
     def request(
         self,
@@ -1259,6 +1316,41 @@ class ChromeBackgroundDriver(PageScriptActs):
             raise BrowserError("Chrome no longer has that tab.")
         self._current = target
         return await self._here(target)
+
+    async def downloads(self) -> list[Download]:
+        """The downloads this driver's pages made that ended since the last call, once (#547).
+
+        A download is this driver's when the frame that started it is in one
+        of its pages; one whose page cannot be told is dropped, not given to
+        another chat.
+        """
+        browser = self._browser
+        if browser is None:
+            return []
+        found: list[Download] = []
+        for guid, entry in list(browser.saving.items()):
+            if entry["state"] == "started":
+                continue
+            target = await browser._page_of(entry["frame"])
+            if target and target not in self._mine:
+                continue  # another chat's: it tells its own
+            browser.saving.pop(guid, None)
+            if not target:
+                continue
+            state = (
+                "done"
+                if entry["state"] == "completed"
+                else "too big" if entry.get("cut") else "failed"
+            )
+            found.append(
+                Download(
+                    entry["name"],
+                    int(entry["size"]),
+                    state,
+                    downloads_folder(browser.profile),
+                )
+            )
+        return found
 
     def local_attempts(self) -> list[LocalAttempt]:
         """The requests to this computer melo blocked on this driver's pages since the last call, once."""

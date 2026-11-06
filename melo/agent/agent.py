@@ -199,6 +199,8 @@ from localmelo.melo.schema import (
     CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
+    EXTEND_WHEN,
+    MAX_EXTENSIONS,
     MAX_REFLECTION_CHARS,
     PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
@@ -889,6 +891,8 @@ class _RunState:
     # last, and the steps of this run that did not count for it.
     call_refused: bool = False
     free_steps: int = 0
+    # How many times the run was given more steps for making progress (#547).
+    extensions: int = 0
     refused_calls: set[str] = dataclasses.field(default_factory=set)
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
@@ -2851,6 +2855,16 @@ class Agent(_RecallLoop, _NotesLoop):
         )
 
     @staticmethod
+    def _progressing(fingerprints: list[tuple[str, str, str]]) -> bool:
+        """Whether the last five steps made progress: two different steps ran with no error."""
+        done = {
+            (name, step_h)
+            for name, step_h, error in fingerprints[-5:]
+            if name and not error
+        }
+        return len(done) >= 2
+
+    @staticmethod
     def _detect_stuck(
         fingerprints: list[tuple[str, str, str]],
     ) -> str:
@@ -3160,6 +3174,22 @@ class Agent(_RecallLoop, _NotesLoop):
         while step + 1 < budget:
             step += 1
             self.chat.check_call_budget()  # before the step starts, not inside it
+            if (
+                budget - step == EXTEND_WHEN
+                and run.last_attempt
+                and run.extensions < MAX_EXTENSIONS
+                and self.options.extend_steps > 0
+                and self._progressing(fingerprints)
+            ):
+                # Still making progress near the end of the run's last steps:
+                # more steps now, with the last ones still there to finish.
+                run.extensions += 1
+                budget += self.options.extend_steps
+                logger.info(
+                    "Task %s is making progress: %d more steps",
+                    task.task_id,
+                    self.options.extend_steps,
+                )
             if budget - step == 2:
                 await self._deadline_check(run)
                 if self.options.task_aids and run.last_attempt:

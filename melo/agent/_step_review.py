@@ -66,6 +66,7 @@ from localmelo.melo.checker.review.model import (
     user_message,
 )
 from localmelo.melo.checker.review.named import (
+    folder_named,
     key_named,
     local_sites,
     loopback_site,
@@ -554,6 +555,15 @@ class StepReviewer:
         if category == "credentials":
             return key_named(subject, self.requests, os.path.expanduser("~"))
         return category == "remote_code" and script_named(subject, self.requests)
+
+    def names_folder(self, path: str) -> bool:
+        """Whether the person's own words name *path* (canonical, outside the workspace) or a folder above it.
+
+        The home folder and the folders above it never count (see
+        :func:`~localmelo.melo.checker.review.named.folder_named`); a place
+        melo never opens does not reach here at all.
+        """
+        return folder_named(path, self.requests, os.path.expanduser("~"))
 
     def written_local(self, host: str, port: int) -> bool:
         """Whether the person's own words write the server ``host:port`` on this computer.

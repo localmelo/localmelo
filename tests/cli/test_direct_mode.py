@@ -245,7 +245,9 @@ class TestBuildDirectModeAgent:
                 args, options=options, tool_providers=providers
             )
         kwargs = dict(agent_cls.call_args.kwargs)
-        assert kwargs.pop("options") is options
+        # The config's switches ride on a copy (a chat's steps extend, #547).
+        sent = kwargs.pop("options")
+        assert dataclasses.replace(sent, extend_steps=options.extend_steps) == options
         assert kwargs.pop("tool_providers") is providers
         kwargs["embedding_cls"] = embedding_cls
         return kwargs

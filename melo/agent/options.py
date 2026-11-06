@@ -303,6 +303,14 @@ class AgentOptions:
       (``BaseLLMProvider.takes_images``, asked once, when a tool first
       returns an image) and ``"off"`` otherwise. A run whose tools return
       no image sends the same requests in every mode.
+    - ``extend_steps``: how many steps a run still making progress is given
+      by itself when it is :data:`~localmelo.melo.schema.EXTEND_WHEN` steps
+      from the end of its last attempt (so the steps left finish the work and
+      report), at most :data:`~localmelo.melo.schema.MAX_EXTENSIONS` times
+      (#547). Progress is two different steps with no error among the last
+      five. Default 0: a run ends at ``max_steps`` as before; the sessions
+      of the gateway, the console and the CLI chats turn it on
+      (:func:`~localmelo.support.sessions.agents.configured_attempt_options`).
     - ``refused_steps``: how many steps of a run may go uncounted toward
       ``max_steps`` because a policy check refused every call in them: the
       tool's own check (it returned ``refuse_call(...)``, see
@@ -374,6 +382,7 @@ class AgentOptions:
     max_calls: int | None = None
     task_aids: bool = False
     refused_steps: int = 0
+    extend_steps: int = 0
     empty_reply_fallback: EmptyReplyFallback = "on"
 
     def __post_init__(self) -> None:
@@ -410,6 +419,14 @@ class AgentOptions:
         ):
             raise ValueError(
                 f"max_calls must be None or an int >= 2, got {self.max_calls!r}"
+            )
+        if (
+            isinstance(self.extend_steps, bool)
+            or not isinstance(self.extend_steps, int)
+            or self.extend_steps < 0
+        ):
+            raise ValueError(
+                f"extend_steps must be an int >= 0, got {self.extend_steps!r}"
             )
         if (
             isinstance(self.refused_steps, bool)

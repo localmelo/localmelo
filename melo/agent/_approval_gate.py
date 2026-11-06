@@ -52,7 +52,7 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_key,
 )
-from localmelo.melo.contracts.folders import OutsideAccess, home_label
+from localmelo.melo.contracts.folders import NAMED_FOLDER, OutsideAccess, home_label
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
@@ -400,7 +400,19 @@ class _ApprovalGate:
         if self.review is not None and "self" in self.review.categories:
             self._record(asking, origin="policy", reason=SELF_DENIAL)
             return ApprovalDecision(False, SELF_DENIAL, origin="policy")
-        decided = await self._ask(asker.decide_folder, asking)
+        if (
+            self._reviewer is not None
+            and review_mode(self._policy, asking) == "auto"
+            and self._reviewer.names_folder(outside.path)
+        ):
+            # In Auto, a folder the person wrote in their own words needs no
+            # card (#547): the path is theirs, the rules above still stop what
+            # is never offered and what changes localmelo itself.
+            decided: ApprovalDecision = ApprovalDecision(
+                True, NAMED_FOLDER, origin="user"
+            )
+        else:
+            decided = await self._ask(asker.decide_folder, asking)
         if decided.allow and decided.origin in ("auto", "earlier"):
             # Only a person, a grant of the folder or the settings allow it.
             refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
@@ -583,9 +595,11 @@ def _outside_write(review: ActionReview | None, outside: OutsideAccess) -> Actio
 
 
 def _folder_scope(decision: ApprovalDecision) -> str:
-    """What allowed a call outside the workspace: once, chat, always, or "" (denied)."""
+    """What allowed a call outside the workspace: once, chat, always, named (the person wrote the folder), or "" (denied)."""
     if not decision.allow:
         return ""
+    if decision.reason == NAMED_FOLDER:
+        return "named"
     if decision.origin == "session":
         return "chat"
     if decision.origin == "policy":

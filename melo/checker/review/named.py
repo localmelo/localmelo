@@ -2,15 +2,17 @@
 
 Auto mode shows a card, instead of stopping a step without one, when the step
 uses a key the person wrote, runs a script whose address they wrote, or reads
-a server on this computer at an address they wrote. These functions read the
+a server on this computer at an address they wrote; and it asks nothing about
+a file in a folder they wrote. These functions read the
 texts they are given, which are the person's own messages and never a page's
 or a tool's, and say whether the text names the subject *exactly*: a key by
 its path (``~/.ssh/id_ed25519``, ``$HOME/...`` or absolute) or by a file name
 that is specific (``id_ed25519``), a script by its whole address, a server by
-``localhost:3000``, ``127.0.0.1:3000`` or ``[::1]:3000``. Naming a folder does
-not name a file in it, a longer name does not name a shorter one, and a host
-without its port or a script's host without its path names nothing. They
-import only the standard library.
+``localhost:3000``, ``127.0.0.1:3000`` or ``[::1]:3000``, a folder by its path
+(it names every file under it). Naming a folder does not name a key file in
+it, a longer name does not name a shorter one, and a host without its port or
+a script's host without its path names nothing. They import only the standard
+library and :mod:`localmelo.melo.contracts.folders`.
 """
 
 from __future__ import annotations
@@ -19,7 +21,9 @@ import os
 import re
 from collections.abc import Iterable
 
-__all__ = ["key_named", "local_sites", "loopback_site", "script_named"]
+from localmelo.melo.contracts.folders import above_home
+
+__all__ = ["folder_named", "key_named", "local_sites", "loopback_site", "script_named"]
 
 # A file name is specific when it holds a digit or one of _ . - : "id_ed25519"
 # and ".npmrc", not "credentials" or "config".
@@ -32,19 +36,24 @@ _SERVER = re.compile(
 )
 
 
-def _token(text: str, needle: str, *, before: str = r"\w./~$-") -> bool:
+def _token(
+    text: str, needle: str, *, before: str = r"\w./~$-", folder: bool = False
+) -> bool:
     """Whether *needle* stands in *text* as a whole word of a path or address.
 
     Not inside a longer one: nothing that can continue a name stands right
     before it, and after it comes no name character, no ``/`` and no ``.``
-    followed by one (``id_ed25519.pub`` is not ``id_ed25519``).
+    followed by one (``id_ed25519.pub`` is not ``id_ed25519``). A *folder* may
+    be written with a ``/`` after it.
     """
-    pattern = rf"(?<![{before}]){re.escape(needle)}(?![\w/%-]|\.\w)"
+    pattern = (
+        rf"(?<![{before}]){re.escape(needle)}{'/?' if folder else ''}(?![\w/%-]|\.\w)"
+    )
     return re.search(pattern, text) is not None
 
 
-def key_named(path: str, texts: Iterable[str], home: str) -> bool:
-    """Whether a text names the key file *path* (an absolute, canonical path)."""
+def _forms(path: str, home: str) -> set[str]:
+    """The ways a person writes *path*: absolute, ``~/…``, ``$HOME/…``, ``${HOME}/…``."""
     homes = {home.rstrip("/"), os.path.realpath(home).rstrip("/")} - {""}
     forms = {path}
     for base in homes:
@@ -56,13 +65,35 @@ def key_named(path: str, texts: Iterable[str], home: str) -> bool:
                 f"${{HOME}}/{rest}",
                 f"{base}/{rest}",
             }
-    name = os.path.basename(path)
-    texts = list(texts)
+    return forms
+
+
+def key_named(path: str, texts: Iterable[str], home: str) -> bool:
+    """Whether a text names the key file *path* (an absolute, canonical path)."""
+    forms, name = _forms(path, home), os.path.basename(path)
     for text in texts:
         if any(_token(text, form, before=r"\w.~$-") for form in forms):
             return True
         if len(name) >= MIN_NAME and _SPECIFIC.search(name) and _token(text, name):
             return True
+    return False
+
+
+def folder_named(path: str, texts: Iterable[str], home: str) -> bool:
+    """Whether a text names *path* or a folder above it (an absolute, canonical path).
+
+    The home folder and the folders above it never count: naming ``~`` names
+    nothing in it. A path written deeper than *path* names nothing of it.
+    """
+    texts = list(texts)
+    here = path.rstrip("/")
+    while here and here != "/" and not above_home(here, home=home):
+        forms = _forms(here, home)
+        if any(
+            _token(t, f, before=r"\w.~$-", folder=True) for t in texts for f in forms
+        ):
+            return True
+        here = os.path.dirname(here)
     return False
 
 

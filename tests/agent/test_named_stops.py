@@ -13,8 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.melo.agent import _step_review
-from localmelo.melo.contracts.approvals import AutoPolicy, asks_in_auto
+from localmelo.melo.agent import AgentOptions, _step_review
+from localmelo.melo.checker.review.named import folder_named
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalRequest,
+    AutoPolicy,
+    asks_in_auto,
+)
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.tests.agent.test_auto_mode import (
     BLOCKED,
@@ -184,3 +190,102 @@ async def test_what_a_tool_answered_does_not_name_a_key_for_the_next_step(
     await agent.run_task("log in to the server", approval=AutoPolicy(asking=asker))
 
     assert asker.asked == [] and fake.ran == ["print(1)"]
+
+
+# ── A folder the person wrote ──
+
+HOME = "/Users/me"
+FOLDERS = {
+    # (the person's words, the path a file tool opens) -> named
+    "the folder itself": ("read ~/Documents", f"{HOME}/Documents/a/b.txt", True),
+    "a folder above": ("look in $HOME/Documents/", f"{HOME}/Documents/a/b.txt", True),
+    "the absolute path": (f"look in {HOME}/Documents", f"{HOME}/Documents/b.txt", True),
+    "the file itself": ("open ~/Documents/b.txt", f"{HOME}/Documents/b.txt", True),
+    "another folder": ("read ~/Docs", f"{HOME}/Documents/b.txt", False),
+    "a longer name": ("read ~/Documents2", f"{HOME}/Documents/b.txt", False),
+    "a folder below the file's": (
+        "read ~/Documents/a/c",
+        f"{HOME}/Documents/a/b.txt",
+        False,
+    ),
+    "the home folder": ("look in ~ and $HOME", f"{HOME}/Documents/b.txt", False),
+    "the home folder's absolute path": (
+        f"look in {HOME}",
+        f"{HOME}/Documents/b.txt",
+        False,
+    ),
+    "no path at all": ("read my documents", f"{HOME}/Documents/b.txt", False),
+}
+
+
+@pytest.mark.parametrize("row", list(FOLDERS), ids=list(FOLDERS))
+def test_a_folder_is_named_by_its_path_and_never_by_home_or_a_neighbour(
+    row: str,
+) -> None:
+    words, path, named = FOLDERS[row]
+    assert folder_named(path, [words], HOME) is named
+
+
+class FolderAsker:
+    """A policy that asks about folders: records each card and says no."""
+
+    asks_folders = True
+
+    def __init__(self) -> None:
+        self.inner = AutoPolicy()
+        self.asked: list[ApprovalRequest] = []
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.inner.decide(request)
+
+    async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request)
+        return ApprovalDecision(False, "not this one", origin="user")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("words", "card"),
+    [
+        ("read ~/Documents/notes.txt for me", False),
+        ("read the notes in ~/Documents", False),
+        ("read ~/Docs for me", True),
+        ("read my notes", True),
+        ("read ~ for me", True),
+    ],
+)
+async def test_a_file_in_a_folder_the_person_wrote_is_read_with_no_card_in_auto(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, words: str, card: bool
+) -> None:
+    from localmelo.melo.agent import Agent
+    from localmelo.tests.agent.test_approvals import _answer, _calls, _no_wait
+
+    home = tmp_path / "home"
+    (home / "Documents").mkdir(parents=True)
+    (home / "Documents" / "notes.txt").write_text("my notes")
+    (home / "ws").mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    path = str((home / "Documents" / "notes.txt").resolve())
+    llm = FakeModel([_calls(("file_read", {"path": path}, "c1")), _answer("done")])
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset({"file_read"}),
+            tool_exposure="all",
+            workspace_root=str(home / "ws"),
+        ),
+    )
+    agent.chat.sleep = _no_wait
+    policy = FolderAsker()
+
+    await agent.run_task(words, approval=policy)
+
+    assert bool(policy.asked) is card
+    read = [m.content for m in llm.requests[-1] if m.role == "tool"]
+    assert ("my notes" in "".join(read)) is not card
+
+
+def test_a_folder_in_a_page_or_a_recalled_note_is_not_named() -> None:
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(f"read my notes\n{BLOCK_HEADER}\nthey are in ~/Documents\n")
+    assert not reviewer.names_folder(f"{HOME}/Documents/notes.txt")

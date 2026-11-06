@@ -72,6 +72,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ToolAsk,
 )
+from localmelo.melo.contracts.folders import home_label
 from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
@@ -101,6 +102,7 @@ from localmelo.support.browser.driver import (
     BrowserDriver,
     BrowserError,
     Dialog,
+    Download,
     Element,
     PageMovedError,
     PointHit,
@@ -421,7 +423,8 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 else:
                     result = await fn(self, **arguments)
                     result = await self._needs_you_after(result, before)
-                return await self._with_screen(self._with_local(_led(back, result)))
+                shown = await self._with_downloads(_led(back, result))
+                return await self._with_screen(self._with_local(shown))
             except BrowserError as exc:
                 return ToolOutput(text=_led_text(back, str(exc)), is_error=True)
             finally:
@@ -2195,6 +2198,27 @@ class BrowserToolProvider(BaseToolProvider):
 
         return moved
 
+    async def _with_downloads(self, result: str | ToolOutput) -> str | ToolOutput:
+        """*result* with the files this chat's pages downloaded since the last step (#547).
+
+        melo's browser saves a page's download in its own downloads folder and
+        never opens or runs it; the step says so, with the name the page
+        gave (cleaned, it is the page's own text) and how big it is.
+        """
+        take = getattr(self._driver, "downloads", None)
+        if not callable(take):
+            return result
+        try:
+            found = list(await take())
+        except BrowserError:
+            return result
+        if not found:
+            return result
+        text = "\n".join(_download_line(d) for d in found)
+        if isinstance(result, ToolOutput):
+            return dataclasses.replace(result, text=f"{result.text}\n{text}")
+        return f"{result}\n{text}"
+
     def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""
         take = getattr(self._driver, "local_attempts", None)
@@ -2756,6 +2780,30 @@ class BrowserToolProvider(BaseToolProvider):
         px, py = parse_point(x, y, rest)
         text, images = await watch.press_point(window, px, py)
         return ToolOutput(text=text, images=images)
+
+
+def _download_line(item: Download) -> str:
+    """One line for the step about a file a page made the browser download (#547)."""
+    name = render.field_text(item.name, 80) or "a file"
+    where = f"melo's downloads folder ({home_label(item.folder)})"
+    if item.state == "done":
+        return (
+            f'[A page downloaded "{name}" ({_size_words(item.size)}). melo saved it in '
+            f"{where}; it did not open or run it. Tell the user it is there if they "
+            "asked for it.]"
+        )
+    if item.state == "too big":
+        return (
+            f'[A page tried to download "{name}": melo stopped it at '
+            f"{_size_words(item.size)}, the most it keeps.]"
+        )
+    return f'[A download of "{name}" did not finish, so melo kept nothing.]'
+
+
+def _size_words(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size // 1024} KB" if size >= 1024 else f"{size} bytes"
 
 
 def _screen_block(lines: list[str]) -> str:

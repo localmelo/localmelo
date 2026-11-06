@@ -143,6 +143,11 @@ ASKED_TEXT: Final = (
 )
 
 
+# The reason of the decision that lets a call on a path outside the workspace run
+# because the person's own words name the folder (#547).
+NAMED_FOLDER: Final = "you named this folder"
+
+
 @dataclass(frozen=True)
 class OutsideAccess:
     """One file tool call whose real path is outside the workspace.
