@@ -8,6 +8,7 @@ asks LaunchServices or opens an app.
 from __future__ import annotations
 
 import dataclasses
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -64,8 +65,9 @@ def handing_off(
     driver: FakeDriver,
     handoff: dict[str, str] | None = None,
     boxes: dict[str, tuple[Dialog, ...]] | None = None,
+    late: dict[str, tuple[str, ...]] | None = None,
 ) -> FakeDriver:
-    """*driver* as Chrome's: an act on a label asks for an address, or puts up boxes."""
+    """*driver* as Chrome's: an act on a label asks for an address (or had been asked for one before it began), or puts up boxes."""
     real = driver.act
 
     async def act(tab: str | None, what: Act) -> ActResult:
@@ -74,6 +76,7 @@ def handing_off(
         return dataclasses.replace(
             result,
             handoff=(handoff or {}).get(label, ""),
+            late=(late or {}).get(label, ()),
             dialogs=(boxes or {}).get(label, ()),
         )
 
@@ -154,6 +157,38 @@ async def test_a_page_that_asks_for_an_app_is_offered_to_the_person_and_opened_o
         "Chat comes to the front."
     ) in out.text
     assert "secret-token" not in out.text  # the address can hold a sign-in token
+
+
+async def test_what_a_page_asked_for_before_the_step_is_told_and_never_opened() -> None:
+    """Whatever grant is held for the kind of address, an old request is no part of this step."""
+    opener, asks = Opener(), Asks()
+    driver = handing_off(
+        world(button("Open in Chat"), button("Daily")),
+        {"Open in Chat": CHAT},
+        late={"Daily": (CHAT, CHAT, "other://x")},
+    )
+    provider, found = await tools(driver, opener)
+    try:
+        with asking(asks):
+            await run(found, "browser_open", url=HOME)
+            first = await run(found, "browser_click", ref="e1")  # asked, and allowed
+            read = await run(found, "browser_read")
+            ref = re.search(r"\[(e\d+) button \"Daily\"", read.text)
+            assert ref is not None
+            late = await run(found, "browser_click", ref=ref.group(1))
+    finally:
+        await provider.close()
+    assert "You allowed it; melo opened it" in first.text
+    assert opener.opened == [CHAT], "opened once, for the step that asked"
+    assert asks.names.count("handoff:chat") == 1 and "handoff:other" not in asks.names
+    assert not late.is_error
+    for shown in ("chat:…", "other:…"):
+        line = (
+            f"The page asked to open an app ({shown}) before this step; "
+            "melo did not open it."
+        )
+        assert late.text.count(line) == 1
+    assert "secret-token" not in late.text
 
 
 async def test_a_refused_app_is_not_opened_and_the_step_says_so() -> None:

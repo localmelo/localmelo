@@ -535,6 +535,26 @@ async def test_an_address_of_another_apps_kind_is_put_on_the_result_and_not_foll
     assert again.handoff == ""  # taken once, by the act it came with
 
 
+async def test_an_address_asked_for_before_an_act_began_is_told_late_never_as_its_own(
+    driver: ChromeBackgroundDriver,
+) -> None:
+    raw = await opened(driver, APP)
+    session = await driver._session()
+    driver._live().handoffs[session] = ["chat://asked-while-no-act-ran"]
+    # An act that fails leaves it for the next one.
+    with pytest.raises(StaleElementError):
+        await driver.act(None, Act("click", raw.url, named(raw, "Daily"), doc="other"))
+    result = await driver.act(
+        None, Act("click", raw.url, named(raw, "Open in Chat"), doc=raw.doc)
+    )
+    assert result.late == ("chat://asked-while-no-act-ran",)
+    assert result.handoff == "chat://login?token=secret-token", "its own is its own"
+    again = await driver.act(
+        None, Act("click", raw.url, named(raw, "Daily"), doc=raw.doc)
+    )
+    assert (again.late, again.handoff) == ((), ""), "told once"
+
+
 @pytest.mark.parametrize("answer", [True, False])
 async def test_a_confirm_during_an_act_is_put_to_the_person(
     driver: ChromeBackgroundDriver, peer: Peer, answer: bool

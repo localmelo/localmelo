@@ -614,9 +614,11 @@ _QR_WORDS = re.compile(
 _SCAN_WORDS = re.compile(r"scan|扫|掃|スキャン|스캔|読み取", re.IGNORECASE)
 # The addresses a human check loads its box from: a host here, or under one of
 # these, is a box that checks the visitor is human. melo presses it like any
-# other control, as the person would. A box is told by what the page loads,
-# never by the words around it. Any host with a label that starts with
-# "captcha" counts too.
+# other control, as the person would. Only a row of this table lowers a question
+# (the ordinary click question instead of the card for a box melo cannot check),
+# and only where the browser itself says a frame from such a host sits at the
+# point pressed. A host with a label that starts with "captcha" is only named a
+# check in words (see :func:`names_a_check`); it never lowers a question.
 CHECK_HOSTS: Final = (
     "recaptcha.net",
     "hcaptcha.com",
@@ -625,6 +627,16 @@ CHECK_HOSTS: Final = (
     "arkoselabs.com",
     "funcaptcha.com",
     "captcha-delivery.com",
+)
+# The field each check provider fills with its answer when the check is passed
+# (reCAPTCHA, hCaptcha, Turnstile, Arkose, GeeTest). Only these name a passed
+# check; they are not listed as fields of a page, and a form's rows leave them out.
+ANSWER_FIELDS: Final = (
+    "g-recaptcha-response",
+    "h-captcha-response",
+    "cf-turnstile-response",
+    "fc-token",
+    "geetest_validate",
 )
 # How many times melo presses inside a check that stays there before it is the person's to pass.
 CHECK_PRESSES: Final = 8
@@ -672,11 +684,25 @@ def needs_person(
 
 
 def is_human_check(address: str) -> bool:
-    """Whether *address* (a page's, a box's or its origin) is where a human check loads its box from: the host is in :data:`CHECK_HOSTS`."""
+    """Whether *address* (a page's, a box's or its origin) is where a human check loads its box from: the host is a row of :data:`CHECK_HOSTS` or under one.
+
+    This alone lowers a question; a page cannot pick a host that is not in the table.
+    """
     host = _host(address)
-    return bool(host) and (
-        any(host == known or host.endswith(f".{known}") for known in CHECK_HOSTS)
-        or any(label.startswith("captcha") for label in host.split("."))
+    return bool(host) and any(
+        host == known or host.endswith(f".{known}") for known in CHECK_HOSTS
+    )
+
+
+def names_a_check(address: str) -> bool:
+    """Whether *address* may be named a human check in words: a table host, or a host with a label that starts with ``captcha``.
+
+    Words only (where a box is, what a line says): a press there is asked about
+    like a press in any other box melo cannot check.
+    """
+    host = _host(address)
+    return is_human_check(address) or any(
+        label.startswith("captcha") for label in host.split(".")
     )
 
 

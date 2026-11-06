@@ -23,6 +23,7 @@ import contextlib
 import json
 import re
 import uuid
+from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -44,8 +45,17 @@ from localmelo.support.browser.driver import (
     StaleElementError,
     View,
 )
-from localmelo.support.browser.takeover import is_human_check
+from localmelo.support.browser.takeover import (
+    ANSWER_FIELDS,
+    is_human_check,
+    names_a_check,
+)
 
+# The answer fields of the check providers as one selector: a check passed is one of
+# them holding something; they are never listed as fields of the page or of a form.
+ANSWER_SELECTOR = ",".join(
+    f"textarea[name='{name}'],input[name='{name}']" for name in ANSWER_FIELDS
+)
 KINDS = ("link", "button", "textbox", "checkbox", "select")
 SECRETS = ("password", "code", "card")
 # How long a page may take to load, and how often it is looked at while melo waits
@@ -189,7 +199,8 @@ _COVER_HOST = re.compile(r"^iframe(?: from [a-z0-9.-]{1,60})?$", re.IGNORECASE)
 # its functions does not work, ``P`` is null: the page's own built-ins are never
 # used instead, so a page is then read as text only and nothing is done on it.
 COMMON_JS = (
-    r"""
+    (
+        r"""
 var P = (function () {
   var frame = null;
   try {
@@ -241,8 +252,8 @@ var attr = function (n, a) { return P.ga.call(n, a) || ""; };
 var inside = function (n, q) { return P.qs.call(n, q); };
 var hrefOf = function (a) { return typeof a.href === "string" ? a.href : attr(a, "href"); };  // an SVG link has no string href
 """
-    + fields.JS_RULES
-    + r"""
+        + fields.JS_RULES
+        + r"""
 var docId = function () { return String(performance.timeOrigin); };
 var formAddress = function (form, button) {
   var raw = button ? P.ga.call(button, "formaction") : null;
@@ -343,11 +354,14 @@ var attrsOf = function (n, st, labels, aria, ph) {
   var masked = String(st.webkitTextSecurity || st.getPropertyValue("-webkit-text-security") || "none") !== "none";
   return {type: tag === "textarea" ? "textarea" : tag === "select" ? "select" : type || "text", autocomplete: attr(n, "autocomplete").toLowerCase(), words: cap(words, 400), inputmode: mode, maxlength: max, masked: masked};
 };
+// A check provider's answer field: a long token nobody reads, so it is not listed or sent along.
+var ANSWER_SEL = __ANSWER_SELECTOR__;
+var isAnswer = function (n) { return P.matches.call(n, ANSWER_SEL); };
 var formFields = function (form) {
   var out = [], list = form.elements;
   for (var i = 0; i < list.length && out.length < 12; i++) {
     var f = list[i], tag = f.tagName.toLowerCase(), type = attr(f, "type").toLowerCase();
-    if (/^(button|submit|reset|image|file)$/.test(type) || /^(fieldset|button|object|output)$/.test(tag)) continue;
+    if (/^(button|submit|reset|image|file)$/.test(type) || /^(fieldset|button|object|output)$/.test(tag) || isAnswer(f)) continue;
     var name = cap(attr(f, "name") || f.id || attr(f, "aria-label"), 40);
     if (!name) continue;
     if (type === "hidden") { out.push([name, "", "h"]); continue; }
@@ -363,6 +377,7 @@ var lookAt = function (n, counts) {
   var r = n.getBoundingClientRect(), st = P.gcs(n);
   if (st.visibility === "hidden" || st.display === "none" || (r.width === 0 && r.height === 0)) return {skip: 1};
   if (n.disabled || attr(n, "aria-disabled") === "true") return {skip: 1};
+  if (isAnswer(n)) return {skip: 0};
   var native = /^(a|button|input|textarea|select|summary)$/.test(tag);
   var known = /^(button|link|menuitem|menuitemcheckbox|menuitemradio|tab|switch|option|checkbox|radio)$/.test(role);
   if (!native && !known) {
@@ -565,7 +580,10 @@ var linesOf = function (node, into, limit) {
   return into;
 };
 """
-).replace("__COVER_TAGS__", json.dumps("^(?:" + "|".join(COVER_TAGS) + ")$"))
+    )
+    .replace("__COVER_TAGS__", json.dumps("^(?:" + "|".join(COVER_TAGS) + ")$"))
+    .replace("__ANSWER_SELECTOR__", json.dumps(ANSWER_SELECTOR))
+)
 
 
 # Returns JSON: the page's text (the main part when there is one) and its
@@ -617,7 +635,7 @@ PAGE_JS = (
   }
   out.view = [window.innerWidth || 0, window.innerHeight || 0];
   // Whether a check's answer field holds something: the check was passed.
-  var answers = P.qsa.call(document, "textarea[name$='-response'],input[name$='-response'],input[name='fc-token'],input[name='geetest_validate']");
+  var answers = P.qsa.call(document, ANSWER_SEL);
   for (var ai = 0; ai < answers.length && ai < 10; ai++) {
     var af = answers[ai], got = /^textarea$/i.test(af.tagName) ? P.vt : P.vi;
     if (got && attr(af, "type").toLowerCase() !== "password" && String(got.call(af) || "").length) { out.solved = true; break; }
@@ -715,9 +733,8 @@ def act_script(spec: dict[str, Any]) -> str:
   if (pt) {
     hit = hitAt(pt.x, pt.y);
     if (spec.at < 0 && !hit.node && hit.raw && hit.raw.nodeType === 1 && /\|bare$/.test(spec.fp) && bareBox(hit.raw)) {
-      // A box in a closed shadow root: the bare box that most likely holds it, a frame like any other.
-      var held = checkBox();
-      if (held && held.node === hit.raw) { tail = "|bare"; hit.node = hit.raw; hit.surface = "frame"; }
+      // A box in a closed shadow root: the bare box the point was found on, a frame like any other.
+      tail = "|bare"; hit.node = hit.raw; hit.surface = "frame";
     }
     if (spec.at >= 0 ? hit.node !== n : !hit.node || fingerprint(hit.node, 0) + frameMark(hit.node) + tail !== spec.fp) return say({ok: false, stale: "point"});
     if (spec.at < 0) { n = hit.node; D = hit.doc; }
@@ -1013,9 +1030,10 @@ def hit_script(spec: dict[str, Any]) -> str:
     words around it, which melo checks for consent and terms. When it is on
     nothing melo can name, the answer has the ``tag`` of the element there (a
     standard one, else ``element``) and whether it holds ``words``, never the
-    words themselves; and on the bare box that most likely holds a box drawn in
-    a closed shadow root, ``hidden``: the frames the page loaded that no iframe
-    element holds.
+    words themselves; and on a bare box (where a box in a closed shadow root
+    may be drawn), ``bare``, ``hidden`` (the frames the page loaded that no
+    iframe element holds) and whether it is the ``guess``, the bare box nearest
+    the size of a check's. Whether a frame is there is the browser's to say.
     """
     return r"""(function (at) {""" + COMMON_JS + r"""
   var spec = at;
@@ -1034,10 +1052,11 @@ def hit_script(spec: dict[str, Any]) -> str:
       var tag = t.tagName.toLowerCase();
       out.tag = COVER_TAGS.test(tag) ? tag : "element";
       out.hasWords = Array.prototype.some.call(t.childNodes, function (c) { return c.nodeType === 3 && cap(c.nodeValue, 1); });
-      var hf = bareBox(t) ? hiddenFrames() : [], cb = hf.length ? checkBox() : null;
-      if (cb && cb.node === t) {
+      if (bareBox(t)) {
+        var hf = hiddenFrames(), cb = hf.length ? checkBox() : null;
         out.hidden = hf;
         out.bare = true;
+        out.guess = !!cb && cb.node === t;
         out.el = {kind: "button", label: "", fp: fingerprint(t, 0) + frameMark(t) + "|bare"};
       }
     }
@@ -1424,26 +1443,33 @@ def observed(data: dict[str, Any], quiet: bool) -> Changes | None:
 
 
 def _check_boxes(hidden: Any) -> list[str]:
-    """The addresses among the *hidden* frames of a page (frames in a closed shadow root) that a human check loads."""
+    """The addresses among the *hidden* frames of a page (frames in a closed shadow root) that may be named a human check."""
     if not isinstance(hidden, list):
         return []
-    return [str(u) for u in hidden if is_human_check(str(u))]
+    return [str(u) for u in hidden if names_a_check(str(u))]
 
 
 # How far in from the left edge of a check's box its checkbox sits, in page pixels.
 CHECKBOX_INSET = 30
+# The least a box measures, each way, to be one melo points at.
+MIN_BOX = 20
 
 
-def _aims(data: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
+def _aims(
+    data: dict[str, Any], placed: list[list[Any]] | None = None
+) -> tuple[tuple[str, int, int], ...]:
     """Where the boxes of a human check on a page read are: (address, x, y) on the 0-1000 scale of the view.
 
-    ``spots`` are the boxes the script measured (address, left, top, width,
-    height); one without an address is the empty box that holds a check in a
-    closed shadow root, and takes the address of the first check the page
-    loaded there. The point is the checkbox: a little in from the left edge,
-    in the middle of the box's height.
+    The boxes are those the browser itself placed (*placed*: address, left,
+    top, width, height; None when it cannot say), else the ``spots`` the script
+    measured; of those, one without an address is the empty box that holds a
+    check in a closed shadow root and takes the address of the first check the
+    page loaded there (a guess, so the line only says where to look). The point
+    is the checkbox: a little in from the left edge, in the middle of the box's
+    height.
     """
-    spots, view = data.get("spots"), data.get("view")
+    spots = data.get("spots") if placed is None else placed
+    view = data.get("view")
     if not isinstance(spots, list) or not isinstance(view, list) or len(view) != 2:
         return ()
     width, height = as_number(view[0]), as_number(view[1])
@@ -1454,7 +1480,7 @@ def _aims(data: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
             continue
         address = str(spot[0]) or hidden
         left, top, wide, high = (as_number(v) for v in spot[1:])
-        if is_human_check(address) and wide > 0 and high > 0:
+        if names_a_check(address) and wide >= MIN_BOX and high >= MIN_BOX:
             x = (left + min(CHECKBOX_INSET, wide / 2)) / width * 1000
             y = (top + high / 2) / height * 1000
             found.setdefault(address, (address, round(x), round(y)))
@@ -1517,6 +1543,25 @@ class PageScriptActs:
         """The controls in the frames from other sites of *boxes* that the browser can name, and the frames left."""
         return [], boxes
 
+    async def _frame_boxes(
+        self, names: Callable[[str], bool]
+    ) -> list[list[Any]] | None:
+        """The frames the browser itself has in the tab, those whose address *names* accepts, as ``[address, left, top, width, height]`` (page pixels).
+
+        None when the browser cannot say (the page script's own measures are
+        used then, and are only a guess for a box in a closed shadow root).
+        """
+        return None
+
+    async def _frame_at(self, x: float, y: float) -> str | None:
+        """The address of the frame the browser itself puts topmost at (*x*, *y*) of the view; ``""`` when there is none it can name, None when it cannot say.
+
+        This is the proof that a box is where a human check is: nothing the
+        page's own scripts say (a closed shadow root hides a frame from them)
+        is taken for it.
+        """
+        return None
+
     async def page(self, tab: str | None) -> RawPage:
         await self._focus(tab)
         url = await self._address(tab)
@@ -1538,8 +1583,16 @@ class PageScriptActs:
             if isinstance(unreached, list)
             else ()
         )
-        # A human check drawn in a closed shadow root is a box melo cannot read, like any other.
-        boxes = tuple(dict.fromkeys((*boxes, *_check_boxes(data.get("hidden")))))[:10]
+        # A human check drawn in a closed shadow root is a box melo cannot read, like any
+        # other: the browser says which frames are there and where, else the page's
+        # loads say so.
+        placed = await self._frame_boxes(names_a_check)
+        named = (
+            _check_boxes(data.get("hidden"))
+            if placed is None
+            else [str(box[0]) for box in placed]
+        )
+        boxes = tuple(dict.fromkeys((*boxes, *named)))[:10]
         framed, boxes = await self._other_sites(boxes)
         return RawPage(
             url,
@@ -1550,7 +1603,7 @@ class PageScriptActs:
             doc=str(data.get("doc") or ""),
             frames=tuple(str(f) for f in frames) if isinstance(frames, list) else (),
             unreached=boxes,
-            aims=_aims(data),
+            aims=_aims(data, placed),
             solved=data.get("solved") is True,
         )
 
@@ -1565,16 +1618,24 @@ class PageScriptActs:
         surface = data.get("surface")
         if surface not in ("control", "canvas", "frame"):
             hidden, held = data.get("hidden"), _element(data.get("el"))
-            if (
-                data.get("bare") is True
-                and held
-                and isinstance(hidden, list)
-                and hidden
-            ):
-                # The box that most likely holds a frame in a closed shadow root: a
-                # human check when the page loaded one there, else a box melo cannot check.
-                box = next(iter(_check_boxes(hidden)), "") or str(hidden[0])
-                return PointHit("frame", held, site=box)
+            if data.get("bare") is True and held:
+                # A bare box may hold a frame drawn in a closed shadow root. Only the
+                # browser can say which frame sits there: that frame's address, and a
+                # human check only when it is a check provider's.
+                there = await self._frame_at(x, y)
+                if there:
+                    return PointHit(
+                        "frame", held, site=there, check=is_human_check(there)
+                    )
+                if (
+                    there is None
+                    and data.get("guess") is True
+                    and isinstance(hidden, list)
+                    and hidden
+                ):
+                    # It cannot say: the box that most likely holds a frame the page
+                    # loaded, which melo cannot check.
+                    return PointHit("frame", held)
             return PointHit(
                 "none",
                 tag=str(data.get("tag") or "")[:20],
@@ -1582,14 +1643,18 @@ class PageScriptActs:
             )
         item = _element(data.get("el"))
         site = str(data.get("site") or "") if surface == "frame" else ""
+        # A frame is a check only where the browser itself says it is one: the
+        # page's own word for a frame's address (its ``src``) is not taken for it.
+        there = await self._frame_at(x, y) if surface == "frame" else None
         mx, my = data.get("x"), data.get("y")
         moved = isinstance(mx, int | float) and isinstance(my, int | float)
         return PointHit(
             cast(Any, surface),
             item,
-            site=site,
+            site=there or site,
             consent=fields.consent(str(data.get("words") or "")),
             at=(as_number(mx), as_number(my)) if moved else None,
+            check=bool(there) and is_human_check(there or ""),
         )
 
     async def wait(

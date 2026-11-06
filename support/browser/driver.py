@@ -195,6 +195,10 @@ class PointHit:
     words agree to terms, consent or a sign-in with another account, which
     melo asks the person about. ``at`` is where to click instead (page pixels),
     when the point was on a label and its field can take the click itself.
+    ``check`` is set only when the browser itself says that a frame from the
+    address of a human check provider sits at the point (``site`` is then that
+    frame's address, as the browser gives it); a driver that cannot say leaves
+    it unset, so a point in a box is asked about as a box melo cannot check.
     """
 
     surface: Literal["control", "canvas", "frame", "none"]
@@ -204,6 +208,7 @@ class PointHit:
     at: tuple[float, float] | None = None
     tag: str = ""
     words: bool = False
+    check: bool = False
 
 
 @dataclass(frozen=True)
@@ -250,9 +255,10 @@ class ActResult:
     work there, so the site starts with the page script next time.
     ``handoff`` is an address of another app's kind (``chat://...``) the page
     asked the browser to open meanwhile, which the browser did not open
-    (``""``: none); melo asks the person before it opens it itself.
-    ``dialogs`` are the boxes the page put up meanwhile and how they were
-    answered.
+    (``""``: none); melo asks the person before it opens it itself. ``late``
+    are such addresses the page asked for before this act began (while no act
+    ran): they are told, never opened. ``dialogs`` are the boxes the page put
+    up meanwhile and how they were answered.
     """
 
     note: str = ""
@@ -261,6 +267,7 @@ class ActResult:
     changes: Changes | None = None
     native_failed: bool = False
     handoff: str = ""
+    late: tuple[str, ...] = ()
     dialogs: tuple[Dialog, ...] = ()
 
 
@@ -287,7 +294,10 @@ class Act:
     did not work earlier). ``point`` is a click at that place of ``view`` (page
     pixels), with the browser's own click, on the control ``element`` that was
     found there; the driver does nothing unless the point still resolves to it
-    and the view has not scrolled.
+    and the view has not scrolled. ``proof`` is the address of the frame of a
+    human check that the browser said sits at ``point`` (:attr:`PointHit.check`):
+    a driver that can say again right before it clicks does nothing unless that
+    frame is still there.
     """
 
     kind: ActionKind
@@ -300,6 +310,7 @@ class Act:
     native: bool = True
     point: tuple[float, float] | None = None
     view: View | None = None
+    proof: str = ""
 
 
 class StaleElementError(BrowserError):

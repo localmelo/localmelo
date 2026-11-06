@@ -1344,36 +1344,64 @@ class BrowserToolProvider(BaseToolProvider):
     async def _pressed(self, tab: str, check: str, doc: str) -> str:
         """After a press inside a human check (*check*: the address of its box): what it did, in words to add to the step.
 
-        melo sees nothing inside the box, so the page says: a field of the
-        check's that holds an answer, or a page that was replaced (*doc* is the
-        document the press was made in), means it passed; if neither shows within
-        :data:`CHECK_WAIT_S`, it is still there. A check still there after
-        :data:`CHECK_PRESSES` presses is the person's: the step then offers
-        them the page (see :meth:`_needs_you_after`).
+        melo sees nothing inside the box, so the page says: one of the check
+        providers' answer fields (:data:`~takeover.ANSWER_FIELDS`) that holds
+        something means it passed. A page replaced meanwhile (*doc* is the
+        document the press was made in) is told as changed, not as passed, and
+        the count of presses goes on; if neither shows within
+        :data:`CHECK_WAIT_S`, the check is still there. Every press that did not
+        pass is counted for the check: at :data:`CHECK_PRESSES` it is the
+        person's, and the step offers them the page (see
+        :meth:`_needs_you_after`).
         """
         loop = asyncio.get_running_loop()
         end = loop.time() + CHECK_WAIT_S
-        passed = False
+        passed = moved = False
         while (raw := self._raw.get(tab)) is not None:
             try:
                 now = await self._driver.page(raw)
             except BrowserError:
                 break  # the step's own reading says what happened to the page
-            passed = now.solved or bool(doc and now.doc and now.doc != doc)
-            if passed or loop.time() >= end:
+            passed = now.solved
+            moved = bool(doc and now.doc and now.doc != doc)
+            if passed or moved or loop.time() >= end:
                 break
             await asyncio.sleep(CHECK_POLL_S)
         key = (tab, sites.origin_of(check) or "")
         if passed:
             self._presses.pop(key, None)
             return " The check passed."
-        count = self._presses.get(key, 0) + 1
+        count = self._presses[key] = self._presses.get(key, 0) + 1
+        if count >= CHECK_PRESSES:
+            self._stuck = tab
+        if moved:
+            return f" The page changed (press {count} of this check): the page below is the new one."
+        if count >= CHECK_PRESSES:
+            return f" The check is still there after {count} presses."
+        return " The check is still there."
+
+    def _check_spent(self, tab: str, check: str, origin: str) -> None:
+        """Refuse another press in a human check that is still there after :data:`CHECK_PRESSES`, once the person cannot be offered the page.
+
+        The count is kept (a page that loops back to its check does not start
+        it again). While the take-over card can still come after the press, the
+        press is made; when it was asked already (or they said not now), or
+        nobody can take the page over here, melo says so and does nothing.
+        """
+        count = self._presses.get((tab, sites.origin_of(check) or ""), 0)
         if count < CHECK_PRESSES:
-            self._presses[key] = count
-            return " The check is still there."
-        self._presses.pop(key, None)
-        self._stuck = tab
-        return f" The check is still there after {CHECK_PRESSES} presses."
+            return
+        if not self._can_take():
+            why = "nobody can take the page over here"
+        elif (tab, origin, "captcha") in self._asked_you or origin in self._not_now:
+            why = "the user was already offered the page"
+        else:
+            return
+        raise BrowserError(
+            f"melo pressed this human check {count} times and it is still there, "
+            f"so it does not press it again: {why}. Say in your reply what you "
+            "need the user to do."
+        )
 
     # ── Acting ──
 
@@ -1905,6 +1933,15 @@ class BrowserToolProvider(BaseToolProvider):
                 result.handoff, self._origins.get(tab_id, "")
             )
             said += f" {line}"
+        # What the page asked for while no step ran is told, never opened: no
+        # question or grant of this step is for it.
+        for shown in dict.fromkeys(
+            apps.shown_scheme(url) for url in (result.late if result else ())
+        ):
+            said += (
+                f" The page asked to open an app ({shown}) before this step; "
+                "melo did not open it."
+            )
         stop = self._page_moved(landed, urls[landed], before)
         # melo's own opening of the app is an act: its window is waited for too.
         others = await self._other_windows(
@@ -2162,6 +2199,9 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
+        check = bool(item.site) and is_human_check(item.site)
+        if check:
+            self._check_spent(tab_id, item.site, snap.origin)
         await _ask_foreign(snap.origin, item, "click")
         before = await self._acting(tab_id, snap, "click", on=_control_words(item))
         assert before is not None
@@ -2178,7 +2218,6 @@ class BrowserToolProvider(BaseToolProvider):
             before,
         )
         said = self._done_line("Clicked", used, ref, result)
-        check = bool(item.site) and is_human_check(item.site)
         if check:
             said += await self._pressed(tab_id, item.site, snap.doc)
         return await self._after(
@@ -2301,8 +2340,10 @@ class BrowserToolProvider(BaseToolProvider):
         item = hit.element
         if hit.surface == "none" or item is None:
             raise BrowserError(_nothing_there(hit))
-        what = _point_words(hit.surface, item, hit.site)
-        check = hit.surface == "frame" and is_human_check(hit.site)
+        check = hit.surface == "frame" and hit.check
+        what = _point_words(hit.surface, item, hit.site, check)
+        if check:
+            self._check_spent(tab_id, hit.site, origin)
         if item.sensitive:
             await sites.require_point(origin, fields.REASONS[item.sensitive])
         elif hit.surface == "frame" and not _named(item) and not check:
@@ -2332,6 +2373,7 @@ class BrowserToolProvider(BaseToolProvider):
             send=bool(item.submit),
             point=(cx, cy),
             view=view,
+            proof=hit.site if check else "",
         )
         result, _used = await self._run_act(tab_id, snap, "", act, before)
         self._points[tab_id] = (view, cx, cy)
@@ -2743,10 +2785,12 @@ async def _ask_foreign(origin: str, item: Element, how: str) -> None:
     """A control with no name in a box from another site: melo cannot tell what it is, so the person is asked every time.
 
     A control melo lists there by its name is acted on like any other: the
-    click's or the typing's own question names it, box and all (#465). A box
-    of a human check is no such stranger: melo knows it by what the page loads.
+    click's or the typing's own question names it, box and all (#465). A
+    box's address is no reason to skip the question: only a point the browser
+    proved is in a human check's frame is asked about by the click's own
+    question (see :meth:`_click_point`).
     """
-    if not item.site or _named(item) or is_human_check(item.site):
+    if not item.site or _named(item):
         return
     host = render.field_text(item.site.split("://", 1)[-1], 60)
     await sites.require_point(
@@ -2776,17 +2820,18 @@ def _control_words(item: Element) -> str:
     return words
 
 
-def _point_words(surface: str, item: Element, site: str) -> str:
+def _point_words(surface: str, item: Element, site: str, check: bool = False) -> str:
     """What a point lands on, in words for the person and the model.
 
     A box from another site is named by its title when it has one
-    (``inside a box "Sign in" from accounts.example.org``); one of a human
-    check is told as that.
+    (``inside a box "Sign in" from accounts.example.org``); one the browser
+    said is a human check's (*check*) is told as that, and no other is, whatever
+    its address says.
     """
     if surface == "frame":
         host = sites.origin_of(site) or "another site"
         host = render.field_text(host.split("://", 1)[-1], 60)
-        if is_human_check(site):
+        if check:
             return f"a human check box from {host}"
         title = render.field_text(item.label or item.also, 40)
         if title:

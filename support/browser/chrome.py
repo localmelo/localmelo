@@ -33,8 +33,9 @@ background).
 A page that asks Chrome to open an address of another app's kind
 (``chat://...``) is not followed: Chrome in the background drops it. The
 driver sees each such request (``Page.frameRequestedNavigation``) and puts it on
-the act's result (``ActResult.handoff``), and melo asks the person. Chrome is
-never told to allow a scheme.
+the act's result (``ActResult.handoff``), and melo asks the person. A request
+the page made while no act ran is told by the next act's result
+(``ActResult.late``) and never opened. Chrome is never told to allow a scheme.
 
 A tab's page can be streamed as pictures for the live view
 (:meth:`ChromeBackgroundDriver.start_screencast`, Chrome's ``Page.startScreencast``):
@@ -82,6 +83,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from localmelo.support import config
 from localmelo.support.browser import apps, local_apps
@@ -93,6 +95,7 @@ from localmelo.support.browser.driver import (
     BrowserSetupError,
     Dialog,
     Shot,
+    StaleElementError,
     TabInfo,
     View,
 )
@@ -147,6 +150,8 @@ DIALOG_S = 5.0
 MAX_LATE_DIALOGS = 5
 # The most addresses of other apps' kinds one tab keeps until an act takes them.
 MAX_HANDOFFS = 5
+# How many frames of a read are measured at most (those of a human check's addresses).
+MAX_FRAME_BOXES = 5
 # The most one streamed picture may hold, and how long starting or stopping a stream may take.
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 STREAM_S = 10.0
@@ -773,6 +778,14 @@ def _holds(tree: object, frame: str) -> bool:
         return True
     children = tree.get("childFrames")
     return isinstance(children, list) and any(_holds(c, frame) for c in children)
+
+
+def _same_frame(there: str | None, proof: str) -> bool:
+    """Whether the frame now at a point (*there*, its address) is loaded from the same host as the one that was proved a check there (*proof*)."""
+    return (
+        bool(there)
+        and urlsplit(there or "").netloc.lower() == urlsplit(proof).netloc.lower()
+    )
 
 
 def _picture(params: dict[str, Any]) -> Frame | None:
@@ -1485,6 +1498,8 @@ class ChromeBackgroundDriver(PageScriptActs):
         target = self._targets[session]
         if act.element.frame.startswith("x"):
             raise BrowserError(STALE["reach"])
+        # What the page asked for before this act is told, never opened.
+        late = browser.handoffs.pop(session, [])
         self._acting.add(session)
         try:
             spec = act_spec(act)
@@ -1498,12 +1513,19 @@ class ChromeBackgroundDriver(PageScriptActs):
                     passed, failed = done
             if result is None:
                 result = await self._scripted(spec, act, passed, failed)
+        except BaseException:
+            # The next act tells what was asked before this one.
+            kept = browser.handoffs.setdefault(session, [])
+            kept[:0] = late
+            del kept[MAX_HANDOFFS:]
+            raise
         finally:
             self._acting.discard(session)
         asked = browser.handoffs.pop(session, [])
         return dataclasses.replace(
             result,
             handoff=asked[0] if asked else "",
+            late=tuple(late),
             dialogs=tuple(self._said.pop(target, [])),
         )
 
@@ -1523,6 +1545,9 @@ class ChromeBackgroundDriver(PageScriptActs):
             if isinstance(aimed, str):
                 return aimed, False
             x, y = aimed
+            if act.proof and not _same_frame(await self._frame_at(x, y), act.proof):
+                # What was proved a check at that point is not there now.
+                raise StaleElementError(STALE["point"], "point")
             key = new_key()
             armed = await self._script(act_script({**spec, "mode": "arm", "key": key}))
             try:
@@ -1551,6 +1576,84 @@ class ChromeBackgroundDriver(PageScriptActs):
             "",
             observed(data, quiet),
         )
+
+    async def _frame_at(self, x: float, y: float) -> str | None:
+        """The address, as Chrome has it, of the frame Chrome puts topmost at (*x*, *y*) of the view; ``""`` when none is.
+
+        Chrome sees through a closed shadow root: the element under the point
+        is asked for, and when it owns a frame, that frame's own target says
+        where it was loaded from. A frame in the same process as the page, or
+        a box the page drew itself (a ``srcdoc`` for one), has no such target.
+        """
+        session = await self._session()
+        try:
+            at = await self._cmd(
+                "DOM.getNodeForLocation", {"x": round(x), "y": round(y)}, session
+            )
+            node = await self._cmd(
+                "DOM.describeNode", {"backendNodeId": at.get("backendNodeId")}, session
+            )
+            owner = node.get("node")
+            owner = owner if isinstance(owner, dict) else {}
+            frame = str(owner.get("frameId") or "")
+            if not frame or str(owner.get("nodeName") or "").lower() not in (
+                "iframe",
+                "frame",
+            ):
+                return ""
+            # Chrome makes a frame's target known to the browser when asked for the list.
+            got = await self._cmd("Target.getTargets", {})
+        except CdpError:
+            return ""
+        infos = got.get("targetInfos")
+        for info in infos if isinstance(infos, list) else []:
+            if (
+                isinstance(info, dict)
+                and info.get("targetId") == frame
+                and info.get("type") == "iframe"
+            ):
+                return str(info.get("url") or "")[:500]
+        return ""
+
+    async def _frame_boxes(
+        self, names: Callable[[str], bool]
+    ) -> list[list[Any]] | None:
+        """The frames Chrome has loaded, of the addresses *names* accepts, with the box each owner element has in this tab's view.
+
+        An owner element is found by the frame's id wherever it is, in a closed
+        shadow root too; a frame of another tab, or one nobody can see (its
+        owner has no box), is left out.
+        """
+        session = await self._session()
+        got = await self._cmd("Target.getTargets", {})
+        infos = got.get("targetInfos")
+        boxes: list[list[Any]] = []
+        for info in infos if isinstance(infos, list) else []:
+            if not isinstance(info, dict) or info.get("type") != "iframe":
+                continue
+            url = str(info.get("url") or "")[:500]
+            if not names(url) or len(boxes) >= MAX_FRAME_BOXES:
+                continue
+            try:
+                owner = await self._cmd(
+                    "DOM.getFrameOwner", {"frameId": info.get("targetId")}, session
+                )
+                model = await self._cmd(
+                    "DOM.getBoxModel",
+                    {"backendNodeId": owner.get("backendNodeId")},
+                    session,
+                )
+            except CdpError:
+                continue
+            quad = (model.get("model") or {}).get("border")
+            if not isinstance(quad, list) or len(quad) != 8:
+                continue
+            xs, ys = (
+                [as_number(v) for v in quad[0::2]],
+                [as_number(v) for v in quad[1::2]],
+            )
+            boxes.append([url, min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)])
+        return boxes
 
     async def _aim(self, spec: dict[str, Any], act: Act) -> tuple[float, float] | str:
         """Where Chrome's input goes for *act*: a point of the view, else why not.
