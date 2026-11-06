@@ -2434,6 +2434,8 @@ class TaskWorkers:
                     browser_driver=(
                         "off" if chat is None else configured_driver(settings)
                     ),
+                    # What its pages hand over stays in its chat's work folder.
+                    chat_id=chat,
                     # What it opens stays in melo's browser: another app's window is
                     # the person's to see, and nobody is at this task's side.
                     desktop=False,

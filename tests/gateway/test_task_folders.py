@@ -119,6 +119,8 @@ async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_long_steps(
     await eventually(lambda: len(built) == 1)
     assert built[0]["browser_driver"] == ("chrome" if browses else "off")
     assert built[0]["desktop"] is False, "another app's window never, for anyone"
+    # What its pages hand over stays with its chat, for that chat's later work.
+    assert built[0].get("chat_id") == (workers.front_id if browses else None)
     assert built[0]["options"].builtins == worker_tool_allowlist("user").builtins
     assert not any(name.startswith("browser") for name in built[0]["options"].builtins)
     assert built[0]["options"].max_extensions == (

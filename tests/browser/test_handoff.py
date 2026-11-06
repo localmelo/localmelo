@@ -145,6 +145,13 @@ async def clicked(
 # ── The hand-off ──
 
 
+def test_every_question_a_browser_asks_is_known_as_one() -> None:
+    prefixes = [v for k, v in vars(sites).items() if k.endswith("PREFIX")]
+    assert len(prefixes) >= 8
+    assert all(sites.is_browser_question(f"{p}https://a.example") for p in prefixes)
+    assert not sites.is_browser_question("python_exec")
+
+
 @pytest.mark.parametrize("driver", ["safari-automation", "chrome"])
 @pytest.mark.parametrize("opens", [True, False], ids=["a chat", "a task"])
 async def test_each_browser_keeps_the_rule_it_was_made_with(

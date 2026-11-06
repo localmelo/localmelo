@@ -46,16 +46,8 @@ DIALOG_PREFIX = "browser-dialog:"
 # ``takeover:<site>``, a card that offers to take the page over in the Browser
 # panel. Asked when needed, never kept for the chat, only the person answers it.
 TAKEOVER_PREFIX = "takeover:"
-QUESTIONS = (
-    PREFIX,
-    ACT_PREFIX,
-    TYPE_PREFIX,
-    SUBMIT_PREFIX,
-    POINT_PREFIX,
-    HANDOFF_PREFIX,
-    DIALOG_PREFIX,
-    TAKEOVER_PREFIX,
-)
+# Every ``browser-`` question, whenever a new one is added, and the two others.
+QUESTIONS = (PREFIX, "browser-", HANDOFF_PREFIX, TAKEOVER_PREFIX)
 TAKEOVER_NEEDS = {
     "sign-in": "a sign-in",
     "password": "a password field",
