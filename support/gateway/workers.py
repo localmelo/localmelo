@@ -1014,7 +1014,8 @@ class TaskWorkers:
         stopped task runs again in its own session, the message as its next
         turn after the earlier ones; *level* (from the person's words)
         replaces its old level. A message the run never read continues the
-        task once the run ends.
+        task once the run ends. A worker is one-time: a chat brings only the
+        same job here, and :meth:`Front.follow` starts new work as a new task.
 
         *automatic*: the message is its chat's own, in its follow-up (#411).
         It only continues a finished task (never answers its question nor

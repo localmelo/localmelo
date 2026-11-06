@@ -311,6 +311,10 @@ _WHICH: Final = (
     "Not done: the user's words fit more than one task. The user sees a one-tap "
     "suggestion for each instead; say so in one short sentence."
 )
+_NOT_PAUSED: Final = (
+    "Not done: that task is not paused. One that stopped before finishing goes on "
+    "with task_message; one that finished takes no new work."
+)
 _NOT_ASKED: Final = (
     "Not done: the user's words say not to act. The user sees a one-tap line to "
     "start it instead; say so in one short sentence."
@@ -1133,6 +1137,8 @@ class TaskTools(BaseToolProvider):
             return "Not done: name a task from task_list and stop, pause or resume."
         typed = front.typed()
         act: Action = action  # type: ignore[assignment]
+        if act == "resume" and record.state in FINISHED:
+            return _NOT_PAUSED
         if not allows(typed, act, _ref(record)):
             await front.suggest(record, act)
             return _REFUSED

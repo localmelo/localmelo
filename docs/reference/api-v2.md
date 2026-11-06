@@ -1284,13 +1284,13 @@ with the echo.
   `action` and maybe `level`; `action` `send` carries the message as `text`),
   `ask` (`Start this as a task?`, with `text`, the whole message, `words`, what
   was typed, and `turn_id`), `sent` (a message given to a task, `how`
-  `queued` for its next step or `continued` as a new turn of a finished task;
-  `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a repeating
-  phrase code read: `Run this every weekday at 8:30?`, with `title`, `text`
-  (the work), `schedule`, `when` and `level`; a reminder cue with a time gives
+  `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
+  `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
+  schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
+  (the whole message), `schedule`, `when` and `level`; a reminder cue with a time gives
   `Remind you on Fri Oct 30 at 9:00?` with `reminder: true`, `text`
   `Reminder: <words>`, `work` (the words), a `once` `schedule` and no
-  `level`), `chore_saved` (with `chore_id`),
+  `level`), `chore_saved` (with `chore_id`; `of` when it answers a `chore` echo, none when the chat saved it),
   `checkin` (the check-in's note, with `items`), `sleep` (melo tidied notes while the
   person was away: `run_id`, `count`, `variant`, `items` of at most five
   `{change, text}` with `change` one of `merged`, `updated`, `added`, `reworded`,
@@ -1319,8 +1319,9 @@ with the echo.
   deleted and the task handed over) and a `task_id`, and the key's cancel
   stops the task (202, `cancelling`) instead of storing a withdrawal; a task that
   cannot start is 400 and leaves no chat, one that is admitted keeps its chat), and a side chat's code rules (`/task`, control phrases,
-  follow-ups, chores and reminders) apply from its second message, the task
-  belonging to that side chat. A repeated `client_request_id` of a delegation
+  follow-ups and reminders) apply from its first message, the task
+  belonging to that side chat: `POST /api/sessions` with a message code acts on
+  answers 201 with the `session` and the `echo`, no turn, as `turn.as_task` does. A repeated `client_request_id` of a delegation
   answers the same echo.
 - A chat keeps a note of the news it has told as an `attention.news` event (turn
   `null`; `floor`, `tasks`, `sides`); a client ignores it.

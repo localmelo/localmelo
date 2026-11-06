@@ -302,6 +302,26 @@ async def test_continue_on_a_finished_worker_goes_to_the_model_with_all_its_word
         assert await state(console, old) == "done"
 
 
+async def test_resume_on_a_finished_worker_never_says_it_is_still_working(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ids: dict[str, str] = {}
+
+    def resumes(_: Any) -> Any:
+        return tool_call(
+            "task_control", {"task_id": ids["task"], "action": "resume"}, "r-1"
+        )
+
+    async with owner_console(
+        tmp_path, monkeypatch, main=[resumes, OK], follow_up=False, run=False
+    ) as (console, client, models, _):
+        ids["task"] = await task_of(client, console, "write the vendors list")
+        await _finished(console, ids["task"], REPORT)
+        await say(client, console, "resume the vendors list please, once more")
+        assert tool_results(models["main"])[-1].startswith("Not done: that task")
+        assert await state(console, ids["task"]) == "done"
+
+
 # ── 3. "Do it, and every day at 9" does both ──
 
 BOTH = "download my invoice from example.com now and every day at 9"

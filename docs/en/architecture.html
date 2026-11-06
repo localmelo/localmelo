@@ -121,10 +121,12 @@
         </div>
         <p class="diagram-caption">You, or Auto's review, approve a step. What you allow is kept as a grant, and it survives a restart.</p>
         <ul>
-          <li>You talk to the main chat. Side chats have the same abilities and share its memory.</li>
+          <li>You talk to the main chat. Side chats have the same abilities and share its memory, from their first message.</li>
+          <li>The chat's model reads what you say and decides: it answers, or starts the work. No word list stands in its way; only words that say not to act stop it, and those get a one-tap offer.</li>
           <li>Bigger work goes to the task scheduler, from the main chat, a side chat or a scheduled chore. It orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
           <li>A task belongs to the chat that started it: its news and result come back there, and a finished side chat leaves a summary for the main chat.</li>
-          <li>A chat can check on a worker and message it. A worker asks its chat for help; only the chat asks you.</li>
+          <li>A chat can check on a worker and message it while it runs. A worker asks its chat for help; only the chat asks you.</li>
+          <li>A worker does one job. New work on what it finished goes to a new worker, with the old one's record as background; a worker that stopped before finishing can go on with that job.</li>
           <li>A task a chat starts comes with your own words, what the chat picks, and a context pack of notes about you, your preferences and this project.</li>
         </ul>
 
@@ -433,7 +435,7 @@
             <h3>Scheduled chores</h3>
             <p>Tasks that run on time, and a check-in that tells you what happened.</p>
             <ul>
-              <li>Say <code class="wrap">every weekday at 8:30, brief me on my calendar</code> in the main chat; nothing is saved until you tap Save chore.</li>
+              <li>Say <code class="wrap">every weekday at 8:30, brief me on my calendar</code> in any chat: it saves your whole message and shows Undo. Say <code class="wrap">do it now and every day at 9</code> and it runs now too.</li>
               <li>A tick every 30 seconds starts due chores as tasks, never early; a run missed while the computer slept happens once at wake.</li>
               <li>Every 30 minutes the check-in tells the main chat what finished or waits, and makes no model call when there is nothing to say.</li>
               <li>A reminder is a chore that runs once: <code class="wrap">remind me to send the report on Friday at 9</code> shows the date it understood, and nothing is saved until you tap Remind me.</li>
@@ -501,7 +503,7 @@
             <ul>
               <li>Local MCP servers from <code>--mcp PATH</code> run as stdio processes.</li>
               <li>Their tools are named <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.</li>
-              <li>With browsing on, melo reads and acts on pages in Chrome in the background or in Safari's automation windows.</li>
+              <li>With browsing on, melo reads and acts on pages in Chrome in the background or in Safari's automation windows. With it off, a chat says so once, with how to turn it on.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md">Tools and MCP guide</a>
           </div>
