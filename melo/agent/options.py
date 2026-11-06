@@ -39,7 +39,7 @@ EmptyReplyFallback = Literal["on", "off"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
-# tokens; a longer turn is left out and counted (see Agent._as_sent).
+# tokens; a longer turn is left out and counted (see agent._replay_plan).
 REPLAY_TURN_CAP = 40_000
 
 
@@ -188,12 +188,13 @@ class AgentOptions:
       modes.
     - ``window_eviction``: how working memory drops old turns. ``"chunk"``
       (default) drops whole units down to ``window_messages -
-      WINDOW_EVICT_CHUNK`` messages at once, and the prompt-cap fit and the
-      context fit then drop down to ``WINDOW_FIT_TARGET`` (70%) of their
-      limit instead of just under it. ``"boundary"`` is ``"chunk"`` and also
-      drops a finished attempt's turns when the next attempt starts after a
-      reflection. Both keep the retained history stable for several steps,
-      which a server's prompt cache can reuse.
+      WINDOW_EVICT_CHUNK`` messages at once, and a request fit (to the prompt
+      cap, or to the context budget) cuts down to ``WINDOW_FIT_TARGET`` (70%)
+      of its limit instead of just under it and holds that cut.
+      ``"boundary"`` is ``"chunk"`` and also drops a finished attempt's turns
+      when the next attempt starts after a reflection. Both keep the retained
+      history stable for several steps, which a server's prompt cache can
+      reuse.
     - ``window_messages``: the working window's message cap (8 to 256, default
       ``LOCAL_WINDOW_MESSAGES``, 64). A larger cap leaves the prompt-size fit
       (see ``window_eviction``) to drop history. 20 is the cap before this

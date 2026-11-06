@@ -376,7 +376,8 @@ def test_working_memory_shows_and_forgets_aliases() -> None:
     memory.append(first, aliases=("n1",))
     memory.append_turn(assistant, [result], aliases=("d1",))
     assert memory.shown_aliases() == frozenset({"n1", "d1"})
-    memory.drop_oldest_units(1)
+    # Past four messages the window evicts its oldest unit, "q".
+    memory.append_turn(Message(role="assistant", content="y"), [result])
     assert memory.shown_aliases() == frozenset({"d1"})
     memory.clear()
     assert memory.shown_aliases() == frozenset()

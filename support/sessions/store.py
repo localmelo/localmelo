@@ -2149,16 +2149,44 @@ class SessionStore:
         run never read has none: it became the next turn); an empty text is left
         out. Nothing from another turn of the session.
         """
+        return [text for _, text in await self._read_notes(session_id, turn)]
+
+    async def all_read_notes(self, session_id: str) -> list[tuple[int, str]]:
+        """Every note of the session that a run read, as ``(turn, text)``, in read
+        order: what :meth:`read_notes` gives for each of its turns, in one read."""
+        return await self._read_notes(session_id, None)
+
+    async def _read_notes(
+        self, session_id: str, turn: int | None
+    ) -> list[tuple[int, str]]:
+        sql = (
+            "SELECT turn, event FROM events WHERE session_id = ? AND type = ? "
+            "AND turn IS NOT NULL"
+        )
+        args: list[Any] = [session_id, INBOX_ACCEPTED_EVENT_TYPE]
+        if turn is not None:
+            sql += " AND turn = ?"
+            args.append(turn)
         async with self._lock:
             conn = await self._ready()
-            rows = await _rows(
-                conn,
-                "SELECT event FROM events WHERE session_id = ? AND turn = ? "
-                "AND type = ? ORDER BY id",
-                (session_id, turn, INBOX_ACCEPTED_EVENT_TYPE),
-            )
-        texts = (json.loads(row[0]).get("data", {}).get("text") for row in rows)
-        return [text for text in texts if isinstance(text, str) and text.strip()]
+            rows = await _rows(conn, sql + " ORDER BY id", args)
+        notes = [
+            (int(row[0]), json.loads(row[1]).get("data", {}).get("text"))
+            for row in rows
+        ]
+        return [
+            (n, text) for n, text in notes if isinstance(text, str) and text.strip()
+        ]
+
+    async def queued_words(self, session_id: str) -> list[str]:
+        """The words of the messages the person sent to the chat that have not
+        started a turn, oldest first: its ``meta.queued``, which the console keeps.
+        It holds the words added to a running turn until that run reads them.
+        Empty for an unknown chat."""
+        info = await self.get_session(session_id)
+        kept = info.meta.get("queued") if info is not None else None
+        words = [q.get("typed") for q in kept if isinstance(q, dict)] if kept else []
+        return [w for w in words if isinstance(w, str) and w.strip()]
 
     async def turn_tool_results(
         self,

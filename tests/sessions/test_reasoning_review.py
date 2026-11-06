@@ -50,12 +50,13 @@ async def test_loaded_legacy_replay_strips_thinking_before_evicting_facts(
         outcome = await agent.run_task("follow")
         assert outcome.status == "completed"
         assert outcome.memory_stats is not None
-        assert outcome.memory_stats["replay_stripped"] == 1
+        # Down to 70% of the cap: thinking goes, every fact stays.
+        assert outcome.memory_stats["replay_stripped"] == 2
         [request] = provider.requests
         assert [m.content for m in request if m.role == "assistant"] == [
             f"kept fact {index}" for index in range(3)
         ]
-        assert len([m for m in request if m.thinking]) == 2
+        assert len([m for m in request if m.thinking]) == 1
         # Loading uses copies; neither request normalization nor cap fitting
         # rewrites a caller's checkpoint objects.
         assert all(m.thinking == thinking for m in messages if m.role == "assistant")

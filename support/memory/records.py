@@ -357,10 +357,11 @@ _ME = re.compile(
 # What a note keeps as it is when it is put in the second person: a quoted span
 # and the numeral of "Phase I", "Type I diabetes", "World War I".
 _KEPT = re.compile(
-    r"\"[^\"]+\"|“[^”]+”|「[^」]+」"
+    r"\"[^\"]+\"|“[^”]+”|「[^」]+」|『[^』]+』"
     r"|\b(?:Phase|Type|War|Chapter|Volume|Appendix|Category|Tier|Edition) I\b(?!['’])"
 )
-_KEPT_SPLIT = re.compile(f"({_KEPT.pattern})")
+# The fewest characters a sentence the user typed has to have for a note to quote it.
+QUOTE_CHARS: Final = 8
 # The user named in the third person (:func:`names_user`); "my user account" is no one.
 _THIRD_USER = re.compile(
     r"(?<!\bmy )(?<!\byour )(?<!\bour )\buser(?:['’]s)?\b|\bthe person\b(?! I\b)|用户",
@@ -432,35 +433,71 @@ def _swap(text: str) -> str:
     return text
 
 
-def second_person(sentence: str, *, protect: bool = False) -> str:
+def _kept(keep: Sequence[str]) -> str:
+    """The pattern of what a note leaves as typed: :data:`_KEPT` and each of the
+    spans in *keep* (the sentences of :func:`typed_spans`), longest first."""
+    spans = sorted(set(keep), key=len, reverse=True)
+    return "|".join([_KEPT.pattern, *map(re.escape, spans)])
+
+
+def typed_spans(note: str, said: Sequence[str]) -> list[str]:
+    """The sentences the user typed that *note* copies word for word, which the
+    first-person checks leave as typed (a form line such as "I confirm I have read
+    the above." is the user's "I", not the note's).
+
+    A whole sentence or line of the *said* texts (:func:`split_sentences`, its end
+    mark left off) of at least :data:`QUOTE_CHARS` characters that the note holds
+    exactly, white space aside. A phrase the note shares with the user's words
+    (its own "I prefer that …" after the user's "I prefer short answers") is not
+    one. None when the note says nothing besides such sentences: it only repeats
+    the user's statement, which is put in the second person as ever.
+    """
+    flat = " ".join(note.split())
+    spans = {
+        span
+        for text in said
+        for _, sentence in split_sentences(text)
+        if len(span := " ".join(sentence.split()).rstrip(" .!?。！？")) >= QUOTE_CHARS
+        and span in flat
+    }
+    rest = flat
+    for span in sorted(spans, key=len, reverse=True):
+        rest = rest.replace(span, " ")
+    return sorted(spans) if any(char.isalnum() for char in rest) else []
+
+
+def second_person(
+    sentence: str, *, protect: bool = False, keep: Sequence[str] = ()
+) -> str:
     """The user's *sentence* as a record: second person, one sentence, bounded.
 
-    With *protect*, a quoted span and a numeral "I" (:data:`_KEPT`) stay as typed.
+    With *protect*, a quoted span, a numeral "I" (:data:`_KEPT`) and each span of
+    *keep* stay as typed.
     """
     text = " ".join(sentence.split()).strip(" -—:：,，")
-    pieces = _KEPT_SPLIT.split(text) if protect else [text]
+    pieces = re.split(f"({_kept(keep)})", text) if protect else [text]
     text = "".join(_swap(p) if n % 2 == 0 else p for n, p in enumerate(pieces))
     return finished(text)
 
 
-def first_person(note: str) -> bool:
+def first_person(note: str, *, keep: Sequence[str] = ()) -> bool:
     """Whether *note* speaks as "I": ``I`` (and ``I'm``, ``I've`` …), ``me``,
-    ``my``, ``mine``, ``myself`` or ``我`` (not ``我们``, not "we"), a quoted span
-    and a numeral "I" ("Phase I") aside."""
-    return _ME.search(_KEPT.sub(" ", note)) is not None
+    ``my``, ``mine``, ``myself`` or ``我`` (not ``我们``, not "we"), a quoted span,
+    a numeral "I" ("Phase I") and each span of *keep* aside."""
+    return _ME.search(re.sub(_kept(keep), " ", note)) is not None
 
 
-def addresses_user(note: str) -> bool:
+def addresses_user(note: str, *, keep: Sequence[str] = ()) -> bool:
     """Whether *note* says ``you``, ``your``, ``yours``, ``你`` or ``您``, a
-    quoted span aside."""
-    return _TO_USER.search(_KEPT.sub(" ", note)) is not None
+    quoted span and each span of *keep* aside."""
+    return _TO_USER.search(re.sub(_kept(keep), " ", note)) is not None
 
 
-def names_user(note: str) -> bool:
+def names_user(note: str, *, keep: Sequence[str] = ()) -> bool:
     """Whether *note* names the user in the third person (``the user``, ``user``,
-    ``the person``, ``用户``), a quoted span aside. Its "I" is then the assistant:
-    "The user wants me to answer in Chinese."."""
-    return _THIRD_USER.search(_KEPT.sub(" ", note)) is not None
+    ``the person``, ``用户``), a quoted span and each span of *keep* aside. Its "I"
+    is then the assistant: "The user wants me to answer in Chinese."."""
+    return _THIRD_USER.search(re.sub(_kept(keep), " ", note)) is not None
 
 
 def finished(text: str) -> str:

@@ -27,6 +27,7 @@ from localmelo.support.memory.service import (
     CHAT_TURN,
     INFER_SENTENCE,
     REMEMBER,
+    TRY_ONCE_MORE,
     _record_item,
     remember_for,
 )
@@ -199,10 +200,18 @@ class Gate:
         await self.calls(info, ("web_fetch", {"url": url}, output, "success"))
 
     async def remember(self, text: str, topic: str = "about") -> str:
-        """The model's ``remember`` call; ``provider.calls`` then holds the calls it made."""
+        """The model's ``remember`` call; ``provider.calls`` then holds the calls it made.
+
+        Every call is judged as the first of its turn, and the reply is the gate's
+        own: the retry cap and its sentence (``test_chat_remember``) are left out.
+        """
         if self.provider is not None:
             self.provider.calls.clear()
-        return await self.memory.tools().remember(text=text, topic=topic)
+        turn = CHAT_TURN.get()
+        if turn is not None:
+            turn.refusals = 0
+        reply = await self.memory.tools().remember(text=text, topic=topic)
+        return reply.removesuffix(TRY_ONCE_MORE)
 
     async def notes(self) -> list[Any]:
         return list(await self.memory.records())

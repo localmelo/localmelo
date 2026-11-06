@@ -22,14 +22,18 @@ from localmelo.support.memory import ChatMemory, records
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.service import (
     CHAT_TURN,
+    MAX_REFUSALS,
+    NO_MORE_TRIES,
     REMEMBER,
     SEARCH_MEMORY,
+    TRY_ONCE_MORE,
     WRITE_IN_YOU,
 )
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 from localmelo.tests.memory.test_chat_records import STATEMENTS
 from localmelo.tests.memory.test_note_check import EXPLAIN, LISTS, PARKING, SUMMARIES
+from localmelo.tests.sessions.helpers import core_event
 
 HOLDER = "test-host:1:remember"
 NOT_SAID = "Not remembered: not something the user said."
@@ -258,7 +262,9 @@ async def test_a_note_in_another_language_or_with_a_changed_value_is_refused(
     answer = await memory.remember(note, "about")
     assert answer.startswith(f"{NOT_SAID} {words}: not in what the user typed")
     assert answer.endswith(
-        "in their words." + (" Write it in the language the user used." if hint else "")
+        "in their words."
+        + (" Write it in the language the user used." if hint else "")
+        + TRY_ONCE_MORE
     )
     assert await memory.records() == []
 
@@ -280,6 +286,10 @@ async def test_what_the_user_typed_earlier_in_this_chat_counts_and_nothing_else(
     kept = await tools.remember(text="Your group meeting is on Thursdays at 3pm.")
     assert kept.startswith("Remembered: ")
     assert (await tools.remember(text="Your dentist is Lee Park.")).startswith(NOT_SAID)
+    # A turn allows two refusals: the other chat's words are tried in the next one.
+    await _finish(store, turn)
+    again = "ok"
+    await memory.before_turn(store, await _turn(store, again, first.session_id), again)
     assert (await tools.remember(text="Your bike is red.")).startswith(NOT_SAID)
     (entry,) = await memory.records()
     assert entry.provenance["quote"] == "My group meeting is on Thursdays at 3 pm."
@@ -405,7 +415,8 @@ async def test_outside_a_chat_turn_or_with_an_empty_note_nothing_is_kept(
     assert await memory.remember("You prefer tea.", "preferences") == off
     typed = "I prefer tea."
     await memory.before_turn(store, await _turn(store, typed), typed)
-    assert await memory.remember("  ", "about") == "Not remembered: the note is empty."
+    empty = await memory.remember("  ", "about")
+    assert empty == "Not remembered: the note is empty." + TRY_ONCE_MORE
     assert await memory.records() == []
 
 
@@ -478,7 +489,7 @@ async def test_a_note_about_the_wrong_person_is_refused_with_the_fix(
     memory: ChatMemory, store: SessionStore, typed: str, note: str, reply: str
 ) -> None:
     await memory.before_turn(store, await _turn(store, typed), typed)
-    assert await memory.remember(note, "people") == reply
+    assert await memory.remember(note, "people") == reply + TRY_ONCE_MORE
     assert await memory.records() == []
 
 
@@ -579,7 +590,7 @@ async def test_a_note_that_says_i_and_you_is_refused_with_how_to_write_it(
 ) -> None:
     await memory.before_turn(store, await _turn(store, typed), typed)
     answer = await memory.remember(note, "preferences")
-    assert answer == WRITE_IN_YOU
+    assert answer == WRITE_IN_YOU + TRY_ONCE_MORE
     assert answer.startswith('Not remembered: write the user as "you"')
     assert await memory.records() == []
     # Written the way the refusal says, "melo" is no word the user had to type.
@@ -726,3 +737,174 @@ def test_a_note_that_names_the_user_and_says_i_is_known_by_its_words(
     note: str, first: bool, names: bool
 ) -> None:
     assert (records.first_person(note), records.names_user(note)) == (first, names)
+
+
+# ── Why a note the user said is refused, and the cap on retrying (#442) ──
+# A note that copies a sentence the user typed word for word is not read for "I":
+# the "I" of a form line is the user's. The user's words are every message of the
+# chat, also those added while melo worked, read or still queued. A turn gets two
+# refusals; the second ends the attempts and later calls answer so, with no check.
+
+QUESTION = "Are you authorized to work in the country"
+AUTHORIZED = f"{QUESTION}? yes"
+CONFIRM = "I confirm I have read the above."
+FORM = f"请帮我填写这份示例表格，并记住这些回答。\n{AUTHORIZED}\n{CONFIRM}"
+# The model's note: Chinese, with the form lines copied as the user typed them.
+FORM_NOTE = f"你已填写这份示例表格，回答是：{AUTHORIZED}。{CONFIRM}"
+# What the person added while melo worked, and a note that needs its words.
+ADDED = "后面记住这些回答，然后不需要再询问我了"
+ADDED_NOTE = "你希望后面记住这些回答，然后不再询问你。"
+
+
+async def _begin(
+    memory: ChatMemory, store: SessionStore, typed: str, session_id: str | None = None
+) -> Any:
+    info = await _turn(store, typed, session_id)
+    await memory.before_turn(store, info, typed)
+    return info
+
+
+def test_only_whole_sentences_the_user_typed_are_copies() -> None:
+    said = [FORM, "I prefer short answers. Thanks!"]
+    # Each sentence on its own: the "yes" is too short to be one.
+    assert records.typed_spans(FORM_NOTE, said) == [QUESTION, CONFIRM[:-1]]
+    # Spacing aside, with or without the end mark; fewer than 8 characters or
+    # words the user typed only in part are no copy.
+    spaced = (
+        "Note:  I confirm   I have read the above  and I prefer short, quick answers."
+    )
+    assert records.typed_spans(spaced, said) == [CONFIRM[:-1]]
+    assert records.typed_spans("Note: Thanks! and I agree", ["I agree. Thanks!"]) == []
+    # A note that says nothing of its own only repeats the user's statement.
+    assert records.typed_spans("I prefer short answers.", said) == []
+    assert records.typed_spans(f"{CONFIRM} {QUESTION}?", said) == []
+
+
+async def test_a_note_that_copies_a_typed_form_line_with_i_is_kept(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    await _begin(memory, store, FORM)
+    # Read for "I" it is refused, as it was: the line has "I" and the note "你".
+    assert records.first_person(FORM_NOTE) and records.addresses_user(FORM_NOTE)
+    answer = await memory.remember(FORM_NOTE, "about")
+    assert answer.startswith("Remembered: ")
+    (entry,) = await memory.records()
+    # The copy stays as typed: no "you confirm you have read the above".
+    assert entry.text == FORM_NOTE
+
+
+async def test_a_note_in_its_own_voice_is_still_refused_beside_a_copied_line(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    typed = f"I prefer short answers.\n{CONFIRM}"
+    await _begin(memory, store, typed)
+    # "I prefer" is the user's too, but only in another sentence: not a copy.
+    note = f"I prefer that you remember short answers. {CONFIRM}"
+    assert await memory.remember(note, "preferences") == WRITE_IN_YOU + TRY_ONCE_MORE
+    assert await memory.records() == []
+
+
+def _added(words: str) -> dict[str, Any]:
+    """The event of a run reading *words* the person added, as a console chat words it."""
+    lead = "[The user added this while you were working]"
+    return core_event("inbox.accepted", text=f"{lead}\n{words}")
+
+
+@pytest.mark.parametrize(
+    ("where", "kept"),
+    [
+        ("queued", True),
+        ("read in this turn", True),
+        ("read in an earlier turn", True),
+        # Not this chat's words: nobody added them, another chat has them queued,
+        # or the turn they were added to was undone.
+        ("nowhere", False),
+        ("queued in another chat", False),
+        ("read in an undone turn", False),
+    ],
+)
+async def test_words_added_while_melo_worked_are_what_the_user_typed(
+    memory: ChatMemory, store: SessionStore, where: str, kept: bool
+) -> None:
+    queue = [{"typed": ADDED, "composed": ADDED, "key": "queued-1"}]
+    first = await _turn(store, "Fill in the sample form.")
+    if "earlier" in where or "undone" in where:
+        await store.append_events(
+            first.session_id, first.turn, [_added(ADDED)], holder=HOLDER
+        )
+        await _finish(store, first)
+        if "undone" in where:
+            assert await store.undo_last_turn(first.session_id) is not None
+        info = await _begin(memory, store, "Thanks.", first.session_id)
+    else:
+        info = first
+        await memory.before_turn(store, first, "Fill in the sample form.")
+    if where == "queued":
+        await store.update_session(info.session_id, meta_update={"queued": queue})
+    if where == "queued in another chat":
+        other = await _turn(store, "Plan a trip.")
+        await store.update_session(other.session_id, meta_update={"queued": queue})
+    if where == "read in this turn":
+        await store.append_events(
+            info.session_id, info.turn, [_added(ADDED)], holder=HOLDER
+        )
+    answer = await memory.remember(ADDED_NOTE, "preferences")
+    if kept:
+        assert answer.startswith("Remembered: ")
+        (entry,) = await memory.records()
+        assert entry.provenance["quote"] == ADDED
+    else:
+        assert answer.startswith(NOT_SAID) and await memory.records() == []
+
+
+async def test_the_second_refusal_ends_the_attempts_and_costs_no_more_checks(
+    memory: ChatMemory, store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    info = await _begin(memory, store, "My seat is 4A.")
+    checked: list[str] = []
+    real = records.unsupported
+
+    def counting(note: str, evidence: Any) -> list[str]:
+        checked.append(note)
+        return real(note, evidence)
+
+    monkeypatch.setattr(records, "unsupported", counting)
+    first = await memory.remember("Your seat is 9F.", "about")
+    assert first.startswith(NOT_SAID) and first.endswith(TRY_ONCE_MORE)
+    second = await memory.remember("Your seat is 7C.", "about")
+    assert second == NO_MORE_TRIES and MAX_REFUSALS == 2
+    seen = len(checked)
+    assert seen >= 2
+    # The turn's attempts are over: a note that would be kept is not even looked at.
+    third = await memory.remember("Your seat is 4A.", "about")
+    assert third == NO_MORE_TRIES and len(checked) == seen
+    assert await memory.records() == []
+    # The next turn starts again.
+    await _finish(store, info)
+    await _begin(memory, store, "My seat is 4A.", info.session_id)
+    assert (await memory.remember("Your seat is 4A.", "about")).startswith("Remembered")
+
+
+async def test_a_kept_note_does_not_take_a_refusal_back(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    await _begin(memory, store, "My seat is 4A. My gate is B12.")
+    assert (await memory.remember("Your seat is 9F.")).endswith(TRY_ONCE_MORE)
+    assert (await memory.remember("Your seat is 4A.")).startswith("Remembered")
+    assert await memory.remember("Your gate is C30.") == NO_MORE_TRIES
+    assert await memory.remember("Your gate is B12.") == NO_MORE_TRIES
+    assert [e.text for e in await memory.records()] == ["Your seat is 4A."]
+
+
+async def test_a_secret_is_refused_and_counts_as_a_refusal(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    secret = "Your wifi password is hunter2-lighthouse."
+    await _begin(memory, store, secret.replace("Your", "My"))
+    first = await memory.remember(secret, "about")
+    assert first.startswith(f"Not remembered: {records.NOT_KEPT}.")
+    assert first.endswith(TRY_ONCE_MORE)
+    turn = CHAT_TURN.get()
+    assert turn is not None and turn.refused and turn.refusals == 1
+    assert await memory.remember(secret.replace("hunter2-", "")) == NO_MORE_TRIES
+    assert await memory.records() == []
