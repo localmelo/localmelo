@@ -443,22 +443,32 @@ def _parse(data: object) -> Plan:
     )
 
 
-def plan(timeout: float = PLAN_TIMEOUT_S) -> Plan:
+def installed_version() -> str:
+    """The version of the ``melo-serve`` on this Mac when it is at least the minimum, else ``""``."""
+    path = melo_serve.command()
+    have = _version(path) if path else ""
+    return have if _current(have) else ""
+
+
+def plan(timeout: float = PLAN_TIMEOUT_S, pick: str = "") -> Plan:
     """What melo_serve would set up on this Mac; never raises.
 
     It asks the installed ``melo-serve`` when that is at least the minimum
     version (an older one has no ``plan``), else ``uv tool run`` fetches
     melo_serve's pinned source into uv's cache and runs it there: nothing is
-    installed or started. Any failure is an unavailable plan with a one-line
-    reason.
+    installed or started. With *pick* (a chat pick's id) that pick is planned
+    instead of the recommended one. Any failure is an unavailable plan with a
+    one-line reason.
     """
     try:
-        return _plan(timeout)
+        return _plan(timeout, pick)
     except Exception as exc:  # this is a promise to a screen: no exception
         return _unavailable(f"melo-serve plan failed: {exc}")
 
 
-def _plan(timeout: float) -> Plan:
+def _plan(timeout: float, pick: str) -> Plan:
+    if pick and not _id(pick):
+        return _unavailable("that is not a model melo_serve knows")
     path = melo_serve.command()
     if path and _current(_version(path)):
         argv = [path, "plan", "--json"]
@@ -478,6 +488,8 @@ def _plan(timeout: float) -> Plan:
             "plan",
             "--json",
         ]
+    if pick:
+        argv += ["--pick", pick]
     ran = _run(argv, timeout=timeout)
     if not ran.ok:
         return _unavailable(ran.reason)
@@ -486,6 +498,28 @@ def _plan(timeout: float) -> Plan:
     except (ValueError, RecursionError):
         return _unavailable("melo-serve plan did not answer with JSON")
     return _parse(data)
+
+
+def embedding_item(plan: Plan) -> Item | None:
+    """The plan's embedding model, when its id can go into an argv."""
+    item = next((i for i in plan.items if i.role == "embedding"), None)
+    return item if item and _id(item.id.removeprefix("model:")) else None
+
+
+def role_items(plan: Plan, chat: Pick) -> tuple[frozenset[str], frozenset[str]]:
+    """The ids of the items that *chat* needs, and those that the embedding model needs."""
+    embedding = embedding_item(plan)
+    return (
+        frozenset({f"model:{chat.id}", f"backend:{chat.backend}"}),
+        frozenset(
+            {
+                embedding.id,
+                *([f"backend:{embedding.backend}"] if embedding.backend else []),
+            }
+            if embedding
+            else ()
+        ),
+    )
 
 
 # ── The job ──
@@ -585,16 +619,9 @@ class SetupJob:
         self._child: subprocess.Popen[bytes] | None = None
         self._cancelled = False
         self._path = ""  # the melo-serve command, once the first step has found it
-        embedding = next((i for i in plan.items if i.role == "embedding"), None)
+        embedding = embedding_item(plan)
         picked = embedding.id.removeprefix("model:") if embedding else ""
-        if not _id(picked):  # an id goes into an argv: not one that is an option
-            embedding = None
-        chat_items = {f"model:{chat.id}", f"backend:{chat.backend}"}
-        embedding_items = set()
-        if embedding:
-            embedding_items = {embedding.id}
-            if embedding.backend:
-                embedding_items.add(f"backend:{embedding.backend}")
+        chat_items, embedding_items = role_items(plan, chat)
         self._picks = [chat.id, *([picked] if embedding else [])]
         # The pick to load for each role; None once its model or backend is skipped.
         self._chat = None if self.skip & chat_items else chat.id
@@ -751,18 +778,17 @@ class SetupJob:
 
     def _download(self) -> str | None:
         """``melo-serve get`` without the skipped items; its events become the job's."""
-        failure = ""
+        failed: ItemEvent | None = None
 
         def on_line(raw: bytes | None) -> None:
-            nonlocal failure
+            nonlocal failed
             event = _parse_event(raw)
             if event is None:
                 return
-            if event.state == "failed":
-                failure = event.line
-                if self._cancelled:  # ``get`` reports a stop as a failure
-                    event = replace(event, state="skipped")
-            self._emit(event)
+            if event.state == "failed":  # ``get`` reports a stop as a failure too
+                failed = event  # its exit code says which, below
+            else:
+                self._emit(event)
 
         ran = _run(
             [
@@ -774,12 +800,15 @@ class SetupJob:
             hold=self._hold,
             on_line=on_line,
         )
-        if ran.ok:
-            return None
         if ran.code in (130, -signal.SIGTERM):  # stopped by a TERM or an INT
             self._cancelled = True
-        if failure:
-            return failure
+        if failed:
+            state = "skipped" if self._cancelled else "failed"
+            self._emit(replace(failed, state=state))
+        if ran.ok:
+            return None
+        if failed:
+            return failed.line
         if ran.code == 2 and not ran.why:  # cannot start: nothing was touched
             return self._fail(DOWNLOAD, _failed(ran.reason, NOTHING))
         return self._fail(DOWNLOAD, _failed(ran.reason, "what was downloaded is kept"))

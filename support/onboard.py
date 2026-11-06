@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 
-from localmelo.support import config, hosted, hosted_check, keychain
+from localmelo.support import config, hosted, hosted_check, keychain, melo_serve
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_family import (
     LOCAL_BACKENDS,
@@ -19,7 +19,7 @@ from localmelo.support.backends.openai_family import (
     USUAL_URL,
 )
 from localmelo.support.onboard_probe import ProbeError, probe_chat, probe_embedding
-from localmelo.support.server_setup import plan as server_setup
+from localmelo.support.server_setup import run, terminal
 from localmelo.support.words import t_in
 
 
@@ -340,7 +340,7 @@ def run_backend_setup(*, guided: bool = False) -> config.Config | None:
 
     With *guided* (default mode's ``--reconfigure``), a model server found on
     this machine is offered first, as the first run does. With no server, only
-    a fresh setup shows the read-only preview; a saved backend uses the full menu.
+    a fresh setup offers to set a server up; a saved backend uses the full menu.
     The full menu also follows a declined/unusable server.
 
     1. Choose and configure the chat backend.
@@ -698,57 +698,37 @@ def _port(url: str) -> str:
     return tail.rsplit(":", 1)[1] if ":" in tail else tail
 
 
-def _show_steps(setup: server_setup.Detection) -> None:
-    """Print the numbered steps; a command is kept whole, a sentence is wrapped."""
-    print()
-    for line in server_setup.numbered_steps(setup):
-        if line.startswith(server_setup.COMMAND_INDENT):
-            print(line)  # Copy-only shell commands stay on one logical line.
-        else:
-            _say(line, hang=3)
-    print()
+@dataclass(frozen=True)
+class _Back:
+    """The person went back from the list of servers they already run."""
 
 
-def _wait_for_a_server(
-    urls: Sequence[str],
-) -> discovery.FoundServer | str | _UseHosted | None:
-    """Print how to set one up, then reuse discovery on Enter; return a server/address or quit.
+_NO_SERVER = "No model server found. What now?"
+_Waited = discovery.FoundServer | str | _UseHosted | FirstSetup | None
 
-    The summary is printed once. EOFError and KeyboardInterrupt reach the
-    caller. Piped input keeps Enter/address/q; on a terminal, "Use a hosted
-    service" is the way in for a person with no server.
+
+def _look_for_a_server(
+    urls: Sequence[str], *, back: bool
+) -> discovery.FoundServer | str | _UseHosted | _Back | None:
+    """Look again on Enter until a server answers, or take an address; None quits.
+
+    The last rows are ``Back`` (with *back*) or ``Use a hosted service`` and
+    ``Quit``; esc answers the last. EOFError and KeyboardInterrupt reach the caller.
     """
-    setup = None
-    try:
-        setup = server_setup.detect()
-        for line in server_setup.preview(setup, interactive=_arrow_keys()):
-            _say(line)
-    except Exception:
-        how = discovery.how_to_start()
-        _say(f"Setup checks unavailable. Start {how.name} manually:")
-        for command in how.commands:
-            print(command)
-        _say(how.note)
-        print(discovery.GUIDE_URL)
-    rows = ["Check again", "Show how to set one up", "Enter an address"]
-    rows += ["Use a hosted service", "Quit"]
-    if setup is None:
-        del rows[1]
+    rows = ["Check again", "Enter an address"]
+    rows += ["Back"] if back else ["Use a hosted service", "Quit"]
     while True:
         if _arrow_keys():
-            choice = _choose_from(
-                "No model server found. What now?", rows, 0, len(rows) - 1
-            )
-            if choice == len(rows) - 1:
+            row = rows[_choose_from(_NO_SERVER, rows, 0, len(rows) - 1)]
+            if row == "Quit":
                 return None
-            if setup is not None and choice == 1:
-                _show_steps(setup)
-                continue
-            if choice == len(rows) - 2:
+            if row == "Back":
+                return _Back()
+            if row == "Use a hosted service":
                 return _UseHosted()
             answer = (
                 _question("Server URL", _FIRST_RUN_URL)
-                if choice == len(rows) - 3
+                if row == "Enter an address"
                 else ""
             )
         else:
@@ -764,6 +744,195 @@ def _wait_for_a_server(
             return found
         ports = ", ".join(_port(url) for url in urls)
         _say(f"✗ No model server found yet (looked at ports {ports}).", hang=2)
+
+
+def _manual_way(plan: run.Plan | None) -> None:
+    """Why there is nothing to set up here (when it is known), and how to start a server by hand."""
+    _say("No model server is running yet.")
+    for line in (plan.reason, plan.hint) if plan else ():
+        if line:
+            _say(line)
+    how = discovery.how_to_start()
+    _say(f"To start one yourself, run {how.name}:")
+    for command in how.commands:
+        print(command)
+    _say(how.note)
+    print(discovery.GUIDE_URL)
+
+
+def _plan_for_this_mac(pick: str = "") -> run.Plan | None:
+    """What melo_serve would set up here; None on a system it does not run on, or if asking failed."""
+    if sys.platform != "darwin":
+        return None
+    _say("Checking what this Mac can run…")
+    try:
+        return run.plan(pick=pick)
+    except Exception:
+        return None
+
+
+def _show_list(plan: run.Plan, skip: set[str], recommended: str) -> bool:
+    """Print the list a person says yes to; False if it could not be made."""
+    try:
+        lines = terminal.consent_lines(
+            plan,
+            skip,
+            run.installed_version(),
+            chosen=bool(plan.pick and plan.pick.id != recommended),
+            width=_columns(),
+        )
+    except Exception:
+        return False
+    print()
+    for line in lines:
+        if line.startswith(" "):  # a row of the list keeps its columns
+            print(line)
+        else:
+            _say(line)
+    return True
+
+
+def _ask_what_to_install(plan: run.Plan, skip: set[str]) -> set[str]:
+    """One question for each item that is not here yet: install it, or skip it."""
+    left_out = set()
+    for item, title in terminal.skippable(plan):
+        answer = _choose(
+            f"{title} [I/s]: ",
+            "is",
+            "s" if item in skip else "i",
+            title=title,
+            rows=["Install it", "Skip it"],
+            escape="i",
+        )
+        if answer == "s":
+            left_out.add(item)
+    return left_out
+
+
+def _another_model(plan: run.Plan) -> run.Plan | None:
+    """The plan for a model chosen from the pick and its alternatives; None to keep this one."""
+    picks = [pick for pick in (plan.pick, *plan.alternatives) if pick]
+    rows = [f"{p.name} on {terminal.backend_name(plan, p.backend)}" for p in picks]
+    chosen = _choose_from("Choose a model", rows, 0, 0)
+    if chosen == 0:
+        return None
+    fresh = _plan_for_this_mac(picks[chosen].id)
+    if fresh is None or not fresh.available:
+        _say(f"✗ {fresh.reason if fresh else 'Could not plan that model.'}", hang=2)
+        return None
+    return fresh
+
+
+def _set_up(plan: run.Plan, skip: set[str]) -> FirstSetup | None:
+    """Set *plan* up after the person's yes; a FirstSetup when the chat is ready, else None.
+
+    The job runs on this thread, so Ctrl-C reaches it and its child together.
+    """
+    assert plan.pick is not None
+    pick = plan.pick
+    print()
+    _say(f"Setting up {pick.name}. Ctrl-C stops it and keeps what was downloaded.")
+    job = run.SetupJob(
+        plan, pick.id, skip, gateway_service=False, on_event=terminal.Progress(plan)
+    )
+    state = job.run()
+    if state == "cancelled":
+        _say("Stopped. What was downloaded is kept; choose Set up to go on.")
+    elif state == "done":
+        saved = job.items.get(run.SAVE)
+        if saved is None or saved.state != "done":
+            _say(
+                f"The rest is set up, but not the chat model: melo-serve get {pick.id} "
+                "finishes it."
+            )
+            return None
+        _say(f"Ready. {pick.name} answers through melo_serve.")
+        if job.items.get(run.LOAD_EMBEDDING, run.ItemEvent("", "")).state != "done":
+            _say(_EMBEDDING_OFF)
+        snap = melo_serve.snapshot()
+        chat = snap.roles.get("chat")
+        return FirstSetup(
+            url=snap.url or melo_serve.DEFAULT_URL,
+            model=chat.model if chat else "",
+            saved=True,
+        )
+    return None
+
+
+def _offer_setup(plan: run.Plan, urls: Sequence[str]) -> _Waited:
+    """The list and the menu on a terminal, until the person sets up, takes a server or quits."""
+    assert plan.pick is not None
+    recommended, skip = plan.pick.id, set[str]()
+    while True:
+        if not _show_list(plan, skip, recommended):
+            _manual_way(None)
+            return _manual_choice(urls)
+        rows = (
+            [("set up", terminal.setup_row(plan, skip))]
+            if (plan.enough_disk or skip)
+            else []
+        )
+        rows += [("install", "Choose what to install")]
+        rows += [("model", "Choose another model")] if plan.alternatives else []
+        rows += [
+            ("server", "Use a server I already run"),
+            ("hosted", "Use a hosted service"),
+            ("quit", "Quit"),
+        ]
+        names = [row[1] for row in rows]
+        chosen = _choose_from("What would you like to do?", names, 0, len(rows) - 1)
+        match rows[chosen][0]:
+            case "quit":
+                return None
+            case "hosted":
+                return _UseHosted()
+            case "server":
+                waited = _look_for_a_server(urls, back=True)
+                if not isinstance(waited, _Back):
+                    return waited
+            case "install":
+                skip = _ask_what_to_install(plan, skip)
+            case "model":
+                if (other := _another_model(plan)) is not None:
+                    plan, skip = other, set()
+            case _:
+                if (setup := _set_up(plan, skip)) is not None:
+                    return setup
+                again = _plan_for_this_mac(plan.pick.id if plan.pick else "")
+                if again is None or not again.available:
+                    _manual_way(again)
+                    return _manual_choice(urls)
+                plan = again
+
+
+def _manual_choice(
+    urls: Sequence[str],
+) -> discovery.FoundServer | str | _UseHosted | None:
+    waited = _look_for_a_server(urls, back=False)
+    assert not isinstance(waited, _Back)
+    return waited
+
+
+def _wait_for_a_server(urls: Sequence[str]) -> _Waited:
+    """Offer to set a model server up, or say how to by hand; then look on Enter.
+
+    On a Mac, melo_serve's plan is shown as one list and, on a terminal, set up
+    after one yes; a pipe is only shown it, since consent comes from a person.
+    Anywhere else, or if the plan is not available, the way by hand is printed.
+    A server is looked for again on each Enter; a typed address is returned.
+    EOFError and KeyboardInterrupt reach the caller.
+    """
+    plan = _plan_for_this_mac()
+    if plan is None or not plan.available or plan.pick is None:
+        _manual_way(plan)
+        return _manual_choice(urls)
+    if _arrow_keys():
+        return _offer_setup(plan, urls)
+    if not _show_list(plan, set(), plan.pick.id):
+        _manual_way(None)
+        return _manual_choice(urls)
+    _say("Run melo in a terminal to set this up.")
+    return _manual_choice(urls)
 
 
 def _servers_named() -> str:
@@ -992,8 +1161,9 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
     The first line says what the first run needs: a model server. A server
     found on this machine is offered with one question (``n`` asks for a URL,
     prefilled with it); the model is chosen from the server's list. With none
-    found, it previews a pinned setup (no execution) and looks again on each
-    Enter; an address typed instead is checked as a URL is. Only
+    found, a Mac offers to set one up after one OK (see
+    :func:`_wait_for_a_server`) and looks again on each Enter; an address typed
+    instead is checked as a URL is. Only
     ``GET <url>/models`` is sent, and ``GET /api/version`` once when saving, to
     tell Ollama apart. When the check of a URL fails the user may retry, start
     without saving, or quit (None). EOFError and KeyboardInterrupt reach the
@@ -1001,7 +1171,7 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
 
     With *ask_keep* (``--reconfigure``), declining a found server or a server
     without models raises :class:`_FullMenuError` before anything is saved.
-    A no-server preview never changes the saved connection.
+    Looking for a server never changes the saved connection.
     """
     # A reconfigure knows what melo needs; a first run says it, also when it
     # reaches this question through `melo serve`.
@@ -1015,6 +1185,8 @@ def run_first_setup(*, ask_keep: bool = False) -> FirstSetup | None:
         waited = _wait_for_a_server(urls)
         if waited is None:
             return None
+        if isinstance(waited, FirstSetup):
+            return waited
         if isinstance(waited, _UseHosted):
             return _first_hosted_service()
         if isinstance(waited, str):
