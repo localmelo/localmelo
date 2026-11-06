@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import signal
 import socket
 import threading
 import time
@@ -459,6 +460,19 @@ class _ConsoleServer(uvicorn.Server):
         self._console = console
         self._on_ready = on_ready
         self._gateway = gateway
+
+    def handle_exit(self, sig: int, frame: Any) -> None:
+        """A SIGTERM is a stop that was asked for: end with exit status 0.
+
+        uvicorn sends a captured signal to the process again once it has shut
+        down, which would end this one as killed by SIGTERM. The login service
+        restarts a gateway that did not exit 0, so ``melo serve stop`` would be
+        undone.
+        """
+        if sig == signal.SIGTERM:
+            self.should_exit = True
+            return
+        super().handle_exit(sig, frame)
 
     async def startup(self, sockets: Any = None) -> None:
         """Start, then tell *on_ready*: a page opened now must find the server.

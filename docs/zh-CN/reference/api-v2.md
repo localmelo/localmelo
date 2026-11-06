@@ -99,6 +99,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `activity` 用平实的话说明该项正在做什么（请求带 `X-LocalMelo-Language` 时用那种语言，macOS 的活动胶囊就是这样；否则是英文），`icon` 是它的类别：`Waiting for your approval`（`wait`）、`Needs your approval`（`wait`，因批准而被扣住的任务）、`Waiting for the model`（`held`，调度器暂缓了它的模型调用；原因已知时会说明原因：`Waiting for a higher-priority task`、`Waiting for a free model slot`、`Waiting while another job uses the model`、`Waiting for free memory`、`Waiting for the battery`、`Waiting for the Mac to cool down` 或 `Waiting until the Mac is idle`）、`Reading notes.md` 和 `Looking through
   ~/talk`（`read`）、`Writing slides.md`（`write`）、`Running the tests`（运行测试套件的命令）、`Running a command` 和 `Running Python`（`run`）、`Reading example.com`、`Reading the page` 和 `Following a link`（`web`）、`Remembering`（`memory`）、`Checking its work` 和 `Thinking`（`think`），其他任何工具为 `Using a tool`（`tool`）。它们来自该项最新的 40 个事件；只显示文件名、文件夹和网页的主机名，绝不显示命令行、代码或文本。无法读取的存储显示 `Thinking`。
 - `answering` 只有在该项最新的事件是已开始的步骤、轮次或反思，且其后没有未结束的工具调用、审批或暂缓时才为 true：模型正在作答。因为没有事件可读（还没读到，或存储无法读取）而说的 `Thinking` 为 `false`。macOS 应用的桌面 Melo 和控制台的头像只在它为 true 时显示 Melo 在思考。`GET /api/activity` 中运行中的行也带有它。
+- `switch` 是 melo_serve 模型最新的一次切换（[`POST /api/serve/switch`](#post-apiserveswitch)），没有时为 `null`。
 - `desktop_helper` 是桌面控制助手的状态，取最近一次对话或检查得到的结果：`state` 为 `missing`（未安装）、`installed`（还没检查）、`granted`（它能运行并有“辅助功能”权限；`pictures` 表示它是否也有“录屏”权限）、`no_grant`（“辅助功能”权限没有打开）或 `failed`（没有启动）；`app` 是要给予权限的应用，`problem` 说明问题所在。`GET /api/health?helper=check` 会启动助手一次来读取它的权限（不弹出提示，至少相隔 30 秒，并且只在浏览已开启且 `[browser] app_windows` 为 true 时）；其他情况下不会启动任何东西。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
@@ -318,6 +319,34 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - 不带 `backend` 或 `url` 时，使用已保存的对话后端及其 `chat_url`。
 - 云端后端返回 400 `invalid_request`：`Listing models works for local backends only; type the model name.`
 - 无法连接的服务器或空的模型列表会返回 502 `backend_unreachable`。
+
+## GET /api/serve
+
+melo_serve 提供的对话模型，用控制台的语言写好，供模型标签、设置、`/model` 和应用的 **Model** 菜单使用。它通过控制套接字询问 melo_serve。
+
+```json
+{"picks": [{"id": "qwen3-8b-omlx", "short": "8b", "name": "Qwen3 8B", "backend_name": "oMLX", "model": "Qwen3-8B-4bit", "current": false, "loadable": true, "words": "oMLX · needs 5 GB · fits", "fit": "fits", "tight": false}], "foot": "Every chat on this Mac follows the switch.", "switch": null}
+```
+
+- `words` 是这一行的完整文字；`fit` 是它的最后一个词（`fits`、`tight fit`，无法加载的模型为空）；`tight` 表示只有在不加载其他模型时才放得下。放不下或有问题的模型 `loadable` 为 `false`，`words` 会说明原因。
+- `switch` 是最新的一次切换，与 `GET /api/health` 相同。
+- 409 `not_melo_serve`：聊天的模型服务器不是 melo_serve。502 `melo_serve_unavailable`：melo_serve 没有响应。
+
+## POST /api/serve/switch
+
+切换 melo_serve 提供的模型。请求体：`{"pick": "<id>"}`。它立即返回 202 和 `{"switch": ...}`，切换在网关中继续；每个聊天都会跟上。
+
+```json
+{"switch": {"id": 1, "pick": "qwen3-8b-omlx", "name": "Qwen3 8B", "state": "waiting", "waiting_for": 1, "load_s": 12, "error": "", "title": "Switching to Qwen3 8B…", "detail": "Waiting for 1 chat to finish"}}
+```
+
+- `state` 依次为 `waiting`（等待正在运行一轮的聊天，最多 10 分钟）、`loading`（最多 45 分钟），然后是 `done`、`failed`（`error` 说明原因；此时 `title` 写 `Did not switch to Qwen3 8B`，`detail` 重复错误）或 `cancelled`。`GET /api/health` 的 `switch` 是同一个对象，第一次切换之前为 `null`。
+- 切换期间发出的一轮会等待（hold 为 `Switching`），然后在新模型上运行。
+- 400 `invalid_request`：未知的 pick。409 `pick_cannot_load`：放不下或有问题。409 `switch_running`：已有切换在进行。409 `not_melo_serve` 和 502 `melo_serve_unavailable` 同上。
+
+## POST /api/serve/switch/cancel
+
+结束尚未开始加载的切换的等待；返回 `{"switch": ...}`，其 `state` 为 `cancelled`。409 `no_switch`：没有切换在运行。409 `switch_loading`：加载已开始，会在 melo_serve 中继续。
 
 ## GET /api/setup/detect
 
@@ -875,6 +904,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
+- 轮次里某一步正在等待的卡片（批准、接管、关于另一个应用窗口的询问）会在发送补充时结束：`approval.resolved`，`outcome` 为 `denied`，`origin` 为 `words`，调用立刻返回，所以运行在下一步就读到这条补充。文字不会允许任何事，不论写了什么；不属于该轮次任何运行中步骤的卡片（任务的卡片）保持打开。
 - 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
 - `text` 会去掉首尾空白，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。除非 `images` 里有图片，否则不能为空；此时模型读到的是 `[1 picture]`，`text` 为 `""`。一个轮次最多接收 20 条补充。
 - `images` 可选：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不能重复，且都还在暂存区，规则与消息的 `images` 相同（400 `invalid_request`、400 `picture_gone`；已知聊天模型读不了图片时为 409 `model_text_only`）。回答在 `images` 下列出它们，写法与轮次的 `images` 相同（`sha256`、`mime_type`、`size_bytes`；图片本身用 [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256) 取），`turn.note` 事件也一样。它们在调用返回之前就已保存在对话里，所以变成下一个轮次、或等过一次重启的补充仍然带着它们。运行在下一步把它们作为这条补充消息的图片部分发送（每一步最多 8 张，其余的补充在再下一步读到）；若到那时发现模型读不了图片，补充的文字里会说明这一点，并且不发送图片。

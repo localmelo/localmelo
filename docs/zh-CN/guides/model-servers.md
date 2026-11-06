@@ -8,14 +8,16 @@
 - 在其他系统上，可以用 Ollama 作为替代。
 - 云端服务只需要一个密钥：在设置里粘贴一次，它会保存在你 Mac 的钥匙串里。见[云端模型](hosted-models.md)。
 
-<a id="setup-preview"></a>
+<a id="first-run-setup"></a>
 
-## 设置预览
+## 首次运行的设置
 
-- 尚未保存后端且未找到服务器时，终端首次运行和 `melo setup` 会显示简短的只读预览。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct（4-bit），显示下载量上限，仅在需要时添加一条警告。其他系统显示手动指南。若已经保存后端但没有找到服务器，`melo setup` 会改为打开完整后端菜单。
-- 摘要只显示一次。随后的列表提供 `Check again`、`Show how to set one up`、`Enter an address`、`Use a hosted service` 和 `Quit`。`Show how to set one up` 会显示最多六步的简明编号步骤：下载 oMLX、可选地核对校验和、打开并移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出。
-- 内存低于 16 GB 只提示可能较慢，不限制为仅手动设置。固定模型约 2.28 GB；oMLX 0.7.3 的 DMG 在 macOS 15 上约 0.84 GB，在 macOS 26/27 上约 0.88 GB，下载量包含两者。不会安装、下载、启动或写设置。
-- 这些步骤由同一个固定版本配方生成：模型保留在标准 Hugging Face 缓存中，服务器使用独立的设置目录，并关闭 oMLX 的额外缓存扫描，让这个实例只提供所选快照。自行安装官方应用，准备好后再复制显示的命令。步骤中的端口（49152）只是示例，并未预留；如果被占用请换一个，然后在 melo 中输入该地址。手动命令独立运行，服务器须自行按 Ctrl+C 停止。缓存位置依次遵循 `HF_HUB_CACHE`、旧变量 `HUGGINGFACE_HUB_CACHE`、`HF_HOME/hub`、XDG/标准默认值；服务器状态位于 `~/.cache/localmelo/server-setup/` 下。管道和 `TERM=dumb` 显示手动指南链接而不是列表项；设置检查失败时，手动路径仍然可用。
+- 已经在运行的服务器总是优先提供。尚未保存后端且没有找到服务器时，搭载 Apple silicon 的 Mac（macOS 15 或更新版本）上的首次运行会提议帮你设置一个。这是可选的：`Use a server I already run` 和 `Use a hosted service` 在同一个菜单里，选择 `Set up <model> (<size>)` 之前不会安装任何东西。若已经保存后端，`melo setup` 会改为打开完整后端菜单。
+- melo 会向 [melo_serve](https://github.com/localmelo/melo_serve) 询问这台 Mac 能运行什么（`melo-serve plan`，只读），然后打印一个列表：芯片、内存、macOS 和可用磁盘空间，推荐的模型，以及每一项的大小和去向。已经有的项显示 `✓ already here`，不计入下载量；下载了一半的模型会显示已有多少。若尚未安装 melo_serve，uv 会把固定版本的副本取到自己的缓存里，只为了这次询问。
+- 各项是：melo_serve 本身（用 `uv tool install` 安装固定版本）、对话后端（oMLX：固定的下载文件，会核对大小和校验和，再复制到 `~/Applications/oMLX.app`；Splash 通过 Homebrew 安装）、对话模型和嵌入模型（Hugging Face 缓存，遵循 `HF_HOME`，绝不放进项目文件夹），以及 melo_serve 的登录项（macOS 会显示“登录项”通知）。缓存所在的卷上必须放得下下载量，另加 5 GiB。
+- `Choose what to install` 会逐项询问尚未安装的项。melo_serve 本身不提供跳过：不想用它就选 `Use a server I already run`。没有对话模型或它的后端，melo_serve 暂时无法对话，之后用 `melo-serve get <pick>` 补齐。没有嵌入模型或它的后端，记忆只按字词查找。没有登录项，`melo serve` 会在需要时启动 melo_serve。`Choose another model` 会从同一目录规划另一个选择，并重新显示列表。
+- 同意之后，每一步打印一行，下载带进度条。按 Ctrl-C 会停下并保留已下载的内容；再选 `Set up` 即可继续。某一步失败时会说明原因并回到列表。对话模型能回答后，melo 会把 melo_serve 保存为对话服务器并进入对话。
+- 管道和 `TERM=dumb` 只会看到列表和 `Run melo in a terminal to set this up.`：同意必须来自真人，所以管道从不开始设置。其他系统、Intel Mac、内存太小的 Mac 以及检查失败时，会用一行说明原因，并给出手动方式：下面的命令，加上 `Check again`、`Enter an address`、`Use a hosted service` 和 `Quit`。
 - 直接指向快照时，服务器提供的模型 ID 可能是修订哈希，而不是仓库名称，请使用服务器实际列出的 ID。重新检查地址只列出模型，不会加载模型。网页/应用设置卡片以及已有配置或显式指定地址的运行保持原有行为。
 
 <a id="serve-a-model-with-omlx"></a>
@@ -173,14 +175,25 @@ enable_thinking = false
    chat_url = "http://127.0.0.1:8321/v1"
    ```
 
-3. 想换模型时随时切换：`melo-serve use <pick>`。
+3. 想换模型时随时切换：在任一聊天里用 `/model`、控制台的模型标签、应用的 **Model** 菜单，或 `melo-serve use <pick>`；见[切换模型](#switch-the-model)。
 
-- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及没有用 `/model` 选过模型的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。在某个模型上构建的聊天，若现在提供的是另一个模型，会在下一轮重新构建；正在运行一轮的聊天先完成这一轮。只有控制套接字接受连接，并且套接字和状态文件都属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
+- `chat_model` 为空表示 melo_serve 当前提供的模型。localmelo 在创建提供方时从 melo_serve 的状态文件读取它，因此切换会被跟上；`embedding_model` 也一样。正在运行的聊天会在下一轮跟上：网关的聊天（`melo` 主聊天、侧聊天、网页控制台和应用），以及启动时没有带 `--model` 的本地终端聊天（`[cli] chat = "local"`、`-c`、`-r`）。终端聊天会打印 `The model changed to <model> (via melo_serve).`，网关运行该轮时也一样。在某个模型上构建的聊天，若现在提供的是另一个模型，会在下一轮重新构建；正在运行一轮的聊天先完成这一轮。只有控制套接字接受连接，并且套接字和状态文件都属于你自己、所在文件夹只有你能写入时，melo_serve 才算在运行，所以崩溃或停止后留下的状态什么也不提供。
 - 没有提供任何模型时，`melo "task"`（以及 `POST /v1/agent/run`，返回 502 `agent_start_failed`）会以一行说明要运行什么命令结束：`melo-serve up`、安装命令，或 `melo-serve use <pick>`。直接运行的退出码为 1。
 - 首次运行的设置优先选择正在运行的 melo_serve，并且不写入模型。设置、设置页和启动时的检查都不需要已有模型在提供：是否有模型，在需要模型时才检查。
 - 配置使用 melo_serve 时，`melo serve` 会检查它；见[网关](gateway.md#start-the-gateway)。
 - localmelo 运行第一个只有你能写入的 `melo-serve` 文件，依次查找 PATH（须为绝对路径）和 `uv tool install` 的安装文件夹（`$UV_TOOL_BIN_DIR`，其次 `$XDG_BIN_HOME`，再其次 `~/.local/bin`；登录项的 PATH 里没有它）。
 - melo_serve 的 [README](https://github.com/localmelo/melo_serve#readme) 介绍可选项（pick）、登录项和其他命令。
+
+<a id="switch-the-model"></a>
+
+#### 切换模型
+
+- **终端：** `/model` 列出 melo_serve 的对话模型，当前模型标 `✓`，每行写出后端、需要的内存，以及 `fits` 或 `tight fit`。Enter 切换，Esc 保留当前模型。`/model NAME`（短名、ID 或名称）不打开列表直接切换。主聊天里也可以用。
+- **控制台：** 页头的模型标签和输入框下方的模型按钮打开同一个列表，**设置 → 模型服务器** 和 `/model` 也一样。
+- **应用：** 菜单栏菜单的 **Model** 子菜单。
+- 本机的每个聊天都会跟上切换。切换先等待正在运行一轮的聊天（`Waiting for 1 chat to finish`，最多 10 分钟）；这期间发出的一轮会等待（`Waiting for the model switch`），然后在新模型上运行。**Cancel**（终端里按 Esc）结束等待；已经开始的加载会在 melo_serve 中继续。
+- 需要的内存超过空闲内存的模型显示为灰色，写出它需要多少和还有多少空闲，不能选择。任务不会被挂起：模型加载期间，它的请求会等待并再次询问，然后用新模型继续。被终端里的 `melo-serve use` 赶上的聊天也一样。加载慢不会让它失败，Stop 会立即结束等待。只有一直不回答的 melo_serve 才会到达 45 分钟的上限（高于它在没有 `before_load` 钩子时最坏的情况；很慢的钩子也可能到达）：切换以 `failed` 结束，被挂起的一轮继续运行；正在等待的任务以 `failed` 结束，这一轮以 `provider_error` 结束，并带上 melo_serve 的回答。
+- 网关在运行时，终端通过网关切换，使用主聊天已在用的令牌，因此网关的聊天也会等待；没有网关时，终端直接请求 melo_serve。开发者模式会加上每个模型在磁盘上的大小。
 
 <a id="ollama-with-embeddings"></a>
 

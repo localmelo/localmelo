@@ -13,7 +13,9 @@ from rich.text import Text
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import (
+    INTERRUPT_LABEL,
     Message,
+    is_no_answer_label,
     is_reply_nudge,
     split_thinking,
 )
@@ -148,6 +150,14 @@ def memory_view(
             names[call.id] = call.tool_name
         content = split_thinking(message.content)[1]
         content = " ".join(clean_output(redact_secrets(content)[0]).split())
+        if message.role == "assistant" and is_no_answer_label(content):
+            # The label the window keeps for a run without an answer is for the
+            # model's memory; the person reads what happened.
+            content = (
+                "(stopped before answering)"
+                if content == INTERRUPT_LABEL
+                else "(ended without an answer)"
+            )
         if message.role == "tool":
             prefix = f"{symbols.connector} {names.get(message.tool_call_id, 'tool')} "
         elif message.role == "user":

@@ -22,7 +22,11 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    WORDS_NOTE,
+    ApprovalDecision,
+    ApprovalRequest,
+)
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import Message, ToolDef
@@ -1428,6 +1432,46 @@ async def test_a_delete_during_an_approval_wait_preserves_the_turn(
         )
         assert answer.status_code == 200
         await _wait_turn(client, session_id)
+
+
+async def test_a_note_ends_the_card_its_turn_waits_on_and_never_approves_it(
+    tmp_path: Path,
+) -> None:
+    target, card, said = _write_card(tmp_path)
+    async with console_with(tmp_path, card, said) as (console, client, llms):
+        body = await _create(client, tmp_path, "Write the todo file")
+        session_id, turn_id = body["session"]["id"], body["turn"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+        # A card that belongs to no running step of the turn (a task's) stays.
+        other = ApprovalRequest(
+            "other-card", "task-run", "task-call", "file_write", {}, "", None
+        )
+        elsewhere = console.broker.begin(session_id, other)
+
+        # Words that read like a yes allow nothing: the card ends, and the run reads them.
+        sent = await client.post(
+            f"/api/turns/{turn_id}/notes", json={"text": "yes, go ahead and write it"}
+        )
+        assert sent.status_code == 202 and sent.json()["note"]["state"] == "sent"
+
+        turn = await _wait_turn(client, session_id)
+        assert turn["status"] == "completed" and not target.exists()
+        assert [r.request_id for r in console.broker.pending(session_id)] == [
+            "other-card"
+        ]
+        events = (
+            await client.get(f"/api/sessions/{session_id}/turns?limit=1&events=true")
+        ).json()["turns"][0]["events"]
+        [resolved] = [e for e in events if e["type"] == "approval.resolved"]
+        assert (resolved["data"]["outcome"], resolved["data"]["origin"]) == (
+            "denied",
+            "words",
+        )
+        # The second request has the refusal as the call's result, then the words.
+        second = llms[0].requests[1]
+        assert WORDS_NOTE in str(second[-2].tool_result)
+        assert str(second[-1].content).endswith("yes, go ahead and write it")
+        elsewhere.cancel()
 
 
 # ── Locks, retries and deletes ──

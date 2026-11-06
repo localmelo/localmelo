@@ -5,11 +5,14 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from localmelo.tests._cache_guard import RealCacheGuard, real_cache_dir
+
+if TYPE_CHECKING:
+    from localmelo.tests.fixtures.melo_serve import FakeServe
 
 # The home the test process started with, before any fixture redirects it.
 _REAL_HOME = os.environ.get("HOME")
@@ -145,6 +148,20 @@ def melo_serve_home(
     return home
 
 
+@pytest.fixture(autouse=True)
+def _no_setup_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first run's setup plan is unavailable: no test runs ``uv`` or fetches melo_serve.
+
+    A test of the setup screen fakes ``run.plan`` itself.
+    """
+    from localmelo.support.server_setup import run
+
+    monkeypatch.setattr(
+        run, "plan", lambda timeout=0.0, pick="": run.Plan(False, "no plan in tests")
+    )
+    monkeypatch.setattr(run, "installed_version", lambda: "")
+
+
 @pytest.fixture
 def melo_serve_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """A control socket that accepts connections, so a fake ``state.json`` is running.
@@ -156,6 +173,20 @@ def melo_serve_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     with listening() as path:
         monkeypatch.setenv("MELO_SERVE_SOCKET", str(path))
         yield path
+
+
+@pytest.fixture
+def serve_fake(
+    melo_serve_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[FakeServe]:
+    """A running fake melo_serve that serves the 27B and answers ``/picks`` and ``/switch``."""
+    from localmelo.tests.fixtures.melo_serve import FakeServe, listening
+
+    fake = FakeServe(melo_serve_home)
+    fake.write()
+    with listening(fake) as path:
+        monkeypatch.setenv("MELO_SERVE_SOCKET", str(path))
+        yield fake
 
 
 @pytest.fixture(autouse=True)

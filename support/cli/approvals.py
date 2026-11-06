@@ -24,6 +24,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import re
 import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -178,6 +179,34 @@ def _diff_body(
         for index, part in enumerate(wrap_cells(f"{number:4} {sign} {text}", width)):
             body.append((style, part if index == 0 else "      " + part))
     return body, added, removed
+
+
+# The engine's words for a control in a click's or a text's question: ``a button "Sign in"``,
+# with ``inside a box from login.example.org`` after it for another site's box.
+_CONTROL: Final = re.compile(
+    r'^an? (link|button|textbox|checkbox|select)(?: "(.*)")?(?: inside a box from \S+)?$'
+)
+_KIND_NAMES: Final = {"textbox": "text field", "select": "list"}
+
+
+def _site_title(arguments: Mapping[str, Any], site: str, *, typing: bool) -> str:
+    """The question of a click, a choice or typing on a site, naming the control when melo knows it.
+
+    ``Click “Sign in” on example.org?`` or ``Type into “Comment” on example.org?``; the generic
+    question when the request names no control the engine described.
+    """
+    found = _CONTROL.match(str(arguments.get("on") or "").strip())
+    if found is None:
+        return "Type on a website?" if typing else "Click on a website?"
+    kind, label = found.group(1), found.group(2)
+    if typing:
+        target = f"“{label}”" if label else f"a {_KIND_NAMES.get(kind, kind)}"
+        return f"Type into {target} on {site}?"
+    if str(arguments.get("how") or "").startswith("choose"):
+        target = f"“{label}”" if label else "a list"
+        return f"Choose an option in {target} on {site}?"
+    target = f"“{label}”" if label else f"a {_KIND_NAMES.get(kind, kind)}"
+    return f"Click {target} on {site}?"
 
 
 def panel_text(
@@ -352,8 +381,8 @@ def _tool_panel(
                 "before it presses send, but cannot stop every send the page makes."
             )
         else:
-            said = f"melo wants to click and choose on {site} {window}, as you would."
-            note = "Each text it types is asked about apart, every time."
+            said = f"melo does this on {site} {window}, as you would."
+            note = "Typing is decided separately, each time."
         body = [("", row) for row in _wrapped([said], width)]
         if sending and goes:
             body += [("", row) for row in _wrapped([shown(goes)], width)]
@@ -368,17 +397,27 @@ def _tool_panel(
             typed = shown(str(arguments.get("text") or ""))
             body += [("", row) for row in _wrapped(typed.split("\n"), width)]
         body += [("muted", row) for row in _wrapped([note], width)]
+        if sending:
+            title = "Send a form?"
+        elif pointing:
+            title = "Click on a website?"
+        else:
+            title = _site_title(arguments, site, typing=typing)
         return PanelText(
-            (
-                "Send a form?"
-                if sending
-                else "Type on a website?" if typing else "Click on a website?"
-            ),
+            title,
             f"{site}{mark} · "
             + (
-                "sends a form"
+                "sending a form from a web page"
                 if sending
-                else "types text" if typing else "acts on the page"
+                else (
+                    "typing on a web page"
+                    if typing
+                    else (
+                        "an action at one spot of a web page"
+                        if pointing
+                        else "a click or a choice on a web page"
+                    )
+                )
             ),
             body,
             escaped_any,
@@ -571,7 +610,7 @@ FOLDER_RULE: Final = (
 
 
 def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str:
-    """The label of the answer that allows *request* for the rest of the session.
+    """The label of the answer that allows *request* for the rest of the chat.
 
     In the main chat (*everywhere*) it says the answer counts in every chat.
     """
@@ -590,7 +629,7 @@ def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str
     if request.tool_name.startswith("window-read:"):
         app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
         return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
-    where = "in every chat" if everywhere else "in this session"
+    where = "in every chat" if everywhere else "for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call {where}"
 
 
@@ -604,7 +643,7 @@ def session_warning(tool: str, workspace: str) -> list[str]:
         return []
     return [
         f'"Allow every" lets routine {what} run without asking for the rest of '
-        "this session.",
+        "this chat.",
         f"Installs, downloads and changes outside {workspace} still ask.",
     ]
 
@@ -886,7 +925,7 @@ def approval_words(mode: Mode, grants: Iterable[str]) -> str:
         names = [name for name in names if grant_site(name)]
     allowed = ", ".join(grant_words(name) for name in names)
     if mode in ("ask", "auto") and allowed:
-        return f"{_MODE_WORDS[mode]} · allowed this session: {allowed}"
+        return f"{_MODE_WORDS[mode]} · allowed in this chat: {allowed}"
     return _MODE_WORDS[mode]
 
 

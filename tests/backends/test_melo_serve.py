@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from localmelo.support.backends.registry import in_use
 from localmelo.support.cli.agents import config_backend
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console.routes_settings import model_json
-from localmelo.tests.fixtures.melo_serve import URL, role, write_state
+from localmelo.tests.fixtures.melo_serve import URL, FakeServe, role, write_state
 
 
 def _cfg() -> Config:
@@ -86,7 +87,7 @@ def _oversized(home: Path) -> None:
 
 NOT_RUNNING = melo_serve.Snapshot()
 RUNNING_NO_ROLES = melo_serve.Snapshot(
-    running=True, url=URL, status="ready", login=True
+    running=True, url=URL, status="ready", login=True, generation=1
 )
 RUNNING_LOGINLESS = melo_serve.Snapshot(
     running=True,
@@ -94,6 +95,7 @@ RUNNING_LOGINLESS = melo_serve.Snapshot(
     status="ready",
     login=False,
     roles={"chat": melo_serve.Role("m", "m", "Splash", "ready")},
+    generation=1,
 )
 
 
@@ -167,9 +169,7 @@ def test_a_live_socket_does_not_make_a_bad_state_good(
     MALFORMED["a front door url that is not loopback"][0](melo_serve_home)
     assert not melo_serve.snapshot().running  # its address is never offered
     MALFORMED["a model that is not a string"][0](melo_serve_home)
-    assert melo_serve.snapshot() == melo_serve.Snapshot(
-        running=True, url=URL, status="ready", login=True
-    )  # running, but with no model to serve
+    assert melo_serve.snapshot() == RUNNING_NO_ROLES  # running, with no model to serve
     assert in_use(_cfg(), "melo_serve") == ("melo_serve", "")
 
 
@@ -251,6 +251,21 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     assert melo_serve.refusal() == (
         f"melo_serve: {uv} is not run: others can write its folder {uv.parent}"
     )
+    # Homebrew's folder is the user's, mode 775, group admin: that group may
+    # write it; another group may not, and when the group lookup fails nobody may.
+    uv.parent.chmod(0o775)
+    gid = os.stat(uv.parent).st_gid
+    refused = f"melo_serve: {uv} is not run: others can write its folder {uv.parent}"
+    for admin, found in ((gid, str(uv)), (gid + 1, None), (None, None)):
+        monkeypatch.setattr(melo_serve, "_admin_gid", lambda admin=admin: admin)
+        assert melo_serve.command() == found
+        assert melo_serve.refusal() == (None if found else refused)
+    uv.chmod(0o775)  # the file itself: another owner or others stay refused
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+    assert melo_serve.command() == str(uv)
+    uv.chmod(0o757)
+    assert melo_serve.command() is None
+    uv.chmod(0o755)
     uv.parent.chmod(0o755)
     assert melo_serve.command() == str(uv)
     # uv tool install: a link in the bin folder into the tool's own folder.
@@ -264,6 +279,13 @@ def test_melo_serve_is_found_in_the_uv_tool_folder_when_path_lacks_it(
     (link / "melo-serve").unlink()
     (link / "melo-serve").symlink_to(real_command / "gone")  # a dangling link
     assert melo_serve.command() is None
+
+
+def test_the_admin_group_exemption_is_macos_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")  # its ``admin`` is not macOS's
+    assert melo_serve._admin_gid() is None
 
 
 def test_a_melo_serve_found_by_a_relative_path_entry_is_refused(
@@ -361,6 +383,22 @@ def _unknown_user_home(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(melo_serve.HOME_ENV, "~nosuchuser/melo_serve")
 
 
+def _admin_group_folder(sock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A folder the admin group can write: fine for a command, not for the socket."""
+    sock.parent.chmod(0o775)
+    gid = os.stat(sock.parent).st_gid
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+
+
+def _state_in_an_admin_group_folder(
+    sock: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = Path(os.environ[melo_serve.HOME_ENV])
+    home.chmod(0o775)
+    gid = os.stat(home).st_gid
+    monkeypatch.setattr(melo_serve, "_admin_gid", lambda: gid)
+
+
 REFUSED = {
     "a symlink to a real socket": _symlink,
     "a regular file": _regular_file,
@@ -368,9 +406,19 @@ REFUSED = {
     "a folder others can write": _shared_folder,
     "a state file another user owns": _state_of_another_user,
     "a state file in a folder others can write": _state_in_a_shared_folder,
+    "a socket in a folder the admin group can write": _admin_group_folder,
+    "a state file in a folder the admin group can write": _state_in_an_admin_group_folder,
     "a state file that is a link": _state_that_is_a_link,
     "a socket path of an unknown user": _unknown_user_socket,
     "a home of an unknown user": _unknown_user_home,
+}
+
+
+# The rows about the socket itself: the control client reads no state file.
+SOCKET_REFUSED = {
+    name: spoil
+    for name, spoil in REFUSED.items()
+    if "state file" not in name and "home" not in name
 }
 
 
@@ -385,3 +433,193 @@ def test_a_control_socket_that_is_not_the_users_own_is_not_connected_to(
     assert melo_serve.snapshot().running  # the fixture's socket passes the checks
     spoil(melo_serve_socket, monkeypatch)
     assert melo_serve.snapshot() == melo_serve.Snapshot()
+
+
+async def test_the_control_client_reads_the_chat_picks_and_words_them_once(
+    serve_fake: FakeServe,
+) -> None:
+    picks = await melo_serve.picks()
+    assert [pick.name for pick in picks] == [
+        "Qwen3.8 27B",
+        "Qwen3 8B",
+        "Qwen3 4B",
+        "Qwen3 70B",
+    ]  # chat picks only
+    words = [melo_serve.pick_words(pick) for pick in picks]
+    assert words[0] == ("Splash · needs 21 GB · fits", "fits")
+    assert words[2] == ("oMLX · needs 2.5 GB · fits", "fits")
+    assert words[3] == ("Splash · needs 48 GB, 31 GB free", "")  # its reason, no fit
+    assert [p.current for p in picks] == [True, False, False, False]
+    assert [p.loadable for p in picks] == [True, True, True, False]
+    assert melo_serve.pick_words(picks[1], developer=True)[0] == (
+        "oMLX · needs 5 GB · 4.2 GB on disk · fits"
+    )
+    assert melo_serve.pick_words(picks[1], "zh-Hans")[0] == "oMLX · 需要 5 GB · 放得下"
+    assert melo_serve.snapshot().generation == 1
+    # A reply that is not a list of picks is refused; a row that is wrong is left out.
+    serve_fake.reply = {"memory": None, "picks": "all of them"}
+    with pytest.raises(melo_serve.MeloServeError, match="lists no picks"):
+        await melo_serve.picks()
+    serve_fake.reply = {"picks": [{"role": "chat", "id": "\x1b[2J"}, "x", {"id": 3}]}
+    assert await melo_serve.picks() == []
+    serve_fake.reply = {"picks": ["x" * melo_serve.MAX_REPLY_BYTES]}
+    with pytest.raises(melo_serve.MeloServeError, match="too large"):
+        await melo_serve.picks()
+
+
+async def test_a_switch_names_its_generation_and_a_stale_one_is_refused(
+    serve_fake: FakeServe, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reply = await melo_serve.switch("qwen3-8b-omlx", expected_generation=1)
+    assert reply["changed"] is True and reply["generation"] == 2
+    assert serve_fake.switches[-1]["expected_generation"] == 1
+    assert melo_serve.snapshot().roles["chat"].model == "Qwen3-8B-4bit"
+    with pytest.raises(melo_serve.MeloServeError) as refused:
+        await melo_serve.switch("qwen3-4b-omlx", expected_generation=1)
+    assert (refused.value.kind, refused.value.generation) == ("stale_generation", 2)
+    monkeypatch.setenv("MELO_SERVE_SOCKET", "/nonexistent/control.sock")
+    with pytest.raises(melo_serve.MeloServeError, match="not installed"):
+        await melo_serve.picks()  # nothing connects to a socket that is not there
+
+
+async def test_a_task_mid_step_follows_a_switch_and_asks_again_once() -> None:
+    """A request naming a model melo_serve no longer serves gets 409 model_switched,
+    which names the one served now: the provider asks for it, once, from then on."""
+    import httpx
+
+    from localmelo.melo.schema import Message
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    asked: list[tuple[str, bool]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        asked.append((body["model"], bool(body.get("stream"))))
+        if body["model"] == "old":
+            error = {"type": "model_switched", "message": "switched", "current": "new"}
+            return httpx.Response(409, json={"error": error})
+        reply = {"role": "assistant", "content": f"{body['model']} here"}
+        return httpx.Response(200, json={"choices": [{"message": reply}]})
+
+    llm = OpenAICompatLLM(
+        base_url=URL, model="old", transport=httpx.MockTransport(serve)
+    )
+    try:
+        assert (await llm.chat([Message("user", "hi")])).content == "new here"
+        assert asked == [("old", False), ("new", False)] and llm.model == "new"
+        llm.model = "old"  # a stream is asked for again the same way
+        fragments = [f async for f in llm.stream_chat([Message("user", "hi")])]
+        assert fragments[-1].reply is not None
+        assert fragments[-1].reply.content == "new here"
+        assert asked[2:] == [("old", True), ("new", True)]
+    finally:
+        await llm.close()
+
+
+async def test_a_load_is_a_wait_that_stop_and_only_the_bound_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """While melo_serve loads it answers 503 switching: the request asks again after
+    retry_after, then follows the 409 of the model served. Stop ends the wait at once.
+    A slow load never fails it; past the bound the error stands, and is not retried."""
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    import httpx
+
+    from localmelo.melo.contracts.providers import ProviderError
+    from localmelo.melo.schema import Message
+    from localmelo.support.providers.llm import openai_compat
+
+    loading = {"left": 2, "retry_after": 0.01}
+    asked: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        asked.append(model)
+        if loading["left"]:
+            loading["left"] -= 1
+            error = {"type": "switching", "message": "wait", **loading}
+            return httpx.Response(503, json={"error": error})
+        if model == "old":
+            error = {"type": "model_switched", "message": "no", "current": "new"}
+            return httpx.Response(409, json={"error": error})
+        reply = {"role": "assistant", "content": f"{model} here"}
+        return httpx.Response(200, json={"choices": [{"message": reply}]})
+
+    llm = openai_compat.OpenAICompatLLM(
+        base_url=URL, model="old", transport=httpx.MockTransport(serve)
+    )
+    hi = [Message("user", "hi")]
+    try:
+        assert (await llm.chat(hi)).content == "new here"
+        assert asked == ["old", "old", "old", "new"]
+
+        loading.update(left=1000, retry_after=600)  # a load that does not end
+        task = asyncio.create_task(llm.chat(hi))
+        while len(asked) == 4:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.01)  # now in its wait of ten minutes
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 10)
+
+        now = [0.0]
+
+        async def sleep(seconds: float) -> None:
+            now[0] += seconds
+
+        monkeypatch.setattr(openai_compat, "asyncio", SimpleNamespace(sleep=sleep))
+        clock = SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+        monkeypatch.setattr(openai_compat, "time", clock)
+        loading.update(left=30, retry_after=60)  # slow, and healthy: 30 minutes
+        assert (await llm.chat(hi)).content == "new here"
+        assert now[0] == 1800
+
+        now[0], loading["left"] = 0.0, 1000  # it never ends
+        with pytest.raises(ProviderError) as ended:
+            async for _ in llm.stream_chat(hi):
+                pass
+        assert ended.value.status_code == 503 and not ended.value.retryable
+        assert now[0] == melo_serve.LOAD_BOUND_S
+    finally:
+        await llm.close()
+
+
+@pytest.mark.parametrize("spoil", SOCKET_REFUSED.values(), ids=SOCKET_REFUSED.keys())
+async def test_the_control_client_sends_nothing_to_a_socket_that_is_not_the_users_own(
+    spoil: Callable[[Path, pytest.MonkeyPatch], None],
+    serve_fake: FakeServe,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spoil(Path(os.environ[melo_serve.SOCKET_ENV]), monkeypatch)
+    with pytest.raises(melo_serve.MeloServeError):
+        await melo_serve.switch("qwen3-8b-omlx", expected_generation=1)
+    assert serve_fake.switches == []
+
+
+async def test_a_reply_out_of_range_or_compressed_is_no_crash(
+    serve_fake: FakeServe,
+) -> None:
+    """A number beyond a float counts as absent, in the client and the provider; a
+    compressed reply is refused rather than inflated; a name stays on one line."""
+    import httpx
+
+    from localmelo.support.providers._http import switching_for
+
+    huge = 10**400
+    row = serve_fake.rows[3]
+    row["name"], row["load_s"], row["fit"]["after_pct"] = "Qwen3\n70B", huge, huge
+    serve_fake.reply = {
+        "memory": {"total_gb": huge, "free_pct": huge},
+        "picks": [row],
+    }
+    (pick,) = await melo_serve.picks()
+    assert (pick.name, pick.load_s, pick.free_gb) == ("Qwen3 70B", 0.0, None)
+    error = {"error": {"type": "switching", "retry_after": huge}}
+    assert switching_for(httpx.Response(503, json=error)) == 0.0
+
+    serve_fake.gzipped = True
+    with pytest.raises(melo_serve.MeloServeError, match="not JSON"):
+        await melo_serve.picks()

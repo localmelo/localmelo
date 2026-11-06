@@ -18,6 +18,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import (
     LEFT_UNANSWERED,
     NO_ANSWER,
+    TOOL_ASK,
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
@@ -295,6 +296,54 @@ async def test_a_site_card_nobody_answered_says_why_in_the_calls_record(
     assert "call_key" not in first
     assert second["declined"] is True and second["unanswered"] == why
     assert len(card.asked) == 1
+
+
+class TakesOver(OpensSite):
+    """A provided tool that asks the person to take a page over, as the browser does."""
+
+    async def _open(self, site: str) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            f"takeover:https://{site}",
+            {"site": site, "access": "takeover", "need": "sign-in"},
+            f"take over {site} in the Browser panel",
+        )
+        self.answers.append(decision)
+        return "taken" if decision.allow else decision.reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool", [OpensSite, TakesOver])
+async def test_a_card_ended_by_the_persons_message_leaves_a_step_record_and_no_block(
+    tmp_path: Path, tool: type[OpensSite]
+) -> None:
+    opener = tool()
+    plans = [_calls(("open_site", {"site": "news.example"}, "call_1")), _answer("ok")]
+    llm = FakeModel(plans, [NOT_ASKED])
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[opener],
+    )
+    agent.chat.sleep = _no_wait
+    card = Card(ApprovalDecision(False, "wrote instead", origin="words"))
+    recorder = Recorder()
+
+    await agent.run_task(
+        "what is the weather?", on_event=recorder, approval=_auto(card)
+    )
+
+    # The step shows why it did not run, and it is nobody's denial: no call key, so the
+    # same step may be asked again and the store keeps no block of it.
+    [ask] = recorder.of("tool.finished")[0].data["tool_asks"]
+    assert (ask["allowed"], ask["origin"]) == (False, "words")
+    assert "call_key" not in ask and "loose_keys" not in ask
 
 
 # ── A choice lasts: "Allow on this site for this chat" ──

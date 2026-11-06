@@ -6,36 +6,43 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 - Ollama is the alternative on other systems.
 - A hosted service needs only a key: paste it once in Settings and it is kept in your Mac's keychain. See [Hosted models](hosted-models.md).
 
-## Setup preview
+## First-run setup
 
-- With no backend saved and no server found, terminal first run and `melo setup`
-  show a short, read-only preview. Supported Apple-silicon Macs get oMLX with
-  Qwen3 4B Instruct (4-bit) and the download upper bound, with one warning when
-  needed. Other systems show manual guidance.
-  With a backend already saved and no server found, `melo setup` opens the full
-  backend menu instead.
-- The summary is printed once. The list then offers `Check again`,
-  `Show how to set one up`, `Enter an address`, `Use a hosted service` and `Quit`. `Show how to set one
-  up` prints at most six plain numbered steps: download oMLX, optionally check
-  its checksum, open it and move it to Applications, download the model, start
-  the server, then choose `Enter an address` in melo. Automatic setup is coming
-  soon.
-- Less than 16 GB of RAM is a speed warning, not a manual-only restriction. The
-  pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB on macOS 15
-  or 0.88 GB on macOS 26/27. The download figure includes both. Nothing
-  installs, downloads, starts or saves settings.
-- The steps come from the same pinned recipe. They keep the model in the
-  standard Hugging Face cache, use a separate server settings directory, and
-  disable oMLX's additional cache scan so this instance serves only the chosen
-  snapshot. Install the official app yourself and copy the shown commands only
-  when ready. The port in the steps (49152) is an example, not a reserved port;
-  pick another if it is busy and enter its address in melo. These commands
-  run independently; stop the manual server yourself with Ctrl+C. Cache
-  precedence is `HF_HUB_CACHE`, then legacy `HUGGINGFACE_HUB_CACHE`, then
-  `HF_HOME/hub`, then the XDG/standard default. The server state is under
-  `~/.cache/localmelo/server-setup/`. Pipes and `TERM=dumb` show a manual-guide
-  link instead of picker choices; if the setup checks fail, the manual path
-  still works.
+- A server you already run is always offered first. With none found and no
+  backend saved, the first run on a Mac with Apple silicon (macOS 15 or later)
+  offers to set one up. It stays optional: `Use a server I already run` and
+  `Use a hosted service` are rows of the same menu, and nothing is installed
+  until you choose `Set up <model> (<size>)`. With a backend already saved,
+  `melo setup` opens the full backend menu instead.
+- melo asks [melo_serve](https://github.com/localmelo/melo_serve) what this Mac
+  can run (`melo-serve plan`, which only reads) and prints one list: the chip,
+  memory, macOS and free disk space, the recommended model, and each item with
+  its size and where it goes. An item that is already here says
+  `✓ already here` and is not counted; a half-downloaded model says how much of
+  it is here. If melo_serve is not installed yet, uv fetches a pinned copy into
+  its cache just to ask.
+- The items are melo_serve itself (`uv tool install` of a pinned version), the
+  chat backend (oMLX: a pinned download whose size and checksum are checked,
+  copied to `~/Applications/oMLX.app`; Splash comes through Homebrew), the chat
+  model and the embedding model (the Hugging Face cache, `HF_HOME` honoured,
+  never a project folder) and melo_serve's login item (macOS shows a "Login
+  Items" notice). The download plus 5 GiB must fit on the cache's volume.
+- `Choose what to install` asks about each item that is not here yet. melo_serve
+  itself is not offered a skip: take `Use a server I already run` instead.
+  Without the chat model or its backend melo_serve cannot chat yet, and
+  `melo-serve get <pick>` finishes it later. Without the embedding model or its
+  backend, memory goes by words only. Without the login item, `melo serve`
+  starts melo_serve when needed. `Choose another model` plans another pick from
+  the same catalog and starts the list again.
+- After the OK each step prints one line, with a bar for a download. Ctrl-C
+  stops it and keeps what was downloaded; choose `Set up` again to go on. A step
+  that fails says why and returns to the list. When the chat model answers, melo
+  saves melo_serve as the chat server and opens the chat.
+- Pipes and `TERM=dumb` get the list and `Run melo in a terminal to set this
+  up.`: consent comes from a person, so a pipe never starts it. Other systems,
+  Intel Macs, a Mac with too little memory and a failed check print the reason
+  in one line and the manual way: the commands below, `Check again`,
+  `Enter an address`, `Use a hosted service` and `Quit`.
 - A direct snapshot's served model ID can be its revision hash, not the
   repository name. Use the ID the server lists. Rechecking an address only
   lists models; it does not load one. The web/app setup card and already
@@ -191,14 +198,23 @@ enable_thinking = false
    chat_url = "http://127.0.0.1:8321/v1"
    ```
 
-3. Switch the model whenever you like: `melo-serve use <pick>`.
+3. Switch the model whenever you like: `/model` in any chat, the model chip in the console, the app's **Model** menu, or `melo-serve use <pick>`; see [Switch the model](#switch-the-model).
 
-- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. A running chat follows it at its next turn: the gateway's chats (the `melo` main chat, side chats, the web console and the app) and a local terminal chat (`[cli] chat = "local"`, `-c`, `-r`) that chose no model with `/model`. A terminal chat prints `The model changed to <model> (via melo_serve).`, also when the gateway runs its turn. A chat built on one model while another is served is built again at its next turn; one that is running a turn finishes it first. melo_serve counts as running only while its control socket accepts a connection, and only if the socket and its state file are your own, in a folder only you can write, so a state left by a crash or a stop serves nothing.
+- An empty `chat_model` means the model melo_serve serves now. localmelo reads it from melo_serve's state file when it builds the provider, so a switch is followed; the same goes for `embedding_model`. A running chat follows it at its next turn: the gateway's chats (the `melo` main chat, side chats, the web console and the app) and a local terminal chat (`[cli] chat = "local"`, `-c`, `-r`) started with no `--model`. A terminal chat prints `The model changed to <model> (via melo_serve).`, also when the gateway runs its turn. A chat built on one model while another is served is built again at its next turn; one that is running a turn finishes it first. melo_serve counts as running only while its control socket accepts a connection, and only if the socket and its state file are your own, in a folder only you can write, so a state left by a crash or a stop serves nothing.
 - With nothing served, `melo "task"` (and `POST /v1/agent/run`, as 502 `agent_start_failed`) ends with one line that says what to run: `melo-serve up`, the install command, or `melo-serve use <pick>`. A direct run exits with code 1.
 - First-run setup prefers a running melo_serve and saves it with no model. Setup, Settings and the check at start-up never need a model to be served: that is checked when a model is asked for.
 - `melo serve` checks melo_serve when the config uses it; see [Gateway](gateway.md#start-the-gateway).
 - localmelo runs the first `melo-serve` that is a file only you can write, from your PATH (an absolute path) or from the folder `uv tool install` uses (`$UV_TOOL_BIN_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin`), which a login item's PATH lacks.
 - The melo_serve [README](https://github.com/localmelo/melo_serve#readme) covers the picks, the login item and the other commands.
+
+#### Switch the model
+
+- **Terminal:** `/model` lists melo_serve's chat models, the current one marked `✓`, each with its backend, the memory it needs and `fits` or `tight fit`. Enter switches, Esc keeps the current one. `/model NAME` (a short name, id or name) switches with no list. It works in the main chat too.
+- **Console:** the model chip in the header and the model button under the message box open the same list, as do **Settings → Model server** and `/model`.
+- **App:** the menu-bar menu's **Model** submenu.
+- Every chat on this Mac follows the switch. It first waits for the chats that are running a turn (`Waiting for 1 chat to finish`, 10 minutes at most); a turn sent meanwhile waits (`Waiting for the model switch`) and runs on the new model. **Cancel** (Esc in the terminal) ends the wait; a load that has started goes on in melo_serve.
+- A model that needs more memory than is free shows dimmed, with what it needs and what is free, and cannot be chosen. A task is not held: while the model loads, its request waits and asks again, then goes on with the new model. So does a chat caught by a `melo-serve use` from a terminal. A slow load never fails it, and Stop ends the wait at once. Only a melo_serve that never answers reaches the limit of 45 minutes, above its own worst case without a `before_load` hook (a slow hook can reach it too): the switch ends `failed` and held turns go on, and a waiting task ends `failed`, or its turn `provider_error`, with melo_serve's answer.
+- When a gateway runs, the terminal switches through it with the token its main chat already uses, so the gateway's chats wait too; with none, it asks melo_serve itself. Developer mode adds each model's size on disk.
 
 ### Ollama with embeddings
 

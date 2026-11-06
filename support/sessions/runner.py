@@ -174,6 +174,8 @@ class _Turn:
     # The run, as the sink saw it.
     saw_started: bool = False
     run_id: str = ""
+    # The ids of the calls started and not finished (a card of one waits the run).
+    calls: set[str] = field(default_factory=set)
     outcome: RunResult | None = None
     # The RunResult of a turn that ended without run.finished (step 7.4).
     fallback: RunResult | None = None
@@ -473,6 +475,18 @@ class SessionRunner:
         self._check_idle()
         self._agent = agent
 
+    def adopt(self, agent: Agent) -> None:
+        """Run the turn that has begun, and the next turns, on *agent*.
+
+        Only from *before_turn*: the turn's run has not started yet. The caller
+        has started *agent*; it moves the conversation and closes the old Agent.
+        """
+        _check_agent(agent)
+        turn = self._active
+        if turn is None or turn.saw_started:
+            raise SessionBusyError(f"Session {self._name()} has no turn to adopt")
+        self._agent = turn.agent = agent
+
     # ── Turns ──
 
     async def run_turn(
@@ -750,6 +764,10 @@ class SessionRunner:
                     turn.finished.set()
                     if self._finishing is turn:
                         self._finishing = None
+                if event.type == "tool.started":
+                    turn.calls.add(str(event.data.get("call_id", "")))
+                elif event.type == "tool.finished":
+                    turn.calls.discard(str(event.data.get("call_id", "")))
                 if event.type == "note":
                     data = event.data
                     if data.get("kind") == "digest" and isinstance(
@@ -1624,6 +1642,17 @@ class SessionRunner:
             and not turn.closing
             and not self.run_ended
         )
+
+    def running_calls(self, turn_id: str) -> frozenset[str]:
+        """The ids of the calls turn *turn_id* has started and not finished.
+
+        A card of one of them is a step the turn waits on; empty for another
+        turn or none.
+        """
+        turn = self._active
+        if turn is None or turn.turn.id != turn_id:
+            return frozenset()
+        return frozenset(turn.calls)
 
     def publish_note(
         self,

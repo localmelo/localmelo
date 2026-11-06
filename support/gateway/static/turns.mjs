@@ -15,6 +15,7 @@
 import { blockWords } from "./blocked.mjs";
 import { t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
+import { stepWords } from "./step-words.mjs";
 
 const SEPARATOR = " · ";
 // `support/cli/render.py`: these two calls end after SESSION_TOOL_TIMEOUT_S.
@@ -316,6 +317,21 @@ export function serverUnreachable(status, error) {
   return status === "provider_error" && String(error ?? "").startsWith(UNREACHABLE_PREFIX);
 }
 
+/**
+ * What kind of answer a model server gave a provider error (`POST /chat/completions failed with HTTP 500: …`): `auth`
+ * (401, 403), `missing` (404), `busy` (408, 429), `server` (5xx), `refused` (another 4xx), or "" for an error that
+ * names no status. The page words each kind in a sentence of its own; the raw text stays in the details.
+ */
+export function httpFailure(status, error) {
+  if (status !== "provider_error") return "";
+  const code = Number(/failed with HTTP (\d{3})/.exec(String(error ?? ""))?.[1]);
+  if (code === 401 || code === 403) return "auth";
+  if (code === 404) return "missing";
+  if (code === 408 || code === 429) return "busy";
+  if (code >= 500) return "server";
+  return code >= 400 ? "refused" : "";
+}
+
 /** The address that error names, as the provider wrote it, or "". */
 export function unreachableUrl(error) {
   return new RegExp(`^${UNREACHABLE_PREFIX}(\\S+)\\. `).exec(String(error ?? ""))?.[1] ?? "";
@@ -452,6 +468,9 @@ export function approvalTag(status, errorCategory, approval) {
   }
   if (origin === "timeout") {
     return {short: t("turns.approval.timeout.short"), long: t("turns.approval.timeout.long")};
+  }
+  if (origin === "words") {
+    return {short: t("turns.approval.words.short"), long: t("turns.approval.words.long")};
   }
   // Auto mode (#339): a block says why in a few words; a routine call has no tag.
   if (origin === "auto" && !approval.allowed) {
@@ -1262,9 +1281,10 @@ export function declinedStep(item) {
   }
   const asked = [item.approval, ...(item.toolAsks ?? [])].filter(isObject);
   const found = asked.find(
-    (one) => one.allowed === false && (one.origin === "user" || one.origin === "timeout"),
+    (one) => one.allowed === false && ["user", "timeout", "words"].includes(one.origin),
   );
   if (!found) return null;
+  if (found.origin === "words") return {how: "words", note: "", waitS: null};
   if (found.origin === "user") {
     const note = String(found.reason ?? "").split(/\s+/).filter(Boolean).join(" ");
     return {how: "denied", note, waitS: null};
@@ -1286,6 +1306,7 @@ export function declinedLine(declined) {
       ? t("turns.declined.deniedNote", {note: declined.note})
       : t("turns.declined.denied");
   }
+  if (declined.how === "words") return t("turns.declined.words");
   if (declined.how === "unanswered") {
     return declined.waitS
       ? t("turns.declined.unanswered", {wait: waitWords(declined.waitS)})
@@ -1324,9 +1345,12 @@ export function turnDuration(turn) {
 
 /** The scheduler's hold for a call that waits on a foreign GPU lock. */
 export const LOCK_HOLD = "Reservation";
+// A turn that waits for a switch of melo_serve's chat model (the gateway's serve_switch.py).
+export const SWITCH_HOLD = "Switching";
 
-/** What a held call says: the GPU lock in plain words, as the console's banner does; any other hold keeps its code. */
-export function holdText(held) {
+/** The words for a turn's hold; a switch names the model it switches to when the caller knows it. */
+export function holdText(held, switching = "") {
+  if (held === SWITCH_HOLD) return switching ? t("serve.switching", {name: switching}) : t("serve.held");
   return held === LOCK_HOLD ? t("turns.hold.gpu") : t("turns.hold.other", {held});
 }
 
@@ -1341,20 +1365,24 @@ export function holdText(held) {
  * footer under its answer already gives the turn's time: it reads `Thought`
  * when it has reasoning to open (the events carry the step's time, not the
  * reasoning's own, so no time is shown) and is empty when it has none.
+ *
+ * *plain* is the default mode's line: the same, without the count of tool
+ * calls (`Working`, `Worked for 14s · 1 failed`).
  */
-export function workSummary(turn, {held = ""} = {}) {
-  const calls = toolCount(turn);
+export function workSummary(turn, {held = "", plain = false} = {}) {
+  const calls = plain ? 0 : toolCount(turn);
   const callWord = t("turns.summary.calls", {n: calls});
   if (!turn.finishedAt) {
     const activity = held ? holdText(held) : t("turns.summary.working");
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
-  if (turn.status === "completed" && calls === 0) {
+  if (turn.status === "completed" && toolCount(turn) === 0) {
     return turn.items.some((item) => item.kind === "thinking") ? t("turns.summary.thought") : "";
   }
   const duration = formatDuration(turnDuration(turn));
   if (turn.status === "completed") {
-    const parts = [t("turns.summary.workedFor", {duration}), callWord];
+    const parts = [t("turns.summary.workedFor", {duration})];
+    if (calls > 0) parts.push(callWord);
     const failed = failedCount(turn);
     const denied = deniedCount(turn);
     if (failed) parts.push(t("turns.summary.failed", {n: failed}));
@@ -1371,9 +1399,10 @@ export function workSummary(turn, {held = ""} = {}) {
  * The live row's activity, in the order that matters to a person.
  *
  * A held call comes before an approval, an approval before a stop, a stop
- * before a retry, and the model's own work last.
+ * before a retry, and the model's own work last. *plain* says a running call
+ * in a person's words (`Reading notes.md`), not by its tool's name.
  */
-export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0} = {}) {
+export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0, plain = false} = {}) {
   if (held) return holdText(held);
   if (pending > 0) return t("turns.activity.approval");
   if (cancelling) return t("turns.activity.stopping");
@@ -1387,9 +1416,19 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
   const tool = [...turn.items]
     .reverse()
     .find((item) => item.kind === "tool" && item.status === "running");
-  if (tool !== undefined) return t("turns.activity.running", {tool: tool.name});
+  if (tool !== undefined) return plain ? stepWords(tool.name, tool.arguments) : t("turns.activity.running", {tool: tool.name});
   if (turn.step > 0) return t("turns.activity.thinking");
   return t("turns.activity.starting");
+}
+
+// The phases a run's progress names (`EXPLORE`, `WRITING`, `VERIFY` and `FINISHING` in `melo/memory/procedures/classify.py`).
+const PHASES = new Set(["explore", "write", "verify", "finishing"]);
+
+/** A run's phase in the page's language; a phase the page does not know stays as the run wrote it. */
+export function phaseWords(phase) {
+  const name = String(phase);
+  const key = name.toLowerCase();
+  return PHASES.has(key) ? t(`turns.phase.${key}`) : name;
 }
 
 /**
@@ -1399,9 +1438,17 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
  * `run.progress` has arrived (the cap is the most the run may take, never an
  * estimate of its length); before the first one, the step of the turn's own
  * events (`step 2 of 100`).
+ *
+ * *plain* leaves the numbers out and keeps what a person can use: the phase
+ * (`Looking around`), in the page's language; the terminal's `Explore` stays
+ * in the developer mode.
  */
-export function liveFacts(turn) {
+export function liveFacts(turn, {plain = false} = {}) {
   const parts = [];
+  if (plain) {
+    const phase = isObject(turn.progress) ? turn.progress.phase : "";
+    return phase ? [phaseWords(phase)] : parts;
+  }
   const progress = isObject(turn.progress) ? turn.progress : null;
   if (progress === null) {
     if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 100}));
@@ -1438,7 +1485,7 @@ export function toolState(item, {held = "", now = 0} = {}) {
   const declined = declinedStep(item);
   if (declined) {
     // Not run, and nothing went wrong: the approval card's amber, not a failure.
-    const word = declined.how === "denied" ? t("turns.tool.declined") : t("turns.tool.unanswered");
+    const word = ["denied", "words"].includes(declined.how) ? t("turns.tool.declined") : t("turns.tool.unanswered");
     return {state: "declined", mark: "⊘", text: word};
   }
   const tag = approvalTag(item.status, item.errorCategory, item.approval);

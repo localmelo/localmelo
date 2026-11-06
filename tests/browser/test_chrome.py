@@ -12,6 +12,7 @@ import json
 import os
 import stat
 import sys
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -534,6 +535,26 @@ async def test_an_address_of_another_apps_kind_is_put_on_the_result_and_not_foll
     assert again.handoff == ""  # taken once, by the act it came with
 
 
+async def test_an_address_asked_for_before_an_act_began_is_told_late_never_as_its_own(
+    driver: ChromeBackgroundDriver,
+) -> None:
+    raw = await opened(driver, APP)
+    session = await driver._session()
+    driver._live().handoffs[session] = ["chat://asked-while-no-act-ran"]
+    # An act that fails leaves it for the next one.
+    with pytest.raises(StaleElementError):
+        await driver.act(None, Act("click", raw.url, named(raw, "Daily"), doc="other"))
+    result = await driver.act(
+        None, Act("click", raw.url, named(raw, "Open in Chat"), doc=raw.doc)
+    )
+    assert result.late == ("chat://asked-while-no-act-ran",)
+    assert result.handoff == "chat://login?token=secret-token", "its own is its own"
+    again = await driver.act(
+        None, Act("click", raw.url, named(raw, "Daily"), doc=raw.doc)
+    )
+    assert (again.late, again.handoff) == ((), ""), "told once"
+
+
 @pytest.mark.parametrize("answer", [True, False])
 async def test_a_confirm_during_an_act_is_put_to_the_person(
     driver: ChromeBackgroundDriver, peer: Peer, answer: bool
@@ -551,6 +572,7 @@ async def test_a_confirm_during_an_act_is_put_to_the_person(
     )
     assert asked == [("confirm", "Delete the draft?", APP)]
     assert result.dialogs == (Dialog("confirm", "Delete the draft?", answer),)
+    assert result.dialogs[0].url == APP, "the page that put it up, as the browser says"
     answered = peer.calls("Page.handleJavaScriptDialog")[0]["params"]
     assert answered == {"accept": answer}
     landed = await driver.location(None)
@@ -596,3 +618,51 @@ async def test_a_tab_a_page_opens_is_melos_and_another_chats_never_is(
     assert len(new) == 1 and after[new[0]].url == "https://example.com/news"
     read = await driver.page(new[0])
     assert read.title == "News"
+
+
+class Observer:
+    """What ``_look`` asks of a driver: the page script's report of the changes it saw, by the time."""
+
+    def __init__(self, changes_at: float | None, quiet_after: float | None) -> None:
+        self.began = time.monotonic()
+        self.changes_at, self.quiet_after = changes_at, quiet_after
+
+    async def _eval(self, source: str) -> dict[str, Any]:
+        spent = time.monotonic() - self.began
+        if self.changes_at is None or spent < self.changes_at:
+            return {"count": 0, "quiet": spent * 1000}
+        if self.quiet_after is None:  # steady background traffic: never quiet
+            return {"count": 5, "quiet": 0}
+        return {"count": 1, "quiet": max(spent - self.changes_at, 0) * 1000}
+
+    async def _finish(self, key: str, doc: str) -> dict[str, Any]:
+        return {"count": 1}
+
+
+async def test_a_page_that_never_goes_quiet_is_left_soon_after_its_first_change_but_a_late_one_still_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in (
+        ("LOOK_STEP_S", 0.01),
+        ("QUIET_S", 0.05),
+        ("LOOK_CAP_S", 0.5),
+        ("LOOK_BUSY_S", 0.05),
+    ):
+        monkeypatch.setattr(pagescript, name, value)
+    act = Act("click", FORM, Element("button", "Go"))
+
+    async def looked(changes_at: float | None, quiet_after: float | None) -> Any:
+        found = Observer(changes_at, quiet_after)
+        began = time.monotonic()
+        report, quiet = await pagescript.PageScriptActs._look(found, "k", "d", act)  # type: ignore[arg-type]
+        return quiet, time.monotonic() - began
+
+    # Steady traffic: it ends a moment after the first change, not at the cap.
+    quiet, spent = await looked(0.0, None)
+    assert quiet is False and spent < 0.25
+    # A change that comes late, then quiet: waited for, and reported quiet.
+    quiet, spent = await looked(0.2, 0.05)
+    assert quiet is True and 0.2 <= spent < 0.45
+    # Nothing at all: the page is left at the cap.
+    quiet, spent = await looked(None, None)
+    assert quiet is True and spent >= 0.5

@@ -6,7 +6,8 @@
  *
  * `host` is the page (`workspace.js`): `api`, `state()`, and the moves it makes: `send`,
  * `newChat`, `pickChat`, `openChat`, `openMain`, `openSettings`, `openMemory`, `settingsSaved`,
- * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`
+ * `setMode`, `setTitle`, `setNewTitle`, `view`, `reveal`, `writeText`, `isApp`, `canQuit`, `quit`,
+ * `models` (melo_serve's chat models: `serves()`, `open()`, `load()`, `named(word)`, `switchTo(id)`)
  * `memoryImport` (`/memory import`: the Memory tab looks for notes), `undoSleep` (`/memory undo`: the
  * newest "melo tidied your notes" line of the main chat is undone) and `media` (the composer's pictures
  * and files: `pick()` opens the file picker, `list()` the names and sizes, `remove(id)` and `clear()`).
@@ -56,6 +57,21 @@ export function createActions(host) {
     await host.settingsSaved(await api('/settings', {method: 'PUT', body}));
   }
 
+  async function serveModel(args) {
+    const models = host.models;
+    if (!args) {
+      models.open();
+      return;
+    }
+    await models.load();
+    const pick = models.named(args);
+    if (!pick) throw new Error(t('serve.errors.unknownPick', {pick: args}));
+    if (pick.current) return [say(t('serve.still', {name: pick.name}), 'muted')];
+    if (!pick.loadable) throw new Error(t('serve.errors.cannotLoad', {name: pick.name, reason: pick.words}));
+    const started = await models.switchTo(pick.id);
+    return [say(started?.title || t('serve.switching', {name: pick.name}), 'ok')];
+  }
+
   async function sessionStatus() {
     return api(`${chat()}/status`);
   }
@@ -64,6 +80,8 @@ export function createActions(host) {
     // ── The model ──
 
     async model({args}) {
+      // melo_serve: its chat models, the list the header chip opens; a name switches every chat to it.
+      if (host.models?.serves()) return serveModel(args);
       if (!args) return host.openSettings('model');
       await changeSettings(() => ({chat_model: args}));
       return [say(t('slash.modelSet', {model: args}), 'ok')];

@@ -33,8 +33,9 @@ background).
 A page that asks Chrome to open an address of another app's kind
 (``chat://...``) is not followed: Chrome in the background drops it. The
 driver sees each such request (``Page.frameRequestedNavigation``) and puts it on
-the act's result (``ActResult.handoff``), and melo asks the person. Chrome is
-never told to allow a scheme.
+the act's result (``ActResult.handoff``), and melo asks the person. A request
+the page made while no act ran is told by the next act's result
+(``ActResult.late``) and never opened. Chrome is never told to allow a scheme.
 
 A tab's page can be streamed as pictures for the live view
 (:meth:`ChromeBackgroundDriver.start_screencast`, Chrome's ``Page.startScreencast``):
@@ -58,7 +59,9 @@ with OK; a ``confirm`` during an act is put to the person through
 :attr:`ChromeBackgroundDriver.on_dialog` and is otherwise answered Cancel; a
 ``prompt`` is always answered Cancel (melo types only where it was asked to);
 a page that asks before it is left is left, since the step that leaves it
-was allowed. The act's result lists them (``ActResult.dialogs``).
+was allowed. The act's result lists them (``ActResult.dialogs``), and so does
+the next act's for a box, or a request to open an app, that came after the one
+before had returned: neither is dropped unsaid.
 """
 
 from __future__ import annotations
@@ -80,6 +83,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from localmelo.support import config
 from localmelo.support.browser import apps, local_apps
@@ -91,6 +95,7 @@ from localmelo.support.browser.driver import (
     BrowserSetupError,
     Dialog,
     Shot,
+    StaleElementError,
     TabInfo,
     View,
 )
@@ -141,8 +146,12 @@ STARTUP_S = 20.0
 CALL_S = 60.0
 CLOSE_S = 5.0
 DIALOG_S = 5.0
+# Boxes a page put up that no act has told yet (one that came after an act returned is told by the next one).
+MAX_LATE_DIALOGS = 5
 # The most addresses of other apps' kinds one tab keeps until an act takes them.
 MAX_HANDOFFS = 5
+# How many frames of a read are measured at most (those of a human check's addresses).
+MAX_FRAME_BOXES = 5
 # The most one streamed picture may hold, and how long starting or stopping a stream may take.
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 STREAM_S = 10.0
@@ -771,6 +780,14 @@ def _holds(tree: object, frame: str) -> bool:
     return isinstance(children, list) and any(_holds(c, frame) for c in children)
 
 
+def _same_frame(there: str | None, proof: str) -> bool:
+    """Whether the frame now at a point (*there*, its address) is loaded from the same host as the one that was proved a check there (*proof*)."""
+    return (
+        bool(there)
+        and urlsplit(there or "").netloc.lower() == urlsplit(proof).netloc.lower()
+    )
+
+
 def _picture(params: dict[str, Any]) -> Frame | None:
     """The :class:`Frame` a ``Page.screencastFrame`` carries, or None when it is not a usable JPEG."""
     data = params.get("data")
@@ -982,7 +999,9 @@ class ChromeBackgroundDriver(PageScriptActs):
                     "Page.handleJavaScriptDialog", {"accept": accept}, session
                 )
         target = self._targets.get(session, "")
-        self._said.setdefault(target, []).append(Dialog(kind, message, accept))
+        said = self._said.setdefault(target, [])
+        said.append(Dialog(kind, message, accept, str(params.get("url") or "")[:500]))
+        del said[:-MAX_LATE_DIALOGS]
 
     async def _attach(self, target: str) -> str:
         """The session melo drives *target* in, attached (and set up) on first use."""
@@ -1411,10 +1430,10 @@ class ChromeBackgroundDriver(PageScriptActs):
         self, tab: str | None, until: str, text: str, *, origin: str = ""
     ) -> bool:
         await self._focus(tab)
-        return await self._probe(wait_probe(until, text, origin))
+        return await self._probe(wait_probe(until, text, origin)) is True
 
-    async def _probe(self, source: str) -> bool:
-        """Whether the wait probe *source* is true now; a page between two documents does not answer yet."""
+    async def _probe(self, source: str) -> bool | str:
+        """What the wait probe *source* says now; a page between two documents does not answer yet."""
         try:
             return await super()._probe(source)
         except BrowserError:
@@ -1477,10 +1496,16 @@ class ChromeBackgroundDriver(PageScriptActs):
         session = await self._focus(tab)
         browser = self._live()
         target = self._targets[session]
-        browser.handoffs.pop(session, None)
-        self._said.pop(target, None)
         if act.element.frame.startswith("x"):
             raise BrowserError(STALE["reach"])
+        if act.proof and act.point is not None:
+            # One whole pixel for the arming, the proof and the click: the proof is
+            # about the very place pressed.
+            act = dataclasses.replace(
+                act, point=(float(round(act.point[0])), float(round(act.point[1])))
+            )
+        # What the page asked for before this act is told, never opened.
+        late = browser.handoffs.pop(session, [])
         self._acting.add(session)
         try:
             spec = act_spec(act)
@@ -1494,12 +1519,19 @@ class ChromeBackgroundDriver(PageScriptActs):
                     passed, failed = done
             if result is None:
                 result = await self._scripted(spec, act, passed, failed)
+        except BaseException:
+            # The next act tells what was asked before this one.
+            kept = browser.handoffs.setdefault(session, [])
+            kept[:0] = late
+            del kept[MAX_HANDOFFS:]
+            raise
         finally:
             self._acting.discard(session)
         asked = browser.handoffs.pop(session, [])
         return dataclasses.replace(
             result,
             handoff=asked[0] if asked else "",
+            late=tuple(late),
             dialogs=tuple(self._said.pop(target, [])),
         )
 
@@ -1524,8 +1556,15 @@ class ChromeBackgroundDriver(PageScriptActs):
             try:
                 if act.kind == "type" and act.point is None:
                     await self._type_at(session, x, y, act.text, act.enter)
+                elif act.proof:
+                    await self._press_proved(session, x, y, act.proof)
                 else:
                     await self._click_at(session, x, y)
+            except StaleElementError:
+                # The proof failed: nothing was pressed, and the guards come down.
+                with contextlib.suppress(BrowserError):
+                    await self._finish(key, spec["doc"])
+                raise
             except BrowserError:
                 if self._browser is None or self._browser.closed:
                     raise
@@ -1547,6 +1586,98 @@ class ChromeBackgroundDriver(PageScriptActs):
             "",
             observed(data, quiet),
         )
+
+    async def _press_proved(self, session: str, x: float, y: float, proof: str) -> None:
+        """A trusted click on the frame that was proved a check's (*proof*): the mouse moves there first, the frame is proved at that moment, and only then is it pressed.
+
+        The page has had everything it gets before a click (the arming, the
+        pointer arriving) by the time the proof is made; only a timer can still
+        change what is there. A frame that is not the proved one raises
+        :class:`StaleElementError`, with nothing pressed.
+        """
+        await self._mouse(session, "mouseMoved", x, y)
+        if not _same_frame(await self._frame_at(x, y), proof):
+            raise StaleElementError(STALE["point"], "point")
+        for kind in ("mousePressed", "mouseReleased"):
+            await self._mouse(session, kind, x, y)
+
+    async def _frame_at(self, x: float, y: float) -> str | None:
+        """The address, as Chrome has it, of the frame Chrome puts topmost at (*x*, *y*) of the view; ``""`` when none is.
+
+        Chrome sees through a closed shadow root: the element under the point
+        is asked for, and when it owns a frame, that frame's own target says
+        where it was loaded from. A frame in the same process as the page, or
+        a box the page drew itself (a ``srcdoc`` for one), has no such target.
+        """
+        session = await self._session()
+        try:
+            at = await self._cmd(
+                "DOM.getNodeForLocation", {"x": round(x), "y": round(y)}, session
+            )
+            node = await self._cmd(
+                "DOM.describeNode", {"backendNodeId": at.get("backendNodeId")}, session
+            )
+            owner = node.get("node")
+            owner = owner if isinstance(owner, dict) else {}
+            frame = str(owner.get("frameId") or "")
+            if not frame or str(owner.get("nodeName") or "").lower() not in (
+                "iframe",
+                "frame",
+            ):
+                return ""
+            # Chrome makes a frame's target known to the browser when asked for the list.
+            got = await self._cmd("Target.getTargets", {})
+        except CdpError:
+            return ""
+        infos = got.get("targetInfos")
+        for info in infos if isinstance(infos, list) else []:
+            if (
+                isinstance(info, dict)
+                and info.get("targetId") == frame
+                and info.get("type") == "iframe"
+            ):
+                return str(info.get("url") or "")[:500]
+        return ""
+
+    async def _frame_boxes(
+        self, names: Callable[[str], bool]
+    ) -> list[list[Any]] | None:
+        """The frames Chrome has loaded, of the addresses *names* accepts, with the box each owner element has in this tab's view.
+
+        An owner element is found by the frame's id wherever it is, in a closed
+        shadow root too; a frame of another tab, or one nobody can see (its
+        owner has no box), is left out.
+        """
+        session = await self._session()
+        got = await self._cmd("Target.getTargets", {})
+        infos = got.get("targetInfos")
+        boxes: list[list[Any]] = []
+        for info in infos if isinstance(infos, list) else []:
+            if not isinstance(info, dict) or info.get("type") != "iframe":
+                continue
+            url = str(info.get("url") or "")[:500]
+            if not names(url) or len(boxes) >= MAX_FRAME_BOXES:
+                continue
+            try:
+                owner = await self._cmd(
+                    "DOM.getFrameOwner", {"frameId": info.get("targetId")}, session
+                )
+                model = await self._cmd(
+                    "DOM.getBoxModel",
+                    {"backendNodeId": owner.get("backendNodeId")},
+                    session,
+                )
+            except CdpError:
+                continue
+            quad = (model.get("model") or {}).get("border")
+            if not isinstance(quad, list) or len(quad) != 8:
+                continue
+            xs, ys = (
+                [as_number(v) for v in quad[0::2]],
+                [as_number(v) for v in quad[1::2]],
+            )
+            boxes.append([url, min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)])
+        return boxes
 
     async def _aim(self, spec: dict[str, Any], act: Act) -> tuple[float, float] | str:
         """Where Chrome's input goes for *act*: a point of the view, else why not.

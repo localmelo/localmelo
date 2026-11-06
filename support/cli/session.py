@@ -39,7 +39,7 @@ from localmelo.support import config
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.openai_family import USUAL_URL
-from localmelo.support.cli import browsing, commands, hanging, usershell
+from localmelo.support.cli import browsing, commands, hanging, serve_model, usershell
 from localmelo.support.cli import grants as grant_commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
@@ -233,6 +233,7 @@ _STATE_HINTS: Final = {
     "switching": "Switching the chat or model; esc cancels it.",
     "shell": "A ! command is running.",
 }
+SWITCH_ENDING_HINT: Final = "Finishing the switch; it ends in a moment."
 # Why a "! command" draft waits: the draft is kept.
 _SHELL_REFUSED: Final = {
     "running": "! runs only when melo is idle (esc stops the turn).",
@@ -240,6 +241,10 @@ _SHELL_REFUSED: Final = {
     "switching": "! runs only when melo is idle; wait for the switch to finish.",
     "shell": "A ! command is already running.",
 }
+
+
+class _StoppedBeforeSendError(Exception):
+    """A stop that came before the turn was sent: it ends as stopped, unsent."""
 
 
 class CliSession:
@@ -313,6 +318,8 @@ class CliSession:
         self._shell: usershell.ShellRun | None = None
         self.shell_ran = False
         self.activity: str | None = None
+        # Muted words after the activity: what the wait may take, and the key that ends it.
+        self.activity_note = ""
         self.title = ""
         self.models: list[str] = []
         self._clock = clock
@@ -553,7 +560,7 @@ class CliSession:
                 "attach",
                 "attachments",
                 "detach",
-            ):
+            ) or (command.name == "model" and serve_model.applies(self)):
                 self._state = "switching"
                 self._pending_command = command.name
                 self._work = self.spawn(
@@ -571,9 +578,11 @@ class CliSession:
             self.queued = text
             self._hint("Sent when this turn completes · ↑ edits it · ctrl+c clears it")
             return None
-        return (
-            UNDO_HINT if self._pending_command == "undo" else _STATE_HINTS[self._state]
-        )
+        if self._pending_command == "undo":
+            return UNDO_HINT
+        if self._state == "switching" and self._work is None:
+            return SWITCH_ENDING_HINT  # past the point Esc can stop
+        return _STATE_HINTS[self._state]
 
     def _main_chat_command(
         self, command: commands.Command | None, name: str, arguments: str, text: str
@@ -605,7 +614,12 @@ class CliSession:
             side = commands.find("side")
             assert side is not None
             return side, "side", ""
-        if command is not None and command.name in commands.LOCAL_ONLY:
+        if (
+            command is not None
+            and command.name in commands.LOCAL_ONLY
+            and not (command.name == "model" and serve_model.applies(self))
+        ):
+            # melo_serve's /model switches what every chat uses, the main chat's too.
             self.out.print(
                 self._text(
                     f"/{name} works only in the terminal's own chat "
@@ -719,8 +733,13 @@ class CliSession:
         runner = self.runner
         result: RunResult | None = None
         error: BaseException | None = None
+        unsent = False
         try:
             await self._follow_served()
+            if self._stop_wanted:
+                # Esc during the move to a new model: no runner holds the turn to
+                # cancel, so nothing is sent.
+                raise _StoppedBeforeSendError
             if self.runner is None:
                 self.runner = SessionRunner(
                     self.agent,
@@ -759,6 +778,8 @@ class CliSession:
             finally:
                 if token is not None:
                     STREAM_DISPLAY.reset(token)
+        except _StoppedBeforeSendError:
+            unsent = True
         except UnknownSessionError:
             error = UnknownSessionError(DELETED)
         except SessionBusyError:
@@ -774,13 +795,24 @@ class CliSession:
         with contextlib.suppress(SessionStoreError):
             await self.session_tools.apply_title()
         cause = "user_stop" if self._stop_wanted else ""
+        if unsent:
+            symbols = self.renderer.symbols
+            self.out.print(
+                self._text(
+                    f"{symbols.stopped} Stopped {symbols.dot} nothing was sent; "
+                    "your message is back",
+                    "warn",
+                )
+            )
         self.renderer.end_turn(result, error, cause=cause)
         with contextlib.suppress(SessionStoreError):
             await self.navigation.refresh_refs()
-        if error is not None and attachments:
+        if (error is not None or unsent) and attachments:
             self._attachments = attachments + self._attachments
         completed = result is not None and result.status == "completed"
-        self._after_turn(text, started, completed=completed, failed=error is not None)
+        self._after_turn(
+            text, started, completed=completed, failed=error is not None or unsent
+        )
 
     async def _remote_turn(
         self, text: str, *, typed: bool = True, retry: str = ""
@@ -1397,7 +1429,7 @@ class CliSession:
             grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
             self._row(
                 "approvals",
-                f"{self.approvals.mode} · allowed in this session: {grants}",
+                f"{self.approvals.mode} · allowed in this chat: {grants}",
             )
         tools = self.agent.list_tools()
         builtin = [tool for tool in tools if tool.source == "builtin"]
@@ -1792,7 +1824,13 @@ class CliSession:
             self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
     async def model(self, arguments: str) -> None:
-        """``/model``: pick one of the server's models, or switch to one by name and save it."""
+        """``/model``: pick one of the server's models, or switch to one by name and save it.
+
+        With melo_serve, its chat models instead, and a switch every chat follows.
+        """
+        if serve_model.applies(self):
+            await serve_model.command(self, arguments)
+            return
         backend = self.factory.backend
         if not arguments:
             await self._pick_current_server_model()

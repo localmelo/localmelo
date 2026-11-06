@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import re
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any
@@ -19,6 +28,7 @@ from localmelo.melo.contracts.providers import (
     thinking_disabled,
 )
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
+from localmelo.support import melo_serve
 from localmelo.support.providers._http import (
     RETRYABLE_STATUS_CODES,
     _body_preview,
@@ -26,6 +36,8 @@ from localmelo.support.providers._http import (
     attempt_headers,
     malformed_body,
     post_json,
+    switched_to,
+    switching_for,
     unreachable,
 )
 from localmelo.support.providers.llm._protocol import (
@@ -371,6 +383,12 @@ def _usage_details(raw_usage: Any) -> dict[str, int] | None:
     return usage
 
 
+# Seconds between two asks during a model switch when the server names no time, and
+# at the least.
+SWITCH_ASK_S = 5.0
+SWITCH_MIN_ASK_S = 0.1
+
+
 class OpenAICompatLLM(BaseLLMProvider):
     """OpenAI-compatible chat/completion provider.
 
@@ -554,14 +572,67 @@ class OpenAICompatLLM(BaseLLMProvider):
             finish = "tool_calls" if reply.tool_calls else "stop"
         return reply, finish
 
+    def _follow(self, exc: ProviderError) -> bool:
+        """Whether to ask again: the server switched to the model *exc* names (melo_serve).
+
+        The provider asks for that model from now on, as a chat follows a switch
+        at its next turn; a task mid-step goes on instead of failing.
+        """
+        if not exc.served or exc.served == self.model:
+            return False
+        self.model = exc.served
+        return True
+
+    def _asking(self) -> Callable[[ProviderError], Awaitable[bool]]:
+        """For one request: whether to ask again after an error, once any wait is over.
+
+        A switch under way is a wait, not a failure: the request asks again after
+        the time the server names, until the switch ends. Only a server that
+        never ends it reaches :data:`~localmelo.support.melo_serve.LOAD_BOUND_S`:
+        then the error stands, and is no longer one to retry. A model switched
+        meanwhile is followed once (:meth:`_follow`). Stop cancels the task,
+        which ends the wait at once.
+        """
+        deadline: float | None = None
+        followed = False
+
+        async def again(exc: ProviderError) -> bool:
+            nonlocal deadline, followed
+            if exc.switching_s is not None:
+                now = time.monotonic()
+                bound = melo_serve.LOAD_BOUND_S
+                deadline = now + bound if deadline is None else deadline
+                if now >= deadline:
+                    exc.switching_s, exc.retryable = None, False
+                    return False
+                wait = max(exc.switching_s or SWITCH_ASK_S, SWITCH_MIN_ASK_S)
+                await asyncio.sleep(min(wait, deadline - now))
+                return True
+            if followed or not self._follow(exc):
+                return False
+            followed = True
+            return True
+
+        return again
+
     async def _complete(
         self, messages: list[Message], tools: list[ToolDef] | None
     ) -> tuple[Message, str]:
         """Send one request that does not ask for a stream: its reply and finish reason."""
         path = "/chat/completions"
-        resp, data = await post_json(
-            self._http, path, self._payload(messages, tools), headers=attempt_headers()
-        )
+        again = self._asking()
+        while True:
+            try:
+                resp, data = await post_json(
+                    self._http,
+                    path,
+                    self._payload(messages, tools),
+                    headers=attempt_headers(),
+                )
+                break
+            except ProviderError as exc:
+                if not await again(exc):
+                    raise
         self.last_limits = rate_limits(resp.headers)
         return self._completion(resp, path, data)
 
@@ -600,6 +671,25 @@ class OpenAICompatLLM(BaseLLMProvider):
 
     async def stream_chat(
         self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """Stream one response; a switch that refuses it is waited out (see :meth:`_asking`).
+
+        The refusal comes before any fragment, so nothing reached the caller
+        from a try that is asked for again.
+        """
+        again = self._asking()
+        while True:
+            async with contextlib.aclosing(self._stream(messages, tools)) as stream:
+                try:
+                    async for fragment in stream:
+                        yield fragment
+                    return
+                except ProviderError as exc:
+                    if not await again(exc):
+                        raise
+
+    async def _stream(
+        self, messages: list[Message], tools: list[ToolDef] | None
     ) -> AsyncGenerator[StreamFragment, None]:
         """Stream one OpenAI-compatible response; never retry after a delta.
 
@@ -649,6 +739,8 @@ class OpenAICompatLLM(BaseLLMProvider):
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
                         context_overflow=_context_overflow(error_response),
                         detail=_body_preview(error_response),
+                        served=switched_to(error_response),
+                        switching_s=switching_for(error_response),
                     )
                 opened = True
                 self.last_limits = rate_limits(response.headers)

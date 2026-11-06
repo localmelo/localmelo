@@ -186,10 +186,10 @@ The decision (`ApprovalDecision`):
 | `allow` | required | Whether the call may run. |
 | `reason` | `""` | Why it may not, for the model. |
 | `remember` | `False` | Allow this tool for the rest of the session. The run reports it on `tool.finished`, but does not act on it: a policy that grants a tool keeps the grant itself, and answers later requests with `origin="session"`. |
-| `origin` | `"user"` | Who decided: `"user"`, `"session"` (a grant), `"policy"` or `"timeout"`. |
+| `origin` | `"user"` | Who decided: `"user"`, `"session"` (a grant), `"policy"`, `"timeout"` or `"words"` (the person wrote instead of answering). |
 
 - A field of the wrong type raises `TypeError`.
-- `remember=True` or `origin="session"` on a denial, and `origin="timeout"` on an allow, raise `ValueError`.
+- `remember=True` or `origin="session"` on a denial, and `origin="timeout"` or `"words"` on an allow, raise `ValueError`.
 
 A denied call does not run. The model reads one of these texts as the call's error, and the run goes on:
 
@@ -198,6 +198,7 @@ A denied call does not run. The model reads one of these texts as the call's err
 | `user` | `The user denied this call. <ending>` | `The user denied this call: <reason>. <ending>` |
 | `policy` | `The approval policy denied this call. <ending>` | `The approval policy denied this call: <reason>. <ending>` |
 | `timeout` | `The call was not approved in time, so it did not run. Silence is not consent: do not retry it without asking the user.` | The same. |
+| `words` | `The user sent a message while melo waited for their answer, so the call did not run and nothing was allowed. Read their message. If the task still needs the call, run it again: melo asks them again.` | The same. |
 
 - `<ending>` is `Do not run it again or reach the same result another way unless the user asks.`
 - The reason loses surrounding whitespace and a final `.`, and keeps at most 500 characters.

@@ -19,6 +19,7 @@ from localmelo.melo.contracts.providers import (
     LLM_REQUEST_KIND,
     ProviderError,
 )
+from localmelo.support.melo_serve import as_number
 
 # Statuses for which the same request may succeed when sent again: rate
 # limiting, and a gateway or proxy in front of the model server failing.
@@ -78,6 +79,44 @@ def _exception_text(exc: Exception) -> str:
 
 # The start of every "cannot reach" message; the status hint matches it.
 UNREACHABLE_PREFIX = "cannot reach the model server at "
+
+
+def _error(response: httpx.Response) -> dict[str, Any]:
+    """The ``error`` object of a response's JSON body, {} when it has none."""
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return {}
+    return error if isinstance(error, dict) else {}
+
+
+def switched_to(response: httpx.Response) -> str:
+    """The model a server serves now, when it refused the one asked for as switched.
+
+    melo_serve answers a request that names a model it served before with 409
+    ``{"error": {"type": "model_switched", "current": <served name>}}``; ``""``
+    for any other response.
+    """
+    error = _error(response) if response.status_code == 409 else {}
+    if error.get("type") != "model_switched":
+        return ""
+    current = error.get("current")
+    if not isinstance(current, str) or not 0 < len(current) <= 200:
+        return ""
+    return current if current.isprintable() else ""
+
+
+def switching_for(response: httpx.Response) -> float | None:
+    """The seconds to wait while a server switches its model, else None.
+
+    melo_serve answers a request during a switch with 503
+    ``{"error": {"type": "switching", "retry_after": <seconds>}}``; 0.0 when it
+    names no usable time.
+    """
+    error = _error(response) if response.status_code == 503 else {}
+    if error.get("type") != "switching":
+        return None
+    return as_number(error.get("retry_after"))
 
 
 def unreachable(
@@ -153,6 +192,8 @@ async def post_json(
             status_code=status,
             retryable=status in RETRYABLE_STATUS_CODES,
             context_overflow=_context_overflow(exc.response),
+            served=switched_to(exc.response),
+            switching_s=switching_for(exc.response),
         ) from exc
     except httpx.ConnectError as exc:
         raise unreachable(client, exc, retryable=True) from exc

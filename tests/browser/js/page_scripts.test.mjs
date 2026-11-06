@@ -708,3 +708,28 @@ test('what covers an element is told by kind and tag, never by text the page wro
   const report = disarm(dom, 'k10', page.doc);
   assert.deepEqual(report.movedBy, {what: 'a sticky header', detail: 'h1'});
 });
+
+
+// ── A human check's answer field ──
+
+test('only a check provider\'s own answer field says a check was passed, and none is listed', () => {
+  const form = (fields) => `<form action="/go"><input name="q" value="cats">${fields}<button>Go</button></form>`;
+  // A field that only ends in "-response" holds something: nothing was passed.
+  assert.ok(!readPage(load(form('<textarea name="note-response">filled by the page</textarea>'))).solved);
+  // Each provider's field, when it holds something, is a pass.
+  for (const field of [
+    '<textarea name="g-recaptcha-response">tok</textarea>',
+    '<textarea name="h-captcha-response">tok</textarea>',
+    '<input type="hidden" name="cf-turnstile-response" value="tok">',
+    '<input type="hidden" name="fc-token" value="tok">',
+    '<input type="hidden" name="geetest_validate" value="tok">',
+  ]) {
+    assert.equal(readPage(load(form(field))).solved, true, field);
+  }
+  // Empty is not a pass.
+  assert.ok(!readPage(load(form('<textarea name="g-recaptcha-response"></textarea>'))).solved);
+  // The answer field is no field of the page: not listed, and not a row of the form either.
+  const page = readPage(load(form('<textarea name="g-recaptcha-response">a-long-token-nobody-reads</textarea><input type="hidden" name="cf-turnstile-response" value="tok">')));
+  assert.equal(page.elements.filter((el) => el.kind === 'textbox').length, 1, 'only the search box');
+  assert.deepEqual(byLabel(page, 'Go').form.map(([name]) => name), ['q']);
+});

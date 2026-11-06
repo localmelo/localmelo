@@ -1016,11 +1016,21 @@ def _code_sites(code: str, python: bool, depth: int) -> Sites:
 
 
 def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -> Sites:
-    found = shell_lexer.unwrap(words)
-    assigned, codes = found.assignments, found.codes
+    # A NAME=value word where a wrapper takes its next word (``nohup A=1 …``)
+    # is read there, and as an assignment too: a key never narrows.
+    both = [
+        shell_lexer.unwrap(words),
+        shell_lexer.unwrap(words, assignments_anywhere=True),
+    ]
+    assigned = dict.fromkeys(item for found in both for item in found.assignments)
+    codes = dict.fromkeys(code for found in both for code in found.codes)
+    # The first line holds the words of the others, and a command with more is
+    # unread.
+    codes.update((found.line(j), None) for found in both for j in found.joins[:1])
+    readings = dict.fromkeys(tuple(r) for found in both for r in found.readings)
     keys: set[str] = set()
     # A wrapper option melo could not read: the step may reach any site.
-    unread = found.unread
+    unread = any(found.unread for found in both)
 
     def add(found: Sites) -> None:
         nonlocal unread
@@ -1032,7 +1042,7 @@ def _command_sites(words: Sequence[str], depth: int, here: Sequence[str] = ()) -
             add(_proxy_sites(value))
     for code in codes:
         add(_code_sites(code, False, depth))
-    for words in found.readings:
+    for words in readings:
         if not words:
             continue
         program, args = _program(words[0]), list(words[1:])

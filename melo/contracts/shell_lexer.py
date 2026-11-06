@@ -24,7 +24,10 @@ of a step (``melo.contracts.review``) both read a command with it, so a
 verdict and a key never name two different programs. Each wrapper lists all
 the options of its manual; one it does not list makes the command unread,
 and every program a reading of it may run is named (at most
-:data:`MAX_READINGS`, each a place in the words), never just one.
+:data:`MAX_READINGS`, each a place in the words), never just one. A
+``NAME=value`` word after a wrapper is where its manual puts it: an assignment
+for ``env`` and ``sudo``, else the wrapper's next word (its program,
+``timeout``'s duration).
 
 This module imports only the standard library.
 """
@@ -37,7 +40,7 @@ from collections import deque
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, NamedTuple, overload
+from typing import Final, Literal, NamedTuple, overload
 
 
 class Lexer(shlex.shlex):
@@ -256,6 +259,10 @@ def commands(words: Sequence[str], cuts: Collection[str] = CUTS) -> list[Command
 # ── The program a command runs ──
 
 
+# Where a program takes NAME=value words (see Options).
+Assignments = Literal["", "among", "after"]
+
+
 @dataclass(frozen=True)
 class Options:
     """A program's options from its manual: those that take no value, those that take one.
@@ -263,16 +270,30 @@ class Options:
     ``--`` among the ``flags`` ends the options; a program that does not
     list it does not take it. ``splits`` are options whose value the program
     splits into arguments of its own, read in its place (``env -S``).
+    ``assignments`` is where it takes ``NAME=value`` words: ``"among"`` its
+    options (sudo), ``"after"`` them, where the first ends them (env), or
+    ``""``: nowhere, such a word is its next word (its program, timeout's
+    duration, flock's file).
     """
 
     flags: frozenset[str]
     valued: frozenset[str]
     splits: frozenset[str] = frozenset()
+    assignments: Assignments = ""
 
     @classmethod
-    def of(cls, flags: str, valued: str = "", splits: str = "") -> Options:
+    def of(
+        cls,
+        flags: str,
+        valued: str = "",
+        splits: str = "",
+        assignments: Assignments = "",
+    ) -> Options:
         """The table from its options as words, each kind apart."""
-        return cls(*(frozenset(names.split()) for names in (flags, valued, splits)))
+        flag, value, split = (
+            frozenset(names.split()) for names in (flags, valued, splits)
+        )
+        return cls(flag, value, split, assignments)
 
 
 # The most ways one command is read: past them melo reads no more, and asks.
@@ -301,7 +322,7 @@ WRAPPERS: Final[Mapping[str, Options]] = MappingProxyType(
         # OpenBSD doas(1)
         "doas": Options.of("-L -n -s", "-a -C -u"),
         # macOS env(1); - is its old form of -i
-        "env": Options.of("- -0 -i -v", "-C -P -S -u", "-S"),
+        "env": Options.of("- -0 -i -v", "-C -P -S -u", "-S", "after"),
         # bash(1)
         "exec": Options.of("-c -l --", "-a"),
         # util-linux flock(1)
@@ -337,6 +358,7 @@ WRAPPERS: Final[Mapping[str, Options]] = MappingProxyType(
             " -v --validate --",
             "-C --close-from -D --chdir -g --group -h --host -p --prompt"
             " -R --chroot -T --command-timeout -U --other-user -u --user",
+            assignments="among",
         ),
         # macOS taskpolicy(8)
         "taskpolicy": Options.of("-b -B -a -s -x -X", "-d -g -c -p -m -j -P -S -t -l"),
@@ -375,6 +397,13 @@ OPERAND: Final = frozenset({"timeout", "gtimeout", "flock"})
 # Options whose value a shell runs: ``env -S`` (and GNU's long form, which
 # an env melo could not read may be), ``flock -c``.
 _CODE: Final = {"env": {"-S", "--split-string"}, "flock": {"-c", "--command"}}
+# Wrappers that hand the words after their options, joined by spaces, to
+# ``sh -c``, unless given one of these options: procps-ng watch(1).
+_JOINS: Final = {"watch": frozenset({"-x", "--exec"})}
+# Wrappers a shell also has as a keyword of its own (bash's ``time``): the
+# command after one may be the shell's, which takes ``NAME=value`` words
+# first, or the program time(1) runs.
+_KEYWORDS_TOO: Final = frozenset({"time"})
 # Shell words that open or close a compound command or a part of it. The
 # command follows an opening word; a closing word ends a group, whose output
 # is its last command's. ``function NAME`` and ``coproc NAME {`` are read in
@@ -382,7 +411,8 @@ _CODE: Final = {"env": {"-S", "--split-string"}, "flock": {"-c", "--command"}}
 KEYWORDS: Final = frozenset(
     {"!", "{", "}", "do", "done", "elif", "else", "fi", "if", "then", "until", "while"}
 )
-_ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
+# A word a shell reads as an assignment: plain, an append, an array element.
+ASSIGNMENT: Final = re.compile(r"([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)", re.S)
 
 
 def program(word: str) -> str:
@@ -433,6 +463,31 @@ class Spliced(Sequence[str]):
 Start = tuple[Sequence[str], int]
 
 
+# Words :func:`past_options` has read: each with whether an option that changes
+# what the program does came before it, and whether it was read as env's
+# assignment.
+Read = set[tuple[int, bool, bool]]
+
+
+class Walked:
+    """What :func:`past_options` has read, so that it reads a word once per program.
+
+    A word can be both an option and a place to read from (one that starts
+    with ``-`` and names a wrapper by its last path part): read afresh from
+    each such place, a command would cost the square of its length. Where an
+    earlier walk of the same program read a word in the same state, the ends
+    that word leads to are already known.
+    """
+
+    def __init__(self) -> None:
+        self._read: dict[tuple[int, str, bool], tuple[object, Read]] = {}
+
+    def of(self, words: Sequence[str], program: str, anywhere: bool) -> Read:
+        """What was read in *words* for *program*, with assignments read anywhere."""
+        key = id(words), program, anywhere
+        return self._read.setdefault(key, (words, set()))[1]  # keeps the id theirs
+
+
 @dataclass(frozen=True)
 class Unwrapped:
     """A simple command from the program it runs, and what came before it.
@@ -440,11 +495,16 @@ class Unwrapped:
     ``starts`` are where each reading's program starts: one, or one for each
     way to read an option a wrapper's table does not list (``unread``), at
     most :data:`MAX_READINGS`, the first with each such option taking no
-    value. ``added`` follows the words of each (what ``xargs`` adds).
+    value and no lone ``-`` or ``--`` read as getopt(3) reads it. ``added``
+    follows the words of each (what ``xargs`` adds).
     ``assignments`` are the ``NAME=value`` words before the program (and
     among a wrapper's options), in order; ``wrappers`` the wrappers it runs
     under by name, outermost first; ``codes`` the command lines a wrapper
     hands to a shell (``env -S``, ``flock FILE -c``): of all the readings.
+    ``joins`` are where the words a wrapper joins into a command line for a
+    shell start (``watch`` without ``-x``; see :meth:`line`), a place each:
+    one for each reading, the first reading's first, at most
+    :data:`MAX_READINGS`.
     """
 
     starts: list[Start]
@@ -453,15 +513,26 @@ class Unwrapped:
     codes: list[str]
     unread: bool = False
     added: tuple[str, ...] = ()
+    joins: tuple[Start, ...] = ()
 
     @property
     def readings(self) -> list[list[str]]:
         """The words of each reading, from its program on."""
         return [[*words[at:], *self.added] for words, at in self.starts]
 
+    def line(self, join: Start) -> str:
+        """The command line a shell runs for one of ``joins``: its words, joined."""
+        words, at = join
+        return " ".join([*words[at:], *self.added])
+
 
 def unwrap(
-    words: Sequence[str], added: Sequence[str] = (), start: int = 0
+    words: Sequence[str],
+    added: Sequence[str] = (),
+    start: int = 0,
+    shell: bool = True,
+    assignments_anywhere: bool = False,
+    walked: Walked | None = None,
 ) -> Unwrapped:
     """*words* from the program they run, from *start*: past keywords,
     assignments and wrappers.
@@ -471,17 +542,32 @@ def unwrap(
     so does a command read more ways than :data:`MAX_READINGS`. ``env -S``
     is read as env(1) runs it: the words of its value, then the rest; a
     value with a form env(1) reads its own way makes the command unread
-    (see :func:`_split`).
+    (see :func:`_split`). The words ``watch`` hands to ``sh -c`` are a
+    command line too (``joins``), and still a program and its arguments.
+
+    A ``NAME=value`` word is an assignment where a shell reads one: at
+    *start* when *shell* (not in the words a program runs: ``busybox``'s
+    applet, ``uv run``'s command), and after a keyword or an assignment.
+    After a wrapper it is where the wrapper's manual puts its next word
+    (see :class:`Options`); after ``time``, which a shell runs as its
+    keyword, it is read both ways and the command is unread. With
+    *assignments_anywhere* it is an assignment wherever it stands before
+    the program: the keys of a step read a command that way too, so that
+    they never narrow.
+
     *added* stands for what ``xargs`` adds to the command it runs, from its
-    input.
+    input. *walked* carries what was read across calls on the same words.
     """
-    # The command's words, then each list env -S makes; a place is (list, word).
+    walked = Walked() if walked is None else walked
+    # The command's words, then each list env -S makes; a place is (list,
+    # word, whether a NAME=value word there is an assignment).
     sources: list[Sequence[str]] = [words]
     starts: list[Start] = []
     assignments: list[tuple[str, str]] = []
     wrappers: list[str] = []
     codes: list[str] = []
-    todo, seen = [(0, start)], set[tuple[int, int]]()
+    joins: dict[tuple[int, int], Start] = {}
+    todo, seen = [(0, start, shell)], set[tuple[int, int, bool]]()
     unread = xargs = False
     while todo:  # from each word a reading reaches, once, the first reading first
         if len(starts) == MAX_READINGS:
@@ -491,33 +577,46 @@ def unwrap(
         if place in seen:
             continue
         seen.add(place)
-        source, at = place
+        source, at, assigns = place
         words = sources[source]
         head = words[at : at + 3]
-        assignment = _ASSIGNMENT.fullmatch(head[0]) if head else None
+        assignment = ASSIGNMENT.fullmatch(head[0]) if head else None
         keyword = _keyword(head)
         name = program(head[0]) if head else ""
         if keyword:
-            todo.append((source, at + keyword))
-        elif assignment is not None:
+            todo.append((source, at + keyword, True))
+        elif assignment is not None and (assigns or assignments_anywhere):
             assignments.append((assignment[1], assignment[2]))
-            todo.append((source, at + 1))
+            todo.append((source, at + 1, True))
         elif name in WRAPPERS:
             wrappers.append(name)
-            passed = past_options(words, WRAPPERS[name], at + 1)
+            execs = _JOINS.get(name, frozenset())
+            passed = past_options(
+                words,
+                WRAPPERS[name],
+                at + 1,
+                assignments_anywhere,
+                walked.of(words, name, assignments_anywhere),
+                execs,
+            )
             assignments += passed.assignments
             code = _CODE.get(name, set())
             codes += [
                 value for option, value in passed.options if option in code and value
             ]
             unread = unread or passed.unread
+            if name in _JOINS and (
+                passed.unread or not execs & {option for option, _ in passed.options}
+            ):
+                # Its words from each end are a line for sh -c.
+                joins.update({(source, end): (words, end) for end, _ in passed.ends})
             for end, split in reversed(passed.ends):
                 if split is not None:  # its words in its place, then the rest
                     spliced, own = _split(split)
                     unread = unread or own or len(sources) > MAX_READINGS
                     if len(sources) <= MAX_READINGS:
                         sources.append(Spliced([words[at], *spliced], words, end))
-                        todo.append((len(sources) - 1, 0))
+                        todo.append((len(sources) - 1, 0, False))
                     continue
                 if name in OPERAND and end < len(words):
                     end += 1
@@ -526,11 +625,19 @@ def unwrap(
                         codes.append(words[end + 1])
                         end += 2
                 xargs = xargs or name == "xargs" and end < len(words)
-                todo.append((source, end))
+                todo.append((source, end, False))
+                both = name in _KEYWORDS_TOO and not assignments_anywhere
+                if both and ASSIGNMENT.fullmatch("".join(words[end : end + 1])):
+                    unread = True  # the shell's time, or time(1): melo cannot tell
+                    todo.append((source, end, True))
         else:
             starts.append((words, at))
     more = tuple(added) if xargs else ()
-    return Unwrapped(starts, assignments, wrappers, codes, unread, more)
+    lines = tuple(joins.values())
+    unread = unread or len(lines) > MAX_READINGS
+    return Unwrapped(
+        starts, assignments, wrappers, codes, unread, more, lines[:MAX_READINGS]
+    )
 
 
 class Passed(NamedTuple):
@@ -538,7 +645,8 @@ class Passed(NamedTuple):
 
     ``ends`` are where they may end, each with the value of an option the
     program splits into arguments in its place (else ``None``), the first
-    where no unlisted option takes a value.
+    where no unlisted option takes a value; those of getopt(3)'s reading of
+    an unlisted ``-`` or ``--`` come last.
     """
 
     ends: list[tuple[int, str | None]]
@@ -547,33 +655,57 @@ class Passed(NamedTuple):
     unread: bool
 
 
-def past_options(words: Sequence[str], options: Options, start: int = 0) -> Passed:
+def past_options(
+    words: Sequence[str],
+    options: Options,
+    start: int = 0,
+    assignments_anywhere: bool = False,
+    seen: Read | None = None,
+    marks: Collection[str] = (),
+) -> Passed:
     """Where the options of *words* from *start* may end, and what they pass.
 
     Each option is passed with its value (``""`` for none), a cluster
     (``-xvf``) as its letters, and a ``NAME=value`` word as an assignment
-    (``env`` and ``sudo`` set them). ``--`` ends them when *options* lists
-    it, and so does a split option (``env -S``). An option *options* does
-    not list makes them ``unread``: it may take the next word as its value
-    or not, so they may end where either way leads, at most
-    :data:`MAX_READINGS` ends.
+    where *options* takes one (:attr:`Options.assignments`), or anywhere
+    with *assignments_anywhere*; elsewhere such a word ends them, as the
+    program's next word. ``--`` ends them when *options* lists it, and so
+    does a split option (``env -S``). An option *options* does not list
+    makes them ``unread``: it may take the next word as its value or not,
+    so they may end where either way leads; getopt(3)'s reading of an
+    unlisted ``--`` (their end) or ``-`` (an operand) is one more, after
+    those. At most :data:`MAX_READINGS` ends, the first ones. A word *seen*
+    holds was read before: where it leads is known, and is not repeated.
+    One of *marks* changes what the program does with the rest, so a word is
+    read apart before and after one.
     """
     ends: list[tuple[int, str | None]] = []
+    operands: list[tuple[int, str | None]] = []
     passed: list[tuple[str, str]] = []
-    todo, seen, unread = [start], set[int](), False
+    seen = set() if seen is None else seen
+    todo, unread = [(start, False)], False
     while todo:
-        if len(ends) == MAX_READINGS:
+        if len(ends) >= MAX_READINGS:
             unread = True
             break
-        at = todo.pop()
-        while at not in seen:
-            seen.add(at)
+        at, marked = todo.pop()
+        while (at, marked, False) not in seen:
+            seen.add((at, marked, False))
             word = words[at] if at < len(words) else ""
             if word == "--" and "--" in options.flags:
                 ends.append((at + 1, None))
                 break
-            if not word.startswith("-") and "=" not in word:
-                ends.append((at, None))  # the program, or no word left
+            if not word.startswith("-") and (
+                "=" not in word or not (options.assignments or assignments_anywhere)
+            ):
+                ends.append((at, None))  # the program, its next word, or none left
+                break
+            after = options.assignments == "after" and not assignments_anywhere
+            if not word.startswith("-") and after:
+                # env(1): they end its options, and its program follows them
+                end = _past_assignments(words, at, seen, passed)
+                if end is not None:
+                    ends.append((end, None))
                 break
             name, _, value = word.partition("=")
             found = (
@@ -581,7 +713,10 @@ def past_options(words: Sequence[str], options: Options, start: int = 0) -> Pass
             )
             if found is None:
                 unread = True
-                todo.append(min(at + 2, len(words)))  # the way with a value
+                # getopt(3): an operand, the options' end
+                if word in ("-", "--") and len(operands) < MAX_READINGS:
+                    operands.append((at if word == "-" else at + 1, None))
+                todo.append((min(at + 2, len(words)), marked))  # the way with a value
                 if not (word.startswith("--") and "=" in word):
                     name, value = word, "".join(words[at + 1 : at + 2])
                 found = [(name, value)], 0
@@ -589,12 +724,33 @@ def past_options(words: Sequence[str], options: Options, start: int = 0) -> Pass
             if takes:
                 held[-1] = (held[-1][0], "".join(words[at + 1 : at + 2]))
             passed += held
+            marked = marked or any(option in marks for option, _ in held)
             at = min(at + 1 + takes, len(words))
             if held[-1][0] in options.splits:
                 ends.append((at, held[-1][1]))
                 break
-    assigned = [option for option in passed if not option[0].startswith("-")]
-    return Passed(list(dict.fromkeys(ends)), passed, assigned, unread)
+    found_ends = list(dict.fromkeys([*ends, *operands]))
+    if len(found_ends) > MAX_READINGS:
+        unread, found_ends = True, found_ends[:MAX_READINGS]
+    names = [option for option in passed if not option[0].startswith("-")]
+    return Passed(found_ends, passed, names, unread)
+
+
+def _past_assignments(
+    words: Sequence[str], at: int, seen: Read, passed: list[tuple[str, str]]
+) -> int | None:
+    """Past the ``NAME=value`` words env(1) reads after its options, from *at*:
+    every word with ``=``. Where its program is, or ``None`` when another
+    way read them already (*seen*); each is added to *passed*.
+    """
+    while at < len(words) and "=" in words[at]:
+        if (at, False, True) in seen:
+            return None
+        seen.add((at, False, True))
+        name, _, value = words[at].partition("=")
+        passed.append((name, value))
+        at += 1
+    return at
 
 
 def _held(word: str, options: Options) -> tuple[list[tuple[str, str]], int] | None:

@@ -196,10 +196,10 @@ asyncio.run(main())
 | `allow` | 必填 | 是否允许运行调用。 |
 | `reason` | `""` | 不允许的原因，提供给模型。 |
 | `remember` | `False` | 在本会话剩余时间内允许此工具。运行在 `tool.finished` 中报告该值，但不会据此操作：授予工具权限的策略自行保存授权，并以 `origin="session"` 回答后续请求。 |
-| `origin` | `"user"` | 决策者：`"user"`、`"session"`（授权）、`"policy"` 或 `"timeout"`。 |
+| `origin` | `"user"` | 决策者：`"user"`、`"session"`（授权）、`"policy"`、`"timeout"` 或 `"words"`（这个人写了话，没有回答）。 |
 
 - 字段类型错误时引发 `TypeError`。
-- 拒绝时设置 `remember=True` 或 `origin="session"`，以及允许时设置 `origin="timeout"`，都会引发 `ValueError`。
+- 拒绝时设置 `remember=True` 或 `origin="session"`，以及允许时设置 `origin="timeout"` 或 `"words"`，都会引发 `ValueError`。
 
 被拒绝的调用不会运行。模型将以下文本之一作为调用错误读取，运行继续：
 
@@ -208,6 +208,7 @@ asyncio.run(main())
 | `user` | `The user denied this call. <ending>` | `The user denied this call: <reason>. <ending>` |
 | `policy` | `The approval policy denied this call. <ending>` | `The approval policy denied this call: <reason>. <ending>` |
 | `timeout` | `The call was not approved in time, so it did not run. Silence is not consent: do not retry it without asking the user.` | 相同。 |
+| `words` | `The user sent a message while melo waited for their answer, so the call did not run and nothing was allowed. Read their message. If the task still needs the call, run it again: melo asks them again.` | 相同。 |
 
 - `<ending>` 是 `Do not run it again or reach the same result another way unless the user asks.`。
 - 原因会去掉首尾空白和末尾的 `.`，最多保留 500 个字符。

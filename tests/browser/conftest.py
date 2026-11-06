@@ -35,6 +35,8 @@ def dns(monkeypatch: pytest.MonkeyPatch) -> FakeDns:
 def _no_wait_for_the_page_to_settle(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fake page moves only when a test says so, so melo need not wait to see it stay."""
     monkeypatch.setattr(provider, "SETTLE_S", 0.0)
+    monkeypatch.setattr(provider, "CHECK_WAIT_S", 0.0)
+    monkeypatch.setattr(provider, "CHECK_POLL_S", 0.0)
 
 
 @pytest.fixture(autouse=True)

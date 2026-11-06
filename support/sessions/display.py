@@ -365,6 +365,11 @@ def approval_tag(
         return ApprovalText("approval failed", "Approval failed; the call did not run")
     if origin == "timeout":
         return ApprovalText("not answered in time", "Not approved in time")
+    if origin == "words":
+        return ApprovalText(
+            "ended by your message",
+            "Not allowed: you sent a message instead of answering",
+        )
     if approval.get("allowed"):
         # A folder outside the workspace (#405) a grant or the settings let melo read.
         folder = approval.get("folder")
