@@ -1,4 +1,5 @@
 import {cleanOutput, formatDuration} from './turns.mjs';
+import {stepWords} from './step-words.mjs';
 import {maker} from './dom.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
@@ -52,55 +53,23 @@ const SHOWN = 8;
 // low). Before the first health reply and while the gateway is lost it is the offline still (curled up), faded.
 const STILLS = {idle: 'idle_rest', working: 'working', waiting: 'attention', done: 'done', error: 'error'};
 const STEPS = 8;
+export {stepWords};
+
 // The page says once that the moves could not be read.
 let movesUnread = false;
 const REFRESH_MS = 30000;
 const KEY = 'localmelo-panel-tab';
-const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
 
 const chatOfAddress = () => /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.location?.hash ?? '')?.[1] ?? '';
 // A task's address does not name a chat: the panel keeps the chat it was following.
 const onTaskAddress = () => /^#\/tasks(?:\/|$)/.test(globalThis.location?.hash ?? '');
-const base = (path) => String(path ?? '').replace(/\/+$/, '').split('/').pop();
-
-/** A step's plain words, as the server's `activity_text` says them: `Reading notes.md`, or `Read notes.md` once done. */
-export function stepWords(name, args, done = false) {
-  const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
-  const a = args && typeof args === 'object' ? args : {};
-  // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
-  const say = (verb, what = '') => t(`steps.${done ? 'done' : 'now'}.${verb}`, {what});
-  const file = base(a.path) || t('steps.aFile');
-  if (tool === 'file_read') return say('read', file);
-  if (tool === 'file_write') return say('write', file);
-  if (tool === 'list_files') return say('look', base(a.path) || t('steps.theFolder'));
-  if (tool === 'file_edit') return say('edit', file);
-  if (tool === 'git_status') return say('read', t('steps.gitState'));
-  if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
-  if (tool === 'python_exec') return say('run', 'Python');
-  if (tool === 'recall' || tool === 'search_memory' || tool === 'open_memory' || tool === 'remember') return say('remember');
-  if (tool === 'browser_open') {
-    let host = '';
-    try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }
-    return host ? say('read', host) : say('open', t('steps.aPage'));
-  }
-  if (tool === 'web_search') {
-    const words = String(a.query ?? '').replace(/\s+/g, ' ').trim();
-    return say('search', words ? `“${words.length > 60 ? `${words.slice(0, 59)}…` : words}”` : '…');
-  }
-  if (tool === 'browser_follow') return say('follow', t('steps.aLink'));
-  if (tool === 'browser_click' || tool === 'browser_click_point') return say('click', t('steps.thePage'));
-  if (tool === 'browser_type') return say('type', t('steps.aField'));
-  if (tool === 'browser_select') return say('choose', t('steps.aList'));
-  if (tool === 'browser_screenshot') return say('lookAt', t('steps.thePage'));
-  if (tool.startsWith('browser_')) return say('read', t('steps.thePage'));
-  return say('use', t('steps.aTool'));
-}
 
 /**
  * What the header says, and the link it offers: the model's state first, then what runs. For a side chat,
- * `scoped` is that chat's rows and what runs is read from them instead of the whole console.
+ * `scoped` is that chat's rows and what runs is read from them instead of the whole console. `plain` (the default mode)
+ * names the model and leaves out the kind of server it runs on.
  */
-export function headline(health, scoped = null) {
+export function headline(health, scoped = null, {plain = false} = {}) {
   if (!health) return {text: t('panel.head.connecting'), mood: 'idle', fix: false};
   if (health.configured === false) return {text: t('panel.head.noModel'), mood: 'error', fix: true};
   if (health.model_server?.reachable === false) return {text: t('panel.head.unreachable'), mood: 'error', fix: true};
@@ -112,7 +81,7 @@ export function headline(health, scoped = null) {
   const recent = scoped && !scoped.some((row) => row.id === status.recent?.id) ? null : status.recent;
   const mood = recent && recent.ended_s_ago < 8 && recent.outcome !== 'stopped' ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
   const model = health.model?.name;
-  const server = health.model?.backend_label;
+  const server = plain ? '' : health.model?.backend_label;
   const text = !model ? t('panel.head.connected') : server ? t('panel.head.connectedModelOn', {model, server}) : t('panel.head.connectedModel', {model});
   return {text, mood, fix: false, count: 0};
 }
@@ -323,7 +292,7 @@ export function setupPanel({
 
   function drawHeader() {
     const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
-    const said = headline(state.health, scoped);
+    const said = headline(state.health, scoped, {plain: !developer()});
     root.dataset.mood = said.mood;
     // Not connected yet, or the gateway is lost: the offline still, faded.
     const away = !state.health || state.offline;

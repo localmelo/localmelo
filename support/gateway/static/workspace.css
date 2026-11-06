@@ -1520,6 +1520,15 @@ dialog::backdrop {
   white-space: nowrap;
   overflow: hidden;
 }
+/* Default mode: the step in words, in the page's own font; the developer mode keeps the tool's name. */
+.tool-card > summary.tool-summary.plain {
+  font: inherit;
+  font-size: var(--text-small);
+}
+.tool-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tool-mark {
   flex: none;
   min-width: 1.25em;

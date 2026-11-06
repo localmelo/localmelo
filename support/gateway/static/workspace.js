@@ -23,6 +23,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { stepWords } from "./step-words.mjs";
 import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
@@ -54,6 +55,7 @@ import {
   formatPast,
   formatTokens,
   holdText,
+  httpFailure,
   liveFacts,
   LOCK_HOLD,
   newTurn,
@@ -1591,11 +1593,14 @@ function answerNode(answer) {
 function actionsNode(turn) {
   const actions = el("div", "message-actions");
   const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
-  const parts = [
-    formatDuration(turnDuration(turn)),
-    t("turns.steps", { n: steps }),
-    turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
-  ].filter(Boolean);
+  // A person reads how long it took; the steps and the tokens are for the developer mode.
+  const parts = developerMode
+    ? [
+        formatDuration(turnDuration(turn)),
+        t("turns.steps", { n: steps }),
+        turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
+      ].filter(Boolean)
+    : [formatDuration(turnDuration(turn))];
   actions.append(el("span", "", parts.join(" · ")));
   actions.append(
     button("copy-button", t("chat.copyResponse"), async () => {
@@ -1632,6 +1637,9 @@ function failureHint(turn, can, error) {
     case "provider_error": {
       // The title says all there is to say, and the actions offer the settings.
       if (error === PICTURES_REFUSED) return "";
+      // A person reads what went wrong as a sentence; the server's own text is under Details.
+      const kind = developerMode ? "" : httpFailure(turn.status, error);
+      if (kind) return t(`failure.http.${kind}`);
       if (serverUnreachable(turn.status, error)) {
         if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
@@ -1698,7 +1706,9 @@ function statusNode(turn) {
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
   // So does the title of a tool call written as text.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
+  // In the default mode a model server's own text is under Details too, with the sentence above it.
+  const raw = developerMode || turn.status !== "provider_error";
+  if (!stopped && raw && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -1754,7 +1764,7 @@ function workGroup(turn) {
     turn.userToggledGroup ||
     prefs.verbose ||
     turn.status !== "completed";
-  const summary = workSummary(turn, { held: heldOf(turn) });
+  const summary = workSummary(turn, { held: heldOf(turn), plain: !developerMode });
   const group = workBox(summary, open);
   // A finished turn without tool calls is one line over its reasoning: the reasoning is the
   // group's body, not a second "Thought" disclosure inside it.
@@ -1921,8 +1931,16 @@ function toolCard(item, turn, context = {}) {
   callCards.set(item, card);
   const summary = el("summary", "tool-summary");
   summary.append(el("span", "tool-mark", state.mark));
-  summary.append(el("span", "tool-name", item.name));
-  if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
+  if (developerMode) {
+    summary.append(el("span", "tool-name", item.name));
+    if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
+  } else {
+    // What the step is, not the tool's name or its arguments (they stay in the opened card). A step that
+    // did not finish reads as what it was to do, beside its mark and its word.
+    const tense = state.state === "running" ? false : state.state === "success" ? true : "ask";
+    summary.classList.add("plain");
+    summary.append(el("span", "tool-words", stepWords(item.name, item.arguments, tense)));
+  }
   const meta = state.text ? el("span", "tool-meta", state.text) : null;
   if (meta) summary.append(meta);
   if (meta && state.state === "running" && !context.readOnly) {
@@ -2023,6 +2041,7 @@ function liveRow(turn) {
 
 function activityOptions(turn, now) {
   return {
+    plain: !developerMode,
     held: heldOf(turn),
     pending: S.view?.pending.size ?? 0,
     cancelling: S.cancelling.has(turn.id),
@@ -2030,12 +2049,12 @@ function activityOptions(turn, now) {
   };
 }
 
-/** The live row's first line: `● Running bash · 12s · step 2 · 412 tokens`. */
+/** The live row's first line: `● Reading notes.md · 12s`, and in the developer mode `● Running bash · 12s · step 2 · 412 tokens`. */
 function liveText(turn, now) {
   const parts = [activity(turn, activityOptions(turn, now))];
   parts.push(formatDuration(Math.max(0, now - turn.startedAt)));
-  parts.push(...liveFacts(turn));
-  if (turn.outputTokens > 0) parts.push(t("chat.tokens", { n: formatTokens(turn.outputTokens) }));
+  parts.push(...liveFacts(turn, { plain: !developerMode }));
+  if (developerMode && turn.outputTokens > 0) parts.push(t("chat.tokens", { n: formatTokens(turn.outputTokens) }));
   parts.push(t("chat.escToStop"));
   return parts.join(" · ");
 }
@@ -2713,7 +2732,7 @@ function leaveWorkers() {
 // is the line for a turn without events, or "" to draw its work group.
 function turnSteps(turn, sessionId, render, empty) {
   if (empty) return [el("p", "muted", empty)];
-  const summary = workSummary(turn, {});
+  const summary = workSummary(turn, { plain: !developerMode });
   const group = workBox(summary, true);
   const inline = Boolean(turn.finishedAt) && summary === t("turns.summary.thought");
   for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));

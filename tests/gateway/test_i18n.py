@@ -71,6 +71,7 @@ CONVERTED_JS = (
     "slash-actions.mjs",
     "slash.mjs",
     "status-row.mjs",
+    "step-words.mjs",
     "task-live.mjs",
     "tasks.mjs",
     "turns.mjs",

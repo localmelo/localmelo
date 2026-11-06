@@ -163,6 +163,7 @@ test('a step reads as the server words it, in the present while it runs and the 
 
 test('the header says the model, what runs, a wait, or what to fix', () => {
   assert.deepEqual(headline(health()), {text: 'Connected · Qwen3.8 Flash on oMLX', mood: 'idle', fix: false, count: 0});
+  assert.equal(headline(health(), null, {plain: true}).text, 'Connected · Qwen3.8 Flash', 'default mode names the model, not the kind of server');
   const busy = headline(health({running: {chats: 1, tasks: 1, runs: 0, terminal: 0}}));
   assert.equal(busy.text, 'Working on 2 things');
   assert.equal(busy.mood, 'working');
