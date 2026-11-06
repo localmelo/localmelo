@@ -178,6 +178,24 @@ def test_ranked_takes_half_the_question_words_only_under_a_lower_coverage() -> N
     assert ranked(corpus, HALF_QUESTION, None, "", now=now, coverage=1.0) == []
 
 
+def test_ranked_leaves_japanese_particles_out_of_the_question_words() -> None:
+    dog = doc_item("d:1", "User: 私の犬の名前はポチです。\nmelo: 覚えました。")
+    meeting = doc_item(
+        "d:2", "User: 明日の会議は午後三時からです。\nmelo: 了解しました。"
+    )
+    hobby = doc_item("d:3", "User: 母の趣味は庭の手入れです。\nmelo: いいですね。")
+    corpus = Corpus()
+    for item in (dog, meeting, hobby):
+        corpus.add(item)
+    now = NOW + 1
+    # An ordinary question still finds its turn.
+    assert ranked(corpus, "私の犬の名前は何ですか", None, "", now=now) == [dog]
+    assert ranked(corpus, "明日の会議は何時からですか", None, "", now=now) == [meeting]
+    # A message that is one particle names nothing, so no turn that holds it counts.
+    for particle in "のはがをにへでともかねよ":
+        assert ranked(corpus, particle, None, "", now=now) == []
+
+
 def test_ranked_with_the_default_bars_is_ranked_with_the_constants() -> None:
     corpus = Corpus()
     for item in (

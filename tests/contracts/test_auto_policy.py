@@ -232,9 +232,10 @@ def test_the_note_s_variants() -> None:
         INSTALL, model=ModelAnswer("ask", "install", "no", "no", "Installs x.")
     )
     assert "in .venv. The user did not ask for it.\n" in block_note(off_goal)
-    assert "from the task's page; the task goes on without it." in block_note(
-        INSTALL, task=True
-    )
+    in_task = block_note(INSTALL, task=True)
+    assert "the task goes on without it" in in_task
+    assert "new work they ask the chat for" in in_task
+    assert "Ending: blocked" in in_task and "task's page" not in in_task
     self_review = ActionReview("high", ("self",), ("Installs x into melo's Python.",))
     assert "this step cannot be allowed" in block_note(self_review, folder="demo")
     assert "Offer a way that works inside demo." in block_note(

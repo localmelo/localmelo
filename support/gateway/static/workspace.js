@@ -1112,7 +1112,7 @@ function viewSnapshot() {
 function syncBrowser() {
   const cards = S.view?.browsers ?? [];
   browserCards.sync(cards);
-  browser.card(cards.at(-1) ?? null);
+  browser.card(cards.at(-1) ?? null, cards);
 }
 
 /** The nodes of the browser cards of the runs of *turn*: a task's card is no reply of this chat. */
@@ -1401,6 +1401,17 @@ async function stopBrowsingTask(card) {
     notify(error.message || t("panel.taskChangeFailed"));
     return false;
   }
+}
+
+/**
+ * Stop in the Browser view, which covers the composer: a task's browser ends that task, as its card's Stop does; a chat's
+ * is the chat's own run, as the composer's Stop does. False when there is no run to stop.
+ */
+async function stopBrowsingRun(card) {
+  if (card.task) return stopBrowsingTask(card);
+  if (composerTurn() === null) return false;
+  await stop();
+  return true;
 }
 
 /** Done on a browser card: the page the person has goes back to that card's run alone. False when it did not take. */
@@ -3042,9 +3053,9 @@ async function showScheduled() {
   if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
 }
 
-/** Where Melo's panel and the Browser panel do not both fit, a task or the schedule shown in Melo's panel takes the place. */
+/** The Browser view covers Melo's panel, so a task or the schedule shown in Melo's panel takes the room: the view goes. */
 function giveWayToPanel() {
-  if (!matchMedia("(min-width: 1480px)").matches) browser.hide();
+  browser.hide();
 }
 
 function hashId() {
@@ -3096,11 +3107,11 @@ const panel = setupPanel({
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 
-// The Browser panel: a live window onto the page melo is working in, which the person can take over (browser-live.mjs). Pop out
-// shows it alone and large: the macOS app in a window of its own (it offers the `localmeloBrowser` message handler), a
-// browser in a window of the page's own `#/live/<id>`.
+// The Browser view: a live window onto the page melo is working in, big, which the person can take over (browser-live.mjs).
+// It covers the work area; Pop out shows it alone in a window of its own: the macOS app's (it offers the `localmeloBrowser`
+// message handler), or a browser window of the page's own `#/live/<id>`.
 const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
-// One transport for every view of melo's browser: the card in the chat, the dock above it and the panel share one socket
+// One transport for every view of melo's browser: the card in the chat, the dock above it and the big view share one socket
 // and one decoder for each source they show (browser-stream.mjs).
 const browserStreams = createStreams({
   openSocket: (url) => new WebSocket(url),
@@ -3124,6 +3135,7 @@ const browser = setupBrowser({
     note: $("bp-note"),
     hide: $("bp-hide"),
     pop: $("bp-pop"),
+    stop: $("bp-stop"),
     take: $("bp-take"),
     give: $("bp-give"),
     window: $("bp-window"),
@@ -3138,7 +3150,9 @@ const browser = setupBrowser({
     dialogCancel: $("bp-dialog-cancel"),
   },
   observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
-  wide: () => matchMedia("(min-width: 900px)").matches,
+  stop: stopBrowsingRun,
+  // Closing the view gives the keys back to the card that opened it.
+  returned: (key) => browserCards.focus(key),
   popOut: browserBridge
     ? (source) => browserBridge.postMessage({ action: "popOut", ...source })
     : (source) => globalThis.open?.(liveUrl(globalThis.location, source), `melo-live-${source.session}-${source.run ?? ""}`, "popup,width=1000,height=680"),
@@ -3147,7 +3161,7 @@ const browser = setupBrowser({
 const browserCards = setupBrowserCards({
   doc: document,
   streams: browserStreams,
-  open: (card) => browser.open(card),
+  open: (card, picture) => browser.open(card, picture),
   stop: stopBrowsingTask,
   done: givePageBack,
   observe: typeof IntersectionObserver === "function"
@@ -3169,7 +3183,7 @@ const browserCards = setupBrowserCards({
   },
 });
 $("browser-chip").addEventListener("click", () => browser.toggle());
-$("bp-hide").addEventListener("click", () => browser.hide());
+$("bp-hide").addEventListener("click", () => browser.close());
 $("bp-pop").addEventListener("click", () => browser.popOut());
 
 // ── Pictures and files in the composer ──
@@ -3852,6 +3866,9 @@ document.addEventListener("keydown", (event) => {
   if ($("picture-box")?.open) return;
   // Something nearer took this Escape (the task's confirmation closes itself): nothing behind it reacts either.
   if (event.defaultPrevented) return;
+  // The Browser view covers the chat and Melo's panel: it closes first (a dialog above it closes itself). An Escape the
+  // person's page took, while they have it, never gets here.
+  if (!$("settings-dialog")?.open && browser.close()) return;
   // Close what is open first, in every view; a stop is the last thing Escape does.
   if (running.isOpen()) {
     running.toggle(false);
@@ -3886,7 +3903,6 @@ document.addEventListener("keydown", (event) => {
   // A task shown in the panel goes back to the chat first; the sheet closes on the next Escape.
   if (panel.stepBack()) return;
   if (panel.closeSheet()) return;
-  if (browser.closeSheet()) return;
   if ($("app").classList.contains("sidebar-open")) {
     sidebar(false);
     return;

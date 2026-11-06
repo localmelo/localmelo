@@ -1157,6 +1157,9 @@ class TurnRenderer:
         if declined is not None:
             # A declined step is a refused one, never a failure (#465).
             status, error = "blocked", declined_line(declined)
+        tense: Tense = "done" if status == "success" else "ask"
+        if status == "success" and refused_step(text):
+            status = "blocked"  # its own check turned it down: it did nothing
         self.tool_outputs.append(
             ToolOutput(
                 ref=f"{self._turn}.{self._call_number}",
@@ -1166,11 +1169,7 @@ class TurnRenderer:
                 text=error if error and status != "success" else text,
                 duration_s=_float(data.get("duration_s")),
                 exit_code=exit_code if isinstance(exit_code, int) else None,
-                words=self._step(
-                    str(data.get("name") or "?"),
-                    data,
-                    "done" if status == "success" else "ask",
-                ),
+                words=self._step(str(data.get("name") or "?"), data, tense),
             )
         )
 

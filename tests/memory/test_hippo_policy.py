@@ -39,7 +39,6 @@ def _decision(
     text: str,
     *,
     kind: str = "episodic",
-    source: str = "reasoning_note",
     active: list[dict[str, Any]] | None = None,
     task_text: str = "",
     first_person: bool | None = None,
@@ -47,7 +46,6 @@ def _decision(
     return decide(
         text,
         kind=kind,
-        source=source,
         provenance={"task_text": task_text},
         active=active or [],
     )
@@ -92,7 +90,6 @@ def test_a_same_subject_compatible_fact_updates_and_the_old_one_is_superseded() 
     decision = _decision(
         "I live in Berlin near the park and work at Acme",
         kind="profile",
-        source="user",
         active=active,
     )
     assert decision.action == "UPDATE"
@@ -104,7 +101,6 @@ def test_a_same_subject_changed_value_with_a_change_marker_updates() -> None:
     decision = _decision(
         "I moved to Paris and now live there and work at Acme",
         kind="profile",
-        source="user",
         active=active,
     )
     assert decision.action == "UPDATE"
@@ -113,7 +109,7 @@ def test_a_same_subject_changed_value_with_a_change_marker_updates() -> None:
 def test_a_same_subject_contradiction_without_a_marker_conflicts() -> None:
     active = [_entry(1, "I live in Berlin in a small flat")]
     decision = _decision(
-        "I live in Paris in a large house", kind="profile", source="user", active=active
+        "I live in Paris in a large house", kind="profile", active=active
     )
     assert decision.action == "CONFLICT"
     assert decision.target_id == 1
@@ -124,7 +120,6 @@ def test_an_overlapping_distinct_fact_is_related() -> None:
     decision = _decision(
         "Bob's address is 12 Main Street in Springfield",
         kind="semantic",
-        source="user",
         active=active,
     )
     # The two subjects differ, so a shared body of words is RELATED.
@@ -143,10 +138,7 @@ def test_a_same_subject_entry_never_produces_new() -> None:
         "I live in Berlin and work at Acme on the analytics team",
         "I live in Paris and work at Acme",
     ):
-        assert (
-            _decision(text, kind="profile", source="user", active=active).action
-            != "NEW"
-        )
+        assert _decision(text, kind="profile", active=active).action != "NEW"
 
 
 def test_a_short_fact_and_a_task_file_fact_are_ignored_with_a_reason() -> None:
@@ -209,7 +201,6 @@ def test_the_target_tie_break_prefers_the_higher_id() -> None:
     decision = _decision(
         "I live in Berlin near the river and work at Acme",
         kind="profile",
-        source="user",
         active=active,
     )
     assert decision.action == "IGNORE"

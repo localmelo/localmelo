@@ -507,6 +507,17 @@ test('Workers says when workers appear: for a side chat and for the main chat, a
   assert.deepEqual(once.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks']);
 });
 
+test('a step its own check refused has no tick in the live steps', async () => {
+  const live = row({kind: 'run', id: 'r1', state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
+  const h = harness({rows: [live], turns: [started, tool(2, 'c1', 'tool.started', {name: 'task_create', arguments: {title: 'Buy it'}}),
+    tool(3, 'c1', 'tool.finished', {name: 'task_create', status: 'success', output: 'Not done: one task per message.', duration_s: 0.1})]});
+  await h.panel.update(health({running: {chats: 0, tasks: 0, runs: 1, terminal: 0}}));
+  h.heads()[0].click();
+  await settle();
+  const [step] = h.root.findAll((node) => node.className === 'activity-step');
+  assert.deepEqual([step.dataset.state, step.text()], ['declined', '⊘ Not done: Start “Buy it” 0.1s']);
+});
+
 test('a running worker run opens to its live steps, which follow its stream until it ends', async () => {
   const live = row({kind: 'run', id: 'r1', state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
   const h = harness({rows: [live], turns: [started, tool(2, 'c1', 'tool.started', {name: 'file_read', arguments: {path: 'notes.md'}})]});

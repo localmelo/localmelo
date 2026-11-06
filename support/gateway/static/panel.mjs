@@ -1,5 +1,5 @@
 import {cleanOutput, formatDuration} from './turns.mjs';
-import {stepWords} from './step-words.mjs';
+import {refusedStep, stepWords} from './step-words.mjs';
 import {maker} from './dom.mjs';
 import {taskLive} from './task-live.mjs';
 import {setupMemoryTab} from './memory-tab.mjs';
@@ -444,9 +444,10 @@ export function setupPanel({
   function stepNode(step) {
     const running = step.status === 'running';
     const failed = ['error', 'timeout', 'crashed'].includes(step.status);
+    const refused = !running && !failed && refusedStep(step.output);
     const item = node('li', 'activity-step');
-    item.dataset.state = running ? 'running' : failed ? 'failed' : 'done';
-    item.append(node('span', 'activity-mark', running ? '●' : failed ? '✗' : '✓'),
+    item.dataset.state = running ? 'running' : failed ? 'failed' : refused ? 'declined' : 'done';
+    item.append(node('span', 'activity-mark', running ? '●' : failed ? '✗' : refused ? '⊘' : '✓'),
       node('span', 'activity-step-label', step.label ?? stepWords(step.name, step.arguments, !running, step.output)),
       node('span', 'activity-step-time', running ? t('panel.stepNow') : step.durationS == null ? '' : formatDuration(step.durationS)));
     item.firstChild.setAttribute('aria-hidden', 'true');

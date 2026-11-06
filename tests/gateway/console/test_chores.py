@@ -1430,7 +1430,7 @@ async def test_a_slot_skipped_for_a_run_that_has_not_ended_is_said_once_in_its_c
         assert await runner.tick() == []
         [line] = await skipped(console, main)
         assert (line["echo"], line["said"]["params"]) == (
-            "failed", {"title": "Shop check-in"}
+            "notice", {"title": "Shop check-in"}
         )  # fmt: skip
         assert "Shop check-in" in line["line"] and "not finished" in line["line"]
         [side_line] = await skipped(console, side)

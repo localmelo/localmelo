@@ -62,7 +62,7 @@ from ..auto_blocks import blocked_steps
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, OUT_OF_STEPS, is_out_of_steps, not_committed
 from ..front_rules import FINISHED
-from ..task_endings import default_ending
+from ..task_endings import default_ending, job_finished
 from ..task_store import TaskStoreError
 from .activity import answer_lines, answer_word, left_line
 
@@ -453,6 +453,7 @@ class MainChatCards:
         block = next((b for b in found if b["request_id"] == request_id), None)
         if block is None:
             return None
+        record = await self._console.workers.tasks.get_task(info.id)
         review = block["review"] or {}
         words = said("cards.blocked", what=said(f"auto.words.{_first(review)}"))
         return {
@@ -462,7 +463,8 @@ class MainChatCards:
             "said": words,
             **{k: block[k] for k in ("request_id", "step_key", "name", "preview")},
             "review": review,
-            "can_allow": block["can_allow"],
+            "can_allow": block["can_allow"] and not job_finished(record),
+            "finished": job_finished(record),
         }
 
     async def _reminder_words(self, task_id: str) -> str | None:

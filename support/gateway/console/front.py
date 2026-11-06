@@ -18,10 +18,12 @@ that acts (the browser, a command, a changed file) or that takes long goes
 through ``task_create`` before its first effect, so a task owns the run from its
 start: there is nothing to move and nothing to send again, and the chat takes the
 next message while the task works. The model reads the person's message and
-decides; its call on the person's turn starts the task, and only words with no
-work in them stop it (:func:`~localmelo.support.gateway.front_rules.create_rule`,
-#567). The task is admitted once for the person's turn (:meth:`Front.delegate`),
-whichever words a model gives it. A reply that only says what it will do did
+decides; its call on the person's turn starts the task, and only words that
+plainly say not to act stop it
+(:func:`~localmelo.support.gateway.front_rules.create_rule`, #567). A message has
+one receipt (:meth:`Front.receipt`): its work is admitted under it and its schedule
+named by it, so a retry or a card's tap starts nothing twice, whichever words a
+model gives it. A reply that only says what it will do did
 nothing, so code settles it: a request starts as a task under the same key;
 anything else is answered from what the turn found, and a question code offers
 also shows "Start this as a task?" (#440); the sentences are in the message's
@@ -102,7 +104,9 @@ from localmelo.support.gateway.chore_store import (
     CHORE_NOTE,
     READING_HEAD,
     REMINDER_PREFIX,
+    Chore,
     ChoreError,
+    chore_id_of,
 )
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import (
@@ -152,7 +156,11 @@ from localmelo.support.gateway.task_policy import (
     TaskPolicyError,
     TaskSpec,
 )
-from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
+from localmelo.support.gateway.task_store import (
+    JobFinishedError,
+    TaskRecord,
+    TaskStoreError,
+)
 from localmelo.support.memory.service import CHAT_TURN
 from localmelo.support.providers.llm.thinking import TEMPLATE_KWARGS_BACKENDS
 from localmelo.support.sessions.agents import (
@@ -318,12 +326,6 @@ _NOT_PAUSED: Final = (
 _NOT_ASKED: Final = (
     "Not done: the user's words say not to act. The user sees a one-tap line to "
     "start it instead; say so in one short sentence."
-)
-_ANSWER_HERE: Final = (
-    "Not done: this is a question or small talk you answer yourself in the chat; "
-    "no task starts for it. Answer it now, or ask one short question if it is "
-    "unclear. A question about a task (is it done, what did it find) is answered "
-    "from task_list and task_get: its state and its whole answer."
 )
 _NOT_PERSONS: Final = (
     "Not done: only the user's own message starts a task, and this turn is not "
@@ -632,7 +634,7 @@ class FrontAgent(Agent):
         """What a turn says that only said what it would do: a task is committed before the words claim one."""
         front = self.front
         assert front is not None
-        if rule == "start":
+        if rule == "start" and not await front.only_saved(turn):
             return await front.start_for(turn, words)
         # A brief question was told to answer already.
         text = "" if quick else await self._closing_answer(query)
@@ -953,10 +955,9 @@ class TaskTools(BaseToolProvider):
 
         The model read the person's words and chose to act, so its call starts
         the work. Only a person's own turn does, once per message, and the task's
-        objective is their message; the model's title only names it. Words with
-        no work in them stop it (``create_rule``): a question for the chat, or
-        words that say not to act, which are offered. *earlier* is the finished
-        task this work follows on.
+        objective is their message; the model's title only names it. Words that
+        plainly say not to act stop it, and are offered (``create_rule``).
+        *earlier* is the finished task this work follows on.
         """
         front = self._front
         turn = front.current_turn()
@@ -975,10 +976,7 @@ class TaskTools(BaseToolProvider):
                 f"{_row(started)}. {_tell(turn.user_text)}"
             )
         typed = front.typed()
-        rule = create_rule(typed)
-        if rule == "answer":
-            return _ANSWER_HERE
-        if rule == "offer":
+        if create_rule(typed) == "offer":
             await front.ask_to_start(turn)
             return _NOT_ASKED
         # The model's reading rides along only where code read the words as
@@ -1002,7 +1000,7 @@ class TaskTools(BaseToolProvider):
             )
         if uses_website and await front.tell_browsing_off():
             said += "Browsing is off, so it has no browser; the user sees how to turn it on. "
-        if front.names_schedule(turn) and not front.has_schedule(turn):
+        if front.names_schedule(turn) and await front.saved_chore(turn) is None:
             said += (
                 "The message names a schedule too: when the user asked for one, save "
                 "it with task_schedule, run_now false. "
@@ -1028,13 +1026,10 @@ class TaskTools(BaseToolProvider):
         refused = self._not_persons(turn)
         if refused or turn is None:
             return refused
-        if front.has_schedule(turn):
+        if await front.saved_chore(turn) is not None:
             return "Not done: one schedule per message."
         typed = front.typed()
-        rule = create_rule(typed)
-        if rule == "answer":
-            return _ANSWER_HERE
-        if rule == "offer":
+        if create_rule(typed) == "offer":
             await front.offer_chore(turn)
             return _NOT_ASKED
         if typed.strip() != turn.user_text.strip():
@@ -1055,10 +1050,10 @@ class TaskTools(BaseToolProvider):
                 text=text,
                 schedule=found.schedule,
                 level=triage(typed)[0],
+                receipt=await front.receipt(turn),
             )
         except (ChoreError, ScheduleError, TaskPolicyError) as exc:
             return f"Not done: {_plain(exc)}"
-        front.scheduled(turn)
         said = f"Saved: {chore['title']} · {found.schedule.describe()}. "
         if uses_website is True and await front.tell_browsing_off():
             said += "Browsing is off, so its runs have no browser; the user sees how to turn it on. "
@@ -1074,9 +1069,6 @@ class TaskTools(BaseToolProvider):
             return (
                 f"{said}It could not start now: {echo.get('line', '')} {_tell(typed)}"
             )
-        await front.console.chore_runner.ran_in_chat(
-            str(chore["chore_id"]), str(echo["task_id"])
-        )
         return (
             f"{said}And started task {echo['task_id']} for now; its result comes back "
             f"to this chat as a card. {_tell(typed)}"
@@ -1298,8 +1290,8 @@ class Front:
         self.tools = TaskTools(self)
         # Tasks each turn of this chat started or sent a message to, by turn id.
         self.made: dict[str, int] = {}
-        # The turns whose schedule was saved or offered: no card comes after them.
-        self._scheduled: dict[str, bool] = {}
+        # The turns that offered their schedule on a card: one card a turn.
+        self._carded: dict[str, bool] = {}
         # Whether this chat said that browsing is off: it says so once.
         self._told_browsing = False
         # One tap on an echo at a time, so an Undo or a Start runs once.
@@ -1784,8 +1776,15 @@ class Front:
         if routed.route == "follow" and routed.task:
             record = await self.record(routed.task.task_id)
             if record is None:
-                return await self.failed(typed, "front.echo.gone")
-            return await self.follow(record, composed, typed=typed, show=typed, key=key)
+                return await self._failed(typed, "front.echo.gone")
+            return await self.follow(
+                record,
+                composed,
+                typed=typed,
+                show=typed,
+                key=key,
+                create_key=create_key,
+            )
         if routed.route == "reminder" and typed.strip() == composed.strip():
             found = parse_reminder(typed, self._now())
             return None if found is None else await self._remind(found, typed)
@@ -1862,7 +1861,7 @@ class Front:
                     ref, "resume", show=typed
                 )  # paused: it resumes
             if ref.state not in FINISHED:
-                return await self.failed(
+                return await self._failed(
                     typed, "front.echo.stillWorking", title=ref.title
                 )
         return None
@@ -1914,7 +1913,9 @@ class Front:
             show=typed,
         )  # fmt: skip
 
-    async def propose_chore(self, typed: str) -> dict[str, Any] | None:
+    async def propose_chore(
+        self, typed: str, *, receipt: str = "", ran: str = ""
+    ) -> dict[str, Any] | None:
         """ "Run this every weekday at 8:30?" for a repeating phrase code can read, else ``None``.
 
         Nothing is saved here: the card's Save chore, Just once and Cancel
@@ -1940,6 +1941,8 @@ class Front:
                 "said": said("front.echo.runThis", when=parsed.schedule.said()),
                 "text": spec.objective, "schedule": parsed.schedule.to_json(),
                 "when": when, "level": triage(typed)[0],
+                **({"receipt": receipt} if receipt else {}),
+                **({"ran": ran} if ran else {}),
             },
         )  # fmt: skip
 
@@ -1947,33 +1950,37 @@ class Front:
         """Whether code reads *turn*'s typed words as a schedule: the model decides, the card is the way back."""
         return route(turn.typed_text).route == "chore"
 
-    def has_schedule(self, turn: TurnInfo) -> bool:
-        """Whether *turn*'s schedule was saved or offered."""
-        return turn.id in self._scheduled
-
-    def scheduled(self, turn: TurnInfo) -> None:
-        """*turn*'s schedule was saved or offered: no card comes after it."""
-        self._scheduled[turn.id] = True
-        while len(self._scheduled) > 64:
-            self._scheduled.pop(next(iter(self._scheduled)))
+    async def saved_chore(self, turn: TurnInfo) -> Chore | None:
+        """The chore *turn*'s accepted message saved, on any try of it, or ``None``."""
+        found = chore_id_of(await self.receipt(turn))
+        return await self.console.chore_runner.store.find(found)
 
     async def offer_chore(self, turn: TurnInfo) -> None:
         """The card of a message that names a schedule and whose turn saved none.
 
         The model reads the message first. When it saved nothing (it took the
         words for something else, or only said it would), the person can still
-        save it in one tap. A message with an attachment is one-time, and gets none.
+        save it in one tap. A message with an attachment is one-time, and gets
+        none. The card holds the message's receipt, so its work starts once, and
+        says when the message started it already (``ran``): only saving is left.
         """
         typed = turn.typed_text
         if (
-            self.has_schedule(turn)
+            turn.id in self._carded
             or not self.names_schedule(turn)
             or typed.strip() != turn.user_text.strip()
         ):
             return
-        self.scheduled(turn)
+        self._carded[turn.id] = True
+        while len(self._carded) > 64:
+            self._carded.pop(next(iter(self._carded)))
         try:
-            await self.propose_chore(typed)
+            if await self.saved_chore(turn) is not None:
+                return
+            receipt = await self.receipt(turn)
+            started = await self.console.workers.tasks.by_create_key(receipt)
+            ran = "" if started is None else started.task_id
+            await self.propose_chore(typed, receipt=receipt, ran=ran)
         except Exception:
             logger.exception("A chat could not offer a schedule")
 
@@ -1985,18 +1992,35 @@ class Front:
         schedule: Schedule,
         level: int,
         of: int | None = None,
+        receipt: str | None = None,
     ) -> dict[str, Any]:
-        """Keep a chore of this chat; its ``chore_saved`` echo, with Undo."""
+        """Keep a chore of this chat; its ``chore_saved`` echo, with Undo.
+
+        *receipt* is the message it comes from: that message saves one chore, and
+        the task it started is the chore's run.
+        """
         chore = await self.console.chore_runner.store.create(
             title=title, request=text, schedule=schedule, level=level,
-            front_id=self.chat_id,
+            front_id=self.chat_id, receipt=receipt,
         )  # fmt: skip
+        if receipt is not None:
+            started = await self.console.workers.tasks.by_create_key(receipt)
+            if started is not None:
+                await self._ran(chore, started.task_id)
         line = f"Saved: {title} · {chore.schedule.describe()}"
         return await self.echo(
             {"echo": "chore_saved", "chore_id": chore.chore_id, "title": title,
              "line": line, **({} if of is None else {"of": of}),
              "said": said("front.echo.saved", title=title, when=chore.schedule.said())}
         )  # fmt: skip
+
+    async def _ran(self, chore: Chore | None, task_id: str) -> None:
+        """*task_id* is the run of the *chore* its message saved. The task stands either way: a store that fails here costs only the link."""
+        try:
+            if chore is not None:
+                await self.console.chore_runner.ran_in_chat(chore.chore_id, task_id)
+        except SessionStoreError:
+            logger.exception("A chat could not link a chore to its run")
 
     def browsing_off(self) -> bool:
         """Whether melo has no browser now: ``[browser] driver`` is off."""
@@ -2008,7 +2032,7 @@ class Front:
             return False
         if not self._told_browsing:
             self._told_browsing = True
-            await self.failed(None, "front.echo.browsingOff")
+            await self.notice("front.echo.browsingOff")
         return True
 
     # ── Tasks: start, change, suggest ──
@@ -2038,14 +2062,14 @@ class Front:
         checked again when the task is made.
 
         Work a running *turn* starts is admitted once, under this chat and the
-        turn the person's words were accepted in (:meth:`_turn_key`): never under
+        turn the person's words were accepted in (:meth:`receipt`): never under
         anything a model wrote, so a retry finds the task the turn started.
 
         *earlier* is the finished task this work follows on: the new task works
         in its folder, and its record rides in the handover as background.
         """
         if turn is not None and key is None and create_key is None:
-            create_key = await self._turn_key(turn)
+            create_key = await self.receipt(turn)
         level, reason = triage(typed)
         try:
             spec = TaskSpec.from_payload(
@@ -2055,7 +2079,7 @@ class Front:
                 }
             )
         except TaskPolicyError as exc:
-            return await self.failed(show, "front.echo.startFailed", problem=str(exc))
+            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
         spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         # What the chat hands the task (#463): its earlier turns, and what this
@@ -2091,6 +2115,9 @@ class Front:
         )
         if not title and echo.get("echo") == "started" and wants_title(work):
             self._name_later(str(echo["task_id"]), spec.title, work)
+        if turn is not None and echo.get("echo") == "started":
+            # A message that saved its schedule first: this is that chore's run.
+            await self._ran(await self.saved_chore(turn), str(echo["task_id"]))
         return echo
 
     async def admitted(self, turn: TurnInfo) -> TaskRecord | None:
@@ -2098,15 +2125,17 @@ class Front:
 
         It counts as this turn's: a retry that finds it starts and offers nothing.
         """
-        found = await self.console.workers.tasks.by_create_key(
-            await self._turn_key(turn)
-        )
+        found = await self.console.workers.tasks.by_create_key(await self.receipt(turn))
         if found is not None:
             self._count(turn)
         return found
 
-    async def _turn_key(self, turn: TurnInfo) -> str:
-        """The key *turn*'s work is admitted under: its chat and its accepted turn.
+    async def receipt(self, turn: TurnInfo) -> str:
+        """The one key of *turn*'s message: its chat and its accepted turn.
+
+        The work the message starts is admitted under it (``task_creates``), and
+        the chore it saves is named by it (:func:`chore_id_of`), so a request
+        starts its work once however it arrives: a retry, or a card's tap.
 
         A retry runs as a new turn right after the undone one with the same
         words and nothing typed; the accepted turn is the one those retries go
@@ -2156,7 +2185,7 @@ class Front:
                 handover=handover,
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
-            return await self.failed(show, "front.echo.startFailed", problem=str(exc))
+            return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         if turn is not None:
             self._count(turn)
         for event in reversed(await self._echoes() if repeated else []):
@@ -2198,6 +2227,7 @@ class Front:
         turn: TurnInfo | None = None,
         automatic: bool = False,
         key: str | None = None,
+        create_key: str | None = None,
         asked_at: float | None = None,
     ) -> dict[str, Any]:
         """Send the person's *text* to *record*: read at its next step, or a new turn if it stopped.
@@ -2209,13 +2239,18 @@ class Front:
 
         A worker is one-time (#567): a task that finished its job takes no new
         work, so *text* starts a new task, under *key*, with this one's record as
-        background (:meth:`delegate`).
+        background (:meth:`delegate`). The worker's lock has the last word, for a
+        job that finishes while this reads.
         """
-        if job_finished(record) and not automatic:
+
+        async def new_task(earlier: TaskRecord) -> dict[str, Any]:
             return await self.delegate(
                 text, typed=typed, key=key, show=show, of=of, turn=turn,
-                asked_at=asked_at, earlier=record,
+                create_key=create_key, asked_at=asked_at, earlier=earlier,
             )  # fmt: skip
+
+        if job_finished(record) and not automatic:
+            return await new_task(record)
         level, why = triage(typed)
         try:
             _, how = await self.console.workers.message(
@@ -2224,9 +2259,12 @@ class Front:
                 level=None if level == 2 else level,
                 reason=why,
                 automatic=automatic,
+                same_job=not automatic,
             )
+        except JobFinishedError:
+            return await new_task(await self.record(record.task_id) or record)
         except (SessionStoreError, TaskPolicyError, ValueError, RuntimeError) as exc:
-            return await self.failed(
+            return await self._failed(
                 show, "front.echo.sendFailed", title=record.title, problem=_plain(exc)
             )
         if turn is not None:
@@ -2249,17 +2287,17 @@ class Front:
         """Stop, pause, resume or move *task* first; the echo carries Undo."""
         record = await self.record(task.task_id)
         if record is None:
-            return await self.failed(show, "front.echo.gone")
+            return await self._failed(show, "front.echo.gone")
         if action == "first":
             return await self.set_level(record, 1, show=show, of=of)
         if action == "resume" and record.state not in ("parked", "interrupted"):
             # "Continue the … task" on a task that is not paused: it is going already.
-            return await self.failed(
+            return await self._failed(
                 show, "front.echo.stillWorking", title=record.title
             )
         problem = await self._change(record, state=action)
         if problem:
-            return await self.failed(
+            return await self._failed(
                 show, f"front.echo.{action}Failed", title=record.title, problem=problem
             )
         undo = {"pause": {"state": "resume"}, "resume": {"state": "pause"}}
@@ -2313,7 +2351,7 @@ class Front:
         before: int | str = record.level if record.level_source == "user" else "auto"
         problem = await self._change(record, level=level)
         if problem:
-            return await self.failed(
+            return await self._failed(
                 show, "front.echo.changeFailed", title=record.title, problem=problem
             )
         line = f"{record.title} → {level_code(level)}"
@@ -2417,6 +2455,11 @@ class Front:
                 await inner.close()
         return reply.content
 
+    async def only_saved(self, turn: TurnInfo) -> bool:
+        """Whether *turn*'s message saved a schedule and started no work: a retry adds none."""
+        saved = await self.saved_chore(turn)
+        return saved is not None and await self.admitted(turn) is None
+
     async def start_for(self, turn: TurnInfo, words: str) -> str:
         """Start *turn*'s whole message as a task, and what the reply says: that it started, or why not.
 
@@ -2486,11 +2529,20 @@ class Front:
             data.update(await self.foreign(record))  # a task of another chat says so
         return await self.echo(data if of is None else {**data, "of": of}, show)
 
-    async def failed(self, show: str | None, key: str, **params: str) -> dict[str, Any]:
+    async def _failed(
+        self, show: str | None, key: str, **params: str
+    ) -> dict[str, Any]:
         """A line that says what could not be done: English, and its words for the reader."""
         line = t_in("en", key, **params)
         return await self.echo(
             {"echo": "failed", "line": line, "said": said(key, **params)}, show
+        )
+
+    async def notice(self, key: str, **params: str) -> dict[str, Any]:
+        """A plain line for the person that is neither a failure nor a task's: English, and its words for the reader."""
+        line = t_in("en", key, **params)
+        return await self.echo(
+            {"echo": "notice", "line": line, "said": said(key, **params)}
         )
 
     async def _echoes(self, after_id: int = 0) -> list[StoredEvent]:
@@ -2638,9 +2690,13 @@ class Front:
         """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
         title = str(echo.get("title", ""))
         runner = self.console.chore_runner
-        if do == "once" and echo.get("echo") == "chore" and not echo.get("reminder"):
+        receipt = str(echo.get("receipt") or "") or None
+        just_once = do == "once" and echo.get("echo") == "chore"
+        if just_once and not echo.get("reminder") and not echo.get("ran"):
             text = str(echo.get("text", ""))
-            return await self.delegate(text, typed=text, of=echo_id, asked_at=shown_at)
+            return await self.delegate(
+                text, typed=text, of=echo_id, asked_at=shown_at, create_key=receipt
+            )
         if do == "cancel" and echo.get("echo") == "chore":
             line = f"Not saved: {title}"
             return await self._echo(
@@ -2657,6 +2713,7 @@ class Front:
                     # A reminder runs at P1, so a busy queue does not hold it back.
                     level=int(echo.get("level", 1 if schedule.kind == "once" else 2)),
                     of=echo_id,
+                    receipt=receipt,
                 )
             if do == "undo" and echo.get("echo") == "chore_saved":
                 await runner.delete(str(echo.get("chore_id", "")))

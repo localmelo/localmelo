@@ -48,7 +48,7 @@ from .test_turn_writes import _post_turn, _wait_turn
 async def test_a_title_that_matches_words_that_say_not_to_act_starts_no_task(
     tmp_path: Path,
 ) -> None:
-    typed = "Do not delete report.md; just explain what it contains."
+    typed = "Do not start a task; just explain what report.md contains."
     call = {"title": "Delete report", "objective": "Delete report.md"}
     scripts = [[tool_call("task_create", call), answer("I offered it.")]]
     async with chats_console(tmp_path, sides=scripts) as (console, client, models):
@@ -345,17 +345,17 @@ async def test_a_chinese_prohibition_is_no_work_request_for_the_model_or_the_rou
     async with chats_console(
         tmp_path, main=[answer("Here is what it says.")], sides=scripts
     ) as (console, client, models):
-        # The side chat's first message goes to the model, which asks for a task.
+        # The side chat's first message goes to the model, whose call starts a task:
+        # the person's words are what it does, never the model's.
         side = (await _open(client, NOT_DELETE))["session"]["id"]
         await _wait_turn(client, side)
-        assert await console.workers.tasks.list_tasks() == []
-        [offer] = await _events(console, side, ECHO_EVENT)
-        assert (offer["echo"], offer["text"]) == ("ask", NOT_DELETE)
+        [task] = await console.workers.tasks.list_tasks()
+        assert task.spec["objective"] == NOT_DELETE
         # The main chat's code routing used to start it as a task without a model call.
         response = await _say(client, console, NOT_DELETE)
         assert response.status_code == 202, response.text
         await _wait_turn(client, str(console.main_id))
-        assert await console.workers.tasks.list_tasks() == []
+        assert len(await console.workers.tasks.list_tasks()) == 1
 
 
 # ── R2. A task that ends before the snapshot of a delete is the main chat's too ──

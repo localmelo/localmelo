@@ -713,21 +713,33 @@ def status_question(typed: str) -> bool:
     )
 
 
-# The person says not to act: explain, describe or answer only, change nothing, start nothing.
+# The person plainly says not to act: start nothing, change nothing, hold off.
+_STANDS_BACK: Final = re.compile(
+    r"\b(?:don['’]?t|do\s+not|no\s+need\s+to|never)\s+(?:\w+\s+){0,2}?(?:"
+    r"(?:start(?:ing)?|run(?:ning)?|do(?:ing)?)\s+"
+    r"(?:a\s+task|anything(?!\s+else)|it(?=\s*(?:$|[.,;!?，。；！？])))"
+    r"|(?:chang(?:e|ing)|touch(?:ing)?|modify(?:ing)?|edit(?:ing)?|alter(?:ing)?)\s+"
+    r"anything(?!\s+else))"
+    r"|\bno\s+need\s+for\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|\b(?:don['’]?t|do\s+not)\s+(?:make|create|open|start|add)\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|先别(?:动手|做|改)"
+    r"|(?:不要|不用|不需要|无需|不必)(?:开始|开|建|新建|创建)?(?:一个|个)?任务"
+    r"|别(?:开始|开|建|新建|创建)(?:一个|个)?任务"
+    r"|不用(?:动手|做|改)|别动手"
+)
+# Or limits what is done or what comes back, which may come with the work ("without
+# changing anything else", "just tell me the result").
 _HANDS_OFF: Final = re.compile(
-    r"\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
+    _STANDS_BACK.pattern
+    + r"|\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)"
     r"|\b(?:don['’]?t|do\s+not|no\s+need\s+to|never|without)\s+(?:\w+\s+){0,2}?"
     r"(?:start(?:ing)?|run(?:ning)?|chang(?:e|ing)|touch(?:ing)?|do(?:ing)?|"
     r"modify(?:ing)?|edit(?:ing)?|alter(?:ing)?|writ(?:e|ing)|delet(?:e|ing))\s+"
     r"(?:a\s+task|anything(?:\s+else)?|any\s+(?:other\s+)?(?:code|files?)|it|"
     r"(?:the|my|this|other)\s+(?:code|files?|repo(?:sitory)?|project|folder))\b"
     r"|\b(?:make\s+)?no\s+changes?\b"
-    r"|\bno\s+need\s+for\s+(?:a\s+)?(?:new\s+)?task\b"
-    r"|\b(?:don['’]?t|do\s+not)\s+(?:make|create|open|start|add)\s+(?:a\s+)?(?:new\s+)?task\b"
-    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|先别(?:动手|做|改)"
-    r"|(?:不要|不用|不需要|无需|不必)(?:开始|开|建|新建|创建)?(?:一个|个)?任务"
-    r"|别(?:开始|开|建|新建|创建)(?:一个|个)?任务"
-    r"|不用(?:动手|做|改)|别(?:动手|改|动|碰)|不要(?:改|动|修改|碰|删)"
+    r"|别(?:改|动|碰)|不要(?:改|动|修改|碰|删)"
 )
 
 
@@ -760,32 +772,19 @@ def _holds_back(typed: str) -> bool:
 def create_rule(typed: str) -> StartRule:
     """What a chat's ``task_create`` does on a person's turn with their words *typed* (#567).
 
-    The model read the words and chose to act, so no list of verbs stands in its
-    way. Only words with no work in them stop it:
-
-    - ``offer`` for no typed words (an attachment alone, a retry) and for words
-      that say not to act (:func:`hands_off`) and ask for nothing else;
-    - ``answer`` for a question about how a task stands (:func:`status_question`;
-      a polite request, or one that names a file or a site, is about something
-      else), text given to explain or translate, a greeting, and a question that
-      asks to be answered briefly: the chat answers those from what it has;
-    - else ``start``, the person's message the task's objective.
+    The model read the words and chose to act, so no list of words stands
+    between its call and the work. ``offer`` for no typed words (an attachment
+    alone, a retry) and for words that plainly say not to act (start nothing,
+    change nothing, hold off); a limit on the work or on what comes back
+    ("without changing anything else", "just tell me the result") is no such
+    word, and goes to the task with the rest of the message. Else ``start``, the
+    person's message the task's objective.
 
     Only the first :data:`OPENING_CHARS` characters are read.
     """
-    if not typed.strip():
+    opening = typed.lstrip()[:OPENING_CHARS]
+    if not opening or _STANDS_BACK.search(norm(_QUOTED.sub(" ", opening))):
         return "offer"
-    typed = typed.lstrip()[:OPENING_CHARS]
-    text = norm(typed)
-    about_a_task = status_question(typed) and not (
-        _REQUEST.match(text) or _NAMES_THING.search(text)
-    )
-    if about_a_task or _material(text):
-        return "answer"
-    if _holds_back(typed):
-        return "offer"
-    if GREETING.match(text) or brief_question(typed):
-        return "answer"
     return "start"
 
 

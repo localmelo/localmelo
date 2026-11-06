@@ -585,9 +585,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     box.append(node(sectionTag, '', t('tasks.blocked.title')), node('p', 'muted', t('tasks.blocked.note')));
     const now = Date.now() / 1000;
     for (const block of blockedOf(task)) {
-      const facts = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
+      const read = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
         review: block.review, reason: block.reason}, name: block.name, preview: block.preview});
-      if (!facts || !facts.category) continue;
+      if (!read || !read.category) continue;
+      // A job that finished has no step left to allow: it is new work for the chat.
+      const facts = block.finished ? {...read, allow: false, finished: true} : read;
       const allowing = allowState({until: task.allowances?.[block.step_key] ?? null, used: block.used_at, now});
       const fold = node('details', 'task-block');
       fold.open = state.openBlock === block.request_id;

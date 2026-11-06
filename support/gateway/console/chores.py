@@ -198,8 +198,8 @@ class ChoreRunner:
             return
         self._skipped_for.add(chore.last_task_id)
         try:
-            await self.console.front_for(chore.front_id).failed(
-                None, "chores.skipped", title=chore.title
+            await self.console.front_for(chore.front_id).notice(
+                "chores.skipped", title=chore.title
             )
         except Exception:
             logger.exception("Could not tell a chat that a chore's slot was skipped")

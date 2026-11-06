@@ -405,10 +405,8 @@ class Hippo:
                 decision = self.policy.decide(
                     checked,
                     kind=kind,
-                    source=candidate.source,
                     provenance=item_provenance,
                     active=active,
-                    admitted_by=signal,
                 )
             except Exception as exc:  # malformed stored data or a policy bug
                 logger.warning("Could not route a memory candidate: %s", exc)

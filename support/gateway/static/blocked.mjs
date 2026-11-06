@@ -169,7 +169,7 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   if (developer && facts.name) head.append(node('span', 'block-tool', facts.name));
   card.append(head);
   const why = [...facts.reasons];
-  why.push(t(facts.self ? 'auto.blocked.self' : facts.words ? 'auto.blocked.why' : 'auto.blocked.clickOnly'));
+  why.push(t(facts.self ? 'auto.blocked.self' : facts.finished ? 'auto.blocked.finished' : facts.words ? 'auto.blocked.why' : 'auto.blocked.clickOnly'));
   card.append(node('p', 'block-why', why.join(t('common.sentenceGap'))));
   if (facts.step) {
     // The code follows. A blocked step is never routine, so it is open: the sentence and the kind do not

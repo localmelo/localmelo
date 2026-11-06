@@ -43,7 +43,6 @@ from localmelo.melo.memory.hippo.policy import (
 )
 from localmelo.support.memory.index import ConversationIndex, MemoryItem, holds_secret
 
-SOURCE: Final = "ingest"
 # The action of an item that holds a secret (:class:`Route`).
 REFUSE: Final = "REFUSE"
 # How many of the best-matching active items are handed to the policy.
@@ -165,7 +164,6 @@ class Router:
         decision: PolicyDecision = decide(
             item.text,
             kind=item.kind,
-            source=SOURCE,
             provenance=provenance,
             active=self._pool(item, provenance),
             embedding=item.vector,

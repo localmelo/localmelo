@@ -2067,6 +2067,7 @@ class SessionStore:
         workspace: str | None = None,
         meta: Mapping[str, Any] | None = None,
         kind: str = "chat",
+        session_id: str | None = None,
     ) -> SessionInfo:
         """A new session without turns (T-4). *workspace* is stored as given."""
         kind = _check_kind(kind)
@@ -2074,7 +2075,7 @@ class SessionStore:
         async with self._lock:
             conn = await self._ready()
             self._check_writable()
-            session_id = uuid.uuid4().hex[:12]
+            session_id = session_id or uuid.uuid4().hex[:12]
             now = self._clock()
             await conn.execute(
                 "INSERT INTO sessions (id, kind, created_at, updated_at, model, "

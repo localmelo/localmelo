@@ -208,7 +208,6 @@ def test_repeated_identical_facts_do_not_grow_the_store(tmp_path: Path) -> None:
                 decision = decide(
                     text,
                     kind="episodic",
-                    source="reasoning_note",
                     provenance={"task_text": "the release"},
                     active=active,
                 )

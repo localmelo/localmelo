@@ -102,6 +102,7 @@ from localmelo.support.gateway.task_endings import (
     can_finish,
     finish_message,
     finish_run,
+    job_finished,
     shown,
     stash_floor,
 )
@@ -118,6 +119,7 @@ from localmelo.support.gateway.task_policy import (
     worker_tool_allowlist,
 )
 from localmelo.support.gateway.task_store import (
+    JobFinishedError,
     TaskConflictError,
     TaskNotFoundError,
     TaskNotPausedError,
@@ -1008,6 +1010,7 @@ class TaskWorkers:
         level: int | None = None,
         reason: str = "",
         automatic: bool = False,
+        same_job: bool = False,
     ) -> tuple[dict, str]:
         """Give *task_id* the person's message; the task's body and what happened.
 
@@ -1016,8 +1019,10 @@ class TaskWorkers:
         stopped task runs again in its own session, the message as its next
         turn after the earlier ones; *level* (from the person's words)
         replaces its old level. A message the run never read continues the
-        task once the run ends. A worker is one-time: a chat brings only the
-        same job here, and :meth:`Front.follow` starts new work as a new task.
+        task once the run ends. A worker is one-time: with *same_job* the
+        message is for the job it was given, and :class:`JobFinishedError` says
+        under the lock that the job finished meanwhile, so a chat starts a new
+        task (:meth:`Front.follow`).
 
         *automatic*: the message is its chat's own, in its follow-up (#411).
         It only continues a finished task (never answers its question nor
@@ -1047,6 +1052,8 @@ class TaskWorkers:
             if self._closed:
                 raise RuntimeError("workers are closed")
             current = await self.tasks.get_task(task_id)
+            if same_job and job_finished(current):
+                raise JobFinishedError("it finished; a finished task takes no new work")
             if current.state in _CONTINUABLE:
                 record = await self._continue(current, text, level=level, reason=reason)
                 await self._schedule()
@@ -1119,10 +1126,11 @@ class TaskWorkers:
 
         The block is found in the task's records; the allowance is kept in
         the task's :class:`AutoPolicy`, and the message goes as the person's
-        (:meth:`message`): queued for a running task, or continuing a
-        finished one. :class:`BlockError` for an unknown block, one that
-        cannot be allowed, or one allowed already (it ran on its allowance,
-        or one waits). The task's policy goes when it finishes, and with it
+        (:meth:`message`): queued for a running task, or continuing one that
+        stopped before its job was done. :class:`BlockError` for an unknown
+        block, one that cannot be allowed, or one allowed already (it ran on
+        its allowance, or one waits); :class:`JobFinishedError` for a job that
+        finished since. The task's policy goes when it finishes, and with it
         an allowance it did not use.
         """
         await self.tasks.get_task(task_id)
@@ -1136,7 +1144,7 @@ class TaskWorkers:
         policy = self._auto.setdefault(task_id, AutoPolicy(task=True))
         policy.allow_once(key, categories, tool)
         try:
-            return await self.message(task_id, go_ahead_text(categories))
+            return await self.message(task_id, go_ahead_text(categories), same_job=True)
         except BaseException:
             policy.withdraw(key)
             raise
@@ -2934,6 +2942,11 @@ class TaskWorkers:
             if body["approvals"] == "auto"
             else []
         )
+        if job_finished(record):
+            # A worker is one-time: its finished job has no step left to allow.
+            body["blocked"] = [
+                {**b, "can_allow": False, "finished": True} for b in body["blocked"]
+            ]
         policy = self._auto.get(record.task_id)
         body["allowances"] = dict(policy.given) if policy is not None else {}
         # Its steps that ran on the person's earlier approval, each with Revoke (#369).
