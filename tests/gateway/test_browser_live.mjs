@@ -261,10 +261,10 @@ class FakeSocket {
  * A panel on a fake socket. The panel never opens by itself: with `open` (the default) the chat's header chip is pressed
  * once the chat is followed, as the person does; `open: false` leaves it for the test to press.
  */
-function panel({wide = true, state = {available: true, open: true, browsing: true}, popOut = null, bridge = false, open = true} = {}) {
+function panel({state = {available: true, open: true, browsing: true}, popOut = null, bridge = false, open = true} = {}) {
   FakeSocket.all = [];
   const els = {
-    root: node({hidden: true}),
+    root: node({hidden: true, focused: 0, focus() { this.focused += 1; }}),
     chip: node({hidden: true}),
     chipText: node(),
     title: node(),
@@ -276,9 +276,10 @@ function panel({wide = true, state = {available: true, open: true, browsing: tru
     note: node(),
     hide: node(),
     pop: node({hidden: true}),
+    stop: node({hidden: true}),
   };
   const timers = [];
-  const calls = {api: [], changed: [], decoded: [], denied: 0, popped: []};
+  const calls = {api: [], decoded: [], denied: 0, popped: [], returned: []};
   let apiState = state;
   const browser = setupBrowser({
     api: async (path) => {
@@ -295,9 +296,8 @@ function panel({wide = true, state = {available: true, open: true, browsing: tru
     location: {protocol: 'http:', host: 'gw.test'},
     schedule: (fn, ms) => { timers.push({fn, ms, cancelled: false}); return timers.length; },
     cancel: (id) => { timers[id - 1].cancelled = true; },
-    wide: () => wide,
     popOut: popOut ?? (bridge ? (session) => calls.popped.push(session) : null),
-    changed: (event) => calls.changed.push(event.shown),
+    returned: (key) => calls.returned.push(key),
     denied: () => { calls.denied += 1; },
   });
   const follow = browser.follow;
@@ -328,7 +328,6 @@ test('the panel never opens by itself: the chip opens it, on the source of the c
   assert.equal(FakeSocket.all.length, 0);
   browser.toggle();
   assert.equal(els.root.hidden, false);
-  assert.deepEqual(calls.changed, [true]);
   assert.equal(FakeSocket.all.length, 1);
   assert.equal(FakeSocket.all[0].url, SOURCE);
   assert.equal(els.root.dataset.state, 'loading');
@@ -393,7 +392,6 @@ test('hiding the panel only stops watching: nothing is sent, the chip stays and 
   assert.equal(socket.closed, 1000);
   assert.deepEqual(socket.sent, [], 'closing the panel is not Done or Stop');
   assert.equal(els.root.hidden, true);
-  assert.deepEqual(calls.changed, [true, false]);
   assert.equal(els.chip.hidden, false, 'the chip brings it back');
   browser.card(card());
   assert.equal(els.root.hidden, true);
@@ -609,24 +607,23 @@ test('a stream the gateway ended for the token asks the page to check it, then r
   assert.equal(browser.state().link, 'retry');
 });
 
-test('on a narrow screen the panel is a sheet that Escape closes', async () => {
-  const {browser, els, calls} = panel({wide: false, open: false, state: {available: true, open: true}});
+test('Escape closes the view at any width, and gives the keys back to the card that opened it', async () => {
+  const {browser, els, calls} = panel({open: false, state: {available: true, open: true}});
   await browser.follow('s1');
-  assert.equal(els.root.hidden, true);
-  assert.equal(FakeSocket.all.length, 0);
-  browser.toggle();
+  assert.equal(browser.close(), false, 'nothing is open: Escape is not this view\'s');
+  await browser.open(card({key: 's1:run-1'}));
   assert.equal(els.root.hidden, false);
-  assert.deepEqual(calls.changed, [true]);
-  assert.equal(browser.closeSheet(), true, 'Escape closes the sheet');
+  assert.equal(els.root.focused, 1, 'the keys go into the view when it opens');
+  assert.equal(browser.close(), true);
   assert.equal(els.root.hidden, true);
-  assert.equal(browser.closeSheet(), false);
-});
-
-test('on a wide screen Escape leaves the docked panel alone', async () => {
-  const {browser, els} = panel();
-  await browser.follow('s1');
-  assert.equal(browser.closeSheet(), false);
-  assert.equal(els.root.hidden, false);
+  assert.deepEqual(calls.returned, ['s1:run-1'], 'the card that opened it has the keys again');
+  assert.equal(FakeSocket.all[0].closed, 1000, 'closing the view only stops watching');
+  assert.deepEqual(FakeSocket.all[0].sent, [], 'it is not Done or Stop');
+  assert.equal(browser.close(), false);
+  // Hiding it by the page itself (the chat is left, a task takes the room) is not a person's close: the keys stay where they are.
+  await browser.open(card({key: 's1:run-1'}));
+  browser.hide();
+  assert.deepEqual(calls.returned, ['s1:run-1']);
 });
 
 test('leaving the chat takes the panel and its socket away, and the same chat keeps them', async () => {
@@ -641,7 +638,6 @@ test('leaving the chat takes the panel and its socket away, and the same chat ke
   browser.release('s2');
   assert.equal(socket.closed, 1000);
   assert.equal(els.root.hidden, true);
-  assert.deepEqual(calls.changed, [true, false]);
   assert.equal(els.chip.hidden, true);
 });
 
@@ -714,11 +710,10 @@ test('the pop-out window shows the panel alone: no chip, no hide, whatever the c
   assert.equal(FakeSocket.all.length, 1);
   browser.hide();
   assert.equal(els.root.hidden, false, 'there is nothing behind it to go back to');
-  assert.equal(browser.closeSheet(), false);
+  assert.equal(browser.close(), false);
   browser.card(card());
   browser.open(card());
-  assert.deepEqual(calls.changed, [true], 'its chat\'s cards and Open browser are not its business');
-  assert.equal(FakeSocket.all.length, 1);
+  assert.equal(FakeSocket.all.length, 1, 'its chat\'s cards and Open browser are not its business');
 });
 
 test('the pop-out window of a chat with no live view says so', async () => {
@@ -817,7 +812,8 @@ function page() {
   const make = (tag) => {
     const attributes = {};
     return {
-      tag, hidden: false, textContent: '', className: '', dataset: {}, style: {}, children: [], listeners: {}, tabIndex: 0, drawn: [],
+      tag, hidden: false, textContent: '', className: '', dataset: {}, style: {}, children: [], listeners: {}, tabIndex: 0, drawn: [], focused: 0,
+      focus() { this.focused += 1; },
       setAttribute(key, value) { attributes[key] = String(value); },
       getAttribute(key) { return attributes[key] ?? null; },
       append(...items) { this.children.push(...items); },
@@ -831,7 +827,7 @@ function page() {
 }
 
 /** The card manager, the panel and one transport on fake sockets, with decodes the test releases by hand. */
-function together({state = {available: true, open: true}, acts = {}} = {}) {
+function together({state = {available: true, open: true}, acts = {}, options = {}} = {}) {
   FakeSocket.all = [];
   const decodes = [];
   const streams = createStreams({
@@ -843,22 +839,25 @@ function together({state = {available: true, open: true}, acts = {}} = {}) {
   });
   const {doc, make, all} = page();
   const els = {
-    root: node({hidden: true}), chip: node({hidden: true}), chipText: node(), title: node(), host: node(), rest: node(), status: node(),
+    root: node({hidden: true, focused: 0, focus() { this.focused += 1; }}), chip: node({hidden: true}), chipText: node(), title: node(), host: node(), rest: node(), status: node(),
     viewport: node({clientWidth: 400, clientHeight: 300}), canvas: make('canvas'), note: node(), hide: node(), pop: node({hidden: true}),
+    stop: make('button'), take: make('button'), give: make('button'), viewOnly: node(),
   };
-  const browser = setupBrowser({api: async () => state, els, streams, location: {protocol: 'http:', host: 'gw.test'}});
+  els.stop.hidden = true;
+  const browser = setupBrowser({api: async () => state, els, streams, location: {protocol: 'http:', host: 'gw.test'}, ...options});
   const sight = new Map();
   let report = null;
   const dock = {root: make('div'), canvas: make('canvas'), mark: make('span'), text: make('span'), jump: make('button'), open: make('button')};
   dock.root.hidden = true;
   const cards = setupBrowserCards({
-    doc, streams, open: (card) => browser.open(card), dock, ...acts,
+    doc, streams, open: (card, picture) => browser.open(card, picture), dock, ...acts,
     observe: (onChange) => { report = onChange; return {add: (target) => sight.set(target, null), remove: (target) => sight.delete(target)}; },
   });
   return {
     streams, browser, cards, els, dock, decodes, all,
     see: (key, visible) => report(cards.nodeOf(key), visible),
     open: (key) => all(cards.nodeOf(key), 'button').find((found) => found.className.includes('outline-button')),
+    picture: (key) => all(cards.nodeOf(key), 'button').find((found) => found.className.includes('bcard-picture')),
   };
 }
 
@@ -889,10 +888,12 @@ test('the card and the panel share one socket and one decode, and a late picture
   socket.say(new Uint8Array([2]).buffer);
   const late = t.decodes.shift();
   const second = readBrowser(row({id: 11, card_key: 's1:run-2', run_id: 'run-2', browser_session_id: 'e5f6a7b8'}));
-  t.cards.sync([readBrowser(row({id: 10, state: 'done', action: ''})), second]);
+  const ended = readBrowser(row({id: 10, state: 'done', action: ''}));
+  t.cards.sync([ended, second]);
   t.see('s1:run-2', true);
-  t.browser.card(second);
+  t.browser.card(second, [ended, second]);
   assert.equal(socket.closed, 1000, 'nothing watches the old source any more');
+  assert.equal(t.els.root.dataset.state, 'kept', 'the view the person opened on run 1 keeps run 1\'s last picture');
   late();
   await settle();
   assert.deepEqual([canvas.drawn, t.els.canvas.drawn], [[1], [1]], 'the late picture is painted nowhere');
@@ -1078,4 +1079,131 @@ test('Open browser asks again when the chat was last found unwatchable: it opens
   browser.hide();
   await browser.open(card());
   assert.equal(calls.api.length, 3);
+});
+
+// ── The big view: the card's click shows the page big at once, in the same panel ──
+
+/** A card's page painted, as the stream does: the socket opens, says what it shows and sends one picture. */
+async function paint(t, socket, extra = {}) {
+  socket.open();
+  socket.say(message(extra));
+  socket.say(new Uint8Array([5]).buffer);
+  t.decodes.shift()();
+  await settle();
+}
+
+test('one press on a card\'s picture or its button shows the page big on the same socket, and closing puts the keys back on the card', async () => {
+  const back = [];
+  const t = together({options: {returned: (key) => { back.push(key); t.cards.focus(key); }}});
+  const working = readBrowser(row());
+  t.cards.sync([working]);
+  t.see('s1:run-1', true);
+  await t.browser.follow('s1');
+  t.browser.card(working, [working]);
+  for (const [name, target] of [['button', () => t.open('s1:run-1')], ['picture', () => t.picture('s1:run-1')]]) {
+    target().press();
+    await settle();
+    assert.equal(t.els.root.hidden, false, `the ${name}: the view shows at once, with no second click`);
+    assert.equal(FakeSocket.all.length, 1, 'on the card\'s own socket');
+    assert.equal(t.browser.close(), true);
+    assert.equal(t.els.root.hidden, true);
+  }
+  assert.equal(t.els.root.focused, 2, 'the keys went into the view each time it opened');
+  assert.deepEqual(back, ['s1:run-1', 's1:run-1']);
+  assert.equal(t.open('s1:run-1').focused, 2, 'and came back to the card');
+  assert.equal(t.streams.size().sinks, 1, 'only the card still watches: it stays live in the chat');
+});
+
+test('the view says what melo is doing now as the card does, and Stop ends the run it shows: a chat\'s by its own run, a task\'s by the task', async () => {
+  const stopped = [];
+  const t = together({options: {stop: async (found) => { stopped.push(found.task ? found.session : 'chat'); return true; }}});
+  const chat = readBrowser(row());
+  t.cards.sync([chat]);
+  t.see('s1:run-1', true);
+  await t.browser.follow('s1');
+  t.browser.card(chat, [chat]);
+  t.open('s1:run-1').press();
+  await settle();
+  await paint(t, FakeSocket.all[0]);
+  assert.equal(t.els.status.textContent, 'Working · Pressing on the page', 'the card\'s words: the state and the step');
+  assert.equal(t.els.stop.hidden, false);
+  t.els.stop.press();
+  await settle();
+  assert.deepEqual(stopped, ['chat']);
+  assert.equal(t.els.stop.disabled, true, 'a press waits for the run to change');
+  // A task\'s card: the same button names the task.
+  const task = readBrowser(row({id: 8, card_key: 'task1:run-1', source_kind: 'task', source_session_id: 'task1', goal: 'Find ML jobs'}));
+  t.cards.sync([chat, task]);
+  t.see('task1:run-1', true);
+  t.browser.card(task, [chat, task]);
+  await t.browser.open(task);
+  assert.equal(t.els.stop.disabled, false, 'a view of another run starts with a Stop that can be pressed');
+  t.els.stop.press();
+  await settle();
+  assert.deepEqual(stopped, ['chat', 'task1']);
+  // The run is over: no live control is left.
+  const over = readBrowser(row({id: 9, card_key: 'task1:run-1', source_kind: 'task', source_session_id: 'task1', state: 'stopped', by: 'you', action: ''}));
+  t.cards.sync([chat, over]);
+  t.browser.card(over, [chat, over]);
+  assert.equal(t.els.stop.hidden, true);
+});
+
+test('the view stays on the card the person opened while a newer card of the chat runs', async () => {
+  const {browser, els} = panel({open: false});
+  await browser.follow('s1');
+  const task = card({session: 'task1', task: true, owner: 's1', key: 'task1:run-1', gen: 'a1b2c3d4', run: 'run-1'});
+  const mine = card({key: 's1:run-2', gen: 'e5f6a7b8', run: 'run-2'});
+  browser.card(task, [task]);
+  await browser.open(task);
+  assert.equal(FakeSocket.all.length, 1);
+  browser.card(mine, [task, mine]);
+  assert.equal(els.root.hidden, false);
+  assert.equal(FakeSocket.all.length, 1, 'a card that begins elsewhere does not take the view away');
+  assert.equal(FakeSocket.all[0].closed, null);
+  assert.match(FakeSocket.all[0].url, /sessions\/task1\/browser\/live\?gen=a1b2c3d4&run=run-1&owner=s1$/);
+});
+
+test('a finished card opens its last picture big with no live control, and a run that ends under the view keeps its picture', async () => {
+  const back = [];
+  const t = together({options: {returned: (key) => back.push(key), stop: async () => true}});
+  const working = readBrowser(row());
+  t.cards.sync([working]);
+  t.see('s1:run-1', true);
+  await t.browser.follow('s1');
+  t.browser.card(working, [working]);
+  t.open('s1:run-1').press();
+  await settle();
+  await paint(t, FakeSocket.all[0], {takeover: true});
+  assert.equal(t.els.take.hidden, false, 'a live page offers Take over as before');
+  // The run ends while the person watches: the picture stays, what melo's browser did next is not in the way.
+  FakeSocket.all[0].say(message({state: 'closed', tab: '', reason: 'browser'}));
+  const done = readBrowser(row({id: 12, state: 'done', action: ''}));
+  t.cards.sync([done]);
+  t.browser.card(done, [done]);
+  assert.equal(t.els.root.hidden, false, 'the view stays open');
+  assert.equal(t.els.root.dataset.state, 'kept');
+  assert.equal(t.els.canvas.hidden, false, 'with the last picture');
+  assert.equal(t.els.status.textContent, 'Done · example.com');
+  assert.deepEqual([t.els.stop.hidden, t.els.take.hidden, t.els.give.hidden], [true, true, true], 'no live control');
+  assert.equal(FakeSocket.all[0].closed, 1000, 'and nothing watches');
+  assert.equal(t.browser.close(), true);
+  // Later the card is pressed on its picture: the view shows what the card kept, and asks for nothing.
+  t.picture('s1:run-1').press();
+  await settle();
+  assert.equal(t.els.root.hidden, false);
+  assert.equal(t.els.root.dataset.state, 'kept');
+  assert.equal(t.els.canvas.drawn.at(-1), 'canvas', 'the card\'s own canvas is copied, not asked for again');
+  assert.equal(FakeSocket.all.length, 1);
+  assert.equal(t.els.status.textContent, 'Done · example.com');
+  assert.deepEqual([t.els.stop.hidden, t.els.take.hidden, t.els.give.hidden], [true, true, true]);
+  assert.deepEqual(layout({w: t.els.canvas.width, h: t.els.canvas.height}, {width: 400, height: 300}).width, 400);
+  // A card with no picture to keep (a reload) has nothing to open.
+  const bare = readBrowser(row({id: 13, card_key: 's1:run-9', run_id: 'run-9', state: 'done', action: ''}));
+  t.browser.close();
+  assert.equal(await t.browser.open(bare, null), false);
+  assert.equal(t.els.root.hidden, true);
+  // The card finds its keys again: its button while it can open, else its picture, else itself.
+  assert.equal(t.cards.focus('s1:run-1'), true);
+  assert.equal(t.picture('s1:run-1').focused, 1, 'an ended card takes the keys on its picture');
+  assert.equal(t.cards.focus('nothing'), false);
 });

@@ -471,7 +471,7 @@ In developer mode, **Details** opens in the panel, in place of the tabs, until y
 
 ## The browser in the chat
 
-While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), the chat that asked shows a card under the task's line, like a message: **Working for this chat**, the task's goal, the live page, what melo is doing ("Opening a page", "Pressing a button"), one state word (Working, Waiting for you, You're in control, Done or Stopped), **Open browser** and **Stop**. It works in the main chat and in a side chat alike, and a web search counts as browsing. You can keep typing under it, and the chat answers while the task works.
+While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), the chat that asked shows a card under the task's line, like a message: **Working for this chat**, the task's goal, the live page, what melo is doing ("Opening a page", "Pressing a button"), one state word (Working, Waiting for you, You're in control, Done or Stopped), **Open browser** and **Stop**. A click on the picture or on **Open browser** shows the page big at once ([The Browser panel](#the-browser-panel)). It works in the main chat and in a side chat alike, and a web search counts as browsing. You can keep typing under it, and the chat answers while the task works.
 
 - The card shows only what the program wrote: the state, the kind of step and the site's name, and the task's title. It never holds a typed value, a full address or a query.
 - **Stop** ends that task, while the run the card shows is the one going: a card left from an earlier run stops nothing. **Done**, which shows while you have the page, gives it back to that task's run. Neither reaches any other task of the chat.
@@ -479,22 +479,24 @@ While melo browses in Chrome in the background ([Browsing with melo](browsing.md
 - Melo has one Chrome. While you have a page in a real window it restarts, so the cards of other chats and tasks say "Not updating" until it is back. Four tasks you hold pages for fill the four worker slots, and the next task waits its turn.
 - When the card scrolls out of view, a small bar at the top of the chat keeps the page in sight (a picture, the state and the same button); a click on it goes back to the card.
 - A picture that is not arriving never reads as live: the card says "Not updating", or "Reconnecting…" while the link is being made again, and dims the picture.
-- When the run ends the card keeps the last picture this page showed, and says how it ended.
+- When the run ends the card keeps the last picture this page showed, and says how it ended. A click on it shows that picture big, with no live controls.
 - A chat that is open again, or a page that was reloaded, shows the same card again.
 
 ## The Browser panel
 
-**Open browser** on the card, or the **Browser** button in the header, shows the page in a **Browser** panel beside the chat, live, and lets you take it over.
+A click on the card's picture, on **Open browser**, or on the **Browser** button in the header shows the page big and live at once, in the **Browser** panel, and lets you take it over. It covers the chat and Melo's panel, so the picture fills the window; there is no second click.
 
-- The panel never opens by itself; **Hide browser** in its header closes it. Closing it only stops watching: melo goes on, and nothing is stopped or given back.
+- It never opens by itself. **Back to chat** in its header, or Esc, closes it and puts the keys back on the card you clicked. Closing it only stops watching: melo goes on, nothing is stopped or given back, and the card stays live in the chat.
+- melo keeps working while you watch. The footer says what it is doing now ("Opening a page", "Pressing a button") and its state, as the card does, and **Stop** ends the run you see (a task's run, or the chat's own turn).
+- A page that has ended shows its last picture big, with no Take over, Stop or Pop out. Open it from a finished card; a run that ends while you watch turns into that picture.
 - After you switch the browser to Chrome in Settings, it opens at the chat's next browser step. A chat in the middle of a turn finishes it in the browser it has.
 - **Pop out** shows the panel alone and large: in the app in a window of its own, in a browser in a new window. A task's browser pops out the same way, showing that run's page and no other.
 - It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.
-- On a window 1480 pixels wide or more it sits between the chat and the [panel beside the chat](#the-panel-beside-a-chat). On a narrower one it takes that panel's place while it is open, and under 900 pixels it opens as a sheet when you ask.
+- It fills the area beside the chat list; on a phone or a window 700 pixels wide or less it fills the screen.
 - It sends nothing while it is hidden or its tab is in the background, and closing the tab ends the picture stream.
 - **Take over** in its footer makes the page yours, in a real window of melo's Chrome: the panel says "You're in control", shows a live copy and offers **Show Chrome window**. melo is paused, with no time limit. **Done** gives it back (closing the window does too), and melo reads the page again before it acts ([Taking over melo's browser](browsing.md#taking-over-melos-browser)).
 - When melo needs you on a page (a sign-in, a code, a QR code, a check that you are human), a card in the chat says "melo needs you to sign in on example.com" with **Take over** and **Not now**. A page with a form you began offers **Take over here** first, since a window would clear the form.
-- When the page is in the panel (a form you began, or a window that could not open), your clicks, keys, input method and pastes go to it there. A box the page puts up while you have it (an alert, a confirm, a question) shows in the panel.
+- When the page is in the panel (a form you began, or a window that could not open), your clicks, keys, input method and pastes go to it there, and Esc is the page's: Control-Esc moves to **Done**. A box the page puts up while you have it (an alert, a confirm, a question) shows in the panel.
 - The chat's record keeps one line of how it ended: "Gave the page back to melo at 10:42.", "You closed the Chrome window, so the page went back to melo." or "melo was stopped while you had the page."
 - Nothing you type is kept, and the picture is not saved anywhere.
 
