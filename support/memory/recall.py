@@ -148,6 +148,11 @@ _ASKING_WORDS: Final = (
 )
 _ASKING: Final = frozenset(_ASKING_WORDS.split())
 _CJK_FILLER: Final = frozenset("的了是在我你他她它们和与就也都吗呢吧啊么什怎哪谁几时候")
+# Japanese particles, as whole terms. The tokenizer gives every kana as a term and
+# every adjacent pair of them, so "は" and "から" are terms of their own; "はな" and
+# "かばん" are words that hold a particle's character, so (unlike a ``_CJK_FILLER``)
+# only a term that is a whole particle is left out.
+_JA_PARTICLES: Final = frozenset((*"のはがをにへでともかねよ", "から", "まで", "より"))
 # A note that starts in the first person ("I prefer tea", "My name is Juno", "我…").
 _FIRST_PERSON: Final = re.compile(r"(?:i|my|me|we|our|我|咱)(?![a-z])", re.IGNORECASE)
 # A message that asks about an older value, so the block keeps the older item.
@@ -710,12 +715,14 @@ def stemmed(text: str) -> str:
 
 
 def gate_terms(text: str) -> set[str]:
-    """The stemmed content terms of a question: no stopwords, asking words or CJK fillers."""
+    """The stemmed content terms of a question: no stopwords, asking words, Japanese
+    particles or CJK fillers."""
     return {
         stem(term)
         for term in tokenize(normalise(text))
         if term not in STOPWORDS
         and term not in _ASKING
+        and term not in _JA_PARTICLES
         and (term.isascii() or not any(char in _CJK_FILLER for char in term))
     }
 

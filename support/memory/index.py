@@ -1118,19 +1118,10 @@ class ConversationIndex:
             raise KeyError(f"no item {item_id}")
         return (str(row[0]), _ids(row[1]), _ids(row[2]))
 
-    async def mark_replaced(self, item_id: int, by: int) -> None:
+    async def _replace(self, conn: aiosqlite.Connection, item_id: int, by: int) -> None:
         """Mark *item_id* replaced by item *by*: it stays, and reads as older. Any
         conflict it was in ends (its partners are current again unless another
-        item disagrees with them)."""
-        conn = await self._ready()
-        try:
-            await self._replace(conn, item_id, by)
-            await conn.commit()
-        except BaseException:
-            await conn.rollback()
-            raise
-
-    async def _replace(self, conn: aiosqlite.Connection, item_id: int, by: int) -> None:
+        item disagrees with them). The caller commits."""
         _, _, conflicts = await self._links(conn, item_id)
         await conn.execute(
             "UPDATE items SET status = 'replaced', replaced_by = ?, "
@@ -1145,20 +1136,11 @@ class ConversationIndex:
                 (json.dumps(left), "conflict" if left else "active", other),
             )
 
-    async def link_items(self, first: int, second: int, *, conflict: bool) -> None:
-        """Link two items both ways as related, or with *conflict* as in conflict
-        (both ``status`` ``conflict``; each stays recallable)."""
-        conn = await self._ready()
-        try:
-            await self._link(conn, first, second, conflict=conflict)
-            await conn.commit()
-        except BaseException:
-            await conn.rollback()
-            raise
-
     async def _link(
         self, conn: aiosqlite.Connection, first: int, second: int, *, conflict: bool
     ) -> None:
+        """Link two items both ways as related, or with *conflict* as in conflict
+        (both ``status`` ``conflict``; each stays recallable). The caller commits."""
         for item_id, other in ((first, second), (second, first)):
             status, related, conflicts = await self._links(conn, item_id)
             if conflict:
