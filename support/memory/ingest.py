@@ -35,9 +35,10 @@ split and its halves are asked in its place; one very long exchange is read in p
 with ``[memory] compress_parallel`` above
 1, the windows of all the chats are asked for together, that many requests at most in
 flight, and the result is the same), then the items routed against the ones kept, the
-chats oldest first as they were written, one chat after the other. The report says, for each chat by
-its id in the file, what became of every exchange. It does not check the GPU lock:
-it is an explicit developer command, for whoever holds the GPU.
+chats oldest first as they were written, one chat after the other. An item that
+holds a secret is not kept, and the report counts them (``refused``). The report says,
+for each chat by its id in the file, what became of every exchange. It does not check
+the GPU lock: it is an explicit developer command, for whoever holds the GPU.
 """
 
 from __future__ import annotations
@@ -129,6 +130,8 @@ class Report:
     compress: dict[str, dict[str, Any]] | None = None
     stats: hippo_encode.Stats = field(default_factory=hippo_encode.Stats)
     items: int = 0
+    # Items the encoder made that held a secret and were not kept, over every chat.
+    refused: int = 0
 
     def to_json(self) -> dict[str, Any]:
         data = self._turns_json()
@@ -136,6 +139,7 @@ class Report:
             data["ingest"] = "compress"
             data["model_calls"] = self.stats.calls
             data["cache_hits"] = self.stats.cache_hits
+            data["refused"] = self.refused
             # Sub-windows asked for windows whose reply ran out of room, and how many
             # of them failed, over every chat (each chat's own are in its windows).
             rows = [w for chat in self.compress.values() for w in chat["windows"]]
@@ -179,6 +183,12 @@ class Report:
                 f"({self.stats.calls} model call{'s' if self.stats.calls != 1 else ''}, "
                 f"{self.stats.cache_hits} from the cache)."
             )
+            if self.refused:
+                line += (
+                    f" {self.refused} item{'s' if self.refused != 1 else ''} held a "
+                    "secret and "
+                    f"{'were' if self.refused != 1 else 'was'} not kept."
+                )
         return (
             f"{line} The embedding model failed: {self.error}" if self.error else line
         )
@@ -316,10 +326,11 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
     ``windows`` (``exchanges``, ``chars``, ``cached``, ``failed``, ``cut``,
     ``dropped``, ``split``, ``failed_parts``, ``part``: ``[k, m]`` for part *k* of
     *m* of one long exchange, else ``null``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
-    exchange indexes), ``items`` (each stored: ``id``, ``title``, ``text``,
-    ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
-    ``item`` (its id, ``null`` when ignored), ``action``, ``target``, ``reason``,
-    ``title``).
+    exchange indexes, read from the items that were kept), ``refused`` (how many items
+    held a secret and were not kept), ``items`` (each stored: ``id``, ``title``,
+    ``text``, ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes``
+    (each routed item: ``item`` (its id, ``null`` when ignored), ``action``,
+    ``target``, ``reason``, ``title``).
     """
     encoding = encoded.encoding
     return {
@@ -330,6 +341,7 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
             "unmentioned": encoding.unmentioned,
             "forced": encoding.forced,
         },
+        "refused": encoded.refused,
         "items": [
             {
                 "id": route.item,
@@ -478,6 +490,7 @@ async def run(
             report.items += sum(
                 1 for _, route in encoded.routed if route.item is not None
             )
+            report.refused += encoded.refused
     report.model = memory.embedding()[1]
     report.error = memory.last_error
     report.seconds = time.perf_counter() - started

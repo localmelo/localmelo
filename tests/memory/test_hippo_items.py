@@ -10,6 +10,7 @@ stored). Synthetic items, no model.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -17,7 +18,8 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.memory.hippo.policy import decide
-from localmelo.support.memory.hippo_route import POOL, Router
+from localmelo.support.memory import hippo_route
+from localmelo.support.memory.hippo_route import POOL, REFUSE, Router
 from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
@@ -127,6 +129,11 @@ async def test_the_table_is_made_on_open_beside_an_older_index(tmp_path: Path) -
     try:
         assert await index.count() == 1 and await index.count_items() == 0
         assert await index.add_item(make("An item for an older index.")) == 1
+        # No mark is no migration: the chat counts as not encoded.
+        assert await index.encoded_turn("s1") is None
+        assert await index.ids(unencoded=True) == await index.ids()
+        await index.mark_encoded("s1", 1)
+        assert await index.encoded_turn("s1") == 1
     finally:
         await index.aclose()
     columns = [
@@ -283,6 +290,45 @@ async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
     assert await index.add_item(make("A new item after forgetting.")) >= 1
 
 
+async def test_a_mark_moves_forward_and_leaves_the_turns_past_it_unencoded(
+    index: ConversationIndex,
+) -> None:
+    # A summary sits at a turn below 1: no encoder reads it, so no mark covers it.
+    for session, turns in (("s1", (1, 2, 3, -1)), ("s2", (1, 2))):
+        for turn in turns:
+            await add_turn(index, session, turn)
+
+    async def unencoded() -> set[tuple[str, int]]:
+        docs = await index.fetch(await index.ids(unencoded=True))
+        return {(doc.session_id, doc.turn) for doc in docs}
+
+    assert await index.encoded_turn("s1") is None
+    assert len(await unencoded()) == 6  # no mark: nothing is encoded
+    await index.mark_encoded("s1", 2)
+    assert await unencoded() == {("s1", 3), ("s1", -1), ("s2", 1), ("s2", 2)}
+    await index.mark_encoded("s1", 1)  # a mark never moves back
+    assert await index.encoded_turn("s1") == 2
+    await index.mark_encoded("s1", 3)
+    assert await unencoded() == {("s1", -1), ("s2", 1), ("s2", 2)}
+
+
+async def test_forgetting_clears_the_marks_but_one_turn_and_a_rebuild_do_not(
+    index: ConversationIndex,
+) -> None:
+    for session in ("s1", "s2"):
+        for turn in (1, 2):
+            await add_turn(index, session, turn)
+        await index.mark_encoded(session, 1)
+    await index.delete("s1", 2)
+    assert await index.encoded_turn("s1") == 1
+    await index.forget_all(mark=False)
+    assert [await index.encoded_turn(s) for s in ("s1", "s2")] == [1, 1]
+    await index.delete("s1")
+    assert [await index.encoded_turn(s) for s in ("s1", "s2")] == [None, 1]
+    await index.forget_all()
+    assert await index.encoded_turn("s2") is None
+
+
 # ── Routing ──
 
 PITTSBURGH = "The user said they live in Pittsburgh."
@@ -309,6 +355,45 @@ async def test_a_new_fact_is_stored_as_new(index: ConversationIndex) -> None:
     )
     assert (second.action, second.item) == ("NEW", 2)
     assert [i.status for i in await index.fetch_items([1, 2])] == ["active", "active"]
+
+
+@pytest.mark.parametrize(
+    ("text", "title"),
+    [
+        ("The user said their card number is 4111 1111 1111 1111.", ""),
+        ("The user said their password is private.", ""),
+        ("The user said they have a card.", "Card 4111 1111 1111 1111"),
+    ],
+    ids=["value in the text", "words only", "title only"],
+)
+async def test_an_item_that_holds_a_secret_is_refused_and_stores_nothing(
+    index: ConversationIndex, text: str, title: str
+) -> None:
+    router = Router(index)
+    refused = await route(router, text, title=title)
+    assert (refused.action, refused.item, refused.target) == (REFUSE, None, None)
+    assert refused.reason == "holds a secret" and await index.count_items() == 0
+    # Nothing was taken from the router's run: the next item is the first stored.
+    clean = await route(router, PITTSBURGH, kind="profile")
+    assert (clean.action, clean.item) == ("NEW", 1)
+
+
+def test_the_router_is_the_only_way_into_the_items_table() -> None:
+    """``add_item`` is the one statement that writes an item's title and text, and
+    the router, which refuses an item that holds a secret first, is its only caller
+    outside the tests; no statement changes a stored item's title, text or kind."""
+    root = Path(hippo_route.__file__).parents[2]
+    writers: set[str] = set()
+    callers: set[str] = set()
+    for folder in ("support", "melo"):
+        for path in (root / folder).rglob("*.py"):
+            code = path.read_text(encoding="utf-8")
+            if re.search(r"(?:INSERT|REPLACE)\b[^;]*?\bINTO\s+items\b", code, re.I):
+                writers.add(path.name)
+            if ".add_item(" in code:
+                callers.add(path.name)
+            assert not re.search(r"UPDATE\s+items\s+SET\s+(?:title|text|kind)\b", code)
+    assert writers == {"index.py"} and callers == {"hippo_route.py"}
 
 
 async def test_an_update_stores_the_new_item_and_marks_the_old_one_replaced(

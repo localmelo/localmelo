@@ -616,6 +616,9 @@ async def test_guide_follows_the_item_guide_of_the_items_arm(
         tmp_path, store, recall_form="list", recall_source="items", gather="guide"
     )
     try:
+        _, index = memory.stores()
+        for doc in await index.fetch(await index.ids()):  # the five turns are encoded
+            await index.mark_encoded(doc.session_id, doc.turn)
         session_id = (await _turn(store, "Clinics")).session_id
         number = await put(
             memory, session_id, "Hearing aid fitting", "Fitted last week.", cosine=0.45
