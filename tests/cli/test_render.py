@@ -2934,6 +2934,25 @@ def test_a_page_the_person_has_pauses_the_live_row_until_it_comes_back() -> None
     assert turn.renderer.in_control is None and not live.control
     assert turn.text().splitlines()[-2:] == [
         "◆ You're in control: melo is paused. example.com is in a browser window. "
-        "Press Enter on an empty line here, or close the window to give it back.",
+        "Press Enter on an empty line here, or close the window, to give it back.",
         "✓ You closed the window, so the page went back to melo · 1m15s",
     ]
+
+
+def test_every_way_a_page_comes_back_but_a_stop_has_its_line_and_the_panel_says_enter_too() -> (
+    None
+):
+    turn = Turn(width=200)
+    panel = {"tab": "t1", "place": "app", "site": "example.com", "form": True}
+    turn.event("run.paused", what="browser", detail=panel)
+    assert "Press Enter on an empty line here, or Done there" in turn.text()
+    for how, words in (
+        ("gone", "The page closed its own window"),
+        ("lost", "melo's Chrome stopped"),
+        ("ended", "The turn ended while you had the page"),
+    ):
+        turn.event("run.resumed", what="browser", how=how, held_s=2.0)
+        assert words in turn.text().splitlines()[-1]
+    before = turn.text()
+    turn.event("run.resumed", what="browser", how="stopped", held_s=2.0)
+    assert turn.text() == before, "the stop's own line says it"

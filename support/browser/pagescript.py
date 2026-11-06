@@ -1138,22 +1138,43 @@ FOCUS_JS = r"""(function () {
 
 
 # Whether the page has a form the person began: a field that differs from how the
-# page set it. Only true or false comes back, never what a field holds.
+# page set it, or words in an editor the page made editable; in open shadow roots
+# and frames of the page's own site too, two frames deep, at most 20,000 elements.
+# Only true or false comes back, never what a field holds.
 UNSENT_JS = r"""(function unsent() {
   const skip = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file']);
-  for (const el of document.querySelectorAll('input, textarea, select')) {
-    if (el.disabled) continue;
+  const changed = (el) => {
+    if (el.disabled) return false;
     if (el.tagName === 'SELECT') {
       const opts = Array.from(el.options);
       const set = opts.some((o) => o.defaultSelected);
-      if (opts.some((o, i) => o.selected !== (set ? o.defaultSelected : !el.multiple && i === 0))) return true;
-    } else if (el.type === 'checkbox' || el.type === 'radio') {
-      if (el.checked !== el.defaultChecked) return true;
-    } else if (!skip.has(el.type) && el.value !== el.defaultValue) {
-      return true;
+      return opts.some((o, i) => o.selected !== (set ? o.defaultSelected : !el.multiple && i === 0));
     }
-  }
-  return false;
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+    return !skip.has(el.type) && el.value !== el.defaultValue;
+  };
+  // An editor the page made of an editable element has no first value to compare:
+  // any words in it count, so a window never clears what may be the person's.
+  const written = (el) => el.isContentEditable && el.getAttribute('contenteditable') !== 'false'
+    && !(el.parentElement && el.parentElement.isContentEditable) && /\S/.test(el.textContent || '');
+  let left = 20000;
+  const look = (root, depth) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (--left < 0) return false;
+      const tag = el.tagName;
+      if ((tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') && changed(el)) return true;
+      if (el.hasAttribute('contenteditable') && written(el)) return true;
+      if (el.shadowRoot && look(el.shadowRoot, depth)) return true;
+      if ((tag === 'IFRAME' || tag === 'FRAME') && depth < 2) {
+        let inner = null;
+        try { inner = el.contentDocument; } catch (e) { inner = null; }
+        if (inner && look(inner, depth + 1)) return true;
+      }
+    }
+    return false;
+  };
+  const top = document.body && document.body.isContentEditable && /\S/.test(document.body.textContent || '');
+  return top || look(document, 0);
 })()"""
 
 

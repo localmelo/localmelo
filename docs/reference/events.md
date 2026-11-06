@@ -639,18 +639,22 @@ ends the run's `run.progress` events, never the run.
 - `detail`: what the surfaces show. For `browser`: `tab`, `place` (`window`, a
   real browser window, or `app`, the console's Browser panel), and when known
   `site`, `form` (the page has a form the person began, so it stays in the
-  app) and `failed` (a window could not open, so the page is in the app).
+  app), `failed` (a window could not open, so the page is in the app) and
+  `busy` (that was because another chat's window is open).
 
-While the run is held it makes no model call and starts no tool call, and
-neither the run's own time limit (`timeout_s`) nor the running call's counts.
-Stop (a cancellation) goes through at once.
+While the run is held no request goes to the model, whichever part of the run
+asks, and neither the run's own time limit (`timeout_s`) nor the running call's
+counts. Tool calls the model already chose are not stopped, but a browser step
+on a page the person has waits for it. Stop (a cancellation) goes through at
+once.
 
 ### run.resumed
 
 - `what`: as on `run.paused`.
 - `how`: `done` (the person said so: Done, an empty Enter in the terminal),
-  `closed` (they closed the window they were given), `stopped` (the run was
-  stopped while held) or `ended` (the run ended another way).
+  `closed` (they closed the window they were given), `gone` (the page closed
+  its own window), `lost` (the browser stopped), `stopped` (the run was stopped
+  while held) or `ended` (the run ended another way).
 - `held_s`: the seconds the run was held, to a tenth.
 
 ### run.finished

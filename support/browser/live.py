@@ -41,7 +41,8 @@ stay on that tab even when melo opens another, the pictures come at up to
 :data:`TAKEN_FPS` a second, and the meta says where they have it (``place``:
 ``window``, a real Chrome window, of which the panel is a live copy; or
 ``app``, the panel itself, with ``form`` for a page whose form a window would
-clear and ``failed`` for a window that could not open). The page's boxes are
+clear, ``failed`` for a window that could not open and ``busy`` when that was
+because another chat's window is open). The page's boxes are
 shown to them (``dialog`` in the meta) and answered by them
 (:meth:`LiveView.answer_dialog`). In the app their input goes to the page
 (:meth:`LiveView.send_input`), held to a rate per viewer and only while melo is
@@ -649,6 +650,8 @@ class LiveView:
                 meta["form"] = True
             if where.failed:
                 meta["failed"] = True
+            if where.busy:
+                meta["busy"] = True
             dialog_of = getattr(self._driver, "dialog_of", None)
             box = dialog_of(raw) if callable(dialog_of) and raw else None
             if box:

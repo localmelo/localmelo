@@ -37,6 +37,7 @@ from localmelo.support.browser.driver import (
     Element,
     RawPage,
     StaleElementError,
+    WindowBusyError,
 )
 
 FAKE = str(Path(__file__).with_name("fake_chrome_peer.py"))
@@ -235,7 +236,7 @@ async def test_taking_over_opens_a_window_on_the_same_pages_and_done_goes_back(
     mine = await driver.open("https://example.com/", new_tab=True)
     other = await driver.open("https://example.com/news", new_tab=True)
     closed: list[str] = []
-    assert await driver.show_window(mine.id, lambda: closed.append("x")) is True
+    assert await driver.show_window(mine.id, closed.append) is True
     window = starts(peer)[-1]
     assert "--headless=new" not in window and "about:blank" not in window
     assert {(t.id, t.url) for t in await driver.tabs()} == {
@@ -263,9 +264,9 @@ async def test_closing_the_window_is_done_and_the_page_comes_back_in_the_backgro
     await driver.start()
     try:
         tab = await driver.open("https://example.com/news", new_tab=True)
-        done = asyncio.Event()
-        assert await driver.show_window(tab.id, done.set) is True
-        await asyncio.wait_for(done.wait(), 3)
+        done: list[str] = []
+        assert await driver.show_window(tab.id, done.append) is True
+        await until(lambda: done == ["closed"])
         await driver.hide_window()
         assert [(t.id, t.url) for t in await driver.tabs()] == [
             (tab.id, "https://example.com/news")
@@ -282,7 +283,7 @@ async def test_a_window_that_cannot_open_leaves_melo_in_the_background(
     await driver.start()
     try:
         tab = await driver.open("https://example.com/", new_tab=True)
-        assert await driver.show_window(tab.id, lambda: None) is False
+        assert await driver.show_window(tab.id, lambda how: None) is False
         assert "--headless=new" in starts(peer)[-1]
         assert [t.id for t in await driver.tabs()] == [tab.id]
     finally:
@@ -298,14 +299,251 @@ async def test_while_the_window_is_open_another_chat_waits_and_keeps_its_tab(
     try:
         a = await first.open("https://example.com/", new_tab=True)
         b = await second.open("https://example.com/news", new_tab=True)
-        assert await first.show_window(a.id, lambda: None) is True
-        with pytest.raises(BrowserError, match="open in a window for the person"):
+        assert await first.show_window(a.id, lambda how: None) is True
+        with pytest.raises(WindowBusyError, match="open in a window for the person"):
             await second.tabs()
         await first.hide_window()
         assert [t.id for t in await second.tabs()] == [b.id]
     finally:
         await first.close()
         await second.close()
+
+
+async def until(condition: Any, seconds: float = 5.0) -> None:
+    async with asyncio.timeout(seconds):
+        while not condition():
+            await asyncio.sleep(0.02)
+
+
+async def test_a_call_during_the_restart_waits_for_it_and_keeps_its_tabs(
+    peer: Peer,
+) -> None:
+    first, second = make(peer), make(peer)
+    await first.start()
+    await second.start()
+    try:
+        a = await first.open("https://example.com/", new_tab=True)
+        b = await second.open("https://example.com/news", new_tab=True)
+        old = first._browser
+        assert old is not None
+        showing = asyncio.ensure_future(first.show_window(a.id, lambda how: None))
+        await until(lambda: old.closed)
+        assert old.successor is None, "inside the restart"
+        with pytest.raises(WindowBusyError):  # it waited, then met the person's window
+            await second.tabs()
+        assert await showing is True
+        window = first._browser
+        assert window is not None and window.windowed and window.owner is first
+        assert a.id in [t.id for t in await first.tabs()]
+        await first.hide_window()
+        assert [t.id for t in await second.tabs()] == [b.id]
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_another_chat_ending_leaves_the_persons_window(peer: Peer) -> None:
+    from localmelo.support.browser.provider import BrowserToolProvider
+
+    first, second = make(peer), make(peer)
+    await first.start()
+    await second.start()
+    other = BrowserToolProvider(second)  # type: ignore[arg-type]
+    try:
+        a = await first.open("https://example.com/", new_tab=True)
+        await second.open("https://example.com/news", new_tab=True)
+        told: list[str] = []
+        assert await first.show_window(a.id, told.append) is True
+        await other.close()  # chat B ends: deleted, evicted to make room, rebuilt
+        first._follow()
+        window = first._browser
+        assert window is not None and window.windowed and not window.closed
+        assert told == [] and "--headless=new" not in starts(peer)[-1]
+        await first.hide_window()
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_a_page_that_closes_itself_is_no_done_and_does_not_come_back(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CHROME_PAGE_CLOSES", "0.2")
+    driver = make(peer)
+    await driver.start()
+    try:
+        tab = await driver.open("https://example.com/news", new_tab=True)
+        told: list[str] = []
+        assert await driver.show_window(tab.id, told.append) is True
+        assert peer.calls("Runtime.addBinding"), "the page says it closes itself"
+        await until(lambda: told == ["gone"])
+        await driver.hide_window()
+        assert tab.id not in [t.id for t in await driver.tabs()]
+    finally:
+        await driver.close()
+
+
+async def test_a_sign_in_window_that_closes_itself_ends_the_step_with_how_it_ended(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.melo.agent._pause import Hold
+    from localmelo.melo.contracts.pause import PAUSE
+    from localmelo.support.browser.provider import BrowserToolProvider
+    from localmelo.tests.browser.test_acting import Asks, asking
+    from localmelo.tests.browser.test_provider import run
+
+    monkeypatch.setenv("FAKE_CHROME_PAGE_CLOSES", "0.2")
+    provider = BrowserToolProvider(make(peer))  # type: ignore[arg-type]
+    tools = {t.definition.name: t for t in await provider.start()}
+    said: list[Any] = []
+    token = PAUSE.set(Hold(lambda w, d: None, lambda w, h, s: said.append(h)))
+    try:
+        with asking(Asks()):  # the page needs the person: the card, then the window
+            out = await asyncio.wait_for(
+                run(tools, "browser_open", url="https://example.com/"), 10
+            )
+        assert said == ["gone"] and "closed its own window" in out.text
+    finally:
+        PAUSE.reset(token)
+        await provider.close()
+
+
+@pytest.mark.parametrize(("code", "how"), [(0, "closed"), (1, "lost")])
+async def test_a_chrome_that_ends_is_the_persons_quit_only_when_it_quit_cleanly(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch, code: int, how: str
+) -> None:
+    monkeypatch.setenv("FAKE_CHROME_QUITS", f"1.0:{code}")
+    driver = make(peer)
+    await driver.start()
+    try:
+        tab = await driver.open("https://example.com/news", new_tab=True)
+        told: list[str] = []
+        assert await driver.show_window(tab.id, told.append) is True
+        await until(lambda: told == [how])
+        monkeypatch.delenv("FAKE_CHROME_QUITS")
+        await driver.hide_window()
+        assert [t.id for t in await driver.tabs()] == [tab.id]
+    finally:
+        await driver.close()
+
+
+async def test_a_second_chats_take_while_a_window_is_open_is_its_page_in_the_app(
+    peer: Peer,
+) -> None:
+    from localmelo.melo.agent._pause import Hold
+    from localmelo.melo.contracts.pause import PAUSE
+    from localmelo.support.browser.provider import BrowserToolProvider
+    from localmelo.tests.browser.test_acting import Asks, asking
+    from localmelo.tests.browser.test_provider import run
+
+    first, second = make(peer), make(peer)
+    other = BrowserToolProvider(second)  # type: ignore[arg-type]
+    tools = {t.definition.name: t for t in await other.start()}
+    said: list[Any] = []
+    hold = Hold(lambda w, d: said.append(d), lambda w, h, s: said.append(h))
+    token = PAUSE.set(hold)
+    try:
+        await first.start()
+        with asking(Asks()):
+            await run(tools, "browser_open", url="https://example.com/news")
+        a = await first.open("https://example.com/", new_tab=True)
+        assert await first.show_window(a.id, lambda how: None) is True
+        other.owners.take("t1")
+        await until(lambda: bool(said))
+        await other._switched()
+        where = other.owners.where("t1")
+        assert where is not None and (where.place, where.failed, where.busy) == (
+            "app",
+            True,
+            True,
+        )
+        assert said == [
+            {
+                "tab": "t1",
+                "place": "app",
+                "site": "example.com",
+                "failed": True,
+                "busy": True,
+            }
+        ]
+    finally:
+        PAUSE.reset(token)
+        other.hand_back()
+        await first.hide_window()
+        await other.close()
+        await first.close()
+
+
+async def test_a_take_with_the_panel_open_keeps_the_window_and_every_tab(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The panel's viewer looks at the tabs while Chrome starts again for the window."""
+    from localmelo.melo.agent._pause import Hold
+    from localmelo.melo.contracts.pause import PAUSE
+    from localmelo.support.browser.provider import BrowserToolProvider
+    from localmelo.tests.browser.test_acting import Asks, asking
+    from localmelo.tests.browser.test_provider import run
+
+    monkeypatch.setenv("FAKE_CHROME_FRAMES", "100000")
+    driver = make(peer)
+    provider = BrowserToolProvider(driver)  # type: ignore[arg-type]
+    tools = {t.definition.name: t for t in await provider.start()}
+    said: list[Any] = []
+    hold = Hold(lambda w, d: said.append(d), lambda w, h, s: said.append(h))
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url="https://example.com/news")
+        live = provider.live
+        assert live is not None
+        viewer = await live.watch()
+        await until(lambda: viewer.meta.get("state") == "live")
+        provider.owners.take("t1")
+        await until(lambda: bool(said))
+        await provider._switched()
+        where = provider.owners.where("t1")
+        assert where is not None and (where.place, where.failed) == ("window", False)
+        window = driver._browser
+        assert window is not None and window.windowed and window.owner is driver
+        raw = provider.live_raw("t1")
+        assert raw in [t.id for t in await driver.tabs()]
+        assert viewer.meta.get("state") != "closed"
+        provider.hand_back()
+        await provider._switched()
+        assert driver._browser is not None and not driver._browser.windowed
+    finally:
+        PAUSE.reset(token)
+        await provider.close()
+
+
+def test_preferences_save_no_password_and_never_write_through_a_planted_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / "chrome"
+    folder = profile / "Default"
+    folder.mkdir(parents=True, mode=0o700)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep me")
+    os.link(outside, folder / f"Preferences.melo-{os.getpid()}")  # the old fixed name
+    chrome.keep_sessions(str(profile))
+    assert outside.read_text() == "keep me"
+    saved = json.loads((folder / "Preferences").read_text())
+    assert saved["credentials_enable_service"] is False
+    assert saved["profile"] == {
+        "exit_type": "Normal",
+        "password_manager_enabled": False,
+    }
+    assert saved["autofill"] == {"profile_enabled": False, "credit_card_enabled": False}
+    (folder / "Preferences").unlink()
+
+    def full(*args: Any) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(chrome.os, "replace", full)
+    with pytest.raises(OSError):
+        chrome.keep_sessions(str(profile))
+    left = sorted(p.name for p in folder.iterdir())
+    assert left == [f"Preferences.melo-{os.getpid()}"], "no temporary file is left"
 
 
 async def test_a_form_the_person_began_is_told_and_nothing_it_holds(
@@ -660,7 +898,7 @@ async def test_an_address_asked_for_before_an_act_began_is_told_late_never_as_it
 ) -> None:
     raw = await opened(driver, APP)
     session = await driver._session()
-    driver._live().handoffs[session] = ["chat://asked-while-no-act-ran"]
+    (await driver._live()).handoffs[session] = ["chat://asked-while-no-act-ran"]
     # An act that fails leaves it for the next one.
     with pytest.raises(StaleElementError):
         await driver.act(None, Act("click", raw.url, named(raw, "Daily"), doc="other"))

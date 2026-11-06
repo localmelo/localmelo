@@ -25,7 +25,7 @@ import {t} from './i18n.mjs';
  * then `you`) and melo is paused, with no timer. Where they have it is `meta.place`: `window`, a real Chrome window
  * in front of them, of which this panel is a live copy (**Show Chrome window** brings it back to the front); or
  * `app`, this panel, when the page has a form they began (`form`: **Open in Chrome, clear the form** moves it to a
- * window) or the window could not open (`failed`). In the panel their clicks, drags and wheel on the picture, and
+ * window) or the window could not open (`failed`; `busy`: another chat's window is open). In the panel their clicks, drags and wheel on the picture, and
  * their keys, input-method text and pastes in a hidden text box over it, go to the gateway as small JSON messages
  * (`mouseMessage`, `wheelMessage`, `keyMessage`, `composeMessage`, `commitMessage`, `pasteMessage`) and from there to
  * melo's browser as its own input. A point on the picture becomes a point on the page by the frame's own metadata
@@ -127,6 +127,7 @@ export function parseMeta(text) {
   meta.place = yours ? (raw.place === 'window' ? 'window' : 'app') : '';
   meta.form = yours && raw.form === true;
   meta.failed = yours && raw.failed === true;
+  meta.busy = meta.failed && raw.busy === true;
   const box = raw.dialog;
   meta.dialog = meta.owner === 'you' && box && typeof box === 'object' && DIALOGS.has(box.kind)
     ? {kind: box.kind, message: words(box.message).slice(0, 300), default: words(box.default).slice(0, 300)}
@@ -272,7 +273,7 @@ export function control(meta, {focused = false, link = 'open', touch = false} = 
   let hint = '';
   if (place === 'window') hint = `${t('browser.paused')} ${t('browser.liveCopy')}`;
   else if (you) {
-    const why = meta.failed ? t('browser.failed') : meta.form ? t('browser.formHere') : '';
+    const why = meta.busy ? t('browser.busy') : meta.failed ? t('browser.failed') : meta.form ? t('browser.formHere') : '';
     const keys = finishing ? t('browser.finishing') : focused ? t(touch ? 'browser.inControlNoteTouch' : 'browser.inControlNote') : t('browser.clickToType');
     hint = [t('browser.pausedHere'), why, keys].filter(Boolean).join(' ');
   }

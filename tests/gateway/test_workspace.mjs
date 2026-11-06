@@ -68,6 +68,25 @@ function fullTurn() {
   return {view, push, turn: view.turns[0]};
 }
 
+test('a page the person has pauses the turn, and how it came back is one line of the record', () => {
+  const {push, turn} = fullTurn();
+  push('run.paused', {what: 'browser', detail: {tab: 't1', place: 'window', site: 'example.com'}});
+  assert.deepEqual(turn.control, {place: 'window', form: false, failed: false, site: 'example.com'});
+  assert.equal(activity(turn), "You're in control");
+  const lines = () => turn.items.filter((item) => item.factKind === 'run.resumed').map((item) => item.message);
+  for (const how of ['closed', 'gone', 'lost', 'stopped', 'ended']) {
+    push('run.resumed', {what: 'browser', how, held_s: 2});
+    assert.equal(turn.control, null);
+  }
+  assert.deepEqual(lines(), [
+    'You closed the Chrome window, so the page went back to melo.',
+    'The page closed its own window, so melo has the tab back.',
+    "melo's Chrome stopped while you had the page.",
+    'melo was stopped while you had the page.',
+    'The turn ended while you had the page, so melo took it back.',
+  ]);
+});
+
 test('a frame at or below the cursor is not applied twice', () => {
   const {view, turn} = started();
   const frame = {id: 7, turn: 1, ts: 110, type: 'turn.finished', data: {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''}};

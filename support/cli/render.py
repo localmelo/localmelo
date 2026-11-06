@@ -579,20 +579,23 @@ def paused_line(detail: Mapping[str, Any], symbols: Symbols) -> Text:
     site = clean_output(str(detail.get("site") or "the page"))
     if detail.get("place") == "app":
         why = (
-            "Chrome could not open a window, so "
-            if detail.get("failed")
-            else "Your form stays there, so " if detail.get("form") else ""
+            "Another chat has melo's Chrome window open, so "
+            if detail.get("busy")
+            else (
+                "Chrome could not open a window, so "
+                if detail.get("failed")
+                else "Your form stays there, so " if detail.get("form") else ""
+            )
         )
-        where = (
-            f"{why}{site} is in the web console's Browser panel (melo console). "
-            "Press Done there"
-        )
+        where = f"{why}{site} is in the web console's Browser panel (melo console)"
+        back = "or Done there"
     else:
-        where = (
-            f"{site} is in a browser window. Press Enter on an empty line here, "
-            "or close the window"
-        )
-    text = f"You're in control: melo is paused. {where} to give it back."
+        where = f"{site} is in a browser window"
+        back = "or close the window"
+    text = (
+        f"You're in control: melo is paused. {where}. Press Enter on an empty "
+        f"line here, {back}, to give it back."
+    )
     return Text(f"{symbols.session} {text}", style="accent")
 
 
@@ -600,6 +603,9 @@ def paused_line(detail: Mapping[str, Any], symbols: Symbols) -> Text:
 RESUMED_WORDS: Final = {
     "done": "You gave the page back to melo",
     "closed": "You closed the window, so the page went back to melo",
+    "gone": "The page closed its own window, so melo has the tab back",
+    "lost": "melo's Chrome stopped while you had the page",
+    "ended": "The turn ended while you had the page, so melo took it back",
 }
 
 

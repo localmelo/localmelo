@@ -46,6 +46,9 @@ function objectOf(value) {
 }
 
 /** The `turn.pictures` event's list, kept to the entries the page can use. */
+// The ways a hold of the run ends that the record tells (`run.resumed`'s `how`).
+const RESUMED_HOWS = new Set(["done", "closed", "gone", "lost", "stopped", "ended"]);
+
 export function readPictures(list) {
   if (!Array.isArray(list)) return [];
   return list
@@ -1106,9 +1109,10 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       break;
     }
     case "run.resumed": {
-      // How the page came back is one line of the record: Done, the window closed, or a stop.
+      // How the page came back is one line of the record: Done, the window closed, the page or
+      // Chrome went away, a stop, or the turn's end.
       turn.control = null;
-      if (["done", "closed", "stopped"].includes(data.how)) {
+      if (RESUMED_HOWS.has(data.how)) {
         const time = formatTime(new Date((ts || Date.now() / 1000) * 1000));
         turn.items.push({kind: "fact", factKind: type, step: turn.step, how: data.how, message: t(`turns.resumed.${data.how}`, {time})});
       }

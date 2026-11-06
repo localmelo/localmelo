@@ -37,8 +37,11 @@ brings them back with new target ids (numbering goes on), as Chrome's own
 windows: it answers the window calls, and ``FAKE_CHROME_NO_WINDOW=1`` makes such a
 start quit at once (no window can open). ``FAKE_CHROME_PERSON_CLOSES`` (seconds)
 is the person closing the window of the page brought to the front that long
-after (``Target.targetDestroyed``). A page with ``unsent`` has a form the person
-began.
+after (``Target.targetDestroyed``); ``FAKE_CHROME_PAGE_CLOSES`` (seconds) is that
+page closing itself, which first calls the closing binding when melo added one
+(``Runtime.bindingCalled``); ``FAKE_CHROME_QUITS`` (``seconds:code``) is a Chrome
+with windows ending that long after it started, with that exit code (0: the
+person quit it). A page with ``unsent`` has a form the person began.
 """
 
 from __future__ import annotations
@@ -217,7 +220,12 @@ PROFILE = next(
 )
 SESSION = os.path.join(PROFILE, "fake-session.json") if PROFILE else ""
 CLOSES = float(os.environ.get("FAKE_CHROME_PERSON_CLOSES") or 0)
-closing: list[tuple[float, str]] = []  # (when, target) the person closes
+SELF_CLOSES = float(os.environ.get("FAKE_CHROME_PAGE_CLOSES") or 0)
+closing: list[tuple[float, str, bool]] = []  # (when, target, the page itself)
+bound: set[str] = set()  # the sessions melo added the closing binding to
+_QUITS = (os.environ.get("FAKE_CHROME_QUITS") or "").split(":")
+QUIT_AT = time.time() + float(_QUITS[0]) if _QUITS[0] and WINDOWS else 0.0
+QUIT_CODE = int(_QUITS[1]) if len(_QUITS) > 1 else 0
 
 
 def log(entry: dict[str, Any]) -> None:
@@ -448,6 +456,8 @@ def run_script(target: str, source: str) -> Any:
         )
     if source.startswith("(function (mark)"):
         return True
+    if "__meloClosing" in source:  # the closing hook of a page another page opened
+        return None
     if "getBoundingClientRect" in source:
         return json.dumps(page_now(target))
     if "activeElement" in source:
@@ -536,9 +546,16 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
     if method == "Browser.setWindowBounds" and WINDOWS:
         return {}
     if method == "Page.bringToFront":
-        if CLOSES and WINDOWS:
-            closing.append((time.time() + CLOSES, target))
+        if (CLOSES or SELF_CLOSES) and WINDOWS:
+            closing.append(
+                (time.time() + (SELF_CLOSES or CLOSES), target, bool(SELF_CLOSES))
+            )
         return {}
+    if method == "Runtime.addBinding":
+        bound.add(session)
+        return {}
+    if method == "Page.addScriptToEvaluateOnNewDocument":
+        return {"identifier": "1"}
     if method == "Target.getTargets":
         return {"targetInfos": [info(t) for t in targets]}
     if method == "Target.createTarget":
@@ -701,11 +718,20 @@ def restore() -> None:
 
 
 def person_closes() -> None:
-    """The windows whose time came: the person closed them."""
+    """The windows whose time came: the person closed them, or the page itself did; a Chrome whose end came."""
     now = time.time()
-    for when, target in list(closing):
+    if QUIT_AT and now >= QUIT_AT:
+        os._exit(QUIT_CODE)
+    for when, target, itself in list(closing):
         if when <= now:
-            closing.remove((when, target))
+            closing.remove((when, target, itself))
+            session = session_of(target)
+            if itself and session in bound:
+                event(
+                    "Runtime.bindingCalled",
+                    {"name": "__meloClosing", "payload": ""},
+                    session,
+                )
             if targets.pop(target, None) is not None:
                 event("Target.targetDestroyed", {"targetId": target})
 
@@ -719,7 +745,7 @@ def main() -> None:
         new_target("about:blank")  # the page Chrome starts with
     buffer = b""
     while True:
-        if closing:
+        if closing or QUIT_AT:
             ready, _, _ = select.select([reader], [], [], 0.05)
             person_closes()
             if not ready:

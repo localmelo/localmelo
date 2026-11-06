@@ -30,6 +30,7 @@ from localmelo.melo.agent._request_accounting import (
     request_proxy,
 )
 from localmelo.melo.checker.stream_filter import StreamFilter
+from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_EXTRA_BODY,
@@ -780,6 +781,9 @@ class Chat:
         error of the last attempt, and any other exception at once,
         propagates.
 
+        While the run is held (:data:`~localmelo.melo.contracts.pause.PAUSE`),
+        the request waits first, with no time limit counting.
+
         With ``max_calls`` set, the check comes before the first attempt and
         before each retry's delay: a request that would pass the limit is not
         sent (see :meth:`check_call_budget`; *closing* is for the request
@@ -792,6 +796,11 @@ class Chat:
         A cancellation during that await propagates with the response
         counted.
         """
+        # The run's gate: while the person has the run (a page they took over), no
+        # request goes to the model, whichever part of the run asks.
+        pause = PAUSE.get()
+        if pause is not None:
+            await pause.wait()
         self.check_call_budget(closing)
         if kind == "plan":
             schema = json.dumps(

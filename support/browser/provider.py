@@ -73,7 +73,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ToolAsk,
 )
-from localmelo.melo.contracts.pause import PAUSE, RunPause
+from localmelo.melo.contracts.pause import PAUSE, Resumed, RunPause
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
@@ -108,6 +108,7 @@ from localmelo.support.browser.driver import (
     StaleElementError,
     TabInfo,
     View,
+    WindowBusyError,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, LiveView
 from localmelo.support.browser.local_apps import LocalAttempt
@@ -450,8 +451,17 @@ def _back_line(back: Returned) -> str:
             f"The user had tab {back.tab} for {had} and closed its Chrome window, "
             "which gives it back to melo."
         )
+    if back.how == "gone":
+        return (
+            f"The user had tab {back.tab} for {had} when its page closed its own "
+            "window (a sign-in window often does once it is done); the tab is gone."
+        )
+    if back.how == "lost":
+        return f"The user had tab {back.tab} for {had} when melo's Chrome stopped."
     if back.how == "stopped":
         return f"The user had tab {back.tab} for {had} when melo was stopped."
+    if back.how == "ended":
+        return f"The user had tab {back.tab} for {had} when the turn ended."
     return f"The user had tab {back.tab} for {had} and gave it back to melo."
 
 
@@ -697,10 +707,15 @@ class BrowserToolProvider(BaseToolProvider):
         return callable(getattr(self._driver, "show_window", None))
 
     def _page_given(self, back: Returned) -> None:
-        """*back* came back to melo: the browser goes back to the background and the run goes on."""
+        """*back* came back to melo: the browser goes back to the background, and the run goes on once no tab is the person's."""
         self._switch(self._to_background)
-        if self._pause is not None:
-            self._pause.release(back.how)
+        if self._pause is None:
+            return
+        still = sorted(self._owners.held)
+        if still:
+            self._hold_for(still[0])  # the run stays held, for the page they still have
+        else:
+            self._pause.release(back.how, by=self)
 
     def _switch(self, job: Callable[[], Awaitable[None]]) -> None:
         """Run *job* (a page to the person, or back) once the switch before it ended; one at a time."""
@@ -711,7 +726,7 @@ class BrowserToolProvider(BaseToolProvider):
                 await asyncio.wait({before})
             try:
                 await job()
-            except BrowserError as exc:
+            except Exception as exc:  # a switch never fails the chat
                 logger.info("melo's browser could not switch for the person: %s", exc)
 
         with contextlib.suppress(RuntimeError):  # no running loop: nothing to switch
@@ -727,37 +742,48 @@ class BrowserToolProvider(BaseToolProvider):
 
         A real window when it can be (Safari's window is one already); the app's
         Browser panel for a page with a form they began, unless they *chosen* the
-        window, and when the window could not open.
+        window, and when the window could not open for any reason (another
+        chat's window is open: ``busy``). The person is never left with nothing.
         """
         where = self._owners.where(tab)
         raw = self._raw.get(tab)
         if where is None or raw is None:
             return  # given back already, or the tab is gone
         place: Place = "window" if chosen else where.place
-        form, failed = where.form, False
-        if place == "window" and form is None and not chosen:
-            form = await self._unsent(raw)
-            place = "app" if form else "window"
-        if place == "window" and not self._windows():
-            place = "app"
-        elif place == "window":
-            closed = functools.partial(self._window_closed, tab)
-            if not await self._driver.show_window(raw, closed):  # type: ignore[attr-defined]
-                place, failed = "app", True
+        form, failed, busy = where.form, False, False
+        try:
+            if place == "window" and form is None and not chosen:
+                form = await self._unsent(raw)
+                place = "app" if form else "window"
+            if place == "window" and not self._windows():
+                place = "app"
+            elif place == "window":
+                closed = functools.partial(self._window_closed, tab)
+                if not await self._driver.show_window(raw, closed):  # type: ignore[attr-defined]
+                    place, failed = "app", True
+        except Exception as exc:  # any failure: the page is theirs in the app
+            logger.info("melo's browser could not open a window: %s", exc)
+            place, failed, busy = "app", True, isinstance(exc, WindowBusyError)
         if self._owners.where(tab) is None:
             return  # they gave it back while the window opened
-        self._owners.move(tab, place, form=form, failed=failed)
-        pause = self._pause
-        if pause is not None and pause.running:
-            detail: dict[str, Any] = {"tab": tab, "place": place}
-            site = sites.host_of(self._origins.get(tab, ""))
-            if self._origins.get(tab):
-                detail["site"] = site
-            if form:
-                detail["form"] = True
-            if failed:
-                detail["failed"] = True
-            pause.hold("browser", detail, functools.partial(self._run_ended, tab))
+        self._owners.move(tab, place, form=form, failed=failed, busy=busy)
+        self._hold_for(tab)
+
+    def _hold_for(self, tab: str) -> None:
+        """Hold the run for *tab*, which the person has: the surfaces say where (``run.paused``)."""
+        pause, where = self._pause, self._owners.where(tab)
+        if pause is None or not pause.running or where is None:
+            return
+        detail: dict[str, Any] = {"tab": tab, "place": where.place}
+        if self._origins.get(tab):
+            detail["site"] = sites.host_of(self._origins[tab])
+        if where.form:
+            detail["form"] = True
+        if where.failed:
+            detail["failed"] = True
+        if where.busy:
+            detail["busy"] = True
+        pause.hold("browser", detail, functools.partial(self._run_ended, tab), by=self)
 
     async def _to_background(self) -> None:
         """After the person: melo's browser without a window again, on the same pages."""
@@ -765,13 +791,15 @@ class BrowserToolProvider(BaseToolProvider):
         if callable(hide) and not self._owners.held:
             await hide()
 
-    def _window_closed(self, tab: str) -> None:
-        """The person closed the page's window (or quit Chrome): that is Done."""
-        self._owners.give(tab, "closed")
+    def _window_closed(self, tab: str, how: str) -> None:
+        """The page's window went: the person closed it (Done), the page closed itself, or Chrome stopped."""
+        self._owners.give(
+            tab, "gone" if how == "gone" else "lost" if how == "lost" else "closed"
+        )
 
-    def _run_ended(self, tab: str) -> None:
-        """The run ended while the person had *tab* (a Stop): melo takes the page back."""
-        self._owners.give(tab, "stopped")
+    def _run_ended(self, tab: str, how: Resumed) -> None:
+        """The run ended while the person had *tab* (a Stop, or its end): melo takes the page back."""
+        self._owners.give(tab, "stopped" if how == "stopped" else "ended")
 
     async def _unsent(self, raw: str) -> bool:
         """Whether the page has a form the person began, which a window would clear (only a browser that starts again for one says)."""
@@ -855,8 +883,14 @@ class BrowserToolProvider(BaseToolProvider):
         ]
 
     async def close(self) -> None:
-        """Close the tabs melo opened (unless ``keep_tabs``), then the driver."""
+        """Close the tabs melo opened (unless ``keep_tabs``), then the driver.
+
+        A page the person has comes back to melo first, and the hold it set on
+        the run with it.
+        """
         self._cancel_idle()
+        for tab in sorted(self._owners.held):
+            self._owners.give(tab, "stopped")
         self._owners.clear()
         # A window open for the person goes, and melo's browser with it.
         with contextlib.suppress(Exception):
@@ -1322,9 +1356,16 @@ class BrowserToolProvider(BaseToolProvider):
         return tab, {**arguments, "tab": tab}
 
     async def _wait_for_person(self, tab: str | None) -> None:
-        """Wait while the person has *tab*, the step's tab: as long as they need, no time limit counting."""
+        """Wait while the person has *tab*, the step's tab: as long as they need, no time limit counting.
+
+        The run is held meanwhile, also for a page they took when no run could
+        be (between two turns): the surfaces say "You're in control".
+        """
         if tab is None or self._owners.owner(tab) != YOU:
             return
+        pause = self._pause
+        if pause is not None and pause.running and not pause.held:
+            self._hold_for(tab)
         async with self._no_limit():
             await self._owners.wait_for_melo(tab)
 
@@ -1478,7 +1519,10 @@ class BrowserToolProvider(BaseToolProvider):
         finally:
             self._set_busy(True)
         back, _ = self._back_lines()
-        page = await self._read_tab(TabInfo(tab), set())
+        try:
+            page = await self._read_tab(TabInfo(tab), set())
+        except BrowserError:  # the page went with its window: only how it ended is left
+            return "\n".join(back)
         return "\n".join([*back, "The page as it is now:", page])
 
     async def _pressed(self, tab: str, check: str, doc: str) -> str:
@@ -1776,7 +1820,7 @@ class BrowserToolProvider(BaseToolProvider):
             seen = await watch.adopt_seen(window) if allowed else None
         except TimeoutError:
             return
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Asking about another app's window failed", exc_info=True)
             return
         if seen is not None:
@@ -1834,7 +1878,7 @@ class BrowserToolProvider(BaseToolProvider):
                 # tells waits for the next step, however late that comes.
                 found = await self._look(sampling=True)
                 self._held.extend(found)
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Sampling the screen failed", exc_info=True)
 
     async def _refind(
@@ -2125,7 +2169,7 @@ class BrowserToolProvider(BaseToolProvider):
         shown = apps.shown_scheme(url)
         try:
             app = await self._opener.name_for(url)
-        except Exception:  # noqa: BLE001 - which app it is, is a hint
+        except Exception:  # which app it is, is a hint
             app = ""
         app = " ".join(app.split())[:80]
         if not app:
@@ -2205,7 +2249,7 @@ class BrowserToolProvider(BaseToolProvider):
                 )
                 note = watch.notice()
                 pending = watch.take_pending()
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Looking at other apps' windows failed", exc_info=True)
             return []
         self._offer(pending)

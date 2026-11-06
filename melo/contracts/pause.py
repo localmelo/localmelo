@@ -5,16 +5,19 @@ sign in on) holds the run with :class:`RunPause`, which the agent sets in
 :data:`PAUSE` around each tool call of a run:
 
 * :meth:`RunPause.hold` puts the run on hold: the run reports ``run.paused``,
-  and it waits before its next model call and before each tool call until
+  and no model call of the run starts (each waits in :meth:`RunPause.wait`,
+  the one gate before every request to the model) until
   :meth:`RunPause.release`, which reports ``run.resumed`` with how it ended.
-  Holding again while held only says what changed (a new ``run.paused``).
+  Holding again while held only says what changed (a new ``run.paused``). A
+  hold records who set it (*by*): a release that names another holder does
+  nothing, so one holder never ends another's hold.
 * :meth:`RunPause.suspended` is for a tool call that waits for the person
   itself: inside it neither the call's time limit (:data:`TOOL_DEADLINE`, which
   the executor sets around a tool's body) nor the run's own counts. Nothing
   counts down while the person has the run.
-* A run that ends while held (the person's Stop, say) releases the hold as
-  ``stopped`` and calls the holder's *on_end*, so the holder can take back what it
-  handed over.
+* A run that ends while held releases the hold as ``stopped`` (the person's
+  Stop) or ``ended`` (it ended another way) and calls the holder's *on_end*
+  with that, so the holder can take back what it handed over.
 
 Stop is never held back: a cancellation goes through a hold as it goes through
 any await.
@@ -29,8 +32,10 @@ from contextvars import ContextVar
 from typing import Any, Literal, Protocol
 
 # How a hold ended: the person said so (``done``), closed what they were given
-# (``closed``), the run was stopped (``stopped``) or it ended another way (``ended``).
-Resumed = Literal["done", "closed", "stopped", "ended"]
+# (``closed``), what they had went away by itself (``gone``: a page closed its own
+# window) or with what showed it (``lost``: the browser stopped), the run was
+# stopped (``stopped``) or it ended another way (``ended``).
+Resumed = Literal["done", "closed", "gone", "lost", "stopped", "ended"]
 
 
 class RunPause(Protocol):
@@ -50,13 +55,19 @@ class RunPause(Protocol):
         self,
         what: str,
         detail: Mapping[str, Any] | None = None,
-        on_end: Callable[[], None] | None = None,
+        on_end: Callable[[Resumed], None] | None = None,
+        *,
+        by: object | None = None,
     ) -> None:
-        """Put the run on hold for *what* (``browser``), with *detail* for the surfaces."""
+        """Put the run on hold for *what* (``browser``), with *detail* for the surfaces; *by* is the holder."""
         ...
 
-    def release(self, how: Resumed) -> None:
-        """End the hold; nothing happens when the run is not held."""
+    def release(self, how: Resumed, *, by: object | None = None) -> None:
+        """End the hold; nothing happens when the run is not held, or when *by* is not its holder."""
+        ...
+
+    async def wait(self) -> None:
+        """The gate before a model call: wait while the run is held, no time limit counting."""
         ...
 
     def suspended(self) -> AbstractAsyncContextManager[None]:

@@ -152,6 +152,11 @@ those tools can do.
   lasting ones. Chrome does not use the Keychain there, so they are protected
   by the folder's permissions and FileVault only. To clear them, quit melo and
   delete that folder.
+- **The person's window is a full Chrome on that profile.** It offers to save
+  no password, address or card, so what they type is not kept at rest there.
+  What else they change in it (an extension, a setting) stays for melo's later
+  background browsing, and melo's other open pages, from every chat, come back
+  in it as minimized windows.
 - **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
   See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
   for sign-in and token rotation. Host, Origin and fetch-metadata checks remain

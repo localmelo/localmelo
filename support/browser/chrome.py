@@ -15,9 +15,9 @@ the file mode and FileVault only. Chrome keeps melo's last session
 (:func:`keep_sessions`: ``session.restore_on_startup`` is 1 and every start
 passes ``--restore-last-session``), so sign-ins are kept from one chat to the
 next and across restarts, those whose cookie lasts only for the session too:
-such cookies are on disk in the profile while melo is not running. The pages
-Chrome brings back with the session go at once on a fresh start. Downloads are
-refused.
+such cookies are on disk in the profile while melo is not running. Chrome
+offers to save no password, address or card there. The pages Chrome brings back
+with the session go at once on a fresh start. Downloads are refused.
 
 **A window for the person.** To take a page over the person needs a real
 window, and a Chrome without one cannot show one. :meth:`ChromeBackgroundDriver.show_window`
@@ -27,10 +27,14 @@ profile), the person's page in a normal window in front (it comes back at 500 by
 375, so its size is set) and the others minimized. Chrome's own target ids change
 with the restart: a page is found again by its address, the old Chrome names its
 successor and how each tab was renamed, and every driver of the profile follows
-(the ids a driver gave out stay the same). While the window is open, another
-chat's driver is refused, so no window of melo's opens in front of the person.
-Closing the page's window, or quitting Chrome, is Done: the driver's ``on_closed``
-is told. :meth:`ChromeBackgroundDriver.hide_window` goes back to the background
+(the ids a driver gave out stay the same). While Chrome starts again every call
+of every driver waits for it. While the window is open it is the driver's that
+asked for it: another chat's driver is refused (:class:`WindowBusyError`), so no
+window of melo's opens in front of the person, and another chat ending leaves
+it. The driver's ``on_closed`` is told how the window went: the person closing
+it or quitting Chrome is Done (``closed``); a page that closed itself says so
+first (``gone``; see :data:`CLOSING_BINDING`), and a Chrome that did not quit
+cleanly stopped (``lost``). :meth:`ChromeBackgroundDriver.hide_window` goes back to the background
 the same way, and opens the page again at its last address when the person
 closed its window.
 
@@ -100,10 +104,11 @@ import plistlib
 import shlex
 import shutil
 import signal
+import tempfile
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 from urllib.parse import urlsplit
 
 from localmelo.support import config
@@ -119,6 +124,7 @@ from localmelo.support.browser.driver import (
     StaleElementError,
     TabInfo,
     View,
+    WindowBusyError,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, DEFAULT_QUALITY, Frame
 from localmelo.support.browser.local_apps import LocalAttempt, LocalRule
@@ -172,6 +178,26 @@ WINDOW_AT = (80, 60)
 WINDOW_BUSY_MESSAGE = (
     "melo's Chrome is open in a window for the person in another chat. Ask "
     "again once they are done."
+)
+# How long melo waits to learn how a windowed Chrome ended: the person quit it, or it stopped.
+EXIT_S = 3.0
+# What melo's profile always says (see keep_sessions): the last session comes back
+# on every start, and the person's window offers to save no password, address or card.
+PREFERENCES: Final[dict[str, Any]] = {
+    "session": {"restore_on_startup": 1},
+    "profile": {"exit_type": "Normal", "password_manager_enabled": False},
+    "credentials_enable_service": False,
+    "autofill": {"profile_enabled": False, "credit_card_enabled": False},
+}
+# A page may close itself (a sign-in window, once it is done): in the person's window
+# it says so through this binding first, so its close is never their Done.
+CLOSING_BINDING = "__meloClosing"
+CLOSE_HOOK_JS = (
+    "(function(){var c=window.close;if(c&&!c.__melo){var w=function(){"
+    "try{window."
+    + CLOSING_BINDING
+    + "('')}catch(e){}return c.apply(window,arguments)};"
+    "w.__melo=true;window.close=w}})()"
 )
 CALL_S = 60.0
 CLOSE_S = 5.0
@@ -298,10 +324,14 @@ def launch_args(
 def keep_sessions(profile: str) -> None:
     """Have Chrome keep melo's last session in *profile*, its session cookies with it.
 
-    ``session.restore_on_startup`` is 1 ("continue where you left off") in the
-    profile's ``Default/Preferences``, and the last exit reads clean, so a window
-    opens without a bubble that offers to restore pages. Written only while
-    Chrome is not running, private to this user (0600), never through a link.
+    The profile's ``Default/Preferences`` says :data:`PREFERENCES`:
+    ``session.restore_on_startup`` is 1 ("continue where you left off") and the
+    last exit reads clean, so a window opens without a bubble that offers to
+    restore pages; and Chrome offers to save no password, address or card, so
+    what the person types in their window is not kept. Written only while
+    Chrome is not running, private to this user (0600), through a new file of
+    its own (never a link, never one already there), on disk before it
+    replaces the old one.
     """
     folder = os.path.join(profile, "Default")
     make_profile(folder)
@@ -315,19 +345,26 @@ def keep_sessions(profile: str) -> None:
         pass
     if not isinstance(data, dict):
         data = {}
-    session = data.get("session") if isinstance(data.get("session"), dict) else {}
-    prefs = data.get("profile") if isinstance(data.get("profile"), dict) else {}
-    if session.get("restore_on_startup") == 1 and prefs.get("exit_type") == "Normal":
+    wanted = dict(data)
+    for key, value in PREFERENCES.items():
+        if isinstance(value, dict):
+            had = data.get(key)
+            wanted[key] = {**(had if isinstance(had, dict) else {}), **value}
+        else:
+            wanted[key] = value
+    if wanted == data:
         return
-    data["session"] = {**session, "restore_on_startup": 1}
-    data["profile"] = {**prefs, "exit_type": "Normal"}
-    temporary = f"{path}.melo-{os.getpid()}"
-    fd = os.open(
-        temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(data, handle)
-    os.replace(temporary, path)
+    fd, temporary = tempfile.mkstemp(prefix="Preferences.melo-", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(wanted, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def make_profile(path: str) -> None:
@@ -420,9 +457,17 @@ class _Chrome:
         self.renamed: dict[str, str] = {}
         self.before: list[tuple[str, str]] | None = None
         self.closing = False  # melo quit it: not the person
-        # While windowed: whom to tell when the person closes a page's window,
-        # and every page's latest address.
-        self.watch: dict[str, Callable[[], None]] = {}
+        # A restart of this Chrome is under way; set once it ended (with a successor
+        # or without): until then every driver of the profile waits for it.
+        self.restarting = False
+        self.replaced = asyncio.Event()
+        # While windowed: whom to tell how a page's window closed (``closed``: the
+        # person; ``gone``: the page closed itself; ``lost``: Chrome stopped), the
+        # pages that said they close themselves (their session, then target), and
+        # every page's latest address.
+        self.watch: dict[str, Callable[[str], None]] = {}
+        self.hooked: dict[str, str] = {}
+        self.self_closed: set[str] = set()
         self.urls: dict[str, str] = {}
 
     @classmethod
@@ -560,12 +605,18 @@ class _Chrome:
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
         elif method == "Target.targetDestroyed":
-            told = self.watch.pop(str(params.get("targetId") or ""), None)
+            target = str(params.get("targetId") or "")
+            told = self.watch.pop(target, None)
+            how = "gone" if target in self.self_closed else "closed"
+            self.self_closed.discard(target)
             if told is not None:
                 with contextlib.suppress(
                     Exception
                 ):  # a driver's failure never stops the browser
-                    told()
+                    told(how)
+        elif method == "Runtime.bindingCalled":
+            if params.get("name") == CLOSING_BINDING and session in self.hooked:
+                self.self_closed.add(self.hooked[session])
         elif method in ("Target.targetCreated", "Target.targetInfoChanged"):
             info = params.get("targetInfo")
             if isinstance(info, dict) and info.get("type") == "page":
@@ -739,12 +790,13 @@ class _Chrome:
 
     def _stopped(self) -> None:
         self.closed = True
-        # The person quit the Chrome of their window: every watched page is Done.
+        # The Chrome of the person's window went away: they quit it, or it stopped.
         told, self.watch = list(self.watch.values()), {}
-        if self.windowed and not self.closing:
-            for fn in told:
-                with contextlib.suppress(Exception):
-                    fn()
+        if self.windowed and not self.closing and told:
+            # Kept apart from ``jobs``, which are cancelled below: it tells the person's chats.
+            job = self.loop.create_task(self._ended(told))
+            _ENDING.add(job)
+            job.add_done_callback(_ENDING.discard)
         for job in list(self.jobs):
             job.cancel()
         for future in self._pending.values():
@@ -779,8 +831,28 @@ class _Chrome:
         self._writer.write(json.dumps(message).encode("utf-8") + b"\0")
         return future
 
+    async def _ended(self, told: list[Callable[[str], None]]) -> None:
+        """Tell *told* how the windowed Chrome ended: ``closed`` when it quit cleanly (the person), else ``lost``."""
+        how = "lost"
+        end = self.loop.time() + EXIT_S
+        while True:
+            try:
+                pid, status = os.waitpid(self.pid, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if pid:
+                how = "closed" if os.waitstatus_to_exitcode(status) == 0 else "lost"
+                break
+            if self.loop.time() >= end:
+                break
+            await asyncio.sleep(0.05)
+        for fn in told:
+            with contextlib.suppress(Exception):
+                fn(how)
+
     async def close(self) -> None:
         """Ask Chrome to quit, then make sure it did (its whole process group)."""
+        self.closing = True  # melo quits it, never the person
         if not self.closed:
             with contextlib.suppress(BrowserError, TimeoutError):
                 async with asyncio.timeout(CLOSE_S):
@@ -794,6 +866,7 @@ class _Chrome:
 
     def kill(self) -> None:
         """Stop Chrome at once, without waiting."""
+        self.closing = True
         self._signal(signal.SIGKILL)
         with contextlib.suppress(ChildProcessError, OSError):
             os.waitpid(self.pid, os.WNOHANG)
@@ -833,6 +906,8 @@ class _Chrome:
 _SHARED: dict[tuple[str, int], _Chrome] = {}
 _LOCKS: dict[tuple[str, int], asyncio.Lock] = {}
 _ALIVE: dict[int, _Chrome] = {}
+# The tasks that tell how a windowed Chrome ended (see _Chrome._ended), kept until done.
+_ENDING: set[asyncio.Task[None]] = set()
 _AT_EXIT = False
 
 
@@ -901,14 +976,20 @@ async def _close_restored(chrome: _Chrome) -> None:
             _fire(chrome, "Target.closeTarget", {"targetId": target})
 
 
-async def _restart(old: _Chrome, *, window: bool) -> _Chrome:
+async def _restart(
+    old: _Chrome, *, window: bool, owner: object | None = None
+) -> _Chrome:
     """Quit *old* and start its profile again, with windows or without, its pages restored.
 
     Chrome's own session restore brings the pages back with their sign-ins
-    (:func:`keep_sessions`); a page is found again by its address. *old* then
-    names its successor and how its tabs were renamed, so every driver of the
-    profile follows. A Chrome that does not start raises :class:`BrowserError`
-    and *old* stays closed, with the pages it had, for the next try.
+    (:func:`keep_sessions`); a page is found again by its address. A Chrome
+    with windows that does not start is started again without them (the new
+    one says ``windowed`` False). The windows are *owner*'s, from the moment
+    they exist. *old* then names its successor and how its tabs were renamed,
+    so every driver of the profile follows; while the restart runs they wait
+    for it (``replaced``). A Chrome that does not start at all raises
+    :class:`BrowserError` and *old* stays closed, with the pages it had, for
+    the next try.
     """
     loop = asyncio.get_running_loop()
     key = (old.profile, id(loop))
@@ -918,25 +999,43 @@ async def _restart(old: _Chrome, *, window: bool) -> _Chrome:
             return old.successor
         if old.rebuild is None:
             raise BrowserError("melo cannot start this Chrome again.")
-        if old.before is None:
-            old.before = await _pages_of(old)
-        old.closing = True
-        if not old.closed:
-            await old.close()
-        keep_sessions(old.profile)
-        new = await _Chrome.launch(
-            old.rebuild(window), old.profile, old.timeout_s, old.local
-        )
-        new.rebuild, new.timeout_s, new.windowed = old.rebuild, old.timeout_s, window
-        new.users = old.users
-        renamed = await _restored(new, old.before)
-        new.claimed = set(renamed.values())
-        for spare in new.spare - new.claimed:
-            _fire(new, "Target.closeTarget", {"targetId": spare})
-        new.spare = set()
-        old.successor, old.renamed = new, renamed
-        _SHARED[key] = new
-        return new
+        old.restarting = True
+        old.replaced.clear()
+        try:
+            if old.before is None:
+                old.before = await _pages_of(old)
+            old.closing = True
+            if not old.closed:
+                await old.close()
+            keep_sessions(old.profile)
+            try:
+                new = await _Chrome.launch(
+                    old.rebuild(window), old.profile, old.timeout_s, old.local
+                )
+            except BrowserError:
+                if not window:
+                    raise
+                window = False  # no window can open: melo's browser goes on without
+                new = await _Chrome.launch(
+                    old.rebuild(False), old.profile, old.timeout_s, old.local
+                )
+            new.rebuild, new.timeout_s, new.windowed = (
+                old.rebuild,
+                old.timeout_s,
+                window,
+            )
+            new.owner = owner if window else None
+            new.users = old.users
+            renamed = await _restored(new, old.before)
+            new.claimed = set(renamed.values())
+            for spare in new.spare - new.claimed:
+                _fire(new, "Target.closeTarget", {"targetId": spare})
+            new.spare = set()
+            old.successor, old.renamed = new, renamed
+            _SHARED[key] = new
+            return new
+        finally:
+            old.replaced.set()
 
 
 async def _pages_of(chrome: _Chrome) -> list[tuple[str, str]]:
@@ -1119,7 +1218,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         return self._profile or default_profile()
 
     async def start(self) -> None:
-        self._follow()
+        await self._settled()
         if self._browser is not None and not self._browser.closed:
             return
         self._release()
@@ -1139,6 +1238,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._browser = await _shared(build, profile, self._startup_s, self.local)
 
     async def close(self) -> None:
+        await self._settled()
         browser = self._release()
         if browser is not None and browser.users <= 0:
             await browser.close()
@@ -1188,16 +1288,34 @@ class ChromeBackgroundDriver(PageScriptActs):
             self._targets.clear()
         self._browser = browser
 
-    def _live(self) -> _Chrome:
+    async def _settled(self) -> None:
+        """Wait while Chrome starts again (for a window, or back without), then follow it.
+
+        A call that comes meanwhile, from this chat or another, never takes the
+        Chrome being replaced for one that stopped.
+        """
         self._follow()
+        browser = self._browser
+        while (
+            browser is not None
+            and browser.restarting
+            and browser.successor is None
+            and not browser.replaced.is_set()
+        ):
+            await browser.replaced.wait()
+            self._follow()
+            browser = self._browser
+
+    async def _live(self) -> _Chrome:
+        await self._settled()
         browser = self._browser
         if browser is None:
             raise BrowserError("Chrome is not running. Ask again: melo starts it.")
         if browser.closed:
             self._release()
             raise BrowserError(STOPPED_MESSAGE)
-        if browser.windowed and browser.owner not in (None, self):
-            raise BrowserError(WINDOW_BUSY_MESSAGE)
+        if browser.windowed and browser.owner is not self:
+            raise WindowBusyError(WINDOW_BUSY_MESSAGE)
         return browser
 
     # ── Calls ──
@@ -1212,7 +1330,7 @@ class ChromeBackgroundDriver(PageScriptActs):
 
         The time a person takes to answer a box is not counted against the call.
         """
-        browser = self._live()
+        browser = await self._live()
         if session and session in browser.dialogs and not self._holds_box(session):
             await self._answer(browser, session)
         future = browser.request(method, params, session)
@@ -1364,7 +1482,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         return self._value(got)
 
     async def _world(self, session: str) -> int:
-        browser = self._live()
+        browser = await self._live()
         frame = browser.main.get(session, "")
         for attempt in range(2):
             if not frame or attempt:
@@ -1421,7 +1539,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self, session: str, start: Callable[[], Awaitable[dict[str, Any]]]
     ) -> None:
         """Start a navigation, wait until the tab shows the new document, then until it has loaded."""
-        browser = self._live()
+        browser = await self._live()
         before = browser.navs.get(session, 0)
         got = await start()
         error = str(got.get("errorText") or "")
@@ -1435,7 +1553,7 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     async def _create(self) -> str:
         """A new tab in a window of its own, in the background; melo's."""
-        browser = self._live()
+        browser = await self._live()
         got = await self._cmd(
             "Target.createTarget",
             {
@@ -1504,7 +1622,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         return await self._here(target)
 
     async def tabs(self) -> list[TabInfo]:
-        browser = self._live()
+        browser = await self._live()
         got = await self._cmd("Target.getTargets")
         pages = [
             t
@@ -1588,7 +1706,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         """
         target = self._resolve(tab)
         session = await self._attach(target)
-        browser = self._live()
+        browser = await self._live()
         cast = _Cast(on_frame, on_end, 1.0 / max(float(fps), 1.0), on_dialog)
         running = session in browser.casts
         browser.casts[session] = cast
@@ -1646,41 +1764,59 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     # ── A window for the person (take over) ──
 
-    async def show_window(self, tab: str, on_closed: Callable[[], None]) -> bool:
+    async def show_window(self, tab: str, on_closed: Callable[[str], None]) -> bool:
         """Put *tab*'s page before the person in a real Chrome window; whether it is there.
 
         Chrome starts again with windows on the same profile (see the module
-        docstring), the page's window in front at the size of the view and
-        melo's other pages minimized. *on_closed* is told when the person closes
-        the page's window or quits Chrome. A Chrome that cannot start with
-        windows is started again without, on the same pages: False.
+        docstring), the windows this driver's, the page's in front at the size
+        of the view and melo's other pages minimized. *on_closed* is told how
+        the page's window went: ``closed`` (the person closed it or quit
+        Chrome), ``gone`` (a page another page opened closed itself) or
+        ``lost`` (Chrome stopped). A Chrome that cannot start with windows is
+        started again without, on the same pages: False. While another chat's
+        window is open: :class:`WindowBusyError`.
         """
-        browser = self._live()
+        browser = await self._live()
         ident = self._id_of(self._resolve(tab))
         if not browser.windowed:
-            try:
-                await _restart(browser, window=True)
-            except BrowserError:
-                await self._background()
-                return False
+            new = await _restart(browser, window=True, owner=self)
             self._follow()
-            if self._browser is not None:
-                self._browser.owner = self
+            if not new.windowed:
+                return False
             if ident not in self._ids:  # the page did not come back
                 await self.hide_window()
                 return False
-        browser = self._live()
+        browser = await self._live()
         target = self._resolve(ident)
 
-        def closed() -> None:
-            self._lost[ident] = browser.urls.get(target, "")
-            on_closed()
+        def closed(how: str) -> None:
+            if how == "closed":  # the person's own close: the page opens again after
+                self._lost[ident] = browser.urls.get(target, "")
+            on_closed(how)
 
         browser.watch[target] = closed
         with contextlib.suppress(BrowserError):
             await self._cmd("Target.setDiscoverTargets", {"discover": True})
+            await self._hook_close(browser, target)
             await self._arrange(browser, target)
         return True
+
+    async def _hook_close(self, browser: _Chrome, target: str) -> None:
+        """The person's page says it closes itself before it does (a sign-in window that is done).
+
+        Its ``window.close`` calls :data:`CLOSING_BINDING` first, in the page's
+        own world and in every document it loads after, so its close reads as
+        ``gone``, never as the person's. A restored page has lost its opener, so
+        every page put before the person gets the hook, not only those a page
+        opened.
+        """
+        session = await self._attach(target)
+        browser.hooked[session] = target
+        await self._cmd("Runtime.addBinding", {"name": CLOSING_BINDING}, session)
+        await self._cmd(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": CLOSE_HOOK_JS}, session
+        )
+        await self._cmd("Runtime.evaluate", {"expression": CLOSE_HOOK_JS}, session)
 
     async def _arrange(self, browser: _Chrome, target: str) -> None:
         """The person's page in a normal window in front; melo's other pages minimized."""
@@ -1711,11 +1847,12 @@ class ChromeBackgroundDriver(PageScriptActs):
         """Back to Chrome in the background after the person's take over, on the same pages.
 
         A page whose window the person closed opens again at its last address,
-        under the same id; one that was not a web page stays closed.
+        under the same id; one that was not a web page stays closed. Only the
+        driver whose window it is puts it away: another chat ending leaves it.
         """
-        self._follow()
+        await self._settled()
         browser = self._browser
-        if browser is None or not browser.windowed:
+        if browser is None or not browser.windowed or browser.owner is not self:
             return
         await self._background()
         lost, self._lost = self._lost, {}
@@ -1768,7 +1905,7 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     async def answer_dialog(self, tab: str, accept: bool, text: str = "") -> bool:
         """The person's answer to the box *tab*'s page shows (*text* for a prompt); whether there was one."""
-        browser = self._live()
+        browser = await self._live()
         session = self._sessions.get(self._resolve(tab))
         if not session or session not in browser.dialogs:
             return False
@@ -1882,7 +2019,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 f"melo types at most {MAX_TYPED_CHARS} characters at a time."
             )
         session = await self._focus(tab)
-        browser = self._live()
+        browser = await self._live()
         target = self._targets[session]
         if act.element.frame.startswith("x"):
             raise BrowserError(STALE["reach"])

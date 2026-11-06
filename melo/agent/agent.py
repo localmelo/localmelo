@@ -3152,8 +3152,6 @@ class Agent(_RecallLoop, _NotesLoop):
         step = -1
         while step + 1 < budget:
             step += 1
-            # The person has the run (a page they took over): no model call meanwhile.
-            await run.hold.wait()
             self.chat.check_call_budget()  # before the step starts, not inside it
             if budget - step == 2:
                 await self._deadline_check(run)
@@ -3291,7 +3289,6 @@ class Agent(_RecallLoop, _NotesLoop):
             )
             refused_all = bool(calls)
             for call in calls:
-                await run.hold.wait()
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
                 run.n_tool += 1
@@ -5108,7 +5105,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 out_of = "Max steps reached"
             else:
                 out_of = ""  # another attempt can start
-            await run.hold.wait()
             run.events.reflection_started(failure_type)
             run.note(Trace.reflection)
             reflection = await self._do_reflect(

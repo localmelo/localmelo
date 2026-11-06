@@ -441,7 +441,7 @@ class SafariAutomationDriver(PageScriptActs):
 
     # ── A window for the person (take over) ──
 
-    async def show_window(self, tab: str, on_closed: Callable[[], None]) -> bool:
+    async def show_window(self, tab: str, on_closed: Callable[[str], None]) -> bool:
         """Bring *tab*'s page before the person: Safari's automation window is a real one already.
 
         The tab comes to the front of its window and Safari to the front of the

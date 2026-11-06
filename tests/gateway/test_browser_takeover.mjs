@@ -107,6 +107,8 @@ test('the panel offers Take over while melo has the page and says who is in cont
   assert.equal(control(parseMeta(message({owner: 'you', place: 'app', form: true}))).window, 'Open in Chrome, clear the form');
   const failed = control(parseMeta(message({owner: 'you', place: 'app', failed: true})));
   assert.deepEqual([failed.window, /could not open a window/.test(failed.hint)], ['', true]);
+  // Another chat has the window: the words say so.
+  assert.match(control(parseMeta(message({owner: 'you', place: 'app', failed: true, busy: true}))).hint, /Another chat has melo's Chrome open/);
   assert.match(control(parseMeta(message({owner: 'you'})), {focused: true}).hint, /Control-Esc/);
   assert.doesNotMatch(control(parseMeta(message({owner: 'you'})), {focused: true, touch: true}).hint, /Control-Esc/, 'a touch screen has no Control key');
   const finishing = control(parseMeta(message({owner: 'you', browsing: true})));

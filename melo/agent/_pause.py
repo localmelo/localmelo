@@ -1,8 +1,8 @@
 """The run's hold (:class:`~localmelo.melo.contracts.pause.RunPause`): the person has the run.
 
-One per run. The run's loop calls :meth:`Hold.wait` before each model call and
-before each tool call; a tool calls :meth:`Hold.hold` and :meth:`Hold.release`
-(see the contract). While the run waits, or a tool waits inside
+One per run. Every request of the run to the model waits in :meth:`Hold.wait`
+first (the chat's request path calls it); a tool calls :meth:`Hold.hold` and
+:meth:`Hold.release` (see the contract). While the run waits, or a tool waits inside
 :meth:`Hold.suspended`, its time limits are moved on by the time it waited: an
 ``asyncio.Timeout`` is set to no deadline and given back what it had left.
 """
@@ -27,7 +27,8 @@ class _Held:
     what: str
     detail: dict[str, Any]
     since: float
-    on_end: Callable[[], None] | None = field(default=None)
+    on_end: Callable[[Resumed], None] | None = field(default=None)
+    by: object | None = None
 
 
 class Hold:
@@ -62,31 +63,35 @@ class Hold:
         self,
         what: str,
         detail: Mapping[str, Any] | None = None,
-        on_end: Callable[[], None] | None = None,
+        on_end: Callable[[Resumed], None] | None = None,
+        *,
+        by: object | None = None,
     ) -> None:
         if not self._running:
             return
         said = dict(detail or {})
         held = self._held
         if held is None:
-            self._held = _Held(what, said, self._clock(), on_end)
+            self._held = _Held(what, said, self._clock(), on_end, by)
             self._free.clear()
         elif said == held.detail and what == held.what:
             return
         else:
             held.what, held.detail = what, said
             held.on_end = on_end or held.on_end
+            held.by = by if by is not None else held.by
         self._paused(what, said)
 
-    def release(self, how: Resumed) -> None:
-        held, self._held = self._held, None
-        if held is None:
+    def release(self, how: Resumed, *, by: object | None = None) -> None:
+        held = self._held
+        if held is None or (by is not None and held.by is not by):
             return
+        self._held = None
         self._free.set()
         self._resumed(held.what, how, max(0.0, self._clock() - held.since))
 
     async def wait(self) -> None:
-        """The run's loop: wait while the run is held, with no time limit counting."""
+        """The gate before a model call: wait while the run is held, with no time limit counting."""
         if self._held is None:
             return
         async with self.suspended():
@@ -122,4 +127,4 @@ class Hold:
             with contextlib.suppress(
                 Exception
             ):  # a holder's failure never stops the run's end
-                held.on_end()
+                held.on_end(how)

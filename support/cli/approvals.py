@@ -550,7 +550,8 @@ def _takeover_panel(
     if arguments.get("form") is True:
         where = (
             "This page has a filled-in form, so it opens in the web console's Browser "
-            "panel (melo console), where the form stays. Press Done there."
+            "panel (melo console), where the form stays. Press Enter on an empty "
+            "line here, or Done there, when you're done."
         )
     elif arguments.get("browser") == "chrome":
         where = (

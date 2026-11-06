@@ -10,7 +10,7 @@ import pytest
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.events import AgentEvent
-from localmelo.melo.contracts.pause import PAUSE, RunPause
+from localmelo.melo.contracts.pause import PAUSE, Resumed, RunPause
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.tests.agent.test_tool_providers import (
@@ -61,7 +61,7 @@ class Holding(BaseToolProvider):
         )
         return [ProvidedTool(definition, hand, timeout_ms=self.timeout_ms)]
 
-    def _ended(self) -> None:
+    def _ended(self, how: Resumed) -> None:
         self.ended += 1
 
     async def close(self) -> None:
@@ -127,4 +127,33 @@ async def test_a_stop_while_held_ends_the_run_and_tells_the_holder() -> None:
     assert resumed == ["stopped"] and tools.ended == 1
     assert events[-1].type == "run.finished"
     assert events[-1].data["result"]["status"] == "cancelled"
+    await agent.close()
+
+
+async def test_a_hold_that_lands_after_the_step_began_stops_its_planning_call() -> None:
+    """The one gate is at the request itself: a take can land while the step gets ready."""
+    llm = Timed([_call("hand", "x"), _answer("done")])
+    tools = Holding()
+    agent = Agent(llm=llm, options=_provided_only(), tool_providers=[tools])
+    fit = agent._fit_prompt_cap
+    calls = [0]
+
+    async def holding_on_the_second(*args: Any, **kwargs: Any) -> Any:
+        calls[0] += 1
+        if calls[0] == 2 and tools.pause is not None:
+            tools.pause.release("done")  # the tool's own hold is over: the step goes on
+            tools.pause.hold("browser", {"tab": "t1"})  # and the panel's take lands now
+        return await fit(*args, **kwargs)
+
+    agent._fit_prompt_cap = holding_on_the_second  # type: ignore[method-assign]
+    run = asyncio.ensure_future(agent.run_task("sign in", on_event=lambda e: None))
+    async with asyncio.timeout(2):
+        while calls[0] < 2:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)
+    assert len(llm.at) == 1, "no model call while the person has the run"
+    assert tools.pause is not None
+    tools.pause.release("done")
+    result = await run
+    assert result.status == "completed" and len(llm.at) == 2
     await agent.close()

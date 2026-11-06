@@ -731,7 +731,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 <binary frame: one JPEG>
 ```
 
-- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`place` 为 `window` 或 `app`（同上），`form: true` 表示网页因有用户填了一半的表单而留在应用里，`failed: true` 表示窗口打不开，`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`place` 为 `window` 或 `app`（同上），`form: true` 表示网页因有用户填了一半的表单而留在应用里，`failed: true` 表示窗口打不开（`busy: true`：因为另一个对话的窗口开着），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
 - 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
 - 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
 - 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。

@@ -45,14 +45,16 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
+from localmelo.melo.contracts.pause import Resumed
+
 Owner = Literal["melo", "you"]
 MELO: Final = "melo"
 YOU: Final = "you"
 
 # Where the person has a tab: a real Chrome window, or the app's Browser panel.
 Place = Literal["window", "app"]
-# How a tab came back: Done, the window closed, or the run stopped.
-How = Literal["done", "closed", "stopped"]
+# How a tab came back: the run's ``run.resumed`` says the same (see the pause contract).
+How = Resumed
 # The person's input: messages a second a viewer may send, and the burst above that.
 RATE: Final = 120.0
 BURST: Final = 240.0
@@ -155,12 +157,14 @@ class Where:
 
     ``form`` says the page had a form they began when they took it (``None``
     until melo looked), which a window would clear; ``failed`` that the window
-    could not open, so the page is in the app.
+    could not open, so the page is in the app, and ``busy`` that it could not
+    because another chat's window is open.
     """
 
     place: Place
     form: bool | None = None
     failed: bool = False
+    busy: bool = False
     since: float = 0.0
 
 
@@ -212,13 +216,19 @@ class Owners:
         return True
 
     def move(
-        self, tab: str, place: Place, *, form: bool | None = None, failed: bool = False
+        self,
+        tab: str,
+        place: Place,
+        *,
+        form: bool | None = None,
+        failed: bool = False,
+        busy: bool = False,
     ) -> None:
         """Say where the person has *tab* now (the window opened, or could not)."""
         held = self._held.get(tab)
         if held is None:
             return
-        held.place, held.failed = place, failed
+        held.place, held.failed, held.busy = place, failed, busy
         if form is not None:
             held.form = form
         self._changed_now()
