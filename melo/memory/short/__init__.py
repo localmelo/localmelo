@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import itertools
 from collections import deque
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -194,66 +193,6 @@ class WorkingMemory:
         """Clear conversation buffer only. The latest reflection survives."""
         self._buf.clear()
         self._aliases.clear()
-
-    def drop_oldest_units(self, count: int) -> int:
-        """Drop the *count* oldest units of the buffer (see :func:`group_turns`).
-
-        Units go whole, so a tool call never loses its results, and the
-        newest unit always stays. Returns the number of messages dropped.
-        """
-        dropped = 0
-        for _ in range(count):
-            if not self._buf:
-                break
-            size = self._leading_unit_size()
-            if size >= len(self._buf):
-                break  # only the newest unit is left
-            self._drop_leading(size)
-            dropped += size
-        return dropped
-
-    def strip_thinking(self, count: int, *, only: set[int] | None = None) -> int:
-        """Clear the thinking of the *count* oldest units of the buffer.
-
-        Only an assistant message's ``thinking`` is cleared; its content,
-        calls and results stay, so the unit is not dropped. Returns the
-        number of messages changed. The newest unit always stays, as in
-        :meth:`drop_oldest_units`: a window with one unit changes nothing.
-        With *only*, a set of ``id()`` values, only those messages change;
-        the fit-to-cap loop uses it so it never clears reasoning the
-        request does not carry (an earlier task's, or a turn over the cap).
-        """
-        changed = 0
-        index = 0
-        for _ in range(count):
-            if index >= len(self._buf):
-                break
-            size = self._unit_size_at(index)
-            if size >= len(self._buf) - index:
-                break  # only the newest unit is left
-            for offset in range(index, index + size):
-                msg = self._buf[offset]
-                if msg.role != "assistant" or not msg.thinking:
-                    continue
-                if only is not None and id(msg) not in only:
-                    continue
-                replaced = dataclasses.replace(msg, thinking="")
-                names = self._aliases.pop(id(msg), None)
-                if names:
-                    self._aliases[id(replaced)] = names
-                self._buf[offset] = replaced
-                changed += 1
-            index += size
-        return changed
-
-    def _unit_size_at(self, start: int) -> int:
-        """Messages in the unit that starts at *start* (see :func:`group_turns`)."""
-        unit = [self._buf[start]]
-        for msg in itertools.islice(self._buf, start + 1, None):
-            if not _joins(unit, msg, self._empty_prefix):
-                break
-            unit.append(msg)
-        return len(unit)
 
     def _evict(self) -> None:
         if len(self._buf) <= self._max_len:

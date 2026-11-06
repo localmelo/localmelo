@@ -196,14 +196,44 @@ class TestReader:
             "control_char",
         )
 
-    def test_the_repair_names_are_the_documented_five(self) -> None:
+    def test_the_repair_names_are_the_documented_seven(self) -> None:
         assert REFLECTION_REPAIRS == (
             "unmatched_closer",
             "trailing_comma",
             "control_char",
             "invalid_escape",
             "unclosed_array",
+            "single_quotes",
+            "key_quote",
         )
+
+    @pytest.mark.parametrize(
+        ("text", "repair", "key", "value"),
+        [
+            (
+                '{"next_promising_directions": ["Write bowling.py.", '
+                "'Run pytest once, then fix what fails.'], "
+                '"recommended_action": "continue"}',
+                "single_quotes",
+                "next_promising_directions",
+                ["Write bowling.py.", "Run pytest once, then fix what fails."],
+            ),
+            (
+                '{"summary": "2 tests still fail.", failed_hypotheses": ["a stale '
+                'cache"], "recommended_action": "continue"}',
+                "key_quote",
+                "failed_hypotheses",
+                ["a stale cache"],
+            ),
+        ],
+        ids=["list_item", "key"],
+    )
+    def test_a_lost_double_quote_is_repaired(
+        self, text: str, repair: str, key: str, value: list[str]
+    ) -> None:
+        assert _find_reflection(text) is None
+        found = _read_reflection(text)
+        assert found is not None and found[1] == repair and found[0][key] == value
 
     @pytest.mark.parametrize(
         "text",

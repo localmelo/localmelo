@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
@@ -33,6 +33,11 @@ if TYPE_CHECKING:
     from localmelo.melo.contracts.review import ActionReview
 
 
+# The prompt cap without a context window: the characters a planning or
+# reflection request is fitted to before it is sent (``Chat._request``), and
+# past which ``Checker.pre_plan`` refuses it.
+PROMPT_CAP_CHARS = 100_000
+
 # The characters one image with pixels counts for in the prompt cap: a
 # 1280x1024 screenshot is about 1,300 tokens on the local vision models, at
 # about 3.45 characters per token. A reference (no pixels) counts nothing.
@@ -40,13 +45,12 @@ IMAGE_PROMPT_CHARS = 4_500
 
 
 def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
-    """Characters *msg* contributes to a planning prompt.
+    """Characters *msg* contributes to a request, for the prompt cap.
 
     With *count_thinking*, an assistant message's ``thinking`` counts too:
-    a replay request sends it, so it must fit the cap. The default counts
-    the content and tool calls only, as every request before replay did.
-    Each image the message sends (one with data) counts
-    :data:`IMAGE_PROMPT_CHARS`.
+    a request that sends it (the provider has a reasoning field) must fit
+    the cap with it. Tool schemas never count. Each image the message sends
+    (one with data) counts :data:`IMAGE_PROMPT_CHARS`.
     """
     total = len(msg.content)
     total += IMAGE_PROMPT_CHARS * sum(1 for image in msg.images if image.data)
@@ -56,6 +60,19 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
         total += len(tc.tool_name)
         total += len(json.dumps(tc.arguments, ensure_ascii=False, default=str))
     return total
+
+
+def prompt_chars(messages: Sequence[Message], *, count_thinking: bool = False) -> int:
+    """Characters *messages* count toward :data:`PROMPT_CAP_CHARS`.
+
+    The system prompt does not count: the cap bounds what a run adds (task,
+    history, recall, reflections), and the fixed prompt never grows.
+    """
+    return sum(
+        _prompt_chars(m, count_thinking=count_thinking)
+        for m in messages
+        if m.role != "system"
+    )
 
 
 # True while the executor checks a call of the harness itself (see
@@ -92,17 +109,18 @@ class Checker:
     # ── Core → Memory boundary ──
 
     async def pre_plan(
-        self,
-        messages: list[Message],
-        *,
-        count_thinking: bool = False,
-        cap_ratio: float = 1.0,
+        self, messages: list[Message], *, count_thinking: bool = False
     ) -> CheckResult:
-        # Tool-call arguments are replayed to the model with the assistant
-        # message, so they count toward the prompt size as well. With
-        # *count_thinking*, so does the reasoning a replay request sends.
-        total = sum(_prompt_chars(m, count_thinking=count_thinking) for m in messages)
-        if total > 100_000 * cap_ratio:
+        """The check after the fit: refuse a request over :data:`PROMPT_CAP_CHARS`.
+
+        With no context window, ``Chat`` fits each planning and reflection
+        request to the cap (``_context_fit.fit_request``) and then asks this;
+        it refuses only a request whose pinned part alone is over the cap.
+        Tool-call arguments count, as the model reads them with the message;
+        with *count_thinking*, so does the reasoning the request sends.
+        """
+        total = prompt_chars(messages, count_thinking=count_thinking)
+        if total > PROMPT_CAP_CHARS:
             return CheckResult(allowed=False, reason=f"Prompt too large: {total} chars")
         return CheckResult(allowed=True)
 

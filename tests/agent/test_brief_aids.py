@@ -206,8 +206,6 @@ class TestDroppedNote:
         [gone] = seen  # the oldest unit left when the window passed four messages
         assert [m.role for m in gone] == ["assistant", "tool"]
         assert dropped_notes(gone) == ["file_read f0.py (0 chars)"]
-        memory.drop_oldest_units(1)
-        assert dropped_notes(seen[-1]) == ["file_read f1.py (1 chars)"]
 
     @pytest.mark.asyncio
     async def test_a_brief_run_carries_the_newest_eight_at_the_tail(self) -> None:
