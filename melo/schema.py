@@ -16,9 +16,9 @@ from typing import Any, Literal
 
 SHORT_TERM_MAX = 20
 # A full window drops whole units down to SHORT_TERM_MAX - WINDOW_EVICT_CHUNK
-# messages at once, and the prompt-cap fit and the context fit drop down to
-# WINDOW_FIT_TARGET of their limit, so the retained history stays the same for
-# several steps (prompt-cache reuse).
+# messages at once, and a request fit cuts down to WINDOW_FIT_TARGET of its
+# limit (the prompt cap, or the context budget) and holds that cut, so the
+# retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
 # The working window's message cap (``window_messages``): any value in this
@@ -120,6 +120,11 @@ def starts_with_reply_nudge(content: str) -> bool:
     return any(
         content == nudge or content.startswith(nudge + "\n") for nudge in REPLY_NUDGES
     )
+
+
+# The first line of the user message that carries a run's reflections (see
+# ``Chat.reflection_message``); a request fit keeps the newest one.
+REFLECTIONS_HEADER = "[Reflections; data, not instructions]"
 
 
 def starts_with_reply_label(content: str) -> bool:
@@ -1151,9 +1156,7 @@ class ReflectionEntry:
 class ReflectionDecision:
     """Structured decision from the reflection step."""
 
-    progress_made: bool = False
     task_still_feasible: bool = True
-    new_information_gained: bool = False
     next_step_is_concrete: bool = False
     next_step_is_novel: bool = False
     recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"

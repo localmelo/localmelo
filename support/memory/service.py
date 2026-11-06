@@ -224,6 +224,17 @@ WRITE_IN_YOU: Final = (
     '"I" or "my" (not "I prefer that when you explain …" but "You prefer that '
     'melo explains …").'
 )
+# How many notes of one turn ``remember`` refuses before it stops looking at more: the
+# first refusal says it may try once more, the second ends the attempts.
+MAX_REFUSALS: Final = 2
+# The final line has a period where a refusal has a colon: ``Front.refused_by_tool``
+# reads "Not remembered:" as a refused step that is free, so a model that goes on
+# calling after the final line pays for each call.
+TRY_ONCE_MORE: Final = " You may try once more; change only what this message names."
+NO_MORE_TRIES: Final = (
+    "Not remembered. Do not try to save this note again in this turn; tell the user "
+    "in one sentence what you could not keep."
+)
 _BATCH: Final = 16
 # Longest the embedding of a note and the windows of its sources may take: one call.
 NOTE_EMBED_TIMEOUT_S: Final = INDEX_EMBED_TIMEOUT_S
@@ -494,6 +505,9 @@ class ChatTurn:
     emit: Callable[[dict[str, Any]], None] | None = None
     kept: list[records.Written] = field(default_factory=list)
     refused: bool = False
+    # How many of the model's notes ``remember`` refused in this turn (a kept note
+    # does not take one back); at :data:`MAX_REFUSALS` it refuses without looking.
+    refusals: int = 0
     # The reply said it noted something and no note was kept (``keep_claims``).
     unsaved_claim: bool = False
     # The oldest turn of this chat the model's window holds (None: not known).
@@ -752,24 +766,25 @@ def _typed_words(turn: TurnInfo) -> str:
     return turn.typed_text if turn.attachments else turn.user_text
 
 
+def _note_words(note: str) -> str:
+    """The words of a note the person added while melo worked, as the run read it:
+    after the console's own lead (:data:`_NOTE_LEAD`), without the stand-in for its
+    pictures or the console's line about pictures a model was not sent (neither is
+    words); ``""`` when none are left."""
+    words = note.strip().removeprefix(_NOTE_LEAD).strip()
+    words = _PICTURES_WITHHELD.sub("", words).strip()
+    return "" if _PICTURE_STANDIN.fullmatch(words) else words
+
+
 def with_read_notes(typed: str, notes: Sequence[str]) -> str:
     """*typed* and then each of *notes*, the words the person added while melo
     worked, on a paragraph of its own: :data:`ADDED_MARK`, a line break, the note.
 
     The mark is a line of its own so a statement in the note reads as one (a
-    sentence that starts with a mark is no statement). A note that holds nothing
-    after the console's own lead (:data:`_NOTE_LEAD`) is left out, so is one that
-    is only the stand-in for its pictures, and the console's line about pictures
-    a model was not sent never counts as words. Without notes, *typed* exactly.
+    sentence that starts with a mark is no statement). A note with no words
+    (:func:`_note_words`) is left out. Without notes, *typed* exactly.
     """
-    marked = []
-    for note in notes:
-        words = note.strip().removeprefix(_NOTE_LEAD).strip()
-        words = _PICTURES_WITHHELD.sub("", words).strip()
-        if _PICTURE_STANDIN.fullmatch(words):
-            words = ""
-        if words:
-            marked.append(f"{ADDED_MARK}\n{words}")
+    marked = [f"{ADDED_MARK}\n{words}" for words in map(_note_words, notes) if words]
     if not marked:
         return typed
     return "\n\n".join([typed.rstrip(), *marked] if typed.strip() else marked)
@@ -1664,7 +1679,12 @@ class ChatMemory:
         user did not type in this chat and no finished task's result shown in it
         holds. A note that says "I" or "my" and nothing of the user otherwise is
         kept in the second person (:func:`records.second_person`), as the user's
-        own words are.
+        own words are; a sentence the user typed that the note copies exactly
+        stays as typed and is not read for "I" (:func:`records.typed_spans`).
+
+        A turn gets :data:`MAX_REFUSALS` refusals. The first says the model may try
+        once more (:data:`TRY_ONCE_MORE`); the second, and every call after it,
+        answers :data:`NO_MORE_TRIES` with no check run (:attr:`ChatTurn.refusals`).
 
         That is the rule at ``[memory] note_gate = "typed"``, the default. Above it
         (:meth:`_admit`) a page or file the user pointed to is a source too, a note
@@ -1675,6 +1695,17 @@ class ChatMemory:
         turn = CHAT_TURN.get()
         if not self.enabled or turn is None or turn.memory.recall is None:
             return "Not remembered: memory across chats is off in this chat."
+        if turn.refusals >= MAX_REFUSALS:
+            return NO_MORE_TRIES
+        reply = await self._remember(turn, text, topic)
+        if not reply.startswith("Not remembered"):
+            return reply
+        turn.refusals += 1
+        return NO_MORE_TRIES if turn.refusals >= MAX_REFUSALS else reply + TRY_ONCE_MORE
+
+    async def _remember(self, turn: ChatTurn, text: str, topic: str) -> str:
+        """The checks and the write of :meth:`remember`: the reply, a refusal
+        starting ``Not remembered``."""
         if is_owner_question(turn.info):
             return NOT_THE_USER
         note = records.finished(text)
@@ -1687,12 +1718,15 @@ class ChatMemory:
                 f"Not remembered: {records.NOT_KEPT}. Do not write it anywhere "
                 "(no file, no code)."
             )
-        if records.first_person(note):
-            # "I" is the assistant when the note names the user in the third person.
-            if records.addresses_user(note) or records.names_user(note):
-                return WRITE_IN_YOU
-            note = records.second_person(note, protect=True)
         said = [turn.typed, *await self._said(turn)]
+        typed = records.typed_spans(note, said)
+        if records.first_person(note, keep=typed):
+            # "I" is the assistant when the note names the user in the third person.
+            if records.addresses_user(note, keep=typed) or records.names_user(
+                note, keep=typed
+            ):
+                return WRITE_IN_YOU
+            note = records.second_person(note, protect=True, keep=typed)
         gate = self.note_settings()
         admission: Admission | None = None
         if gate.level == note_gate.TYPED:
@@ -1992,8 +2026,9 @@ class ChatMemory:
     async def keep_claims(self, info: TurnInfo, answer: str) -> list[records.Written]:
         """After the chat turn *info* ran: when *answer* says it noted a fact
         (:func:`records.claimed`) and no note of the turn was kept, keep that
-        fact with :meth:`remember`, which checks it as it checks the model's own
-        notes (the user's words, no secret, supersedes the old value).
+        fact with the checks of :meth:`remember` (the user's words, no secret,
+        supersedes the old value), though not its cap of refusals per turn: the
+        cap stops the model's retries, not the one try after its reply.
 
         When nothing written to the user is named (a fragment such as "gate 9
         for Faro"), the reply claims a save and names nothing ("Saved.",
@@ -2018,7 +2053,8 @@ class ChatMemory:
             return []
         if fact:
             before = len(turn.kept)
-            reply = await self.remember(fact, records.topic_of(fact, request=False))
+            topic = records.topic_of(fact, request=False)
+            reply = await self._remember(turn, fact, topic)
             if not reply.startswith("Not remembered"):
                 return turn.kept[before:]
         turn.unsaved_claim = True
@@ -2026,12 +2062,22 @@ class ChatMemory:
         return []
 
     async def _said(self, turn: ChatTurn) -> list[str]:
-        """What the user typed in the earlier turns of this chat (undone ones aside)."""
-        return [
-            _typed_words(t)
-            for t in await turn.store.list_turns(turn.info.session_id)
-            if t.turn < turn.info.turn and not t.undone and not is_owner_question(t)
-        ]
+        """What the user typed in this chat besides this turn's own message: the
+        earlier turns' messages (undone ones aside), then every note added to a turn
+        while melo worked that its run read (this turn's too), then the messages
+        still queued for the chat (the notes its run has not read yet among them).
+        All read from the store."""
+        store, chat = turn.store, turn.info.session_id
+        shown = {
+            t.turn: _typed_words(t)
+            for t in await store.list_turns(chat)
+            if not t.undone and not is_owner_question(t)
+        }
+        said = [words for n, words in shown.items() if n < turn.info.turn]
+        for n, note in await store.all_read_notes(chat):
+            if n in shown and (words := _note_words(note)):
+                said.append(words)
+        return [*said, *await store.queued_words(chat)]
 
     async def _results(self, turn: ChatTurn) -> list[str]:
         """The finished tasks' results this chat has shown: those it recalled, as they

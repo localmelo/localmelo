@@ -347,9 +347,9 @@ class TestStatuses:
         result = await agent.run_task("x" * 110_000)
         assert (result.status, result.result) == ("failed", "")
         assert result.error.startswith("Plan check failed: ")
-        # The check refused the step before its planning call was made.
+        # The check refused the step's request after its fit: none was sent.
         assert llm.calls == []
-        assert (result.steps, result.attempts, result.n_llm) == (0, 1, 0)
+        assert (result.steps, result.attempts, result.n_llm) == (1, 1, 0)
         assert _only_task(agent).result == result.error
 
     @pytest.mark.asyncio

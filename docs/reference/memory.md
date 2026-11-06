@@ -34,18 +34,19 @@ In the web console and the app, a turn of the chat that has left the window is n
 next message that matches, as `this chat`, and `search_memory` finds it too. A turn whose
 question the window still shows is not recalled.
 
-`--window-eviction` (or `[agent] window_eviction`) picks the mode. The window is
-also cut by the prompt cap (100,000 characters) and, with `--context-window`,
-by the request fit.
+`--window-eviction` (or `[agent] window_eviction`) picks the mode. Each request is
+then fitted on a copy: to the prompt cap (100,000 characters) or, with
+`--context-window`, to the context budget. The window itself stays as it is.
 
 | Mode | The window drops |
 |---|---|
-| `chunk` (default) | Whole units down to the cap less 8 messages (56 of 64, 12 of 20) when it would pass the cap, so the history starts at the same unit for about four steps. The prompt-cap fit then drops down to 70% of the cap, not just under it. |
+| `chunk` (default) | Whole units down to the cap less 8 messages (56 of 64, 12 of 20) when it would pass the cap, so the history starts at the same unit for about four steps. The prompt-cap fit then cuts down to 70% of the cap, not just under it. |
 | `boundary` | `chunk` within an attempt, and the finished attempt's turns when the next attempt starts after a reflection (the reflection carries them); the task and inbox messages stay. |
 
 With the default of 64 messages the count rarely drops anything: the prompt-size fit is the
-evictor. When the planning prompt would pass the 100,000-character cap,
-it drops whole units, a tool call with its results never split, down to 70% of the cap.
+evictor. When a planning or reflection request would pass the 100,000-character cap,
+the fit cuts a copy of it down to 70% of the cap: old tool results become short previews,
+old thinking and old recall go, then whole units, a tool call with its results never split.
 
 A window that reaches the message cap first still drops by count, as the mode says; a drop takes at most half the
 window, so below a cap of 16 a chunk is fewer than eight messages. The value appears as
@@ -56,15 +57,15 @@ window, so below a cap of 16 a chunk is fewer than eight messages. The value app
 default: without prompt caching, a longer window costs input tokens on every request.
 
 The mode appears as `window_eviction` in the JSON result's `config`. The
-request fit (`--context-window`) also holds its cut: when a request would pass the
-input limit it drops whole units down to 70% of the limit and remembers the
-oldest unit it kept, and the next requests start from that unit and drop again
-only when they would pass the limit.
+request fit holds its cut, at the prompt cap and with `--context-window`: the next
+requests repeat the cut byte for byte, so a server's prompt cache can reuse them,
+and the fit cuts again only when one would pass the limit.
 
 A window chunk drop or a boundary drop
-that removes the remembered unit resets the cut. Reasoning replay and the
-units the fit never drops (an unfinished tool call, the latest failing result,
-images) are unchanged.
+that removes the first unit the cut kept resets the cut. On a provider that requires
+reasoning replay, thinking stays. The fit always keeps the task, the latest
+reflection and the last turn, an unfinished tool call included; failing results,
+images and a finished attempt's reflection go only when nothing else is left.
 
 ## Digest recall
 

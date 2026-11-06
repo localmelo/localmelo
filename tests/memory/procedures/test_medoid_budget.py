@@ -145,20 +145,26 @@ def test_past_the_budget_a_first_version_takes_the_latest_episode() -> None:
     assert first.medoid == "t7"
 
 
+def _long_run(k: int) -> RunFacts:
+    return RunFacts(
+        task_id=uuid.uuid4().hex,
+        key=KEY,
+        model="m",
+        options={},
+        status="completed",
+        steps=5,
+        segments=segments(1000, shift=k),
+    )
+
+
 async def test_learning_long_runs_stays_far_below_the_bound() -> None:
+    # CPU time, not the wall clock: learning is pure computation, and a stall of the
+    # whole machine under a parallel test run once read as 0.64 s.
     store = MemoryProcedures()
     took: list[float] = []
     for k in range(9):
-        facts = RunFacts(
-            task_id=uuid.uuid4().hex,
-            key=KEY,
-            model="m",
-            options={},
-            status="completed",
-            steps=5,
-            segments=segments(1000, shift=k),
-        )
-        started = time.perf_counter()
+        facts = _long_run(k)
+        started = time.thread_time()
         await store.learn(facts)
-        took.append(time.perf_counter() - started)
-    assert max(took) < 0.5
+        took.append(time.thread_time() - started)
+    assert max(took) < 0.5, [round(t, 3) for t in took]

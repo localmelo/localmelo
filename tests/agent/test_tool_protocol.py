@@ -16,6 +16,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._tool_images import withheld_note
 from localmelo.melo.agent.agent import WITHHELD_PREVIEW_CHARS, _cut_to
+from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, prompt_chars
 from localmelo.melo.checker.validators import (
     MAX_MEMORY_TEXT_LEN,
     MAX_OUTPUT_LEN,
@@ -1159,20 +1160,6 @@ class TestWorkingMemoryTurns:
             assert window[0].role != "tool"
             assert_protocol_valid(window)
 
-    def test_drop_oldest_units_keeps_whole_units_and_the_newest(self) -> None:
-        wm = WorkingMemory(max_len=20)
-        wm.append(Message(role="user", content="q"))
-        wm.append_turn(*_turn(2, "a"))
-        wm.append_turn(*_turn(1, "b"))
-        assert wm.drop_oldest_units(2) == 4  # "q", then the "a" turn
-        window = wm.get_window()
-        assert_protocol_valid(window)
-        assert [m.tool_call_id for m in window if m.role == "tool"] == ["call_b0"]
-        # The newest unit always stays.
-        assert wm.drop_oldest_units(5) == 0
-        assert len(wm.get_window()) == 2
-        assert WorkingMemory(max_len=2).drop_oldest_units(1) == 0
-
     def test_tail_turns_never_splits(self) -> None:
         msgs: list[Message] = [Message(role="user", content="q")]
         a, a_results = _turn(2, "a")
@@ -1199,7 +1186,7 @@ class TestWorkingMemoryTurns:
         assert tail_turns(msgs, 3) == [a, *a_results]
         assert tail_turns(msgs, 4) == [label, nudge, a, *a_results]
 
-    def test_eviction_and_dropping_keep_the_label_with_its_nudge(self) -> None:
+    def test_eviction_keeps_the_label_with_its_nudge(self) -> None:
         label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
         nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
         a, a_results = _turn(1, "a")
@@ -1207,13 +1194,6 @@ class TestWorkingMemoryTurns:
         wm.append(Message(role="user", content="q"))
         wm.append_turn(label, [nudge])  # 3
         wm.append_turn(a, a_results)  # 5 > 3: drop "q", then label and nudge
-        assert wm.get_window() == [a, *a_results]
-
-        wm = WorkingMemory(max_len=20)
-        wm.append(Message(role="user", content="q"))
-        wm.append_turn(label, [nudge])
-        wm.append_turn(a, a_results)
-        assert wm.drop_oldest_units(2) == 3  # "q", then label and nudge
         assert wm.get_window() == [a, *a_results]
 
         # The newest unit stays whole, even past max_len.
@@ -1275,18 +1255,6 @@ class TestAgentWindowTruncation:
 
 # ── Working memory that outgrows the prompt cap ────────────────────────────
 
-# Checker.pre_plan fails a step whose prompt is larger than this.
-PROMPT_CAP = 100_000
-
-
-def _prompt_chars(messages: list[Message]) -> int:
-    """What Checker.pre_plan counts of *messages*."""
-    return sum(
-        len(m.content)
-        + sum(len(tc.tool_name) + len(json.dumps(tc.arguments)) for tc in m.tool_calls)
-        for m in messages
-    )
-
 
 def _reader(llm: BaseLLMProvider, size: int = 40_000) -> Agent:
     """Agent whose read tool returns *size* characters a call."""
@@ -1305,12 +1273,15 @@ def _read_call(part: str) -> Message:
     return Message(role="assistant", tool_call=call)
 
 
+def _fits_the_cap(messages: list[Message]) -> bool:
+    return prompt_chars(messages) <= PROMPT_CAP_CHARS
+
+
 class TestPromptCapRecovery:
     @pytest.mark.asyncio
-    async def test_later_runs_drop_old_turns_instead_of_failing(self) -> None:
+    async def test_later_runs_fit_old_turns_instead_of_failing(self) -> None:
         # One large turn a run. From the third run on, the turns no longer
-        # fit the cap together; the oldest whole units are dropped, so no
-        # run fails with "Prompt too large".
+        # fit the cap together; each request is fitted, so no run fails.
         replies = []
         for i in range(6):
             replies += [_read_call(str(i)), Message(role="assistant", content=f"a{i}")]
@@ -1323,16 +1294,15 @@ class TestPromptCapRecovery:
         for call in _planning_calls(llm):
             sent = call["messages"]
             assert_protocol_valid(sent)
-            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
+            assert _fits_the_cap(sent)
+        # The fit works on the request's copy: working memory keeps the turns.
         window = agent.hippo.working.get_window()
-        assert_protocol_valid(window)
-        assert [m.tool_call_id for m in window if m.role == "tool"] == [
-            "call_4",
-            "call_5",
-        ]
+        assert len([m for m in window if m.role == "tool"]) == 6
 
     @pytest.mark.asyncio
     async def test_large_turns_within_one_run(self) -> None:
+        # No context window: the character cap is the limit. The oldest
+        # results become previews first; the task and the turns stay.
         llm = FakeLLM(
             [
                 _read_call("1"),
@@ -1350,147 +1320,37 @@ class TestPromptCapRecovery:
         for call in planning:
             sent = call["messages"]
             assert_protocol_valid(sent)
-            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
-            # The task still opens the conversation after its message left.
+            assert _fits_the_cap(sent)
             assert (sent[1].role, sent[1].content) == ("user", "read parts 1 to 4")
-        last = planning[-1]["messages"]
-        assert [m.tool_call_id for m in last if m.role == "tool"] == [
-            "call_3",
-            "call_4",
-        ]
+        tools = [m for m in planning[-1]["messages"] if m.role == "tool"]
+        assert [m.tool_call_id for m in tools] == [f"call_{i}" for i in "1234"]
+        previewed = ["characters omitted" in m.content for m in tools]
+        assert previewed == [True, True, False, False]
 
     @pytest.mark.asyncio
-    async def test_a_leftover_oversized_message_is_dropped(self) -> None:
+    async def test_an_earlier_turn_too_large_is_left_out(self) -> None:
+        # A turn before the task is history: it goes whole, whatever it is,
+        # where a user turn of the task itself would stay.
         llm = FakeLLM([Message(role="assistant", content="ok")])
         agent = _agent(llm)
-        agent.hippo.working.append(Message(role="system", content="x" * 110_000))
+        agent.hippo.working.append(Message(role="user", content="x" * 110_000))
         result = await agent.run_task("hello")
         assert (result.status, result.result) == ("completed", "ok")
-        assert [m.content for m in agent.hippo.working.get_window()] == ["hello"]
+        [sent] = [call["messages"] for call in llm.calls]
+        assert [m.content for m in sent[1:]] == ["hello"]
 
     @pytest.mark.asyncio
-    async def test_nothing_is_dropped_when_the_newest_unit_cannot_fit(self) -> None:
+    async def test_a_task_over_the_cap_fails_before_its_request(self) -> None:
         llm = FakeLLM([Message(role="assistant", content="never sent")])
         agent = _agent(llm)
         agent.hippo.working.append(Message(role="user", content="earlier"))
-        query = "x" * (PROMPT_CAP + 1)
+        query = "x" * (PROMPT_CAP_CHARS + 1)
         result = await agent.run_task(query)
         assert result.status == "failed"
         assert result.error.startswith("Plan check failed: Prompt too large")
         assert llm.calls == []
         window = agent.hippo.working.get_window()
         assert [m.content for m in window] == ["earlier", query]
-
-    @pytest.mark.asyncio
-    async def test_an_empty_reply_label_goes_only_with_its_nudge(self) -> None:
-        # The prompt, with the query that plan_step puts back in front,
-        # fits with the nudge and the newest turn, but not with the label
-        # as well. Dropping the label alone would leave the nudge to follow
-        # that query, so the label and the nudge go together.
-        agent = _agent(FakeLLM())
-        query = Message(role="user", content="q")
-        label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
-        nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
-        a, a_results = _turn(1, "a")
-        agent.hippo.working.append(query)
-        agent.hippo.working.append_turn(label, [nudge])
-        agent.hippo.working.append_turn(a, a_results)
-        room = PROMPT_CAP - _prompt_chars([query, nudge, a, *a_results])
-        await agent._fit_prompt_cap([Message(role="system", content="x" * room)], "q")
-        assert agent.hippo.working.get_window() == [a, *a_results]
-
-    @pytest.mark.asyncio
-    async def test_the_query_counts_once_its_message_is_dropped(self) -> None:
-        # A 60,000-character task and two 20,000-character results: the
-        # second result does not fit beside the task and the first. The
-        # request puts the task back in front once its message is dropped,
-        # so dropping that message alone saves nothing: the first result
-        # goes too.
-        query = "read parts 1 and 2: " + "q" * 60_000
-        llm = FakeLLM(
-            [
-                _read_call("1"),
-                _read_call("2"),
-                Message(role="assistant", content="done"),
-            ]
-        )
-        result = await _reader(llm, size=20_000).run_task(query)
-        assert (result.status, result.result) == ("completed", "done")
-
-        planning = _planning_calls(llm)
-        assert len(planning) == 3
-        for call in planning:
-            sent = call["messages"]
-            assert_protocol_valid(sent)
-            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
-            assert (sent[1].role, sent[1].content) == ("user", query)
-        last = planning[-1]["messages"]
-        assert [m.tool_call_id for m in last if m.role == "tool"] == ["call_2"]
-
-    @pytest.mark.asyncio
-    async def test_a_task_that_cannot_fit_beside_the_newest_turn_fails(self) -> None:
-        # A 70,000-character task and one 45,000-character result: every
-        # request would carry both, whatever is dropped, so the task fails
-        # with "Prompt too large" instead of sending a request over the cap.
-        query = "read this: " + "q" * 70_000
-        llm = FakeLLM([_read_call("1"), Message(role="assistant", content="never")])
-        result = await _reader(llm, size=45_000).run_task(query)
-        assert result.status == "failed"
-        assert result.error == "Plan check failed: Prompt too large: 115028 chars"
-
-        [sent] = [call["messages"] for call in _planning_calls(llm)]
-        assert _prompt_chars(sent[1:]) <= PROMPT_CAP
-
-    @pytest.mark.asyncio
-    async def test_the_query_counts_once_eviction_dropped_its_message(self) -> None:
-        # A 60,000-character task, then results of 10, 10 and 45,000
-        # characters. Eviction by message count drops the task's message
-        # after the second turn, so the window alone fits the cap, but not
-        # with the task the request puts back in front: the check before
-        # the step must count the task too, and fail the run instead of
-        # sending a request over the cap.
-        query = "q" * 60_000
-        llm = FakeLLM(
-            [
-                _read_call("1"),
-                _read_call("2"),
-                _read_call("3"),
-                Message(role="assistant", content="never"),
-            ]
-        )
-        agent = Agent(
-            llm=llm,
-            options=AgentOptions(
-                builtins=frozenset(), tool_exposure="all", memory=False
-            ),
-        )
-        agent.hippo.working = WorkingMemory(max_len=4)
-        agent.hippo.register_tool(_echo_def("read"))
-
-        async def _read(text: str) -> str:
-            return "r" * (45_000 if text == "3" else 10)
-
-        agent.executor.register("read", _read)
-        result = await agent.run_task(query)
-        assert (result.status, result.error, result.steps) == (
-            "failed",
-            "Plan check failed: Prompt too large: 105044 chars",
-            3,
-        )
-
-        planning = _planning_calls(llm)
-        assert len(planning) == 3
-        for call in planning:
-            assert _prompt_chars(call["messages"][1:]) <= PROMPT_CAP
-        # Eviction took the task's message out of the window. Nothing was
-        # dropped to fit the cap: not even the newest turn fits beside the
-        # task.
-        window = agent.hippo.working.get_window()
-        assert query not in [m.content for m in window]
-        assert [m.tool_call_id for m in window if m.role == "tool"] == [
-            "call_2",
-            "call_3",
-        ]
 
 
 # ── Stuck detection with several calls per step ────────────────────────────
