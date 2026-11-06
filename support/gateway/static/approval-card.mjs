@@ -311,7 +311,10 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     card.append(warning);
   }
   if (gist?.note) card.append(el("p", "approval-says", gist.note));
-  card.append(el("p", "approval-title", title), el("p", "approval-caption", caption));
+  const captionNode = el("p", "approval-caption", caption);
+  // A caption in words (it does not lead with the tool's id) is set in the page's type, not in code type.
+  if (!caption.includes(tool)) captionNode.setAttribute("data-words", "");
+  card.append(el("p", "approval-title", title), captionNode);
   if (outside) card.append(folderBox(doc, outside, tool, outsideFolder));
   if (stopped && reviewed.reasons.length) {
     card.append(el("p", "approval-why", t("approval.why")));

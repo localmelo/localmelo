@@ -1649,6 +1649,11 @@ dialog::backdrop {
   color: var(--ink-3);
   font: var(--text-caption)/16px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.approval-caption[data-words] {
+  font-family: inherit;
+  font-size: var(--text-small);
+  line-height: 18px;
+}
 .failure-title {
   display: flex;
   gap: 8px;

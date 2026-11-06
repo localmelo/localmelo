@@ -110,6 +110,8 @@ test('an approval asks a plain question and puts the tool id in a caption', asyn
     assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, title);
     assert.equal(findNode(card, (node) => node.className === 'approval-caption').textContent, caption);
   }
+  const clicking = c.draw({request_id: 'words', tool_name: 'browser-act:https://example.com', arguments: {site: 'example.com', access: 'act'}, workspace_label: '~/w'});
+  assert.ok('data-words' in findNode(clicking, (node) => node.className === 'approval-caption').attributes, 'a caption in words is not set in code type');
   request = {request_id: 'scroll', tool_name: 'shell_exec', arguments: {command: 'make test'}, workspace_label: '~/w'};
   const box = findNode(c.draw(request), (node) => node.className === 'approval-content');
   assert.equal(box.tabIndex, 0, 'a long command scrolls, so a keyboard reaches it');
@@ -433,6 +435,7 @@ test('a high-impact card says why melo asks, shows the request, and offers no ch
   assert.equal(card.dataset.impact, 'high');
   assert.equal(text('approval-title'), 'Install software?');
   assert.equal(text('approval-caption'), 'python_exec · asks every time');
+  assert.ok(!('data-words' in findNode(card, (node) => node.className === 'approval-caption').attributes), 'a tool id stays in code type');
   assert.equal(text('approval-why'), 'Why melo asks');
   const reasons = findNode(card, (node) => node.className === 'approval-reasons');
   assert.deepEqual(reasons.children.map((node) => node.textContent), highImpact().review.reasons);
