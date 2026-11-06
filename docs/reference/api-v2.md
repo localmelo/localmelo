@@ -595,7 +595,7 @@ Switch the model melo_serve serves. Body: `{"pick": "<id>"}`. It answers 202 wit
 {"switch": {"id": 1, "pick": "qwen3-8b-omlx", "name": "Qwen3 8B", "state": "waiting", "waiting_for": 1, "load_s": 12, "error": "", "title": "Switching to Qwen3 8B…", "detail": "Waiting for 1 chat to finish"}}
 ```
 
-- `state` goes `waiting` (for chats that run a turn, 10 minutes at most), `loading`, then `done`, `failed` (`error` says why) or `cancelled`. `GET /api/health` carries the same object as `switch`, `null` before the first one.
+- `state` goes `waiting` (for chats that run a turn, 10 minutes at most), `loading` (45 minutes at most), then `done`, `failed` (`error` says why; `title` then reads `Did not switch to Qwen3 8B` and `detail` repeats the error) or `cancelled`. `GET /api/health` carries the same object as `switch`, `null` before the first one.
 - A turn sent during a switch waits, with `Switching` as its hold, and runs on the new model.
 - 400 `invalid_request`: an unknown pick. 409 `pick_cannot_load`: it does not fit or has a problem. 409 `switch_running`: another switch is under way. 409 `not_melo_serve` and 502 `melo_serve_unavailable` as above.
 

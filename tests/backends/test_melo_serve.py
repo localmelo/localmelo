@@ -414,6 +414,14 @@ REFUSED = {
 }
 
 
+# The rows about the socket itself: the control client reads no state file.
+SOCKET_REFUSED = {
+    name: spoil
+    for name, spoil in REFUSED.items()
+    if "state file" not in name and "home" not in name
+}
+
+
 @pytest.mark.parametrize("spoil", REFUSED.values(), ids=REFUSED.keys())
 def test_a_control_socket_that_is_not_the_users_own_is_not_connected_to(
     spoil: Callable[[Path, pytest.MonkeyPatch], None],
@@ -508,13 +516,15 @@ async def test_a_task_mid_step_follows_a_switch_and_asks_again_once() -> None:
         await llm.close()
 
 
-async def test_a_load_is_a_wait_that_stop_and_time_end(
+async def test_a_load_is_a_wait_that_stop_and_only_the_bound_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """While melo_serve loads it answers 503 switching: the request asks again after
-    retry_after, then follows the 409 of the model served. Stop ends the wait at once;
-    past the bound the error stands, and is not retried again."""
+    retry_after, then follows the 409 of the model served. Stop ends the wait at once.
+    A slow load never fails it; past the bound the error stands, and is not retried."""
     import asyncio
+    import time
+    from types import SimpleNamespace
 
     import httpx
 
@@ -555,11 +565,61 @@ async def test_a_load_is_a_wait_that_stop_and_time_end(
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, 10)
 
-        loading["retry_after"] = 0.01
-        monkeypatch.setattr(openai_compat, "SWITCH_WAIT_S", 0.15)
+        now = [0.0]
+
+        async def sleep(seconds: float) -> None:
+            now[0] += seconds
+
+        monkeypatch.setattr(openai_compat, "asyncio", SimpleNamespace(sleep=sleep))
+        clock = SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+        monkeypatch.setattr(openai_compat, "time", clock)
+        loading.update(left=30, retry_after=60)  # slow, and healthy: 30 minutes
+        assert (await llm.chat(hi)).content == "new here"
+        assert now[0] == 1800
+
+        now[0], loading["left"] = 0.0, 1000  # it never ends
         with pytest.raises(ProviderError) as ended:
             async for _ in llm.stream_chat(hi):
                 pass
         assert ended.value.status_code == 503 and not ended.value.retryable
+        assert now[0] == melo_serve.LOAD_BOUND_S
     finally:
         await llm.close()
+
+
+@pytest.mark.parametrize("spoil", SOCKET_REFUSED.values(), ids=SOCKET_REFUSED.keys())
+async def test_the_control_client_sends_nothing_to_a_socket_that_is_not_the_users_own(
+    spoil: Callable[[Path, pytest.MonkeyPatch], None],
+    serve_fake: FakeServe,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spoil(Path(os.environ[melo_serve.SOCKET_ENV]), monkeypatch)
+    with pytest.raises(melo_serve.MeloServeError):
+        await melo_serve.switch("qwen3-8b-omlx", expected_generation=1)
+    assert serve_fake.switches == []
+
+
+async def test_a_reply_out_of_range_or_compressed_is_no_crash(
+    serve_fake: FakeServe,
+) -> None:
+    """A number beyond a float counts as absent, in the client and the provider; a
+    compressed reply is refused rather than inflated; a name stays on one line."""
+    import httpx
+
+    from localmelo.support.providers._http import switching_for
+
+    huge = 10**400
+    row = serve_fake.rows[3]
+    row["name"], row["load_s"], row["fit"]["after_pct"] = "Qwen3\n70B", huge, huge
+    serve_fake.reply = {
+        "memory": {"total_gb": huge, "free_pct": huge},
+        "picks": [row],
+    }
+    (pick,) = await melo_serve.picks()
+    assert (pick.name, pick.load_s, pick.free_gb) == ("Qwen3 70B", 0.0, None)
+    error = {"error": {"type": "switching", "retry_after": huge}}
+    assert switching_for(httpx.Response(503, json=error)) == 0.0
+
+    serve_fake.gzipped = True
+    with pytest.raises(melo_serve.MeloServeError, match="not JSON"):
+        await melo_serve.picks()

@@ -18,7 +18,8 @@ struct ServeList: Equatable {
     var current: ServePick? { picks.first { $0.current } }
 }
 
-/// A switch of the served model, from `switch` of `GET /api/health`: `title` and `detail` are its two lines.
+/// A switch of the served model, from `switch` of `GET /api/health`: `title` and `detail` are its two lines,
+/// for one that failed what it did not reach and why.
 struct ServeSwitch: Equatable {
     let id: Int
     let pick: String
@@ -28,6 +29,7 @@ struct ServeSwitch: Equatable {
 
     /// Waiting for chats, or loading: the picks wait for it.
     var active: Bool { state == "waiting" || state == "loading" }
+    var failed: Bool { state == "failed" }
 }
 
 private func json(_ data: Data) -> [String: Any]? {
@@ -86,14 +88,16 @@ enum ModelMenuRow: Equatable {
     case foot(String)
 }
 
-/// The submenu: while a switch runs, its line and Cancel Switch first and every pick dimmed; a pick that cannot load
-/// is always dimmed, its reason its subtitle; the current one checked.
+/// The submenu: while a switch runs, its line and Cancel Switch first and every pick dimmed; after one that failed,
+/// why, until the next; a pick that cannot load is always dimmed, its reason its subtitle; the current one checked.
 func modelMenuRows(_ list: ServeList, switching: ServeSwitch?) -> [ModelMenuRow] {
     var rows: [ModelMenuRow] = []
     if let running = switching, running.active {
         rows.append(.status(title: running.title, subtitle: running.detail))
         if running.state == "waiting" { rows.append(.cancel) }
         rows.append(.separator)
+    } else if let ended = switching, ended.failed {
+        rows += [.status(title: ended.title, subtitle: ended.detail), .separator]
     }
     let busy = switching?.active == true
     for pick in list.picks {
@@ -102,6 +106,12 @@ func modelMenuRows(_ list: ServeList, switching: ServeSwitch?) -> [ModelMenuRow]
     }
     if !list.foot.isEmpty { rows += [.separator, .foot(list.foot)] }
     return rows
+}
+
+/// Whether to draw *rows*: a poll with nothing new leaves the submenu as it is, and an open one is not rebuilt under
+/// the pointer (the first poll after it closes draws it).
+func modelMenuNeedsDrawing(_ rows: [ModelMenuRow], shown: [ModelMenuRow], open: Bool) -> Bool {
+    rows != shown && !open
 }
 
 /// The Model item's subtitle: the switch under way, else the current model's name.

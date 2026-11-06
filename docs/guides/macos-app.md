@@ -68,7 +68,7 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 | A red dot with a ring | A chat or task waits for your answer to an approval. |
 
 - The menu lists what runs, **Waiting for your approval** (it opens that chat or task), **Open localmelo**, **Settings…** and **Quit localmelo**.
-- With melo_serve, a **Model** submenu lists its chat models, the current one checked; picking one switches every chat ([Switch the model](model-servers.md#switch-the-model)). While a switch waits, **Cancel Switch** ends the wait.
+- With melo_serve, a **Model** submenu lists its chat models, the current one checked; picking one switches every chat ([Switch the model](model-servers.md#switch-the-model)). While a switch waits, **Cancel Switch** ends the wait. A switch that failed says why at the top of the submenu until the next one.
 - **Sign In Again** appears only when it can help: after four failed sign-ins, on the Locked screen, and always in developer mode.
 - The app checks every 2 seconds, so an approval shows within one poll; VoiceOver and the tooltip say the same in words.
 

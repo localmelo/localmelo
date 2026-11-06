@@ -28,6 +28,7 @@ from localmelo.melo.contracts.providers import (
     thinking_disabled,
 )
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
+from localmelo.support import melo_serve
 from localmelo.support.providers._http import (
     RETRYABLE_STATUS_CODES,
     _body_preview,
@@ -382,9 +383,8 @@ def _usage_details(raw_usage: Any) -> dict[str, int] | None:
     return usage
 
 
-# How long one request waits for a model switch to end, as long as a switch waits
-# for the chats; between two asks when the server names no time; and at the least.
-SWITCH_WAIT_S = 600.0
+# Seconds between two asks during a model switch when the server names no time, and
+# at the least.
 SWITCH_ASK_S = 5.0
 SWITCH_MIN_ASK_S = 0.1
 
@@ -587,10 +587,11 @@ class OpenAICompatLLM(BaseLLMProvider):
         """For one request: whether to ask again after an error, once any wait is over.
 
         A switch under way is a wait, not a failure: the request asks again after
-        the time the server names, until the switch ends, for
-        :data:`SWITCH_WAIT_S` in all. Then the error stands, and is no longer
-        one to retry. A model switched meanwhile is followed once (:meth:`_follow`).
-        Stop cancels the task, which ends the wait at once.
+        the time the server names, until the switch ends. Only a server that
+        never ends it reaches :data:`~localmelo.support.melo_serve.LOAD_BOUND_S`:
+        then the error stands, and is no longer one to retry. A model switched
+        meanwhile is followed once (:meth:`_follow`). Stop cancels the task,
+        which ends the wait at once.
         """
         deadline: float | None = None
         followed = False
@@ -599,7 +600,8 @@ class OpenAICompatLLM(BaseLLMProvider):
             nonlocal deadline, followed
             if exc.switching_s is not None:
                 now = time.monotonic()
-                deadline = now + SWITCH_WAIT_S if deadline is None else deadline
+                bound = melo_serve.LOAD_BOUND_S
+                deadline = now + bound if deadline is None else deadline
                 if now >= deadline:
                     exc.switching_s, exc.retryable = None, False
                     return False

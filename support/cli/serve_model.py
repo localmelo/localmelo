@@ -30,7 +30,11 @@ if TYPE_CHECKING:
 
 # Seconds between two reads of the gateway's switch.
 POLL_S: Final = 0.5
+# Health reads in a row that may fail before the terminal stops following.
+MISSED_READS: Final = 5
 ACTIVE: Final = ("waiting", "loading")
+# A switch whose end the terminal cannot read: nothing says it failed.
+UNKNOWN: Final = "unknown"
 STOP_KEY: Final = "esc stop waiting"
 
 
@@ -100,10 +104,11 @@ async def _gateway(session: CliSession) -> tuple[GatewayClient | None, bool]:
     if found is None:
         return None, False
     try:
-        headers = task_cli.client_headers(found.url)
-    except task_cli.ClientError:
+        url = task_cli.address(found.url)  # the token goes to this Mac only
+        headers = task_cli.client_headers(url)
+    except (ValueError, task_cli.ClientError):
         return None, False
-    return GatewayClient(found.url, headers=headers), True
+    return GatewayClient(url, headers=headers), True
 
 
 def _show(session: CliSession, pick: melo_serve.Pick, switch: dict[str, Any]) -> None:
@@ -131,22 +136,32 @@ async def _through(
     started = body.get("switch")
     switch: dict[str, Any] = started if isinstance(started, dict) else {}
     number = switch.get("id")
+    missed = 0
     while True:
         seen.update(switch)
         _show(session, pick, switch)
         if switch.get("state") not in ACTIVE:
             return switch
         await asyncio.sleep(POLL_S)
-        found = (await client.call("GET", "/api/health")).get("switch")
+        try:
+            found = (await client.call("GET", "/api/health")).get("switch")
+        except GatewayError:
+            missed += 1
+            if missed == MISSED_READS:
+                return {"state": UNKNOWN}
+            continue
+        missed = 0
         if not isinstance(found, dict) or found.get("id") != number:
-            return {"state": "failed", "error": "the gateway no longer runs the switch"}
+            return {"state": UNKNOWN}
         switch = found
 
 
 async def _switch(session: CliSession, pick: melo_serve.Pick, still: str) -> None:
-    """Switch melo_serve to *pick*, then show the model every chat now uses."""
-    session._state = "switching"
-    session._work = asyncio.current_task()
+    """Switch melo_serve to *pick*, then show the model every chat now uses.
+
+    The session is "switching" from the moment ``/model`` was sent, so no message
+    can start a turn under it; the command's end leaves that state.
+    """
     client, opened = await _gateway(session)
     seen: dict[str, Any] = {"state": "waiting" if client else "loading"}
     try:
@@ -161,14 +176,27 @@ async def _switch(session: CliSession, pick: melo_serve.Pick, still: str) -> Non
         await _stopped(session, client, pick, seen, still)
         return
     except (melo_serve.MeloServeError, GatewayError) as exc:
-        session.out.print(session._text(f"✗ {exc}. Still using {still}.", "error"))
+        if isinstance(exc, GatewayError) and not exc.code:
+            _unknown(session)  # no answer: the gateway may have started it
+        else:
+            session.out.print(session._text(f"✗ {exc}. Still using {still}.", "error"))
         return
     finally:
-        session._state, session.activity, session.activity_note = "idle", None, ""
-        session._work = None
+        session.activity, session.activity_note = None, ""
         if opened and client is not None:
             await client.aclose()
     await _ended(session, pick, ended, still)
+
+
+def _unknown(session: CliSession) -> None:
+    """The gateway stopped answering: the switch may go on, so nothing is claimed."""
+    session.out.print(
+        session._text(
+            "✗ The gateway stopped answering. The switch may still be running; "
+            "/model shows what is served.",
+            "error",
+        )
+    )
 
 
 async def _stopped(
@@ -199,6 +227,9 @@ async def _ended(
     session: CliSession, pick: melo_serve.Pick, ended: dict[str, Any], still: str
 ) -> None:
     state = ended.get("state")
+    if state == UNKNOWN:
+        _unknown(session)
+        return
     if state == "cancelled":
         session.out.print(
             session._text(f"The switch was cancelled. Still using {still}.", "muted")
@@ -209,12 +240,16 @@ async def _ended(
         session.out.print(session._text(f"✗ {error}. Still using {still}.", "error"))
         return
     if session.remote is None:
-        # The terminal's own chat moves to the new model now, as at its next turn.
+        # The terminal's own chat moves to the new model now, as at its next turn:
+        # still "switching" until it has, and past Esc, as CliSession._switch is.
+        session._work = None
         try:
             await session._carry_over(await session.factory.build())
         except Exception as exc:
             session._start_failed(pick.model or pick.name, exc)
             return
+        finally:
+            session._state = "idle"
     else:
         session.factory.show_served()
     line = Text()

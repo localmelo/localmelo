@@ -7,6 +7,7 @@ control socket does, with the four chat picks the mockups show.
 
 from __future__ import annotations
 
+import gzip
 import json
 import shutil
 import socketserver
@@ -124,7 +125,8 @@ class FakeServe:
     """What the fake control socket answers, and what it was asked.
 
     ``GET /picks`` answers *reply* when it is set (to send something
-    malformed), else *rows* with the current one marked. ``POST /switch``
+    malformed), else *rows* with the current one marked, compressed when
+    *gzipped*. ``POST /switch``
     waits for *gate* when there is one, refuses with *refuse* (a status and an
     ``error`` object) when set, and refuses a stale ``expected_generation`` as
     melo_serve does; otherwise it serves the pick from then on, one
@@ -138,6 +140,7 @@ class FakeServe:
     reply: Any = None
     refuse: tuple[int, dict[str, Any]] | None = None
     gate: threading.Event | None = None
+    gzipped: bool = False
     switches: list[dict[str, Any]] = field(default_factory=list)
 
     def write(self) -> None:
@@ -184,6 +187,9 @@ class _Control(BaseHTTPRequestHandler):
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        if self.server.fake is not None and self.server.fake.gzipped:
+            data = gzip.compress(data)
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

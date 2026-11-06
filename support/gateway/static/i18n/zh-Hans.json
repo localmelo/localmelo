@@ -1377,6 +1377,8 @@
   "serve.listLabel": "这台 Mac 上的对话模型",
   "serve.loadingAbout": "正在加载，约 {s} 秒",
   "serve.loadingNow": "正在加载",
+  "serve.noAnswer": "melo_serve 已有 {minutes} 分钟没有回答",
+  "serve.notSwitched": "未切换到 {name}",
   "serve.pick.disk": "磁盘占用 {disk} GB",
   "serve.pick.needs": "需要 {need} GB",
   "serve.pick.noRoom": "需要 {need} GB，超过可用内存",

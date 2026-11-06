@@ -76,7 +76,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 | 带圈的红点 | 有对话或任务在等你回答审批。 |
 
 - 菜单列出正在运行的内容、**Waiting for your approval**（打开那个对话或任务）、**Open localmelo**、**Settings…** 和 **Quit localmelo**。
-- 使用 melo_serve 时，**Model** 子菜单列出它的对话模型，当前模型打勾；选一个就会切换，每个聊天都跟上（[切换模型](model-servers.md#switch-the-model)）。切换等待期间，**Cancel Switch** 结束等待。
+- 使用 melo_serve 时，**Model** 子菜单列出它的对话模型，当前模型打勾；选一个就会切换，每个聊天都跟上（[切换模型](model-servers.md#switch-the-model)）。切换等待期间，**Cancel Switch** 结束等待。切换失败时，子菜单顶部会写出原因，直到下一次切换。
 - **Sign In Again** 只在它能帮上忙时才出现：连续四次登录失败之后、显示锁定画面时，以及开发者模式下始终出现。
 - 应用每 2 秒检查一次，因此审批会在一次轮询之内显示；VoiceOver 和悬停提示用文字说出同样的内容。
 

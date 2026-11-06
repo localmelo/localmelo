@@ -25,6 +25,7 @@ terminal when no gateway runs), and every surface words a pick with
 
 from __future__ import annotations
 
+import asyncio
 import grp
 import json
 import math
@@ -49,6 +50,12 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
+# The longest a load may take. melo_serve's own worst case is about 42 minutes (a
+# drain, a start and a rollback), so this is only for one that never answers: past
+# it a switch ends failed, and a request that waited for the load gives its error.
+LOAD_BOUND_S: Final = 45 * 60.0
+# The kind of the MeloServeError for that.
+NO_ANSWER: Final = "no_answer"
 # The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.0,
 # and the oldest version it accepts.
 MELO_SERVE_REF: Final = "4936aa0668949be6d21e0744dad6cf151fefe6af"
@@ -164,12 +171,21 @@ def as_count(value: object) -> int:
     return 0
 
 
+def _finite(value: object) -> float | None:
+    """*value* as a finite number of either sign, not a bool; else None."""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:  # an int beyond a float's range
+        return None
+    return number if math.isfinite(number) else None
+
+
 def as_number(value: object) -> float:
     """*value* when it is a finite number (not a bool) of at least 0, else 0.0."""
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        number = float(value)
-        return number if 0.0 <= number < float("inf") else 0.0
-    return 0.0
+    number = _finite(value)
+    return number if number is not None and number >= 0.0 else 0.0
 
 
 def _own(info: os.stat_result) -> bool:
@@ -483,6 +499,11 @@ def _words(key: str, language: str, **params: Any) -> str:
 # ── The control socket ──
 
 
+def one_line(text: str) -> str:
+    """*text* as one line of a list: :func:`clean`, with any newline folded."""
+    return " ".join(clean(text).split())
+
+
 def _refusal(status: int, reply: object) -> MeloServeError:
     """The error a refusal of the control socket carries, in melo_serve's words."""
     error = reply.get("error") if isinstance(reply, dict) else None
@@ -517,9 +538,12 @@ async def _call(
                 timeout=httpx.Timeout(timeout, connect=CONTROL_CONNECT_S),
                 trust_env=False,
             ) as client,
-            client.stream(method, path, json=body) as response,
+            client.stream(
+                method, path, json=body, headers={"Accept-Encoding": "identity"}
+            ) as response,
         ):
-            async for chunk in response.aiter_bytes():
+            # As sent: the cap counts what came, and a compressed reply is no JSON.
+            async for chunk in response.aiter_raw():
                 raw += chunk
                 if len(raw) > MAX_REPLY_BYTES:
                     raise MeloServeError(f"melo_serve's answer to {path} is too large")
@@ -546,29 +570,22 @@ def _pick(entry: object, total_gb: float, free_pct: float) -> Pick | None:
     fit = entry.get("fit")
     fit = fit if isinstance(fit, dict) else {}
     need = as_number(fit.get("need_gb"))
-    # Below 0 for a model that does not fit, which as_number would read as 0, so it is checked here.
-    after = fit.get("after_pct")
+    after = _finite(fit.get("after_pct"))  # below 0 for a model that does not fit
     free = None
-    if (
-        total_gb
-        and need
-        and isinstance(after, int | float)
-        and not isinstance(after, bool)
-        and math.isfinite(after)
-    ):
+    if total_gb and need and after is not None:
         free = max(0.0, need + after * total_gb / 100)  # the memory there is for it
     elif total_gb and free_pct:
         free = free_pct * total_gb / 100
     return Pick(
         id=pick_id,
-        short=clean(as_text(entry.get("short"))),
-        name=clean(as_text(entry.get("name")) or pick_id),
-        backend_name=clean(
+        short=one_line(as_text(entry.get("short"))),
+        name=one_line(as_text(entry.get("name")) or pick_id),
+        backend_name=one_line(
             as_text(entry.get("backend_name")) or as_text(entry.get("backend"))
         ),
-        model=clean(as_text(entry.get("model"))),
+        model=one_line(as_text(entry.get("model"))),
         current=entry.get("current") is True,
-        problem=clean(as_text(entry.get("problem"))),
+        problem=one_line(as_text(entry.get("problem"))),
         verdict=as_text(fit.get("verdict")),
         need_gb=need,
         free_gb=free,
@@ -600,21 +617,28 @@ async def picks() -> list[Pick]:
 async def switch(pick: str, *, expected_generation: int) -> dict[str, Any]:
     """Load *pick* for its role, unless melo_serve has left *expected_generation* meanwhile.
 
-    It answers once the model is ready, which can take minutes, so only the
-    connection is bounded. A refusal raises MeloServeError whose kind is
-    melo_serve's ``error.type``: ``stale_generation`` (with the generation it
-    is at now), ``busy``, ``does_not_fit``, ``unknown_pick``, ...
+    It answers once the model is ready, which can take minutes, so only
+    :data:`LOAD_BOUND_S` bounds it: past that, kind :data:`NO_ANSWER`. A refusal
+    raises MeloServeError whose kind is melo_serve's ``error.type``:
+    ``stale_generation`` (with the generation it is at now), ``busy``,
+    ``does_not_fit``, ``unknown_pick``, ...
     """
-    reply = await _call(
-        "POST",
-        "/switch",
-        body={
-            "pick": pick,
-            "expected_generation": expected_generation,
-            "initiator": "localmelo",
-        },
-        timeout=None,
-    )
+    try:
+        async with asyncio.timeout(LOAD_BOUND_S):
+            reply = await _call(
+                "POST",
+                "/switch",
+                body={
+                    "pick": pick,
+                    "expected_generation": expected_generation,
+                    "initiator": "localmelo",
+                },
+                timeout=None,
+            )
+    except TimeoutError:
+        minutes = round(LOAD_BOUND_S / 60)
+        words = _words("serve.noAnswer", "en", minutes=minutes)
+        raise MeloServeError(words, NO_ANSWER) from None
     if not isinstance(reply, dict):
         raise MeloServeError("melo_serve's answer to /switch is not an object")
     return reply

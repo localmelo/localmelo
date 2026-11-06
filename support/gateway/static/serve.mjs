@@ -157,6 +157,8 @@ export function setupServe({doc, api, state, notify, changed, openers}) {
   /** Start the switch to the pick *id*; throws what the gateway refuses. */
   async function switchTo(id) {
     const body = await api('/serve/switch', {body: {pick: id}});
+    // Seen from here on, so that one that fails before the next poll is said too.
+    seen = {id: body.switch.id, state: body.switch.state};
     changed(body.switch);
     redraw();
     return body.switch;

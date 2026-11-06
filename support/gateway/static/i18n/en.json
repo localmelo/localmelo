@@ -1454,6 +1454,8 @@
   "serve.listLabel": "Chat models on this Mac",
   "serve.loadingAbout": "Loading, about {s} s",
   "serve.loadingNow": "Loading",
+  "serve.noAnswer": "melo_serve did not answer for {minutes} minutes",
+  "serve.notSwitched": "Did not switch to {name}",
   "serve.pick.disk": "{disk} GB on disk",
   "serve.pick.needs": "needs {need} GB",
   "serve.pick.noRoom": "needs {need} GB, more than is free",

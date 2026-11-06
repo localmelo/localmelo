@@ -555,7 +555,7 @@ class CliSession:
                 "attach",
                 "attachments",
                 "detach",
-            ):
+            ) or (command.name == "model" and serve_model.applies(self)):
                 self._state = "switching"
                 self._pending_command = command.name
                 self._work = self.spawn(

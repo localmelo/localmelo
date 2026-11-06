@@ -7,6 +7,7 @@ no model loads and nothing leaves the machine.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +18,7 @@ from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.schema import RunResult
+from localmelo.support import melo_serve
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.tests.fixtures.melo_serve import URL, FakeServe
@@ -159,6 +161,7 @@ async def test_a_wait_ends_by_cancel_or_time_and_a_switch_elsewhere_is_reported(
     console.serve.wait_s = 60
     await client.post("/api/serve/switch", json={"pick": "qwen3-8b-omlx"})
     serve_fake.current, serve_fake.generation = "qwen3-4b-omlx", 2
+    serve_fake.rows[2]["name"] = "Qwen3\x1b[2J 4B\n"  # shown as the data it is
     serve_fake.write()  # `melo-serve use 4b` in a terminal meanwhile
     gate.set()
     await until(lambda: console.serve.last and console.serve.last.state == "failed")
@@ -166,3 +169,50 @@ async def test_a_wait_ends_by_cancel_or_time_and_a_switch_elsewhere_is_reported(
     health = (await client.get("/api/health")).json()["switch"]
     assert health["error"] == "The model changed to Qwen3 4B meanwhile; choose again."
     assert serve_fake.current == "qwen3-4b-omlx"  # not undone
+
+
+async def test_a_load_that_never_answers_fails_and_held_turns_go_on(
+    serving: Serving,
+    serve_fake: FakeServe,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console, client, agents, gate = serving
+    monkeypatch.setattr(melo_serve, "LOAD_BOUND_S", 0.3)
+    serve_fake.gate = threading.Event()  # melo_serve takes it and never answers
+    chat = (await seed_turn(console.store, workspace)).session_id
+    await client.post("/api/serve/switch", json={"pick": "qwen3-8b-omlx"})
+    switch = console.serve.last
+    assert switch is not None
+    await until(lambda: switch.state == "loading")
+    await console.sessions.start_turn(chat, "hi", "hi")
+    await until(lambda: console.serve.held(chat) == "Switching")
+
+    await until(lambda: switch.state == "failed")
+    await until(lambda: agents and agents[-1].ran)  # the turn goes on
+    health = (await client.get("/api/health")).json()["switch"]
+    assert health["title"] == "Did not switch to Qwen3 8B"
+    assert health["detail"] == health["error"]
+    assert health["error"] == "melo_serve did not answer for 0 minutes"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"pick": "nothing"},
+        {"pick": "8b"},  # its short name
+        {"pick": "Qwen3-8B-4bit"},  # the model it serves
+        {"pick": "bge-m3-omlx"},  # not a chat pick
+        {"pick": ""},
+        {"pick": 7},
+        {"pick": "x" * 201},
+        {"pick": "qwen3-8b-omlx", "force": True},
+    ],
+    ids=str,
+)
+async def test_only_the_id_of_a_listed_chat_pick_reaches_melo_serve(
+    serving: Serving, serve_fake: FakeServe, body: dict[str, object]
+) -> None:
+    client = serving[1]
+    assert (await client.post("/api/serve/switch", json=body)).status_code == 400
+    assert serve_fake.switches == []

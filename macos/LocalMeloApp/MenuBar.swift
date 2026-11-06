@@ -15,6 +15,7 @@ final class MenuBar {
     let modelItem: NSMenuItem
     private let models: NSMenu
     private let modelsOpened = MenuOpened()
+    private var modelRows: [ModelMenuRow] = []
     private let choose: Selector
     private let cancel: Selector
     private let divider = NSMenuItem.separator()
@@ -67,8 +68,11 @@ final class MenuBar {
         modelItem.isHidden = list == nil
         guard let list = list else { return }
         modelItem.subtitle = modelMenuSubtitle(list, switching: switching)
+        let rows = modelMenuRows(list, switching: switching)
+        guard modelMenuNeedsDrawing(rows, shown: modelRows, open: modelsOpened.open) else { return }
+        modelRows = rows
         models.removeAllItems()
-        for row in modelMenuRows(list, switching: switching) {
+        for row in rows {
             switch row {
             case .status(let title, let subtitle):
                 let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -168,6 +172,12 @@ final class MenuBar {
 /// Runs a closure as the menu it is the delegate of opens.
 final class MenuOpened: NSObject, NSMenuDelegate {
     var opened: () -> Void = {}
+    private(set) var open = false
 
-    func menuWillOpen(_ menu: NSMenu) { opened() }
+    func menuWillOpen(_ menu: NSMenu) {
+        open = true
+        opened()
+    }
+
+    func menuDidClose(_ menu: NSMenu) { open = false }
 }

@@ -417,6 +417,14 @@ precondition(busy[0] == .status(title: "Switching to Qwen3 8B…", subtitle: "Wa
 precondition(busy[1] == .cancel && busy[2] == .separator)
 precondition(!busy.contains { if case .pick(_, _, _, _, true) = $0 { return true } else { return false } })
 precondition(modelMenuSubtitle(list, switching: running) == "Switching to Qwen3 8B…")
+let failed = serveSwitch(Data(#"{"switch": {"id": 4, "pick": "8b", "state": "failed", "title": "Did not switch to Qwen3 8B", "detail": "1 chat is still working; try again when it finishes"}}"#.utf8))!
+let told = modelMenuRows(list, switching: failed)
+precondition(told[0] == .status(title: "Did not switch to Qwen3 8B", subtitle: "1 chat is still working; try again when it finishes"))
+precondition(told[1] == .separator && told[2] == idle[0])
+precondition(modelMenuSubtitle(list, switching: failed) == "Qwen3.8 27B")
+precondition(!modelMenuNeedsDrawing(idle, shown: idle, open: false))  // a poll with nothing new
+precondition(!modelMenuNeedsDrawing(told, shown: idle, open: true))  // never under the pointer
+precondition(modelMenuNeedsDrawing(told, shown: idle, open: false))
 """,
         "ModelMenu.swift",
     )

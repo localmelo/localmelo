@@ -96,3 +96,12 @@ test('a pick switches every chat; while it waits the others are disabled and Can
   t.serve.close();
   assert.equal(t.serve.click(1), false);
 });
+
+test('a switch that fails before the next poll is said once', async () => {
+  const t = rig();
+  await t.serve.switchTo('8b');  // the 202 says waiting; no poll saw it
+  t.health.switch = {id: 1, pick: '8b', name: 'Qwen3 8B', state: 'failed', error: 'melo_serve is busy'};
+  t.serve.update();
+  t.serve.update();
+  assert.deepEqual(t.said, ['The switch to Qwen3 8B did not finish: melo_serve is busy']);
+});

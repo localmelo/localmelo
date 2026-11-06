@@ -122,7 +122,8 @@ class ServeSwitch:
         """``switch`` of ``GET /api/health``; null before the first switch.
 
         ``title`` and ``detail`` are its two lines in the request's language
-        (``Switching to Qwen3 8B…``, ``Waiting for 1 chat to finish``).
+        (``Switching to Qwen3 8B…``, ``Waiting for 1 chat to finish``); for a
+        switch that failed, ``Did not switch to Qwen3 8B`` and why.
         """
         found = self.last
         if found is None:
@@ -136,7 +137,8 @@ class ServeSwitch:
                 if found.load_s
                 else t("serve.loadingNow")
             )
-        error = found.error
+        error = said_text(found.error) if isinstance(found.error, dict) else found.error
+        failed = found.state == "failed"
         return {
             "id": found.id,
             "pick": found.pick,
@@ -144,9 +146,11 @@ class ServeSwitch:
             "state": found.state,
             "waiting_for": found.waiting_for,
             "load_s": found.load_s,
-            "error": said_text(error) if isinstance(error, dict) else error,
-            "title": t("serve.switching", name=found.name),
-            "detail": detail,
+            "error": error,
+            "title": t(
+                "serve.notSwitched" if failed else "serve.switching", name=found.name
+            ),
+            "detail": error if failed else detail,
         }
 
     async def picks_json(self) -> dict[str, Any]:
@@ -275,13 +279,17 @@ class ServeSwitch:
             await melo_serve.switch(switch.pick, expected_generation=switch.generation)
         except melo_serve.MeloServeError as exc:
             error: str | dict[str, Any] = str(exc)
-            if exc.kind == "stale_generation":
+            if exc.kind == melo_serve.NO_ANSWER:
+                minutes = round(melo_serve.LOAD_BOUND_S / 60)
+                error = said("serve.noAnswer", minutes=minutes)
+            elif exc.kind == "stale_generation":
                 # Switched elsewhere meanwhile: read what is served now and say so.
                 snap = await asyncio.to_thread(melo_serve.snapshot)
                 served = snap.roles.get("chat")
                 switch.generation = snap.generation
                 if served is not None:
-                    error = said("serve.stale", name=served.name or served.model)
+                    name = melo_serve.one_line(served.name or served.model)
+                    error = said("serve.stale", name=name)
             # In one step, after the read: a poll must not see "failed" with the raw words.
             switch.state, switch.error = "failed", error
             return

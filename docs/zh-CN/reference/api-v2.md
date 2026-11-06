@@ -340,7 +340,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 {"switch": {"id": 1, "pick": "qwen3-8b-omlx", "name": "Qwen3 8B", "state": "waiting", "waiting_for": 1, "load_s": 12, "error": "", "title": "Switching to Qwen3 8B…", "detail": "Waiting for 1 chat to finish"}}
 ```
 
-- `state` 依次为 `waiting`（等待正在运行一轮的聊天，最多 10 分钟）、`loading`，然后是 `done`、`failed`（`error` 说明原因）或 `cancelled`。`GET /api/health` 的 `switch` 是同一个对象，第一次切换之前为 `null`。
+- `state` 依次为 `waiting`（等待正在运行一轮的聊天，最多 10 分钟）、`loading`（最多 45 分钟），然后是 `done`、`failed`（`error` 说明原因；此时 `title` 写 `Did not switch to Qwen3 8B`，`detail` 重复错误）或 `cancelled`。`GET /api/health` 的 `switch` 是同一个对象，第一次切换之前为 `null`。
 - 切换期间发出的一轮会等待（hold 为 `Switching`），然后在新模型上运行。
 - 400 `invalid_request`：未知的 pick。409 `pick_cannot_load`：放不下或有问题。409 `switch_running`：已有切换在进行。409 `not_melo_serve` 和 502 `melo_serve_unavailable` 同上。
 

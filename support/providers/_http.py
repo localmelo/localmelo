@@ -19,6 +19,7 @@ from localmelo.melo.contracts.providers import (
     LLM_REQUEST_KIND,
     ProviderError,
 )
+from localmelo.support.melo_serve import as_number
 
 # Statuses for which the same request may succeed when sent again: rate
 # limiting, and a gateway or proxy in front of the model server failing.
@@ -115,10 +116,7 @@ def switching_for(response: httpx.Response) -> float | None:
     error = _error(response) if response.status_code == 503 else {}
     if error.get("type") != "switching":
         return None
-    wait = error.get("retry_after")
-    if isinstance(wait, int | float) and not isinstance(wait, bool) and wait > 0:
-        return float(wait)
-    return 0.0
+    return as_number(error.get("retry_after"))
 
 
 def unreachable(

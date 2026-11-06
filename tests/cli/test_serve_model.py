@@ -10,6 +10,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -132,6 +133,94 @@ async def test_the_list_and_the_typed_name_switch_melo_serve(
     await _until(lambda: "cannot load" in out.text())
     assert "✗ Qwen3 70B cannot load: Splash · needs 48 GB, 31 GB free." in out.text()
     assert len(serve_fake.switches) == 2
+
+
+async def test_a_message_sent_while_the_picks_load_gets_no_switch_under_its_turn(
+    chat: tuple[CliSession, PickingApp, RecordingOut],
+    serve_fake: FakeServe,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _, out = chat
+    gate = asyncio.Event()
+    read = melo_serve.picks
+
+    async def slow() -> list[melo_serve.Pick]:
+        await gate.wait()
+        return await read()
+
+    monkeypatch.setattr(melo_serve, "picks", slow)
+    session.enter("/model 8b")
+    assert session.state == "switching"  # from the start
+    assert session.enter("hello") is not None  # a hint: the draft stays, no turn
+    assert session.state == "switching"
+    gate.set()
+    await _until(lambda: "Switched to" in out.text() and session.state == "idle")
+    assert len(serve_fake.switches) == 1
+
+    gate.clear()
+    session.enter("/model 4b")
+    await asyncio.sleep(0)
+    assert session.stop()  # Esc while they load: nothing is sent
+    await _until(lambda: session.state == "idle")
+    assert len(serve_fake.switches) == 1
+
+
+async def test_the_token_goes_only_to_a_gateway_on_this_mac(
+    chat: tuple[CliSession, PickingApp, RecordingOut],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def token(url: str) -> dict[str, str]:
+        raise AssertionError("the token was read for another host")
+
+    other = SimpleNamespace(url="http://192.0.2.1:8401")
+    monkeypatch.setattr(serve_model.gateway_endpoint, "live", lambda: other)
+    monkeypatch.setattr(serve_model.task_cli, "client_headers", token)
+    assert await serve_model._gateway(chat[0]) == (None, False)
+
+
+@pytest.mark.parametrize(
+    ("lost", "ends"),
+    [
+        ({"GET": 1}, "Switched to Qwen3 8B"),  # one read lost: it goes on
+        ({"GET": 100}, "may still be running"),
+        ({"POST": 1}, "may still be running"),
+    ],
+    ids=["one-read", "every-read", "the-request"],
+)
+async def test_a_gateway_that_stops_answering_never_claims_the_old_model(
+    chat: tuple[CliSession, PickingApp, RecordingOut],
+    serve_fake: FakeServe,
+    monkeypatch: pytest.MonkeyPatch,
+    lost: dict[str, int],
+    ends: str,
+) -> None:
+    session, _, out = chat
+    done = {"id": 1, "state": "done", "error": ""}
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        if lost.get(request.method, 0):
+            lost[request.method] -= 1
+            raise httpx.ConnectError("gone", request=request)
+        if request.method == "POST":
+            return httpx.Response(202, json={"switch": {**done, "state": "loading"}})
+        serve_fake.current, serve_fake.generation = "qwen3-8b-omlx", 2
+        serve_fake.write()
+        return httpx.Response(200, json={"switch": done})
+
+    async def found(session: CliSession) -> tuple[GatewayClient, bool]:
+        client = GatewayClient(
+            "http://127.0.0.1:1",
+            transport=httpx.MockTransport(gateway),
+            headers={"Authorization": "Bearer token"},
+        )
+        return client, True
+
+    monkeypatch.setattr(serve_model, "_gateway", found)
+    monkeypatch.setattr(serve_model, "POLL_S", 0.01)
+    session.enter("/model 8b")
+    await _until(lambda: ends in out.text() and session.state == "idle")
+    assert "Still using" not in out.text()
+    assert lost.get("POST", 0) == 0 and lost.get("GET", 0) != 1  # they did fail
 
 
 async def test_with_a_gateway_the_switch_goes_through_its_route(
