@@ -20,6 +20,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.review.posting import asks_to_attach
 from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
@@ -296,6 +297,14 @@ async def test_a_file_in_a_folder_the_person_named_gets_a_card_naming_that_file(
         request.arguments["source"] == "other"
         and request.arguments["name"] == "resume.pdf"
     )
+    # The page says it in its own language from the facts the gist carries.
+    gist = step_gist(request.tool_name, request.arguments, review)
+    assert gist is not None and gist.to_json()["attach"] == {
+        "file": "resume.pdf",
+        "folder": "~/Documents",
+        "site": SITE,
+        "named": False,
+    }
     assert not grant_offered(request) and never_granted(request.tool_name)
 
 

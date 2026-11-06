@@ -368,6 +368,8 @@
   "auto.reason.account": "这一步会更改账号的登录或安全设置。",
   "auto.reason.appControlNamed": "这一步会通过脚本操作 {apps}。",
   "auto.reason.app_control": "这一步会通过脚本操作另一个应用。",
+  "auto.reason.attach": "这一步会把文件 {file}（来自 {folder}）发送到 {site}。",
+  "auto.reason.attachUnnamed": "这一步会把文件 {file}（来自 {folder}）发送到 {site}。你没有点名这个文件。",
   "auto.reason.beyond_request": "这一步做的事超出了你的要求。",
   "auto.reason.credentials": "这一步会使用你的密码或密钥。",
   "auto.reason.delete": "这一步会删除无法恢复的文件。",
