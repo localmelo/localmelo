@@ -581,6 +581,8 @@ def test_a_row_says_what_the_step_did_and_a_developer_keeps_the_call() -> None:
     ):
         assert words in Turn().tool(tool, "", output=output).text()
         assert tool in Turn(developer=True).tool(tool, "", output=output).text()
+    refused = Turn().tool("task_create", "", output="Not done: one per message.")
+    assert "◌ ± Not done: Start a task" in refused.text()
     raw = '{"run_now":true,"title":"Buy it"}'
     assert raw not in Turn().tool("task_schedule", raw, output="Saved").text()
     assert raw in Turn(developer=True).tool("task_schedule", raw, output="x").text()

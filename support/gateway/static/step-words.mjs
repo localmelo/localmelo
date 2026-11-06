@@ -27,6 +27,11 @@ function quoted(text) {
   return words ? `“${words.length > SHOWN ? `${words.slice(0, SHOWN - 1)}…` : words}”` : '…';
 }
 
+/** A task tool's own check turned the call down, so it did nothing (the server's `refused_step`). */
+export function refusedStep(output) {
+  return /^Not done/.test(String(output ?? '').trim());
+}
+
 /**
  * The words the server's `step_said` says: `done` is false while it runs, true once done, or `ask` for a step that did
  * not finish. Only a finished call's *output* says what it came to: a task tool's own check refused it ("Not done: …"),
@@ -38,7 +43,7 @@ export function stepWords(name, args, done = false, output = '') {
   // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
   const tense = done === 'ask' ? 'ask' : done ? 'done' : 'now';
   const said = String(output ?? '').trim();
-  if (done === true && /^Not done/.test(said)) return t('steps.refused', {step: stepWords(name, args, 'ask')});
+  if (done && refusedStep(said)) return t('steps.refused', {step: stepWords(name, args, 'ask')});
   if (done === true && tool === 'task_message' && /^Started task/.test(said)) return stepWords('task_create', {}, true);
   const say = (verb, what = '') => t(`steps.${tense}.${verb}`, {what});
   const file = base(a.path) || t('steps.aFile');

@@ -635,6 +635,11 @@ def activity_text(
     return _doing("use", words[:_NAME_SHOWN] or said("steps.aTool"), "tool")
 
 
+def refused_step(output: str) -> bool:
+    """A task tool's own check turned the call down, so it did nothing."""
+    return output.lstrip().startswith("Not done")
+
+
 def step_said(
     tool: str,
     arguments: object = None,
@@ -654,7 +659,7 @@ def step_said(
     """
     if tense == "done":
         said_back = output.lstrip()
-        if said_back.startswith("Not done"):
+        if refused_step(output):
             return said("steps.refused", step=step_said(tool, arguments, tense="ask"))
         if tool == "remember" and said_back.startswith("Not remembered"):
             return said("steps.failed.keep")

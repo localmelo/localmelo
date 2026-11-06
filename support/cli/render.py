@@ -83,6 +83,7 @@ from localmelo.support.sessions.display import (
     format_bytes,
     format_duration,
     format_tokens,
+    refused_step,
     status_text,
     step_said,
 )
@@ -1604,6 +1605,8 @@ class TurnRenderer:
             # A command that exits nonzero ran (the event says success), but
             # its row reads as a failure: the thing to notice in a turn.
             symbol, style = (symbols.failed, "error") if nonzero else (symbols.ok, "ok")
+            if refused_step(output):
+                symbol, style = symbols.not_run, "muted"
             body = output
             if nonzero:
                 meta.append(f"exit {exit_code}")

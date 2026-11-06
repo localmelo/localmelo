@@ -237,6 +237,9 @@ test('a tool call runs, asks for approval and finishes', () => {
   assert.equal(card.pendingRequestId, 'req-1');
   assert.equal(view.pending.size, 1);
   assert.equal(toolState(card).text, 'Needs approval');
+  const refused = toolState({status: 'success', durationS: 0.1, exitCode: null, approval: null, output: 'Not done: one task per message.'});
+  assert.equal(refused.mark, '⊘', 'A call its own check refused did not happen: no tick');
+  assert.equal(refused.state, 'declined');
 
   push('approval.resolved', {request_id: 'req-1', call_id: 'call-1', tool_name: 'shell_exec', outcome: 'allowed', origin: 'user', reason: '', remember: true});
   assert.equal(card.status, 'running');
