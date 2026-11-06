@@ -154,7 +154,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 - 在终端聊天里用 `/browser on`（Safari 窗口）或 `/browser chrome`（后台的 Chrome）打开它，或用 `melo -X browser.driver=chrome` 只对一次运行生效。
 - 用 Safari 时，在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。用 Chrome 时只需要安装 Google Chrome。
-- 之后终端聊天以及网页控制台和 App 的每个聊天会得到十二个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot` 和 `browser_click_point`。
+- 之后终端聊天以及网页控制台和 App 的每个聊天会得到十三个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot`、`browser_click_point` 和 `browser_attach`（把文件附到网页的上传框，见[文件](browsing.md#files-downloads-and-uploads)）。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态；或在使用 melo 自己配置的 Chrome 里工作，从不使用你的配置。
 - melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击或选择前会再问一次。输入文字和发送表单都不会为对话保留：“询问”模式每次都问；“自动”模式逐个对照你的请求检查，任务明显需要的直接运行，其余的拦下（询问你，涉及密钥则直接拦下）。输入的文字会完整显示，发送的表单会显示发往哪里、里面有什么。它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
