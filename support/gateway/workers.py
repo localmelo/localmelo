@@ -2420,9 +2420,9 @@ class TaskWorkers:
             chat = await self._person_chat(record)
             settings = self.settings()
             driver = "off" if chat is None else configured_driver(settings)
-            guide = (
-                f"{WORKER_GUIDE} {NO_BROWSER_NOTE}" if driver == "off" else WORKER_GUIDE
-            )
+            # Only a person's work can turn browsing on: other work has none either way.
+            no_browser = chat is not None and driver == "off"
+            guide = f"{WORKER_GUIDE} {NO_BROWSER_NOTE}" if no_browser else WORKER_GUIDE
             try:
                 agent = await build_session_agent(
                     cfg=settings,
