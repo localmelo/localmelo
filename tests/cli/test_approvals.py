@@ -730,7 +730,10 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         assert f"│ shell_exec · in {WORKSPACE}" in text
         assert "│   ls -1" in text
         assert "❯ 1. Yes" in text
-        assert "  2. Yes, and allow every shell_exec call for the rest of this chat" in text
+        assert (
+            "  2. Yes, and allow every shell_exec call for the rest of this chat"
+            in text
+        )
         assert "  3. No, and tell melo why" in text
         assert '"Allow every" lets routine shell commands run without asking' in text
         assert (

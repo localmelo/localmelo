@@ -12,9 +12,9 @@
 
 在浏览器中打开 `http://127.0.0.1:8401/` 即可进入网页工作区。这是控制台的页面，只与 `/api`（[API v2](../../reference/api-v2.md)（英文））通信，因此网关必须运行才能提供该页面：先运行 `melo serve`，它会在浏览器中打开已登录的页面。没有链接就打开页面时，会显示 “Sign in to localmelo”：在终端运行 `melo console`，页面会以已登录的状态打开（非默认端口需加上 `--port PORT`）。通过 SSH 或没有浏览器能启动时，它会改为输出一次性链接，请在 60 秒内打开。不要分享该链接；见[网关安全](gateway.md#keep-the-gateway-private)。
 
-首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。没有服务器在运行时，卡片会显示启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致），放在一个点按一次即可全选的方框里，并提供键盘可用的 **Copy commands** 按钮；卡片在屏幕上且标签页可见时，每三秒再次寻找，服务器一响应，模型就会出现。**Check again** 立即寻找；**Enter a server address…** 会打开连接设置；在设置好模型之前，输入框显示 `Connect a model to start`。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
+首次运行时，如果还没有设置模型，欢迎页会用一张卡片代替起始提示，主对话和新对话里都一样。它像终端的首次运行一样，在这台 Mac 上寻找模型服务器，并显示找到的内容：**Found oMLX on this Mac**（或 Ollama，或某个模型服务器）及其模型、**A model server needs an API key**，或 **No model server is running on this Mac**。**Use this model** 会保存该服务器、测试它，并让欢迎页无需打开设置即可使用。如果有多个对话模型而且不知道哪个已加载，卡片会列出它们、标出已加载的那个，并等你选择，绝不会替你选。没有服务器在运行时，卡片会显示启动服务器的命令（Mac 上是 oMLX，其他系统是 Ollama，与[模型服务器指南](model-servers.md)中的一致），放在一个点按一次即可全选的方框里，并提供键盘可用的 **Copy commands** 按钮；卡片在屏幕上且标签页可见时，每三秒再次寻找，服务器一响应，模型就会出现。**Check again** 立即寻找；**Enter a server address…** 会打开连接设置。卡片也写出另一种办法，在 **Or use an account or a key** 下：**Choose a service…** 会打开 Settings → Model server，用你自己的密钥设置一个在线运行的模型。在设置好模型之前，输入框显示 `Connect a model to start`，不会发送任何内容：你输入的文字留在框里，横幅（**No model is configured yet.**）上的 **Connect a model** 按钮会打开同一处设置。已配置的服务器不再响应时也会显示这张卡片，而且只在它显示在屏幕上时才会查找服务器（[`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)）。
 
-页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务页面里的优先级一行（运行中任务的优先级菜单仍然保留）。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。任务在[对话旁的面板](#the-panel-beside-a-chat)里打开，入口是它在 Activity 里的那一行，侧边栏里没有它自己的链接；worker 运行在面板的 **Workers** 标签页里，空的[主对话](#the-main-chat-and-side-chats)里也有链接。[开发者模式](#developer-mode)会在侧边栏显示 Workers 链接。这些元素都保留在页面中，只是隐藏。
+页面以默认模式打开，不显示只有开发者才需要的内容：对话的级别标签、**Details**、GPU 锁状态行、**LOCAL** 徽标、状态行的缓存、步骤、阶段和队列段、运行中标签（[对话旁的面板](#the-panel-beside-a-chat)会显示正在运行的内容），以及任务页面里的优先级一行（运行中任务的优先级菜单仍然保留）。它的措辞也更平实：正在运行的对话在 **Stop** 旁写 `Working…`，实时行写 melo 在做什么、做了多久（`Reading notes.md · 12s`），不出现工具名、步数或 token 数（工作行写 `Worked for 14s`，回答下面一行给出用时，工具卡片写 `Wrote notes.md`，运行阶段写成 `Looking around` 这样的话，面板只写模型名，不写服务器类型），设置里把服务器叫 **Model server**、把它的地址叫 **Server address**。页眉显示一个模型标签（模型名称、`Model offline` 或 `No model`），点按它会打开设置。任务在[对话旁的面板](#the-panel-beside-a-chat)里打开，入口是它在 Activity 里的那一行，侧边栏里没有它自己的链接；worker 运行在面板的 **Workers** 标签页里，空的[主对话](#the-main-chat-and-side-chats)里也有链接。[开发者模式](#developer-mode)会在侧边栏显示 Workers 链接。这些元素都保留在页面中，只是隐藏。
 
 新对话在你发送任何内容之前，就会显示 melo 将在哪里工作。输入框里的标签显示 `In localmelo-workspace`，点按它会打开一个面板：默认文件夹（`[gateway] workspace`，没有设置时是 `~/localmelo-workspace`）、最近对话的文件夹（从新到旧，最多四个）、**Choose a folder…**，以及在 [macOS 应用](macos-app.md)中的 **Show in Finder**。在浏览器里，**Choose a folder…** 会打开一个路径输入框（完整路径，或以 `~/` 开头的路径；在其中按回车绝不会发送你的消息），在应用里则打开系统的文件夹面板。文件工具只在该文件夹内活动；shell 命令和 Python 从那里启动。你的选择会随第一条消息作为 `POST /api/sessions` 中的 `workspace` 发出（使用默认文件夹的对话不发送它），并保留给下一个新对话，之后显示在对话的页眉里（`In ~/notes`；开发者模式会把它加在模型之后）。输入框下方有三个单行起始提示（**Summarize the files in this folder**、**Plan a small project with me**、**Explain a piece of code**），会替你填好输入框，可以直接发送或修改，输入内容后它们就让开。
 
@@ -230,7 +230,7 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 <a id="the-panel-beside-a-chat"></a>
 ## 对话旁的面板
 
-对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model> on <server>`、`Working on 2 things`、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。
+对话右侧是 Melo 的面板。最上方是 Melo 的画像，外圈的颜色表示它在做什么（工作时为绿色，有事等你时为琥珀色），下面是名字和一行状态：`Connected · <model>`（开发者模式再加 `on <server>`）、`Working on 2 things`、`Stopping…`（从点 Stop 到这一轮结束）、`Waiting for you`，或带 **Open settings** 的 `Model server not reachable`。页面显示的一轮结束时，面板会马上重新读取网关，所以回答出来或点了 Stop 之后，它不会再说对话还在工作。
 
 画像里的 Melo 随它在做的事而动：
 
@@ -257,7 +257,7 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 
 结果行始终是平实的话。在回答之前就被停止的运行写 `Stopped before answering`，图片写 `Made a picture`，文件写文件名，而内容是代码的回答写代码周围的第一句话（没有这样的句子时写 `Wrote some code`）。Markdown 标记会去掉（代码保留原样，例如 `__init__.py`；删除线里的文字一起去掉；`x**2` 保持不变），`In short:` 这样的开场白也会去掉，结果行到第一句话为止。对话的结果行先说这个对话做了什么，再接它回答的第一句话：`Offered a task: Visit example.com · I can't open websites myself.`；做了什么写作 `Started a task: …`、`Offered a task: …` 或 `Kept a note`（中文页面上是“开始了任务：…”“提议了任务：…”“记下了一条笔记”）；只说把事情交给了任务的回答不再重复。主对话那一行用页面的语言命名。
 
-请求过审批的行会把审批折叠在结果行下面：`1 approval`，或 `2 approvals, 1 waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
+请求过审批的行会把审批折叠在结果行下面：`1 approval`、`2 approvals, 1 waiting`，或在每个请求都还在等你时写 `1 approval waiting`。选中它，会用平实的话列出每个请求（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令本身）、它是怎样被回答的（`Allowed once`、`Allowed for this chat`、`Denied`、`No answer in time`）以及请求的时间。等你处理的请求就在那里提供 **Allow once** 和 **Deny**，与对话里审批卡片的回答相同，还有 **Review**，打开带卡片和确切内容的对话或任务。不再有单独的 Approvals 标签页。
 
 选中任务的那一行（行尾有一个 `›`），任务的详情会在面板里打开，取代 Melo 的页面；见[任务](#tasks)。选中对话、worker 运行或终端对话的行，会在原处展开：正在运行的行实时显示它的步骤（标记、用文字写出的步骤和用时）和最近一次输出的最后几行。**Open chat** 或 **Open run** 打开完整视图；等待中的行提供 **Review**，打开带审批卡片的对话或任务。同一时间只展开一行；运行期间，它的步骤跟随会话的事件流更新。
 
@@ -402,6 +402,7 @@ melo 在后台的 Chrome 中浏览时（见[用 melo 浏览网页](browsing.md#w
 - **Runs** 标签页增加每次运行记录的计数：请求数、工具调用数、token 用量和缓存数字；
 - 页眉显示对话的级别标签、**Details**、GPU 锁状态行、**N running** 标签，以及显示页面状态（`Ready`、`Working`、`Approval needed`）的标签，侧边栏始终列出 **Workers**；
 - 状态行增加缓存、步骤、阶段和队列段，任务页面写出任务的优先级；
+- 运行中的一轮在每张工具卡片上显示工具名和参数，显示步数、尝试次数、阶段和测试数，工作行里有工具调用数，回答下面有步数和 token 数，模型服务器出错时卡片上保留它自己的文字（默认模式把这些都换成给人看的话，原始文字留在 **Details** 里）；
 - 侧边栏显示 **LOCAL** 徽标，正在运行的对话写 `Running on your backend`，连接表单保留它的技术用语（**Chat backend**、**Chat API URL**、`Settings apply to subsequent turns…`）。
 
 关闭时这些内容只是隐藏，不会被删除：再次开启即可看到。对话在等待其他持有者的 GPU 锁时，默认模式会在 GPU 状态行的位置显示一条横幅：“Waiting for this Mac's GPU, your chat starts when it is free.”对话、批准、Workers 视图、面板里的任务，以及设置所保存的内容，在两种模式下的行为相同。
@@ -433,6 +434,8 @@ melo 在后台的 Chrome 中浏览时（见[用 melo 浏览网页](browsing.md#w
 melo 想要对话文件夹之外的文件时，卡片会询问那个文件夹（“让 melo 读取 ~/Documents/letters 里的内容？”），在一个框里显示它的真实路径，以及 melo 想在那里做什么（“melo 想读取这个文件夹里的 cover-letter.md。”）。读取提供 **允许一次**、**在这个对话里允许这个文件夹**、**总是允许这个文件夹** 和 **拒绝**：“这个对话”是一项授权（见[授权](#permissions)），“总是”会把文件夹记在设置的 **对话和文件夹** 里，你可以在那里移除。在那里写入是高影响卡片，每次都只有 **允许一次** 和 **拒绝**。对话可以读取的文件夹列在 **Details › Tools** 里，每个都有 **撤回**。密钥、melo 自己的数据、系统文件夹和你的整个主文件夹从不提供（见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)）。
 
 失败的轮次会显示一张卡片：符号（错误为 ✗，警告为 ⚠）、简明的标题、错误的第一行和一条提示。最近的轮次用实心按钮给出一个下一步，其余操作以链接显示：模型服务器给出了错误回答（密钥被拒绝、模型不存在）时为 **Open model settings**，步数用尽或超时后为 **Continue**（没有运行过工具时为 **Try again**），卡住、失败或反思后停止时为 **Try again**，工具无法启动时为 **Show tools**，localmelo 内部崩溃后为 **Copy details**。**Try again** 和 **Continue** 只在最近完成的轮次上提供，Continue 还要求该轮次已运行工具。**Copy error** 复制一行文字和运行 ID，便于提交错误报告；技术字段仍放在 **Details** 中。已停止或中断的轮次使用中性提示行（■）。页面连不上网关时，提示条带有 **Try again**。
+
+模型服务器答了一个错误时，卡片写 `Could not get an answer from the model server` 和一句带下一步的话（`The model server ran into a problem and could not answer. Try again; if it keeps happening, restart the server.`；服务器不接受密钥、没有这个模型、正忙、拒绝请求时各有一句）。服务器自己的文字，如 `HTTP 500: …`，留在 **Details** 里；开发者模式也会把它显示在卡片上。
 
 模型服务器完全连不上时，卡片写 `Could not reach the model server`，并问 `Is your model server still running at 127.0.0.1:8000? Start it, then try again.`，其中的地址就是失败的那个地址。卡片不重复错误本身：提供方的原始文字留在 **Details** 中。实心按钮是 **Try again**（该轮次已运行过工具时是 **Continue**，接着做而不是从头开始），**Change the server address** 是打开设置的链接。使用云端模型时，提示是 `Check your network connection, then try again.`，链接仍是 **Open model settings**，因为没有地址可改。以这种方式结束的运行，其工作框也不再列出重试行（卡片已经说过了）；运行仍在重试时它们照常显示。
 

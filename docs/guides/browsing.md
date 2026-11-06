@@ -128,7 +128,7 @@ The page in the Browser panel can be yours for a while: to sign in, type a code,
 - **Give back to melo** returns the page. melo reads it again before it does anything, since you may have changed it, and the step says how long you had it: "The user had tab t1 for 42 s and gave it back to melo." Nothing of what you typed is in it.
 - **If you leave.** Close the panel, hide the page or let the console sign out, and the page stays yours for 2 minutes, then goes back to melo. Come back sooner and it is still yours.
 - **The page's own boxes** (an alert, a confirm, a question) show in the panel while you have the page, and you answer them there.
-- **Moving out of the page.** While the page has the keys, Control-Esc moves to **Give back to melo**.
+- **Moving out of the page.** While the page has the keys, Control-Esc moves to **Give back to melo**. A phone or a tablet has no Control key, so its note says `Taps and typing go to the page, and melo waits.` and leaves Control-Esc out.
 - **Nothing you type is kept.** Your keys and text go from the panel to melo's Chrome and nowhere else: not to a log, the chat's record, melo's memory or the model. A paste is plain text, at most 1,000 characters at a time.
 
 ## What melo can do

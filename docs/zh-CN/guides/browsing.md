@@ -146,7 +146,7 @@ Safari is not set up for melo yet. In Safari, open Settings > Developer and turn
 - **交还给 melo。** 网页回到 melo 手里。melo 在做任何事之前会重新读一遍网页，因为你可能改动过它；这一步会说明你用了多久：“The user had tab t1 for 42 s and gave it back to melo.”里面不含你输入的任何内容。
 - **如果你离开。** 关掉面板、把网页切到后台或控制台退出登录，网页还会在你手里保留 2 分钟，然后回到 melo。在这之前回来，它仍然归你。
 - **网页自己的对话框**（提示、确认、提问）在你操作期间显示在面板里，由你在那里回答。
-- **离开网页。** 网页接收按键时，按 Control-Esc 会移到**交还给 melo**。
+- **离开网页。** 网页接收按键时，按 Control-Esc 会移到**交还给 melo**。手机和平板没有 Control 键，它们的提示是“点按和输入都会发给网页，melo 会等你。”，不再提 Control-Esc。
 - **你输入的内容不会被保存。** 你的按键和文字只从面板发到 melo 的 Chrome，不会进入日志、对话记录、melo 的记忆或模型。粘贴只粘贴纯文本，每次最多 1,000 个字符。
 
 <a id="what-melo-can-do"></a>

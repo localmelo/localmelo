@@ -19,7 +19,7 @@ nondefault port). Over SSH, or when no browser starts, it prints a single-use
 link to open within 60 seconds instead. Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
 On a first run, with no model set up, the welcome shows one card in place of the
-starters. It looks for a model server on this Mac, as the terminal's first run
+starters, in the main chat as in a new chat. It looks for a model server on this Mac, as the terminal's first run
 does, and shows what it found: **Found oMLX on this Mac** (or Ollama, or a model
 server) with its model, **A model server needs an API key**, or **No model server
 is running on this Mac**. **Use this model** saves the server, tests it and makes
@@ -30,9 +30,11 @@ card shows the commands that start one (oMLX on a Mac, Ollama elsewhere, as in t
 [model servers guide](model-servers.md)) in a block that one click selects, with a
 **Copy commands** button for the keyboard, and asks
 again every three seconds while it is on screen and the tab is visible, so the model
-appears once the server answers. **Check again** asks at once, **Enter a server
-address…** opens connection settings, and the composer
-reads `Connect a model to start` until a model is set up. The card also shows when
+appears once the server answers. **Check again** asks at once, and **Enter a server
+address…** opens connection settings. The card names the other way too, under **Or use an account or a key**: **Choose a service…** opens
+Settings → Model server, where a model that runs online is set up with your own key.
+Until a model is set up the composer reads `Connect a model to start` and nothing is sent: words you typed stay in the box, and the banner
+(**No model is configured yet.**) has a **Connect a model** button that opens the same settings. The card also shows when
 the configured server stops answering, and it looks for a server only while it is
 on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
 
@@ -40,7 +42,7 @@ The page opens in default mode, which leaves out what only a developer needs: th
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
 status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
 priority line of a task's page (a running task's priority menu stays). It says things plainly too: a running chat reads
-`Working…` beside **Stop**, and the settings call the server **Model server** and its address
+`Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s`, the line under an answer gives its time, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings.
 A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are in the
@@ -351,8 +353,8 @@ folder.
 
 On the right of the chat is Melo's panel. At the top is Melo's portrait, with a ring in the colour of what it is
 doing (green while it works, amber while something waits for you), the name, and one status line: `Connected ·
-<model> on <server>`, `Working on 2 things`, `Waiting for you`, or `Model server not reachable` with **Open
-settings**.
+<model>` (developer mode adds `on <server>`), `Working on 2 things`, `Stopping…` (from a Stop until the turn ends), `Waiting for you`, or `Model server not reachable` with **Open
+settings**. The panel reads the gateway again as soon as a turn this page shows ends, so it stops saying a chat works when its answer or its Stop has come.
 
 Melo in the portrait moves with what it does:
 
@@ -396,8 +398,8 @@ chat's line says first what the chat did, then its reply's first sentence: `Offe
 I can't open websites myself.`; what it did is `Started a task: …`, `Offered a task: …` or `Kept a note`, and a reply that only says it handed the work to a task is left out. The main
 chat's row is named in the page's language.
 
-A row that asked you for approvals carries them folded under its result line: `1 approval`, or `2 approvals, 1
-waiting`. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
+A row that asked you for approvals carries them folded under its result line: `1 approval`, `2 approvals, 1
+waiting`, or `1 approval waiting` when every request still waits. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
 the command itself), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
 when it was asked. A request that waits for you has **Allow once** and **Deny** right there, the same answers as the
 approval card in the chat, and **Review**, which opens the chat or task with the card and the exact content. There is
@@ -737,6 +739,7 @@ never what runs. When it is on:
   **Workers**;
 - the status row adds the cache, step, phase and queue segments, and a task's page names its
   priority;
+- a running turn shows the tool's name and arguments on each tool card, its step, attempt, phase and test count, the number of tool calls on the work line and the steps and tokens under an answer, and a model server error keeps its own text on the card (default mode words each of these for a person and keeps the raw text under **Details**);
 - the sidebar shows the **LOCAL** badge, a running chat reads `Running on your backend`, and the
   connection form keeps its technical words (**Chat backend**, **Chat API URL**, `Settings apply to subsequent turns…`).
 
@@ -878,6 +881,8 @@ turn that ran tools. **Copy error** copies one line and the run id for a bug
 report; the technical fields stay under **Details**. Stopped or interrupted
 turns use a neutral line (■). The banner shown when the page cannot reach the
 gateway has **Try again**.
+
+When the model server answers with an error, the card says `Could not get an answer from the model server` and one sentence about it with the next step (`The model server ran into a problem and could not answer. Try again; if it keeps happening, restart the server.`; there is one for a key it did not accept, a model it does not have, a busy server and a request it turned down). The server's own text, such as `HTTP 500: …`, stays under **Details**; developer mode shows it on the card too.
 
 When the model server cannot be reached at all, the card says `Could not reach
 the model server` and asks `Is your model server still running at
