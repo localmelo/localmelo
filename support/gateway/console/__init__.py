@@ -74,6 +74,7 @@ from . import (
     routes_status,
     routes_tasks,
     routes_turns,
+    serve_switch,
     uploads,
 )
 from .asks import OwnerAsks
@@ -87,6 +88,7 @@ from .idle_sleep import IdleSleep, IdleSleepOptions
 from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
+from .serve_switch import ServeSwitch
 from .shapes import session_json
 from .uploads import PictureStage
 from .vision import Vision
@@ -220,6 +222,9 @@ class Console:
         self.workers.on_earlier = self._used_earlier
         self.workers.on_ask = self.explanations.start
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
+        # A switch of melo_serve's chat model holds every chat's turns first.
+        self.serve = ServeSwitch(self)
+        self.sessions.hold = self.serve.hold
         # Pictures uploaded and not yet sent, and whether the model reads them.
         self.pictures = PictureStage()
         self.vision: Vision = self.options.vision or Vision(self)
@@ -252,7 +257,7 @@ class Console:
             info,
             pending_approvals=len(self.broker.pending(info.id)),
             level=self.gate.level(info.id),
-            held=self.gate.held(info.id),
+            held=self.gate.held(info.id) or self.serve.held(info.id),
             mode=self.sessions.mode_of(info),
         )
         # Steps allowed once in this chat since the gateway started (#339).
@@ -471,6 +476,7 @@ class Console:
         routes_tasks.add_routes(app, self)
         routes_chores.add_routes(app, self)
         routes_commands.add_routes(app, self)
+        serve_switch.add_routes(app, self)
         front.add_routes(app, self)
         activity.add_routes(app, self)
         _add_not_found(app)
@@ -584,6 +590,7 @@ class Console:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.chore_runner.aclose()
+        await self.serve.aclose()
         await self.idle_sleep.aclose()
         await self.explanations.aclose()
         for each in (self.front, *self._side_fronts.values()):

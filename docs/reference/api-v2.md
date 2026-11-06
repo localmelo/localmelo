@@ -213,6 +213,7 @@ output or log the header; same-user processes can still read the token file.
   and an undone turn does not count. It is for a client that shows how the last
   run went: the macOS app's pet and activity pill read it. One call reads the newest finished turn of
   the most recently updated sessions of each file by their indexes.
+- `switch` is the newest switch of melo_serve's model ([`POST /api/serve/switch`](#post-apiserveswitch)), or `null`.
 - `desktop_helper` is the desktop control helper's state as the last chat or check found it: `state` is `missing` (not installed), `installed` (not checked yet), `granted` (it runs and has Accessibility; `pictures` says whether it also has Screen Recording), `no_grant` (Accessibility is off) or `failed` (it did not start); `app` is the app to give the permissions to and `problem` says what is wrong. `GET /api/health?helper=check` starts the helper once to read its permissions (without a prompt, at most every 30 seconds, and only while browsing is on and `[browser] app_windows` is true); otherwise nothing is started.
 
 ## GET /api/activity
@@ -573,6 +574,34 @@ can be contacted.
   `Listing models works for local backends only; type the model name.`
 - An unreachable server or an empty model list returns 502
   `backend_unreachable`.
+
+## GET /api/serve
+
+The chat models melo_serve offers, worded in the console's language, for the model chip, Settings, `/model` and the app's **Model** menu. It asks melo_serve over its control socket.
+
+```json
+{"picks": [{"id": "qwen3-8b-omlx", "short": "8b", "name": "Qwen3 8B", "backend_name": "oMLX", "model": "Qwen3-8B-4bit", "current": false, "loadable": true, "words": "oMLX · needs 5 GB · fits", "fit": "fits", "tight": false}], "foot": "Every chat on this Mac follows the switch.", "switch": null}
+```
+
+- `words` is the row's whole line; `fit` is its last word (`fits`, `tight fit`, or empty for a model that cannot load); `tight` marks a model that fits only with nothing else loaded. `loadable` is `false` for one that does not fit or has a problem, and `words` then says why.
+- `switch` is the newest switch, as in `GET /api/health`.
+- 409 `not_melo_serve`: the chats' model server is not melo_serve. 502 `melo_serve_unavailable`: melo_serve did not answer.
+
+## POST /api/serve/switch
+
+Switch the model melo_serve serves. Body: `{"pick": "<id>"}`. It answers 202 with `{"switch": ...}` at once and goes on in the gateway; every chat follows.
+
+```json
+{"switch": {"id": 1, "pick": "qwen3-8b-omlx", "name": "Qwen3 8B", "state": "waiting", "waiting_for": 1, "load_s": 12, "error": "", "title": "Switching to Qwen3 8B…", "detail": "Waiting for 1 chat to finish"}}
+```
+
+- `state` goes `waiting` (for chats that run a turn, 10 minutes at most), `loading` (45 minutes at most), then `done`, `failed` (`error` says why; `title` then reads `Did not switch to Qwen3 8B` and `detail` repeats the error) or `cancelled`. `GET /api/health` carries the same object as `switch`, `null` before the first one.
+- A turn sent during a switch waits, with `Switching` as its hold, and runs on the new model.
+- 400 `invalid_request`: an unknown pick. 409 `pick_cannot_load`: it does not fit or has a problem. 409 `switch_running`: another switch is under way. 409 `not_melo_serve` and 502 `melo_serve_unavailable` as above.
+
+## POST /api/serve/switch/cancel
+
+End the wait of a switch that has not started loading; answers `{"switch": ...}` with `state` `cancelled`. 409 `no_switch`: none is running. 409 `switch_loading`: the load has started and goes on in melo_serve.
 
 ## GET /api/setup/detect
 

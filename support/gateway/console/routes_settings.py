@@ -275,6 +275,8 @@ async def health_json(
         "config_errors": [_redact(err) for err in console.cfg.validate()],
         "model": model_json(console.cfg),
         "model_server": console.probe.snapshot(),
+        # A switch of melo_serve's chat model: null before the first one.
+        "switch": console.serve.json(),
         "limits": {
             "text_chars": MAX_QUERY_LEN,
             "attachment_budget_chars": SESSION_TEXT_CHARS,

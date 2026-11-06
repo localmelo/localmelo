@@ -67,7 +67,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
 - 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
 - 任务向对话求助时，会有一行灰色文字 `Task “Fix tests” asks: <problem>`（中文目录里是「任务「Fix tests」在问：…」），随后是 melo 的回答，上面没有你的消息。接着是 `→ melo answered “Fix tests” · <answer>`，或者 `! “Fix tests” needs your answer: <question>`：只有这一个任务在等时，在这里发一条消息回答（`→ Sent to “Fix tests” as your answer`；10 秒内可在 `melo console` 里撤销）；有几个在等时，这一行会写 `several wait: /answer Fix tests …`。
-- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用；`/approvals ask`、`/approvals auto` 和 `/grants` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
+- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用（使用 melo_serve 时，`/model` 在主聊天里也可用）；`/approvals ask`、`/approvals auto` 和 `/grants` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>
 
@@ -79,7 +79,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 | | 来源 | 做法 |
 |---|---|---|
-| 1 | `melo setup` | 运行配置向导，然后使用它保存的后端。默认模式下，它先提供在本机找到的服务器（`Found a model server at …`、`Use this model server?`）；选择 `Use another server`、处于开发者模式，或已经保存后端但没有找到服务器时，会出现完整菜单；尚未保存后端且没有找到服务器时，会显示只读预览。不带任务时不能与 `--url` 同用。 |
+| 1 | `melo setup` | 运行配置向导，然后使用它保存的后端。默认模式下，它先提供在本机找到的服务器（`Found a model server at …`、`Use this model server?`）；选择 `Use another server`、处于开发者模式，或已经保存后端但没有找到服务器时，会出现完整菜单；尚未保存后端且没有找到服务器时，Mac 会提议帮你设置一个。不带任务时不能与 `--url` 同用。 |
 | 2 | `--url URL` | 使用该服务器，不使用配置文件。模型使用 `--model` 指定的模型，否则使用 `GET URL/models` 列出的唯一对话模型（ID 包含 `embed` 或 `rerank` 的不是对话模型），再否则使用服务器说明已加载的那一个；有多个且不知道哪个已加载时，退出码为 2，列出这些模型并要求使用 `--model <id>`。 |
 | 3 | 已保存的后端 | 若指定 `--model`，则在本会话中用它替代保存的模型。界面打开前不做检查：之后 melo 会列出一次服务器模型，如果服务器没有响应或没有列出该模型，就会警告。 |
 | 4 | 没有已保存的后端 | 先回答[首次运行](#first-run)的问题，然后打开界面。 |
@@ -154,7 +154,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | 命令 | 作用 |
 |---|---|
 | `/help [command]` | 三组常用命令；`/help all`（开发者模式下直接 `/help`）列出所有命令和按键；`/help NAME` 给出某个命令的详情。 |
-| `/model [name\|number]` | 单独使用：列出服务器的对话模型，当前模型标 `✓`，已加载的标 `(loaded)`；Enter 切换并把该模型保存为默认值，Esc 保留当前模型。带列出的 ID 或编号：从下一条消息起切换。服务器没有列出的名称会被拒绝。 |
+| `/model [name\|number]` | 单独使用：列出服务器的对话模型，当前模型标 `✓`，已加载的标 `(loaded)`；Enter 切换并把该模型保存为默认值，Esc 保留当前模型。带列出的 ID 或编号：从下一条消息起切换。服务器没有列出的名称会被拒绝。使用 melo_serve 时：列出它的对话模型、每个需要的内存和是否放得下，切换后本机每个聊天都会跟上（[切换模型](model-servers.md#switch-the-model)）。 |
 | `/backend [url]` | 切换到另一个模型服务器：询问它的 URL 和列表中的一个模型，用 `GET /models` 检查，切换并把两者保存为默认值。 |
 | `/new` | 开始新对话：模型忘记之前的对话；在终端自己的对话里，新对话不带上一个对话的授权（你在主对话里允许的仍然有效）。一条 `── New chat ──` 分隔线标出开始位置。 |
 | `/clear` | 在空屏上执行 `/new`：屏幕及其滚动缓冲区被清空，欢迎信息重新绘制。 |
@@ -516,12 +516,12 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo 通过 `GET /v1/models` 在 `127.0.0.1` 的端口 8000（vLLM、oMLX）、8400（MLC）、11434（Ollama）和 30000（SGLang）上查找本机服务器，并提供第一个列出模型的服务器（有对话模型的排在最前）；不会发送任何对话请求，所以服务器不会加载任何东西。
 - 在第二行和第三行之间，melo 以列表询问 `Use this model server?`；有多个模型时会显示选择器，有嵌入模型时还会有一个列表询问 `Remember across chats with nomic-embed-text?`（`Yes, with it`、`No, by words only`）。
-- 没有服务器在运行时，受支持的 Apple silicon Mac 会显示[只读设置预览](model-servers.md#setup-preview)：用简短摘要显示推荐项和下载量，仅在需要时添加警告。摘要只显示一次。选择 `Show how to set one up` 可看到最多六步的简明编号步骤（下载 oMLX、移到“应用程序”、下载模型、启动服务器，最后输入它的地址）；自动设置即将推出，不会安装、下载、启动或保存。仍可重新检查、输入地址或退出；管道输入保留原有提示，并显示手动指南链接而不是列表操作。其他系统保留手动服务器指南。
+- 没有服务器在运行时，受支持的 Apple silicon Mac 会先打印 `Checking what this Mac can run…`，再打印[一个列表](model-servers.md#first-run-setup)：这台 Mac、推荐的模型、每一项的大小和去向，以及要下载的总量。菜单默认停在 `Set up <model> (<size>)`；选择它之前不会安装任何东西。`Choose what to install` 逐项跳过，`Choose another model` 规划另一个选择，`Use a server I already run`、`Use a hosted service` 和 `Quit` 则离开。某一步失败或被 Ctrl-C 停下时会回到菜单，已下载的内容会保留。管道输入保留原有提示，并被告知 `Run melo in a terminal to set this up.`；管道从不开始设置。其他系统会打印手动方式。
 - 无法使用的服务器会连同原因一起指出（`connection refused`、`no answer in 5 s`、`HTTP 401` 或 `HTTP 403` 并附 `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`、`it lists no models`），你可以重试、不保存直接启动或退出。
 - Ollama 服务器保存为 `chat_backend = "ollama"`，oMLX 服务器保存为 `chat_backend = "omlx"`，其他保存为 `"vllm"`；嵌入模型的选择见[配置嵌入模型](embedding.md)。
 - `LOCALMELO_DETECT_URLS` 用逗号分隔的列表替换这四个 URL；空值会关闭查找。
 
-模型保留在 Hugging Face 缓存中。版本、校验和、缓存/设置路径、端口规则和计划摘要放在 `Details` 或开发者模式中，不占默认摘要。生命周期选择只描述未来可能执行的设置，不代表同意执行；手动命令独立运行，服务器须自行按 Ctrl+C 停止。选择空闲端口并在 melo 中输入该地址；没有对应固定 Mac 配方的系统保留现有手动说明。
+模型保留在 Hugging Face 缓存中（遵循 `HF_HOME`），绝不放进项目文件夹。
 
 问题之后，并且只在终端里，首次运行还会提议一次：导入这台电脑上其他助手保存的关于你的笔记：
 

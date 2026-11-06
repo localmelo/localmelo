@@ -475,6 +475,18 @@ class SessionRunner:
         self._check_idle()
         self._agent = agent
 
+    def adopt(self, agent: Agent) -> None:
+        """Run the turn that has begun, and the next turns, on *agent*.
+
+        Only from *before_turn*: the turn's run has not started yet. The caller
+        has started *agent*; it moves the conversation and closes the old Agent.
+        """
+        _check_agent(agent)
+        turn = self._active
+        if turn is None or turn.saw_started:
+            raise SessionBusyError(f"Session {self._name()} has no turn to adopt")
+        self._agent = turn.agent = agent
+
     # ── Turns ──
 
     async def run_turn(

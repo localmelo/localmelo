@@ -4,7 +4,7 @@ import AppKit
 /// titles again when the console's language changes (`retitle`), without the app starting over.
 enum MenuWord: String {
     case open, settings, signIn, quit, edit, undo, redo, cut, copy, paste, selectAll
-    case waiting, showPet, hidePet, desktop, desktopPill, desktopPet, desktopNothing
+    case waiting, showPet, hidePet, desktop, desktopPill, desktopPet, desktopNothing, model, cancelSwitch
 
     /// The item's title in the language now in use. *attached* picks the Quit that leaves a running gateway alone.
     func title(attached: Bool = false) -> String {
@@ -27,6 +27,8 @@ enum MenuWord: String {
         case .desktopPill: return DesktopMode.pill.title
         case .desktopPet: return DesktopMode.pet.title
         case .desktopNothing: return DesktopMode.nothing.title
+        case .model: return L10n.t("app.model.menu", "Model")
+        case .cancelSwitch: return L10n.t("app.model.cancel", "Cancel Switch")
         }
     }
 }

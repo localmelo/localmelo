@@ -1329,9 +1329,12 @@ export function turnDuration(turn) {
 
 /** The scheduler's hold for a call that waits on a foreign GPU lock. */
 export const LOCK_HOLD = "Reservation";
+// A turn that waits for a switch of melo_serve's chat model (the gateway's serve_switch.py).
+export const SWITCH_HOLD = "Switching";
 
-/** What a held call says: the GPU lock in plain words, as the console's banner does; any other hold keeps its code. */
-export function holdText(held) {
+/** The words for a turn's hold; a switch names the model it switches to when the caller knows it. */
+export function holdText(held, switching = "") {
+  if (held === SWITCH_HOLD) return switching ? t("serve.switching", {name: switching}) : t("serve.held");
   return held === LOCK_HOLD ? t("turns.hold.gpu") : t("turns.hold.other", {held});
 }
 

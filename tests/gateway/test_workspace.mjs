@@ -27,6 +27,7 @@ import {memoryNodes} from '../../support/gateway/static/memory.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
 import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
+import * as serve from '../../support/gateway/static/serve.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
@@ -701,6 +702,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/endings\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/serve\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
@@ -928,6 +930,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     ...mainChat,
     ...levels,
     ...modeChip,
+    ...serve,
     ...blocked,
     reportText,
     parseCommand,

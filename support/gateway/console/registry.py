@@ -62,7 +62,9 @@ from localmelo.support.sessions.grants import (
 )
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
+    BeforeTurn,
     ResumeInfo,
+    ResumeLoader,
     SessionRunner,
 )
 from localmelo.support.sessions.store import (
@@ -305,6 +307,9 @@ class ConsoleSessions:
         # change (one that was busy then) is built again at its next open.
         self._settings_epoch = 0
         self._closed = False
+        # Waits, before a turn calls the model, for a switch of the served
+        # model (the console's ServeSwitch.hold); True when it waited.
+        self.hold: Callable[[str], Awaitable[bool]] | None = None
 
     # ── Reading ──
 
@@ -503,6 +508,7 @@ class ConsoleSessions:
                 pictures=True,
                 memory=self._memory,
                 inbox=self._inbox(session_id),
+                before_turn=self._before_turn(session_id),
             )
             policy = ChatPolicy(
                 runner.observe(self._timed_ask(session_id)),
@@ -567,6 +573,35 @@ class ConsoleSessions:
                 self._sessions.pop(session_id, None)
             raise RuntimeError("The console's sessions are closed")
         return entry
+
+    def _before_turn(self, session_id: str) -> BeforeTurn:
+        """What a chat's turn does before it calls the model: wait for a model switch.
+
+        A turn that waited runs on a new Agent when the switch changed the
+        model the settings name (melo_serve's): the conversation moves to it,
+        as at a new open, and the old Agent closes.
+        """
+
+        async def before(reload: ResumeLoader) -> None:
+            if self.hold is None or not await self.hold(session_id):
+                return
+            entry = self._sessions.get(session_id)
+            served = self._settings_model()
+            if entry is None or entry.agent is None or served in ("", entry.model):
+                return
+            old = entry.agent
+            root = old.workspace_root
+            assert root is not None
+            agent, model = await self._build_agent(
+                self._settings(), root, None, session_id, front=entry.main
+            )
+            agent.load_conversation(old.conversation())
+            entry.runner.adopt(agent)
+            entry.agent, entry.model = agent, model
+            with contextlib.suppress(Exception):
+                await old.close()
+
+        return before
 
     async def _load(self, entry: OpenSession) -> None:
         """Load the kept conversation, or resume from the store."""
@@ -1076,6 +1111,7 @@ class ConsoleSessions:
             # A create's key stays where a create looks it up, even though
             # the row was made before the Agent.
             create_scope_key=client_request_id is not None,
+            before_turn=self._before_turn(info.id),
         )
         policy = ChatPolicy(
             runner.observe(self._timed_ask(info.id)),

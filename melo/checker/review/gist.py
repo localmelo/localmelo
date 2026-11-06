@@ -547,7 +547,7 @@ def _program(words: list[str]) -> tuple[str, list[str]]:
         elif (
             word.startswith("-")
             or re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", word)
-            or re.match(r"[A-Za-z_]\w*=", word)
+            or shell_lexer.ASSIGNMENT.match(word)
             or base in _WRAPPERS
             or not opening
         ):

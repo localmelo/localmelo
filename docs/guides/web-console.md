@@ -42,7 +42,7 @@ status row, the running chip (the [panel beside the chat](#the-panel-beside-a-ch
 priority line of a task's page (a running task's priority menu stays). It says things plainly too: a running chat reads
 `Working…` beside **Stop**, and the settings call the server **Model server** and its address
 **Server address**. The header shows a
-model chip (the model's name, `Model offline` or `No model`) that opens settings.
+model chip (the model's name, `Model offline` or `No model`) that opens settings. With melo_serve it shows the model and its backend and opens the list of models to switch to, as does the model button under the message box ([Switch the model](model-servers.md#switch-the-model)).
 A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are in the
 panel's **Workers** tab and a link in the empty [main chat](#the-main-chat-and-side-chats). [Developer mode](#developer-mode) shows the Workers link in the sidebar. Everything stays in the
 page, hidden.
@@ -243,7 +243,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 | Command | On this page |
 |---|---|
 | `/help [command]` | The everyday commands; `/help all` lists every one and `/help NAME` gives one command's details. |
-| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. |
+| `/model [name]` | With a name: switch the model and save it, with the Settings checks. Alone: open Settings at the model server. With melo_serve: alone, the list of its chat models; with a name, a switch every chat follows. |
 | `/backend [url]` | With a URL: switch the model server and save it. Alone: open Settings at the model server. |
 | `/new`, `/clear`, `/side [title]` | A new chat, made by its first message and a side chat under the main chat; `/side` names it, and `/clear` also removes the rows shown. |
 | `/chats`, `/sessions [filter]` | Open the chat list, filtered by the word. |

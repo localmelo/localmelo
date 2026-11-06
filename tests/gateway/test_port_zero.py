@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import IO
 from unittest import mock
@@ -19,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import localmelo.__main__ as cli
+from localmelo.support import console_link
 from localmelo.support.config import Config
 from localmelo.support.gateway import GatewayServer, bind_free_port
 
@@ -188,7 +190,9 @@ def _pump(stream: IO[str], lines: list[str], found: threading.Event) -> None:
             found.set()
 
 
-def test_piped_serve_prints_the_port_before_exit(tmp_path: Path) -> None:
+def test_piped_serve_prints_the_port_before_exit_and_exits_0_on_sigterm(
+    tmp_path: Path,
+) -> None:
     """A pipe is block-buffered: the startup lines must not wait for the exit."""
     env = {**os.environ, "HOME": str(tmp_path)}
     env.pop("LOCALMELO_DETECT_URLS", None)
@@ -213,7 +217,15 @@ def test_piped_serve_prints_the_port_before_exit(tmp_path: Path) -> None:
             assert found.wait(20), "".join(lines) or "no output within 20 s"
             match = re.search(r"Gateway: http://\S+:(\d+)", "".join(lines))
             assert match is not None and int(match.group(1)) != 0
+            # The line comes before the server installs its handlers: stop it
+            # only once it accepts connections.
+            deadline = time.monotonic() + 20
+            while not console_link.listening("127.0.0.1", int(match.group(1))):
+                assert time.monotonic() < deadline, "".join(lines)
+                time.sleep(0.1)
         finally:
             serve.terminate()
-            serve.wait(timeout=20)
+            code = serve.wait(timeout=20)
             reader.join(timeout=20)
+        # A stop that was asked for ends cleanly, so the login service stays stopped.
+        assert code == 0

@@ -2724,3 +2724,37 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 :root[data-view="live"] .app { display: block; }
 :root[data-view="live"] .app > :not(.browser-panel) { display: none !important; }
 :root[data-view="live"] .browser-panel { height: 100dvh; border: 0; }
+
+/* melo_serve's chat models (serve.mjs): the header chip and the composer's model button open one list. It
+   reuses the mode menu's rules (.mode-menu, .mode-item, .mode-check, .mode-menu-foot); Settings reuses .st-choice. */
+.model-picker { position: relative; }
+.composer-models { min-width: 0; max-width: 65%; }
+.composer-models .model-button { max-width: 100%; }
+/* The chip names the model and its backend, with the caret every list chip has. */
+.connection-chip .chip-backend, .connection-chip .chip-caret { color: var(--ink-3); }
+.connection-chip[aria-expanded="true"] { background: var(--soft); }
+/* A switch runs: the chip's dot pulses, as the running chip's does. */
+.connection-chip[data-switching] .status-dot, .pick-busy { animation: pulse 1.4s infinite; }
+/* The header's list hangs below the chip; the composer's opens above it, as the mode menu does. */
+.model-menu { top: calc(100% + 6px); bottom: auto; left: auto; right: 0; width: 320px; }
+/* One word says whether a pick fits in memory; its colour repeats the word, never replaces it. */
+.pick-fit { color: var(--ok); }
+.pick-fit[data-fit="tight"] { color: var(--warn); }
+/* A pick that cannot load, or any other pick while a switch runs: readable, never chosen. */
+.mode-item[aria-disabled="true"], .st-choice[aria-disabled="true"] { cursor: default; }
+.mode-item[aria-disabled="true"]:hover { background: none; }
+.mode-item[aria-disabled="true"] :is(.mode-item-name, .mode-item-words),
+.st-choice[aria-disabled="true"] :is(.st-label, .st-hint) { color: var(--ink-3); }
+.mode-item[aria-disabled="true"] .mode-item-name { font-weight: 500; }
+.st-choice[aria-disabled="true"] input { border-color: var(--line); background: var(--raised); }
+/* The pick being switched to: the pulsing dot in the check's place, and Cancel while it waits. */
+.mode-check.pick-slot { visibility: visible; }
+.pick-busy { display: block; width: 7px; height: 7px; margin: 7px 0 0 2px; border-radius: var(--radius-pill); background: var(--accent); }
+.mode-item.pick-waiting { align-items: flex-start; }
+.mode-item.pick-waiting .mode-item-text { flex: 1; }
+.pick-cancel { flex: none; align-self: center; min-height: 28px; padding: 2px 10px; }
+.st-pick-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+@media (max-width: 700px) {
+  .model-picker { position: static; }
+  .model-menu { left: 16px; right: 16px; width: auto; }
+}

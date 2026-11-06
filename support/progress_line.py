@@ -331,7 +331,7 @@ def bar_percent(fraction: float) -> int:
     return min(RUNNING_CAP_PERCENT, max(0, math.floor(fraction * 100 + 1e-9)))
 
 
-def _bar(fraction: float, complete: bool) -> str:
+def progress_bar(fraction: float, complete: bool) -> str:
     """:data:`BAR_CELLS` cells, all full only for a *complete* run."""
     if complete:
         cells = BAR_CELLS
@@ -365,7 +365,7 @@ def _head(payload: Mapping[str, Any], level: int, step: int) -> list[str]:
     # 100% only on the end of a completed run: the tracker gives 1.0 then
     # and only then (section 6.3).
     complete = ended and fraction >= 1.0
-    bar = _bar(fraction, complete)
+    bar = progress_bar(fraction, complete)
     percent = "100%" if complete else f"{bar_percent(fraction)}%"
     reason = payload.get("off_reason")
     if reason and not ended:

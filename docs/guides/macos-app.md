@@ -8,7 +8,7 @@ A native window around the web console, a menu-bar item and Melo on your desktop
 
 ## Install
 
-- You need macOS, `uv`, network access at build time and a Swift compiler: the release Xcode at `/Applications/Xcode.app`, else the Command Line Tools (`xcode-select --install`).
+- You need macOS 15 or later, `uv`, network access at build time and a Swift compiler: the release Xcode at `/Applications/Xcode.app`, else the Command Line Tools (`xcode-select --install`).
 - With neither compiler the build stops at once and prints one line that says so; a `DEVELOPER_DIR` in the environment picks another developer folder.
 - The build starts, installs and downloads no model server, and changes no signing identity or Xcode setting.
 
@@ -68,6 +68,7 @@ The pinned Python archive and the wheels are checked against their hashes. The b
 | A red dot with a ring | A chat or task waits for your answer to an approval. |
 
 - The menu lists what runs, **Waiting for your approval** (it opens that chat or task), **Open localmelo**, **Settings…** and **Quit localmelo**.
+- With melo_serve, a **Model** submenu lists its chat models, the current one checked; picking one switches every chat ([Switch the model](model-servers.md#switch-the-model)). While a switch waits, **Cancel Switch** ends the wait. A switch that failed says why at the top of the submenu until the next one.
 - **Sign In Again** appears only when it can help: after four failed sign-ins, on the Locked screen, and always in developer mode.
 - The app checks every 2 seconds, so an approval shows within one poll; VoiceOver and the tooltip say the same in words.
 

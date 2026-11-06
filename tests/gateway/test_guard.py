@@ -1064,3 +1064,30 @@ def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
     assert resp.status_code == 422
     assert "detail" in resp.json()
     assert gateway.ran_nothing()
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/serve"),
+        ("POST", "/api/serve/switch"),
+        ("POST", "/api/serve/switch/cancel"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        ({"Authorization": ""}, 401),
+        ({"Authorization": "Bearer wrong"}, 401),
+        ({"Origin": "http://evil.example"}, 403),
+        ({"Origin": f"http://127.0.0.1:{PORT + 1}"}, 403),
+        ({"Sec-Fetch-Site": "cross-site"}, 403),
+        ({"Host": "evil.example"}, 421),
+    ],
+    ids=str,
+)
+def test_the_routes_that_switch_the_model_are_behind_the_guard(
+    gateway: Gateway, method: str, path: str, headers: dict[str, str], status: int
+) -> None:
+    response = gateway.client.request(method, path, headers=headers, json={})
+    assert response.status_code == status
