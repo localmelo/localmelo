@@ -133,10 +133,12 @@ export function setupModelCard({
   function planRow(row) {
     const node = el("li", "setup-row");
     const lead = el("span", "setup-lead");
+    // A row that has to be set up shows its box on and locked, so the rows line up and the person sees why it cannot be left out.
     let box = null;
-    if (row.off) {
+    if (row.state !== "here") {
       box = el("input");
       box.type = "checkbox";
+      box.disabled = !row.off;
       box.addEventListener("change", () => turn(row.id, box.checked));
       lead.append(box);
     }
@@ -159,7 +161,7 @@ export function setupModelCard({
         box.checked = !off.has(found.id);
         box.setAttribute("aria-label", t("setup.rowOn", {name: found.name}));
       } else {
-        mark.textContent = found.state === "here" ? "✓" : "•";
+        mark.textContent = "✓";
         lead.replaceChildren(mark);
       }
     };
@@ -367,8 +369,8 @@ export function setupModelCard({
         parts.push(block);
       }
     }
-    if (text) parts.push(el("p", "", text));
     if (lead) parts.push(el("p", "setup-lead-in", lead));
+    if (text) parts.push(el("p", "", text));
     // The commands, each on one line (the block scrolls, so a flag never breaks): one click selects
     // them all, a focusable group lets the keyboard scroll it, and a button copies them.
     if (commands.length) {

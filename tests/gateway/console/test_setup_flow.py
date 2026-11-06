@@ -216,7 +216,7 @@ async def test_a_plan_that_cannot_run_says_why_and_is_asked_again_soon(
     assert counted.calls == 2
     monkeypatch.setattr(setup_flow.sys, "platform", "linux")
     other = (await client.get("/api/setup/plan")).json()
-    assert other["available"] is False and "Macs" in other["reason"]
+    assert other["available"] is False and other["reason"] == "this is not a Mac"
     assert counted.calls == 2  # nothing was asked of uv
 
 

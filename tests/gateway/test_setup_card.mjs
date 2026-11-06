@@ -103,7 +103,8 @@ test('with nothing found the card shows the terminal\'s list with its sizes and 
   assert.match(rows[1].text(), /oMLX 0\.7\.3 881 MB chat backend pinned download → ~\/Applications\/oMLX\.app/);
   assert.equal(rows[3].dataset.state, 'partial');
   assert.match(h.text(), /Download about 6\.6 GB\. 83 GB free\./);
-  assert.deepEqual(rows.map((r) => r.findAll((n) => n.type === 'checkbox').length), [0, 1, 1, 1, 1], 'a row that is not optional has no box');
+  const boxes = rows.map((r) => r.findAll((n) => n.type === 'checkbox')[0]);
+  assert.deepEqual(boxes.map((box) => box?.disabled), [true, false, false, false, false], 'a row that has to be set up has its box on and locked');
   assert.ok(h.root.button('Set up Qwen3 8B (6.6 GB)'));
   assert.match(h.text(), /Or use an account or a key/, 'the other way stays');
   assert.ok(h.root.button('Enter a server address…'));
@@ -248,7 +249,7 @@ test('a list that does not fit the disk cannot be started until something is lef
 test('with no plan the commands that start a server by hand stay, with why there is no setup', async () => {
   const h = harness({plan: {available: false, reason: 'uv is not installed (https://docs.astral.sh/uv/)', hint: ''}});
   await h.open();
-  assert.match(h.text(), /No model server is running on this Mac.*To start one with oMLX, run this in a terminal:.*Automatic setup is not available: uv is not installed.*brew install/);
+  assert.match(h.text(), /No model server is running on this Mac.*Automatic setup is not available: uv is not installed.*To start one with oMLX, run this in a terminal:.*brew install/);
   assert.equal(h.root.rows('setup-row').length, 0);
   const quiet = harness({plan: new Error('Unexpected request')});
   await quiet.open();
