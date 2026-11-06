@@ -201,18 +201,17 @@ Try: What is this project? · / commands · ctrl+d quit
 The first row shows the package version, and on a git checkout the short commit, as in `melo 0.1.0 (baab21e)`; `melo --version` prints the same line and exits 0. `/status` checks that the model answers and shows the folder, session, approvals and context use; `/status all` adds the tools, memory, limits and files.
 
 With no backend saved and no model server running, first-run `melo` and
-`melo setup` show a short, read-only preview: the recommendation and download upper
-bound. On supported
-Apple-silicon Macs the recommendation is oMLX with Qwen3 4B Instruct. The
-summary is printed once. Choose `Show how to set one up` for at most six
-numbered steps: download oMLX, move it to Applications, download the model,
-start the server, then `Enter an address` in melo. Automatic setup is coming
-soon, and nothing installs, downloads, starts or saves.
-Pipes retain `Press Enter to check again, type an address, or q to quit:`;
-other systems keep their platform's manual-server guidance. Start the server
-yourself and enter its address: the high port in the steps is outside default
-discovery. [Model servers](../guides/model-servers.md#setup-preview) explains
-the manual path. Existing connections and direct tasks are unchanged.
+`melo setup` on a Mac with Apple silicon print one list: this Mac, the
+recommended model (for example Qwen3 8B on oMLX), and each thing it would
+install with its size and where it goes (melo_serve, oMLX, the chat model, the
+embedding model and a login item). Nothing is installed until you choose
+`Set up <model> (<size>)`. That one OK installs the items, shows one line per
+step, and ends in the chat. It stays optional: `Choose what to install` skips
+any item, `Use a server I already run` and `Use a hosted service` are on the
+same menu, and a server that is already running is offered before any of this.
+Pipes are told to run melo in a terminal; other systems print how to start a
+server yourself. [Model servers](../guides/model-servers.md#first-run-setup)
+has the details. Existing connections and direct tasks are unchanged.
 
 If the server also lists an embedding model, the first run adds one question,
 `Remember across chats with <model>?`, and `Yes, with it` (selected first) saves it
@@ -279,8 +278,8 @@ it keeps running in this terminal. In default mode `melo setup` starts with the
 first run's question: it prints `Found a model server at …` and asks
 `Use this model server?`. The full menu above follows only after
 `Use another server` or in developer mode. With none found and a backend already
-saved, it shows the full backend menu; with nothing saved, it shows the read-only
-setup preview.
+saved, it shows the full backend menu; with nothing saved, a Mac offers to set
+up a server.
 
 ## Start the gateway
 

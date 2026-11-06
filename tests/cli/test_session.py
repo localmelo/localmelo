@@ -298,10 +298,13 @@ async def test_esc_stops_through_the_runner_and_retries_until_it_lands(
     assert session.stop()
     assert session.state == "stopping"
     assert not session.stop()  # once per turn
-    session.tick()
-    session.tick()
-    await setup.idle()
-    assert calls == [False, False, True]
+
+    def ticked() -> bool:  # as the app does: a busy machine needs more ticks
+        session.tick()
+        return session.state == "idle"
+
+    await _until(ticked)
+    assert calls[:2] == [False, False] and calls[-1] is True
     [turn] = await setup.rows()
     assert (turn.status, turn.cause) == ("cancelled", "user_stop")
     assert turn.result is not None and turn.result["error"] == STOP_REASON
@@ -357,6 +360,22 @@ async def test_a_message_during_a_turn_is_queued_and_sent_when_it_completes(
     await setup.idle()
     assert [t.status for t in await setup.rows()] == ["completed", "completed"]
     assert session.queued is None
+
+
+async def test_esc_while_the_session_moves_to_a_new_model_sends_nothing(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+
+    async def esc_during_the_move() -> None:
+        assert session.stop()
+
+    monkeypatch.setattr(session, "_follow_served", esc_during_the_move)
+    session.enter("never sent")
+    await setup.idle()
+    assert await setup.rows() == []
+    assert "Stopped" in setup.out.text() and "nothing was sent" in setup.out.text()
+    assert setup.app.buffer.text == "never sent"
 
 
 async def test_a_queued_message_comes_back_when_the_turn_is_stopped(

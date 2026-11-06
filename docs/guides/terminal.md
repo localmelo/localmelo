@@ -61,7 +61,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - An approval that a turn asks for is the usual list, answered through the gateway; one answered in the console closes here.
 - A card is one coloured line: a side chat or a task that finished, did not finish or waits for you, and how to open it. `/task …` starts a task in the open chat, as in the console; an echo about another chat's task ends with `from` and that chat's name.
 - When a task asks the chat for help, a muted line reads `Task “Fix tests” asks: <problem>` and melo's answer follows, with no message of yours above it. Then `→ melo answered “Fix tests” · <answer>`, or `! “Fix tests” needs your answer: <question>`: when only that task waits, answer it in a message here (`→ Sent to “Fix tests” as your answer`; **Undo** is in `melo console` for 10 seconds); when several wait, the line says `several wait: /answer Fix tests …`.
-- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/browser` and `/mcp` work in the terminal's own chat. `/approvals ask`, `/approvals auto` and `/grants` work in every chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
+- `/model`, `/backend`, `/undo`, `/copy`, `/sessions`, `/resume`, `/title`, `/usage`, `/attach`, `/browser` and `/mcp` work in the terminal's own chat; with melo_serve, `/model` works in the main chat too. `/approvals ask`, `/approvals auto` and `/grants` work in every chat. `melo -X cli.chat=local` (or `[cli] chat = "local"`) opens it, as `-u URL`, `-c`, `-r` and `--yolo` do.
 
 ### Which model server
 
@@ -71,7 +71,7 @@ The first of these that applies:
 
 | | Source | What happens |
 |---|---|---|
-| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode, or no server found with a backend already saved. With nothing saved and no server found, it shows the read-only preview. Not with `--url` and no task. |
+| 1 | `melo setup` | The setup wizard, then the backend it saved. Default mode first offers the server it finds (`Found a model server at …`, `Use this model server?`); the full menu follows `Use another server`, developer mode, or no server found with a backend already saved. With nothing saved and no server found, a Mac offers to set one up. Not with `--url` and no task. |
 | 2 | `--url URL` | That server, without the config file. The model is `--model`, else the only chat model that `GET URL/models` lists (ids with `embed` or `rerank` are not chat models), else the one the server says is loaded; with several and none known loaded it exits 2, lists them and asks for `--model <id>`. |
 | 3 | The saved backend | `--model` replaces its model for this session. Nothing is checked before the UI opens; afterwards melo lists the server's models once and warns when it does not answer or does not list the model. |
 | 4 | No saved backend | The [first-run](#first-run) questions, then the UI. |
@@ -140,7 +140,7 @@ When the model is not the saved default, a row after the folder gives the server
 | Command | What it does |
 |---|---|
 | `/help [command]` | The everyday commands in three groups; `/help all` (and `/help` in developer mode) lists every command and the keys; `/help NAME` gives one command's details. |
-| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. |
+| `/model [name\|number]` | Alone: a list of the server's chat models, the current one marked `✓`, the loaded ones `(loaded)`; Enter switches and saves the model as the default, Esc keeps the current one. With a listed id or number: switch from the next message. A name the server does not list is refused. With melo_serve: its chat models with what each needs and whether it fits, and a switch every chat on this Mac follows ([Switch the model](model-servers.md#switch-the-model)). |
 | `/backend [url]` | Switch to another model server: asks for its URL and a model from its list, checks it with `GET /models`, switches and saves both as the default. |
 | `/new` | Start a new chat: the model forgets the conversation; in the terminal's own chat the new chat starts with none of the last chat's grants (what you allowed in the main chat still holds). A `── New chat ──` rule marks the start. |
 | `/clear` | `/new` on an empty screen: the screen and its scrollback are wiped and the welcome is drawn again. |
@@ -471,17 +471,12 @@ Saved to ~/.cache/localmelo/config.toml (melo setup changes it).
 
 - melo looks for a server on this computer with `GET /v1/models` on `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000 (SGLang), and offers the first that lists a model (one with a chat model comes first); no chat request is sent, so the server loads nothing.
 - Between the second and third lines melo asks `Use this model server?` as a list; with several models it shows the picker, and with an embedding model one more list asks `Remember across chats with nomic-embed-text?` (`Yes, with it`, `No, by words only`).
-- With no server running, a supported Apple-silicon Mac shows the [read-only setup preview](model-servers.md#setup-preview): a short recommendation and download summary, with a warning only when needed. The summary is printed once. Choose `Show how to set one up` for at most six plain numbered steps (download oMLX, move it to Applications, download the model, start the server, then enter its address); automatic setup is coming soon, and nothing installs, downloads, starts or saves. Check again, enter an address and quit remain available; piped answers retain their original prompt and show a manual-guide link, not a picker action. Other systems keep manual-server guidance.
+- With no server running, a supported Apple-silicon Mac prints `Checking what this Mac can run…` and [one list](model-servers.md#first-run-setup): the Mac, the recommended model, each item with its size and where it goes, and the total to download. The menu starts on `Set up <model> (<size>)`; nothing installs until you choose it. `Choose what to install` skips items one by one, `Choose another model` plans another pick, and `Use a server I already run`, `Use a hosted service` and `Quit` leave. A step that fails or is stopped with Ctrl-C returns to the menu, and what was downloaded is kept. Piped answers keep their original prompt and are told `Run melo in a terminal to set this up.`; a pipe never starts a setup. Other systems print the manual way.
 - A server that cannot be used is named with its reason (`connection refused`, `no answer in 5 s`, `HTTP 401` or `HTTP 403` with `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`, `it lists no models`), and you can try again, start without saving or quit.
 - An Ollama server is saved as `chat_backend = "ollama"`, an oMLX server as `chat_backend = "omlx"` and any other as `"vllm"`; the embedding model choice is described in [Set up an embedding model](embedding.md).
 - `LOCALMELO_DETECT_URLS` replaces the four URLs with a comma-separated list; an empty value turns the search off.
 
-The model stays in the Hugging Face cache. Versions, checksums, cache/state paths,
-port policy and plan digest are in `Details` or developer mode, not the default
-summary. Lifetime choices describe a possible future setup, not permission to run
-anything. Manual commands run independently: stop the server yourself with Ctrl+C.
-Choose a free port and enter that address in melo; systems without the pinned Mac
-recipe keep their existing manual-server guidance.
+Models stay in the Hugging Face cache (`HF_HOME` is honoured), never in a project folder.
 
 After the questions, and only on a terminal, the first run also offers the notes other assistants on this computer keep about you, once:
 
