@@ -460,7 +460,8 @@ async def test_a_task_the_person_did_not_make_reads_no_project_file(
     assert "this project's notes for assistants" not in _texts(rig.llm.requests[0])
 
 
-async def test_a_saved_chore_reads_the_project_file(rig: Rig) -> None:
+async def test_a_saved_chores_run_reads_no_project_file(rig: Rig) -> None:
+    """A chore's folder holds what earlier runs left: data, never the project's instructions (#570)."""
     job = rig.workspace / "weekly"
     job.mkdir()
     (job / "GEMINI.md").write_text("Weekly notes live in notes/.")
@@ -470,9 +471,7 @@ async def test_a_saved_chore_reads_the_project_file(rig: Rig) -> None:
     )
     task, _ = await rig.workers.create_spec(spec, origin="user_rule")
     await _ended(rig.workers, task["task_id"], 1)
-    assert "--- GEMINI.md ---\nWeekly notes live in notes/." in _texts(
-        rig.llm.requests[0]
-    )
+    assert "Weekly notes live in notes/." not in _texts(rig.llm.requests[0])
 
 
 async def test_a_failed_read_of_the_file_still_starts_the_task(

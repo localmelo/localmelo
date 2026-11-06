@@ -299,7 +299,7 @@ The context pack:
 
 ### A task reads its project's own instruction file
 
-Coding projects keep a file that tells assistants how the project is built, tested and laid out. A task you start, and a saved chore, reads it when it starts, so it does not guess the test command, the layout or the conventions.
+Coding projects keep a file that tells assistants how the project is built, tested and laid out. A task you start reads it when it starts, so it does not guess the test command, the layout or the conventions. A saved chore's run does not: its folder holds what earlier runs left there, which is data, never instructions.
 
 - **Which files.** `AGENTS.md`, `CLAUDE.md` or `GEMINI.md` in the task's folder, then in each folder above it up to and including your home folder, never higher; a folder outside your home reads only itself. At each level the first of those names that exists counts. The nearest file comes first.
 - **How much.** At most three files and 6,000 characters in all. A file that does not fit whole is cut at a heading or a paragraph end and ends with `… (cut)`.
