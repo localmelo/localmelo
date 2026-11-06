@@ -25,6 +25,7 @@ import pytest
 
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -1001,6 +1002,91 @@ async def test_forgetting_one_source_of_an_item_drops_it_and_frees_the_other_tur
         ):
             assert f"t{fill.doc}" in text and TURN[0] in text
             assert TEXT not in text and LATER[0] not in text and LATER[1] not in text
+    finally:
+        await memory.aclose()
+
+
+HOME = "The user said they live in Pittsburgh."
+MOVED = "The user said they now live in Utrecht."
+
+
+async def repeated(
+    tmp_path: Path, store: SessionStore, cfg: Any
+) -> tuple[ChatMemory, Router, str, str]:
+    """A memory in which a first chat states a fact and a second chat repeats it: the
+    router keeps one item, which cites the turns of both chats."""
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        router = Router(memory.stores()[1])
+        sessions = []
+        for n, typed in enumerate(
+            ("I live in Pittsburgh.", "Yes, I live in Pittsburgh.")
+        ):
+            when = time.time() - (4 - n) * DAY
+            session_id, _ = await add_turn(
+                memory, store, typed, "Noted, Pittsburgh.", at=when, title=f"Chat {n}"
+            )
+            sessions.append(session_id)
+            item = MemoryItem(
+                session_id,
+                "Home",
+                HOME,
+                "profile",
+                when,
+                ((session_id, 1),),
+                encoder="1:x",
+            )
+            assert (await router.route(item)).action == ("NEW" if n == 0 else "IGNORE")
+        first, second = sessions
+        (kept,) = await memory.stores()[1].fetch_items([1])
+        assert kept.sources == ((first, 1), (second, 1))
+    except BaseException:
+        await memory.aclose()
+        raise
+    return memory, router, first, second
+
+
+async def test_a_repeated_fact_that_is_replaced_leaves_no_stale_turn(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory, router, _, _ = await repeated(tmp_path, store, cfg)
+    try:
+        third, _ = await add_turn(
+            memory, store, "I now live in Utrecht.", "Utrecht.", at=time.time() - DAY
+        )
+        moved = MemoryItem(
+            third, "Home", MOVED, "profile", time.time() - DAY, ((third, 1),)
+        )
+        assert (await router.route(moved)).action == "UPDATE"
+        found = await ask(memory, store, "Where do I live now?")
+        # The repeat's turn is behind the replaced item: it is not a second, current
+        # statement of the old fact beside the new one.
+        assert [i.key for i in found.used] == ["m:2"]
+        assert not memory._corpus.keys("d:")
+        assert "Utrecht" in found.block and "Pittsburgh" not in found.block
+    finally:
+        await memory.aclose()
+
+
+async def test_forgetting_the_first_chat_of_a_repeated_fact_brings_the_second_back(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory, _, first, _ = await repeated(tmp_path, store, cfg)
+    try:
+        _, index = memory.stores()
+        before = await ask(memory, store, "Where do I live?")
+        assert [i.key for i in before.used] == ["m:1"]
+        assert not memory._corpus.keys("d:")
+        await memory.forget_session(first)
+        # The item goes whole with its first source; the second chat's turn, which it
+        # also cited, is recalled as a turn, so the fact is still found.
+        assert await index.count_items() == 0
+        (doc,) = await index.ids()
+        found = await ask(memory, store, "Where do I live?")
+        assert [i.key for i in found.used] == [f"d:{doc}"]
+        assert "Pittsburgh" in found.block
     finally:
         await memory.aclose()
 

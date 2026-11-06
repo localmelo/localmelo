@@ -708,25 +708,50 @@ class ConversationIndex:
             if lost or (not sources and owner == session_id and turn is None):
                 gone.add(int(item_id))
         if gone:
+            await self._unlink(conn, gone)  # reads the replacement links, then
             marks = ", ".join("?" * len(gone))
             await conn.execute(f"DELETE FROM items WHERE id IN ({marks})", sorted(gone))
-            await self._unlink(conn, gone)
 
     async def _unlink(self, conn: aiosqlite.Connection, gone: set[int]) -> None:
-        """Undo what the items in *gone* did to the others: an item they replaced is
-        current again, an item that disagreed only with them is no longer in
-        conflict, and links to them are dropped."""
+        """Undo what the items in *gone* (still stored) did to the others, and keep
+        the order in which the rest replace one another. An item whose replacer goes
+        is replaced by the replacer's own replacer, and so on to the first one that
+        stays (A, B, C in turn: without B, C replaces A). When none stays, the newest
+        of the items they replaced is current again and replaces the others. An item
+        that disagreed only with them is no longer in conflict, and links to them are
+        dropped."""
         async with conn.execute(
-            "SELECT id, status, replaced_by, related, conflicts FROM items "
+            "SELECT id, status, replaced_by, related, conflicts, created_at FROM items "
             "WHERE replaced_by IS NOT NULL OR related != '[]' OR conflicts != '[]'"
         ) as cur:
             rows = await cur.fetchall()
-        for item_id, status, by, related_raw, conflicts_raw in rows:
+        replacer = {int(row[0]): row[2] for row in rows}
+        made = {int(row[0]): float(row[5]) for row in rows}
+        now: dict[int, int | None] = {}  # a survivor's replacer after the delete
+        orphans: dict[int, list[int]] = {}  # the deleted head -> survivors it replaced
+        for item_id, by in replacer.items():
+            if item_id in gone or by not in gone:
+                continue
+            heir, seen = by, set[int]()
+            while heir in gone and replacer.get(heir) is not None and heir not in seen:
+                seen.add(heir)
+                heir = replacer[heir]
+            if heir in gone:  # no replacer stays: *heir* was the current one
+                orphans.setdefault(heir, []).append(item_id)
+            else:
+                now[item_id] = heir
+        for members in orphans.values():
+            newest = max(members, key=lambda i: (made[i], i))
+            now.update({i: newest for i in members if i != newest})
+            now[newest] = None
+        for item_id, status, by, related_raw, conflicts_raw, _ in rows:
+            if item_id in gone:
+                continue
             related = tuple(i for i in _ids(related_raw) if i not in gone)
             conflicts = tuple(i for i in _ids(conflicts_raw) if i not in gone)
-            replaced_by = None if by in gone else by
+            replaced_by = now.get(item_id, by)
             status_now = status
-            if by in gone and status == "replaced":
+            if by is not None and replaced_by is None and status == "replaced":
                 status_now = "active"
             if status_now == "conflict" and not conflicts:
                 status_now = "active"
@@ -737,12 +762,11 @@ class ConversationIndex:
                 _ids(conflicts_raw),
             ):
                 continue
-            status = status_now
             await conn.execute(
                 "UPDATE items SET status = ?, replaced_by = ?, related = ?, "
                 "conflicts = ? WHERE id = ?",
                 (
-                    status,
+                    status_now,
                     replaced_by,
                     json.dumps(related),
                     json.dumps(conflicts),
@@ -957,6 +981,32 @@ class ConversationIndex:
                 )
                 for row in await cur.fetchall()
             }
+
+    async def add_sources(
+        self, item_id: int, sources: Iterable[tuple[str, int]]
+    ) -> None:
+        """Add *sources* to the turns item *item_id* cites, in one write: for an item
+        that repeats a kept one, so that its turns stay behind it while it stands, and
+        go back to recall with it when it is forgotten. A source it has is not added
+        twice; an unknown item is skipped."""
+        conn = await self._ready()
+        try:
+            async with conn.execute(
+                "SELECT sources FROM items WHERE id = ?", (item_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if row is not None:
+                have = _sources(row[0])
+                merged = tuple(dict.fromkeys((*have, *sources)))
+                if merged != have:
+                    await conn.execute(
+                        "UPDATE items SET sources = ? WHERE id = ?",
+                        (json.dumps([list(src) for src in merged]), item_id),
+                    )
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
 
     async def set_item_vectors(
         self, vectors: Iterable[tuple[int, Sequence[float]]], model: str

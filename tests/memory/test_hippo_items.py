@@ -280,6 +280,49 @@ async def test_deleting_an_item_makes_what_it_replaced_current_and_ends_a_confli
     assert survivors[liked].related == ()
 
 
+async def test_deleting_the_middle_of_a_replacement_chain_leaves_the_end_replacing_the_first(
+    index: ConversationIndex,
+) -> None:
+    for turn in (1, 2, 3, 4):
+        await add_turn(index, "s1", turn)
+    a = await index.add_item(make("The user lived in Pittsburgh.", turns=(1,), at=1.0))
+    b = await index.add_item(make("The user lived in Utrecht.", turns=(2, 3), at=2.0))
+    c = await index.add_item(make("The user lives in Lisbon.", turns=(4,), at=3.0))
+    await index.mark_replaced(a, b)
+    await index.mark_replaced(b, c)
+    await index.delete("s1", 3)  # one of the two turns B rests on: B goes whole
+    first, last = await index.fetch_items([a, c])
+    assert [i.id for i in await index.fetch_items([a, b, c])] == [a, c]
+    # A is still older than C: it is not current again.
+    assert (first.status, first.replaced_by) == ("replaced", c)
+    assert (last.status, last.replaced_by) == ("active", None)
+
+
+async def test_deleting_the_one_two_older_items_were_replaced_by_keeps_the_newer_of_them(
+    index: ConversationIndex,
+) -> None:
+    for turn in (1, 2, 3):
+        await add_turn(index, "s1", turn)
+    router = Router(index)
+    # The newest fact is routed first, then two older ones: both are stored already
+    # replaced by it.
+    for text, at, turn in (
+        ("The user said they now live in Lisbon.", 3.0, 3),
+        (UTRECHT, 2.0, 2),
+        (PITTSBURGH, 1.0, 1),
+    ):
+        await route(router, text, kind="profile", at=at, turns=(turn,))
+    lisbon, utrecht, pittsburgh = await index.fetch_items([1, 2, 3])
+    assert (utrecht.replaced_by, pittsburgh.replaced_by) == (1, 1)
+    await index.delete("s1", 3)
+    utrecht, pittsburgh = await index.fetch_items([2, 3])
+    # With Lisbon forgotten the newest of the two is current, and the other is older
+    # than it, not a second current fact.
+    assert (utrecht.status, utrecht.replaced_by) == ("active", None)
+    assert (pittsburgh.status, pittsburgh.replaced_by) == ("replaced", 2)
+    assert [i.id for i in await index.active_items("profile")] == [2]
+
+
 async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
     index: ConversationIndex,
 ) -> None:
@@ -512,13 +555,19 @@ async def test_a_duplicate_is_ignored_and_not_stored(index: ConversationIndex) -
     router = Router(index)
     text = "melo recommended the book Dune by Frank Herbert for the trip."
     await route(router, text, kind="semantic")
-    ignored = await route(router, text, kind="semantic")
+    ignored = await route(router, text, kind="semantic", session="s2", turns=(4,))
     assert (ignored.action, ignored.item, ignored.target) == ("IGNORE", None, 1)
     assert ignored.reason == "exact duplicate"
     assert await index.count_items() == 1
-    short = await route(router, "Hi", kind="profile")
+    # The item it repeats now cites the repeat's turn too; once, however often.
+    await route(router, text, kind="semantic", session="s2", turns=(4,))
+    (kept,) = await index.fetch_items([1])
+    assert kept.sources == (("s1", 1), ("s2", 4))
+    short = await route(router, "Hi", kind="profile", session="s3", turns=(7,))
     assert (short.action, short.item, short.target) == ("IGNORE", None, None)
     assert short.reason == "short fact" and await index.count_items() == 1
+    # A short fact repeats no item: no item's sources change.
+    assert [i.sources for i in await index.fetch_items([1])] == [kept.sources]
     assert ignored.to_json() == {
         "action": "IGNORE",
         "item": None,

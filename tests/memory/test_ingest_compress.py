@@ -504,7 +504,7 @@ async def test_a_turn_whose_only_item_was_refused_stays_recalled(
         await close(chats, memory)
 
 
-async def test_a_duplicates_turns_stay_recalled_and_deleting_the_first_chat_loses_nothing(
+async def test_a_duplicate_is_cited_by_the_item_it_repeats_and_deleting_the_first_chat_loses_nothing(
     tmp_path: Path,
 ) -> None:
     again = {**MAY, "id": "again", "title": "Again", "date": "2023-05-27T10:00:00"}
@@ -513,14 +513,18 @@ async def test_a_duplicates_turns_stay_recalled_and_deleting_the_first_chat_lose
     try:
         index = memory.stores()[1]
         first, second = report.ids["may"], report.ids["again"]
-        # The second chat says what the first did: its items are ignored, so no item
-        # cites its turns, which stay recalled as turns beside the first chat's items.
+        # The second chat says what the first did: its items are ignored, and the
+        # items they repeat cite its turns too, so no turn is recalled beside them.
         assert await index.count_items() == 2
         assert await index.encoded_turn(second) == 2
-        assert await recalled_as_turns(index) == {(second, 1), (second, 2)}
+        assert [i.sources for i in await index.fetch_items([1, 2])] == [
+            ((first, 1), (second, 1)),
+            ((first, 2), (second, 2)),
+        ]
+        assert await recalled_as_turns(index) == set()
         await memory.forget_session(first)
-        # The items rested on the first chat alone: they go, and the second chat's
-        # turns, still recalled, are all that is left, with no mark to re-encode them.
+        # Both items rested on the first chat too: they go, and the second chat's
+        # turns are recalled as turns, with no mark to encode them again.
         assert await index.count_items() == 0
         assert await recalled_as_turns(index) == {(second, 1), (second, 2)}
         assert await index.encoded_turn(second) == 2
