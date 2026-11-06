@@ -7,8 +7,12 @@ import {t} from './i18n.mjs';
 const TESTS = /(?:^|[\s;&|(])(?:pytest|py\.test|tox|nox|jest|vitest|(?:npm|pnpm|yarn|bun)(?: run)? test|(?:cargo|go|swift|deno|mix) test|python3? -m (?:pytest|unittest)|make (?:test|check))(?:$|[\s;&|)])/;
 const base = (path) => String(path ?? '').replace(/\/+$/, '').split('/').pop();
 
-/** The words the server's `activity_text` says: `done` is false while it runs, true once done, or `ask` for a step that did not finish. */
-export function stepWords(name, args, done = false) {
+/**
+ * The words the server's `activity_text` says: `done` is false while it runs, true once done, or `ask` for a step that
+ * did not finish. A `remember` call keeps a note or does not, which only its *output* says: a refusal comes back as a
+ * result that starts "Not remembered".
+ */
+export function stepWords(name, args, done = false, output = '') {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
   const a = args && typeof args === 'object' ? args : {};
   // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
@@ -22,7 +26,11 @@ export function stepWords(name, args, done = false) {
   if (tool === 'git_status') return say('read', t('steps.gitState'));
   if (tool === 'shell_exec') return say('run', t(TESTS.test(String(a.command ?? '').replace(/\s+/g, ' ')) ? 'steps.theTests' : 'steps.aCommand'));
   if (tool === 'python_exec') return say('run', 'Python');
-  if (tool === 'recall' || tool === 'search_memory' || tool === 'open_memory' || tool === 'remember') return say('remember');
+  if (tool === 'remember') {
+    if (!done) return t('steps.now.keep');
+    return t(done === 'ask' || /^Not remembered/.test(String(output ?? '').trim()) ? 'steps.failed.keep' : 'steps.done.keep');
+  }
+  if (tool === 'recall' || tool === 'search_memory' || tool === 'open_memory') return say('remember');
   if (tool === 'browser_open') {
     let host = '';
     try { host = new URL(String(a.url)).hostname.replace(/^www\./, ''); } catch { /* not a page address */ }

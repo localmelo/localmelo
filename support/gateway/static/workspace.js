@@ -25,6 +25,8 @@ import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
 import { stepWords } from "./step-words.mjs";
 import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
+import { createStreams } from "./browser-stream.mjs";
+import { mergeBrowsers, setupBrowserCards } from "./browser-card.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
@@ -820,6 +822,7 @@ async function loadSession(id) {
   view.turns = (turns.turns ?? []).map((row) => newTurn(row));
   view.cards = mergeCards([], turns.cards ?? []);
   view.echoes = mergeEchoes([], turns.echoes ?? []);
+  view.browsers = mergeBrowsers([], turns.browser ?? []);
   S.view = view;
   renderSessions();
   renderMessages(true);
@@ -928,6 +931,7 @@ function startStream(id) {
   closeStream();
   chatStatus.follow(id);
   browser.follow(id);
+  syncBrowser();
   S.stream = followEvents({
     ...followOptions,
     id,
@@ -947,7 +951,6 @@ function startStream(id) {
         stopSettling = frame.data?.cause === "user_stop";
         refreshHealthSoon();
       }
-      browser.note(frame);
       chatStatus.bump();
       renderMessages(false);
       syncUI();
@@ -1075,6 +1078,8 @@ function viewSnapshot() {
     turn.memory,
     turn.memoryOpen,
     turn.digestOpen,
+    // Who has the page changes the turn box's heading and its live row together.
+    turn.control,
   ]);
   return JSON.stringify([
     S.activeId,
@@ -1086,6 +1091,8 @@ function viewSnapshot() {
     turns,
     showsItems(view) ? (view?.cards ?? []).map((card) => card.id) : null,
     showsItems(view) ? (view?.echoes ?? []).map((echo) => [echo.id, dismissed.has(echo.id)]) : null,
+    // Each browser card is written again at each change; its row id says which one this is.
+    (view?.browsers ?? []).map((card) => [card.key, card.id]),
     mainActive() ? new Date().toDateString() : null,
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
@@ -1098,6 +1105,21 @@ function viewSnapshot() {
     developerMode,
     prefs,
   ]);
+}
+
+/** Make the open chat's browser cards and the header chip current: a card's node is made once, and kept across redraws. */
+function syncBrowser() {
+  const cards = S.view?.browsers ?? [];
+  browserCards.sync(cards);
+  browser.card(cards.at(-1) ?? null);
+}
+
+/** The nodes of the browser cards of the runs of *turn*. */
+function browserNodes(turn) {
+  return (S.view?.browsers ?? [])
+    .filter((card) => card.turn === turn.turn)
+    .map((card) => browserCards.nodeOf(card.key))
+    .filter(Boolean);
 }
 
 function renderMessages(forceScroll = false, preserveScroll = false) {
@@ -1129,6 +1151,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   messageSnapshot = snapshot;
   liveNodes.clear();
   runningCards.clear();
+  syncBrowser();
   const nodes = showsItems(view) ? mainNodes(view, turns) : turns.map((turn, index) => turnNode(turn, index === turns.length - 1));
   if (view?.hasEarlier) {
     const earlier = button("earlier-turns link-button", t(earlierLoading ? "chat.loadingEarlier" : "chat.showEarlier"), loadEarlier);
@@ -1184,6 +1207,7 @@ async function loadEarlier() {
     view.turns = [...history.turns.filter((turn) => !existing.has(turn.turn)), ...view.turns];
     view.cards = mergeCards(view.cards ?? [], page.cards ?? []);
     view.echoes = mergeEchoes(view.echoes ?? [], page.echoes ?? []);
+    view.browsers = mergeBrowsers(view.browsers ?? [], page.browser ?? []);
     view.hasEarlier = page.has_earlier === true;
     const top = scroller.scrollTop;
     const height = scroller.scrollHeight;
@@ -1499,6 +1523,8 @@ function assistantNode(turn, newest = false) {
   label.append(icon, el("span", "", "localmelo"));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
+  // The page melo browses, as a card in the reply: outside the folded steps, the same node at every redraw.
+  article.append(...browserNodes(turn));
   // The pictures melo took (a page it looked at, another app's window) show under the steps, also when they are folded.
   article.append(...shotsOf(turn));
   article.append(...blockedCards(turn));
@@ -1979,7 +2005,7 @@ function toolCard(item, turn, context = {}) {
     // did not finish reads as what it was to do, beside its mark and its word.
     const tense = state.state === "running" ? false : state.state === "success" ? true : "ask";
     summary.classList.add("plain");
-    summary.append(el("span", "tool-words", stepWords(item.name, item.arguments, tense)));
+    summary.append(el("span", "tool-words", stepWords(item.name, item.arguments, tense, item.output)));
   }
   const meta = state.text ? el("span", "tool-meta", state.text) : null;
   if (meta) summary.append(meta);
@@ -3025,8 +3051,17 @@ const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 // shows it alone and large: the macOS app in a window of its own (it offers the `localmeloBrowser` message handler), a
 // browser in a window of the page's own `#/live/<id>`.
 const browserBridge = globalThis.webkit?.messageHandlers?.localmeloBrowser;
+// One transport for every view of melo's browser: the card in the chat, the dock above it and the panel share one socket
+// and one decoder for each source they show (browser-stream.mjs).
+const browserStreams = createStreams({
+  openSocket: (url) => new WebSocket(url),
+  decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
+  // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
+  denied: () => { api("/health").catch(() => {}); },
+});
 const browser = setupBrowser({
   api,
+  streams: browserStreams,
   els: {
     root: $("browser-panel"),
     chip: $("browser-chip"),
@@ -3053,15 +3088,34 @@ const browser = setupBrowser({
     dialogOk: $("bp-dialog-ok"),
     dialogCancel: $("bp-dialog-cancel"),
   },
-  openSocket: (url) => new WebSocket(url),
-  decode: (bytes) => createImageBitmap(new Blob([bytes], { type: "image/jpeg" })),
   observe: (node, fn) => { if (typeof ResizeObserver === "function") new ResizeObserver(fn).observe(node); },
   wide: () => matchMedia("(min-width: 900px)").matches,
   popOut: browserBridge
     ? (session) => browserBridge.postMessage({ action: "popOut", session })
     : (session) => globalThis.open?.(liveUrl(globalThis.location, session), `melo-live-${session}`, "popup,width=1000,height=680"),
-  // The gateway ended the stream for the token's sake: any call finds out whether the page is still signed in.
-  denied: () => { api("/health").catch(() => {}); },
+});
+// The browser card in the conversation, and the dock that keeps it in sight at the top of the chat.
+const browserCards = setupBrowserCards({
+  doc: document,
+  streams: browserStreams,
+  open: (card) => browser.open(card),
+  observe: typeof IntersectionObserver === "function"
+    ? (onChange) => {
+      const watcher = new IntersectionObserver(
+        (entries) => entries.forEach((entry) => onChange(entry.target, entry.isIntersecting)),
+        { root: $("scroll"), rootMargin: "60px 0px" },
+      );
+      return { add: (node) => watcher.observe(node), remove: (node) => watcher.unobserve(node) };
+    }
+    : null,
+  dock: {
+    root: $("browser-dock"),
+    canvas: $("browser-dock-canvas"),
+    mark: $("browser-dock-mark"),
+    text: $("browser-dock-text"),
+    jump: $("browser-dock-jump"),
+    open: $("browser-dock-open"),
+  },
 });
 $("browser-chip").addEventListener("click", () => browser.toggle());
 $("bp-hide").addEventListener("click", () => browser.hide());

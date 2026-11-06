@@ -1,25 +1,28 @@
 import {t} from './i18n.mjs';
+import {createStreams, parseMeta} from './browser-stream.mjs';
+import {ACTIVE, stateWord} from './browser-card.mjs';
+
+export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-stream.mjs';
 
 /**
  * The Browser panel: a live window onto the page melo is working in, which the person can take over.
  *
- * It sits beside the chat and opens by itself while melo browses: when a `browser_*` tool call starts in the chat's
- * event stream, or when the chat is opened in the middle of a browser step or with a page the person took over. When
- * the turn ends it goes again, unless the person opened it or has the page; the chat's header keeps a chip that
- * brings it back, and a panel the person hid does not open by itself again for that chat. Whether the chat can be
- * watched (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, again when
- * melo browses in a chat that could not be watched (the browser was changed in Settings elsewhere), and on
- * `recheck()` (this page saved Settings). The pictures come from one WebSocket per open panel,
- * `/api/sessions/<id>/browser/live` (support/gateway/console/routes_browser.py): JSON `meta` messages say the state
- * (`idle`, `loading`, `live`, `stale`, `closed`), the tab, its address and title, whether melo is in the middle of a
- * browser step, and the size of the page view; binary messages are JPEG pictures, of which only the newest is
- * drawn. A panel that is hidden holds no socket, so the gateway stops the stream and melo's browser costs nothing.
+ * It sits beside the chat and never opens by itself: the **Open browser** button of the browser card in the
+ * conversation (and of the dock above it) opens it on that card's source (`open(card)`), and the chat's header chip,
+ * which names the state of the chat's browser, shows or hides it. Hiding it only stops watching: the page, melo's
+ * run and the card stay as they are, and the panel is never Done or Stop. Whether the chat can be watched
+ * (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, on `recheck()`
+ * (this page saved Settings), and again when a chat marked unwatchable has a new browser card or is asked to open one
+ * (another page may have saved Settings since). The pictures come from the page's one stream of the card's source
+ * (browser-stream.mjs): a panel that is hidden holds no watcher, and the card, the dock and the panel of one source
+ * share one socket and one decoder.
  *
- * `follow(id)` / `release()` bind the panel to the chat that is open, `note(frame)` reads that chat's events, and
- * A page that is hidden for a while, or kept by the browser for Back, lets go of its socket (`suspend`) and asks
- * again when it is back (`resume`). `#/live/<id>` (`liveRoute`, `liveUrl`) is the panel alone, which **Pop out** opens
- * large: in its own window in the macOS app, in a window of the browser elsewhere. The pure helpers
- * (`parseMeta`, `view`, `layout`, `toPage`, `addressParts`, `control` and the input messages) are what the tests check.
+ * `follow(id)` / `release()` bind the panel to the chat that is open, `card(card)` tells it the state of the chat's
+ * newest browser card (the chip's words, and the source the chip opens), and a page that is hidden for a while, or
+ * kept by the browser for Back, lets go of its sockets (`suspend`) and asks again when it is back (`resume`).
+ * `#/live/<id>` (`liveRoute`, `liveUrl`) is the panel alone, which **Pop out** opens large: in its own window in the
+ * macOS app, in a window of the browser elsewhere. The pure helpers (`parseMeta`, `view`, `layout`, `toPage`,
+ * `addressParts`, `control` and the input messages) are what the tests check.
  *
  * Take over: **Take over** (or the "melo needs you" card, `takeOver()`) hands the tab to the person (`meta.owner` is
  * then `you`) and melo is paused, with no timer. Where they have it is `meta.place`: `window`, a real Chrome window
@@ -34,13 +37,6 @@ import {t} from './i18n.mjs';
  * every key.
  */
 
-export const RETRY_S = [1, 2, 4, 8, 16, 30];
-export const STATES = ['idle', 'loading', 'live', 'stale', 'closed'];
-const REASONS = new Set(['tab', 'browser', 'chat', 'unavailable']);
-const DIALOGS = new Set(['alert', 'confirm', 'prompt', 'beforeunload']);
-// Close codes the gateway uses: a refusal (policy), and a store that is down (try again).
-const REFUSED = 1008;
-const MAX_TEXT = 2048;
 // The most characters one paste or input-method commit sends (the gateway takes no more).
 export const MAX_PASTE = 1000;
 // The modifier bits of the browser's input events.
@@ -64,16 +60,6 @@ export const liveRoute = (hash) => /^#\/live\/([A-Za-z0-9._:-]+)$/.exec(hash ?? 
 /** The page that shows one chat's Browser panel alone (`#/live/<id>`) on this page's own origin: Pop out opens it. */
 export const liveUrl = (location, session) => `${location.origin}/#/live/${encodeURIComponent(session)}`;
 
-/** The WebSocket address of one chat's browser on this page's own origin, optionally pinned to a tab. */
-export function socketUrl(location, session, tab = '') {
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const query = tab ? `?tab=${encodeURIComponent(tab)}` : '';
-  return `${scheme}//${location.host}/api/sessions/${encodeURIComponent(session)}/browser/live${query}`;
-}
-
-/** Seconds to wait before the next try, by how many tries failed in a row. */
-export const retryDelay = (attempt) => RETRY_S[Math.min(Math.max(attempt, 0), RETRY_S.length - 1)];
-
 /** A page address as two parts: the site (`host`, which the panel stresses) and what follows it. */
 export function addressParts(address) {
   const text = String(address ?? '').trim();
@@ -86,53 +72,6 @@ export function addressParts(address) {
   } catch {
     return {host: text.slice(0, 80), rest: ''};
   }
-}
-
-const finite = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
-const words = (value) => (typeof value === 'string' ? value.slice(0, MAX_TEXT) : '');
-
-/** The `meta` message in *text*, cleaned, or null when it is not one. Nothing in it is trusted beyond its shape. */
-export function parseMeta(text) {
-  let raw;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!raw || typeof raw !== 'object' || raw.type !== 'meta' || !STATES.includes(raw.state)) return null;
-  const meta = {
-    state: raw.state,
-    tab: typeof raw.tab === 'string' && /^t[0-9]{1,6}$/.test(raw.tab) ? raw.tab : '',
-    url: words(raw.url),
-    title: words(raw.title),
-    browsing: raw.browsing === true,
-    owner: raw.owner === 'you' ? 'you' : 'melo',
-    reason: REASONS.has(raw.reason) ? raw.reason : '',
-    w: 0,
-    h: 0,
-    offsetTop: 0,
-    scale: 1,
-  };
-  const w = finite(raw.w);
-  const h = finite(raw.h);
-  if (w !== null && h !== null && w > 0 && h > 0) {
-    meta.w = w;
-    meta.h = h;
-    meta.offsetTop = Math.max(0, finite(raw.offsetTop) ?? 0);
-    const scale = finite(raw.scale) ?? 1;
-    meta.scale = scale > 0 ? scale : 1;
-  }
-  meta.takeover = raw.takeover === true;
-  const yours = meta.owner === 'you';
-  meta.place = yours ? (raw.place === 'window' ? 'window' : 'app') : '';
-  meta.form = yours && raw.form === true;
-  meta.failed = yours && raw.failed === true;
-  meta.busy = meta.failed && raw.busy === true;
-  const box = raw.dialog;
-  meta.dialog = meta.owner === 'you' && box && typeof box === 'object' && DIALOGS.has(box.kind)
-    ? {kind: box.kind, message: words(box.message).slice(0, 300), default: words(box.default).slice(0, 300)}
-    : null;
-  return meta;
 }
 
 /**
@@ -336,15 +275,17 @@ function on(target, type, fn, options) {
  * The panel's behaviour. *els* are its parts: `root`, `chip` (and `chipText`), `title`, `host`, `rest`, `status`,
  * `viewport` (the box the picture is fitted in), `canvas`, `note`, `hide` and `pop`; for taking over, `take`, `give`,
  * `viewOnly`, `hint`, `keys` (the hidden text box keys go to) and the box's `dialog`, `dialogTitle`, `dialogText`,
- * `dialogInput`, `dialogOk` and `dialogCancel`. *api* reads paths below /api and *openSocket* opens a WebSocket (so a
- * test can give it a fake). *decode* turns a picture's bytes into a bitmap the canvas draws. *popOut* is set only
- * inside the macOS app. *changed({shown})* tells the page the panel opened or closed (it makes room for it), and
- * *denied()* that the gateway refused the stream for the token's sake. *frame* runs a function before the next paint
- * (pointer moves and wheel steps are sent at most once a frame).
+ * `dialogInput`, `dialogOk` and `dialogCancel`. *api* reads paths below /api. *streams* is the page's one transport
+ * (`createStreams`: the card and the dock watch the same sources); without it the panel makes its own from
+ * *openSocket* (a WebSocket, so a test can give it a fake), *decode* (a picture's bytes to a bitmap the canvas draws),
+ * *schedule*, *cancel* and *denied()* (the gateway refused the stream for the token's sake). *popOut* is set only
+ * inside the macOS app. *changed({shown})* tells the page the panel opened or closed (it makes room for it).
+ * *frame* runs a function before the next paint (pointer moves and wheel steps are sent at most once a frame).
  */
 export function setupBrowser({
   api,
   els,
+  streams = null,
   openSocket,
   decode,
   location = globalThis.location,
@@ -357,26 +298,20 @@ export function setupBrowser({
   observe = null,
   frame = (fn) => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(fn) : setTimeout(fn, 16)),
 }) {
+  const hub = streams ?? createStreams({openSocket, decode, location, schedule, cancel, denied});
   const S = {
     session: '',
     liveOnly: false,
     available: null, // whether this chat's browser can be watched at all (null: the gateway has not said)
     known: false, // the chat has opened a page: the chip may show
     shown: false,
-    suspended: false, // the page is away (hidden, or kept for Back): the stream is not asked for
-    meta: null,
+    meta: null, // what the stream of the shown source says (browser-stream.mjs), mirrored here
     link: 'off',
-    attempt: 0,
-    socket: null,
-    timer: null,
-    latest: null,
-    drawing: false,
     picture: false,
-    calls: new Set(), // browser tool calls of the chat that are running (from its events)
-    dismissed: new Set(), // chats whose panel the person hid: it does not open by itself again
-    auto: false, // the panel opened by itself: it goes again when the browsing ends
-    stepped: false, // melo browsed in the turn that runs
-    asked: false, // the gateway was asked again in this turn (a chat that could not be watched)
+    unwatch: null, // lets go of the shown source
+    source: null, // the source being watched: the chat's, pinned to a card's run and generation when it has one
+    pin: null, // the `{gen, run}` of the chat's newest active browser card: the source the chip and Open browser show
+    card: null, // that card's `{gen, run, state}`, or the newest card's once it ended (the chip's words)
     asking: false, // a question to the gateway is on its way
     generation: 0,
     focused: false, // the hidden text box has the keys (take over)
@@ -390,15 +325,15 @@ export function setupBrowser({
     committed: null, // the text an input method just committed (sent once, whatever follows it)
   };
 
-  const hint = () => S.calls.size > 0;
+  const working = () => S.card?.state === 'working';
   // A phone or a tablet has no Control key to leave the page with.
   const touchScreen = () => globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
 
   function render() {
     const v = view(S.meta, S.link, {picture: S.picture, known: S.known});
     const c = control(S.meta, {focused: S.focused, link: S.link, touch: touchScreen()});
-    // Melo is mid-step before the stream says so (the event came first): show it on the chip and the panel.
-    const browsing = v.browsing || (hint() && S.shown && v.state !== 'closed' && v.state !== 'idle');
+    // The card says melo is at work before the stream does: show it on the panel too.
+    const browsing = v.browsing || (working() && S.shown && v.state !== 'closed' && v.state !== 'idle');
     const {root, chip} = els;
     root.hidden = !S.shown;
     root.dataset.state = v.state;
@@ -421,11 +356,11 @@ export function setupBrowser({
     if (els.hide) els.hide.hidden = S.liveOnly;
     if (chip) {
       chip.hidden = S.liveOnly || !(S.available && (S.known || S.shown));
-      const working = !c.you && (browsing || (hint() && !S.shown));
-      chip.dataset.browsing = String(working);
+      chip.dataset.browsing = String(!c.you && (browsing || (working() && !S.shown)));
       chip.setAttribute('aria-expanded', String(S.shown));
       chip.setAttribute('aria-label', S.shown ? t('browser.hide') : t('browser.show'));
-      setText(els.chipText, c.you ? c.status : working ? t('browser.browsing') : t('browser.title'));
+      // One word for the state, the same on the card and the dock: the chat's browser while no run is using it.
+      setText(els.chipText, c.you ? c.status : S.card && ACTIVE.has(S.card.state) ? stateWord(S.card.state) : t('browser.title'));
     }
     relayout();
   }
@@ -487,143 +422,43 @@ export function setupBrowser({
   }
   if (observe && els.viewport) observe(els.viewport, relayout);
 
-  // ── The socket ──
+  // ── The stream ──
 
-  function dropSocket() {
-    if (S.timer !== null) {
-      cancel(S.timer);
-      S.timer = null;
-    }
-    const socket = S.socket;
-    S.socket = null;
-    S.link = 'off';
-    S.latest = null;
-    if (socket) {
-      socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
-      try {
-        socket.close(1000);
-      } catch {
-        /* A socket that is already closed needs nothing. */
-      }
-    }
-  }
-
-  function retry() {
-    if (!S.shown || S.suspended || S.timer !== null || !S.session) return;
-    S.link = 'retry';
-    const wait = retryDelay(S.attempt);
-    S.attempt += 1;
-    S.timer = schedule(() => {
-      S.timer = null;
-      connect();
-    }, wait * 1000);
-    render();
-  }
-
-  function connect() {
-    if (S.socket || !S.shown || S.suspended || !S.session) return;
-    const generation = S.generation;
-    let socket;
-    try {
-      socket = openSocket(socketUrl(location, S.session));
-    } catch {
-      retry();
-      return;
-    }
-    socket.binaryType = 'arraybuffer';
-    S.socket = socket;
-    S.link = 'connecting';
-    socket.onopen = () => {
-      if (S.socket !== socket || S.generation !== generation) return;
-      S.link = 'open';
-      S.attempt = 0;
+  /** What the shown source's stream says, as the stream tells it. */
+  const sink = {
+    canvas: els.canvas,
+    update(state) {
+      S.meta = state.meta;
+      S.link = state.link;
+      S.picture = state.picture;
+      if (state.link !== 'open') S.pressed.clear();
+      if (state.meta && state.meta.state !== 'idle') S.known = true;
       render();
-    };
-    socket.onmessage = (event) => {
-      if (S.socket !== socket || S.generation !== generation) return;
-      if (typeof event.data === 'string') {
-        const meta = parseMeta(event.data);
-        if (!meta) return;
-        if (meta.tab !== (S.meta?.tab ?? '') || meta.state === 'idle' || meta.state === 'closed') S.picture = false;
-        S.meta = meta;
-        if (meta.state !== 'idle') S.known = true;
-        render();
-        return;
-      }
-      S.latest = event.data;
-      pump(generation);
-    };
-    socket.onclose = (event) => {
-      if (S.socket !== socket || S.generation !== generation) return;
-      S.socket = null;
-      S.link = 'off';
-      S.pressed.clear();
-      if (event?.code === REFUSED) {
-        if (event.reason === 'token_rotated') {
-          denied();
-          retry();
-        } else {
-          S.meta = {...(S.meta ?? parseMeta('{"type":"meta","state":"closed"}')), state: 'closed', reason: 'unavailable', browsing: false};
-          S.picture = false;
-          render();
-        }
-        return;
-      }
-      // The gateway ended a closed view on purpose: it stays as it was told, with nothing to retry.
-      if (event?.code === 1000 && (S.meta?.state === 'closed')) {
-        render();
-        return;
-      }
-      retry();
-    };
-    socket.onerror = () => {};
-    render();
+    },
+  };
+
+  /** The source the panel shows: the chat's browser, pinned to a card's run and generation when there is one. */
+  const sourceOf = () => ({session: S.session, ...(S.pin ?? {})});
+
+  function watch() {
+    if (S.unwatch || !S.shown || !S.session) return;
+    S.source = sourceOf();
+    S.unwatch = hub.watch(S.source, sink);
   }
 
-  /** Draw the newest picture; one that arrives while another is being decoded takes its place. */
-  async function pump(generation) {
-    if (S.drawing) return;
-    S.drawing = true;
-    try {
-      while (S.latest !== null) {
-        const data = S.latest;
-        S.latest = null;
-        let bitmap;
-        try {
-          bitmap = await decode(data);
-        } catch {
-          continue;
-        }
-        if (S.generation !== generation) {
-          bitmap?.close?.();
-          return;
-        }
-        const canvas = els.canvas;
-        if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-        if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
-        canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
-        bitmap.close?.();
-        S.picture = true;
-        render();
-      }
-    } finally {
-      S.drawing = false;
-    }
+  function unwatch() {
+    const stop = S.unwatch;
+    S.unwatch = null;
+    S.link = 'off';
+    S.meta = null;
+    S.picture = false;
+    stop?.();
   }
 
   // ── Taking over ──
 
   /** Send one message to the gateway; whether it went. */
-  function send(message) {
-    const socket = S.socket;
-    if (!socket || S.link !== 'open' || typeof socket.send !== 'function') return false;
-    try {
-      socket.send(JSON.stringify(message));
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  const send = (message) => S.unwatch !== null && S.source !== null && hub.send(S.source, message);
 
   const inControl = () => control(S.meta, {link: S.link}).input;
   const box = () => ({width: els.viewport?.clientWidth ?? 0, height: els.viewport?.clientHeight ?? 0});
@@ -820,10 +655,8 @@ export function setupBrowser({
   /** Take the page over: from the panel's button (*ask*: the gateway is asked), or after the card was answered. */
   function takeOver({ask = false} = {}) {
     if (!S.session) return;
-    S.dismissed.delete(S.session);
     S.available = S.available ?? true;
     S.wantFocus = true;
-    S.auto = false;
     show();
     if (ask) send({type: 'take'});
     render();
@@ -832,66 +665,44 @@ export function setupBrowser({
   /** The page in a real Chrome window: moved there from the panel, or that window brought to the front. */
   function showWindow() {
     if (!S.session) return;
-    api(`/sessions/${encodeURIComponent(S.session)}/browser/window`, {method: 'POST'}).catch(() => {});
+    const query = new URLSearchParams(S.source ? {...(S.source.gen ? {gen: S.source.gen} : {}), ...(S.source.run ? {run: S.source.run} : {})} : {}).toString();
+    api(`/sessions/${encodeURIComponent(S.session)}/browser/window${query ? `?${query}` : ''}`, {method: 'POST'}).catch(() => {});
   }
 
   // ── Showing and hiding ──
 
+  const sameSource = (a, b) => a?.session === b?.session && (a?.gen ?? '') === (b?.gen ?? '') && (a?.run ?? '') === (b?.run ?? '');
+
+  /** Show the panel (never by itself: the person asked); one that shows another source moves to the one asked for. */
   function show() {
-    if (S.shown) return;
+    if (S.shown) {
+      if (S.unwatch && !sameSource(S.source, sourceOf())) {
+        unwatch();
+        watch();
+      }
+      return;
+    }
     S.shown = true;
     changed({shown: true});
-    connect();
+    watch();
     render();
   }
 
   function hide() {
     if (!S.shown) return;
     S.shown = false;
-    dropSocket();
+    unwatch();
     changed({shown: false});
     render();
   }
 
-  /** Whether the panel may open by itself: not for a chat whose panel was hidden, and below 900 px only on request. */
-  const wantsOpen = () => S.liveOnly || (!S.dismissed.has(S.session) && wide());
-
-  /** Open the panel by itself while melo browses (a step runs, or *awake*: the gateway says so or the page is the person's). */
-  function reveal(awake = false) {
-    if (!S.session) return;
-    if (S.liveOnly) {
-      show();
-      return;
-    }
-    if (S.available === true && S.known && !S.shown && wantsOpen() && (hint() || awake)) {
-      S.auto = true;
-      show();
-    } else render();
-  }
-
-  /** The browsing ended (the turn did): a panel that opened by itself goes, and the chip stays to bring it back. */
-  function settle() {
-    const browsed = S.stepped;
-    S.stepped = false;
-    S.asked = false;
-    S.calls.clear();
-    if (browsed && S.auto && S.shown && S.meta?.owner !== 'you') {
-      S.auto = false;
-      hide();
-    } else render();
-  }
-
   function reset() {
-    dropSocket();
+    unwatch();
     S.generation += 1;
-    S.meta = null;
-    S.picture = false;
     S.known = false;
     S.available = null;
-    S.calls.clear();
-    S.auto = false;
-    S.stepped = false;
-    S.asked = false;
+    S.pin = null;
+    S.card = null;
     S.asking = false;
     const was = S.shown;
     S.shown = false;
@@ -912,14 +723,15 @@ export function setupBrowser({
     S.asking = false;
     S.available = state?.available === true;
     if (state?.open) S.known = true;
-    if (S.liveOnly && !S.available) {
-      S.meta = parseMeta('{"type":"meta","state":"closed","reason":"unavailable"}');
-    } else if (!S.available && S.shown && !S.liveOnly) {
+    if (S.liveOnly) {
+      // The pop-out window is the panel alone: it shows, and says so when there is nothing to watch.
+      show();
+      if (!S.available) S.meta = parseMeta('{"type":"meta","state":"closed","reason":"unavailable"}');
+      render();
+    } else if (!S.available && S.shown) {
       // The browser now chosen cannot be watched: the panel goes, and it was not the person who hid it.
-      S.auto = false;
       hide();
-    }
-    reveal(state?.browsing === true || state?.yours === true);
+    } else render();
   }
 
   return {
@@ -927,7 +739,7 @@ export function setupBrowser({
     async follow(id, {liveOnly = false} = {}) {
       if (!id) return;
       if (id === S.session && S.liveOnly === liveOnly) {
-        if (S.shown && !S.socket) connect();
+        if (S.shown && !S.unwatch) watch();
         return;
       }
       reset();
@@ -946,48 +758,49 @@ export function setupBrowser({
     },
 
     /**
-     * Read one event of the followed chat: a browser tool call starting is melo beginning to browse, and the turn
-     * finishing is the browsing ending. In a chat that could not be watched, the first browser step of a turn asks
-     * the gateway again: the browser may have been changed in Settings since the chat was followed.
+     * The state of the chat's newest browser card (`{gen, run, state}`, or null when it has none): the chip says it in
+     * the card's words, and while the card is active its source is the one the chip (and a panel not asked for a
+     * card) shows. A panel that shows the chat's browser moves to the card's source when a new card begins.
      */
-    note(frame) {
+    card(card) {
       if (!S.session || S.liveOnly) return;
-      const type = String(frame?.type ?? '');
-      const data = frame?.data ?? {};
-      if (type === 'tool.started' && String(data.name ?? '').startsWith('browser_')) {
-        S.calls.add(String(data.call_id ?? ''));
-        S.known = true;
-        S.stepped = true;
-        if (S.available === false && !S.asked && !S.asking) {
-          S.asked = true;
-          probe();
-        }
-        reveal();
-      } else if (type === 'tool.finished') {
-        if (S.calls.delete(String(data.call_id ?? ''))) render();
-      } else if (type === 'turn.finished') {
-        settle();
-      }
+      const live = Boolean(card) && ACTIVE.has(card.state);
+      const pin = live ? {gen: card.gen, run: card.run} : null;
+      const moved = pin !== null && !sameSource({session: S.session, ...pin}, {session: S.session, ...(S.pin ?? {})});
+      S.card = card ? {gen: card.gen, run: card.run, state: card.state} : null;
+      S.known = S.known || S.card !== null;
+      S.pin = pin;
+      if (moved && S.shown) show();
+      render();
+      // A chat last found unwatchable may browse in another browser now (Settings saved elsewhere): ask once for the run.
+      if (moved && S.available === false) probe();
     },
 
     /**
      * Ask the gateway again whether the chat can be watched (this page saved Settings: the browser may be another
-     * now). The chip and the panel follow the answer; nothing opens unless melo is browsing.
+     * now). The chip and the panel follow the answer; nothing opens.
      */
     async recheck() {
       if (!S.session || S.liveOnly) return;
-      S.known = S.calls.size > 0;
+      S.known = S.card !== null;
       await probe();
     },
 
-    /** The header chip: show the panel, or hide it (a hidden panel stays hidden for this chat until asked). */
+    /** Open browser, on a card or the dock: the panel shows that card's source (`{gen, run}`). */
+    async open(card) {
+      if (!S.session || S.liveOnly) return;
+      const id = S.session;
+      if (S.available === false) await probe(); // the browser may have changed since this page last asked
+      if (S.session !== id || S.available === false) return;
+      S.pin = {gen: card.gen, run: card.run};
+      S.available = S.available ?? true;
+      show();
+    },
+
+    /** The header chip: show the panel, or hide it. Hiding only stops watching. */
     toggle() {
-      S.auto = false;
-      if (S.shown) {
-        S.dismissed.add(S.session);
-        hide();
-      } else if (S.session) {
-        S.dismissed.delete(S.session);
+      if (S.shown) hide();
+      else if (S.session) {
         S.available = S.available ?? true;
         show();
       }
@@ -995,8 +808,6 @@ export function setupBrowser({
 
     hide() {
       if (!S.shown || S.liveOnly) return;
-      S.auto = false;
-      S.dismissed.add(S.session);
       hide();
     },
 
@@ -1013,22 +824,16 @@ export function setupBrowser({
     },
 
     /**
-     * The page is away: hidden for a while, or kept by the browser for Back. Nobody watches, so the socket closes
-     * and the gateway stops the stream; the panel stays as it is. A page that is kept would otherwise hold its
-     * socket open, and the stream with it, until the browser lets the page go.
+     * The page is away: hidden for a while, or kept by the browser for Back. Nobody watches, so the sockets close
+     * and the gateway stops the streams; the panel stays as it is.
      */
     suspend() {
-      S.suspended = true;
-      dropSocket();
+      hub.suspend();
       if (S.shown) render();
     },
 
-    /** The page is back: the stream is asked for again if the panel is shown. */
-    resume() {
-      if (!S.suspended) return;
-      S.suspended = false;
-      connect();
-    },
+    /** The page is back: the streams are asked for again. */
+    resume: () => hub.resume(),
 
     /** The person took the page over on the "melo needs you" card: the panel opens and the keys go to the page. */
     takeOver: () => takeOver(),
@@ -1044,6 +849,6 @@ export function setupBrowser({
 
     relayout,
     isShown: () => S.shown,
-    state: () => ({...S, calls: [...S.calls], dismissed: [...S.dismissed], socket: S.socket !== null, latest: undefined}),
+    state: () => ({...S, socket: S.unwatch !== null, unwatch: undefined}),
   };
 }

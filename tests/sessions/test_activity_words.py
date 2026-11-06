@@ -106,7 +106,7 @@ def test_a_leading_done_gives_way_to_what_followed_it(
         (
             "remember",
             {"text": "You prefer tea.", "topic": "x"},
-            "Remembering",
+            "Keeping a note",
             "memory",
         ),
         ("mcp__files__file_read", {"path": "a/b.txt"}, "Reading b.txt", "read"),
@@ -287,6 +287,7 @@ def test_a_reason_changes_only_a_held_state() -> None:
         ),
         ("list_files", {"path": "/w"}, {"root": "/w"}, "正在浏览 文件夹"),
         ("mcp__x__y", {}, {}, "正在使用 一个工具"),
+        ("remember", {"text": "You prefer tea."}, {}, "正在记下"),
         ("", None, {}, "正在思考"),
         ("", None, {"state": "waiting"}, "在等你批准"),
         ("", None, {"state": "held", "reason": "Thermal"}, "在等 Mac 降温"),

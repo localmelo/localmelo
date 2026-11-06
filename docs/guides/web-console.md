@@ -469,11 +469,21 @@ Closing a chat that made notes asks `Also forget the 2 notes from this chat?`: *
 
 In developer mode, **Details** opens in the panel, in place of the tabs, until you close it.
 
+## The browser in the chat
+
+While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), the chat shows a **Browser** card in the reply, like a message: the live page, what melo is doing ("Opening a page", "Pressing a button"), one state word (Working, Waiting for you, You're in control, Done or Stopped) and one button, **Open browser**. It works in the main chat and in a side chat alike, and a web search counts as browsing. You can keep typing under it.
+
+- The card shows only what the program wrote: the state, the kind of step and the site's name. It never holds a typed value, a full address or a query.
+- When the card scrolls out of view, a small bar at the top of the chat keeps the page in sight (a picture, the state and the same button); a click on it goes back to the card.
+- A picture that is not arriving never reads as live: the card says "Not updating", or "Reconnecting…" while the link is being made again, and dims the picture.
+- When the run ends the card keeps the last picture this page showed, and says how it ended.
+- A chat that is open again, or a page that was reloaded, shows the same card again.
+
 ## The Browser panel
 
-While melo browses in Chrome in the background ([Browsing with melo](browsing.md#watching-melos-browser)), a **Browser** panel beside the chat shows its page, live, and lets you take it over.
+**Open browser** on the card, or the **Browser** button in the header, shows the page in a **Browser** panel beside the chat, live, and lets you take it over.
 
-- It opens by itself while melo browses and follows melo to another tab. When the turn ends it closes again, unless you opened it yourself or have the page; the **Browser** button in the header brings it back. **Hide browser** in its header closes it until you open it again.
+- The panel never opens by itself; **Hide browser** in its header closes it. Closing it only stops watching: melo goes on, and nothing is stopped or given back.
 - After you switch the browser to Chrome in Settings, it opens at the chat's next browser step. A chat in the middle of a turn finishes it in the browser it has.
 - **Pop out** shows the panel alone and large: in the app in a window of its own, in a browser in a new window.
 - It shows the page's title and address, the picture, and a ring with "melo is browsing" while a step runs. When the picture stops it dims and reads "Not updating"; when it ends it says why.

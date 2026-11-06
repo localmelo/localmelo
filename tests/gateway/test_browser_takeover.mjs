@@ -185,6 +185,7 @@ async function panel() {
     frame: (fn) => frames.push(fn),
   });
   await browser.follow('s1');
+  browser.toggle(); // the panel opens when the person asks, never by itself
   const socket = FakeSocket.all[0];
   socket.open();
   socket.say(message());

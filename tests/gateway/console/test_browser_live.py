@@ -37,11 +37,14 @@ from localmelo.tests.browser.test_live import site
 from localmelo.tests.browser.test_provider import run
 
 from .conftest import (
+    HOLDER,
     FakeAgent,
     FakeProbe,
+    core_event,
     make_cfg,
     open_session,
     quiet_gate,
+    run_result,
     seed_turn,
 )
 
@@ -581,3 +584,273 @@ async def test_a_stream_for_another_host_never_reaches_the_route(
         assert {m["code"] for m in sent} == {1008}
     finally:
         auth.close()
+
+
+# ── The chat's browser card: one source, and only words ──
+
+
+async def begin_run(console: Console, session_id: str, run_id: str = "run-2") -> int:
+    """A new turn of an open chat starts to run (the card follows the run the chat's events name)."""
+    turn = await console.store.begin_turn(session_id, "look it up", holder=HOLDER)
+    await console.store.append_events(
+        session_id, turn.turn, [core_event("run.started", run_id=run_id)], holder=HOLDER
+    )
+    return turn.turn
+
+
+async def end_run(console: Console, session_id: str, turn: int) -> None:
+    await console.store.finish_turn(
+        session_id,
+        turn,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(),
+        answer="done",
+    )
+
+
+async def cards(client: httpx.AsyncClient, served: Served, session_id: str) -> Any:
+    """The browser cards a chat's turns page carries."""
+    url = f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/turns?limit=10"
+    return (await client.get(url)).json().get("browser", [])
+
+
+async def until_card(
+    client: httpx.AsyncClient, served: Served, session_id: str, **says: str
+) -> dict[str, Any]:
+    """The card of the chat once it says *says* (the gateway writes it a moment after the browser changes)."""
+    async with asyncio.timeout(5):
+        while True:
+            rows = await cards(client, served, session_id)
+            if rows and all(rows[-1].get(key) == want for key, want in says.items()):
+                return cast(dict[str, Any], rows[-1])
+            await asyncio.sleep(0.02)
+
+
+SOURCES = {
+    "a generation that is not the browser's": {"gen": "0" * 8},
+    "a generation that is a tab id": {"gen": "t1"},
+    "another chat's generation": {"gen": "<other chat>"},
+    "the run before this one": {"run": "run-1"},
+    "a run that never was": {"run": "run-9"},
+    "a run that is not a run id": {"run": "../x"},
+    "a run another chat is on": {"run": "run-0"},
+}
+
+
+async def test_a_source_that_is_not_the_chats_now_is_refused_on_every_route_and_starts_nothing(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    other = await chat(console, builder, workspace)
+    turn = await begin_run(console, session_id)
+    await begin_run(console, other, "run-0")
+    agent = builder.agents[session_id]
+    right = {"gen": agent.provider.generation, "run": "run-2"}
+    base = f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/browser"
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        # The source the card names is served, and reading it opens no browser.
+        ok = await client.get(base, params=right)
+        assert ok.status_code == 200 and ok.json()["open"] is False
+        assert agent.driver.started == 0
+        await browse(builder, session_id, HOME)
+        await until_card(client, served, session_id, state="working")
+        started = agent.driver.started
+        named = "?" + str(httpx.QueryParams(right))
+        async with connect(
+            served.url(session_id, named), additional_headers=served.bearer
+        ) as ws:
+            assert json.loads(str((await messages(ws, 1))[0]))["tab"] == "t1"
+        await until(lambda: agent.provider.live.viewers == 0)  # type: ignore[union-attr]
+        started = agent.driver.started
+        for what, change in SOURCES.items():
+            query = {**right, **change}
+            if query["gen"] == "<other chat>":
+                query["gen"] = builder.agents[other].provider.generation
+            for refused in (
+                await client.get(base, params=query),
+                await client.post(base + "/done", params=query),
+                await client.post(base + "/window", params=query),
+            ):
+                assert refused.status_code == 409, what
+                assert refused.json()["error"]["code"] == "stale_source", what
+            with pytest.raises(InvalidStatus) as closed:
+                async with connect(
+                    served.url(session_id, "?" + str(httpx.QueryParams(query))),
+                    additional_headers=served.bearer,
+                ):
+                    pass
+            assert closed.value.response.status_code == 403, what
+        view = agent.provider.live
+        assert view is not None and view.viewers == 0
+        assert agent.driver.started == started
+        assert (
+            agent.driver.cast.started == agent.driver.cast.stopped == ["t1"]
+        ), "only the served viewer streamed"
+        # A card of a run that ended names a source no route serves any more.
+        await end_run(console, session_id, turn)
+        await until_card(client, served, session_id, state="done")
+        gone = await client.get(base, params=right)
+        assert gone.status_code == 409
+        # A client that names neither gen nor run (an older one) is served as before.
+        assert (await client.get(base)).status_code == 200
+
+
+PINS = {
+    "a card's source (generation and run)": ({"gen": True, "run": True}, True),
+    "a run": ({"run": True}, True),
+    "a generation only": ({"gen": True}, False),
+    "no source (an older client)": ({}, False),
+}
+
+
+@pytest.mark.parametrize("ending", ["the run ends", "the agent is rebuilt"])
+@pytest.mark.parametrize("pin", list(PINS))
+async def test_a_stream_pinned_to_a_run_ends_with_it_and_never_follows_the_next_run(
+    console: Console,
+    builder: Builder,
+    workspace: Path,
+    served: Served,
+    pin: str,
+    ending: str,
+) -> None:
+    named, ends = PINS[pin]
+    session_id = await chat(console, builder, workspace)
+    turn = await begin_run(console, session_id)
+    agent = await browse(builder, session_id, HOME)
+    query = {
+        key: {"gen": agent.provider.generation, "run": "run-2"}[key] for key in named
+    }
+    cast_ = agent.driver.cast
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        await until_card(client, served, session_id, state="working")
+        text = "?" + str(httpx.QueryParams(query)) if query else ""
+        async with connect(
+            served.url(session_id, text), additional_headers=served.bearer
+        ) as ws:
+            await messages(ws, 1)
+            cast_.push("t1", Frame(MARKER, width=1280.0, height=713.0))
+            await messages(ws, 2)
+            if ending == "the run ends":
+                await end_run(console, session_id, turn)
+                await until_card(client, served, session_id, state="done")
+                await begin_run(console, session_id, "run-3")
+            else:
+                console.browser_cards.attach(session_id, agent)
+            if ends:
+                # It ends calmly, as a view of a browser that is not the card's: the next thing it gets is its end.
+                told = json.loads(str((await messages(ws, 1))[0]))
+                assert (told["state"], told["reason"]) == ("closed", "browser")
+                with pytest.raises(ConnectionClosed) as closed:
+                    await asyncio.wait_for(ws.recv(), 5)
+                assert closed.value.rcvd is not None and closed.value.rcvd.code == 1000
+            else:
+                # What names no run keeps following the chat's browser, as documented, and gets the next run's pictures.
+                later = b"\xff\xd8the-next-runs-picture"
+                cast_.push("t1", Frame(later, width=1280.0, height=713.0))
+                assert (await messages(ws, 1))[0] == later
+    view = agent.provider.live
+    assert view is not None
+    await until(lambda: view.viewers == 0)
+
+
+async def test_a_card_says_only_the_words_the_program_wrote(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    turn = await begin_run(console, session_id)
+    agent = builder.agents[session_id]
+    private = HOME + "private/path?q=secret-words&token=abc#part"
+    agent.driver.pages[private] = page(private, "Hi.", title="Secret title")
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        assert (
+            await cards(client, served, session_id) == []
+        ), "no card before the run browses"
+        await browse(builder, session_id, private)
+        card = await until_card(client, served, session_id, state="working")
+        assert {key: card[key] for key in ("state", "action", "site")} == {
+            "state": "working",
+            "action": "open",
+            "site": "example.com",
+        }
+        assert card["card_key"] == f"{session_id}:run-2" and card["run_id"] == "run-2"
+        assert card["browser_session_id"] == agent.provider.generation
+        assert card["owner_chat_id"] == card["source_session_id"] == session_id
+        assert card["source_turn"] == turn
+        assert set(card) == {
+            "id", "ts", "card_key", "owner_chat_id", "source_session_id", "source_turn", "run_id",
+            "browser_session_id", "state", "action", "site",
+        }  # fmt: skip
+        stored = json.dumps(await cards(client, served, session_id))
+        for secret in (
+            "secret-words",
+            "private",
+            "token",
+            "part",
+            "Secret title",
+            "https://",
+        ):
+            assert secret not in stored
+        await end_run(console, session_id, turn)
+        done = await until_card(client, served, session_id, state="done")
+        assert done["action"] == "" and done["id"] > card["id"]
+        # The card of an ended run stays, whatever the gateway sees next.
+        assert [row["state"] for row in await cards(client, served, session_id)] == [
+            "done"
+        ]
+
+
+async def test_a_web_search_counts_as_browsing(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    await begin_run(console, session_id)
+    agent = builder.agents[session_id]
+    release = asyncio.Event()
+    real = agent.driver.open
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        await release.wait()
+        return await real(*args, **kwargs)
+
+    agent.driver.open = slow  # type: ignore[method-assign,assignment]
+    search = asyncio.create_task(agent.provider.read_for_search(HOME))
+    try:
+        async with httpx.AsyncClient(headers=served.bearer) as client:
+            card = await until_card(
+                client, served, session_id, state="working", action="search"
+            )
+        assert card["run_id"] == "run-2"
+    finally:
+        release.set()
+        await search
+
+
+async def test_a_card_left_active_by_a_run_that_is_gone_reads_as_stopped(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    await begin_run(console, session_id)
+    left = {
+        "card_key": f"{session_id}:run-gone",
+        "owner_chat_id": session_id,
+        "source_session_id": session_id,
+        "source_turn": 1,
+        "run_id": "run-gone",
+        "browser_session_id": "deadbeef",
+        "state": "working",
+        "action": "read",
+        "site": "example.com",
+    }
+    await console.store.append_session_event(session_id, "attention.browser", left)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        (row,) = await cards(client, served, session_id)
+        assert (row["state"], row["action"], row["run_id"]) == (
+            "stopped",
+            "",
+            "run-gone",
+        )
+        # It was written, not only shown: a replay says the same, and nothing is written twice.
+        again = await cards(client, served, session_id)
+        assert [(r["id"], r["state"]) for r in again] == [(row["id"], "stopped")]

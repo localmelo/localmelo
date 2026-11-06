@@ -312,6 +312,8 @@ class ConsoleSessions:
         # Waits, before a turn calls the model, for a switch of the served
         # model (the console's ServeSwitch.hold); True when it waited.
         self.hold: Callable[[str], Awaitable[bool]] | None = None
+        # Told each Agent a chat gets (a rebuilt one included): the console follows its browser there.
+        self.on_agent: Callable[[str, Agent], None] | None = None
 
     # ── Reading ──
 
@@ -784,6 +786,8 @@ class ConsoleSessions:
             agent = await builder(
                 _with_chat_model(settings, model), workspace, mcp_config, session_id
             )
+            if self.on_agent is not None:
+                self.on_agent(session_id, agent)
             return agent, model
         except asyncio.CancelledError:
             raise

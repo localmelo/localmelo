@@ -439,7 +439,7 @@ export function setupPanel({
     const item = node('li', 'activity-step');
     item.dataset.state = running ? 'running' : failed ? 'failed' : 'done';
     item.append(node('span', 'activity-mark', running ? '●' : failed ? '✗' : '✓'),
-      node('span', 'activity-step-label', step.label ?? stepWords(step.name, step.arguments, !running)),
+      node('span', 'activity-step-label', step.label ?? stepWords(step.name, step.arguments, !running, step.output)),
       node('span', 'activity-step-time', running ? t('panel.stepNow') : step.durationS == null ? '' : formatDuration(step.durationS)));
     item.firstChild.setAttribute('aria-hidden', 'true');
     return item;

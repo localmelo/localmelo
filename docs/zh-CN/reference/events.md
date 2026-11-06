@@ -477,6 +477,7 @@ asyncio.run(main())
 - `turn` 对于不属于任何轮次的事件为 `null`：`turn.undone`、重命名时的 `session.title`、`session.updated`，以及在轮次之外存储的调度器事件。
 - **调度器的类型。** 以 `task.`、`sched.` 或 `attention.` 开头的类型保留给调度器。只有网关的存储会保存它们，作为不属于任何轮次的事件（`SessionStore.append_session_event`），或属于某一轮（`SessionRunner.publish`）。它们的键尚未固定；其 `data` 遵循[载荷规则](#payload-rules)。存储会拒绝其他所有类型。
 - **`attention.card`** 是其中唯一键已固定的类型：主对话的卡片（`source_id`、`source_kind`、`title`、`state`、`line`、`at`，等待或已答复的卡片还有 `request_id`），在旁支对话的运行或任务有结果时存入主对话，不属于任何轮次；见[主对话中的卡片](api-v2.md#cards-in-the-main-chat)。
+- **`attention.browser`** 是对话为这次运行的浏览器写的卡片（`card_key`、`owner_chat_id`、`source_session_id`、`source_turn`、`run_id`、`browser_session_id`、`state`、`action`、`site`，已停止的另带 `by`），存在拥有它的对话里，不属于任何轮次；它只含程序写下的文字，从不含画面、输入的内容、完整的地址或查询。见[浏览器卡片](api-v2.md#browser-cards)。
 - **`attention.echo`** 是主对话关于它开始、改变或交给消息的任务的一行回执（`echo`、`line`，以及按种类需要的 `task_id`、`title`、`level`、`action`、`undo`、`of`、`typed`、`text`、`turn_id`、`how`），不属于任何轮次；见[主对话中的回执行](api-v2.md#echoes-in-the-main-chat)。
 - **存储的 `run.finished` 保存脱敏后的答案。** 在存储之前，它的 `RunResult` 中的 `result` 会经过与 `assistant.message` 文本相同的脱敏，该轮存储的答案和结果也一样。运行返回的 `RunResult` 保留原文。
 
