@@ -104,8 +104,8 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 No model server is running yet.
 ```
 
-- **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`。
-- **修复：** 在受支持的 Apple silicon Mac 上，选择 `Show how to set one up`，会得到最多六步的编号步骤。自动设置即将推出；其他系统保留手动服务器指南，管道和 `TERM=dumb` 输出指南链接，而不是无法选择的列表项。自行启动服务器后选择 `Check again`；使用非默认端口时选择 `Enter an address`；选择 `Use a hosted service` 则改为设置一个云端服务（见[云端模型](../guides/hosted-models.md)）。`Quit`（或 Esc）不保存任何内容。设置检查出错或耗时过长时，手动指南仍然可用。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
+- **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`，而且 melo 无法提议帮你设置：这不是 Apple silicon Mac，或者 melo_serve 没有找到能在这台 Mac 上运行的东西（这一行后面的一行会说明原因），或者检查失败了。
+- **修复：** 用显示的命令自行启动服务器，然后选择 `Check again`；使用非默认端口时选择 `Enter an address`；选择 `Use a hosted service` 则改为设置一个云端服务（见[云端模型](../guides/hosted-models.md)）。`Quit`（或 Esc）不保存任何内容。在受支持的 Apple silicon Mac 上，melo 通常会提议[帮你设置服务器](../guides/model-servers.md#first-run-setup)，而不是打印这一行；管道和 `TERM=dumb` 会被告知请在终端中运行 melo。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
 
 ### A model server cannot be used at the first run
 
@@ -341,7 +341,7 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 ### The background service keeps restarting
 
 - **原因：** 网关立即退出，launchd 每隔几秒就重新启动它。常见原因是服务缺少云端 API 密钥（它拿不到你 shell 中的变量），或者没有配置文件。
-- **修复：** 阅读 `~/.localmelo/logs/gateway.stderr.log`。让服务使用本地后端，或运行 `melo --daemon uninstall`，然后在终端中运行 `melo --serve` 以查看错误。
+- **修复：** 阅读 `~/.localmelo/logs/gateway.stderr.log`。让服务使用本地后端，或运行 `melo serve uninstall`，然后在终端中运行 `melo serve` 以查看错误。干净停止的网关（`melo serve stop`）不会被重启。
 
 <a id="mcp-servers"></a>
 

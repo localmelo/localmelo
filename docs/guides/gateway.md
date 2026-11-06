@@ -125,13 +125,41 @@ melo serve uninstall
 - `install` writes `~/Library/LaunchAgents/ai.localmelo.gateway.plist` and
   loads it. launchd then runs `<python> -m localmelo --serve --port 8401`
   with the Python of your environment, starts it at login, and restarts it
-  whenever it exits (at most once every 3 seconds).
+  after a crash (at most once every 3 seconds), not after a clean stop, so
+  `melo serve stop` keeps it stopped until the next login or `melo serve`.
+- `install` says what it did. A second run with the same settings prints
+  `already installed, skipped` and leaves the running gateway alone; a
+  changed port prints `updated ai.localmelo.gateway; the gateway restarted`;
+  a new service prints `installed ai.localmelo.gateway (starts at login)`.
+  If another gateway is running (the macOS app's, or `melo serve` in a
+  terminal), `install` writes the plist and does not load it, so two gateways
+  never run: it prints `installed ai.localmelo.gateway; it takes over at next
+  login`.
+- With the service installed, `melo serve` (with no `--port`, `--host`,
+  `--force` or `-X` setting) does not start a second gateway. It starts
+  melo_serve if the config uses it and the gateway service if it is not
+  running, opens the web console, prints one line for each and returns:
+
+  ```text
+  ✓ melo_serve   running
+  ✓ gateway   started
+  ```
+
+  The second line is `✓ gateway   running` when the gateway was already up.
+  If the gateway does not answer within 20 seconds, `melo serve` prints
+  `✗ gateway   did not start in 20 s; log: ~/.localmelo/logs/gateway.stderr.log`
+  and exits 1. Where no browser opens (over SSH, or a pipe), it prints the
+  address and `Sign in: run melo console -p PORT` instead. With any of those
+  flags, `melo serve` runs a gateway in the foreground, as without the service.
 - `install --port N` uses another port. The address is `[gateway] host` from
   the config file; `--host` is ignored.
 - Logs go to `~/.localmelo/logs/gateway.stdout.log` and
   `~/.localmelo/logs/gateway.stderr.log`.
-- `status` prints whether the service is `installed` and `running`, and its
-  `pid`.
+- `status` prints whether the service is `installed` (its plist is there) and
+  `running`, and its `pid`.
+- `uninstall` lists the login services it removes (the gateway's and, when
+  `melo-serve` is installed, melo_serve's), asks once, then removes both. It
+  asks only at a terminal; from a pipe it exits 2 and removes nothing.
 - When melo_serve exists on this computer, `status` also prints a `melo_serve:` block: `running`, its `address`, the `chat` and `embedding` models (`model · backend · status`, or `none`), and whether its `login item` is installed. When it is not running, the block says how to start or install it. The block appears when melo_serve runs, the config uses melo_serve, or `melo-serve` is installed.
 - Save a configuration before `install`, with `melo` or the setup wizard in
   a terminal. The service cannot answer questions: without a config file it
@@ -146,8 +174,9 @@ melo serve uninstall
 
 - In its terminal, press Ctrl+C.
 - One running in the background (the one `melo` starts for the main chat, say): `melo serve stop`. It prints `Stopped the gateway on port N.`, or `No gateway is running.`
-- For the background service, run `melo serve uninstall`. A plain `kill`
-  or `melo serve stop` does not help: launchd starts the gateway again.
+- For the background service, `melo serve stop` stops it until the next login
+  or the next `melo serve`. A plain `kill` is a crash to launchd, which
+  starts the gateway again. To remove the service, run `melo serve uninstall`.
 
 - Stopping closes every session; a session still running a task has its agent closed, and the task ends as `crashed`.
 - SIGTERM first waits up to 3 seconds for runs in flight, then cancels the ones left: the client's request fails and the run ends `crashed`.

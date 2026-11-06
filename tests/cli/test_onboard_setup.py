@@ -8,6 +8,7 @@ temporary directory.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import tomllib
 from collections.abc import Iterator
@@ -26,7 +27,7 @@ from localmelo.support.backends.discovery import DiscoveryError, FoundServer
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.onboard import FirstSetup, run_backend_setup, run_first_setup
 from localmelo.support.onboard_probe import ProbeError
-from localmelo.support.server_setup import plan as setup_plan
+from localmelo.support.server_setup import run
 
 URL = "http://127.0.0.1:8500/v1"
 
@@ -35,17 +36,6 @@ _REAL_IS_OLLAMA = discovery.is_ollama
 _REAL_LOADED_MODELS = discovery.loaded_models
 _REAL_LIST_MODELS = discovery.list_models
 _REAL_DETECT = discovery.detect_local_server
-
-
-@pytest.fixture(autouse=True)
-def _setup_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """No setup preview reads the person's model cache or real RAM probe."""
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hf"))
-    monkeypatch.setattr(setup_plan.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(setup_plan.platform, "machine", lambda: "arm64")
-    monkeypatch.setattr(setup_plan.platform, "mac_ver", lambda: ("27.2", (), ""))
-    monkeypatch.setattr(setup_plan, "ram_bytes", lambda: 16 * 1024**3)
 
 
 @pytest.fixture(autouse=True)
@@ -795,35 +785,6 @@ def test_without_a_found_server_the_typed_url_is_listed(
 _WAIT_PROMPT = "Press Enter to check again, type an address, or q to quit: "
 
 
-@pytest.mark.parametrize("system", ["Darwin", "Linux", "Windows"])
-def test_with_no_server_the_screen_shows_an_honest_pinned_setup_preview(
-    config_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    system: str,
-) -> None:
-    monkeypatch.setattr(setup_plan.platform, "system", lambda: system)
-    monkeypatch.setattr(onboard, "_columns", lambda: 80)
-    monkeypatch.setattr(
-        discovery.sys,
-        "platform",
-        {"Darwin": "darwin", "Linux": "linux", "Windows": "win32"}[system],
-    )
-    answers = _Answers("q")
-    result, detect, _ = _first_setup(answers, found=None)
-    assert result is None and answers.prompts == [_WAIT_PROMPT]
-    detect.assert_awaited_once()
-    assert not config_path.exists()
-    out = capsys.readouterr().out
-    summary = out[out.index("No model server is running yet.") :]
-    assert len(summary.splitlines()) <= 6 and all(
-        len(line) < 80 for line in out.splitlines()
-    )
-    assert "SHA256" not in out and "bytes" not in out and "hf download" not in out
-    assert discovery.GUIDE_URL in out
-    assert ("Download: up to 3.2 GB" if system == "Darwin" else "Manual only") in out
-
-
 def test_intro_is_visible_before_any_server_discovery(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -842,60 +803,6 @@ def test_intro_is_visible_before_any_server_discovery(
     assert not config_path.exists()
 
 
-@pytest.mark.parametrize("failure", ["home", "cache", "detect"])
-def test_a_failed_setup_check_still_says_how_to_start_a_server(
-    config_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    failure: str,
-) -> None:
-    def failed(*args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError("setup metadata unavailable")
-
-    if failure == "home":
-        monkeypatch.setattr(setup_plan.Path, "home", failed)
-    elif failure == "cache":
-        monkeypatch.setenv("HF_HUB_CACHE", "~melo-test-user-does-not-exist/cache")
-    else:
-        monkeypatch.setattr(setup_plan, failure, failed)
-    result, detect, listed = _first_setup(_Answers("q"))
-    assert result is None and not config_path.exists()
-    detect.assert_awaited_once()
-    listed.assert_not_called()
-    out = capsys.readouterr().out
-    how = discovery.how_to_start()
-    assert all(command in out for command in how.commands)
-    assert how.note in out and discovery.GUIDE_URL in out
-
-
-@pytest.mark.parametrize("warning", [False, True])
-@pytest.mark.parametrize("dumb", [False, True], ids=["pipe", "dumb-terminal"])
-def test_plain_terminal_offers_a_usable_guide_not_a_nonexistent_menu_action(
-    config_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
-    dumb: bool,
-    warning: bool,
-) -> None:
-    if warning:
-        monkeypatch.setattr(setup_plan, "ram_bytes", lambda: None)
-    monkeypatch.setenv("TERM", "dumb" if dumb else "xterm-256color")
-    monkeypatch.setattr(onboard.sys.stdin, "isatty", lambda: dumb)
-    monkeypatch.setattr(onboard.sys.stdout, "isatty", lambda: dumb)
-    assert not onboard._arrow_keys()
-    answers = _Answers("q")
-    result, _, _ = _first_setup(answers)
-    assert result is None and answers.prompts == [_WAIT_PROMPT]
-    out = capsys.readouterr().out
-    assert f"Guide: {discovery.GUIDE_URL}" in out
-    if warning:
-        assert "the manual guide" in out
-    summary = out[out.index("No model server is running yet.") :]
-    assert len(summary.splitlines()) <= 6 and all(
-        len(line) < 80 or discovery.GUIDE_URL in line for line in summary.splitlines()
-    )
-
-
 def test_enter_looks_again_until_a_server_answers(
     config_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -908,7 +815,7 @@ def test_enter_looks_again_until_a_server_answers(
     out = capsys.readouterr().out
     missing = "✗ No model server found yet (looked at ports 8000, 11434).\n"
     assert out.count(missing) == 1 and out.index(missing) < out.index("Found a model")
-    assert out.count("Download: up to 3.2 GB") == 1  # summary printed once
+    assert out.count("No model server is running yet.") == 1  # said once
 
 
 def test_q_at_the_no_server_screen_quits_and_saves_nothing(config_path: Path) -> None:
@@ -944,63 +851,11 @@ def _forbid_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(httpx.AsyncClient, "request", forbidden)
 
 
-def test_default_menu_shows_the_summary_once_and_numbered_steps_on_request(
-    config_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    script = iter([1, 1, 4])  # Show how to set one up, again, then Quit.
-    asked: list[tuple[str, list[str], int, int | None]] = []
-
-    def choose(title: str, rows: Any, default: int, escape: int | None = None) -> int:
-        asked.append((title, list(rows), default, escape))
-        return next(script)
-
-    monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", choose)
-    _forbid_side_effects(monkeypatch)
-    result, detect, listed = _first_setup(_Answers(), found=None)
-    assert result is None and not config_path.exists()
-    detect.assert_awaited_once()  # Showing the steps never looks for a server.
-    listed.assert_not_called()
-    rows = [
-        "Check again",
-        "Show how to set one up",
-        "Enter an address",
-        "Use a hosted service",
-        "Quit",
-    ]
-    assert [a[1] for a in asked] == [rows] * 3
-    assert all(a[2] == 0 and a[3] == 4 for a in asked)  # Check again is the default.
-    out = capsys.readouterr().out
-    assert out.count("No model server is running yet.") == 1  # the summary, once
-    assert out.count("Download: up to 3.2 GB") == 1
-    assert out.count(setup_plan.AUTOMATIC_SOON) == 1
-    url = f"http://127.0.0.1:{setup_plan.PORT}/v1"
-    assert out.count(f"6. Back in melo, choose Enter an address and type {url}") == 2
-    assert out.count("1. Download oMLX") == 2  # the steps, each time they are asked for
-
-
-def test_the_steps_keep_each_shell_command_whole_in_a_narrow_terminal(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(onboard, "_columns", lambda: 40)
-    detected = setup_plan.detect()
-    onboard._show_steps(detected)
-    lines = capsys.readouterr().out.splitlines()
-    commands = [
-        line
-        for line in setup_plan.numbered_steps(detected)
-        if line.startswith(setup_plan.COMMAND_INDENT)
-    ]
-    assert len(commands) == 3 and all(command in lines for command in commands)
-
-
 def test_no_server_picker_uses_existing_address_question(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", lambda *args: 2)
+    monkeypatch.setattr(onboard, "_choose_from", lambda *args: 1)  # Enter an address
     answers = _Answers(URL)
     result, detect, listed = _first_setup(answers, lists={URL: ["only"]})
     assert result == FirstSetup(url=URL, model="only", saved=True)
@@ -1059,10 +914,10 @@ def test_piped_addresses_are_not_reinterpreted_as_new_setup_commands(
 def test_successful_discovery_never_runs_setup_planner(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def forbidden() -> Any:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("a working backend must not run the setup planner")
 
-    monkeypatch.setattr(setup_plan, "detect", forbidden)
+    monkeypatch.setattr(run, "plan", forbidden)
     result, detect, listed = _first_setup(
         _Answers(""), found=FoundServer(url=URL, models=["only"])
     )
@@ -1839,19 +1694,15 @@ def test_a_guided_reconfigure_shows_the_full_menu_after_no(
     assert "  Save and continue? [Y]: " in answers.prompts
 
 
-@pytest.mark.parametrize("warning", [False, True])
 def test_a_guided_reconfigure_with_no_server_uses_the_full_backend_menu(
     config_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    warning: bool,
 ) -> None:
-    if warning:
-        monkeypatch.setattr(setup_plan, "ram_bytes", lambda: None)
     detect = mock.Mock(
-        side_effect=AssertionError("saved connections never enter setup preview")
+        side_effect=AssertionError("saved connections never enter setup")
     )
-    monkeypatch.setattr(setup_plan, "detect", detect)
+    monkeypatch.setattr(run, "plan", detect)
     config.save(_configured())
     before = config_path.read_bytes()
     answers = _Answers(*[""] * 10)
@@ -1862,7 +1713,7 @@ def test_a_guided_reconfigure_with_no_server_uses_the_full_backend_menu(
     detect.assert_not_called()
     out = capsys.readouterr().out
     assert "Welcome to localmelo" in out
-    assert "Download:" not in out
+    assert "Checking what this Mac can run" not in out
 
 
 @pytest.mark.parametrize(
@@ -2342,7 +2193,7 @@ def test_choosing_a_hosted_service_in_the_no_server_list_leads_to_the_hosted_set
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
-    monkeypatch.setattr(onboard, "_choose_from", lambda *args: 3)  # the hosted row
+    monkeypatch.setattr(onboard, "_choose_from", lambda *args: 2)  # the hosted row
     first = mock.Mock(return_value=FirstSetup(url="u", model="m", saved=True))
     monkeypatch.setattr(onboard, "_first_hosted_service", first)
     result, _, _ = _first_setup(_Answers(), found=None)
@@ -2364,3 +2215,293 @@ def test_a_cancelled_hosted_setup_saves_nothing(
     ):
         assert onboard._first_hosted_service() is None
     assert not config_path.exists()
+
+
+# ── The first run on a Mac with no server: one list, one yes ──
+
+PLAN_FILE = Path(__file__).parents[1] / "fixtures" / "melo_serve_plan.v1.json"
+CHAT, SMALL = "qwen3-8b-omlx", "qwen3-4b-omlx"
+EMBEDDING = "model:qwen3-embedding-0.6b-omlx"
+SET_UP = "Set up Qwen3 8B (6.6 GB)"
+MENU = [
+    SET_UP,
+    "Choose what to install",
+    "Choose another model",
+    "Use a server I already run",
+    "Use a hosted service",
+    "Quit",
+]
+
+
+def _plan(pick: str = CHAT, **changes: Any) -> run.Plan:
+    """The fixture's plan of a 32 GB Mac, planned for *pick* (the other is an alternative)."""
+    data = json.loads(PLAN_FILE.read_text())
+    if pick == SMALL:
+        data["alternatives"] = [{"id": CHAT, "name": "Qwen3 8B", "backend": "omlx"}]
+        data["pick"] = {"id": SMALL, "name": "Qwen3 4B Instruct", "backend": "omlx"}
+        data["items"][1].update(id=f"model:{SMALL}", name="Qwen3 4B Instruct")
+    return run.Plan(**{**run._parse(data).__dict__, **changes})
+
+
+class _Menu:
+    """``_choose_from`` that picks the row each name starts, and records what was asked."""
+
+    def __init__(self, *picks: str) -> None:
+        self.picks = list(picks)
+        self.asked: list[tuple[str, list[str], int, int | None]] = []
+
+    def __call__(
+        self, title: str, rows: Any, default: int, escape: int | None = None
+    ) -> int:
+        self.asked.append((title, list(rows), default, escape))
+        want = self.picks.pop(0)
+        return next(i for i, row in enumerate(rows) if row.startswith(want))
+
+
+class _Job:
+    """One ``run.SetupJob`` that ends as scripted."""
+
+    def __init__(
+        self,
+        plan: run.Plan,
+        pick: str,
+        skip: set[str],
+        kwargs: dict[str, Any],
+        outcome: str,
+    ) -> None:
+        self.plan, self.pick, self.skip, self.kwargs = plan, pick, skip, kwargs
+        self.outcome = outcome
+        self.items: dict[str, run.ItemEvent] = {}
+
+    def run(self) -> str:
+        emit = self.kwargs["on_event"]
+        if self.outcome == "failed":
+            line = "failed: network is down; what was downloaded is kept"
+            emit(run.ItemEvent(f"model:{self.pick}", "failed", line))
+            emit(run.Finished("failed", line))
+            return "failed"
+        if self.outcome == "cancelled":
+            emit(run.Finished("cancelled"))
+            return "cancelled"
+        emit(run.ItemEvent("backend:omlx", "done", "installed 0.7.3 into ~/A.app"))
+        saved = "done" if self.outcome == "done" else "skipped"
+        self.items[run.SAVE] = run.ItemEvent(run.SAVE, saved)
+        if EMBEDDING not in self.skip:
+            self.items[run.LOAD_EMBEDDING] = run.ItemEvent("l", "done")
+        emit(run.Finished("done"))
+        return "done"
+
+
+class _Jobs:
+    """``run.SetupJob``, each job ending as scripted: ``done``, ``chat-left-out``, ``failed`` or ``cancelled``."""
+
+    def __init__(self, *outcomes: str) -> None:
+        self.outcomes = list(outcomes)
+        self.made: list[_Job] = []
+
+    def __call__(
+        self, plan: run.Plan, pick: str, skip: Any = (), **kwargs: Any
+    ) -> _Job:
+        job = _Job(plan, pick, set(skip), kwargs, self.outcomes.pop(0))
+        self.made.append(job)
+        return job
+
+
+class _Screen:
+    """The first run on a Mac with no server, with the menu, the plans and the jobs faked."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *picks: str,
+        outcomes: tuple[str, ...] = (),
+    ) -> None:
+        self.menu, self.jobs = _Menu(*picks), _Jobs(*outcomes)
+        self.asked_for: list[str] = []
+        monkeypatch.setattr(onboard.sys, "platform", "darwin")
+        monkeypatch.setattr(onboard, "_arrow_keys", lambda: True)
+        monkeypatch.setattr(onboard, "_choose_from", self.menu)
+        monkeypatch.setattr(run, "plan", self.plan)
+        monkeypatch.setattr(run, "SetupJob", self.jobs)
+        self.plans: dict[str, run.Plan] = {}
+
+    def plan(self, timeout: float = 0.0, pick: str = "") -> run.Plan:
+        self.asked_for.append(pick)
+        return self.plans.get(pick) or _plan(pick or CHAT)
+
+    def first_run(self) -> FirstSetup | None:
+        return _first_setup(_Answers(), found=None)[0]
+
+
+def test_the_list_and_the_menu_start_on_setting_up(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    screen = _Screen(monkeypatch, "Quit")
+    monkeypatch.setattr(onboard, "_columns", lambda: 100)
+    assert screen.first_run() is None
+    assert screen.menu.asked == [("What would you like to do?", MENU, 0, 5)]
+    out = capsys.readouterr().out
+    assert "Checking what this Mac can run…\n" in out
+    assert (
+        "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes." in out
+    )
+    assert "Download about 6.6 GB. 83 GB free." in out
+    assert "/Users" not in out and not config_path.exists()
+    assert not screen.jobs.made
+
+
+def test_a_full_disk_is_said_and_setting_up_is_not_offered(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    screen = _Screen(monkeypatch, "Quit")
+    screen.plans[""] = _plan(enough_disk=False)
+    screen.first_run()
+    assert screen.menu.asked[0][1] == MENU[1:]
+    assert (
+        "not enough free space for this. Another model may fit."
+        in capsys.readouterr().out
+    )
+
+
+def test_a_finished_setup_returns_the_saved_chat_and_asks_nothing_more(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+) -> None:
+    from localmelo.tests.fixtures.melo_serve import URL as SERVE_URL
+    from localmelo.tests.fixtures.melo_serve import role, write_state
+
+    write_state(melo_serve_home, chat=role("Qwen3 8B", "omlx", "oMLX"))
+    screen = _Screen(monkeypatch, SET_UP, outcomes=("done",))
+    assert screen.first_run() == FirstSetup(SERVE_URL, "Qwen3 8B", saved=True)
+    (job,) = screen.jobs.made
+    assert (job.pick, job.skip, job.kwargs["gateway_service"]) == (CHAT, set(), True)
+    assert len(screen.menu.asked) == 1
+    out = capsys.readouterr().out
+    assert "✓ oMLX  installed 0.7.3 into ~/A.app\n" in out
+    assert out.endswith("Ready. Qwen3 8B answers through melo_serve.\n")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "said"),
+    [
+        ("failed", "✗ Qwen3 8B  failed: network is down; what was downloaded is kept"),
+        ("cancelled", "Stopped. What was downloaded is kept; choose Set up to go on."),
+        ("chat-left-out", f"melo-serve get {CHAT} finishes it."),
+    ],
+)
+def test_a_setup_that_did_not_finish_goes_back_to_the_menu_with_a_fresh_plan(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    outcome: str,
+    said: str,
+) -> None:
+    screen = _Screen(monkeypatch, SET_UP, "Quit", outcomes=(outcome,))
+    assert screen.first_run() is None
+    assert screen.asked_for == ["", CHAT]  # the second look is of the same pick
+    assert [len(asked[1]) for asked in screen.menu.asked] == [6, 6]
+    assert said in capsys.readouterr().out
+    assert not config_path.exists()
+
+
+def test_a_skip_reaches_the_job_and_the_list_says_what_it_leads_to(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    melo_serve_home: Path,
+    melo_serve_socket: Path,
+) -> None:
+    from localmelo.tests.fixtures.melo_serve import role, write_state
+
+    write_state(melo_serve_home, chat=role("Qwen3 8B", "omlx", "oMLX"))
+    # backend, chat model, embedding model, the two login items
+    screen = _Screen(
+        monkeypatch, "Choose what", "Install", "Install", "Skip", "Install", "Install",
+        "Set up Qwen3 8B (5.8 GB)", outcomes=("done",),
+    )  # fmt: skip
+    result = screen.first_run()
+    assert result is not None and result.saved
+    assert screen.jobs.made[0].skip == {EMBEDDING}
+    asked = [title for title, *_ in screen.menu.asked]
+    assert asked[1:6] == [
+        "Install oMLX (881 MB)?",
+        "Install Qwen3 8B (4.9 GB)?",
+        "Install Qwen3 Embedding 0.6B (788 MB)?",
+        "Start melo_serve at login?",
+        "Start the gateway at login?",
+    ]
+    out = capsys.readouterr().out
+    assert out.count("Without Qwen3 Embedding 0.6B, memory goes by words only.") == 1
+    assert "melo remembers across chats by words only" in out
+
+
+def test_another_model_is_planned_with_its_id_and_the_skips_start_again(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    screen = _Screen(
+        monkeypatch, "Choose what", "Skip", "Skip", "Skip", "Skip", "Skip",
+        "Choose another", "Qwen3 4B", "Quit",
+    )  # fmt: skip
+    screen.plans[SMALL] = _plan(SMALL)
+    assert screen.first_run() is None
+    assert screen.asked_for == ["", SMALL]
+    assert screen.menu.asked[-2][1] == ["Qwen3 8B on oMLX", "Qwen3 4B Instruct on oMLX"]
+    out = capsys.readouterr().out
+    assert out.count("Chosen: Qwen3 4B Instruct on oMLX.") == 1
+    assert out.rindex("Chosen:") > out.rindex(
+        "Without "
+    )  # the list after it has no skips
+    assert screen.menu.asked[-1][1][0].startswith("Set up Qwen3 4B Instruct (")
+
+
+def test_a_pipe_is_shown_the_list_and_never_starts_a_job(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    screen = _Screen(monkeypatch)
+    monkeypatch.setattr(onboard, "_arrow_keys", lambda: False)
+    monkeypatch.setattr(onboard, "_choose_from", None)
+    _forbid_side_effects(monkeypatch)
+    answers = _Answers("q")
+    result, _, _ = _first_setup(answers)
+    assert result is None and answers.prompts == [_WAIT_PROMPT]
+    out = capsys.readouterr().out
+    assert "Recommended: Qwen3 8B on oMLX." in out
+    assert "Run melo in a terminal to set this up." in out
+    assert not screen.jobs.made
+
+
+@pytest.mark.parametrize("raising", [False, True], ids=["unavailable", "raises"])
+def test_without_a_plan_the_screen_shows_the_manual_way(
+    config_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    raising: bool,
+) -> None:
+    screen = _Screen(monkeypatch, "Quit")
+    if raising:
+        monkeypatch.setattr(run, "plan", mock.Mock(side_effect=RuntimeError("boom")))
+    else:
+        screen.plans[""] = run.Plan(
+            False, "This Mac is an Intel Mac.", hint="Try a hosted service."
+        )
+    assert screen.first_run() is None
+    assert screen.menu.asked[0][1] == [
+        "Check again", "Enter an address", "Use a hosted service", "Quit",
+    ]  # fmt: skip
+    out = capsys.readouterr().out
+    how = discovery.how_to_start()
+    assert all(command in out for command in how.commands)
+    assert how.note in out and discovery.GUIDE_URL in out
+    assert ("This Mac is an Intel Mac." in out) is not raising
+    assert "Try a hosted service." in out or raising

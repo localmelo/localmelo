@@ -18,6 +18,7 @@ import pytest
 import localmelo.__main__ as cli
 from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, LocalBackendConfig
+from localmelo.support.gateway import daemon
 
 URL = "http://127.0.0.1:8500/v1"
 
@@ -359,7 +360,8 @@ def test_a_daemon_with_a_port_is_not_refused() -> None:
     with (
         mock.patch("sys.argv", ["melo", "--daemon", "install", "--port", "8401"]),
         mock.patch(
-            "localmelo.support.gateway.daemon.install", return_value="p"
+            "localmelo.support.gateway.daemon.install",
+            return_value=daemon.Installed("installed", "p", "line"),
         ) as inst,
     ):
         cli.main()

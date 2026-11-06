@@ -8,14 +8,16 @@
 - 在其他系统上，可以用 Ollama 作为替代。
 - 云端服务只需要一个密钥：在设置里粘贴一次，它会保存在你 Mac 的钥匙串里。见[云端模型](hosted-models.md)。
 
-<a id="setup-preview"></a>
+<a id="first-run-setup"></a>
 
-## 设置预览
+## 首次运行的设置
 
-- 尚未保存后端且未找到服务器时，终端首次运行和 `melo setup` 会显示简短的只读预览。受支持的 Apple silicon Mac 推荐 oMLX 与 Qwen3 4B Instruct（4-bit），显示下载量上限，仅在需要时添加一条警告。其他系统显示手动指南。若已经保存后端但没有找到服务器，`melo setup` 会改为打开完整后端菜单。
-- 摘要只显示一次。随后的列表提供 `Check again`、`Show how to set one up`、`Enter an address`、`Use a hosted service` 和 `Quit`。`Show how to set one up` 会显示最多六步的简明编号步骤：下载 oMLX、可选地核对校验和、打开并移到“应用程序”、下载模型、启动服务器，最后在 melo 中选择 `Enter an address`。自动设置即将推出。
-- 内存低于 16 GB 只提示可能较慢，不限制为仅手动设置。固定模型约 2.28 GB；oMLX 0.7.3 的 DMG 在 macOS 15 上约 0.84 GB，在 macOS 26/27 上约 0.88 GB，下载量包含两者。不会安装、下载、启动或写设置。
-- 这些步骤由同一个固定版本配方生成：模型保留在标准 Hugging Face 缓存中，服务器使用独立的设置目录，并关闭 oMLX 的额外缓存扫描，让这个实例只提供所选快照。自行安装官方应用，准备好后再复制显示的命令。步骤中的端口（49152）只是示例，并未预留；如果被占用请换一个，然后在 melo 中输入该地址。手动命令独立运行，服务器须自行按 Ctrl+C 停止。缓存位置依次遵循 `HF_HUB_CACHE`、旧变量 `HUGGINGFACE_HUB_CACHE`、`HF_HOME/hub`、XDG/标准默认值；服务器状态位于 `~/.cache/localmelo/server-setup/` 下。管道和 `TERM=dumb` 显示手动指南链接而不是列表项；设置检查失败时，手动路径仍然可用。
+- 已经在运行的服务器总是优先提供。尚未保存后端且没有找到服务器时，搭载 Apple silicon 的 Mac（macOS 15 或更新版本）上的首次运行会提议帮你设置一个。这是可选的：`Use a server I already run` 和 `Use a hosted service` 在同一个菜单里，选择 `Set up <model> (<size>)` 之前不会安装任何东西。若已经保存后端，`melo setup` 会改为打开完整后端菜单。
+- melo 会向 [melo_serve](https://github.com/localmelo/melo_serve) 询问这台 Mac 能运行什么（`melo-serve plan`，只读），然后打印一个列表：芯片、内存、macOS 和可用磁盘空间，推荐的模型，以及每一项的大小和去向。已经有的项显示 `✓ already here`，不计入下载量；下载了一半的模型会显示已有多少。若尚未安装 melo_serve，uv 会把固定版本的副本取到自己的缓存里，只为了这次询问。
+- 各项是：melo_serve 本身（用 `uv tool install` 安装固定版本）、对话后端（oMLX：固定的下载文件，会核对大小和校验和，再复制到 `~/Applications/oMLX.app`；Splash 通过 Homebrew 安装）、对话模型和嵌入模型（Hugging Face 缓存，遵循 `HF_HOME`，绝不放进项目文件夹），以及 melo_serve 的登录项（macOS 会显示“登录项”通知）。缓存所在的卷上必须放得下下载量，另加 5 GiB。
+- `Choose what to install` 会逐项询问尚未安装的项。melo_serve 本身不提供跳过：不想用它就选 `Use a server I already run`。没有对话模型或它的后端，melo_serve 暂时无法对话，之后用 `melo-serve get <pick>` 补齐。没有嵌入模型或它的后端，记忆只按字词查找。没有登录项，`melo serve` 会在需要时启动 melo_serve。`Choose another model` 会从同一目录规划另一个选择，并重新显示列表。
+- 同意之后，每一步打印一行，下载带进度条。按 Ctrl-C 会停下并保留已下载的内容；再选 `Set up` 即可继续。某一步失败时会说明原因并回到列表。对话模型能回答后，melo 会把 melo_serve 保存为对话服务器并进入对话。
+- 管道和 `TERM=dumb` 只会看到列表和 `Run melo in a terminal to set this up.`：同意必须来自真人，所以管道从不开始设置。其他系统、Intel Mac、内存太小的 Mac 以及检查失败时，会用一行说明原因，并给出手动方式：下面的命令，加上 `Check again`、`Enter an address`、`Use a hosted service` 和 `Quit`。
 - 直接指向快照时，服务器提供的模型 ID 可能是修订哈希，而不是仓库名称，请使用服务器实际列出的 ID。重新检查地址只列出模型，不会加载模型。网页/应用设置卡片以及已有配置或显式指定地址的运行保持原有行为。
 
 <a id="serve-a-model-with-omlx"></a>

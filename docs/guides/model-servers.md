@@ -6,36 +6,43 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
 - Ollama is the alternative on other systems.
 - A hosted service needs only a key: paste it once in Settings and it is kept in your Mac's keychain. See [Hosted models](hosted-models.md).
 
-## Setup preview
+## First-run setup
 
-- With no backend saved and no server found, terminal first run and `melo setup`
-  show a short, read-only preview. Supported Apple-silicon Macs get oMLX with
-  Qwen3 4B Instruct (4-bit) and the download upper bound, with one warning when
-  needed. Other systems show manual guidance.
-  With a backend already saved and no server found, `melo setup` opens the full
-  backend menu instead.
-- The summary is printed once. The list then offers `Check again`,
-  `Show how to set one up`, `Enter an address`, `Use a hosted service` and `Quit`. `Show how to set one
-  up` prints at most six plain numbered steps: download oMLX, optionally check
-  its checksum, open it and move it to Applications, download the model, start
-  the server, then choose `Enter an address` in melo. Automatic setup is coming
-  soon.
-- Less than 16 GB of RAM is a speed warning, not a manual-only restriction. The
-  pinned model is about 2.28 GB; oMLX 0.7.3's DMG is about 0.84 GB on macOS 15
-  or 0.88 GB on macOS 26/27. The download figure includes both. Nothing
-  installs, downloads, starts or saves settings.
-- The steps come from the same pinned recipe. They keep the model in the
-  standard Hugging Face cache, use a separate server settings directory, and
-  disable oMLX's additional cache scan so this instance serves only the chosen
-  snapshot. Install the official app yourself and copy the shown commands only
-  when ready. The port in the steps (49152) is an example, not a reserved port;
-  pick another if it is busy and enter its address in melo. These commands
-  run independently; stop the manual server yourself with Ctrl+C. Cache
-  precedence is `HF_HUB_CACHE`, then legacy `HUGGINGFACE_HUB_CACHE`, then
-  `HF_HOME/hub`, then the XDG/standard default. The server state is under
-  `~/.cache/localmelo/server-setup/`. Pipes and `TERM=dumb` show a manual-guide
-  link instead of picker choices; if the setup checks fail, the manual path
-  still works.
+- A server you already run is always offered first. With none found and no
+  backend saved, the first run on a Mac with Apple silicon (macOS 15 or later)
+  offers to set one up. It stays optional: `Use a server I already run` and
+  `Use a hosted service` are rows of the same menu, and nothing is installed
+  until you choose `Set up <model> (<size>)`. With a backend already saved,
+  `melo setup` opens the full backend menu instead.
+- melo asks [melo_serve](https://github.com/localmelo/melo_serve) what this Mac
+  can run (`melo-serve plan`, which only reads) and prints one list: the chip,
+  memory, macOS and free disk space, the recommended model, and each item with
+  its size and where it goes. An item that is already here says
+  `✓ already here` and is not counted; a half-downloaded model says how much of
+  it is here. If melo_serve is not installed yet, uv fetches a pinned copy into
+  its cache just to ask.
+- The items are melo_serve itself (`uv tool install` of a pinned version), the
+  chat backend (oMLX: a pinned download whose size and checksum are checked,
+  copied to `~/Applications/oMLX.app`; Splash comes through Homebrew), the chat
+  model and the embedding model (the Hugging Face cache, `HF_HOME` honoured,
+  never a project folder) and melo_serve's login item (macOS shows a "Login
+  Items" notice). The download plus 5 GiB must fit on the cache's volume.
+- `Choose what to install` asks about each item that is not here yet. melo_serve
+  itself is not offered a skip: take `Use a server I already run` instead.
+  Without the chat model or its backend melo_serve cannot chat yet, and
+  `melo-serve get <pick>` finishes it later. Without the embedding model or its
+  backend, memory goes by words only. Without the login item, `melo serve`
+  starts melo_serve when needed. `Choose another model` plans another pick from
+  the same catalog and starts the list again.
+- After the OK each step prints one line, with a bar for a download. Ctrl-C
+  stops it and keeps what was downloaded; choose `Set up` again to go on. A step
+  that fails says why and returns to the list. When the chat model answers, melo
+  saves melo_serve as the chat server and opens the chat.
+- Pipes and `TERM=dumb` get the list and `Run melo in a terminal to set this
+  up.`: consent comes from a person, so a pipe never starts it. Other systems,
+  Intel Macs, a Mac with too little memory and a failed check print the reason
+  in one line and the manual way: the commands below, `Check again`,
+  `Enter an address`, `Use a hosted service` and `Quit`.
 - A direct snapshot's served model ID can be its revision hash, not the
   repository name. Use the ID the server lists. Rechecking an address only
   lists models; it does not load one. The web/app setup card and already

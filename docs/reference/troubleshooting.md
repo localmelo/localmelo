@@ -127,17 +127,18 @@ No model server is running yet.
 ```
 
 - **Cause:** none of the four usual ports (8000, 8400, 11434, 30000, or the URLs
-  in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`.
-- **Fix:** on a supported Apple-silicon Mac, choose `Show how to set one up` for
-  up to six numbered steps. Automatic setup is coming soon. Other systems keep
-  manual-server guidance; pipes and `TERM=dumb` print a guide link rather than
-  advertising a picker choice. Start the server yourself, then `Check again`
+  in `LOCALMELO_DETECT_URLS`) answered `GET /v1/models`, and melo could not offer
+  to set one up: this is not an Apple-silicon Mac, melo_serve found nothing that
+  runs on it (the line after this one says why), or the check failed.
+- **Fix:** start a server yourself with the commands shown, then `Check again`,
   or `Enter an address` for a nondefault port. `Use a hosted service` sets up one
   instead (see [Hosted models](../guides/hosted-models.md)). `Quit` (or Esc) saves nothing.
-  If setup checks fail or take too long, manual guidance remains available.
-  Already saved a backend? With none found, `melo setup` opens the full backend
-  menu instead. The web/app setup card keeps its manual commands and checks
-  again automatically.
+  On a supported Apple-silicon Mac melo normally offers to
+  [set up a server for you](../guides/model-servers.md#first-run-setup) instead
+  of printing this. Pipes and `TERM=dumb` are told to run melo in a terminal for
+  that. Already saved a backend? With none found, `melo setup` opens the full
+  backend menu instead. The web/app setup card keeps its manual commands and
+  checks again automatically.
 
 ### A model server cannot be used at the first run
 
@@ -473,8 +474,9 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   seconds. Often the service lacks a cloud API key (it does not get your
   shell's variables), or there is no config file.
 - **Fix:** read `~/.localmelo/logs/gateway.stderr.log`. Use a local backend
-  with the service, or run `melo --daemon uninstall` and start
-  `melo --serve` in a terminal to see the error.
+  with the service, or run `melo serve uninstall` and start
+  `melo serve` in a terminal to see the error. A gateway that stops cleanly
+  (`melo serve stop`) is not restarted.
 
 ## MCP servers
 

@@ -56,10 +56,10 @@ INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_ser
 LOAD_BOUND_S: Final = 45 * 60.0
 # The kind of the MeloServeError for that.
 NO_ANSWER: Final = "no_answer"
-# The melo_serve that first-run setup installs: one commit (a tag can move), v0.3.0,
+# The melo_serve that first-run setup installs: one commit (a tag can move), v0.4.0,
 # and the oldest version it accepts.
-MELO_SERVE_REF: Final = "4936aa0668949be6d21e0744dad6cf151fefe6af"
-MIN_VERSION: Final = "0.3.0"
+MELO_SERVE_REF: Final = "a1535a95d5eb1c3c3709be73f465cbaa95258db1"
+MIN_VERSION: Final = "0.4.0"
 ARCHIVE_URL: Final = (
     f"https://github.com/localmelo/melo_serve/archive/{MELO_SERVE_REF}.zip"
 )

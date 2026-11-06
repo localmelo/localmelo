@@ -13,15 +13,33 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at
   most, cancellable), holds new ones and runs them on the new model, and a task mid-step waits out the load (Stop ends
-  it at once) and goes on with the model served. A load is bounded at 45 minutes, for a melo_serve that never answers. `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
+  it at once) and goes on with the model served. A load is bounded at 45 minutes, for a melo_serve that never answers.
+  `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
   `switch`, and the macOS app needs macOS 15 (#532).
-- The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`; no screen yet). `plan()`
-  asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.3.0, otherwise
+- `melo serve` just works after the first run. With the gateway's login service installed, a bare `melo serve` (no
+  `--port`, `--host`, `--force`, `--reconfigure` or `-X` setting) no longer starts a second gateway that fights for the
+  port: it starts melo_serve when the config uses it, starts the gateway service when no gateway is live (up to 20 s),
+  opens the web console where the terminal allows (else it prints the address and `melo console -p PORT`) and returns,
+  with one line per service (`✓ melo_serve   running`, `✓ gateway   started` or `✓ gateway   running`). A gateway that
+  does not come up gives `✗ gateway   did not start in 20 s; log: ~/.localmelo/logs/gateway.stderr.log` and exit 1. The
+  service now stays stopped after `melo serve stop` (`KeepAlive` is `{SuccessfulExit: false}`, and the gateway exits 0
+  on SIGTERM; before, uvicorn sent the signal on again and the process ended as killed). `melo serve install` is
+  idempotent and says what it did: `installed ai.localmelo.gateway (starts at login)`, `already installed, skipped`
+  (the same plist, already loaded: no restart), or `updated ai.localmelo.gateway; the gateway restarted`; next to a
+  gateway that is not the service's own (the app's, or `melo serve` in a terminal) it writes the plist and loads
+  nothing (`installed ai.localmelo.gateway; it takes over at next login`), so two gateways never run. Every
+  `launchctl` call has a time limit, and `LOCALMELO_LAUNCH_AGENTS` moves the plist folder (tests). `melo serve
+  uninstall` lists both login services (the gateway's and melo_serve's), asks once at a terminal, removes the
+  gateway's and runs `melo-serve uninstall`; from a pipe it exits 2 and removes nothing. In the terminal chat, Esc while
+  the session moves to a new melo_serve model now stops the turn before it is sent (the message comes back) instead of
+  being ignored (#540).
+- The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`). `plan()`
+  asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.4.0, otherwise
   `uv tool run --python <this interpreter> --from <archive of a pinned melo_serve commit>`, which fetches melo_serve's
   planner into uv's cache and installs nothing. Its answer is read with a 256 KB cap and every field type-checked, and a
   missing uv, no network or an answer that is not a plan gives `available=False` and one line why. `SetupJob` then does
   what the plan says after the user's OK: it installs melo_serve with `uv tool install --managed-python` (or updates one
-  below 0.3.0 with `--force`), runs `melo-serve get --json`, which installs the backends and downloads the models, and
+  below 0.4.0 with `--force`), runs `melo-serve get --json`, which installs the backends and downloads the models, and
   passes on its progress, registers the login services
   (melo_serve's, and the gateway's only when asked), loads the models with `melo-serve use` and saves melo_serve as the
   chat server. Each step ends in one plain line (`installed X into Y`, `already installed (V), skipped`, `updated
@@ -34,6 +52,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   lookup as `melo-serve`. On macOS that lookup now accepts a file or folder that the `admin` group can write (Homebrew's
   own `/opt/homebrew/bin` is like that), for command paths only: the state file and the control socket still must be
   writable by no one else (#530).
+- The first run sets up a model server for you, on a Mac, after one OK. With no backend saved and no server found
+  (a server that already runs is still offered first), a Mac with Apple silicon prints `Checking what this Mac can
+  run…` and one list: the chip, memory, macOS and free disk, the recommended model, and each thing it would install
+  (melo_serve, the chat backend, the chat model, the embedding model and melo_serve's login item) with its size and where
+  it goes; what is already there says `✓ already here` and is not counted. The menu starts on `Set up Qwen3 8B (5.8
+  GB)`; nothing is installed until you choose it. `Choose what to install` asks install or skip for each item and the
+  list then says what a skip leads to (no chat yet, memory by words only, or `melo serve` starts melo_serve when
+  needed), `Choose another model` plans another pick (`melo-serve plan --pick`), and `Use a server I already run`,
+  `Use a hosted service` and `Quit` leave as before. The job shows one line per step with a bar for a download;
+  Ctrl-C stops it and keeps what was downloaded, and a failed or stopped try goes back to the menu. When the chat
+  model answers, melo saves melo_serve and opens the chat. A pipe is shown the list and told to run melo in a terminal,
+  and never starts it; other systems and a failed check print the reason and how to start a server by hand. The
+  read-only preview, `Show how to set one up` and its six numbered steps are gone. melo_serve is now pinned at v0.4.0
+  and 0.4.0 is the oldest accepted (#537).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,
