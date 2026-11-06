@@ -49,9 +49,10 @@ func face(_ portrait: PillPortrait) -> CGImage? {
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
 }
 func model(_ state: PillState, _ text: String, _ icon: PillIcon, more: Int = 0, _ portrait: PillPortrait,
-           _ click: PillClick = .window) -> PillModel {
-    PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click)
+           _ click: PillClick = .window, giveBack: String? = nil) -> PillModel {
+    PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click, giveBack: giveBack)
 }
+let control = model(.control, "You're in control", .you, .waitAlert, giveBack: "c1")
 let long = "Writing a very long file name that does not fit in the pill and keeps going and going.md"
 let rows: [(String, PillModel, Bool)] = [
     ("Working: the newest running item", model(.working, "Reading example.com", .web, .workRead), false),
@@ -60,6 +61,7 @@ let rows: [(String, PillModel, Bool)] = [
     ("Done: 6 s, then the pet comes back", model(.done, "Done: Slides for the 3 pm meeting", .tool, .done), false),
     ("Failed: 10 s", model(.failed, "Stopped: Fix CI", .tool, .error), false),
     ("The model server is down", model(.serverDown, "Model server not reachable", .tool, .error), false),
+    ("You hold a page: Done gives it back", control, false),
     ("Hover: the x hides it until the next task", model(.working, "Cancelling the subscription", .web, .workRead), true),
     ("A long line is cut at 320 pt", model(.working, long, .write, .workLaptop), false),
 ]
@@ -138,8 +140,15 @@ for dark in [false, true] {
     let data = canvas.representation(using: .png, properties: [:])!
     try! data.write(to: out.appendingPathComponent(dark ? "pill-dark.png" : "pill-light.png"))
 }
+// The "Done" button is the text's ink (dark on the light capsule, light on the dark one), with the word in it.
+for dark in [false, true] {
+    let held = view(control, dark: dark, hover: false)
+    let spot = held.give.frame
+    let fill = snapshot(held).colorAt(x: Int((spot.minX + 6) * 2), y: Int((held.frame.height - spot.midY) * 2))!.usingColorSpace(.sRGB)!
+    if dark { precondition(fill.brightnessComponent > 0.7) } else { precondition(fill.brightnessComponent < 0.3) }
+}
 // One pill alone, 2x, for each state (the test reads their size).
-for (index, row) in rows.prefix(6).enumerated() {
+for (index, row) in rows.prefix(7).enumerated() {
     let shown = view(row.1, dark: false, hover: false)
     let rep = snapshot(shown)
     try! rep.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent("pill-\(index).png"))
@@ -165,10 +174,10 @@ def test_the_pill_is_drawn_in_light_and_dark_for_every_state() -> None:
         timeout=60,
     )
     light, dark = shots / "pill-light.png", shots / "pill-dark.png"
-    # The sheets hold the eight rows at 2x (the Swift checked they are not flat and that the two appearances differ).
-    assert png_size(light) == png_size(dark) == (1600, 2 * (40 + 8 * 70))
+    # The sheets hold the nine rows at 2x (the Swift checked they are not flat and that the two appearances differ).
+    assert png_size(light) == png_size(dark) == (1600, 2 * (40 + 9 * 70))
     # One pill alone per state, at 2x: the 48 pt capsule and its 5 pt margin high, wider for a longer line.
-    sizes = [png_size(shots / f"pill-{index}.png") for index in range(6)]
+    sizes = [png_size(shots / f"pill-{index}.png") for index in range(7)]
     assert {height for _, height in sizes} == {116}
     assert (
         sizes[3][0] > sizes[2][0] > sizes[0][0]
@@ -176,6 +185,9 @@ def test_the_pill_is_drawn_in_light_and_dark_for_every_state() -> None:
     assert (
         sizes[1][0] > sizes[0][0] - 60
     )  # the "+1" chip adds room to a line that is shorter
+    assert (
+        sizes[6][0] > sizes[0][0]
+    )  # the held page's pill has room for its "Done" button
     print("shots:", light, dark)
 
 
@@ -306,6 +318,72 @@ print("ok")
     )
 
 
+@darwin
+def test_the_done_button_is_its_own_press_and_action_while_a_page_is_held() -> None:
+    macos_swift.run_swift(
+        FILES,
+        r"""
+import AppKit
+_ = NSApplication.shared
+NSApp.setActivationPolicy(.prohibited)
+func crossing(_ type: NSEvent.EventType) -> NSEvent {
+    NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                           eventNumber: 0, trackingNumber: 0, userData: nil)!
+}
+let held = PillModel(state: .control, text: "You're in control", icon: .you, more: 0, portrait: .waitAlert,
+                     click: .route("#/s/c1"), giveBack: "c1")
+let view = PillView()
+view.show(held, picture: nil, fade: false)
+view.frame = NSRect(origin: .zero, size: pillPanelSize(width: view.capsuleWidth))
+view.layoutSubtreeIfNeeded()
+
+// Two lines and the button: the line over the smaller note, the paused bar, "Done" at the right end of the capsule,
+// centred, with the text not under it and the capsule as wide as the policy says.
+let give = view.give
+precondition(view.line.stringValue == "You're in control" && view.note.stringValue == "melo is paused" && !view.note.isHidden)
+precondition(view.mark.stringValue == "\u{2016}" && !give.isHidden && give.title == "Done")
+precondition(view.line.frame.minY > view.note.frame.minY && view.note.font!.pointSize < view.line.font!.pointSize)
+precondition(give.frame.width == GiveMark.width("Done") && give.frame.height == pillGiveHeight)
+precondition(give.frame.maxX == view.capsule.maxX - pillGiveEdge && give.frame.midY == view.capsule.midY)
+precondition(view.line.frame.maxX + pillGiveGap <= give.frame.minX && view.note.frame.maxX + pillGiveGap <= give.frame.minX)
+precondition(view.line.frame.width >= ceil(view.line.cell!.cellSize.width))  // the words are not cut
+precondition(view.capsuleWidth == pillWidth(text: ceil(view.line.cell!.cellSize.width), more: 0, give: give.frame.width))
+
+// VoiceOver: still one element with the one sentence; its one action is giving the page back, and "×" is not offered.
+precondition(view.isAccessibilityElement() && view.subviews.allSatisfy { !$0.isAccessibilityElement() })
+precondition(view.accessibilityLabel() == "You're in control. melo is paused. Opens the chat.")
+precondition(view.accessibilityCustomActions()?.map { $0.name } == ["Give the page back to melo"])
+view.mouseEntered(with: crossing(.mouseEntered))
+precondition(view.close.isHidden)
+
+// A press on the button gives the page back and is not a click on the pill; the rest of the capsule still opens the chat.
+var clicks = 0, gives = 0, hides = 0
+view.onClick = { clicks += 1 }
+view.onGiveBack = { gives += 1 }
+view.onDismiss = { hides += 1 }
+precondition(view.hitTest(NSPoint(x: give.frame.midX, y: give.frame.midY)) === give)
+precondition(view.hitTest(NSPoint(x: view.capsule.minX + 20, y: view.bounds.midY)) === view)
+give.mouseDown(with: NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                        windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+precondition(gives == 1 && clicks == 0)
+_ = view.accessibilityCustomActions()?.first?.handler?()
+precondition(gives == 2 && hides == 0 && clicks == 0)
+precondition(view.accessibilityPerformPress() && clicks == 1)
+
+// Given back: the button and the note go, the action is hiding again, and the pill is as wide as before for its line.
+let reading = PillModel(state: .working, text: "Reading example.com", icon: .web, more: 0, portrait: .workRead, click: .window)
+view.show(reading, picture: nil, fade: false)
+view.layoutSubtreeIfNeeded()
+precondition(give.isHidden && view.note.isHidden && view.accessibilityCustomActions()?.map { $0.name } == ["Hide until the next task"])
+precondition(view.capsuleWidth == pillWidth(text: ceil(view.line.cell!.cellSize.width), more: 0))
+view.mouseEntered(with: crossing(.mouseEntered))
+precondition(!view.close.isHidden)
+print("ok")
+""",
+        timeout=30,
+    )
+
+
 def test_the_app_wires_the_pill_beside_the_pet_and_never_launches_it_here() -> None:
     main = (APP / "main.swift").read_text()
     # Each reply, each window change, the stop and the restart reach the pill after the pet.
@@ -316,6 +394,8 @@ def test_the_app_wires_the_pill_beside_the_pet_and_never_launches_it_here() -> N
         "{ self.pill?.windowShown($0) }"
     )
     assert "pill.openRoute" in main and "open(route: pendingRoute)" in main
+    # Done on the pill posts to the chat's own route and reads the health again.
+    assert "pill.giveBack" in main and "/browser/done" in main
     assert "menuBar.offerDesktop(pet.desktop.makeItem())" in main
     # The pill is a panel that is never key and does not hide with the app, as the pet's is.
     panel = (APP / "PillPanel.swift").read_text()

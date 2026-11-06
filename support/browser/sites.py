@@ -371,25 +371,30 @@ async def require_dialog(origin: str, message: str) -> None:
 
 
 async def require_takeover(
-    origin: str, need: str, tab: str
+    origin: str, need: str, tab: str, *, form: bool = False
 ) -> Literal["yes", "no", "words"]:
-    """Ask the person to take over the page on *origin* in the Browser panel: "yes", "no", or "words" when their message ended the card.
+    """Ask the person to take over the page on *origin*: "yes", "no", or "words" when their message ended the card.
 
     *need* says what melo cannot do there itself (a key of :data:`TAKEOVER_NEEDS`)
-    and *tab* is the chat's tab. The question is ``takeover:<origin>``: its yes is
-    "Take over", which hands them the tab; nothing of it is kept for the chat.
-    Without a policy nobody is asked ("no"). A message ended the card is not a
-    "no" to be remembered: melo may ask again.
+    and *tab* is the chat's tab; *form* says the page has a form the person began,
+    which a real window would clear (the card offers the app first). The question
+    is ``takeover:<origin>``: its yes is "Take over", which hands them the tab;
+    nothing of it is kept for the chat. Without a policy nobody is asked ("no").
+    A message ended the card is not a "no" to be remembered: melo may ask again.
     """
     ask = TOOL_ASK.get()
     if ask is None:
         return "no"
     host = host_of(origin) if origin else "a page"
     what = TAKEOVER_NEEDS.get(need, TAKEOVER_NEEDS["sign-in"])
+    asked: dict[str, object] = {"site": host, "access": "takeover", "need": need}
+    asked["tab"] = tab
+    if form:
+        asked["form"] = True
     decision = await ask(
         TAKEOVER_PREFIX + (origin or "page"),
-        _browser({"site": host, "access": "takeover", "need": need, "tab": tab}),
-        f"take over {host} in the Browser panel: melo needs you for {what}",
+        _browser(asked),
+        f"take over {host}: melo needs you for {what}",
     )
     if decision.allow:
         return "yes"

@@ -448,6 +448,7 @@ _TEST_COMMAND: Final = re.compile(
 # A state's words (a catalog key) and icon.
 _STATES: Final[Mapping[str, tuple[str, str]]] = {
     "waiting": ("panel.state.waiting", "wait"),
+    "control": ("browser.inControl", "you"),
     "held": ("panel.state.held", "held"),
     "queued": ("panel.state.queued", "held"),
     "paused": ("panel.state.paused", "paused"),
@@ -525,8 +526,8 @@ def activity_text(
     root: str | None = None,
     reason: str = "",
 ) -> ActivityText:
-    """The words for a *state* (``waiting``, ``held``, ``queued``, ``paused``,
-    ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
+    """The words for a *state* (``waiting``, ``control``, ``held``, ``queued``,
+    ``paused``, ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
 
     A ``held`` state with the scheduler's *reason* code says why: ``Waiting for
     a higher-priority task``, ``Waiting for a free model slot``.
@@ -618,19 +619,34 @@ def request_words(
     return said_in("en", request_said(tool, arguments, root=root))
 
 
+def _on_hold(newest_first: Iterable[Mapping[str, Any]]) -> bool:
+    """Whether the newest of these events about a hold left the run held."""
+    for event in newest_first:
+        kind = event.get("type")
+        if kind == "run.paused":
+            return True
+        if kind in ("run.resumed", "turn.finished", "run.finished"):
+            return False
+    return False
+
+
 def event_activity(
     newest_first: Iterable[Mapping[str, Any]], root: str | None = None
 ) -> ActivityText | None:
     """What a session's turn is doing, from its stored events, newest first.
 
-    An approval that waits wins, then a call still running, then a
-    reflection; any other event of a running turn reads ``Thinking``. A turn
-    whose end is among them is doing nothing: ``None``. A step, a turn or a
-    reflection that started last is the model answering (``answering``).
+    An approval that waits wins, then a hold the person has (``run.paused``
+    not yet resumed: "You're in control", whatever began after it and waits at
+    the run's gate), then a call still running, then a reflection; any other
+    event of a running turn reads ``Thinking``. A turn whose end is among them
+    is doing nothing: ``None``. A step, a turn or a reflection that started
+    last is the model answering (``answering``).
     """
     finished: set[str] = set()
     resolved: set[str] = set()
-    for event in newest_first:
+    events = list(newest_first)
+    held = _on_hold(events)
+    for event in events:
         kind = event.get("type")
         data = event.get("data")
         data = data if isinstance(data, Mapping) else {}
@@ -643,6 +659,9 @@ def event_activity(
         elif kind == "approval.requested":
             if str(data.get("request_id", "")) not in resolved:
                 return _state("waiting")
+        elif held:
+            if kind == "run.paused":
+                return _state("control")
         elif kind == "tool.started":
             if str(data.get("call_id", "")) not in finished:
                 return activity_text(

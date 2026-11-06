@@ -96,7 +96,7 @@ When the model is not the saved default, a row after the folder gives the server
 
 | Key | What it does |
 |---|---|
-| Enter | Send the message. During a turn, queue it: it is sent when the turn completes. |
+| Enter | Send the message. During a turn, queue it: it is sent when the turn completes. While you have a page of melo's ([taking over](browsing.md#taking-over-melos-browser)), Enter on an empty line is Done, and in the main chat a line you type goes to melo as a note. |
 | Alt+Enter, Ctrl+J, or `\` then Enter | A new line in the message. |
 | Esc | Close the completion menu; otherwise stop the turn. |
 | Ctrl+C | Close the menu, else clear the draft, else clear a queued message, else stop the turn; a second Ctrl+C within 2 seconds quits. |

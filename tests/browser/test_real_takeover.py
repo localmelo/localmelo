@@ -7,7 +7,8 @@ melo's, which a chat's browser tools drive on a form served by the test on
 console's Browser panel alone (``#/live/<chat>``) under the real loopback guard.
 The person's Chrome is driven with its own trusted input at the panel, as a
 person's mouse and keyboard would: Take over, a click into the form, typing, an
-input method composing Chinese, a paste, and Give back to melo. melo then reads
+input method composing Chinese, a paste, and Done. The take stays in the panel
+(no window opens: the window has its own tests over a stand-in). melo then reads
 the page and finds what was typed in the name field, and nothing of the password.
 
 A pinch zoom on melo's page checks that a point on the picture lands on the
@@ -31,6 +32,7 @@ from typing import Any
 import pytest
 
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
+from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.gateway.console import Console
 from localmelo.tests.browser import test_real_live as smoke
 from localmelo.tests.browser.test_provider import run
@@ -57,6 +59,13 @@ console = smoke.console
 served = smoke.served
 workspace = smoke.workspace
 person = smoke.person
+
+
+@pytest.fixture(autouse=True)
+def in_the_panel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No window opens: the page is the person's in the Browser panel."""
+    monkeypatch.setattr(BrowserToolProvider, "_windows", lambda self: False)
+
 
 FORM = """<!doctype html><meta charset="utf-8"><title>Test form</title>
 <body style="margin:0;font:16px -apple-system,sans-serif;background:#fff">
@@ -255,7 +264,7 @@ async def test_the_person_takes_over_types_and_gives_back_and_melo_reads_it(
     assert agent.provider.owners.owner("t1") == "you"
     found = await panel(person)
     assert (
-        found["status"] == "You are in control" and found["give"] and not found["take"]
+        found["status"] == "You're in control" and found["give"] and not found["take"]
     )
 
     # A click on the name field in the picture puts melo's caret there; the keys follow.
@@ -294,7 +303,7 @@ async def test_the_person_takes_over_types_and_gives_back_and_melo_reads_it(
     shot = await person.screenshot(None)
     (tmp_path / "panel-in-control-light.jpg").write_bytes(base64.b64decode(shot.data))
 
-    # Give back to melo, with the person's click.
+    # Done, with the person's click.
     give = as_dict(
         await person._eval(
             "JSON.stringify((() => { const r = document.getElementById('bp-give').getBoundingClientRect();"
