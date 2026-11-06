@@ -6,21 +6,26 @@ means the same in either. A file or a download is a PDF by its first bytes
 
 The bytes go to a child process (:mod:`._pdf_child`) on its standard input,
 and nothing else goes with them: the library that parses them is not
-thread-safe, and a broken file must not take the gateway down. The child is a
-fresh interpreter started by path (``python -I``), so melo's own modules are
-not loaded into it and pypdfium2 is imported only there. It runs in a group of
-its own, and ends by itself: after :data:`TIMEOUT_S` plus a few seconds of CPU
-or of wall clock, whichever comes first, so it is bounded even if this process
-is gone. While it runs this process watches it: the wall clock
-(:data:`TIMEOUT_S`), a cancellation, an answer over its limit, or a resident
-memory over :data:`MAX_RSS_BYTES` (looked at every :data:`WATCH_S`, so a burst
-between two looks can pass the limit before it is seen) kill the group whole.
-A file over :data:`MAX_BYTES` is never sent. Of the pages, :data:`MAX_PAGES` are
-read, and of the text, :data:`MAX_CHARS` characters. Nothing leaves the child
-but one JSON object, and the child is not trusted: its answer is read up to a
-limit that depends on what was asked, and checked (types, counts, sizes, the
-picture's own header) before any of it is used. What goes wrong reaches the
-model as one plain line (:class:`PdfError`), never a traceback.
+thread-safe, and a crash of it must end the child, not the gateway. The child
+is a fresh interpreter started by path (``python -I``), so melo's own modules
+are not loaded into it and pypdfium2 is imported only there. It runs in a group
+of its own, and ends by itself: after :data:`TIMEOUT_S` plus a few seconds of
+CPU or of wall clock, whichever comes first, so it is bounded even if this
+process is gone. While it runs this process watches it, and kills the group
+whole on the wall clock (:data:`TIMEOUT_S`), a cancellation, an answer over its
+limit, or a resident memory over :data:`MAX_RSS_BYTES`. That last limit is a
+sample, not a sandbox: it looks every :data:`WATCH_S`, so a burst between two
+looks can pass it unseen; it stops ordinary runaway memory only. When the
+memory cannot be read :data:`BLIND_LOOKS` looks in a row while the child still
+runs, the child is stopped too. One read runs at a time in a process, so the
+limit holds for all of them together. A file over :data:`MAX_BYTES` is never
+sent. Of the pages, :data:`MAX_PAGES` are read, and of the text,
+:data:`MAX_CHARS` characters (a page's text is whole in the child before that
+limit cuts it). Nothing leaves the child but one JSON object, and the child is
+not trusted: its answer is read up to a limit that depends on what was asked,
+and checked (types, counts, sizes, every byte of a picture's PNG structure)
+before any of it is used. What goes wrong reaches the model as one plain line
+(:class:`PdfError`), never a traceback.
 
 The text of a page under :data:`NO_TEXT_CHARS` characters is a page with no
 text (a scan, a drawing): its text stays empty, a line says so, and
@@ -43,7 +48,9 @@ import re
 import struct
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+import threading
+import zlib
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, TypeGuard
@@ -69,6 +76,10 @@ _GRACE_S = 5
 # are not touched do not count, and a burst between two looks is not seen.
 MAX_RSS_BYTES = 1024 * _MB
 WATCH_S = 0.25
+# A look at the memory that does not answer in this long is a look that failed;
+# that many failed looks in a row stop a child that still runs.
+PS_TIMEOUT_S = 1.0
+BLIND_LOOKS = 3
 
 # A page with fewer characters than this, spaces left out, has no text.
 NO_TEXT_CHARS = 20
@@ -247,8 +258,8 @@ async def _exchange(proc: asyncio.subprocess.Process, data: bytes, limit: int) -
     return answer
 
 
-async def _resident(pid: int) -> int:
-    """Resident memory of process *pid*, in bytes; 0 when it cannot be told (it is gone, or no ``ps``)."""
+async def _resident(pid: int) -> int | None:
+    """Resident memory of process *pid*, in bytes; None when the look failed (it is gone, no ``ps``, no answer in time)."""
     try:
         ps = await asyncio.create_subprocess_exec(
             "ps",
@@ -260,20 +271,67 @@ async def _resident(pid: int) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        out, _ = await ps.communicate()
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(ps.communicate(), PS_TIMEOUT_S)
         return int(out.split()[0]) * 1024  # ps gives kilobytes
-    except (OSError, ValueError, IndexError):
-        return 0
+    except (TimeoutError, ValueError, IndexError):
+        return None
+    finally:
+        # A look that timed out or was cancelled leaves no process behind.
+        if ps.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                ps.kill()
+            await ps.wait()
 
 
-async def _watch(proc: asyncio.subprocess.Process, over: asyncio.Event) -> None:
-    """Kill the group *proc* leads when its resident memory passes :data:`MAX_RSS_BYTES`, after setting *over*."""
+async def _watch(proc: asyncio.subprocess.Process, stopped: list[str]) -> None:
+    """Stop the child *proc* leads, saying why in *stopped* first, when it is over its memory or cannot be watched.
+
+    Over :data:`MAX_RSS_BYTES`, or :data:`BLIND_LOOKS` failed looks in a row
+    while it still runs. A child that has ended is a normal end, whatever the
+    last look found.
+    """
+    blind = 0
     while proc.returncode is None:
         await asyncio.sleep(WATCH_S)
-        if await _resident(proc.pid) > MAX_RSS_BYTES:
-            over.set()
-            await kill_process_group(proc)
+        used = await _resident(proc.pid)
+        if proc.returncode is not None:
             return
+        blind = blind + 1 if used is None else 0
+        if used is not None and used > MAX_RSS_BYTES:
+            reason = (
+                f"Reading this PDF needed more than {MAX_RSS_BYTES // _MB} MB of "
+                "memory; melo stopped."
+            )
+        elif blind >= BLIND_LOOKS:
+            reason = (
+                "melo stopped reading this PDF: it could not check how much memory "
+                "the PDF reader used."
+            )
+        else:
+            continue
+        stopped.append(reason)
+        await kill_process_group(proc)
+        return
+
+
+# One PDF read at a time in this process (a lock of threads, polled, so it holds
+# across event loops and a cancelled wait leaves nothing held).
+_ONE_READ = threading.Lock()
+_POLL_S = 0.02
+
+
+@contextlib.asynccontextmanager
+async def _one_at_a_time() -> AsyncIterator[None]:
+    """Hold the place of the one PDF read that runs: the memory limit is for all of them."""
+    while not _ONE_READ.acquire(blocking=False):
+        await asyncio.sleep(_POLL_S)
+    try:
+        yield
+    finally:
+        _ONE_READ.release()
 
 
 async def _ask(
@@ -282,6 +340,13 @@ async def _ask(
     """The child's answer for *mode*, at most *answer_limit* bytes; :class:`PdfError` for every way it can fail."""
     if not sys.executable:
         raise PdfError(_PROBLEMS["unavailable"])
+    async with _one_at_a_time():
+        return await _run_child(mode, limits, data, answer_limit)
+
+
+async def _run_child(
+    mode: str, limits: dict[str, Any], data: bytes, answer_limit: int
+) -> dict[str, Any]:
     ends = int(TIMEOUT_S) + _GRACE_S
     limits = {**limits, "cpu": ends, "wall": ends}
     try:
@@ -299,8 +364,8 @@ async def _ask(
         )
     except OSError:
         raise PdfError(_PROBLEMS["unavailable"]) from None
-    over = asyncio.Event()
-    watcher = asyncio.create_task(_watch(proc, over))
+    stopped: list[str] = []
+    watcher = asyncio.create_task(_watch(proc, stopped))
     try:
         async with asyncio.timeout(TIMEOUT_S):
             answer = await _exchange(proc, data, answer_limit)
@@ -318,11 +383,8 @@ async def _ask(
     finally:
         watcher.cancel()
         await asyncio.gather(watcher, return_exceptions=True)
-    if over.is_set():
-        raise PdfError(
-            f"Reading this PDF needed more than {MAX_RSS_BYTES // _MB} MB of memory; "
-            "melo stopped."
-        )
+    if stopped:
+        raise PdfError(stopped[0])
     try:
         found = json.loads(answer) if proc.returncode == 0 else None
     except (
@@ -359,18 +421,51 @@ async def read_text(data: bytes) -> PdfText:
     )
 
 
+def _is_png(raw: bytes) -> bool:
+    """Whether *raw* is a whole PNG within the size of a screenshot, by its structure alone.
+
+    The signature, then chunks whose lengths stay in *raw* and whose CRCs hold,
+    ``IHDR`` first (with a width and height within the limits), some ``IDAT``,
+    ``IEND`` last and nothing after it. Nothing is decoded here: the pixels are
+    never opened by this process.
+    """
+    if raw[:8] != _PNG:
+        return False
+    view = memoryview(raw)
+    pos = 8
+    kinds: list[bytes] = []
+    while pos < len(raw):
+        if (kinds and kinds[-1] == b"IEND") or pos + 12 > len(raw):
+            return False
+        (size,) = struct.unpack(">I", raw[pos : pos + 4])
+        end = pos + 8 + size
+        if end + 4 > len(raw):
+            return False
+        (crc,) = struct.unpack(">I", raw[end : end + 4])
+        if zlib.crc32(view[pos + 4 : end]) != crc:
+            return False
+        kind = bytes(view[pos + 4 : pos + 8])
+        if not kinds:
+            if kind != b"IHDR" or size != 13:
+                return False
+            width, height = struct.unpack(">II", raw[pos + 8 : pos + 16])
+            if not (0 < width <= PICTURE_WIDTH and 0 < height <= PICTURE_HEIGHT):
+                return False
+        elif kind == b"IEND" and size != 0:
+            return False
+        kinds.append(kind)
+        pos = end + 4
+    return kinds[-1:] == [b"IEND"] and b"IDAT" in kinds
+
+
 def _is_picture(png: object) -> TypeGuard[str]:
-    """Whether *png* is base64 of a PNG within :data:`PICTURE_BYTES` and the size of a screenshot."""
+    """Whether *png* is base64 of a whole PNG (see :func:`_is_png`) within :data:`PICTURE_BYTES`."""
     if type(png) is not str or len(png) > PICTURE_BYTES:
         return False
     try:
-        raw = base64.b64decode(png, validate=True)
+        return _is_png(base64.b64decode(png, validate=True))
     except (binascii.Error, ValueError):
         return False
-    if len(raw) < 24 or raw[:8] != _PNG or raw[12:16] != b"IHDR":
-        return False
-    width, height = struct.unpack(">II", raw[16:24])
-    return bool(0 < width <= PICTURE_WIDTH and 0 < height <= PICTURE_HEIGHT)
 
 
 async def render_pages(data: bytes, pages: Sequence[int]) -> dict[int, ImagePart]:

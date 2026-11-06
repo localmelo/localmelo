@@ -3,7 +3,7 @@
 Run by path, as ``python -I _pdf_child.py MODE JSON`` with the file's bytes on
 standard input and nothing else: no path, no descriptor, no environment of
 melo's. It imports only the standard library and, once the bytes are in,
-pypdfium2, so melo itself never loads the library, and a PDF that breaks it
+pypdfium2, so melo itself never loads the library, and a crash of it
 takes down this process and not the gateway. It writes one JSON object to
 standard output and nothing to standard error. It ends itself: the kernel stops
 it after ``cpu`` seconds of CPU, and an alarm after ``wall`` seconds of any

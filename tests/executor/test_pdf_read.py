@@ -7,7 +7,9 @@ scripted model that cannot see pictures.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import json
 import os
 import signal
@@ -15,6 +17,7 @@ import struct
 import subprocess
 import sys
 import textwrap
+import time
 import tomllib
 import zlib
 from pathlib import Path
@@ -356,15 +359,31 @@ async def test_the_parent_cleans_the_text_the_child_answers(
     assert (await pdf.read_text(b"%PDF-")).texts == ("a[31mb c\nd",)
 
 
-def _png_of(width: int, height: int, *, signature: bytes = b"\x89PNG\r\n\x1a\n") -> str:
-    head = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    chunk = (
-        struct.pack(">I", len(head))
-        + b"IHDR"
-        + head
-        + struct.pack(">I", zlib.crc32(b"IHDR" + head))
+def _png_bytes(
+    width: int, height: int, order: tuple[str, ...] = ("IHDR", "IDAT", "IEND")
+) -> bytes:
+    """A whole PNG (all black), its chunks in *order*."""
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(body))
+            + kind
+            + body
+            + struct.pack(">I", zlib.crc32(kind + body))
+        )
+
+    bodies = {
+        "IHDR": struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0),
+        "IDAT": zlib.compress(b"\x00" * (height * (1 + 3 * width))),
+        "IEND": b"",
+    }
+    return b"\x89PNG\r\n\x1a\n" + b"".join(
+        chunk(kind.encode(), bodies[kind]) for kind in order
     )
-    return base64.b64encode(signature + chunk).decode()
+
+
+def _png_of(width: int, height: int) -> str:
+    return base64.b64encode(_png_bytes(width, height)).decode()
 
 
 async def test_the_parent_admits_only_the_pictures_it_asked_for_within_the_limits(
@@ -439,3 +458,150 @@ def test_pypdfium2_is_never_built_from_source_by_uv() -> None:
         (Path(pdf.__file__).parents[2] / "pyproject.toml").read_text()
     )
     assert "pypdfium2" in project["tool"]["uv"]["no-build-package"]
+
+
+def _answering_pictures(
+    monkeypatch: pytest.MonkeyPatch, *pictures: dict[str, Any]
+) -> None:
+    async def fake(
+        mode: str, limits: dict[str, Any], data: bytes, limit: int
+    ) -> dict[str, Any]:
+        return {"status": "ok", "pictures": list(pictures)}
+
+    monkeypatch.setattr(pdf, "_ask", fake)
+
+
+_GOOD_PNG = _png_bytes(600, 800)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        _GOOD_PNG[:-5],  # cut short
+        _GOOD_PNG[:-12],  # no end chunk
+        _GOOD_PNG + b"x",  # bytes after the end chunk
+        _GOOD_PNG[:41] + bytes([_GOOD_PNG[41] ^ 1]) + _GOOD_PNG[42:],  # a bad CRC
+        _png_bytes(600, 800, ("IDAT", "IHDR", "IEND")),  # the header is not first
+        _png_bytes(600, 800, ("IHDR", "IEND")),  # no image data
+    ],
+    ids=["truncated", "no-end", "trailing", "bad-crc", "header-not-first", "no-data"],
+)
+async def test_a_picture_that_is_not_a_whole_png_leaves_its_page_failed(
+    monkeypatch: pytest.MonkeyPatch, broken: bytes
+) -> None:
+    _answering_pictures(
+        monkeypatch, {"page": 2, "png": base64.b64encode(broken).decode()}
+    )
+    doc = pdf.PdfText(2, ("Cover page with some words in it", ""))
+    shown, note, images = await pdf.with_pictures(
+        b"%PDF-", doc, doc.text, lambda page: "start_line=1"
+    )
+    assert images == [] and "[page 2: no text, picture failed]" in shown
+    assert "attached" not in note and "no picture could be made" in note
+
+
+async def test_a_whole_png_within_the_limits_is_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _answering_pictures(monkeypatch, {"page": 2, "png": _png_of(600, 800)})
+    doc = pdf.PdfText(2, ("Cover page with some words in it", ""))
+    shown, _, images = await pdf.with_pictures(
+        b"%PDF-", doc, doc.text, lambda page: "start_line=1"
+    )
+    assert len(images) == 1 and "[page 2: no text, picture attached]" in shown
+
+
+# ── Watching the child's memory ──
+
+
+def _fake_ps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A ``ps`` that records its pid and then sleeps, put first on the PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    pid_file = tmp_path / "ps.pid"
+    script = bin_dir / "ps"
+    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    return pid_file
+
+
+async def _gone(pid_file: Path) -> bool:
+    """Whether the process whose pid is in *pid_file* is gone (not a zombie), within 2 seconds."""
+    for _ in range(40):
+        try:
+            os.kill(int(pid_file.read_text()), 0)
+        except ProcessLookupError:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_a_look_at_the_childs_memory_has_a_deadline_and_a_cancelled_one_is_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_file = _fake_ps(tmp_path, monkeypatch)
+    # A look that does not answer in time reads as "could not tell", and ends.
+    monkeypatch.setattr(pdf, "PS_TIMEOUT_S", 0.3, raising=False)
+    assert await asyncio.wait_for(pdf._resident(os.getpid()), 5) is None
+    assert await _gone(pid_file)
+    # A look that is cancelled while it waits leaves no process behind.
+    pid_file.unlink()
+    monkeypatch.setattr(pdf, "PS_TIMEOUT_S", 30.0, raising=False)
+    look = asyncio.create_task(pdf._resident(os.getpid()))
+    while not pid_file.exists():
+        await asyncio.sleep(0.02)
+    look.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await look
+    assert await _gone(pid_file)
+
+
+async def test_a_child_whose_memory_cannot_be_read_is_stopped_with_a_plain_line(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (root / "cv.pdf").write_bytes(make_pdf([CV]))
+    pid_file = tmp_path / "pid"
+    sleeper = _child(
+        tmp_path,
+        f"""
+        import os, time
+        open({str(pid_file)!r}, "w").write(str(os.getpid()))
+        time.sleep(4)
+        """,
+    )
+
+    async def blind(pid: int) -> int | None:
+        return None
+
+    monkeypatch.setattr(pdf, "_CHILD", sleeper)
+    monkeypatch.setattr(pdf, "_resident", blind)
+    monkeypatch.setattr(pdf, "WATCH_S", 0.05)
+    began = time.monotonic()
+    outcome = await _read(root, "cv.pdf")
+    assert outcome.status == ExecutionStatus.ERROR
+    assert "could not check how much memory" in outcome.error
+    assert "\n" not in outcome.error and time.monotonic() - began < 3
+    assert await _gone(pid_file)
+
+
+async def test_pdf_reads_in_one_process_run_one_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "log"
+    child = _child(
+        tmp_path,
+        f"""
+        import sys, time
+        log = open({str(log)!r}, "a")
+        log.write("start\\n")
+        log.flush()
+        time.sleep(0.4)
+        log.write("end\\n")
+        log.close()
+        sys.stdout.write('{{"status": "ok", "pages": 1, "texts": ["some words on the only page"]}}')
+        """,
+    )
+    monkeypatch.setattr(pdf, "_CHILD", child)
+    await asyncio.gather(pdf.read_text(b"%PDF-"), pdf.read_text(b"%PDF-"))
+    assert log.read_text().split() == ["start", "end", "start", "end"]
