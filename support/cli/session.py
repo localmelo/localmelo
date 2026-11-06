@@ -242,6 +242,10 @@ _SHELL_REFUSED: Final = {
 }
 
 
+class _StoppedBeforeSendError(Exception):
+    """A stop that came before the turn was sent: it ends as stopped, unsent."""
+
+
 class CliSession:
     """A session in the terminal (see the module docstring)."""
 
@@ -719,8 +723,13 @@ class CliSession:
         runner = self.runner
         result: RunResult | None = None
         error: BaseException | None = None
+        unsent = False
         try:
             await self._follow_served()
+            if self._stop_wanted:
+                # Esc during the move to a new model: no runner holds the turn to
+                # cancel, so nothing is sent.
+                raise _StoppedBeforeSendError
             if self.runner is None:
                 self.runner = SessionRunner(
                     self.agent,
@@ -759,6 +768,8 @@ class CliSession:
             finally:
                 if token is not None:
                     STREAM_DISPLAY.reset(token)
+        except _StoppedBeforeSendError:
+            unsent = True
         except UnknownSessionError:
             error = UnknownSessionError(DELETED)
         except SessionBusyError:
@@ -774,13 +785,24 @@ class CliSession:
         with contextlib.suppress(SessionStoreError):
             await self.session_tools.apply_title()
         cause = "user_stop" if self._stop_wanted else ""
+        if unsent:
+            symbols = self.renderer.symbols
+            self.out.print(
+                self._text(
+                    f"{symbols.stopped} Stopped {symbols.dot} nothing was sent; "
+                    "your message is back",
+                    "warn",
+                )
+            )
         self.renderer.end_turn(result, error, cause=cause)
         with contextlib.suppress(SessionStoreError):
             await self.navigation.refresh_refs()
-        if error is not None and attachments:
+        if (error is not None or unsent) and attachments:
             self._attachments = attachments + self._attachments
         completed = result is not None and result.status == "completed"
-        self._after_turn(text, started, completed=completed, failed=error is not None)
+        self._after_turn(
+            text, started, completed=completed, failed=error is not None or unsent
+        )
 
     async def _remote_turn(
         self, text: str, *, typed: bool = True, retry: str = ""

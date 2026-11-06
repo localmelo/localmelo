@@ -38,7 +38,6 @@ from localmelo.tests.cli.test_onboard_setup import (  # noqa: F401  (fixtures)
     _no_models_for_the_wizard,
     _nothing_is_loaded,
     _server_is_not_ollama,
-    _setup_metadata,
     config_path,
 )
 from localmelo.tests.cli.ui_helpers import CTRL_C, CTRL_D, ENTER, ESC, UP, running_app
@@ -279,14 +278,10 @@ def test_a_failed_address_offers_try_again_start_without_saving_and_quit(
     ("keys", "result", "prompts"),
     [
         (ENTER, FoundServer(url=URL, models=["m"]), []),  # Check again finds one
-        (
-            DOWN + DOWN + ENTER,
-            "http://x/v1",
-            [f"Server URL [{onboard._FIRST_RUN_URL}]: "],
-        ),
-        ("3", "http://x/v1", [f"Server URL [{onboard._FIRST_RUN_URL}]: "]),
-        ("4", onboard._UseHosted(), []),  # no question is asked here
-        ("5", None, []),
+        (DOWN + ENTER, "http://x/v1", [f"Server URL [{onboard._FIRST_RUN_URL}]: "]),
+        ("2", "http://x/v1", [f"Server URL [{onboard._FIRST_RUN_URL}]: "]),
+        ("3", onboard._UseHosted(), []),  # no question is asked here
+        ("4", None, []),
         (ESC, None, []),
     ],
 )
@@ -304,8 +299,8 @@ def test_with_no_server_the_list_checks_again_takes_an_address_or_quits(
     assert answers.prompts == prompts
     text = seen(drawn)
     assert "No model server found. What now?" in text and "❯ 1. Check again" in text
-    assert "2. Show how to set one up" in text and "3. Enter an address" in text
-    assert "4. Use a hosted service" in text and "5. Quit" in text
+    assert "2. Enter an address" in text
+    assert "3. Use a hosted service" in text and "4. Quit" in text
     assert "esc quit" in text
 
 
