@@ -340,11 +340,11 @@ _PY_FILES = (".py", ".pyc", ".pyw")
 # Runners seen to run a NAME=value word as a program. The others may hand it to
 # a shell, which reads it as an assignment: both are read, with a doubt.
 _RUN_THE_WORD = set(["uv", "poetry", "pdm"])
-# What the lines wrappers hand to a shell (watch) may hold in all, with the
-# lines in those lines: this many times the command, and this many characters
-# more, so that a short command has the line of each reading read.
-_LINES = 4
-_LINES_SHORT = 4096
+# What a command adds to the words the review may read again, as many times
+# its length, and what reading any words again costs besides their own length
+# (Findings.room).
+_LINES = 2
+_READ_AGAIN = 32
 # git commands that run the repository's hooks.
 _HOOKED = set(["commit", "push", "merge", "rebase", "am", "pull", "checkout"])
 _FILE_RUNNERS = set(["node", "deno", "bun", "ruby", "perl", "php", "tsx", "ts-node"])
@@ -822,12 +822,10 @@ def _backticks(text: str) -> tuple[list[str], bool]:
 
 
 _NAME = re.compile(r"[A-Za-z_]\w*")
-# A program word filled in when the step runs, or one with ``=``: read as a
-# program only because a wrapper's manual says so.
-_UNNAMED = re.compile(r"[$`=]")
-# An array element whose subscript holds a space: the shell's assignment, cut
-# into words here, and no program.
-_OPEN_SUBSCRIPT = re.compile(r"[A-Za-z_]\w*\[[^\]]*$", re.S)
+# A program word melo cannot name: one filled in when the step runs, one with
+# ``=`` (a program only because a wrapper's manual says so), or one that opens
+# a subscript (an array element cut at a space: a shell runs what follows it).
+_UNNAMED = re.compile(r"[$`=]|^[A-Za-z_]\w*\[[^\]]*\Z")
 _DECLARERS = frozenset(
     ["export", "local", "declare", "typeset", "readonly", "builtin", "command"]
 )
@@ -1290,7 +1288,7 @@ def _unwrap(
     not know is a doubt, and the program of each reading of it is reviewed,
     at most ``MAX_READINGS``: past them, a doubt and the first ones. A
     command line a wrapper has a shell run (``env -S``, ``watch``) is
-    reviewed as a command; past :data:`_LINES` of them, a doubt. ``uv run``
+    reviewed as a command; past ``Findings.room``, a doubt. ``uv run``
     with a Python file (``--script``, a name with a Python ending), an
     address or ``-`` (standard input) is the Python call it makes. With
     ``PATH=.:$PATH`` (a folder named relatively first), a program named bare
@@ -1308,7 +1306,8 @@ def _unwrap(
     # Each place read, with its words kept so that no other list takes their id.
     seen: dict[tuple[int, int], Sequence[str]] = {}
     walked = shell_lexer.Walked()
-    room = ctx.lines
+    if not ctx.depth:
+        f.room += _LINES * sum(map(len, argv))
     while todo:
         if len(programs) == shell_lexer.MAX_READINGS:
             f.doubt(UNREAD)
@@ -1329,15 +1328,13 @@ def _unwrap(
                 f.add("persistence", "Keeps a program running after this call ends.")
         for code in found.codes:
             review_shell(ctx.deeper(), f, code)
-        if found.joins:
-            room = room or [_LINES * sum(map(len, argv)) + _LINES_SHORT]
-            for join in found.joins:
-                if room[0] <= 0:
-                    f.doubt(UNREAD)
-                    break
-                line = found.line(join)
-                room[0] -= len(line)
-                review_shell(ctx.deeper(lines=room), f, line)
+        for join in found.joins:
+            if f.room <= 0:
+                f.doubt(UNREAD)
+                break
+            line = found.line(join)
+            f.room -= len(line) + _READ_AGAIN
+            review_shell(ctx.deeper(), f, line)
         added = (*found.added, *added)
         for words, at in reversed(found.starts):
             prog = os.path.basename(words[at]).lower() if at < len(words) else ""
@@ -1357,7 +1354,9 @@ def _unwrap(
                 continue
             options = _UV_RUN if prog == "uv" else _RUN_OPTIONS
             start = at + skip
-            passed = shell_lexer.past_options(words, options, start, False, walked)
+            passed = shell_lexer.past_options(
+                words, options, start, False, walked.of(words, prog, False)
+            )
             if passed.unread:
                 f.doubt(UNREAD)
             here, ends = local, passed.ends
@@ -1365,7 +1364,9 @@ def _unwrap(
                 "=" in "".join(words[end : end + 1]) for end, _ in ends
             ):
                 f.doubt(UNREAD)
-                both = shell_lexer.past_options(words, options, start, True, walked)
+                both = shell_lexer.past_options(
+                    words, options, start, True, walked.of(words, prog, True)
+                )
                 here = here or _note_assignments(f, both.assignments)
                 ends = [*both.ends, *ends]
             named = {option for option, _ in passed.options}
@@ -1377,6 +1378,25 @@ def _unwrap(
                     else (words, end, added, here, False)
                 )
     return programs
+
+
+def _past_exec(ctx: Context, f: Findings, words: list[str]) -> list[list[str]]:
+    """What the words after ``find -exec`` run past a wrapper. They are read again
+    as a line is: within ``MAX_DEPTH`` and ``Findings.room``, past them a doubt."""
+    if ctx.depth >= MAX_DEPTH or f.room <= 0:
+        f.doubt(UNREAD)
+        return []
+    f.room -= sum(map(len, words)) + _READ_AGAIN
+    return _unwrap(ctx.deeper(), f, words, False)
+
+
+def _found_runs(
+    ctx: Context, f: Findings, argv: list[str], root: str, cwd: str
+) -> None:
+    """Review *argv* as ``find -exec`` runs it. A launcher gets each file found,
+    which melo cannot name."""
+    found = UNKNOWN_ARG if os.path.basename(argv[0]) in _ELSEWHERE else root
+    run_argv(ctx, f, [found if a == "{}" else a for a in argv], cwd)
 
 
 def _uv_python(options: set[str], command: Sequence[str]) -> list[str]:
@@ -1526,7 +1546,7 @@ def run_argv(
     """
     prog, args = os.path.basename(argv[0]).lower(), argv[1:]
     prog = _GNU_NAMES.get(prog, prog)
-    if _UNNAMED.search(argv[0]) and not _OPEN_SUBSCRIPT.match(argv[0]):
+    if _UNNAMED.search(argv[0]):
         f.doubt("Runs a program melo could not name.")
     # Hard links: one file under two names, so the source counts as written.
     _link_sources(ctx, f, prog, args, cwd)
@@ -1584,13 +1604,11 @@ def run_argv(
         for flag in {"-exec", "-execdir", "-ok"} & set(args):
             rest = args[args.index(flag) + 1 :]
             rest = rest[: next((i for i, a in enumerate(rest) if a in ";+"), len(rest))]
-            # find runs them as they are, and what a wrapper there runs.
-            programs = [rest, *_unwrap(ctx, f, rest, False)] if rest else []
-            for program in filter(None, dict.fromkeys(map(tuple, programs))):
-                # A launcher gets each file found, which melo cannot name.
-                base = os.path.basename(program[0])
-                found = UNKNOWN_ARG if base in _ELSEWHERE else roots[0]
-                run_argv(ctx, f, [found if a == "{}" else a for a in program], cwd)
+            if rest:  # find runs them as they are, and what a wrapper there runs
+                _found_runs(ctx, f, rest, roots[0], cwd)
+                for program in _past_exec(ctx, f, rest):
+                    if program and program != rest:
+                        _found_runs(ctx.deeper(), f, program, roots[0], cwd)
     elif prog in _WRITERS and not re.search(r"\s[\w.-]+@?[\w.-]*:", line):
         mode = _WRITERS[prog]
         targets = words[-1:] if mode == "last" and len(words) > 1 else words

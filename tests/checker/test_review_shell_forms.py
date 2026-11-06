@@ -32,6 +32,7 @@ import pytest
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review import shell
+from localmelo.melo.checker.review.paths import Context, Findings
 from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import (
     ActionReview,
@@ -325,15 +326,77 @@ def in_front(name: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "name", [n for n, o in shell_lexer.WRAPPERS.items() if not o.assignments]
+    "place",
+    [
+        *(
+            f"{in_front(name)} {{}}"
+            for name, options in shell_lexer.WRAPPERS.items()
+            if not options.assignments
+        ),
+        "busybox {}",
+        "uv run {}",
+        "poetry run {}",
+        "find . -exec {} ';'",
+    ],
 )
-def test_a_program_word_with_an_equals_is_no_milder_than_an_unnamed_one(
-    ws: Path, name: str
+def test_a_program_word_melo_cannot_name_is_no_milder_than_an_unnamed_one(
+    ws: Path, place: str
 ) -> None:
-    """That the wrapper runs such a word comes from its manual alone."""
-    equals = sh(ws, f"{in_front(name)} A=1 b")
-    unnamed = sh(ws, f"{in_front(name)} $A b")
-    assert SEVERITY[equals.verdict] >= SEVERITY[unnamed.verdict]
+    """A word with ``$``, a backquote or ``=``, or one that opens a subscript, at
+    any place where it is the program; in a shell's own place and in a process
+    call behind a wrapper too."""
+    unnamed = SEVERITY[sh(ws, place.format("$A b")).verdict]
+    for word in ("$A", "`a`", "A=1", "A[1=2", "A[$B", "A[", "x/y=z"):
+        assert SEVERITY[sh(ws, place.format(f"{word} b")).verdict] >= unnamed, word
+
+
+@pytest.mark.parametrize("word", ["$A", "`a`", "A[1=2", "A[$B", "A[", "x/y=z"])
+def test_a_shell_or_a_process_call_gives_such_a_word_the_doubt(
+    ws: Path, word: str
+) -> None:
+    assert sh(ws, f"{word} b").verdict != "routine"
+    call = f"import subprocess\nsubprocess.run({['nohup', word, 'b']!r})"
+    assert py(ws, call).verdict != "routine"
+
+
+def test_an_element_cut_at_a_space_keeps_what_follows_it_asked_about(ws: Path) -> None:
+    """A shell runs the program after an array element whose subscript holds a
+    space; melo does not read past it, and asks."""
+    found = sh(ws, "A[1 + 2]=3 rm -rf ~/x")
+    assert found.verdict != "routine"
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["pdm", "run", "--", "-a/hatch", "run", "A=1", "b"],
+        ["nice", "-Z", "watch", "-x", "-n", "watch", "-t", "a", "b"],
+    ],
+)
+def test_a_shared_record_reads_what_a_fresh_one_reads(
+    ws: Path, monkeypatch: pytest.MonkeyPatch, words: list[str]
+) -> None:
+    """The record of the words read is kept per program, and apart past ``-x``:
+    runners that share a table, and a watch with ``-x`` before one without,
+    differ. The readings and the lines are those of a record for each walk."""
+    ctx = Context(str(ws), str(ws.parent), "/opt/melo/bin/python3", "/opt/melo")
+
+    def read() -> tuple[list[list[str]], list[str]]:
+        lines: list[str] = []
+        monkeypatch.setattr(shell, "review_shell", lambda _c, _f, t: lines.append(t))
+        return sorted(shell._unwrap(ctx, Findings(), words)), sorted(lines)
+
+    shared = read()
+    monkeypatch.setattr(shell_lexer.Walked, "of", lambda *_: set())
+    assert shared == read()
+
+
+def test_find_exec_past_the_depth_is_a_doubt(ws: Path) -> None:
+    """Each wrapper after ``-exec`` is read again, and that stops at the depth limit
+    of the other re-reads; the words as they stand are still reviewed."""
+    command = "find . -exec nice " * 8 + "rm -rf ~/x ';'" + " ';'" * 7
+    found = sh(ws, command)
+    assert shell.UNREAD in (*found.reasons, *found.doubts)
 
 
 @pytest.mark.parametrize("word", ["A+=1", "A[1]=1", "A[1]+=1"])
@@ -367,6 +430,8 @@ def test_find_exec_reads_the_wrapper_in_front_of_its_command(
         "-- -a/watch ",
         "-- -a/busybox -a/nice ",
         "-- -a/npx -a/nice ",
+        "find find . -exec env -Z ",
+        "watch -Z a -Z b c; ",
     ],
 )
 def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -> None:
@@ -377,9 +442,12 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
     The second text is read again past ``busybox`` at each step, both in the
     list ``env -S`` makes and behind an option melo cannot read; the others
     add a reading at each step (the two of ``time A=1``, an unlisted ``--``)
-    or a line for a shell (``watch``, read again past ``busybox``). The last
+    or a line for a shell (``watch``, read again past ``busybox``). The next
     four are words that are both options and places to read from: each is
-    read once for each wrapper's table, however many places reach it. 12 000
+    read once for each program, however many places reach it. The last two
+    are read again by ``find -exec`` behind a wrapper with two readings, and
+    as many short commands with several lines each, within one room for the
+    whole review. 12 000
     and 48 000 characters for the time, 3 000 and 12 000 for the memory
     (measured exactly): enough that a cost growing with the square of the
     text takes 16 times as much, past the bound of 8.
@@ -395,6 +463,27 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
     ):
         assert_linear(make, run, 12_000, 48_000)
         assert_memory_linear(make, run, 3_000, 12_000)
+
+
+def test_many_short_commands_share_one_room_for_their_lines(
+    ws: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor of ``Findings.room`` is one for the review, not one for each
+    command: the lines read cost at most that floor and what the commands add,
+    however many commands there are (the last line is the one that spends it)."""
+    read: list[str] = []
+    review = shell.review_shell
+
+    def counted(ctx: Context, f: Findings, text: str) -> None:
+        read.append(text)
+        review(ctx, f, text)
+
+    monkeypatch.setattr(shell, "review_shell", counted)
+    text = "watch -Z a -Z b -Z c -Z d; " * 400
+    sh(ws, text)
+    assert read
+    spent = sum(len(line) + shell._READ_AGAIN for line in read[:-1])
+    assert spent <= Findings().room + shell._LINES * len(text)
 
 
 @pytest.mark.parametrize(

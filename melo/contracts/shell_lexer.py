@@ -463,24 +463,28 @@ class Spliced(Sequence[str]):
 Start = tuple[Sequence[str], int]
 
 
+# Words :func:`past_options` has read: each with whether an option that changes
+# what the program does came before it, and whether it was read as env's
+# assignment.
+Read = set[tuple[int, bool, bool]]
+
+
 class Walked:
-    """What :func:`past_options` has read, so that it reads a word once per table.
+    """What :func:`past_options` has read, so that it reads a word once per program.
 
     A word can be both an option and a place to read from (one that starts
     with ``-`` and names a wrapper by its last path part): read afresh from
     each such place, a command would cost the square of its length. Where an
-    earlier walk read a word, the ends that word leads to are already known.
+    earlier walk of the same program read a word in the same state, the ends
+    that word leads to are already known.
     """
 
     def __init__(self) -> None:
-        self._read: dict[tuple[int, int, bool], tuple[object, set[tuple[int, bool]]]]
-        self._read = {}
+        self._read: dict[tuple[int, str, bool], tuple[object, Read]] = {}
 
-    def of(
-        self, words: Sequence[str], options: Options, anywhere: bool
-    ) -> set[tuple[int, bool]]:
-        """The (word, read as env's assignment) places read in *words* with *options*."""
-        key = id(words), id(options), anywhere
+    def of(self, words: Sequence[str], program: str, anywhere: bool) -> Read:
+        """What was read in *words* for *program*, with assignments read anywhere."""
+        key = id(words), program, anywhere
         return self._read.setdefault(key, (words, set()))[1]  # keeps the id theirs
 
 
@@ -586,8 +590,14 @@ def unwrap(
             todo.append((source, at + 1, True))
         elif name in WRAPPERS:
             wrappers.append(name)
+            execs = _JOINS.get(name, frozenset())
             passed = past_options(
-                words, WRAPPERS[name], at + 1, assignments_anywhere, walked
+                words,
+                WRAPPERS[name],
+                at + 1,
+                assignments_anywhere,
+                walked.of(words, name, assignments_anywhere),
+                execs,
             )
             assignments += passed.assignments
             code = _CODE.get(name, set())
@@ -595,8 +605,7 @@ def unwrap(
                 value for option, value in passed.options if option in code and value
             ]
             unread = unread or passed.unread
-            execs = _JOINS.get(name)
-            if execs is not None and (
+            if name in _JOINS and (
                 passed.unread or not execs & {option for option, _ in passed.options}
             ):
                 # Its words from each end are a line for sh -c.
@@ -651,7 +660,8 @@ def past_options(
     options: Options,
     start: int = 0,
     assignments_anywhere: bool = False,
-    walked: Walked | None = None,
+    seen: Read | None = None,
+    marks: Collection[str] = (),
 ) -> Passed:
     """Where the options of *words* from *start* may end, and what they pass.
 
@@ -664,21 +674,23 @@ def past_options(
     makes them ``unread``: it may take the next word as its value or not,
     so they may end where either way leads; getopt(3)'s reading of an
     unlisted ``--`` (their end) or ``-`` (an operand) is one more, after
-    those. At most :data:`MAX_READINGS` ends, the first ones. A word *walked*
+    those. At most :data:`MAX_READINGS` ends, the first ones. A word *seen*
     holds was read before: where it leads is known, and is not repeated.
+    One of *marks* changes what the program does with the rest, so a word is
+    read apart before and after one.
     """
     ends: list[tuple[int, str | None]] = []
     operands: list[tuple[int, str | None]] = []
     passed: list[tuple[str, str]] = []
-    seen = (walked or Walked()).of(words, options, assignments_anywhere)
-    todo, unread = [start], False
+    seen = set() if seen is None else seen
+    todo, unread = [(start, False)], False
     while todo:
         if len(ends) >= MAX_READINGS:
             unread = True
             break
-        at = todo.pop()
-        while (at, False) not in seen:
-            seen.add((at, False))
+        at, marked = todo.pop()
+        while (at, marked, False) not in seen:
+            seen.add((at, marked, False))
             word = words[at] if at < len(words) else ""
             if word == "--" and "--" in options.flags:
                 ends.append((at + 1, None))
@@ -701,9 +713,10 @@ def past_options(
             )
             if found is None:
                 unread = True
-                if word in ("-", "--"):  # getopt(3): an operand, the options' end
+                # getopt(3): an operand, the options' end
+                if word in ("-", "--") and len(operands) < MAX_READINGS:
                     operands.append((at if word == "-" else at + 1, None))
-                todo.append(min(at + 2, len(words)))  # the way with a value
+                todo.append((min(at + 2, len(words)), marked))  # the way with a value
                 if not (word.startswith("--") and "=" in word):
                     name, value = word, "".join(words[at + 1 : at + 2])
                 found = [(name, value)], 0
@@ -711,6 +724,7 @@ def past_options(
             if takes:
                 held[-1] = (held[-1][0], "".join(words[at + 1 : at + 2]))
             passed += held
+            marked = marked or any(option in marks for option, _ in held)
             at = min(at + 1 + takes, len(words))
             if held[-1][0] in options.splits:
                 ends.append((at, held[-1][1]))
@@ -723,19 +737,16 @@ def past_options(
 
 
 def _past_assignments(
-    words: Sequence[str],
-    at: int,
-    seen: set[tuple[int, bool]],
-    passed: list[tuple[str, str]],
+    words: Sequence[str], at: int, seen: Read, passed: list[tuple[str, str]]
 ) -> int | None:
     """Past the ``NAME=value`` words env(1) reads after its options, from *at*:
     every word with ``=``. Where its program is, or ``None`` when another
     way read them already (*seen*); each is added to *passed*.
     """
     while at < len(words) and "=" in words[at]:
-        if (at, True) in seen:
+        if (at, False, True) in seen:
             return None
-        seen.add((at, True))
+        seen.add((at, False, True))
         name, _, value = words[at].partition("=")
         passed.append((name, value))
         at += 1

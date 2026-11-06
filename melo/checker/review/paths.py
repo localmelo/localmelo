@@ -103,9 +103,7 @@ class Context:
 
     ``here`` is the folder of the file under review (its imports start
     there); ``since`` the wall-clock time the chat began, or ``None``: a
-    file changed after it counts as written in this chat. ``lines`` holds
-    how much the lines a wrapper hands to a shell may still hold, shared by
-    a command and the lines in its lines (see ``shell._unwrap``).
+    file changed after it counts as written in this chat.
     """
 
     root: str
@@ -115,20 +113,14 @@ class Context:
     depth: int = 0
     here: str = ""
     since: float | None = None
-    lines: list[int] | None = None
 
     @property
     def folder(self) -> str:
         return os.path.basename(self.root.rstrip("/")) or self.root
 
-    def deeper(
-        self, here: str | None = None, lines: list[int] | None = None
-    ) -> Context:
+    def deeper(self, here: str | None = None) -> Context:
         return replace(
-            self,
-            depth=self.depth + 1,
-            here=self.here if here is None else here,
-            lines=self.lines if lines is None else lines,
+            self, depth=self.depth + 1, here=self.here if here is None else here
         )
 
 
@@ -157,6 +149,10 @@ class Findings:
     started: set[str] = field(default_factory=set)
     site: str = ""
     hits: list[tuple[str, str, str]] = field(default_factory=list)
+    # The characters the review may still read again (a line a wrapper hands to
+    # a shell, the words after ``find -exec``): a short step has them all read,
+    # and each command adds in proportion to itself (see ``shell._unwrap``).
+    room: int = 4096
 
     def take(self, path: str, *, key: bool = True) -> str | None:
         """*path*'s text when the review may read it (once, at most

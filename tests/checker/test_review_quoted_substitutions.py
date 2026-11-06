@@ -211,8 +211,10 @@ def test_a_subscript_over_the_bound_takes_the_standing_from_every_name(
 def test_a_subscript_at_the_bound_is_scanned_and_writes_nothing_to_the_name(
     ws: Path,
 ) -> None:
+    """The name keeps the process it holds; a subscript with a space is cut into
+    words, so melo cannot name what runs, and asks."""
     inside = padded("other=5", " ", BOUND)
-    assert sh(ws, STARTED + f"arr[{inside}]=1; kill $pid").verdict == "routine"
+    assert sh(ws, STARTED + f"arr[{inside}]=1; kill $pid").verdict == "undecided"
 
 
 @pytest.mark.parametrize(
