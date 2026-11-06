@@ -168,6 +168,9 @@ MISSING_MESSAGE = (
     "windows (/browser safari), which come to the front."
 )
 STOPPED_MESSAGE = "Chrome stopped. Ask again: melo starts it again."
+# What says which servers on this computer a driver's pages may reach, as
+# ``(address, port)``, whenever a request asks (see allow_local).
+LocalGrant = Callable[[], Iterable[tuple[str, int]]]
 # The size of a tab's window, in page pixels; the page's view (and its picture)
 # is as wide, and lower by the window's own bar.
 VIEW_W = 1280
@@ -464,9 +467,10 @@ class _Chrome:
         self.local: LocalRule | None = None
         self.jobs: set[asyncio.Task[None]] = set()
         self.attempts: dict[str, list[LocalAttempt]] = {}
-        # The servers on this computer a page's driver may reach (the person
-        # wrote them), by page; a page with none here reaches no local address.
-        self.written: dict[str, frozenset[tuple[str, int]]] = {}
+        # What says which servers on this computer a page's driver may reach (the
+        # person wrote them, in a run that is still going), by page; a page
+        # with none here reaches no local address.
+        self.written: dict[str, LocalGrant] = {}
         # Downloads in progress or finished and not told yet, by id: the page's
         # suggested name, its frame, the bytes so far, and the state.
         self.saving: dict[str, dict[str, Any]] = {}
@@ -696,7 +700,7 @@ class _Chrome:
                 # that sent the request (its driver's words), never for another.
                 page = await self._page_of(frame)
                 if page in self.written:
-                    verdict = rule.decide(url, origin, self.written[page])
+                    verdict = rule.decide(url, origin, frozenset(self.written[page]()))
             if verdict.kind == "pass":
                 method, answer = "Fetch.continueRequest", {"requestId": ident}
             elif verdict.kind == "relay" and verdict.helper is not None:
@@ -1276,7 +1280,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._call_s = call_timeout_s
         self._browser: _Chrome | None = None
         self._mine: set[str] = set()
-        self._written: frozenset[tuple[str, int]] = frozenset()
+        self._written: LocalGrant | None = None
         # The id each tab was given (its first target id) and its target now: a
         # restart of Chrome changes the target, never the id (see _follow).
         self._ids: dict[str, str] = {}
@@ -1370,6 +1374,9 @@ class ChromeBackgroundDriver(PageScriptActs):
             self._said = {renamed[t]: d for t, d in self._said.items() if t in renamed}
             self._sessions.clear()
             self._targets.clear()
+        if browser is not self._browser and browser is not None:
+            for target in self._mine:  # the new Chrome has no grant for them yet
+                self._grant(browser, target)
         self._browser = browser
 
     async def _settled(self) -> None:
@@ -1673,24 +1680,27 @@ class ChromeBackgroundDriver(PageScriptActs):
                 await self._cmd("Target.closeTarget", {"targetId": spare})
         return target
 
-    def allow_local(self, sites: Iterable[tuple[str, int]]) -> None:
-        """Let this driver's pages reach exactly these servers on this computer, as ``(address, port)`` (#547).
+    def allow_local(self, grant: LocalGrant | None) -> None:
+        """Let this driver's pages reach exactly the servers on this computer *grant* says, as ``(address, port)`` (#547).
 
-        They are the servers the person wrote in their own words in this run
-        (``localhost`` is ``127.0.0.1``). The set replaces the last one, for
-        every tab of this driver, new ones included; none (the default)
-        reaches no local address. Only :class:`LocalRule` lets a request go
-        on, and only to exactly one of these: melo's own ports and every
-        other local address stay blocked.
+        *grant* says which servers the person wrote in their own words in this
+        run (``localhost`` is ``127.0.0.1``), each time a request asks, so it
+        ends with the run it belongs to: a run that is over says none. It
+        replaces the last one, for every tab of this driver, new ones and the
+        pages of a Chrome started again included; ``None`` (the default, and
+        what a chat that forgets its approvals gives) reaches no local
+        address. Only :class:`LocalRule` lets a request go on, and only to
+        exactly one of these: melo's own ports and every other local address
+        stay blocked.
         """
-        self._written = frozenset(sites)
+        self._written = grant
         if self._browser is not None:
             for target in self._mine:
                 self._grant(self._browser, target)
 
     def _grant(self, browser: _Chrome, target: str) -> None:
-        """Give *target* (one of this driver's pages) the servers :meth:`allow_local` set, or none."""
-        if self._written:
+        """Give *target* (one of this driver's pages) what :meth:`allow_local` set, or nothing."""
+        if self._written is not None:
             browser.written[target] = self._written
         else:
             browser.written.pop(target, None)

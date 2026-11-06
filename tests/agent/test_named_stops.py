@@ -373,6 +373,16 @@ LOCAL = {("127.0.0.1", 3000)}
         ("open http://localhost:3000@site.example/", set()),
         ("open user@localhost:3000", set()),
         ("open site.example:localhost:3000", set()),
+        # A CJK character inside another address does not make a fragment of it
+        # a server of its own: the characters before it, back to the last space,
+        # say it is part of an address (a path, a query, a host or a user part).
+        ("open https://site.example/?to=中localhost:3000", set()),
+        ("open https://site.example/路径中localhost:3000看看", set()),
+        ("打开https://site.example/?to=localhost:3000看看", set()),
+        ("打开http://localhost:3000中@site.example/", set()),
+        # ...while a server in prose counts, whatever else the sentence holds.
+        ("打开 https://site.example/ 再用localhost:3000看看", LOCAL),
+        ("先看站点，再打开localhost:3000，端口(3000)", LOCAL),
         # A Latin letter or a digit next to it is not a boundary, nor does a
         # Chinese word before another address make one a server written.
         (
@@ -392,3 +402,27 @@ def test_only_a_server_written_on_its_own_counts(
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.user_message(said)
     assert reviewer.written_sites() == sites
+
+
+def test_a_servers_written_set_ends_with_the_run_that_has_it() -> None:
+    """The browser keeps the policy's reader, not a copy: the run's end revokes it (#547)."""
+    from localmelo.melo.agent._approval_gate import _ToolAsk
+    from localmelo.melo.agent.agent import _RunState
+    from localmelo.melo.schema import ToolCall
+
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message("open localhost:3000")
+    run = _RunState.__new__(_RunState)
+    run.status = "running"
+    ask = _ToolAsk(
+        AutoPolicy(),
+        run,
+        ToolCall(tool_name="browser", arguments={}, id="call_1"),
+        None,
+        reviewer,
+    )
+    assert ask.written_sites() == LOCAL
+    run.end("done")
+    assert ask.written_sites() == frozenset()
+    # With no reviewer, nothing reads the person's words.
+    assert _ToolAsk(AutoPolicy(), run, ask._call, None).written_sites() == frozenset()

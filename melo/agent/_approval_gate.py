@@ -25,7 +25,7 @@ from localmelo.melo.agent._step_review import (
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
-from localmelo.melo.checker.review.posting import is_field, personal_data, sent_texts
+from localmelo.melo.checker.review.posting import is_message, personal_data, sent_texts
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -741,8 +741,14 @@ class _ToolAsk:
         return None if self._reviewer is None else self._reviewer.asks_to_share()
 
     def written_sites(self) -> frozenset[tuple[str, int]]:
-        """The servers on this computer the person's own words write, as ``(address, port)``; none when nothing reads them (#547)."""
-        return frozenset() if self._reviewer is None else self._reviewer.written_sites()
+        """The servers on this computer the person's own words write, as ``(address, port)``; none when nothing reads them or the run is over (#547).
+
+        The browser keeps this reader for the pages it lets reach those
+        servers, so the end of the run ends what they may reach.
+        """
+        if self._reviewer is None or not self._run.running:
+            return frozenset()
+        return self._reviewer.written_sites()
 
     def signs_in(self, site: str) -> bool:
         """Whether melo has sign-in details of the person's to try on *site*."""
@@ -923,16 +929,21 @@ class _ToolAsk:
                     typing
                     and reviewer.names_host(site)
                     and not holds_secret(arguments, preview)
-                    and is_field(str(arguments.get("text") or ""))
+                    and (
+                        reviewer.searching(arguments)
+                        or not is_message([str(arguments.get("text") or "")])
+                    )
                     and not _personal(reviewer, tool_name, arguments)
                 ):
-                    # The rules judge it: a field's worth of text with no secret
-                    # in it and nothing of the person's own, typed on a site the
-                    # person wrote themselves. Nothing leaves the page until a
-                    # form is sent, and that is reviewed on its own, so a long
-                    # form does not use up the turn's reviews (#547). A longer
-                    # text is a post or a message: it is reviewed whole, with
-                    # all its words, before any of it is typed.
+                    # The rules judge it: a field's worth of text (not a message
+                    # by the one reading the posting check has, or a search the
+                    # person asked for, of any length) with no secret in it and
+                    # nothing of the person's own, typed on a site the person
+                    # wrote themselves. Nothing leaves the page until a form is
+                    # sent, and that is reviewed on its own, so a long form does
+                    # not use up the turn's reviews (#547). A message is a post:
+                    # it is reviewed whole, with all its words, before any of it
+                    # is typed.
                     review = ActionReview(
                         "routine", (), (f"Types on {site}, which you named.",)
                     )

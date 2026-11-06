@@ -723,6 +723,7 @@ class ActsOnSite(OpensSite):
                             "access": {"type": "string"},
                             "how": {"type": "string"},
                             "text": {"type": "string"},
+                            "field": {"type": "string"},
                         },
                         "required": ["site", "access"],
                     },
@@ -733,11 +734,18 @@ class ActsOnSite(OpensSite):
         ]
 
     async def _act(
-        self, site: str, access: str, how: str = "click", text: str = "hello there"
+        self,
+        site: str,
+        access: str,
+        how: str = "click",
+        text: str = "hello there",
+        field: str = "",
     ) -> str:
         ask = TOOL_ASK.get()
         assert ask is not None
         arguments: dict[str, Any] = {"site": site, "access": access, "how": how}
+        if field:
+            arguments["field"] = field
         if access == "submit":
             arguments.update(
                 to="https://collect.example/post", fields=[["email", "me@example.org"]]

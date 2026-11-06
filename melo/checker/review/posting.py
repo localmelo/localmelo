@@ -24,6 +24,9 @@ into saying "the user asked" still does not post:
   what was approved once, so a repeating post asks each time.
 - :func:`asks_to_share`: the words speak of sharing or making something public,
   the one thing that lets a pre-ticked "public" box stay ticked.
+- :func:`asks_to_search`: the words ask to search or look something up, the one
+  thing that lets a search box take a query of any length: a search is no post,
+  whatever it holds, but only a box the person asked to search in is one.
 
 The words are cues, matched on the person's text; they are a necessary
 condition that fails closed, never a licence: the model's verdict still
@@ -42,6 +45,7 @@ __all__ = [
     "POST",
     "account_names",
     "asks_for_review",
+    "asks_to_search",
     "asks_to_send",
     "asks_to_share",
     "asks_to_write",
@@ -190,6 +194,15 @@ _SHARE = re.compile(
     re.IGNORECASE,
 )
 
+# Verbs of searching. A word before it that makes it a noun ("the search box",
+# "a find") does not count, as for :data:`_SEND`.
+_SEARCH = re.compile(
+    r"\b(?P<strong>search|searching|searches|google|googling|find|finding|lookup"
+    r"|look(?:ing)?\s+(?:up|for)|browse|browsing)\b"
+    r"|(?P<plain>搜|查一下|查一查|查查|查找|查询|找一下|找找|找一找)",
+    re.IGNORECASE,
+)
+
 # A phone number is written in a shape (international, North American, or a
 # Chinese mobile number), never as any run of digits: dates, ports and ids are
 # not phone numbers.
@@ -264,11 +277,12 @@ def _asks(pattern: re.Pattern[str], texts: Iterable[str]) -> bool:
     for text in texts:
         for found in pattern.finditer(text):
             before = _word_before(text, found.start())
-            if found.group("plain") is not None:
+            groups = found.groupdict()
+            if groups.get("plain") is not None:
                 return True
-            if found.group("strong") is not None and before not in _DETERMINERS:
+            if groups.get("strong") is not None and before not in _DETERMINERS:
                 return True
-            if found.group("weak") is not None and (
+            if groups.get("weak") is not None and (
                 not before
                 or before in _VERB_AFTER
                 or before not in _DETERMINERS
@@ -281,6 +295,11 @@ def _asks(pattern: re.Pattern[str], texts: Iterable[str]) -> bool:
 def asks_to_send(texts: Iterable[str]) -> bool:
     """Whether the person's words ask to post, send, reply or open an issue or a pull request."""
     return _asks(_SEND, texts)
+
+
+def asks_to_search(texts: Iterable[str]) -> bool:
+    """Whether the person's words ask to search or look something up."""
+    return _asks(_SEARCH, texts)
 
 
 def asks_to_write(texts: Iterable[str]) -> bool:

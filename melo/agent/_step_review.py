@@ -74,6 +74,7 @@ from localmelo.melo.checker.review.named import (
 )
 from localmelo.melo.checker.review.posting import (
     account_names,
+    asks_to_search,
     asks_to_share,
     is_message,
     is_post,
@@ -602,6 +603,22 @@ class StepReviewer:
         """Whether the person's own words speak of sharing or making something public (#547)."""
         return asks_to_share(self.requests)
 
+    def searching(self, arguments: Mapping[str, Any]) -> bool:
+        """Whether a step types or sends a search of the person's (#547).
+
+        The browser says ``field: "search"`` when the box, or every text box of
+        the form, is described as a search box
+        (:func:`~localmelo.support.browser.fields.searches`); a page can
+        describe a box so, so it counts only when the person's own words ask to
+        search too (:func:`~localmelo.melo.checker.review.posting.asks_to_search`).
+        A search is no post whatever its length: a query is not a message.
+        """
+        return (
+            arguments.get("access") in ("type", "submit")
+            and arguments.get("field") == "search"
+            and asks_to_search(self.requests)
+        )
+
     def _posting(
         self,
         settled: ActionReview,
@@ -629,6 +646,7 @@ class StepReviewer:
         if (
             settled.verdict != "routine"
             or settled.by != "model"
+            or self.searching(arguments)
             or not is_post(arguments, rules.evidence)
             or not (
                 is_message(sent)

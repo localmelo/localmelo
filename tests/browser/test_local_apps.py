@@ -912,8 +912,8 @@ async def test_a_server_the_person_wrote_goes_on_for_the_page_of_that_driver_onl
     mine = ChromeBackgroundDriver(command=["unused"], local=rule())
     mine._browser = browser
     mine._mine = {"PAGE1"}
-    mine.allow_local([("127.0.0.1", 3000)])
-    assert browser.written == {"PAGE1": frozenset({("127.0.0.1", 3000)})}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    assert set(browser.written) == {"PAGE1"}
     await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r1")
     await _pause(browser, "http://127.0.0.1:3001/", frame="PAGE1", ident="r2")
     await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE2", ident="r3")
@@ -943,7 +943,7 @@ async def test_a_frame_inside_the_page_is_judged_by_the_words_of_its_pages_drive
         }
     )
     browser = _browser(rule(), calls)
-    browser.written = {"PAGE1": frozenset({("127.0.0.1", 3000)})}
+    browser.written = {"PAGE1": lambda: [("127.0.0.1", 3000)]}
     await _pause(browser, "http://127.0.0.1:3000/", frame="FRAME")
     assert calls.answered() == [("Fetch.continueRequest", {"requestId": "r1"})]
     # A frame melo cannot place gets nothing: no page, no words.
@@ -957,17 +957,68 @@ async def test_the_set_follows_the_drivers_tabs_and_ends_with_them() -> None:
     browser = _browser(rule(), calls)
     mine = ChromeBackgroundDriver(command=["unused"], local=rule())
     mine._browser, mine._mine = browser, {"PAGE1"}
-    mine.allow_local([("127.0.0.1", 3000)])
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
     mine._mine.add("PAGE2")  # a tab the driver adopts later gets the set too
     mine._grant(browser, "PAGE2")
     assert set(browser.written) == {"PAGE1", "PAGE2"}
-    mine.allow_local([])  # the next step wrote none: every tab loses it
+    mine.allow_local(None)  # the next step wrote none: every tab loses it
     assert browser.written == {}
-    mine.allow_local([("127.0.0.1", 3000)])
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
     mine._drop("PAGE2")
     assert set(browser.written) == {"PAGE1"}
     mine._release()
     assert browser.written == {}
+
+
+async def test_what_the_person_wrote_ends_with_the_run_without_another_step() -> None:
+    """The browser keeps the run's reader, so a page goes on reaching a server only while its run lasts (#547)."""
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = browser, {"PAGE1"}
+    live = [True]
+    mine.allow_local(lambda: [("127.0.0.1", 3000)] if live[0] else [])
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r1")
+    live[0] = False  # the run ended; no browser step has come since
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1", ident="r2")
+    assert calls.answered() == [
+        ("Fetch.continueRequest", {"requestId": "r1"}),
+        ("Fetch.failRequest", {"requestId": "r2", "errorReason": "BlockedByClient"}),
+    ]
+
+
+async def test_a_grant_that_cannot_be_read_fails_the_request_and_never_lets_it_go() -> (
+    None
+):
+    calls = Calls()
+    browser = _browser(rule(), calls)
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = browser, {"PAGE1"}
+
+    def broken() -> list[tuple[str, int]]:
+        raise RuntimeError("the run is gone")
+
+    mine.allow_local(broken)
+    await _pause(browser, "http://127.0.0.1:3000/", frame="PAGE1")
+    assert calls.answered()[0][0] == "Fetch.failRequest"
+
+
+async def test_the_pages_of_a_chrome_started_again_keep_what_the_run_may_reach() -> (
+    None
+):
+    """A take-over restarts Chrome: the new one has no grant of its own, so the driver gives its renamed pages the run's (#547)."""
+    calls = Calls()
+    old, new = _browser(rule(), calls), _browser(rule(), calls)
+    new.claimed = {"PAGE9"}
+    old.successor, old.renamed = new, {"PAGE1": "PAGE9"}
+    mine = ChromeBackgroundDriver(command=["unused"], local=rule())
+    mine._browser, mine._mine = old, {"PAGE1"}
+    mine.allow_local(lambda: [("127.0.0.1", 3000)])
+    mine._follow()
+    assert mine._browser is new and mine._mine == {"PAGE9"}
+    assert set(new.written) == {"PAGE9"}
+    await _pause(new, "http://127.0.0.1:3000/", frame="PAGE9")
+    assert calls.answered() == [("Fetch.continueRequest", {"requestId": "r1"})]
 
 
 # ── Launch: Chrome's check stays on, and the rule is set up ──

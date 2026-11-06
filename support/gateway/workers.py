@@ -30,6 +30,7 @@ from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
 )
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
@@ -689,6 +690,12 @@ class TaskWorkers:
                 raise ValueError("front_id must name a console chat")
         if "deadline" in clean:
             raise ValueError("deadline is not supported yet")
+        # The person's own words come in here (a task given directly): a password
+        # in them is cut out before the task is titled or stored (#547). The same
+        # text hides to the same handle, so a repeated request key still matches.
+        for name in ("objective", "prompt", "title"):
+            if isinstance(clean.get(name), str):
+                clean[name] = hide_passwords(clean[name])
         level = clean.get("level")
         if (
             isinstance(level, str)

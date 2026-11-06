@@ -31,17 +31,22 @@ _SPECIFIC = re.compile(r"[0-9_.-]")
 MIN_NAME = 5
 _LOOPBACK = {"localhost": "127.0.0.1", "127.0.0.1": "127.0.0.1", "[::1]": "::1"}
 # Chinese, Japanese and Korean are written with no space between words, so a
-# character of them next to an address is a boundary: the texts are read with
-# each one as a space. A Latin letter, a digit or ``_`` is not one.
-_CJK = re.compile(
+# run of their characters next to an address is a boundary, as a space is
+# (:func:`_prose`). A Latin letter, a digit or ``_`` is not one.
+_CJK_RUN = re.compile(
     "[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
-    "\U00020000-\U0002fa1f]"
+    "\U00020000-\U0002fa1f]+"
 )
+# What stands in place of a run of those characters that sits inside an
+# address, after a character that continues one (``?to=``, ``/``, ``@``) or
+# before a user part (``@``): a character no address may stand next to.
+_INSIDE = "\ue000"
+_CONTINUES = frozenset(".:/@?=&#%~+$\\-")
 # A server is written on its own: not inside a longer word or address (a
 # query string, a path, a user part, a longer host or a longer port).
 _SERVER = re.compile(
-    r"(?<![\w.:/@?=&#%~+$\\-])(?:https?://)?(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})"
-    r"(?![\w:.-]*\w|@)",
+    r"(?<![\w.:/@?=&#%~+$\\\ue000-])(?:https?://)?(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})"
+    r"(?![\w:.-]*\w|@|\ue000)",
     re.IGNORECASE,
 )
 
@@ -115,6 +120,24 @@ def script_named(url: str, texts: Iterable[str]) -> bool:
     return any(_token(text, needle, before=r"\w.-") for text in texts)
 
 
+def _prose(text: str) -> str:
+    """*text* with each run of Chinese, Japanese or Korean characters read as a space, unless it is inside an address.
+
+    Inside is right after a character that continues an address
+    (``https://site.example/?to=中localhost:3000``) or right before a user part
+    (``localhost:3000中@site.example``): the run is then :data:`_INSIDE`, which
+    no server may stand next to, so what is on the other side of it is part of
+    the address and not a server of its own.
+    """
+
+    def read(run: re.Match[str]) -> str:
+        before = text[run.start() - 1] if run.start() else " "
+        after = text[run.end()] if run.end() < len(text) else " "
+        return _INSIDE if before in _CONTINUES or after == "@" else " "
+
+    return _CJK_RUN.sub(read, text)
+
+
 def local_sites(texts: Iterable[str]) -> frozenset[tuple[str, int]]:
     """The servers on this computer the texts write, as ``(address, port)``.
 
@@ -122,11 +145,12 @@ def local_sites(texts: Iterable[str]) -> frozenset[tuple[str, int]]:
     bare ``localhost`` or an address on the network names nothing. A ``host:port``
     inside another address does not count either (``https://site.example/?to=localhost:3000``,
     ``https://site.example/localhost:3000``, ``localhost:3000@site.example``),
-    but a Chinese, Japanese or Korean character next to it is only a boundary.
+    but a Chinese, Japanese or Korean character next to it is only a boundary
+    (:func:`_prose`), unless that character is itself inside such an address.
     """
     found: set[tuple[str, int]] = set()
     for text in texts:
-        for host, port in _SERVER.findall(_CJK.sub(" ", text)):
+        for host, port in _SERVER.findall(_prose(text)):
             if 0 < int(port) < 65536:
                 found.add((_LOOPBACK[host.lower()], int(port)))
     return frozenset(found)

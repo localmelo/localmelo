@@ -374,7 +374,7 @@ def asked() -> dict[int, list[str]]:
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
 async def test_the_server_the_person_wrote_opens(world: World, host: str) -> None:
-    world.driver.allow_local([("127.0.0.1", world.other)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.other)])
     tab = await world.driver.open(local(world.other, host=host), new_tab=True)
     assert tab.url.startswith(f"http://{host}:{world.other}/hello")
     assert asked() == {world.other: ["GET /hello"]}
@@ -384,7 +384,7 @@ async def test_the_server_the_person_wrote_opens(world: World, host: str) -> Non
 async def test_a_server_the_person_did_not_write_is_refused_and_no_request_is_sent(
     world: World,
 ) -> None:
-    world.driver.allow_local([("127.0.0.1", world.other)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.other)])
     for port in (world.helper, world.gateway):
         with pytest.raises(BrowserError, match="could not load"):
             await world.driver.open(local(port), new_tab=True)
@@ -400,18 +400,34 @@ async def test_a_driver_that_was_given_nothing_reaches_no_local_address(
 ) -> None:
     with pytest.raises(BrowserError, match="could not load"):
         await world.driver.open(local(world.other), new_tab=True)
-    world.driver.allow_local([("127.0.0.1", world.other)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.other)])
     await world.driver.open(local(world.other), new_tab=True)
-    world.driver.allow_local([])  # the next step's words wrote none
+    world.driver.allow_local(None)  # the next step's words wrote none
     with pytest.raises(BrowserError, match="could not load"):
         await world.driver.open(local(world.other), new_tab=True)
     assert asked() == {world.other: ["GET /hello"]}
 
 
+async def test_the_written_server_is_refused_once_the_run_that_wrote_it_is_over(
+    world: World,
+) -> None:
+    """The driver keeps the run's reader: no browser step has to come for the end of the run to count."""
+    live = [True]
+    world.driver.allow_local(lambda: [("127.0.0.1", world.other)] if live[0] else [])
+    tab = await world.driver.open(local(world.other), new_tab=True)
+    live[0] = False
+    with pytest.raises(BrowserError, match="could not load"):
+        await world.driver.open(local(world.other), new_tab=False, tab=tab.id)
+    assert asked() == {world.other: ["GET /hello"]}
+    assert await world.ports_told() == [world.other]
+
+
 async def test_melos_own_port_is_refused_even_when_the_person_wrote_it(
     world: World,
 ) -> None:
-    world.driver.allow_local([("127.0.0.1", world.gateway), ("127.0.0.1", world.other)])
+    world.driver.allow_local(
+        lambda: [("127.0.0.1", world.gateway), ("127.0.0.1", world.other)]
+    )
     with pytest.raises(BrowserError, match="could not load"):
         await world.driver.open(local(world.gateway), new_tab=True)
     assert world.gateway not in App.seen
@@ -423,13 +439,15 @@ async def test_a_redirect_from_the_written_server_to_another_local_address_is_re
     world: World,
 ) -> None:
     # The helper's port written: its ``/redir`` sends the tab to ``other``, which is not.
-    world.driver.allow_local([("127.0.0.1", world.helper)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.helper)])
     with pytest.raises(BrowserError, match="could not load"):
         await world.driver.open(local(world.helper, "/redir"), new_tab=True)
     assert asked() == {world.helper: ["GET /redir"]}
     assert await world.ports_told() == [world.other]
     # Written too, the redirect's target opens: the exact address, not a pattern.
-    world.driver.allow_local([("127.0.0.1", world.helper), ("127.0.0.1", world.other)])
+    world.driver.allow_local(
+        lambda: [("127.0.0.1", world.helper), ("127.0.0.1", world.other)]
+    )
     tab = await world.driver.open(local(world.helper, "/redir"), new_tab=True)
     assert tab.url.startswith(f"http://127.0.0.1:{world.other}/x")
 
@@ -437,7 +455,7 @@ async def test_a_redirect_from_the_written_server_to_another_local_address_is_re
 async def test_a_page_at_the_written_server_reaches_no_other_local_address(
     world: World,
 ) -> None:
-    world.driver.allow_local([("127.0.0.1", world.pages)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.pages)])
     target = f"http://127.0.0.1:{world.other}/x"
     await world.driver.open(
         local(world.pages, f"/p?kind=fetch&target={quote(target, safe='')}"),
@@ -453,7 +471,7 @@ async def test_a_public_page_still_cannot_reach_the_written_server(
     world: World,
 ) -> None:
     """The written address is let through melo's rule only: Chrome's own check of a public page's request to this Mac still stops it."""
-    world.driver.allow_local([("127.0.0.1", world.other)])
+    world.driver.allow_local(lambda: [("127.0.0.1", world.other)])
     await world.driver.open(
         world.site("fetch", f"http://127.0.0.1:{world.other}/x"), new_tab=True
     )

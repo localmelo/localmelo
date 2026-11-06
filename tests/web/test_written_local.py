@@ -191,8 +191,9 @@ class Recording(Anywhere):
         super().__init__(*args, **kwargs)
         self.allowed: list[frozenset[tuple[str, int]]] = []
 
-    def allow_local(self, sites: Any) -> None:
-        self.allowed.append(frozenset(sites))
+    def allow_local(self, grant: Any) -> None:
+        """Keeps what the reader says when told (``None``: nothing is allowed)."""
+        self.allowed.append(frozenset() if grant is None else frozenset(grant()))
 
 
 async def test_each_browser_step_tells_the_driver_which_servers_the_person_wrote() -> (
@@ -209,6 +210,18 @@ async def test_each_browser_step_tells_the_driver_which_servers_the_person_wrote
     with asking(BrowserAsks()):  # nor a policy that cannot say
         await run(tools, "browser_read")
     assert driver.allowed == [frozenset({("127.0.0.1", 3000)})] + [frozenset()] * 3
+
+
+async def test_forgetting_the_chat_takes_back_what_the_open_tabs_may_reach() -> None:
+    """A kept tab outlives its chat's approvals; it keeps no server on this computer (#547)."""
+    driver = Recording(page(DEV, "Dev server.", title="Dev"))
+    provider = BrowserToolProvider(driver)
+    tools = {tool.definition.name: tool for tool in await provider.start()}
+    with asking(WroteForBrowser(("127.0.0.1", 3000))):
+        await run(tools, "browser_open", url=DEV)
+    assert driver.allowed == [frozenset({("127.0.0.1", 3000)})]
+    provider.forget()
+    assert driver.allowed[1:] == [frozenset()]
 
 
 async def test_a_web_search_reads_with_no_local_address_even_when_the_person_wrote_one() -> (

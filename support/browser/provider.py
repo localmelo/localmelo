@@ -958,6 +958,8 @@ class BrowserToolProvider(BaseToolProvider):
         self._desk_mark = None
         self._held.clear()
         self._notes.clear()
+        # The open tabs stay, and keep no server on this computer.
+        self._allow_local(revoke=True)
         if self._desktop is not None:
             self._desktop.forget()
 
@@ -1732,7 +1734,13 @@ class BrowserToolProvider(BaseToolProvider):
         rows = list(item.form)
         if typed is not None:
             rows = [*fields.form_pairs([["typed", typed]]), *rows]
-        await sites.require_submit(snap.origin, item.submit, how, rows)
+        await sites.require_submit(
+            snap.origin,
+            item.submit,
+            how,
+            rows,
+            fields.searches(item, snap.elements.values()),
+        )
 
     async def _acting(
         self,
@@ -1742,6 +1750,7 @@ class BrowserToolProvider(BaseToolProvider):
         typed: str | None = None,
         on: str = "",
         origin: str | None = None,
+        search: bool = False,
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
@@ -1752,7 +1761,8 @@ class BrowserToolProvider(BaseToolProvider):
         listed is not acted in. Typing is asked about for *origin*, the site
         of the box itself (:func:`_box_origin`), not the page it sits in:
         the page's being named by the person says nothing of a box from
-        another site.
+        another site. *search*: the box is a search box (see
+        :func:`~localmelo.support.browser.fields.searches`).
         """
         await self._recheck(
             tab_id
@@ -1761,7 +1771,7 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_act(snap.origin, what, on)
         else:
             await sites.require_type(
-                snap.origin if origin is None else origin, typed, on
+                snap.origin if origin is None else origin, typed, on, search
             )
         before = await self._tabs_now()
         if before is None:
@@ -2448,17 +2458,18 @@ class BrowserToolProvider(BaseToolProvider):
             return dataclasses.replace(result, text=f"{result.text}\n{text}")
         return f"{result}\n{text}"
 
-    def _allow_local(self) -> None:
-        """Tell the driver which servers on this computer the person wrote in this run, before a step loads anything (#547).
+    def _allow_local(self, *, revoke: bool = False) -> None:
+        """Tell the driver which servers on this computer the person wrote in this run, before a step loads anything (#547), or take that back (*revoke*).
 
-        The driver's pages reach exactly those and no other local address;
-        none when the run has no policy that says so, or the person wrote none.
-        A driver that blocks nothing by itself (Safari: the address check is
-        melo's own) has nothing to tell.
+        The driver gets the run's reader, not its answer, so its pages reach
+        exactly those servers and no other local address for as long as the
+        run lasts: the reader of a run that is over says none. None when the
+        run has no policy that says so. A driver that blocks nothing by itself
+        (Safari: the address check is melo's own) has nothing to tell.
         """
         allow = getattr(self._driver, "allow_local", None)
         if callable(allow):
-            allow(local_ports.written_sites())
+            allow(None if revoke else local_ports.written_reader())
 
     def _with_local(self, result: str | ToolOutput) -> str | ToolOutput:
         """*result* with the requests to this computer melo blocked on this chat's pages since the last step."""
@@ -2605,6 +2616,7 @@ class BrowserToolProvider(BaseToolProvider):
             shown,
             _control_words(item),
             origin=_box_origin(snap, item),
+            search=fields.searches(item, snap.elements.values()),
         )
         assert before is not None
         done: set[str] = set()

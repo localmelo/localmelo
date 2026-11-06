@@ -19,7 +19,11 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import RunReviews, StepReviewer
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review import review_action
-from localmelo.melo.checker.review.posting import asks_to_send, asks_to_share
+from localmelo.melo.checker.review.posting import (
+    asks_to_search,
+    asks_to_send,
+    asks_to_share,
+)
 from localmelo.melo.contracts.approvals import AutoPolicy, asks_in_auto
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.memory.block import BLOCK_HEADER
@@ -432,14 +436,18 @@ async def test_data_sent_to_a_server_is_no_post(tmp_path: Path) -> None:
 
 
 async def type_on_named_site(
-    tmp_path: Path, text: str, reviews: list[Any]
+    tmp_path: Path,
+    text: str,
+    reviews: list[Any],
+    *,
+    words: str = "Post a question about this error on forum.example",
+    field: str = "",
 ) -> tuple[Recorder, FakeModel, ActsOnSite]:
     tool = ActsOnSite()
-    call = (
-        "act_on_site",
-        {"site": "forum.example", "access": "type", "text": text},
-        "c1",
-    )
+    arguments = {"site": "forum.example", "access": "type", "text": text}
+    if field:
+        arguments["field"] = field
+    call = ("act_on_site", arguments, "c1")
     llm = FakeModel([_calls(call), _answer("done")], reviews)
     (tmp_path / "ws").mkdir()
     agent = Agent(
@@ -453,11 +461,7 @@ async def type_on_named_site(
     )
     agent.chat.sleep = _no_wait
     recorder = Recorder()
-    await agent.run_task(
-        "Post a question about this error on forum.example",
-        on_event=recorder,
-        approval=AutoPolicy(),
-    )
+    await agent.run_task(words, on_event=recorder, approval=AutoPolicy())
     return recorder, llm, tool
 
 
@@ -493,3 +497,131 @@ async def test_the_text_of_a_post_melo_wrote_is_in_the_record(tmp_path: Path) ->
     assert tool.answers[0].allow
     [started] = recorder.of("tool.started")
     assert started.data["arguments"]["text"] == text
+
+
+async def typed_in(
+    tmp_path: Path, folder: str, text: str, reviews: list[Any], **more: Any
+) -> tuple[FakeModel, ActsOnSite]:
+    (tmp_path / folder).mkdir()
+    _, llm, tool = await type_on_named_site(tmp_path / folder, text, reviews, **more)
+    return llm, tool
+
+
+@pytest.mark.asyncio
+async def test_a_sentence_on_a_named_site_is_a_message_like_any_other(
+    tmp_path: Path,
+) -> None:
+    """One reading of "message-sized" (:func:`is_message`): five words are a message even where a field is under 80 characters, so the shortcut does not take it."""
+    text = "Does anyone know how to reset the router?"
+    assert len(text) < 80 and len(text.split()) >= 5
+    look = "Look at the thread on forum.example"
+    # It reaches the review, and no word of the person's asks for a post.
+    llm, tool = await typed_in(tmp_path, "a", text, [verdict(**YES)], words=look)
+    assert len(llm.review_requests) == 1 and not tool.answers[0].allow
+    # The same sentence, asked for in their words, runs after its review.
+    llm, tool = await typed_in(tmp_path, "b", text, [verdict(**YES)])
+    assert tool.answers[0].allow and len(llm.review_requests) == 1
+    # A short field stays on the shortcut.
+    llm, tool = await typed_in(tmp_path, "c", "router manual", [], words=look)
+    assert tool.answers[0].allow and not llm.review_requests
+
+
+QUERY = "cheap flights from Boston to Denver in the second week of March"
+
+
+def in_search(step: tuple[str, dict[str, Any], ActionReview]) -> Any:
+    tool, arguments, rules = step
+    return tool, {**arguments, "field": "search"}, rules
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("words", "step", "runs"),
+    [
+        pytest.param(
+            ["Find cheap flights to Denver"],
+            in_search(typed(QUERY)),
+            True,
+            id="a search box, whatever the length",
+        ),
+        pytest.param(
+            ["Find cheap flights to Denver"],
+            in_search(sent(("q", QUERY))),
+            True,
+            id="a search sent",
+        ),
+        pytest.param(
+            ["找一下去丹佛的便宜机票"],
+            in_search(typed(QUERY)),
+            True,
+            id="a search asked in Chinese",
+        ),
+        # What is not a search still asks: a message in any other box, a box a page
+        # calls a search box when no word of the person's asks to search.
+        pytest.param(
+            ["Find cheap flights to Denver"],
+            typed(FORUM_TEXT),
+            False,
+            id="a message in another box",
+        ),
+        pytest.param(
+            ["Look at the router thread"],
+            in_search(typed(FORUM_TEXT)),
+            False,
+            id="a search box, no search asked",
+        ),
+    ],
+)
+async def test_a_search_is_no_post_whatever_its_length_and_a_message_still_asks(
+    tmp_path: Path,
+    words: list[str],
+    step: tuple[str, dict[str, Any], ActionReview],
+    runs: bool,
+) -> None:
+    found = await settle(words, step, NONE, tmp_path)
+    assert (found.verdict == "routine") is runs, found
+    if not runs:
+        assert found.verdict == "high" and asks_in_auto(found), found
+
+
+@pytest.mark.asyncio
+async def test_a_search_on_a_named_site_is_typed_on_the_shortcut_whatever_its_length(
+    tmp_path: Path,
+) -> None:
+    words = "Find cheap flights to Denver on forum.example"
+    llm, tool = await typed_in(tmp_path, "a", QUERY, [], words=words, field="search")
+    assert tool.answers[0].allow and not llm.review_requests
+    # No search asked, or a box that is not a search box: reviewed whole.
+    llm, tool = await typed_in(
+        tmp_path,
+        "b",
+        QUERY,
+        [verdict(**YES)],
+        words="Look at forum.example",
+        field="search",
+    )
+    assert len(llm.review_requests) == 1 and not tool.answers[0].allow
+    llm, tool = await typed_in(tmp_path, "c", QUERY, [verdict(**YES)], words=words)
+    assert len(llm.review_requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("words", "asks"),
+    [
+        ("Find cheap flights to Denver", True),
+        ("Search the shop for a red kettle", True),
+        ("Look up the router manual", True),
+        ("Look for a hotel in Rome", True),
+        ("Google the capital of Peru", True),
+        ("找一下便宜机票", True),
+        ("搜索路由器说明书", True),
+        ("查一下天气", True),
+        # No request to search.
+        ("Post this on the forum", False),
+        ("Reply to him in this thread", False),
+        ("Look at the router thread", False),
+        ("Summarize the research paper", False),
+    ],
+)
+def test_the_search_cue_is_a_request_to_search(words: str, asks: bool) -> None:
+    assert asks_to_search([words]) is asks

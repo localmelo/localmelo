@@ -154,3 +154,49 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
 async def _wait_idle(console: Console) -> None:
     await until(lambda: not console.sessions.find_turn("none"))
     await asyncio.sleep(0.05)
+
+
+async def test_a_password_in_a_task_given_directly_is_hidden_where_the_task_is_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``POST /api/tasks`` takes the person's words too: the objective, and a title they chose."""
+    objective, title = "directSecret-91", "titleDirect-92"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    body = {
+        "objective": f"sign in to forum.example, my password is {objective}",
+        "title": f"Sign in (password: {title})",
+        "level": "p5",
+        "workspace": str(workspace),
+        "request_key": "direct-1",
+    }
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, client, _):
+        made = await client.post("/api/tasks", json=body)
+        assert made.status_code == 202, made.text
+        # The same request again is the same task: the hidden copy is the same text.
+        again = await client.post("/api/tasks", json=body)
+        assert again.status_code == 200, again.text
+        assert again.json()["task"]["task_id"] == made.json()["task"]["task_id"]
+        listed = await client.get("/api/tasks")
+        # A different request under the same key is still a conflict.
+        other = await client.post(
+            "/api/tasks", json={**body, "objective": "water the plants"}
+        )
+        assert other.status_code == 409, other.text
+        # Ordinary text is left as it is.
+        plain = await client.post(
+            "/api/tasks",
+            json={**body, "objective": "water the plants", "request_key": "p"},
+        )
+        assert plain.status_code == 202 and "water the plants" in plain.text
+        await _wait_idle(console)
+        disks = "\n".join(stored(path) for path in sorted(tmp_path.rglob("*.db")))
+        everything = disks + made.text + again.text + listed.text + plain.text
+        for secret in (objective, title):
+            assert secret not in everything, f"{secret} reached a copy of the task"
+        task = made.json()["task"]
+        assert "[password-" in made.text and "[password-" in task["title"], task
+        assert (
+            "password is [password-" in disks
+        )  # the objective, hidden, is what is kept
+        assert VAULT.value("[password-1]") in (objective, title)

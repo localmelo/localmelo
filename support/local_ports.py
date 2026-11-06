@@ -12,7 +12,7 @@ in the background (Chrome) too.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, urlsplit
 
@@ -90,6 +90,17 @@ def own_ports(
     return ports
 
 
+def written_reader() -> Callable[[], Iterable[tuple[str, int]]] | None:
+    """What says, for the run asking now, which servers on this computer the person wrote; ``None`` when no policy can say (#547).
+
+    The browser keeps this reader, not what it says: a step's answer ends with
+    its run (the policy of a run that is over says none), so what a page may
+    reach is never older than the run that was allowed it.
+    """
+    found = getattr(TOOL_ASK.get(), "written_sites", None)
+    return found if callable(found) else None
+
+
 def written_sites() -> frozenset[tuple[str, int]]:
     """The servers on this computer the person's own words write in this run, as ``(address, port)`` (#547).
 
@@ -101,8 +112,8 @@ def written_sites() -> frozenset[tuple[str, int]]:
     the callers' to refuse: none is ever let through, written or listed
     (:func:`own_ports`).
     """
-    found = getattr(TOOL_ASK.get(), "written_sites", None)
-    return frozenset(found()) if callable(found) else frozenset()
+    found = written_reader()
+    return frozenset(found()) if found is not None else frozenset()
 
 
 def written_site(parts: SplitResult) -> tuple[str, int] | None:
@@ -128,6 +139,7 @@ __all__ = [
     "MODEL",
     "own_ports",
     "urls_of",
+    "written_reader",
     "written_site",
     "written_sites",
 ]
