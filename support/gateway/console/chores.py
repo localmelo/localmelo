@@ -18,8 +18,11 @@ that chat as a task they asked for is: it has the browser, works in the chore's
 own folder, which every run shares and which goes with the chore
 (:func:`~localmelo.support.gateway.task_policy.chore_workspace`), and its chat
 follows up on how it ended. A run already accepted when its chore is deleted
-goes on and ends in place; :meth:`ChoreRunner.sweep` removes the folder after
-it, and any folder a failed removal left. Its approvals are not a task's: it
+goes on and ends in place; the folder of that chore is removed when the run has
+ended, in the same gateway run (:meth:`ChoreRunner._retire`). If the gateway
+restarts first, or removing fails, the folder stays where the chat was told it
+is: melo removes only the folder of a chore it deleted, never one it finds by its
+name. Its approvals are not a task's: it
 neither uses nor records the chat's earlier approvals, and Auto blocks what it
 would ask. A one-time chore (a reminder) runs once, late if the computer slept
 through its time, and is then switched off with no next time; it never waits
@@ -65,7 +68,6 @@ from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
     TaskSpec,
-    chore_folder_ids,
     chore_folder_path,
     chore_workspace,
     remove_chore_workspace,
@@ -146,6 +148,9 @@ class ChoreRunner:
         self._skipped_for: set[str] = set()
         # One lock for each chore: whoever decides whether it may start holds it.
         self._locks: dict[str, asyncio.Lock] = {}
+        # Deleted chores whose last run was going, by that run's id: the folder goes
+        # when it ends (until the gateway restarts; then it stays, and was told).
+        self._leaving: dict[str, Chore] = {}
 
     @contextlib.asynccontextmanager
     async def guard(self, chore_id: str) -> AsyncIterator[None]:
@@ -154,6 +159,10 @@ class ChoreRunner:
         The timer, Run now, a chat that saves a chore and starts its first run,
         and a delete all go through it, so none acts on what another has just
         changed. The task that holds it may ask again (a save that starts the run).
+
+        Re-entry is by context, so it is safe only while no task created inside
+        the hold asks for the same chore later; none does. One that must takes
+        the lock itself, or this is wrong.
         """
         held = _HELD.get()
         if chore_id in held:
@@ -205,10 +214,10 @@ class ChoreRunner:
             self.next_checkin = now + self.options.checkin_s
             if self.checkin_task is None or self.checkin_task.done():
                 self.checkin_task = asyncio.create_task(self._checkin_quietly())
-            try:
-                await self.sweep()
-            except Exception:
-                logger.exception("The sweep of chore folders failed")
+        try:
+            await self._retire()
+        except Exception:
+            logger.exception("Removing the folders of deleted chores failed")
         return started
 
     async def _run_due(self, chore: Chore, now: float) -> str | None:
@@ -276,13 +285,17 @@ class ChoreRunner:
         except TaskStoreError:
             return None
 
-    async def busy(self, chore: Chore) -> bool:
-        """Whether *chore*'s last run has not ended: its runs are one at a time.
+    async def _open_run(self, chore: Chore) -> TaskRecord | None:
+        """*chore*'s last run when it has not ended, else ``None``.
 
         Paused and interrupted runs have not ended: they go on when resumed.
         """
         record = await self._last_run(chore)
-        return record is not None and record.state not in FINISHED
+        return None if record is None or record.state in FINISHED else record
+
+    async def busy(self, chore: Chore) -> bool:
+        """Whether *chore*'s last run has not ended: its runs are one at a time."""
+        return await self._open_run(chore) is not None
 
     async def _holds(self, chore: Chore, now: float) -> bool:
         """Whether *chore*'s last run still holds its slot at *now*.
@@ -290,8 +303,8 @@ class ChoreRunner:
         A run that has not ended does, unless it has waited on the person for
         :data:`WAIT_LIMIT_S`: then it is ended with a plain line and the slot is free.
         """
-        record = await self._last_run(chore)
-        if record is None or record.state in FINISHED:
+        record = await self._open_run(chore)
+        if record is None:
             return False
         if not self._waited_out(record, now):
             return True
@@ -372,61 +385,69 @@ class ChoreRunner:
         """Delete a chore, and the folder its runs shared with it.
 
         A run already accepted goes on and ends in place; its folder is removed
-        once it has ended (:meth:`sweep`). Returns ``""`` when the folder is gone,
-        ``"running"`` when a run still uses it and ``"left"`` when it could not be
-        removed: in both of those the chat is told where it is.
+        when it has ended (:meth:`_retire`). Returns ``""`` when the folder is
+        gone, ``"running"`` when a run still works in it and ``"left"`` when it
+        could not be removed: in both of those the chat is told where it is.
         """
         async with self.guard(chore_id):
             chore = await self.store.get(chore_id)
             await self.store.delete(chore_id, revision=revision)
-            left = await self._clear(chore)
+            run = await self._open_run(chore)
+            if run is not None and self._works_in_folder(run, chore_id):
+                self._leaving[run.task_id] = chore
+                left = "running"
+            else:
+                left = "left" if await self._remove(chore) else ""
         if left:
-            path = str(chore_folder_path(self.console.workers.settings(), chore_id))
             key = "chores.folderRunning" if left == "running" else "chores.folderLeft"
-            await self._say(chore, key, title=chore.title, path=path)
+            await self._say_folder(chore, key)
         return left
 
-    async def _clear(self, chore: Chore) -> str:
-        """Remove *chore*'s folder unless a run still works in it: ``""``, ``"running"`` or ``"left"``."""
-        if await self._in_use(chore.chore_id):
-            return "running"
+    @staticmethod
+    def _works_in_folder(run: TaskRecord, chore_id: str) -> bool:
+        """Whether *run* works in chore *chore_id*'s own folder (a chat's first run does not)."""
+        return Path(str(run.spec.get("workspace") or "")).name == f"chore-{chore_id}"
+
+    async def _remove(self, chore: Chore) -> bool:
+        """Remove the folder of the deleted *chore*; whether it could not be removed."""
         try:
             await asyncio.to_thread(
-                remove_chore_workspace,
-                self.console.workers.settings(),
-                chore.chore_id,
+                remove_chore_workspace, self.console.workers.settings(), chore.chore_id
             )
         except OSError:
             logger.exception("Could not remove the folder of a deleted chore")
-            return "left"
-        return ""
+            return True
+        return False
 
-    async def _in_use(self, chore_id: str) -> bool:
-        """Whether a run that has not ended works in chore *chore_id*'s folder."""
-        name = f"chore-{chore_id}"
-        return any(
-            Path(str(r.spec.get("workspace") or "")).name == name
-            for r in await self.console.workers.tasks.open_tasks()
-        )
+    async def _say_folder(self, chore: Chore, key: str) -> None:
+        """Tell the chat where the folder of the deleted *chore* is."""
+        try:
+            path = chore_folder_path(self.console.workers.settings(), chore.chore_id)
+        except TaskPolicyError:
+            path = ""
+        await self._say(chore, key, title=chore.title, path=path)
 
-    async def sweep(self) -> None:
-        """Remove the folders of deleted chores that were left: a run was in them, or removing failed.
+    async def _retire(self) -> None:
+        """Remove the folder of each deleted chore whose last run has now ended.
 
-        Only folders melo made for a chore (``chore-`` and its 12-hex id), whose
-        chore is gone and which no run that has not ended works in.
+        Only a chore this gateway run deleted while its run was going: its folder is
+        the one it made, by the chore's own id. A chore saved again under that id
+        meanwhile keeps it. A folder that cannot be removed is said, and left.
         """
-        settings = self.console.workers.settings()
-        ids = await asyncio.to_thread(chore_folder_ids, settings)
-        if not ids:
-            return
-        owned = {c.chore_id for c in await self.store.list_chores()}
-        for chore_id in ids:
-            if chore_id in owned or await self._in_use(chore_id):
-                continue
+        for task_id, chore in list(self._leaving.items()):
             try:
-                await asyncio.to_thread(remove_chore_workspace, settings, chore_id)
-            except OSError:
-                logger.exception("Could not remove a folder left by a deleted chore")
+                record = await self.console.workers.tasks.get_task(task_id)
+            except TaskStoreError:
+                record = None  # the run's row is gone: nothing works in the folder
+            if record is not None and record.state not in FINISHED:
+                continue
+            del self._leaving[task_id]
+            async with self.guard(chore.chore_id):
+                if await self.store.find(chore.chore_id) is not None:
+                    continue
+                failed = await self._remove(chore)
+            if failed:
+                await self._say_folder(chore, "chores.folderLeft")
 
     async def run_now(self, chore: Chore) -> dict[str, Any]:
         """The person's Run now: a task at once; the chore's schedule stays as it was.

@@ -222,8 +222,10 @@ those tools can do.
   what it waited on, and starts its own run; a run whose page you hold is
   never ended this way. A run already going when you delete the chore is not
   cancelled: it ends in place, the chat says where its folder is, and melo
-  removes the folder after it ends (only `chore-` and a 12 hex digit id that no
-  chore owns); a folder that cannot be removed is said and tried again. A
+  removes the folder after it ends, from what it kept when it deleted that
+  chore; if melo restarts first, or the removal fails, the folder stays where
+  the chat was told it is. melo never removes a folder because of its name: it
+  removes only the folder of a chore it deleted. A
   password you gave in the message that saved the chore is typed by the run
   that message started only; a later run does not get it, so it relies on the
   sign-in melo's browser kept, or asks you. What a run leaves in its folder,

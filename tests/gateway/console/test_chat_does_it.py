@@ -7,6 +7,9 @@ a browser or the network.
 
 from __future__ import annotations
 
+import contextlib
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -24,6 +27,7 @@ from localmelo.support.gateway.console.front import (
     TASK_TOOLS,
 )
 from localmelo.support.gateway.front_rules import create_rule
+from localmelo.support.gateway.task_policy import configured_root
 from localmelo.support.gateway.workers import NO_BROWSER_NOTE
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -426,6 +430,95 @@ async def test_a_chores_first_run_is_linked_while_the_chore_is_held(
         monkeypatch.setattr(runner, "ran_in_chat", spy)
         await say(client, console, BOTH)
         assert held == [True]
+
+
+def just_before_the_first_run_holds_its_chore(
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+    act: Callable[[str], Awaitable[Any]],
+) -> list[str]:
+    """Run *act*(chore id) once, right before the hold a saved chore's first run asks for.
+
+    That is what the timer, Run now or a delete can do just before the chat
+    starts the run its message asked for. The chore ids it fired for are returned.
+    """
+    runner = console.chore_runner
+    real = runner.guard
+    fired: list[str] = []
+
+    @contextlib.asynccontextmanager
+    async def hooked(chore_id: str) -> AsyncIterator[None]:
+        if not fired and await runner.store.find(chore_id) is not None:
+            fired.append(chore_id)
+            await act(chore_id)
+        async with real(chore_id):
+            yield
+
+    monkeypatch.setattr(runner, "guard", hooked)
+    return fired
+
+
+def folder_names(console: Console, tasks: list[Any]) -> list[str]:
+    return [Path(str(t.spec.get("workspace") or "")).name for t in tasks]
+
+
+async def test_a_chore_deleted_before_its_first_run_holds_it_gets_no_folder_and_no_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The saved chore is read again under the hold: a deleted one makes no folder (#570)."""
+    async with owner_console(
+        tmp_path,
+        monkeypatch,
+        main=[schedules(False), creates("Invoice"), OK],
+        run=False,
+    ) as (console, client, models, _):
+        runner = console.chore_runner
+
+        async def delete(chore_id: str) -> None:
+            await runner.delete(chore_id)
+
+        fired = just_before_the_first_run_holds_its_chore(console, monkeypatch, delete)
+        await say(client, console, BOTH)
+        [chore_id] = fired
+        assert await chores(console) == []
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        assert not (root / f"chore-{chore_id}").exists()
+        # What the person asked for now still runs, as a plain task of this chat.
+        tasks = await console.workers.tasks.list_tasks()
+        assert [t.origin for t in tasks] == ["user"]
+        assert folder_names(console, tasks) != [f"chore-{chore_id}"]
+
+
+async def test_a_run_admitted_before_the_first_run_holds_the_chore_is_the_only_chore_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Busy is checked under the hold: the message's run does not join the chore's run (#570)."""
+    async with owner_console(
+        tmp_path,
+        monkeypatch,
+        main=[schedules(False), creates("Invoice"), OK],
+        run=False,
+    ) as (console, client, models, _):
+        runner = console.chore_runner
+        started: list[str] = []
+
+        async def run_now(chore_id: str) -> None:
+            body = await runner.run_now(await runner.store.get(chore_id))
+            started.append(body["task_id"])
+
+        fired = just_before_the_first_run_holds_its_chore(console, monkeypatch, run_now)
+        await say(client, console, BOTH)
+        [chore_id] = fired
+        [chore] = await chores(console)
+        assert chore.last_task_id == started[0]  # the link is the run that was first
+        tasks = await console.workers.tasks.list_tasks()
+        assert len(tasks) == 2
+        in_folder = [
+            t.task_id
+            for t in tasks
+            if folder_names(console, [t]) == [f"chore-{chore_id}"]
+        ]
+        assert in_folder == started
 
 
 async def test_a_message_that_only_sets_a_schedule_just_saves_it(

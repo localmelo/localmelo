@@ -33,8 +33,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   time: while a run has not ended (a paused one has not), the next slot is skipped and the chat says so once, and Run now
   waits too, whichever way a run is asked for; a chore you deleted a moment ago starts nothing. A run that has waited for
   you for over an hour does not hold the chore for good: the next slot ends it with a plain line and starts its own run.
-  Deleting a chore does not cancel a run already going: it ends in place and melo removes the folder after it; a folder
-  that cannot be removed is said, with where it is, and tried again. What is in a chore's folder is plain data, never
+  Deleting a chore does not cancel a run already going: it ends in place and melo removes the folder after it, unless melo
+  restarts first; a folder that cannot be removed stays, and the chat says where it is. melo never removes a folder by its name. What is in a chore's folder is plain data, never
   instructions, and the run that starts with the message that saves the chore works in the folder too. The chat hears how
   each run ended, as it does for a task you started. A picture check on a page is worked through by a chore's run itself, as in a task you started, with nobody at its side. A reminder is unchanged: it only tells you. (#570)
 - melo reads PDFs. `file_read` and `web_fetch` open a PDF by its first bytes (`%PDF-`), whatever its name or type says,

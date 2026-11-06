@@ -440,12 +440,14 @@ run on an approval or an input, an open ask, a `parked` or `interrupted` run) fo
 `WAIT_LIMIT_S` (one hour) and whose page the person does not hold is ended with
 a `user_stop` at the next slot, the chat gets a `notice` echo (`chores.waitedOut`)
 and the slot's run starts; a run that does not end within `STOP_WAIT_S` keeps the
-slot for that time. A run accepted before its chore is deleted goes on to its end;
-`ChoreRunner.sweep`, at every check-in beat, removes the `chore-<12 hex>`
-folders of chores that are gone once no task that has not ended works in them
-(`TaskStore.open_tasks`), and so retries a folder that could not be removed
-(`task_policy.remove_chore_workspace` raises `OSError`; `delete` says so with a
-`notice` echo). A chore's run takes no project instructions from its folder
+slot for that time. A run accepted before its chore is deleted goes on to its end:
+`delete` keeps the deleted chore in memory under that run's id (`_leaving`), and
+each tick `ChoreRunner._retire` removes the chore's folder
+(`task_policy.remove_chore_workspace`, by the chore's own id) once that run has
+ended, unless a chore was saved again under that id meanwhile. Nothing is
+stored: a restart first leaves the folder where the `notice` echo said it is, and
+a removal that raises `OSError` is said (`chores.folderLeft`) and left. Nothing
+removes a folder by its name. A chore's run takes no project instructions from its folder
 (`TaskWorkers.create_spec`), and `TaskSpec.repeats` becomes
 `AgentOptions.repeats`, which makes the posting review ask each time
 (`StepReviewer`, `post_stop(repeating=True)`).

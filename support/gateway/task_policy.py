@@ -459,7 +459,7 @@ def remove_chore_workspace(cfg: object, chore_id: str) -> None:
 
     Only that one child of the root goes. A link is unlinked, never followed,
     and so are the links inside it. A folder that cannot be deleted whole raises
-    :class:`OSError`, left as far as it went: the caller says so and tries again.
+    :class:`OSError`, left as far as it went: the caller says where it is.
     """
     try:
         root, _ = _root_and_home(cfg)
@@ -470,27 +470,6 @@ def remove_chore_workspace(cfg: object, chore_id: str) -> None:
         os.unlink(path)
     elif os.path.isdir(path) and _inside(os.path.realpath(path), root):
         shutil.rmtree(path)
-
-
-_MADE_FOLDER: Final = re.compile(r"chore-([0-9a-f]{12})")
-
-
-def chore_folder_ids(cfg: object) -> list[str]:
-    """The ids whose chore folders (``chore-`` and twelve hex digits, as melo makes them) are in the workspace root.
-
-    Only real folders by that exact name: a link or any other name is not one.
-    """
-    try:
-        root, _ = _root_and_home(cfg)
-        with os.scandir(root) as entries:
-            return sorted(
-                found.group(1)
-                for entry in entries
-                if (found := _MADE_FOLDER.fullmatch(entry.name))
-                and entry.is_dir(follow_symlinks=False)
-            )
-    except (WorkspaceError, OSError):
-        return []
 
 
 def _user_refusal(path: str, home: str) -> str:
@@ -577,7 +556,6 @@ __all__ = [
     "WorkerToolPolicy",
     "WorkspaceError",
     "check_origin",
-    "chore_folder_ids",
     "chore_folder_path",
     "chore_workspace",
     "configured_root",

@@ -1614,7 +1614,7 @@ async def test_a_side_chat_chore_waiting_on_you_is_in_the_checkin_once(
         assert await console.chore_runner.checkin() is None
 
 
-async def test_a_deleted_chore_whose_folder_cannot_go_says_so_and_it_is_tried_again(
+async def test_a_deleted_chore_whose_folder_cannot_go_says_where_it_is(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with chore_console(tmp_path) as (console, client, clock, _, _):
@@ -1625,7 +1625,6 @@ async def test_a_deleted_chore_whose_folder_cannot_go_says_so_and_it_is_tried_ag
         [task_id] = await console.chore_runner.tick()
         await finish(console, task_id, clock.now)
         (folder / "points.txt").write_text("42")
-        (root / "chore-notes").mkdir()  # not a chore's folder: never touched
         real = chores_module.remove_chore_workspace
 
         def fails(cfg: Any, chore_id: str) -> None:
@@ -1635,20 +1634,48 @@ async def test_a_deleted_chore_whose_folder_cannot_go_says_so_and_it_is_tried_ag
         deleted = await client.delete(f"/api/chores/{chore['id']}")
         assert deleted.status_code == 200, deleted.text
         assert deleted.json() == {"deleted": chore["id"], "folder": "left"}
-        found = [
-            e.get("said", {}).get("key")
+        [line] = [
+            e
             for e in await rows_of(console, str(console.main_id))
+            if e.get("said", {}).get("key") == "chores.folderLeft"
         ]
-        assert "chores.folderLeft" in found
-        assert folder.is_dir()
-        # The folder is found and removed on a later beat, when it can be.
+        assert os.path.realpath(line["said"]["params"]["path"]) == str(folder)
+        # It was told where the folder is, and nothing removes it later: not a
+        # later beat, and not by its name.
         monkeypatch.setattr(chores_module, "remove_chore_workspace", real)
-        await console.chore_runner.sweep()
-        assert not folder.exists() and (root / "chore-notes").is_dir()
+        for _ in range(3):
+            console.chore_runner.next_checkin = 0.0
+            clock.now += CHECKIN_S + 1
+            await console.chore_runner.tick()
+        assert (folder / "points.txt").read_text() == "42"
+
+
+async def test_a_folder_the_chore_did_not_make_survives_every_cleanup(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        lookalike = (
+            root / "chore-0123456789ab"
+        )  # a name melo gives, a folder it did not make
+        lookalike.mkdir(parents=True)
+        (lookalike / "keep.txt").write_text("mine")
+        chore = await add(client, "Brief me", BRIEF)
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await finish(console, task_id, clock.now)
+        deleted = await client.delete(f"/api/chores/{chore['id']}")
+        assert deleted.json() == {"deleted": chore["id"]}
+        for _ in range(3):  # check-in beats, with nothing owning the look-alike
+            console.chore_runner.next_checkin = 0.0
+            clock.now += CHECKIN_S + 1
+            await console.chore_runner.tick()
+        assert (lookalike / "keep.txt").read_text() == "mine"
+        assert not (root / f"chore-{chore['id']}").exists()
 
 
 async def test_a_deleted_chores_folder_stays_while_its_run_goes_on_then_goes(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async with chore_console(tmp_path) as (console, client, clock, _, _):
         chore = await add(client, "Brief me", BRIEF)
@@ -1657,11 +1684,70 @@ async def test_a_deleted_chores_folder_stays_while_its_run_goes_on_then_goes(
         clock.to("2026-10-28 08:31")
         [task_id] = await console.chore_runner.tick()
         deleted = await client.delete(f"/api/chores/{chore['id']}")
-        # Nothing cancels the run: it finishes in place, and the sweep takes the folder.
+        # Nothing cancels the run: it finishes in place, and its end takes the folder.
         assert deleted.json() == {"deleted": chore["id"], "folder": "running"}
-        assert folder.is_dir()
-        await console.chore_runner.sweep()
+        [line] = [
+            e
+            for e in await rows_of(console, str(console.main_id))
+            if e.get("said", {}).get("key") == "chores.folderRunning"
+        ]
+        assert os.path.realpath(line["said"]["params"]["path"]) == str(folder)
+        await console.chore_runner.tick()
         assert folder.is_dir()
         await finish(console, task_id, clock.now)
-        await console.chore_runner.sweep()
+        await console.chore_runner.tick()
         assert not folder.exists()
+
+
+async def test_a_folder_that_cannot_go_when_the_run_ends_is_said_once_and_left(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        folder = root / f"chore-{chore['id']}"
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await client.delete(f"/api/chores/{chore['id']}")
+        await finish(console, task_id, clock.now)
+
+        def fails(cfg: Any, chore_id: str) -> None:
+            raise OSError("busy")
+
+        monkeypatch.setattr(chores_module, "remove_chore_workspace", fails)
+        await console.chore_runner.tick()
+        await console.chore_runner.tick()
+        keys = [
+            e.get("said", {}).get("key")
+            for e in await rows_of(console, str(console.main_id))
+        ]
+        assert keys.count("chores.folderLeft") == 1 and folder.is_dir()
+
+
+async def test_a_chore_saved_again_under_its_id_keeps_its_folder_when_the_old_run_ends(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        runner = console.chore_runner
+
+        async def save() -> Any:  # the same message, so the same id
+            return await runner.store.create(
+                title="Brief me",
+                request="Brief me",
+                schedule=Schedule.from_json(BRIEF),
+                level=2,
+                front_id=None,
+                receipt="turn-1",
+            )
+
+        chore = await save()
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        folder = root / f"chore-{chore.chore_id}"
+        old = (await runner.run_now(chore))["task_id"]
+        (folder / "points.txt").write_text("42")
+        await runner.delete(chore.chore_id)
+        again = await save()  # the same message saves it again
+        assert again.chore_id == chore.chore_id
+        await finish(console, old, clock.now)
+        await runner.tick()
+        assert (folder / "points.txt").read_text() == "42"

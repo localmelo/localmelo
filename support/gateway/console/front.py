@@ -2114,21 +2114,26 @@ class Front:
             folder = str(earlier.spec.get("workspace") or "")
             spec = dataclasses.replace(spec, workspace=folder)
         # A message that saved its schedule first: this is that chore's run, and it
-        # works in the chore's folder as every run of the chore does. Starting it and
-        # linking it are one step for the chore (the same hold as its other runs).
-        saved = None if turn is None else await self.saved_chore(turn)
-        if saved is not None and earlier is None and not saved.is_reminder:
-            with contextlib.suppress(TaskPolicyError):
-                spec = dataclasses.replace(
-                    spec,
-                    workspace=chore_workspace(
-                        self.console.workers.settings(), saved.chore_id
-                    ),
-                )
+        # works in the chore's folder as every run of the chore does. Under the hold
+        # the chore is read again: one that is gone or already running makes this
+        # a plain task (no folder of the chore's, no link), so no second run starts
+        # and no folder is made for a chore that is not there.
         runner = self.console.chore_runner
-        async with (
-            contextlib.nullcontext() if saved is None else runner.guard(saved.chore_id)
-        ):
+        owned = None if turn is None else chore_id_of(await self.receipt(turn))
+        if owned is not None and await runner.store.find(owned) is None:
+            owned = None  # this message saved no chore: there is nothing to hold
+        async with contextlib.nullcontext() if owned is None else runner.guard(owned):
+            saved = None if owned is None else await runner.store.find(owned)
+            if saved is not None and await runner.busy(saved):
+                saved = None
+            if saved is not None and earlier is None and not saved.is_reminder:
+                with contextlib.suppress(TaskPolicyError):
+                    spec = dataclasses.replace(
+                        spec,
+                        workspace=chore_workspace(
+                            self.console.workers.settings(), saved.chore_id
+                        ),
+                    )
             # The task starts at once, under the request's first words; the model's
             # task_create brings a title of its own, any other long request is named later.
             echo = await self._start(
