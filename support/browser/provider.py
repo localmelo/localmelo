@@ -1775,8 +1775,9 @@ class BrowserToolProvider(BaseToolProvider):
     def _solves_checks(self) -> bool:
         """Whether melo may work through a check's pictures itself in this run (#551).
 
-        Only in a run the person started (not a chore, a follow-up or a task's
-        own), with a model that reads pictures: both are the run's to say
+        Only in a run whose words are the person's (a task they started or a
+        chore they saved: not a reminder, a follow-up or a task's own, #570),
+        with a model that reads pictures: both are the run's to say
         (``from_person`` and ``sees_pictures`` of its question handle), so a
         page or the model never turns this on. Anywhere else melo presses only
         the box, and the check goes to the person after :data:`CHECK_PRESSES`.

@@ -458,6 +458,7 @@ def post_stop(
     names: Sequence[str] = (),
     *,
     typing: bool = False,
+    repeating: bool = False,
 ) -> str:
     """Why a post the model let through must ask first, or ``""`` when nothing here stops it.
 
@@ -465,7 +466,8 @@ def post_stop(
     words do not ask for a send (for text being *typed*, to write it) and they
     did not write the text, so whatever told melo to post was not them (a page, a
     tool, the model's own idea); the text holds their phone number, address or
-    real name; the task repeats.
+    real name; the task repeats (its words say so, or *repeating*: code knows its
+    schedule, as a saved chore's).
     """
     wrote = written_by(sent, texts)
     if asks_for_review(texts) and not wrote:
@@ -476,6 +478,6 @@ def post_stop(
     found = personal_data("\n".join(sent), names)
     if found:
         return f"Sends text that holds your {' and '.join(found)}."
-    if repeats(texts):
+    if repeating or repeats(texts):
         return "Posts for a task that repeats, which asks each time."
     return ""

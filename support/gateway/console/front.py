@@ -155,6 +155,7 @@ from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
     TaskSpec,
+    chore_workspace,
 )
 from localmelo.support.gateway.task_store import (
     JobFinishedError,
@@ -235,8 +236,8 @@ CHAT_NOTE: Final = (
 BROWSING_OFF_NOTE: Final = (
     "[localmelo · browsing is off: a task can read public pages but has no browser, "
     "so it cannot sign in, click or fill in a form. Promise no browser. Set "
-    "uses_website on task_create for work that needs one: code then tells the user "
-    "how to turn browsing on.]"
+    "uses_website on task_create or task_schedule for work that needs one: code "
+    "then tells the user how to turn browsing on.]"
 )
 # What a turn that only said what it would do is asked for at its end (#440): its answer.
 CLOSING_NOTE: Final = (
@@ -808,6 +809,13 @@ TASK_TOOLS: Final = (
                     "every day): what it points at, spelled out. Else empty."
                 ),
             },
+            "uses_website": {
+                "type": "boolean",
+                "description": (
+                    "True when the work needs a website: signing in, clicking, "
+                    "filling in a form, buying."
+                ),
+            },
         },
     ),
     _tool(
@@ -1001,7 +1009,12 @@ class TaskTools(BaseToolProvider):
         return f"{said}Its result comes back to this chat as a card. {_tell(typed)}"
 
     async def schedule(
-        self, title: str = "", run_now: bool = False, reading: str = "", **_: Any
+        self,
+        title: str = "",
+        run_now: bool = False,
+        reading: str = "",
+        uses_website: bool = False,
+        **_: Any,
     ) -> str:
         """Save the running turn's message as a chore, and start it when *run_now* (#567).
 
@@ -1032,33 +1045,39 @@ class TaskTools(BaseToolProvider):
         if about and norm(about) != norm(text):
             text = f"{text}\n\n{READING_HEAD}\n{about}"
         name = str(title).strip() or short_title(found.work or about)
-        try:
-            chore = await front.save_chore(
-                title=TaskSpec.from_payload({"objective": text, "title": name}).title,
-                text=text,
-                schedule=found.schedule,
-                level=triage(typed)[0],
-                receipt=await front.receipt(turn),
+        receipt = await front.receipt(turn)
+        # One hold from saving to the first run's link: nothing else starts, links
+        # or deletes this chore in between.
+        async with front.console.chore_runner.guard(chore_id_of(receipt)):
+            try:
+                chore = await front.save_chore(
+                    title=TaskSpec.from_payload(
+                        {"objective": text, "title": name}
+                    ).title,
+                    text=text,
+                    schedule=found.schedule,
+                    level=triage(typed)[0],
+                    receipt=receipt,
+                )
+            except (ChoreError, ScheduleError, TaskPolicyError) as exc:
+                return f"Not done: {_plain(exc)}"
+            said = f"Saved: {chore['title']} · {found.schedule.describe()}. "
+            if uses_website is True and await front.tell_browsing_off():
+                said += "Browsing is off, so its runs have no browser; the user sees how to turn it on. "
+            if run_now is not True:
+                return f"{said}{_tell(typed)}"
+            if front.made.get(turn.id):
+                # task_create ran first: that task is the run the message asked for.
+                return f"{said}The task this message started is its run now. {_tell(typed)}"
+            echo = await front.delegate(
+                f"{text}\n\n{CHORE_NOTE}", typed=typed, title=chore["title"], turn=turn
             )
-        except (ChoreError, ScheduleError, TaskPolicyError) as exc:
-            return f"Not done: {_plain(exc)}"
-        said = f"Saved: {chore['title']} · {found.schedule.describe()}. "
-        if run_now is not True:
-            return f"{said}{_tell(typed)}"
-        if front.made.get(turn.id):
-            # task_create ran first: that task is the run the message asked for.
-            return f"{said}The task this message started is its run now. {_tell(typed)}"
-        echo = await front.delegate(
-            f"{text}\n\n{CHORE_NOTE}", typed=typed, title=chore["title"], turn=turn
-        )
-        if echo.get("echo") != "started":
+            if echo.get("echo") != "started":
+                return f"{said}It could not start now: {echo.get('line', '')} {_tell(typed)}"
             return (
-                f"{said}It could not start now: {echo.get('line', '')} {_tell(typed)}"
+                f"{said}And started task {echo['task_id']} for now; its result comes back "
+                f"to this chat as a card. {_tell(typed)}"
             )
-        return (
-            f"{said}And started task {echo['task_id']} for now; its result comes back "
-            f"to this chat as a card. {_tell(typed)}"
-        )
 
     async def list_tasks(self, **_: Any) -> str:
         # This chat's tasks first, then the other chats': each group has its open
@@ -1985,14 +2004,21 @@ class Front:
         *receipt* is the message it comes from: that message saves one chore, and
         the task it started is the chore's run.
         """
-        chore = await self.console.chore_runner.store.create(
-            title=title, request=text, schedule=schedule, level=level,
-            front_id=self.chat_id, receipt=receipt,
-        )  # fmt: skip
-        if receipt is not None:
-            started = await self.console.workers.tasks.by_create_key(receipt)
-            if started is not None:
-                await self._ran(chore, started.task_id)
+        runner = self.console.chore_runner
+        # Saving and linking the message's run are one step for the chore.
+        async with (
+            contextlib.nullcontext()
+            if receipt is None
+            else runner.guard(chore_id_of(receipt))
+        ):
+            chore = await runner.store.create(
+                title=title, request=text, schedule=schedule, level=level,
+                front_id=self.chat_id, receipt=receipt,
+            )  # fmt: skip
+            if receipt is not None:
+                started = await self.console.workers.tasks.by_create_key(receipt)
+                if started is not None:
+                    await self._ran(chore, started.task_id)
         line = f"Saved: {title} · {chore.schedule.describe()}"
         return await self.echo(
             {"echo": "chore_saved", "chore_id": chore.chore_id, "title": title,
@@ -2018,10 +2044,7 @@ class Front:
             return False
         if not self._told_browsing:
             self._told_browsing = True
-            key = "front.echo.browsingOff"
-            await self.echo(
-                {"echo": "notice", "line": t_in("en", key), "said": said(key)}
-            )
+            await self.notice("front.echo.browsingOff")
         return True
 
     # ── Tasks: start, change, suggest ──
@@ -2090,23 +2113,43 @@ class Front:
             handover = dataclasses.replace(handover, finished_task=line)
             folder = str(earlier.spec.get("workspace") or "")
             spec = dataclasses.replace(spec, workspace=folder)
-        # The task starts at once, under the request's first words; the model's
-        # task_create brings a title of its own, any other long request is named later.
-        echo = await self._start(
-            spec,
-            self.chat_id,
-            show=show,
-            key=key,
-            turn=turn,
-            of=of,
-            create_key=create_key,
-            handover=handover,
-        )
+        # A message that saved its schedule first: this is that chore's run, and it
+        # works in the chore's folder as every run of the chore does. Under the hold
+        # the chore is read again: one that is gone or already running makes this
+        # a plain task (no folder of the chore's, no link), so no second run starts
+        # and no folder is made for a chore that is not there.
+        runner = self.console.chore_runner
+        owned = None if turn is None else chore_id_of(await self.receipt(turn))
+        if owned is not None and await runner.store.find(owned) is None:
+            owned = None  # this message saved no chore: there is nothing to hold
+        async with contextlib.nullcontext() if owned is None else runner.guard(owned):
+            saved = None if owned is None else await runner.store.find(owned)
+            if saved is not None and await runner.busy(saved):
+                saved = None
+            if saved is not None and earlier is None and not saved.is_reminder:
+                with contextlib.suppress(TaskPolicyError):
+                    spec = dataclasses.replace(
+                        spec,
+                        workspace=chore_workspace(
+                            self.console.workers.settings(), saved.chore_id
+                        ),
+                    )
+            # The task starts at once, under the request's first words; the model's
+            # task_create brings a title of its own, any other long request is named later.
+            echo = await self._start(
+                spec,
+                self.chat_id,
+                show=show,
+                key=key,
+                turn=turn,
+                of=of,
+                create_key=create_key,
+                handover=handover,
+            )
+            if saved is not None and echo.get("echo") == "started":
+                await self._ran(saved, str(echo["task_id"]))
         if not title and echo.get("echo") == "started" and wants_title(work):
             self._name_later(str(echo["task_id"]), spec.title, work)
-        if turn is not None and echo.get("echo") == "started":
-            # A message that saved its schedule first: this is that chore's run.
-            await self._ran(await self.saved_chore(turn), str(echo["task_id"]))
         return echo
 
     async def admitted(self, turn: TurnInfo) -> TaskRecord | None:
@@ -2527,6 +2570,13 @@ class Front:
             {"echo": "failed", "line": line, "said": said(key, **params)}, show
         )
 
+    async def notice(self, key: str, **params: str) -> dict[str, Any]:
+        """A plain line for the person that is neither a failure nor a task's: English, and its words for the reader."""
+        line = t_in("en", key, **params)
+        return await self.echo(
+            {"echo": "notice", "line": line, "said": said(key, **params)}
+        )
+
     async def _echoes(self, after_id: int = 0) -> list[StoredEvent]:
         chat = self.chat_id
         if chat is None:
@@ -2671,7 +2721,7 @@ class Front:
     ) -> dict[str, Any]:
         """The person's tap on a chore proposal (Save chore, Just once, Cancel) or on Undo after a save."""
         title = str(echo.get("title", ""))
-        store = self.console.chore_runner.store
+        runner = self.console.chore_runner
         receipt = str(echo.get("receipt") or "") or None
         just_once = do == "once" and echo.get("echo") == "chore"
         if just_once and not echo.get("reminder") and not echo.get("ran"):
@@ -2698,7 +2748,7 @@ class Front:
                     receipt=receipt,
                 )
             if do == "undo" and echo.get("echo") == "chore_saved":
-                await store.delete(str(echo.get("chore_id", "")))
+                await runner.delete(str(echo.get("chore_id", "")))
                 line = f"Undone: {title} is not saved"
                 return await self._echo(
                     "undone", "", title, line, of=echo_id,

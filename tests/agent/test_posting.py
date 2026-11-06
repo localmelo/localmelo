@@ -210,10 +210,12 @@ async def settle(
     step: tuple[str, dict[str, Any], ActionReview],
     model: Mapping[str, str],
     tmp_path: Path,
+    *,
+    repeats: bool = False,
 ) -> ActionReview:
     tool, arguments, rules = step
     chat = Says(**model)
-    reviewer = StepReviewer(lambda: chat)  # type: ignore[arg-type,return-value]
+    reviewer = StepReviewer(lambda: chat, repeats=repeats)  # type: ignore[arg-type,return-value]
     reviewer.person_names = (NAME,)
     for message in words:
         reviewer.user_message(message)
@@ -242,6 +244,18 @@ async def test_a_post_runs_only_for_what_the_persons_own_words_ask(
         assert found.verdict == "high" and asks_in_auto(found), found
     if why:
         assert why in found.reasons[0], found.reasons
+
+
+@pytest.mark.asyncio
+async def test_a_task_the_schedule_repeats_asks_for_each_post_whatever_the_words_say(
+    tmp_path: Path,
+) -> None:
+    """A saved chore's schedule is code's state, not words: the repeat rule sees it (#570)."""
+    words, step, _, _ = ROWS["1 text they wrote"]  # nothing in the words repeats
+    assert (await settle(words, step, YES, tmp_path)).verdict == "routine"
+    found = await settle(words, step, YES, tmp_path, repeats=True)
+    assert found.verdict == "high" and asks_in_auto(found), found
+    assert "repeats" in found.reasons[0]
 
 
 @pytest.mark.asyncio

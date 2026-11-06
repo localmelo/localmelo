@@ -747,7 +747,7 @@ class _ToolAsk:
         return None if reviewer is None else reviewer.sign_in_value(handle, site)
 
     def from_person(self) -> bool:
-        """Whether the person started this run: their own message, not a chore, a follow-up or a task's own (#551).
+        """Whether the run's words are the person's: their own message or a chore they saved, not a follow-up or a task's own (#551, #570).
 
         The browser works through a picture check itself only in such a run.
         """

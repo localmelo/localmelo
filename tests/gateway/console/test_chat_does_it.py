@@ -7,6 +7,9 @@ a browser or the network.
 
 from __future__ import annotations
 
+import contextlib
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -24,6 +27,7 @@ from localmelo.support.gateway.console.front import (
     TASK_TOOLS,
 )
 from localmelo.support.gateway.front_rules import create_rule
+from localmelo.support.gateway.task_policy import configured_root
 from localmelo.support.gateway.workers import NO_BROWSER_NOTE
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -383,6 +387,138 @@ async def test_now_and_every_day_saves_the_whole_request_and_runs_it_now(
         # The next run's slot stands, and the check-in does not tell this run again.
         assert (await chores(console))[0].last_task_id == task.task_id
         assert (await chores(console))[0].next_run == chore.next_run
+
+
+async def test_the_run_started_now_works_in_the_chores_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One folder across the chore's runs, the one started with the schedule too (#570)."""
+    async with owner_console(
+        tmp_path, monkeypatch, main=[schedules(True), OK], run=False
+    ) as (console, client, models, _):
+        await say(client, console, BOTH)
+        [chore] = await chores(console)
+        [task] = await console.workers.tasks.list_tasks()
+        info = await console.store.get_session(task.task_id)
+        assert info is not None and info.workspace is not None
+        assert Path(info.workspace).name == f"chore-{chore.chore_id}"
+
+
+@pytest.mark.parametrize(
+    "main",
+    [[schedules(True), OK], [creates("Invoice"), schedules(False), OK]],
+    ids=["schedule first", "task first"],
+)
+async def test_a_chores_first_run_is_linked_while_the_chore_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, main: list[Reply]
+) -> None:
+    """The tick cannot start a second run between the chore's save and its run's link (#570)."""
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        runner = console.chore_runner
+        held: list[bool] = []
+        link = runner.ran_in_chat
+
+        async def spy(chore_id: str, task_id: str) -> None:
+            held.append(runner._locks[chore_id].locked())
+            await link(chore_id, task_id)
+
+        monkeypatch.setattr(runner, "ran_in_chat", spy)
+        await say(client, console, BOTH)
+        assert held == [True]
+
+
+def just_before_the_first_run_holds_its_chore(
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+    act: Callable[[str], Awaitable[Any]],
+) -> list[str]:
+    """Run *act*(chore id) once, right before the hold a saved chore's first run asks for.
+
+    That is what the timer, Run now or a delete can do just before the chat
+    starts the run its message asked for. The chore ids it fired for are returned.
+    """
+    runner = console.chore_runner
+    real = runner.guard
+    fired: list[str] = []
+
+    @contextlib.asynccontextmanager
+    async def hooked(chore_id: str) -> AsyncIterator[None]:
+        if not fired and await runner.store.find(chore_id) is not None:
+            fired.append(chore_id)
+            await act(chore_id)
+        async with real(chore_id):
+            yield
+
+    monkeypatch.setattr(runner, "guard", hooked)
+    return fired
+
+
+def folder_names(console: Console, tasks: list[Any]) -> list[str]:
+    return [Path(str(t.spec.get("workspace") or "")).name for t in tasks]
+
+
+async def test_a_chore_deleted_before_its_first_run_holds_it_gets_no_folder_and_no_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The saved chore is read again under the hold: a deleted one makes no folder (#570)."""
+    async with owner_console(
+        tmp_path,
+        monkeypatch,
+        main=[schedules(False), creates("Invoice"), OK],
+        run=False,
+    ) as (console, client, models, _):
+        runner = console.chore_runner
+
+        async def delete(chore_id: str) -> None:
+            await runner.delete(chore_id)
+
+        fired = just_before_the_first_run_holds_its_chore(console, monkeypatch, delete)
+        await say(client, console, BOTH)
+        [chore_id] = fired
+        assert await chores(console) == []
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        assert not (root / f"chore-{chore_id}").exists()
+        # What the person asked for now still runs, as a plain task of this chat.
+        tasks = await console.workers.tasks.list_tasks()
+        assert [t.origin for t in tasks] == ["user"]
+        assert folder_names(console, tasks) != [f"chore-{chore_id}"]
+
+
+async def test_a_run_admitted_before_the_first_run_holds_the_chore_is_the_only_chore_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Busy is checked under the hold: the message's run does not join the chore's run (#570)."""
+    async with owner_console(
+        tmp_path,
+        monkeypatch,
+        main=[schedules(False), creates("Invoice"), OK],
+        run=False,
+    ) as (console, client, models, _):
+        runner = console.chore_runner
+        started: list[str] = []
+
+        async def run_now(chore_id: str) -> None:
+            body = await runner.run_now(await runner.store.get(chore_id))
+            started.append(body["task_id"])
+
+        fired = just_before_the_first_run_holds_its_chore(console, monkeypatch, run_now)
+        await say(client, console, BOTH)
+        [chore_id] = fired
+        [chore] = await chores(console)
+        assert chore.last_task_id == started[0]  # the link is the run that was first
+        tasks = await console.workers.tasks.list_tasks()
+        assert len(tasks) == 2
+        in_folder = [
+            t.task_id
+            for t in tasks
+            if folder_names(console, [t]) == [f"chore-{chore_id}"]
+        ]
+        assert in_folder == started
 
 
 async def test_a_message_that_only_sets_a_schedule_just_saves_it(
@@ -883,6 +1019,31 @@ async def test_browsing_off_is_said_once_with_how_to_turn_it_on(
             "browsing is off" in str(models["main"].requests[0][-1].content).casefold()
         )
         assert "browsing is off" in tool_results(models["main"], 1)[-1].casefold()
+
+
+async def test_a_saved_chore_that_needs_a_website_says_browsing_is_off_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same words as for a task: a chore's runs have no browser either (#570)."""
+    args = {"title": "Invoice", "run_now": False, "uses_website": True}
+    saves = tool_call("task_schedule", args, "s-web")
+    main: list[Reply] = [saves, OK, web_task(), OK]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        await say(
+            client, console, "download my invoice from example.com every day at 9"
+        )
+        assert len(await chores(console)) == 1
+        [line] = await off_lines(console)
+        assert "/browser chrome" in line["line"] and "Settings" in line["line"]
+        assert "browsing is off" in tool_results(models["main"], 1)[-1].casefold()
+        # Once for the chat: a task that needs a website after it adds no second line.
+        await say(client, console, "buy it on example.com")
+        assert len(await off_lines(console)) == 1
 
 
 async def test_with_browsing_on_nothing_is_said(

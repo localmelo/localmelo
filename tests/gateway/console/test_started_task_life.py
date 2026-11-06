@@ -6,6 +6,8 @@
 - A follow-up queued when the gateway stops runs after the restart, keeping
   every limit: one per ending, one continue per person message, dropped when
   the person wrote after the task ended, never for tasks the chat did not start.
+- A saved chore's run is the chat's to follow up too, as the chat that saved it
+  (a reminder's run is not: its card says it).
 - Each card of the task keeps the report of its own run.
 - A site the task's tool asked about and was refused is never read in the run
   its chat continued, however the model spells the address.
@@ -784,3 +786,53 @@ async def test_a_site_refused_in_a_task_is_never_read_in_the_run_its_chat_contin
         assert "Steps blocked in it" in turn.user_text
         assert "collect.example" in turn.user_text
         assert "blocked by the user" in turn.user_text
+
+
+# ── A saved chore's run (#570) ──
+
+
+async def run_chore(client: Any, request: str, schedule: dict[str, str]) -> str:
+    """Save *request* in the main chat as a chore on *schedule* and run it now: the task's id."""
+    made = await client.post(
+        "/api/chores", json={"request": request, "schedule": schedule}
+    )
+    assert made.status_code == 201, made.text
+    run = await client.post(f"/api/chores/{made.json()['chore']['id']}/run")
+    assert run.status_code == 202, run.text
+    return str(run.json()["task"]["task_id"])
+
+
+async def test_a_chores_ended_run_is_told_in_the_chat_that_saved_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    told = "Your check-in ran: you are signed in."
+    workers: list[list[Reply]] = [[answer("Signed in.\nEnding: ready")]]
+    async with owner_console(
+        tmp_path, monkeypatch, main=[answer(told)], workers=workers
+    ) as (console, client, _, _):
+        task_id = await run_chore(
+            client, "Sign in to the shop", {"kind": "daily", "at": "09:00"}
+        )
+        await until(lambda: _is(console, task_id, "done"))
+        await settled(console)
+        [turn] = await internal_turns(console)
+        assert turn.answer == told and "it finished" in turn.user_text
+        assert (await console.workers.get(task_id))["origin"] == "user_rule"
+
+
+async def test_a_reminders_ended_run_gets_no_follow_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers: list[list[Reply]] = [[answer("Reminder: stretch.\nEnding: ready")]]
+    async with owner_console(tmp_path, monkeypatch, main=[], workers=workers) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        task_id = await run_chore(
+            client, "Reminder: stretch", {"kind": "once", "at": "2027-01-01T09:00"}
+        )
+        await until(lambda: _is(console, task_id, "done"))
+        await settled(console)
+        assert await internal_turns(console) == []

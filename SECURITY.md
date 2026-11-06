@@ -191,6 +191,46 @@ those tools can do.
   What else they change in it (an extension, a setting) stays for melo's later
   background browsing, and melo's other open pages, from every chat, come back
   in it as minimized windows.
+- **A saved chore's run browses like a task you asked for.** A chore made from
+  your request (not a one-time reminder) has the browser, in the chat that
+  saved it, so it can use any page a Chrome sign-in on that profile opens, with
+  nobody at its side. Nothing is wider than a task you started: its steps ask
+  in that chat's cards on every run, as before, use and record no earlier
+  approval or chat grant, Auto blocks what it would ask, a post, send or
+  purchase is reviewed from your saved words as they stand, and, as the
+  chore's schedule reaches that review from code, what a repeating chore posts
+  in your name asks each time, whatever the request's words say. A chore saved
+  from your own request is a task you started, so its run works through a
+  picture check on a page itself, **with nobody at its side**, every time it
+  fires; so a daily run can solve a check while you are away. The limits of a
+  task you started hold: a model that reads pictures, a frame proved a check's
+  by what Chrome says (a page's words never turn it on), melo's own model only
+  and no outside service, 3 tries and then the take-over card, a step in the
+  record that says plainly what it pressed, and nothing that hides that a
+  program is pressing. A reminder has no browser at all. Each chore keeps
+  one work folder, `chore-<id>` inside the gateway workspace, which every run
+  shares and deleting the chore removes (a link
+  there is unlinked, never followed). What is in that folder is plain data, an
+  untrusted file like any a page gave: it is never read as the project's
+  instructions, whatever it is named. One guard per chore decides whether a
+  run may start, for the timer, Run now, a message that saves a chore and runs
+  it at once, and delete: a run that has not ended (paused ones too) makes the
+  next slot skip and refuses Run now, a chore deleted a moment ago starts
+  nothing and makes no folder, so two runs never share that folder at once.
+  A run that has waited on you for over an hour does not hold the chore for
+  good: the next slot ends it with a plain line in the chat, never answering
+  what it waited on, and starts its own run; a run whose page you hold is
+  never ended this way. A run already going when you delete the chore is not
+  cancelled: it ends in place, the chat says where its folder is, and melo
+  removes the folder after it ends, from what it kept when it deleted that
+  chore; if melo restarts first, or the removal fails, the folder stays where
+  the chat was told it is. melo never removes a folder because of its name: it
+  removes only the folder of a chore it deleted. A
+  password you gave in the message that saved the chore is typed by the run
+  that message started only; a later run does not get it, so it relies on the
+  sign-in melo's browser kept, or asks you. What a run leaves in its folder,
+  and a page it keeps open, stay until then. The saved text is what a run is
+  told to do whenever it fires: edit or delete the chore when it should stop.
 - **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
   See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
   for sign-in and token rotation. Host, Origin and fetch-metadata checks remain

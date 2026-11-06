@@ -403,9 +403,12 @@ class StepReviewer:
         *,
         clock: Callable[[], float] = time.monotonic,
         wall: Callable[[], float] = time.time,
+        repeats: bool = False,
     ) -> None:
         # The Agent's Chat, read at each review (a test may replace it).
         self._chat = chat
+        # The task repeats on a schedule that code knows, whatever the words say.
+        self.repeats = repeats
         self._clock = clock
         self._wall = wall
         # What code can match of the person in a post: the account's real name
@@ -704,6 +707,7 @@ class StepReviewer:
             sent,
             self.person_names,
             typing=arguments.get("access") == "type",
+            repeating=self.repeats,
         )
         if not stop:
             return settled

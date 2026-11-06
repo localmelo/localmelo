@@ -350,13 +350,14 @@ HTML. Stop is the task API, never `POST /api/turns/{id}/cancel`.
 ### A chat's follow-up on its tasks
 
 A task a chat starts from the person's message (`Front._start`, through
-`TaskWorkers.create_spec(chat_started=True)`) carries `started_by: "chat"` in
-its session's `meta`. `support/gateway/console/followups.py` hears each
+`TaskWorkers.create_spec(chat_started=True)`), and each run of a chore the
+chat saved (`ChoreRunner._start`, a reminder's run excepted), carries
+`started_by: "chat"` in its session's `meta`. `support/gateway/console/followups.py` hears each
 `sched.finished` and, with `[tasks] follow_up` on, queues one follow-up for the
 owner chat when the task ran out of steps, ended `draft`, `blocked` or `failed`
 by its own report, or failed with a run status the chat can act on (`failed`,
 `gate_stopped`, `stuck`, `context_budget_exceeded`, `timeout`); never for a
-chore's task, one from `POST /api/tasks`, a Stop, a refused folder, a continue
+reminder's run, one from `POST /api/tasks`, a Stop, a refused folder, a continue
 that could not start, or a provider or setup failure. `meta.followup` keeps
 `person_turn` (the id of the person's newest turn in that chat), `runs`,
 `continued`, `ending_at` and `stage`: at most two follow-ups per task for one
@@ -424,6 +425,32 @@ case, scheme, port and spelling do not matter) or any other page of that site;
 `web_fetch` asks `refused_earlier` before it reads a site the request names.
 `denied_records` counts only real blocks (a `call_key`, no `earlier`), so
 refusals of repeats never push a block out of its window.
+
+### A chore's runs are one at a time
+
+`ChoreRunner.guard(chore_id)` (`support/gateway/console/chores.py`) is the one
+place that decides whether a chore may start: the tick, `POST /api/chores/{id}/run`,
+`Front.save_chore` with `Front.delegate` (a message that saves a chore and runs it
+at once) and `ChoreRunner.delete` hold it, and the starters read the chore again
+under it, so a chore deleted after the tick read it starts nothing and makes no
+folder. A chore is busy while its last task is in any state outside `FINISHED`
+(`front_rules.FINISHED`, the scheduler's terminal phases), parked and interrupted
+included, because those resume. A run that has waited on the person (a `held`
+run on an approval or an input, an open ask, a `parked` or `interrupted` run) for
+`WAIT_LIMIT_S` (one hour) and whose page the person does not hold is ended with
+a `user_stop` at the next slot, the chat gets a `notice` echo (`chores.waitedOut`)
+and the slot's run starts; a run that does not end within `STOP_WAIT_S` keeps the
+slot for that time. A run accepted before its chore is deleted goes on to its end:
+`delete` keeps the deleted chore in memory under that run's id (`_leaving`), and
+each tick `ChoreRunner._retire` removes the chore's folder
+(`task_policy.remove_chore_workspace`, by the chore's own id) once that run has
+ended, unless a chore was saved again under that id meanwhile. Nothing is
+stored: a restart first leaves the folder where the `notice` echo said it is, and
+a removal that raises `OSError` is said (`chores.folderLeft`) and left. Nothing
+removes a folder by its name. A chore's run takes no project instructions from its folder
+(`TaskWorkers.create_spec`), and `TaskSpec.repeats` becomes
+`AgentOptions.repeats`, which makes the posting review ask each time
+(`StepReviewer`, `post_stop(repeating=True)`).
 
 ## S3b.1a foundations
 
