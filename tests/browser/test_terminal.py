@@ -52,7 +52,8 @@ def test_the_site_question_is_asked_in_plain_words() -> None:
     )
     other = ApprovalRequest("r", "run", "c", "mcp__x__y", {}, "", None)
     assert (
-        session_option(other) == "Yes, and allow every mcp__x__y call in this session"
+        session_option(other)
+        == "Yes, and allow every mcp__x__y call for the rest of this chat"
     )
 
 
