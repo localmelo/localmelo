@@ -139,11 +139,11 @@ async def test_a_stop_while_held_ends_the_run_and_tells_the_holder() -> None:
 
 
 async def test_a_hold_that_lands_after_the_step_began_stops_its_planning_call() -> None:
-    """The one gate is at the request itself: a take can land while the step gets ready."""
+    """The gate is at the request itself: a take can land while the step gets ready."""
     llm = Timed([_call("hand", "x"), _answer("done")])
     tools = Holding()
     agent = Agent(llm=llm, options=_provided_only(), tool_providers=[tools])
-    fit = agent._fit_prompt_cap
+    plan = agent._do_plan
     calls = [0]
 
     async def holding_on_the_second(*args: Any, **kwargs: Any) -> Any:
@@ -151,9 +151,9 @@ async def test_a_hold_that_lands_after_the_step_began_stops_its_planning_call() 
         if calls[0] == 2 and tools.pause is not None:
             tools.pause.release("done")  # the tool's own hold is over: the step goes on
             tools.pause.hold("browser", {"tab": "t1"})  # and the panel's take lands now
-        return await fit(*args, **kwargs)
+        return await plan(*args, **kwargs)
 
-    agent._fit_prompt_cap = holding_on_the_second  # type: ignore[method-assign]
+    agent._do_plan = holding_on_the_second  # type: ignore[method-assign]
     run = asyncio.ensure_future(agent.run_task("sign in", on_event=lambda e: None))
     async with asyncio.timeout(2):
         while calls[0] < 2:
