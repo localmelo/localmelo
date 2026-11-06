@@ -160,6 +160,16 @@
             <p class="welcome-link" id="welcome-workers" hidden><a href="#/workers" data-i18n="html.seeWhatWorkerRunsDid">See what worker runs did</a></p>
             <section class="setup-card" id="setup-card" aria-labelledby="setup-title" aria-live="polite" tabindex="-1" hidden></section>
           </div>
+          <div class="bdock-anchor">
+            <div class="bdock" id="browser-dock" role="group" aria-label="Browser" data-i18n-aria-label="browser.title" data-own="working" hidden>
+              <button type="button" class="bdock-jump" id="browser-dock-jump">
+                <canvas class="own-ring bdock-canvas" id="browser-dock-canvas" aria-hidden="true" hidden></canvas>
+                <span class="own-mark" id="browser-dock-mark" aria-hidden="true"></span>
+                <span class="bdock-text" id="browser-dock-text"></span>
+              </button>
+              <button type="button" class="outline-button" id="browser-dock-open" data-i18n="browser.open">Open browser</button>
+            </div>
+          </div>
           <section class="import-card" id="import-card" aria-label="melo found notes on this Mac from other assistants" data-i18n-aria-label="importCard.title" aria-live="polite" tabindex="-1" hidden></section>
           <div
             id="messages"

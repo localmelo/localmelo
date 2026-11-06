@@ -147,7 +147,6 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['browser_type', {ref: 'e2', text: 'my secret'}, 'Typing into a field'],
     ['browser_select', {ref: 'e3', option: 'Spain'}, 'Choosing from a list'],
     ['recall', {}, 'Remembering'],
-    ['remember', {text: 'You prefer tea.', topic: 'preferences'}, 'Remembering'],
     ['mcp__files__file_read', {path: 'a/b.txt'}, 'Reading b.txt'],
     ['mcp__calendar__list_events', {}, 'Using a tool'],
   ];
@@ -156,7 +155,13 @@ test('a step reads as the server words it, in the present while it runs and the 
   assert.equal(stepWords('web_search', {query: 'tomato blight'}, true), 'Searched the web for “tomato blight”');
   assert.equal(stepWords('shell_exec', {command: 'cargo test'}, true), 'Ran the tests');
   assert.equal(stepWords('list_files', {}, true), 'Looked through the folder');
-  assert.equal(stepWords('remember', {text: 'You prefer tea.'}, true), 'Remembered');
+  assert.equal(stepWords('recall', {query: 'tea'}, true), 'Remembered');
+  // A note kept reads as kept, one the gate refused (a result that says so, or a call that failed) as not kept.
+  const note = {text: 'You prefer tea.'};
+  assert.deepEqual(
+    [stepWords('remember', note), stepWords('remember', note, true, 'Noted.'), stepWords('remember', note, true, 'Not remembered: write the user as "you".'), stepWords('remember', note, 'ask')],
+    ['Keeping a note', 'Kept a note', 'Could not keep a note', 'Could not keep a note'],
+  );
   assert.equal(stepWords('browser_click', {ref: 'e1'}, true), 'Clicked on the page');
   assert.ok(!stepWords('browser_type', {ref: 'e2', text: 'my secret'}).includes('secret'));
   const secret = 'sk-' + 'a1b2c3'.repeat(4);

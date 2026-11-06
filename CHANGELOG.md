@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The browser shows in the chat. When melo browses (also for a web search), the reply holds a **Browser** card with
+  the live page, what melo is doing, one state word and **Open browser**, in the main chat and in side chats alike; it
+  shrinks to a bar at the top of the chat when it scrolls out of view, and a picture that stops says "Not updating"
+  or "Reconnecting…". The Browser panel no longer opens by itself, and closing it only stops watching. The card, the
+  bar and the panel share one picture stream, which runs only while one of them is on screen. New event
+  `attention.browser` (words only: no picture, typed value, full address or query), `browser` on `GET .../turns`, and
+  `gen` and `run` queries on the browser routes, which refuse a source that is not the chat's now (409
+  `stale_source`). Also fixed: the turn box's heading now follows the live row while you have the page, the
+  composer's model name no longer shrinks to a letter beside the open panel, and a `remember` step reads "Kept a
+  note", or "Could not keep a note" when refused, instead of "Remembering" (#529).
 - Taking over a page is a real pause in a real window. In Chrome, **Take over** opens the page in a window of melo's own
   Chrome (same page, same sign-ins), and the whole run waits: no model call, no step and no time limit, with no grace or
   step timers left. **Done** (the Browser panel, the app's pill, or an empty Enter in the terminal) or closing the window

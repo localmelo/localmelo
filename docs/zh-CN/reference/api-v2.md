@@ -577,6 +577,22 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 - `answer` 和 `result.result` 是保存的副本：密钥已脱敏，并且在保留期之后，内联的 `<think>` 块已被删除。
 - 轮次运行期间，`cause` 为 `""`。
 - 主对话的每一页另带 `cards`，即这一页轮次旁边的卡片，按从旧到新排列：从该页最旧的轮次（最旧的一页则从头开始）到下一页的第一个轮次（最新的一页则到现在为止），最多取最新的 50 张。没有轮次的主对话给出最新的 50 张卡片，`replay_from` 位于其中最旧一张之前，因此事件流不会回放更早的内容。旁支对话一旦有卡片或回执（它开始过任务），它的每一页也同样带 `cards` 和 `echoes`；没有的旁支对话两个键都没有。
+- 浏览过的对话另带 `browser`：这一页轮次里浏览过的每个运行的浏览器卡片，取现在的样子（每个 `card_key` 的最新一行，从旧到新，最多最新的 50 张；没有时没有这个键）。被这个网关不再跟进的运行留下的“进行中”卡片（运行中途网关停了），会先被写成 `stopped`，这样页面和回放一致。见[浏览器卡片](#browser-cards)。
+
+<a id="browser-cards"></a>
+
+### 浏览器卡片
+
+melo 在一个对话里浏览时（一个浏览步骤、在浏览器里读结果的网页搜索，或用户接管的页面），这个对话会为这次运行得到一张浏览器卡片：一个不属于任何轮次的 `attention.browser` 会话事件，存在这个对话里，像它的其他卡片一样由它的事件流送出、由 `GET .../turns` 回放。每次变化都把整张卡片重新写一遍（一阵连续的变化只写一次）；一个 `card_key` 的最新一行说明它的全部。
+
+```json
+{"card_key": "3f9c2a7b1d4e:run-7", "owner_chat_id": "3f9c2a7b1d4e", "source_session_id": "3f9c2a7b1d4e", "source_turn": 4, "run_id": "run-7", "browser_session_id": "a1b2c3d4", "state": "working", "action": "open", "site": "example.com"}
+```
+
+- `card_key` 是对话加运行；`browser_session_id` 是对话的浏览器工具的代次，与 `run_id` 一起就是卡片的 `gen` 和 `run` 查询参数所指明的来源。`owner_chat_id` 是显示这张卡片的对话，`source_session_id` 是浏览器所属的对话（目前相同）。
+- `state` 为 `working`、`waiting`（接管卡片在等用户回答）、`you`（页面在用户手里）、`done` 或 `stopped`（用户点了停止时 `by` 为 `you`）。`action` 是 melo 这一步的种类，不是 `working` 时为空：`open`、`read`、`press`、`type`、`wait` 或 `search`。`site` 只是主机名。
+- 它不含画面、输入的内容、完整的地址或查询：只有程序写下的文字。实时画面来自 `WS .../browser/live`（带上 `gen` 和 `run`），而且只在有页面显示这张卡片时才传送。
+- 卡片从一次运行的第一个浏览步骤开始（页面开着不算浏览），随它的轮次结束；从不浏览的运行没有卡片。
 
 <a id="cards-in-the-main-chat"></a>
 
@@ -739,7 +755,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 ## GET /api/sessions/{id}/browser
 
-对话在 melo 的浏览器里是否有打开的页面，以及是哪一个。melo 开始浏览时，控制台用它来打开**浏览器**面板。它不启动任何东西，也不传送画面。
+对话在 melo 的浏览器里是否有打开的页面，以及是哪一个。它不启动任何东西，也不传送画面。
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
@@ -750,8 +766,9 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 - 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
-- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true，`place` 说明在哪里：`window`（真实的 Chrome 窗口，面板显示实时画面）或 `app`（就在浏览器面板里）；其他时候 `place` 为 null。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true，`place` 说明在哪里：`window`（真实的 Chrome 窗口，面板显示实时画面）或 `app`（就在浏览器面板里）；其他时候 `place` 为 null。`viewers` 是该对话已打开的实时画面数量。
 - `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
+- **同一个来源。** 这个路由、`POST .../browser/done`、`POST .../browser/window` 和下面的画面流，都向同一个解析器询问请求是针对哪个浏览器的。显示对话浏览器卡片的客户端用查询参数 `gen`（卡片的 `browser_session_id`：对话的浏览器工具的代次，`t1` 这样的标签页编号只在一个代次内有意义）和 `run`（卡片的 `run_id`）来指明它的来源。不是对话当前来源的请求会被拒绝：HTTP 路由返回 409 `stale_source`，画面流在开始前以 1008 和原因 `stale_source` 关闭；绝不会退而使用对话现在拥有的浏览器，所以旧智能体的卡片碰不到新的智能体，已结束的运行也碰不到之后的运行。两者都不带的客户端（旧客户端）照旧提供服务。没有任何路由会启动浏览器。
 
 ## WS /api/sessions/{id}/browser/live
 
@@ -764,12 +781,12 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`place` 为 `window` 或 `app`（同上），`form: true` 表示网页因有用户填了一半的表单而留在应用里，`failed: true` 表示窗口打不开（`busy: true`：因为另一个对话的窗口开着），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
 - 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
-- 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
+- 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。可选的查询参数 `gen` 和 `run` 指明卡片的来源（见 `GET .../browser`）；不是对话当前来源的，以 1008 和原因 `stale_source` 关闭。
 - 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
 - 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
 - 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、在应用中（`place` 为 `app`）、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
 - 用户手里的标签页一直归用户，没有时间限制，直到用户交还（`give`、“完成”、关掉窗口）或运行结束。在此期间对话的运行处于暂停（`run.paused`）：不调用模型，也不计任何时限。
-- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
+- 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者）、不是对话当前来源的 `gen` 或 `run` 对应的 `stale_source`，或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
 
 ## POST /api/sessions/{id}/browser/done
 

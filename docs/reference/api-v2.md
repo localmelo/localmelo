@@ -1191,6 +1191,25 @@ The session's turns, oldest first within the page.
   just before the oldest of them, so the stream replays nothing older. A side
   chat's pages carry `cards` and `echoes` the same way once it has any (a task
   it started); a side chat without them has neither key.
+- A chat that browsed adds `browser`: the browser card of each run the page's
+  turns browsed in, as it stands (the newest row of each `card_key`, oldest
+  first, at most the newest 50; the key is absent when there is none). A card
+  left active by a run this gateway no longer follows (it stopped in the middle
+  of the run) is written as `stopped` first, so the page and a replay agree. See
+  [Browser cards](#browser-cards).
+
+### Browser cards
+
+When melo browses in a chat (a browser step, a web search that reads its results in the browser, or a page the person took over), the chat gets one browser card for the run: an `attention.browser` session event that belongs to no turn, stored in that chat and delivered by its event stream and `GET .../turns` like its other cards. Each change writes the whole card again, once for a burst; the newest row of a `card_key` says all of it.
+
+```json
+{"card_key": "3f9c2a7b1d4e:run-7", "owner_chat_id": "3f9c2a7b1d4e", "source_session_id": "3f9c2a7b1d4e", "source_turn": 4, "run_id": "run-7", "browser_session_id": "a1b2c3d4", "state": "working", "action": "open", "site": "example.com"}
+```
+
+- `card_key` is the chat and the run; `browser_session_id` is the generation of the chat's browser tools, and with `run_id` it is the source the card's `gen` and `run` queries name. `owner_chat_id` is the chat that shows the card and `source_session_id` the chat whose browser it is (the same today).
+- `state` is `working`, `waiting` (the take-over card waits for the person's answer), `you` (the person has the page), `done` or `stopped` (`by` is `you` for a Stop). `action` is the kind of step melo is on, empty unless `working`: `open`, `read`, `press`, `type`, `wait` or `search`. `site` is a bare host.
+- It holds no picture, typed value, full address or query: only words the program wrote. The live picture comes from `WS .../browser/live`, named with `gen` and `run`, only while a page shows the card.
+- A card begins with the first browser step of a run (a page left open is no browsing), ends with its turn, and a run that never browses has none.
 
 ### Cards in the main chat
 
@@ -1560,7 +1579,7 @@ lists them).
 
 ## GET /api/sessions/{id}/browser
 
-Whether the chat has a page open in melo's browser, and which. The console asks it to open its Browser panel when melo starts browsing. It starts nothing and streams nothing.
+Whether the chat has a page open in melo's browser, and which. It starts nothing and streams nothing.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser
@@ -1571,8 +1590,9 @@ Whether the chat has a page open in melo's browser, and which. The console asks 
 ```
 
 - `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
-- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over), with `place` where they have it: `window` (a real Chrome window; the panel shows a live copy) or `app` (the Browser panel itself); `place` is null otherwise. The console opens its Browser panel by itself for either. `viewers` counts the open live views of the chat.
+- `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over), with `place` where they have it: `window` (a real Chrome window; the panel shows a live copy) or `app` (the Browser panel itself); `place` is null otherwise. `viewers` counts the open live views of the chat.
 - `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
+- **One source.** This route, `POST .../browser/done`, `POST .../browser/window` and the stream below all ask the same resolver which browser a request is for. A client that shows a chat's browser card names its source with the queries `gen` (the card's `browser_session_id`: the generation of the chat's browser tools, which a tab id such as `t1` means something only inside of) and `run` (the card's `run_id`). A source that is not the chat's now is refused with 409 `stale_source` (the stream: a close with 1008 and the reason `stale_source`, before it starts), never served by whatever the chat has now: a card of an old Agent cannot reach a new one, nor an ended run a later one. A client that names neither is served as before. No route starts a browser.
 
 ## WS /api/sessions/{id}/browser/live
 
@@ -1585,12 +1605,12 @@ A live picture of the chat's browser: the page melo works in, as JPEG pictures, 
 
 - The server sends text frames and binary frames. A text frame is a `meta` message: `state` is `idle` (no page open), `loading` (a page is open and the first picture has not come), `live`, `stale` (the picture stream failed, so the last picture no longer updates) or `closed`; `reason` explains `closed` (`tab`, `browser`, `chat` or `unavailable`). `tab`, `url`, `title` and `browsing` are as above, `owner` is `melo` or `you` (the person took the tab over), and once a picture came `w` and `h` are the page view in CSS pixels, with `offsetTop` and `scale` (the page's zoom). `takeover: true` says the page may be taken over. While `owner` is `you`, `place` is `window` or `app` (as above), `form: true` says the page stays in the app because it has a form the person began, `failed: true` that a window could not open (`busy: true`: because another chat's window is open), and `dialog` (`kind` `alert`, `confirm`, `prompt` or `beforeunload`, `message`, `default`) is a box the page shows, for the person to answer.
 - A binary frame is one JPEG. Only the newest picture is kept for each viewer, so a slow viewer skips pictures and never queues them. A page that does not change sends one picture and then none; moving pages are held to `[browser] live_fps` (15 by default).
-- The optional `tab=tN` query pins the view to one tab of this chat. Without it the view follows the tab melo works in, and a `meta` message tells of each switch. Another chat's tab, an unknown tab and a malformed name are refused.
+- The optional `tab=tN` query pins the view to one tab of this chat. Without it the view follows the tab melo works in, and a `meta` message tells of each switch. Another chat's tab, an unknown tab and a malformed name are refused. The optional `gen` and `run` queries name a card's source (see `GET .../browser`); one that is not the chat's now closes with 1008 and the reason `stale_source`.
 - The stream runs only while somebody watches: the browser keeps no picture stream for a chat with no viewer, a chat holds at most 4 viewers at a time, and nothing it carries is written to disk or to the session store.
 - It is behind the same guard as every `/api` route: the Host header, a same-origin Origin when one is sent, and the bearer or the console's cookie. A script sends `Authorization: Bearer <token>` and no Origin.
 - The client sends JSON text messages. `{"type":"take"}` hands the tab it watches to the person and `{"type":"give"}` gives it back to melo. While the person has it in the app (`place` `app`), and melo is not in the middle of a step, these are their input: `{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}` (page CSS pixels: the picture's point divided by `scale`, after `offsetTop`), `{"type":"wheel","x","y","dx","dy","mods"}`, `{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`, `{"type":"compose","text","start","end"}` (an input method's text being composed), `{"type":"text","text"}` (its commit) and `{"type":"paste","text"}` (plain text), at most 1,000 characters each; and `{"type":"dialog","accept","text"}` answers the page's box. `mods` is the sum of Alt 1, Control 2, Meta 4 and Shift 8. Input is held to 120 messages a second per viewer. Any other message, and input while melo has the tab, is dropped without an answer. Nothing a message carries is logged, stored or shown to a model.
 - A tab the person has stays theirs, with no time limit, until they give it back (`give`, Done, closing the window) or the run ends. Meanwhile the chat's run is paused (`run.paused`): no model call and no time limit counting.
-- The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down.
+- The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, `stale_source` for a `gen` or `run` that is not the chat's now, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down.
 
 ## POST /api/sessions/{id}/browser/done
 

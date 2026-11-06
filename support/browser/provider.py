@@ -63,9 +63,10 @@ import dataclasses
 import functools
 import logging
 import re
+import secrets
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any, NoReturn, cast
+from typing import Any, Final, Literal, NoReturn, cast
 
 from localmelo.melo.contracts.approvals import (
     SELF_ASKING_TOOLS,
@@ -375,6 +376,37 @@ _FRESH_STEPS = frozenset(
 # The tools that work on no tab of the chat: another app's window.
 _NO_TAB_STEPS = frozenset({"_window_read", "_window_press"})
 
+# The kind of step melo is on, by the tool's function: what the chat's Browser card says in words ("Opening a
+# page", "Pressing a button"). A web search that reads its results in a tab of the browser is ``search``.
+ACTIONS: Final = {
+    "_open": "open",
+    "_follow": "open",
+    "_back": "open",
+    "_read": "read",
+    "_find": "read",
+    "_tabs": "read",
+    "_screenshot": "read",
+    "_window_read": "read",
+    "_click": "press",
+    "_click_point": "press",
+    "_window_press": "press",
+    "_type": "type",
+    "_select": "type",
+    "_wait": "wait",
+}
+
+CardState = Literal["working", "waiting", "you"]
+
+
+@dataclasses.dataclass(frozen=True)
+class BrowserCard:
+    """What the chat's Browser card says now (:meth:`BrowserToolProvider.card`): words, never page content."""
+
+    state: CardState
+    action: str
+    site: str
+    busy: bool
+
 
 def _guarded(fn: ToolFunction) -> ToolFunction:
     """Run a tool under the provider's lock; a browser problem becomes the result.
@@ -403,6 +435,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 tab, arguments = self._step_target(fn.__name__, arguments)
                 await self._wait_for_person(tab)
                 await self._switched()
+                self._set_action(ACTIONS.get(fn.__name__, "read"))
                 self._set_busy(True)
                 await self._driver.start()
                 self._looked, self._handoff, self._stuck = False, False, None
@@ -514,6 +547,13 @@ class BrowserToolProvider(BaseToolProvider):
         live_fps: float = DEFAULT_FPS,
     ) -> None:
         self._driver = driver
+        # Which provider this is: a short id is only meaningful with it (a rebuilt Agent starts at ``t1`` again), so
+        # a card or a stream that names a tab names this too, and an old one can never reach a new provider.
+        self.generation = secrets.token_hex(4)
+        # Told when what the chat's Browser card says may have changed (see :meth:`watch`), and the kind of step
+        # melo is on, or was last on.
+        self._watchers: list[Callable[[], None]] = []
+        self._action = ""
         # Names and opens the app an address of another app's kind is for.
         self._opener = opener or apps.AppOpener()
         # A driver whose page boxes block the page asks melo about a confirm.
@@ -623,9 +663,59 @@ class BrowserToolProvider(BaseToolProvider):
             self._busy = busy
             self._poke_live()
 
+    def _set_action(self, kind: str) -> None:
+        """melo is on a step of this kind (see :data:`ACTIONS`); a change is told like a tab's."""
+        if kind != self._action:
+            self._action = kind
+            self._poke_live()
+
+    def _set_carded(self, tab: str | None) -> None:
+        """The take-over card of *tab* waits for the person's answer (None: no card does)."""
+        if tab != self._carded:
+            self._carded = tab
+            self._poke_live()
+
     def _poke_live(self) -> None:
+        """Something the live view or the chat's Browser card shows changed: both look again soon (never blocks)."""
         if self._live is not None:
             self._live.poke()
+        for watcher in list(self._watchers):
+            try:
+                watcher()
+            except Exception:  # a card's trouble never reaches the browser's work
+                logger.warning("A browser watcher failed", exc_info=True)
+
+    def watch(self, notify: Callable[[], None]) -> None:
+        """Call *notify* whenever what :meth:`card` says may have changed.
+
+        It runs inside the browser's own step, so it must only note the change:
+        nothing awaited, nothing read from Chrome, nothing written.
+        """
+        self._watchers.append(notify)
+
+    def card(self) -> BrowserCard | None:
+        """What the chat's Browser card says now, or None while melo has no page and runs no step.
+
+        Only words the program wrote, never what a page or the person holds:
+        who has the page (``working``; ``waiting`` while the take-over card
+        waits for an answer; ``you`` once they took it), the kind of step melo
+        is on (:data:`ACTIONS`) and the site of the page as a bare host, with no
+        path, query or typed text. ``busy`` is whether a step runs right now.
+        """
+        held = sorted(self._owners.held)
+        tab = held[0] if held else self.live_current()
+        if tab is None and not self._busy:
+            return None
+        state: CardState = (
+            "you" if held else "waiting" if self._carded is not None else "working"
+        )
+        origin = self._origins.get(tab) if tab else None
+        return BrowserCard(
+            state=state,
+            action=self._action if state == "working" else "",
+            site=sites.host_of(origin) if origin else "",
+            busy=self._busy,
+        )
 
     # ── The live view ──
 
@@ -1095,7 +1185,9 @@ class BrowserToolProvider(BaseToolProvider):
                 await self._refuse_tab(tab)  # leave the page it led to
                 raise
             done.add(origin)
-        self._origins[tab] = origin
+        if self._origins.get(tab) != origin:
+            self._origins[tab] = origin
+            self._poke_live()  # the card names the site
 
     async def _recheck(self, tab: str) -> None:
         """Check where *tab* is now, read in the tab: a page can move itself after it was read.
@@ -1256,12 +1348,16 @@ class BrowserToolProvider(BaseToolProvider):
             before, current = set(self._raw), self._tab
             token = TOOL_ASK.set(_no_other_site)
             named = sites.BROWSER.set(self.browser_name)
+            # A search is browsing: the chat's Browser card says so, and shows the results' tab while it is read.
+            self._set_action("search")
+            self._set_busy(True)
             try:
                 await self._driver.start()
                 await addresses.require_public(url)
                 info = await self._driver.open(url, new_tab=True)
                 own = self._own(info)
                 self._made.add(own.id)
+                self._tab = own.id
                 try:
                     await self._read_tab(own, {origin})
                 except BrowserError as exc:
@@ -1275,6 +1371,7 @@ class BrowserToolProvider(BaseToolProvider):
                         await self._driver.close_tab(self._raw[short])
                     self._forget_tab(short)
                 self._tab = current if current in self._raw else None
+                self._set_busy(False)
                 self._arm_idle()
 
     # ── The tools ──
@@ -1494,12 +1591,12 @@ class BrowserToolProvider(BaseToolProvider):
         """
         raw = self._raw.get(tab)
         form = raw is not None and await self._unsent()
-        self._carded = tab
+        self._set_carded(tab)
         try:
             async with self._no_limit():
                 taken = await sites.require_takeover(origin, need, tab, form=form)
         finally:
-            self._carded = None
+            self._set_carded(None)
         chosen = tab in self._want_window
         self._want_window.discard(tab)
         if taken == "words":

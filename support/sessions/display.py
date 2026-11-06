@@ -570,7 +570,9 @@ def activity_text(
         )
     if name == "python_exec":
         return _doing("run", "Python", "run")
-    if name in ("recall", "search_memory", "open_memory", "remember"):
+    if name == "remember":
+        return _activity("steps.now.keep", "memory")
+    if name in ("recall", "search_memory", "open_memory"):
         return _state("remembering")
     if name in ("browser_open", "web_fetch"):
         host = _host(args.get("url"))

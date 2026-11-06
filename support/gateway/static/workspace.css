@@ -2776,6 +2776,69 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .browser-chip { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .browser-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
 .browser-chip[data-browsing="true"] .browser-dot { background: var(--kind-web); animation: bp-dot 1.8s ease-in-out infinite; }
+
+/* ── Who has the page: one map every browser surface reads (--own), so the card, the dock and the page's ring agree. ──
+   melo at work is the web colour, the person is the console's own accent, amber is the one colour that asks for the
+   person. Each colour repeats a word and a glyph, never replaces them. */
+[data-own] { --own: var(--control); --own-fill: var(--raised); --own-ink: var(--ink-2); }
+[data-own="working"] { --own: var(--kind-web); --own-fill: color-mix(in srgb, var(--kind-web) 9%, var(--surface)); --own-ink: var(--kind-web); }
+[data-own="waiting"] { --own: var(--warn); --own-fill: var(--warn-tint); --own-ink: var(--warn); }
+[data-own="you"] { --own: var(--accent); --own-fill: var(--tint); --own-ink: var(--accent); }
+[data-own="done"] { --own: var(--ok); --own-fill: var(--tint); --own-ink: var(--ok); }
+[data-own="stopped"] { --own: var(--ink-3); --own-fill: var(--raised); --own-ink: var(--ink-2); }
+[data-own="stale"] { --own: var(--warn); --own-fill: var(--raised); --own-ink: var(--warn); }
+.own-mark { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--own-fill); color: var(--own); font-size: var(--text-reading); font-weight: 700; line-height: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.own-word { color: var(--own-ink); font-weight: 600; }
+.own-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--own); }
+/* The ring on the page's picture: it says who has the page, and a picture that is not arriving loses it and fades. */
+.own-ring { display: block; border-radius: var(--radius-control); background: var(--canvas); box-shadow: 0 0 0 2px var(--own), 0 0 0 5px color-mix(in srgb, var(--own) 18%, transparent); }
+[data-own="done"] .own-ring, [data-own="stopped"] .own-ring, [data-fresh="false"] .own-ring { box-shadow: 0 0 0 1px var(--line); }
+[data-fresh="false"] .own-ring { filter: grayscale(0.7); opacity: 0.55; animation: none; }
+[data-own="working"] .own-ring { animation: own-breathe 2.4s ease-in-out infinite; }
+@keyframes own-breathe {
+  50% { box-shadow: 0 0 0 2px var(--own), 0 0 0 8px color-mix(in srgb, var(--own) 28%, transparent); }
+}
+
+/* The Browser card: one per run, in the reply like a message, updated in place (browser-card.mjs). */
+.bcard { width: min(100%, 440px); margin: 0 0 var(--space-4); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.bcard[data-own="waiting"] { border-color: var(--warn); background: var(--warn-tint); }
+.bcard[data-own="waiting"] .own-mark { background: var(--surface); box-shadow: inset 0 0 0 1px var(--warn); }
+.bcard-head { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
+.bcard-titles { flex: 1; min-width: 0; display: grid; }
+.bcard-name { font-size: var(--text-body); font-weight: 600; line-height: 20px; }
+.bcard-state { overflow: hidden; color: var(--ink-3); font-size: var(--text-small); line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.bcard-picture { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+/* The page view is about 16:9 (1280 x 713), so the picture shows its whole width. */
+.bcard-canvas { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; transition: opacity 0.3s, filter 0.3s; }
+.bcard[data-own="waiting"] .bcard-canvas { aspect-ratio: 16 / 7; }
+/* While the first picture is on its way the note holds the picture's place, so the card does not grow when it comes
+   and the chat, pinned to its end, does not leave the card's button under the composer. */
+.bcard[data-size="full"] > .bcard-note { display: grid; place-items: center; aspect-ratio: 16 / 9; box-sizing: border-box; }
+.bcard[data-size="full"][data-own="waiting"] > .bcard-note { aspect-ratio: 16 / 7; }
+.bcard-now { display: flex; align-items: center; gap: 7px; margin: var(--space-3) 2px 0; color: var(--ink-2); font-size: var(--text-small); line-height: 18px; }
+.bcard-note { margin: 0 2px; padding: var(--space-4) 0; border: 1px dashed var(--control); border-radius: var(--radius-card); color: var(--ink-2); font-size: var(--text-small); line-height: 1.5; text-align: center; }
+.bcard-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.bcard-actions > .wide { flex: 1; }
+.bcard-actions .outline-button { min-height: 36px; }
+/* The run is over: the last picture this page painted, small beside the words, or just the words. */
+.bcard[data-size="kept"] { display: grid; grid-template-columns: 132px minmax(0, 1fr); column-gap: var(--space-3); align-items: center; padding: 10px; }
+.bcard[data-size="kept"] .bcard-picture { grid-row: 1; grid-column: 1; }
+.bcard[data-size="kept"] .bcard-head { grid-row: 1; grid-column: 2; margin: 0; }
+.bcard[data-size="line"] { padding: var(--space-2) var(--space-3); }
+.bcard[data-size="line"] .bcard-head { margin: 0; }
+.bcard[data-size="line"] .own-mark { width: 28px; height: 28px; font-size: var(--text-small); }
+/* A run that scrolled out of view: the card docks at the top of the chat, watching the same page, until the run ends.
+   The anchor takes no room, so the dock appearing never moves the conversation. */
+.bdock-anchor { position: sticky; top: 0; z-index: 3; height: 0; max-width: 800px; margin: 0 auto; }
+.bdock { position: absolute; inset: var(--space-2) 0 auto; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
+.bdock-jump { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+.bdock-canvas { flex: none; width: 56px; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; }
+.bdock .own-mark { width: 28px; height: 28px; font-size: var(--text-small); }
+.bdock-text { flex: 1; min-width: 0; overflow: hidden; font-size: var(--text-small); text-overflow: ellipsis; white-space: nowrap; }
+.bdock .outline-button { flex: none; }
+@media (max-width: 899px) { .bcard { width: 100%; } }
+@media (pointer: coarse), (max-width: 700px) { .bcard-actions button, .bdock .outline-button, .bdock-jump { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { [data-own="working"] .own-ring { animation: none; } }
 @media (max-width: 1479px) {
   .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 248px minmax(0, 1fr) clamp(320px, 30vw, 420px); }
   .app:has(> .browser-panel:not([hidden])) > .panel { display: none; }
@@ -2815,6 +2878,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .model-picker { position: relative; }
 .composer-models { min-width: 0; max-width: 65%; }
 .composer-models .model-button { max-width: 100%; }
+/* Beside the Browser panel the chat is a narrow column: the composer keeps what fits. The header chip names the model and the
+   panel's bar the state, so neither squeezes into a letter and an ellipsis here. */
+.app:has(> .browser-panel:not([hidden])) :is(#run-status, .composer-models, .composer-hint) { display: none; }
 /* The chip names the model and its backend, with the caret every list chip has. */
 .connection-chip .chip-backend, .connection-chip .chip-caret { color: var(--ink-3); }
 .connection-chip[aria-expanded="true"] { background: var(--soft); }
