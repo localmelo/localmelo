@@ -14,10 +14,11 @@ melo [options]                               # the interactive UI (in a terminal
 melo -u URL [-m NAME]                        # the interactive UI on this server
 melo [-u URL] [-m NAME] ""                   # the plain conversation loop
 melo setup                                   # run setup, then the interactive UI
-melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port)
+melo serve [-p PORT] [--host HOST]           # start the gateway (-p 0: a free port); with the
+                                             # login service, make sure it runs and open the console
 melo import dsh-jsonl FILE [--title TITLE]   # import worker history
 melo serve install|uninstall|status          # macOS background service
-melo serve stop                              # stop the gateway that is running
+melo serve stop                              # stop the gateway that is running (the service stays stopped)
 melo -h all                                  # every option, command and setting
 ```
 

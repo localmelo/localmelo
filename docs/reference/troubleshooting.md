@@ -474,8 +474,9 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   seconds. Often the service lacks a cloud API key (it does not get your
   shell's variables), or there is no config file.
 - **Fix:** read `~/.localmelo/logs/gateway.stderr.log`. Use a local backend
-  with the service, or run `melo --daemon uninstall` and start
-  `melo --serve` in a terminal to see the error.
+  with the service, or run `melo serve uninstall` and start
+  `melo serve` in a terminal to see the error. A gateway that stops cleanly
+  (`melo serve stop`) is not restarted.
 
 ## MCP servers
 

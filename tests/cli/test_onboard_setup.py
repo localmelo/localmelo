@@ -2381,7 +2381,7 @@ def test_a_finished_setup_returns_the_saved_chat_and_asks_nothing_more(
     screen = _Screen(monkeypatch, SET_UP, outcomes=("done",))
     assert screen.first_run() == FirstSetup(SERVE_URL, "Qwen3 8B", saved=True)
     (job,) = screen.jobs.made
-    assert (job.pick, job.skip, job.kwargs["gateway_service"]) == (CHAT, set(), False)
+    assert (job.pick, job.skip, job.kwargs["gateway_service"]) == (CHAT, set(), True)
     assert len(screen.menu.asked) == 1
     out = capsys.readouterr().out
     assert "✓ oMLX  installed 0.7.3 into ~/A.app\n" in out
@@ -2421,20 +2421,21 @@ def test_a_skip_reaches_the_job_and_the_list_says_what_it_leads_to(
     from localmelo.tests.fixtures.melo_serve import role, write_state
 
     write_state(melo_serve_home, chat=role("Qwen3 8B", "omlx", "oMLX"))
-    # backend, chat model, embedding model, login item
+    # backend, chat model, embedding model, the two login items
     screen = _Screen(
-        monkeypatch, "Choose what", "Install", "Install", "Skip", "Install",
+        monkeypatch, "Choose what", "Install", "Install", "Skip", "Install", "Install",
         "Set up Qwen3 8B (5.8 GB)", outcomes=("done",),
     )  # fmt: skip
     result = screen.first_run()
     assert result is not None and result.saved
     assert screen.jobs.made[0].skip == {EMBEDDING}
     asked = [title for title, *_ in screen.menu.asked]
-    assert asked[1:5] == [
+    assert asked[1:6] == [
         "Install oMLX (881 MB)?",
         "Install Qwen3 8B (4.9 GB)?",
         "Install Qwen3 Embedding 0.6B (788 MB)?",
         "Start melo_serve at login?",
+        "Start the gateway at login?",
     ]
     out = capsys.readouterr().out
     assert out.count("Without Qwen3 Embedding 0.6B, memory goes by words only.") == 1
@@ -2447,7 +2448,7 @@ def test_another_model_is_planned_with_its_id_and_the_skips_start_again(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     screen = _Screen(
-        monkeypatch, "Choose what", "Skip", "Skip", "Skip", "Skip",
+        monkeypatch, "Choose what", "Skip", "Skip", "Skip", "Skip", "Skip",
         "Choose another", "Qwen3 4B", "Quit",
     )  # fmt: skip
     screen.plans[SMALL] = _plan(SMALL)

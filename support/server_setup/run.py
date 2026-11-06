@@ -835,7 +835,7 @@ class SetupJob:
             try:
                 from localmelo.support.gateway import daemon
 
-                where = daemon.install()
+                installed = daemon.install()
             except (
                 ImportError,
                 RuntimeError,
@@ -843,11 +843,7 @@ class SetupJob:
                 subprocess.SubprocessError,
             ) as exc:
                 return self._fail(SERVICE_GATEWAY, _failed(_clip(str(exc))))
-            self._item(
-                SERVICE_GATEWAY,
-                "done",
-                f"installed gateway service into {_clip(where)}",
-            )
+            self._item(SERVICE_GATEWAY, "done", _clip(installed.line))
         return None
 
     def _load(self) -> str | None:

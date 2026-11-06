@@ -341,7 +341,7 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 ### The background service keeps restarting
 
 - **原因：** 网关立即退出，launchd 每隔几秒就重新启动它。常见原因是服务缺少云端 API 密钥（它拿不到你 shell 中的变量），或者没有配置文件。
-- **修复：** 阅读 `~/.localmelo/logs/gateway.stderr.log`。让服务使用本地后端，或运行 `melo --daemon uninstall`，然后在终端中运行 `melo --serve` 以查看错误。
+- **修复：** 阅读 `~/.localmelo/logs/gateway.stderr.log`。让服务使用本地后端，或运行 `melo serve uninstall`，然后在终端中运行 `melo serve` 以查看错误。干净停止的网关（`melo serve stop`）不会被重启。
 
 <a id="mcp-servers"></a>
 

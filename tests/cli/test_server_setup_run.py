@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 
 from localmelo.support import config, melo_serve
+from localmelo.support.gateway import daemon
 from localmelo.support.server_setup import run
 from localmelo.tests.fixtures.melo_serve import role, write_state
 
@@ -286,6 +287,11 @@ def _lines(events: list[run.Event]) -> list[tuple[str, str, str]]:
 
 
 GATEWAY = "localmelo.support.gateway.daemon.install"
+INSTALLED = daemon.Installed(
+    "installed",
+    "/lm/ai.localmelo.gateway.plist",
+    "installed ai.localmelo.gateway (starts at login)",
+)
 
 
 def test_a_full_run_skips_nothing_and_says_what_each_step_did(
@@ -293,7 +299,7 @@ def test_a_full_run_skips_nothing_and_says_what_each_step_did(
 ) -> None:
     # No melo-serve yet: the plan comes from uv, then uv installs it, as asked.
     job, events = _job(gateway=True)
-    with mock.patch(GATEWAY, return_value="/lm/ai.localmelo.gateway.plist"):
+    with mock.patch(GATEWAY, return_value=INSTALLED):
         assert job.run() == "done"
     tool = (fakes.dir / "tools" / "melo-serve").resolve()
     url = melo_serve.ARCHIVE_URL
@@ -324,7 +330,7 @@ def test_a_full_run_skips_nothing_and_says_what_each_step_did(
         (
             "service:gateway",
             "done",
-            "installed gateway service into /lm/ai.localmelo.gateway.plist",
+            "installed ai.localmelo.gateway (starts at login)",
         ),
         ("load:chat", "done", f"Now serving {CHAT} for chat"),
         ("load:embedding", "done", f"Now serving {EMBED} for chat"),
@@ -372,7 +378,7 @@ def test_each_skip_leaves_out_exactly_its_step(
         PLAN_SPLASH, GET_SPLASH
     )  # a chat pick on one backend, the embedding on the other
     job, events = _job((skip,), pick=SPLASH, gateway=True)
-    with mock.patch(GATEWAY, return_value="/lm/g.plist") as install:
+    with mock.patch(GATEWAY, return_value=INSTALLED) as install:
         assert job.run() == "done"
     assert fakes.calls("uv", "tool", "install") == []
     asked = ["--skip", skip] if ":" in skip and "service" not in skip else []

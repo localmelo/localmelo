@@ -58,6 +58,7 @@ def test_the_list_is_one_aligned_table_with_sizes_and_places() -> None:
         "  Qwen3 8B              chat model            4.6 GB   Hugging Face → ~/models/huggingface",
         "  Qwen3 Embedding 0.6B  memory model          1.2 GB   same place",
         '  Start at login        melo_serve                     macOS shows a "Login Items" notice',
+        "  Start at login        the gateway                    the same notice",
         "Download about 6.7 GB. 83 GB free.",
     ]
 
@@ -83,6 +84,7 @@ def test_the_list_says_what_is_here_what_was_left_out_and_what_that_leads_to() -
         "  Qwen3 8B              chat model       1.6 GB   3.0 of 4.6 GB already here",
         "  Qwen3 Embedding 0.6B  memory model              skipped",
         "  Start at login        melo_serve                skipped",
+        "  Start at login        the gateway               the same notice",
         "Download about 1.6 GB. 83 GB free.",
         "Without Qwen3 Embedding 0.6B, memory goes by words only.",
         "Without the login item, melo serve starts melo_serve when needed.",

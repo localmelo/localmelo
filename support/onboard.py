@@ -833,7 +833,7 @@ def _set_up(plan: run.Plan, skip: set[str]) -> FirstSetup | None:
     print()
     _say(f"Setting up {pick.name}. Ctrl-C stops it and keeps what was downloaded.")
     job = run.SetupJob(
-        plan, pick.id, skip, gateway_service=False, on_event=terminal.Progress(plan)
+        plan, pick.id, skip, gateway_service=True, on_event=terminal.Progress(plan)
     )
     state = job.run()
     if state == "cancelled":

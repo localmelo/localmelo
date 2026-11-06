@@ -106,7 +106,11 @@ def skippable(plan: run.Plan) -> list[tuple[str, str]]:
         for item in plan.items
         if item.state != "done" and item.kind in ("backend", "model")
     ]
-    return [*asks, (run.SERVICE_MELO_SERVE, "Start melo_serve at login?")]
+    return [
+        *asks,
+        (run.SERVICE_MELO_SERVE, "Start melo_serve at login?"),
+        (run.SERVICE_GATEWAY, "Start the gateway at login?"),
+    ]
 
 
 def _free(plan: run.Plan) -> str:
@@ -180,6 +184,8 @@ def skip_effects(plan: run.Plan, skip: Collection[str]) -> list[str]:
         lines.append(
             "Without the login item, melo serve starts melo_serve when needed."
         )
+    if run.SERVICE_GATEWAY in skip:
+        lines.append("Without the gateway at login, melo serve runs it in its window.")
     return lines
 
 
@@ -217,6 +223,12 @@ def consent_lines(
             "melo_serve",
             "",
             "skipped" if run.SERVICE_MELO_SERVE in skip else LOGIN_NOTE,
+        ),
+        (
+            "Start at login",
+            "the gateway",
+            "",
+            "skipped" if run.SERVICE_GATEWAY in skip else "the same notice",
         ),
     ]
     name_w, kind_w, size_w = (max(len(row[i]) for row in rows) for i in range(3))

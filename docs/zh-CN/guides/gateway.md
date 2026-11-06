@@ -107,10 +107,20 @@ melo serve status
 melo serve uninstall
 ```
 
-- `install` 写入 `~/Library/LaunchAgents/ai.localmelo.gateway.plist` 并加载它。随后 launchd 使用你的环境中的 Python 运行 `<python> -m localmelo --serve --port 8401`，在登录时启动，并在其退出时重启（最多每 3 秒一次）。
+- `install` 写入 `~/Library/LaunchAgents/ai.localmelo.gateway.plist` 并加载它。随后 launchd 使用你的环境中的 Python 运行 `<python> -m localmelo --serve --port 8401`，在登录时启动，并在崩溃后重启（最多每 3 秒一次），干净地停止后不会重启，所以 `melo serve stop` 会让它一直停到下次登录或下次 `melo serve`。
+- `install` 会说明它做了什么。设置相同时再次运行会输出 `already installed, skipped`，并且不动正在运行的网关；端口变了会输出 `updated ai.localmelo.gateway; the gateway restarted`；新服务会输出 `installed ai.localmelo.gateway (starts at login)`。如果已有另一个网关在运行（macOS 应用的，或终端里的 `melo serve`），`install` 只写入 plist 而不加载，因此不会同时运行两个网关：它输出 `installed ai.localmelo.gateway; it takes over at next login`。
+- 安装了该服务后，`melo serve`（不带 `--port`、`--host`、`--force` 或 `-X` 设置）不会再启动第二个网关。配置使用 melo_serve 时它会启动 melo_serve，网关服务没在运行时会启动它，然后打开网页控制台，为每个服务输出一行并返回：
+
+  ```text
+  ✓ melo_serve   running
+  ✓ gateway   started
+  ```
+
+  网关本来就在运行时，第二行是 `✓ gateway   running`。如果网关 20 秒内没有应答，`melo serve` 输出 `✗ gateway   did not start in 20 s; log: ~/.localmelo/logs/gateway.stderr.log` 并以退出码 1 退出。在不会打开浏览器的地方（SSH 或管道），它改为输出地址和 `Sign in: run melo console -p PORT`。带上这些选项时，`melo serve` 像没有服务时一样在前台运行网关。
 - `install --port N` 使用其他端口。主机地址取自配置文件中的 `[gateway] host`；`--host` 会被忽略。
 - 日志写入 `~/.localmelo/logs/gateway.stdout.log` 和 `~/.localmelo/logs/gateway.stderr.log`。
-- `status` 输出服务是否为 `installed` 和 `running`，以及它的 `pid`。
+- `status` 输出服务是否为 `installed`（plist 是否存在）和 `running`，以及它的 `pid`。
+- `uninstall` 会列出要移除的登录服务（网关的，以及已安装 `melo-serve` 时 melo_serve 的），询问一次，然后移除两者。它只在终端里询问；从管道运行时以退出码 2 退出，且什么都不移除。
 - 本机有 melo_serve 时，`status` 还会输出一个 `melo_serve:` 块：`running`、它的 `address`、`chat` 和 `embedding` 模型（`model · backend · status`，或 `none`），以及它的 `login item` 是否已安装。它没有运行时，该块会说明如何启动或安装。melo_serve 正在运行、配置使用 melo_serve，或已安装 `melo-serve` 时，才会出现这个块。
 - 在执行 `install` 前，使用 `melo` 或在终端中使用配置向导保存配置。服务无法回答问题：没有配置文件时，launchd 每次启动服务都会将 `melo: no backend is configured; run melo setup in a terminal` 写入 `gateway.stderr.log`。
 - launchd 启动服务时不会带上你的 shell 环境变量，因此云端 API 密钥和 `LOCALMELO_PERSIST_MEMORY` 均不可用。请为该服务使用本地后端。
@@ -122,7 +132,7 @@ melo serve uninstall
 
 - 在网关所在的终端中按 Ctrl+C。
 - 在后台运行的网关（例如 `melo` 为主对话启动的那个）：运行 `melo serve stop`。它会输出 `Stopped the gateway on port N.` 或 `No gateway is running.`
-- 对于后台服务，运行 `melo serve uninstall`。单纯使用 `kill` 或 `melo serve stop` 无济于事：launchd 会再次启动网关。
+- 对于后台服务，`melo serve stop` 会让它一直停到下次登录或下次 `melo serve`。单纯使用 `kill` 对 launchd 来说是一次崩溃，它会再次启动网关。要移除该服务，运行 `melo serve uninstall`。
 
 - 停止时会关闭所有会话；仍在运行任务的会话，其智能体会被关闭，任务以 `crashed` 结束。
 - 收到 SIGTERM 后，网关会先等待运行中的任务最多 3 秒，然后取消剩余任务：客户端请求会失败，运行以 `crashed` 结束。
