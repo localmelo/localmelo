@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 from urllib.parse import urlsplit
@@ -601,7 +601,8 @@ GUIDE_URL: Final = (
 class HowToStart:
     """How to start a model server here, with the commands of the model servers guide.
 
-    ``note`` is the one thing to do besides running them. A test compares
+    ``note`` is the catalog key of the one thing to do besides running them,
+    worded by the screen in its own language (``to_json``). A test compares
     every command with the guide, so a screen never invents one.
     """
 
@@ -609,12 +610,12 @@ class HowToStart:
     commands: tuple[str, ...]
     note: str
 
-    def to_json(self) -> dict[str, Any]:
-        """The ``start`` object of ``GET /api/setup/detect``."""
+    def to_json(self, say: Callable[..., str]) -> dict[str, Any]:
+        """The ``start`` object of ``GET /api/setup/detect``, with its note worded by *say*."""
         return {
             "name": self.name,
             "commands": list(self.commands),
-            "note": self.note,
+            "note": say(self.note),
             "guide": GUIDE_URL,
         }
 
@@ -629,13 +630,12 @@ def how_to_start() -> HowToStart:
                 "brew install jundot/omlx/omlx",
                 "omlx serve --model-dir ~/models --port 8000",
             ),
-            "Put a model in its own folder of ~/models first.",
+            "setup.start.noteMac",
         )
     return HowToStart(
         "Ollama",
         ("ollama serve", "ollama pull qwen3:8b"),
-        "Install Ollama from ollama.com first. ollama serve keeps running, so run "
-        "ollama pull in another terminal.",
+        "setup.start.noteOllama",
     )
 
 

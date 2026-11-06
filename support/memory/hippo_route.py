@@ -9,6 +9,10 @@ the active items of its kind, by rules and no model call, to one of five actions
 - ``RELATED``: it is stored and the two are linked both ways.
 - ``CONFLICT``: it is stored and both are marked in conflict; both stay recallable.
 - ``IGNORE``: it is not stored; the route names the item it duplicates.
+- ``REFUSE``: its title or text holds a secret (:func:`~.index.holds_secret`); it is
+  not stored and nothing is compared. :meth:`Router.route` is the only caller of
+  :meth:`~.index.ConversationIndex.add_item`, the only writer of the items table, so
+  no item that holds a secret reaches it by any path.
 
 :class:`Router` keeps the active items in memory and updates them as it stores, so a
 run does not read the whole table again for each item. The policy sorts the items it
@@ -33,9 +37,11 @@ from localmelo.melo.memory.hippo.policy import (
     overlap,
     subjects,
 )
-from localmelo.support.memory.index import ConversationIndex, MemoryItem
+from localmelo.support.memory.index import ConversationIndex, MemoryItem, holds_secret
 
 SOURCE: Final = "ingest"
+# The action of an item that holds a secret (:class:`Route`).
+REFUSE: Final = "REFUSE"
 # How many of the best-matching active items are handed to the policy.
 POOL: Final = 8
 
@@ -43,7 +49,7 @@ POOL: Final = 8
 @dataclass(frozen=True)
 class Route:
     """What became of a new item: the action, the id it was stored under (``None``
-    for ``IGNORE``), the item it was compared with, and why."""
+    for ``IGNORE`` and ``REFUSE``), the item it was compared with, and why."""
 
     action: str
     item: int | None
@@ -146,7 +152,9 @@ class Router:
     async def route(self, item: MemoryItem) -> Route:
         """Compare *item* with the active items of its kind and act on the
         policy's decision (see the module's list). Stores the item unless it is
-        ignored."""
+        ignored or refused."""
+        if holds_secret(item.title, item.text):
+            return Route(REFUSE, None, None, "holds a secret")
         active = await self._load(item.embed_model)
         self._count += 1
         provenance = {"candidate_id": "new", "item_index": self._count}

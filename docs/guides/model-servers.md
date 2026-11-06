@@ -45,8 +45,13 @@ Run a model server yourself and point localmelo at it: oMLX, Ollama, MLC LLM, vL
   `Enter an address`, `Use a hosted service` and `Quit`.
 - A direct snapshot's served model ID can be its revision hash, not the
   repository name. Use the ID the server lists. Rechecking an address only
-  lists models; it does not load one. The web/app setup card and already
-  configured or explicitly addressed runs keep their existing behavior.
+  lists models; it does not load one. Already configured or explicitly addressed
+  runs keep their existing behavior.
+- The web console's and the app's welcome card runs the same setup, with the same
+  list and words: one OK, a row per step with its progress, **Stop** (what was
+  downloaded is kept) and **Continue**. The macOS app carries its own pinned,
+  checksummed `uv` next to its Python, so it needs no `uv` on the Mac; the setup
+  uses the bundled one first, and nothing is installed into `~/.local/bin` for it.
 
 ## Serve a model with oMLX
 

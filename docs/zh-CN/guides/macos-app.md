@@ -24,7 +24,7 @@ uv run python scripts/build_macos_app.py --install
 
 - 从 Spotlight 或 `~/Applications` 打开 localmelo：应用是 `~/Applications/LocalMelo.app`，只有旧副本的 bundle id 是 `org.localmelo.app` 时才会替换它。
 - 只有 `PATH` 上没有其他 `melo` 时（检出目录自己的 `.venv/bin/melo` 不算），才会把 `~/.local/bin/melo` 链接到应用的启动器；已有的 `melo` 绝不会被替换。
-- 升级时先退出 localmelo，再运行同一命令；固定版本的 Python 缓存在 `~/Library/Caches/LocalMelo`。
+- 升级时先退出 localmelo，再运行同一命令；固定版本的 Python 和 uv 缓存在 `~/Library/Caches/LocalMelo`。
 
 若要移除应用和链接（仅此而已，设置和对话仍保留在 `~/.cache/localmelo`）：
 
@@ -38,7 +38,7 @@ uv run python scripts/build_macos_app.py --uninstall
 uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ```
 
-固定版本的 Python 归档和 wheel 都会按哈希校验。构建会去掉 Python 运行时中用不到的部分（36 MB；应用约 147 MB）。在内置解释器上运行的代码（例如 `python_exec` 工具）无法导入它们，`python -m venv` 需要加上 `--without-pip`。
+固定版本的 Python 和 uv 归档以及 wheel 都会按哈希校验。应用在自己的 Python 旁带有 uv 0.13.4（约 28 MB），所以没有 uv 的 Mac 上首次运行设置也能进行；它是单个文件，属于构建者、其他人不可写，也不会往 `~/.local/bin` 写任何东西。构建会去掉 Python 运行时中用不到的部分（36 MB；应用约 175 MB）。在内置解释器上运行的代码（例如 `python_exec` 工具）无法导入它们，`python -m venv` 需要加上 `--without-pip`。
 
 <a id="the-window"></a>
 

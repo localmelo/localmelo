@@ -30,7 +30,11 @@ A window's reply is kept in a JSON-lines cache, keyed by the prompt version, the
 model and the window's text with its dates, so a second run with the same chats
 makes no call; a window that was split is kept under a second key (:func:`split_key`),
 so the run does not ask it again either. Text that goes to the model has its
-secrets left out, as an index document has.
+secrets left out, as an index document has (:func:`render`). An item whose title or
+text, as the model wrote it, holds a secret (:func:`~.index.holds_secret`) is refused
+whole, not kept with a ``[left out]`` remnant, and counted in :attr:`Encoding.refused`.
+A window that failed is recorded in :attr:`Encoding.failed_from`, the first exchange
+a progress mark must not pass.
 """
 
 from __future__ import annotations
@@ -53,7 +57,12 @@ from localmelo.melo.memory.retrieval.base import Send
 from localmelo.melo.memory.retrieval.llm import send_from_provider
 from localmelo.melo.schema import Message, split_thinking
 from localmelo.support.memory import records
-from localmelo.support.memory.index import ITEM_KINDS, cleaned, plain_text
+from localmelo.support.memory.index import (
+    ITEM_KINDS,
+    cleaned,
+    holds_secret,
+    plain_text,
+)
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.thinking import thinking_off_fields
 
@@ -228,7 +237,13 @@ class Stats:
 @dataclass
 class Encoding:
     """What encoding one chat gave: its items (in the order of their newest
-    source) and windows, and what became of each exchange, by position."""
+    source) and windows, and what became of each exchange, by position.
+
+    *refused* counts the items that held a secret and are not among *pieces*.
+    *failed_from* is the position of the first exchange of the first window (or
+    half of one) that failed, ``None`` when none did: what the chat's progress mark
+    must not pass.
+    """
 
     pieces: list[Piece] = field(default_factory=list)
     windows: list[WindowReport] = field(default_factory=list)
@@ -236,6 +251,26 @@ class Encoding:
     ignored: list[int] = field(default_factory=list)
     unmentioned: list[int] = field(default_factory=list)
     forced: list[int] = field(default_factory=list)
+    refused: int = 0
+    failed_from: int | None = None
+
+    def without_secrets(self) -> Encoding:
+        """This encoding without the pieces that hold a secret
+        (:func:`~.index.holds_secret`), added to *refused*, with *kept*, *forced* and
+        *unmentioned* read from the pieces that remain (an exchange that lost every
+        item is unmentioned). ``self`` when no piece holds one."""
+        pieces = [p for p in self.pieces if not holds_secret(p.title, p.text)]
+        if len(pieces) == len(self.pieces):
+            return self
+        kept = {n for p in pieces for n in p.sources}
+        return replace(
+            self,
+            pieces=pieces,
+            kept=sorted(kept),
+            unmentioned=sorted(set(self.unmentioned) | (set(self.kept) - kept)),
+            forced=sorted({n for p in pieces if p.forced for n in p.sources}),
+            refused=self.refused + len(self.pieces) - len(pieces),
+        )
 
 
 @dataclass
@@ -245,6 +280,7 @@ class Checked:
     pieces: list[Piece] = field(default_factory=list)
     ignore: set[int] = field(default_factory=set)
     dropped: int = 0
+    refused: int = 0
 
 
 # ── Windows ──
@@ -464,11 +500,14 @@ def check(raw: dict[str, Any], window: Window, turns: Sequence[Turn]) -> Checked
     """The items and ignored exchanges of a window's parsed reply that hold up.
 
     A source that is no exchange of the window is dropped, and an item left with
-    no source, or with no text, or that is no object, is dropped and counted. A
-    kind that is not one of :data:`~.index.ITEM_KINDS` reads as ``episodic`` (the
-    kind that never replaces another); title and text are cleaned of secrets and
-    cut to :data:`TITLE_CHARS` and :data:`TEXT_CHARS`; a missing title is the start
-    of the text.
+    no source, or with no text, or that is no object, is dropped and counted. An
+    item whose title or text, as the model wrote it and before any cut, holds a
+    secret (:func:`~.index.holds_secret`, read as the stored text is, with its
+    whitespace joined) is refused whole and counted in ``refused``, never kept
+    with the secret left out. A kind that is not one of :data:`~.index.ITEM_KINDS`
+    reads as ``episodic`` (the kind that never replaces another); title and text
+    are cut to :data:`TITLE_CHARS` and :data:`TEXT_CHARS`; a missing title is the
+    start of the text.
     """
     inside = set(window.positions)
     out = Checked()
@@ -477,12 +516,18 @@ def check(raw: dict[str, Any], window: Window, turns: Sequence[Turn]) -> Checked
         if not isinstance(entry, dict):
             out.dropped += 1
             continue
+        said = [
+            " ".join(str(entry.get(key) or "").split()) for key in ("title", "text")
+        ]
+        if holds_secret(*said):
+            out.refused += 1
+            continue
         sources = sorted({n for n in _numbers(entry.get("sources")) if n in inside})
-        text = _cut(plain_text(str(entry.get("text") or "")), TEXT_CHARS)
+        text = _cut(plain_text(said[1]), TEXT_CHARS)
         if not sources or not text:
             out.dropped += 1
             continue
-        title = _cut(plain_text(str(entry.get("title") or "")), TITLE_CHARS)
+        title = _cut(plain_text(said[0]), TITLE_CHARS)
         kind = str(entry.get("kind") or "").strip().lower()
         out.pieces.append(
             Piece(
@@ -532,7 +577,8 @@ class Cache:
 
     Read whole on first use and appended to on each new reply; a line that cannot
     be read is skipped. The file holds text from chats, so it is private (0600).
-    One path may serve several runs, whatever store each writes.
+    One path may serve several runs, whatever store each writes. With no path
+    (``""``) the replies are kept in memory only, and nothing is read or written.
 
     :meth:`put` is synchronous (no ``await`` between its read and its write), so
     coroutines of one event loop may call it as their replies arrive.
@@ -548,6 +594,8 @@ class Cache:
     def _load(self) -> dict[str, dict[str, Any]]:
         if self._replies is None:
             self._replies = {}
+            if not self.path:
+                return self._replies
             try:
                 with open(self.path, encoding="utf-8") as handle:
                     for line in handle:
@@ -570,6 +618,8 @@ class Cache:
 
     def put(self, key: str, reply: dict[str, Any]) -> None:
         self._load()[key] = reply
+        if not self.path:
+            return
         folder = os.path.dirname(self.path)
         if folder:
             os.makedirs(folder, exist_ok=True)
@@ -894,10 +944,14 @@ async def encode(
             if leaf.raw is None:
                 if read.parts:
                     report.failed_parts += 1
+                first = min(leaf.window.positions)
+                if result.failed_from is None or first < result.failed_from:
+                    result.failed_from = first
                 logger.warning("Hippo encoder: a window failed, %s", leaf.why)
                 continue
             checked = check(leaf.raw, leaf.window, turns)
             report.dropped += checked.dropped
+            result.refused += checked.refused
             for piece in checked.pieces:
                 result.pieces.append(replace(piece, encoder=encoder))
                 mentioned.update(piece.sources)

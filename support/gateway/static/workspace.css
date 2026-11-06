@@ -730,7 +730,51 @@ button:hover:not(:disabled) {
 .setup-other h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 20px; }
 .setup-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
 .setup-card .link-button { padding: 0; font-size: var(--text-small); }
-@media (max-width: 700px) { .setup-card .primary-button, .setup-other .outline-button { width: 100%; min-height: 44px; } }
+@media (max-width: 700px) { .setup-card .primary-button, .setup-other .outline-button, .setup-actions .outline-button { width: 100%; min-height: 44px; } }
+/* The first-run list and its job (setup-card.mjs): a row says what, how big and where; a step says how far it is.
+   The mark differs by shape as well as colour: ✓ done, ✕ failed, ● running, ○ waiting, · skipped. */
+.setup-card:has(.setup-rows), .setup-card:has(.setup-steps) { max-width: 520px; }
+.setup-card .setup-mac { color: var(--ink-3); font-size: var(--text-caption); }
+.setup-card .setup-lead-in { color: var(--warn); }
+.setup-card .setup-aside { color: var(--ink-3); font-size: var(--text-caption); line-height: 16px; overflow-wrap: anywhere; }
+.setup-rows, .setup-steps { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.setup-row, .setup-step { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--space-3); row-gap: 2px; align-items: baseline; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--raised); }
+.setup-lead { grid-row: 1 / span 2; display: flex; justify-content: center; align-self: start; padding-top: 2px; }
+.setup-lead input { appearance: none; display: grid; place-content: center; width: 18px; height: 18px; margin: 0; border: 1.5px solid var(--ink-3); border-radius: var(--radius-control); background: var(--surface); cursor: pointer; }
+.setup-lead input:checked { border-color: var(--accent); background: var(--accent); }
+.setup-lead input:checked::after { content: "✓"; color: var(--surface); font-size: 12px; font-weight: 700; line-height: 1; }
+.setup-lead input:disabled { cursor: default; opacity: 0.6; }
+.setup-name { grid-column: 2; min-width: 0; overflow-wrap: anywhere; font-size: var(--text-body); font-weight: 600; line-height: 20px; }
+.setup-size { grid-column: 3; color: var(--ink-2); font-size: var(--text-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.setup-detail { grid-column: 2 / 4; overflow-wrap: anywhere; color: var(--ink-3); font-size: var(--text-caption); line-height: 16px; }
+.setup-where::before { content: " · "; }
+.setup-where:empty::before { content: none; }
+.setup-row[data-state="here"] .setup-where, .setup-row[data-state="here"] .setup-mark { color: var(--ok); }
+.setup-row[data-state="skipped"] .setup-name, .setup-row[data-state="skipped"] .setup-size { color: var(--ink-3); font-weight: 500; }
+.setup-card .setup-total { color: var(--ink); font-weight: 500; }
+.setup-notes { display: grid; gap: var(--space-1); }
+.setup-card .setup-note { color: var(--warn); }
+.setup-card .setup-wait { color: var(--ink-3); }
+.setup-card .setup-fault { color: var(--error); }
+.setup-banner { display: grid; gap: 2px; padding: var(--space-3); border-radius: var(--radius-control); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); font-size: var(--text-small); line-height: 18px; }
+.setup-banner[data-kind="nochat"] { box-shadow: inset 3px 0 0 var(--warn); }
+.setup-banner[data-kind="failed"] { box-shadow: inset 3px 0 0 var(--error); }
+.setup-banner strong { font-weight: 600; }
+.setup-banner span { color: var(--ink-2); overflow-wrap: anywhere; }
+.setup-banner[data-kind="failed"] span { font-size: var(--text-caption); line-height: 16px; }
+.setup-step { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.setup-step .setup-mark { grid-row: 1 / span 3; text-align: center; line-height: 20px; }
+.setup-state { grid-column: 3; color: var(--ink-2); font-size: var(--text-small); white-space: nowrap; }
+.setup-line { grid-column: 2 / 4; overflow-wrap: anywhere; color: var(--ink-3); font-size: var(--text-caption); line-height: 16px; }
+.setup-line:empty { display: none; }
+.setup-bar { grid-column: 2 / 4; appearance: none; width: 100%; height: 6px; margin-top: var(--space-1); border: 0; border-radius: var(--radius-pill); background: var(--line); accent-color: var(--accent); overflow: hidden; }
+.setup-bar::-webkit-progress-bar { background: var(--line); }
+.setup-bar::-webkit-progress-value { background: var(--accent); border-radius: var(--radius-pill); }
+.setup-bar::-moz-progress-bar { background: var(--accent); }
+.setup-step[data-state="waiting"] .setup-name, .setup-step[data-state="skipped"] .setup-name, .setup-step[data-state="stopped"] .setup-name, .setup-step[data-state="waiting"] .setup-mark, .setup-step[data-state="skipped"] .setup-mark, .setup-step[data-state="stopped"] .setup-mark { color: var(--ink-3); }
+.setup-step[data-state="done"] .setup-mark, .setup-step[data-state="done"] .setup-state { color: var(--ok); }
+.setup-step[data-state="running"] .setup-mark { color: var(--accent); animation: pulse 1.4s infinite; }
+.setup-step[data-state="failed"] .setup-mark, .setup-step[data-state="failed"] .setup-state, .setup-step[data-state="failed"] .setup-line { color: var(--error); }
 /* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
 .import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
 .import-card:has(.import-done) { grid-template-columns: 1fr auto; align-items: center; padding-block: var(--space-3); }

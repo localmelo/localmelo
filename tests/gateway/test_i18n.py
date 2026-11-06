@@ -42,6 +42,10 @@ HOSTED_CHECK = ROOT / "support/hosted_check.py"
 DESKTOP = ROOT / "support/browser/desktop.py"
 # How a melo_serve pick reads on every surface (``pick_words``).
 SERVE = ROOT / "support/melo_serve.py"
+# The first-run list, as the terminal and the welcome card word it (``say``).
+LISTING = ROOT / "support/server_setup/listing.py"
+# How to start a model server by hand: it names the keys of its notes.
+DISCOVERY = ROOT / "support/backends/discovery.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -262,7 +266,9 @@ def test_the_page_guess_takes_the_setting_then_the_cookie_then_the_browser() -> 
 # ── Every key the code names is in the catalog, and every key is named ──
 
 _JS_KEY = re.compile(r"""\bt\(\s*(["'`])([A-Za-z0-9_.${}]+?)\1""")
-_PY_KEY = re.compile(r"""\b(?:t\(|said\(|t_in\("[\w-]+",\s*)f?"([A-Za-z0-9_.{}]+)\"""")
+_PY_KEY = re.compile(
+    r"""\b(?:t\(|said\(|say\(|t_in\("[\w-]+",\s*)f?"([A-Za-z0-9_.{}]+)\""""
+)
 # A key built in a template or an f-string: the part before the first `${` or `{` is its stem.
 _JS_STEM = re.compile(r"`([a-z][A-Za-z0-9_]*\.[A-Za-z0-9_.]*)\$\{")
 _PY_STEM = re.compile(r"""\bf"([a-z][A-Za-z]*(?:\.[A-Za-z]+)*\.)\{\w+\}[A-Za-z]*\"""")
@@ -291,6 +297,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         TERMINAL,
         DESKTOP,
         SERVE,
+        LISTING,
     ]:
         text = path.read_text("utf-8")
         found |= set(_PY_KEY.findall(text)) | set(_WORDS_KEY.findall(text))
@@ -307,6 +314,8 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         USAGE,
         DISPLAY,
         HOSTED_CHECK,
+        LISTING,
+        DISCOVERY,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
