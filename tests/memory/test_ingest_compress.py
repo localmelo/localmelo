@@ -151,6 +151,10 @@ async def test_the_turns_are_written_as_ever_and_the_items_follow(
         assert (book.status, utrecht.status) == ("active", "active")
         assert first.session_id == may and utrecht.session_id == june
         assert first.encoder == "3:stub-encoder" and first.embed_model == ""
+        # Each chat is marked encoded up to its last turn, so recall reads none of
+        # them as a turn any more.
+        assert (await index.encoded_turn(may), await index.encoded_turn(june)) == (2, 1)
+        assert await index.ids(unencoded=True) == set()
         # The item's time is that of the last turn it came from.
         stored = await chats.get_session(may)
         assert stored is not None and stored.title == "Moving"
@@ -231,6 +235,7 @@ async def test_a_run_of_turns_is_as_it_was_and_asks_the_model_nothing(
     )
     try:
         assert stub.prompts == [] and report.compress is None
+        assert await memory.stores()[1].encoded_turn(report.ids["may"]) is None
         data = report.to_json()
         assert "ingest" not in data and "compress" not in data
         assert "model_calls" not in data and "Encoded" not in report.summary()

@@ -195,6 +195,8 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 
 设置 `[memory] recall_source = "items"`（默认 `"turns"`，不改变任何行为）后，召回用这些条目代替对话轮次。它们按同样的门槛排序、保留或丢弃，在召回块和 `search_memory` 中的显示方式与轮次一样，如 `“Tomato stakes”: The user stakes the tomato garden with bamboo. (chat “Garden”, Oct 29)`。设置 `recall_form = "list"` 时每条是一行，如 `[m12] Oct 29 · chat “Garden” · “Tomato stakes” · 0.71`，上面有一行提示模型用 `open_memory` 打开它需要的条目；此时它接收 `m12` 这样的编号，返回标题和正文，设置 `open_sources = "on"` 后条目所来自的整轮对话也会跟在后面，全部不超过 `recall_open_chars`。在 `turn.memory` 事件中，条目的 `used`、`searched` 和 `opened` 项的类型为 `item`，条目编号写在 `item` 中，来源写在 `sources` 中，格式为 `[chat id, turn]` 对。删除一个对话会删除只来自它的条目，并把它的轮次从其他条目的来源中去掉；不带 ID 的 `melo memory forget` 也会忘记条目；`reindex` 保留它们，因为只有模型能再次写出它们。
 
+还没有被条目收录的轮次仍然可以被召回。每个对话有一个进度标记，即聊天模型已编码的最后一轮（`melo memory ingest FILE -X ingest=compress` 在存下一个对话的条目后设置它）；`recall_source = "items"` 取材于条目，以及每个对话标记之后的所有轮次，放在同一个列表里；没有标记的对话视为尚未编码，所以它在等待时不会丢失任何东西。一轮对话显示为一行 `[t34] …`，与条目的 `[m12] …` 并列，`open_memory` 在一次调用中同时接收 `m12` 和 `t34` 这样的编号（只要这一轮仍在存储中，不论是否已编码，`t` 编号都能打开它）。侧边对话的摘要和任务的往来从不编码，所以总会被召回。轮次已全部编码的对话与以前完全一样，没有条目的记忆与 `recall_source = "turns"` 一样。忘记一个对话或忘记全部会清除它的标记；忘记其中一轮不会。
+
 **来自你指给 melo 的材料、来自对话所显示内容的笔记（开发者设置）。** 人们很少说“记住这个”，而一条关于你自己网站或简历的笔记，又不可能用你输入的词写出来。设置 `[memory] note_gate`（`-X memory.note_gate=pointed` 只对一次运行生效；`melo -h all` 会列出它）后，聊天可以记更多，而且每条笔记都会保留它的来源。默认值 `"typed"` 就是上面讲的一切，不改变任何行为。共有四级，每一级都包含前面的：
 
 | 级别 | 笔记还可以依据 |

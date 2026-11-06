@@ -127,6 +127,11 @@ async def test_the_table_is_made_on_open_beside_an_older_index(tmp_path: Path) -
     try:
         assert await index.count() == 1 and await index.count_items() == 0
         assert await index.add_item(make("An item for an older index.")) == 1
+        # No mark is no migration: the chat counts as not encoded.
+        assert await index.encoded_turn("s1") is None
+        assert await index.ids(unencoded=True) == await index.ids()
+        await index.mark_encoded("s1", 1)
+        assert await index.encoded_turn("s1") == 1
     finally:
         await index.aclose()
     columns = [
@@ -281,6 +286,45 @@ async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
     # The numbers start again from where the table left off, and never repeat a
     # live item's.
     assert await index.add_item(make("A new item after forgetting.")) >= 1
+
+
+async def test_a_mark_moves_forward_and_leaves_the_turns_past_it_unencoded(
+    index: ConversationIndex,
+) -> None:
+    # A summary sits at a turn below 1: no encoder reads it, so no mark covers it.
+    for session, turns in (("s1", (1, 2, 3, -1)), ("s2", (1, 2))):
+        for turn in turns:
+            await add_turn(index, session, turn)
+
+    async def unencoded() -> set[tuple[str, int]]:
+        docs = await index.fetch(await index.ids(unencoded=True))
+        return {(doc.session_id, doc.turn) for doc in docs}
+
+    assert await index.encoded_turn("s1") is None
+    assert len(await unencoded()) == 6  # no mark: nothing is encoded
+    await index.mark_encoded("s1", 2)
+    assert await unencoded() == {("s1", 3), ("s1", -1), ("s2", 1), ("s2", 2)}
+    await index.mark_encoded("s1", 1)  # a mark never moves back
+    assert await index.encoded_turn("s1") == 2
+    await index.mark_encoded("s1", 3)
+    assert await unencoded() == {("s1", -1), ("s2", 1), ("s2", 2)}
+
+
+async def test_forgetting_clears_the_marks_but_one_turn_and_a_rebuild_do_not(
+    index: ConversationIndex,
+) -> None:
+    for session in ("s1", "s2"):
+        for turn in (1, 2):
+            await add_turn(index, session, turn)
+        await index.mark_encoded(session, 1)
+    await index.delete("s1", 2)
+    assert await index.encoded_turn("s1") == 1
+    await index.forget_all(mark=False)
+    assert [await index.encoded_turn(s) for s in ("s1", "s2")] == [1, 1]
+    await index.delete("s1")
+    assert [await index.encoded_turn(s) for s in ("s1", "s2")] == [None, 1]
+    await index.forget_all()
+    assert await index.encoded_turn("s2") is None
 
 
 # ── Routing ──

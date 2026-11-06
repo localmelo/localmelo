@@ -14,7 +14,11 @@ table also holds the sleep watermark (``sleep_until``), and ``sleep_runs`` what
 each sleep run changed, by id, for its undo. Its ``items`` table holds the memory
 items a chat model encoded from chats (developer setting, :class:`MemoryItem`):
 each names the turns it came from, and deleting a chat deletes the items that came
-from it alone and takes its turns out of the sources of the rest.
+from it alone and takes its turns out of the sources of the rest. Its ``encoded``
+table holds, per chat, the last turn a chat model encoded into items
+(:meth:`mark_encoded`); recall reads the turns past it too (:meth:`ids`), and a chat
+with no mark counts as not encoded; a summary or an exchange (a turn below 1) is never
+encoded and is always read.
 """
 
 from __future__ import annotations
@@ -102,6 +106,10 @@ CREATE TABLE IF NOT EXISTS items (
     encoder     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS items_session ON items(session_id);
+CREATE TABLE IF NOT EXISTS encoded (
+    session_id TEXT PRIMARY KEY,
+    turn       INTEGER NOT NULL
+);
 """
 _COLUMNS: Final = (
     "id, session_id, turn, surface, kind, title, text, created_at, vector, "
@@ -534,9 +542,20 @@ class ConversationIndex:
         low = int(row[0]) if row and row[0] is not None else 0
         return min(low, SUMMARY_TURN) - 1
 
-    async def ids(self) -> set[int]:
+    async def ids(self, *, unencoded: bool = False) -> set[int]:
+        """The id of every document; with *unencoded*, only those of turns past
+        their chat's mark (:meth:`mark_encoded`), every one of a chat with no mark.
+        A document at a turn below 1 (a side chat's summary, a task's exchange) is
+        never encoded, so it always stays."""
         conn = await self._ready()
-        async with conn.execute("SELECT id FROM documents") as cur:
+        query = "SELECT id FROM documents"
+        if unencoded:
+            query += (
+                " LEFT JOIN encoded ON encoded.session_id = documents.session_id"
+                " WHERE encoded.turn IS NULL OR documents.turn <= 0"
+                " OR documents.turn > encoded.turn"
+            )
+        async with conn.execute(query) as cur:
             return {int(row[0]) for row in await cur.fetchall()}
 
     async def fetch(self, ids: Iterable[int]) -> list[Document]:
@@ -646,6 +665,10 @@ class ConversationIndex:
                 + (" AND turn = ?" if turn is not None else ""),
                 args,
             )
+            if turn is None:
+                await conn.execute(
+                    "DELETE FROM encoded WHERE session_id = ?", (session_id,)
+                )
             await self._drop_sources(conn, session_id, turn)
             await conn.commit()
         return int(row[0]) if row else 0
@@ -730,6 +753,7 @@ class ConversationIndex:
             await conn.execute("DELETE FROM documents")
             if mark:
                 await conn.execute("DELETE FROM items")
+                await conn.execute("DELETE FROM encoded")
                 await conn.execute("DELETE FROM sleep_runs")
                 await conn.execute("DELETE FROM sleep_processed")
                 await conn.execute(
@@ -908,6 +932,27 @@ class ConversationIndex:
                 )
                 for row in await cur.fetchall()
             }
+
+    async def mark_encoded(self, session_id: str, turn: int) -> None:
+        """Say chat *session_id*'s turns up to *turn* are encoded into items. The mark
+        only moves forward; forgetting the chat or everything clears it."""
+        conn = await self._ready()
+        await conn.execute(
+            "INSERT INTO encoded (session_id, turn) VALUES (?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET turn = MAX(turn, excluded.turn)",
+            (session_id, turn),
+        )
+        await conn.commit()
+
+    async def encoded_turn(self, session_id: str) -> int | None:
+        """The last turn of chat *session_id* encoded into items; ``None`` for a chat
+        with no mark, which counts as not encoded."""
+        conn = await self._ready()
+        async with conn.execute(
+            "SELECT turn FROM encoded WHERE session_id = ?", (session_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else None
 
     async def count_items(self) -> int:
         conn = await self._ready()
