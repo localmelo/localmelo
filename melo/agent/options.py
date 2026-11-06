@@ -248,6 +248,10 @@ class AgentOptions:
       the environment refused) starts with a line that names that cause (see
       :func:`~localmelo.melo.agent._task_aids.refusal_note`). Default false:
       nothing changes.
+    - ``repeats``: the run is one of a task that repeats on a schedule (a saved
+      chore). Set by code from the schedule, not read from any words: the posting
+      review then asks before each post, as it does for a request that says
+      "every day" (#570). Default false.
     - ``answer_on_stop``: when true, a run that ends ``gate_stopped`` or
       ``budget_exhausted`` with no answer makes one more request, without
       tools, for the final answer from the evidence gathered (the working
@@ -402,6 +406,7 @@ class AgentOptions:
     answer_on_stop: bool = True
     max_calls: int | None = None
     task_aids: bool = False
+    repeats: bool = False
     refused_steps: int = 0
     extend_steps: int = 0
     max_extensions: int = MAX_EXTENSIONS
@@ -556,6 +561,7 @@ class AgentOptions:
             "answer_on_stop",
             "confine_writes",
             "task_aids",
+            "repeats",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

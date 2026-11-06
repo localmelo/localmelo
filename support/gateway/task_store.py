@@ -1058,6 +1058,18 @@ class TaskStore:
             )
             return [TaskRecord.from_row(row) for row in rows]
 
+    async def open_tasks(self) -> list[TaskRecord]:
+        """Every task that has not ended, newest first."""
+        ended = ", ".join("?" * len(_TERMINAL_STATES))
+        async with self._store.component_transaction("task_open") as conn:
+            rows = await _rows(
+                conn,
+                f"{_SELECT_TASK} WHERE state NOT IN ({ended}) "
+                "ORDER BY created_at DESC, task_id",
+                tuple(_TERMINAL_STATES),
+            )
+            return [TaskRecord.from_row(row) for row in rows]
+
     async def tasks_since(self, since: float) -> list[TaskRecord]:
         """The tasks changed at or after *since*, and every task not finished, newest change first."""
         ended = ", ".join("?" * len(_TERMINAL_STATES))

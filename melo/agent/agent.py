@@ -1318,7 +1318,7 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         # The user's model reviews steps the rules leave open, under a grant
         # or in auto mode; it keeps this chat's blocks and the user's words.
-        self._reviewer = StepReviewer(lambda: self.chat)
+        self._reviewer = StepReviewer(lambda: self.chat, repeats=self.options.repeats)
 
         names = (
             None

@@ -117,6 +117,12 @@ Stop 总是获胜且始终可用。它与恢复在共享的停放身份上串行
 
 `task_continue`（跟进唯一的动手方式）要求任务仍是结束时的样子（已结束，`finished_at` 相同），且 `meta.followup.continued` 仍为 false，并在发送之前就写上它。它调用 `TaskWorkers.message(automatic=True)`：只会继续已结束的任务（绝不回答它的问题，也不会送进正在运行的任务），卡片以 `NOTE_START` 开头，即 melo 的备注，作为数据读取。那一轮中步骤审查当作你的话来读的内容，仍是任务的 `user_words`，所以备注什么也不允许。继续之后才设置 `meta.followup_guard`；发给任务的其他任何消息都会清除它。带着这个标记的运行会把策略包在 `EarlierBlocks` 里。每次真正的拒绝（你的 Deny、Auto 的拦截、策略对这一步本身的拒绝；绝不是 `Withdrawal`，比如网关停止时撤回的询问）都记录 `approval.call_key`，即工具、文件夹和规整后的参数，以及 `approval.loose_keys`：相似的整串命令（空格、引号、用 `pip3` 或 `python -m pip` 代替 `pip`、安静参数），以及对安装而言的每个安装部分和每个安装（`install:pip:numpy`），所以组合步骤里其余的部分仍能运行。键相同、或有共同宽松键的调用会在任何审查之前被拒绝，origin 为 `policy`，并带 `approval.earlier`（谁拦下的）。之后你 Allow once 过的步骤会重新询问，与它相似的步骤也一样。工具运行时自己问的问题（`TOOL_ASK`：`web_fetch` 或浏览器要打开的网站，`browser:<origin>`）也算一步：被拒绝的问题记在 `tool.finished` 的 `tool_asks` 里，带 `call_key` 和 `loose_keys`（`question_key`：`ask:browser:<origin>`；`site_key`：`ask:site:<host>`，主机名为 ASCII、小写、去掉末尾的点），`SessionStore.denied_records` 和 `denied_steps` 会读取它，`_ToolAsk` 先问 `EarlierBlocks.match`，所以继续的运行既不会再审查、也不会再询问那个地址（空格、大小写、协议、端口和拼写都不影响），也不会问那个网站的其他任何页面；`web_fetch` 读取请求里点名的网站之前，也会先问 `refused_earlier`。`denied_records` 只计入真正的拦截（有 `call_key`，没有 `earlier`），所以对重复的拒绝绝不会把拦截挤出它的窗口。
 
+<a id="a-chores-runs-are-one-at-a-time"></a>
+
+### 定时事项的运行一次只有一个
+
+`ChoreRunner.guard(chore_id)`（`support/gateway/console/chores.py`）是唯一决定定时事项能不能开始的地方：定时检查、`POST /api/chores/{id}/run`、`Front.save_chore` 和 `Front.delegate`（一条保存事项并立刻运行的消息）以及 `ChoreRunner.delete` 都持有它，开始者在锁里重新读取这个事项，所以定时检查读过之后被删除的事项什么都不会开始，也不会建文件夹。事项的最后一个任务处于 `FINISHED`（`front_rules.FINISHED`，调度器的终止阶段）之外的任何状态时它都忙，包括已暂停和被中断的运行，因为它们会恢复。等了本人（`held` 在批准或输入上、有未决的提问、`parked` 或 `interrupted` 的运行）达 `WAIT_LIMIT_S`（一小时）而且本人没有握着它页面的运行，会在下一个时间到来时以 `user_stop` 结束，对话得到一条 `notice` echo（`chores.waitedOut`），这一次的运行开始；没有在 `STOP_WAIT_S` 内结束的运行，这一次仍占着时间。事项被删除前已被接受的运行会继续到结束；`ChoreRunner.sweep` 在每个 check-in 节拍里，删除事项已不在、且没有未结束的任务在里面工作（`TaskStore.open_tasks`）的 `chore-<12 hex>` 文件夹，也就是重试没能删掉的文件夹（`task_policy.remove_chore_workspace` 抛出 `OSError`；`delete` 用一条 `notice` echo 说明）。定时事项的运行不从它的文件夹读取项目指令（`TaskWorkers.create_spec`），`TaskSpec.repeats` 变成 `AgentOptions.repeats`，让发布审查每次都问（`StepReviewer`、`post_stop(repeating=True)`）。
+
 <a id="import-bench-traces"></a>
 
 ## 导入 bench 轨迹

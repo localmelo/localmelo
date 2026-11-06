@@ -818,7 +818,13 @@ class TaskWorkers:
                     budget=TASK_PACK_CHARS - (len(picked) + 1 if picked else 0),
                     exclude=notes,
                 )
-                found = await self._project_notes(workspace)
+                # A chore's folder keeps what its runs left: those files are data,
+                # whatever they are named, never instructions for the next run (#570).
+                found = (
+                    None
+                    if origin == "user_rule"
+                    else await self._project_notes(workspace)
+                )
                 spec = replace(
                     spec,
                     context_pack=pack,
@@ -2453,6 +2459,7 @@ class TaskWorkers:
                                 tool_env=tool_env,
                                 identity=guide,
                                 task_aids=True,
+                                repeats=bool(record.spec.get("repeats")),
                                 max_extensions=(
                                     MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
                                 ),
@@ -2621,12 +2628,15 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
-                            if task_session and (task_session.meta or {}).get(
-                                "followup_guard"
+                            if record.origin == "user_rule" or (
+                                task_session
+                                and (task_session.meta or {}).get("followup_guard")
                             ):
-                                # Its chat continued it, not the person: the reviews
+                                # Its chat continued it, or a saved message started
+                                # it again, not the person's own message: the reviews
                                 # still read the request, and no password in it is
-                                # given again. A park and resume stays under this.
+                                # given again (a saved message's handle was one
+                                # message's). A park and resume stays under this.
                                 words = spent(text if words is None else words)
                             # Only when set: a stand-in runner takes no words.
                             own: dict[str, Any] = (

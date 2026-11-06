@@ -655,3 +655,38 @@ async def test_a_chores_run_reads_the_saved_request_as_the_persons_words(
     assert seen["text"].endswith(CHORE_NOTE)
     assert seen["words"] == saved
     assert "from_person" not in seen
+
+
+@pytest.mark.parametrize(("origin", "alive"), [("user", True), ("user_rule", False)])
+async def test_a_saved_messages_password_handle_is_not_alive_on_a_later_run(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch, origin: str, alive: bool
+) -> None:
+    """A chore's later run never types what its saved message once gave (#570).
+
+    The person's own run still reads the handle its message holds; a saved
+    message's handle was one message's, and the chore's run relies on the sign-in
+    melo's browser kept, or asks.
+    """
+    from localmelo.melo.contracts.sign_in import VAULT, hide_passwords
+
+    workers, workspace, _ = setup
+    VAULT.forget()
+    saved = hide_passwords("sign in to shop.example, my password is Zq7!hunter2x")
+    assert "[password-1]" in saved
+    seen: dict[str, Any] = {}
+
+    class Recording(FakeRunner):
+        async def start_turn(self, text: str, **kwargs: Any) -> None:
+            seen.update(kwargs, text=text)
+            await super().start_turn(text, approval=kwargs["approval"])
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.SessionRunner", Recording)
+    job = workspace / "job"
+    job.mkdir()
+    spec = TaskSpec.from_payload({"objective": saved, "workspace": str(job)})
+    await workers.create_spec(
+        dataclasses.replace(spec, user_words=saved), origin=cast(Origin, origin)
+    )
+    await eventually(lambda: "text" in seen)
+    assert ("[password-1]" in seen["words"]) is alive
+    VAULT.forget()

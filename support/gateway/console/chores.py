@@ -6,17 +6,25 @@ asks the store which chores are due and starts each as a task (origin
 it never calls a model. A chore that came due while the computer slept runs
 once when the tick next runs, and its next time is planned from then, never
 once per missed slot. A chore's runs are one at a time: its next slot is
-skipped while its last run has not ended, and the chat that saved it is told
-once for that run (:meth:`ChoreRunner._skipped`). A run is the person's work in
+skipped while its last run has not ended (paused runs have not), and the chat
+that saved it is told once for that run (:meth:`ChoreRunner._skipped`). A run
+that has waited on the person for :data:`WAIT_LIMIT_S` is ended instead when
+the next slot comes, with a plain line, and the slot's run starts. Whoever
+decides whether a chore may start (the tick, Run now, a chat that saves a
+chore and runs it at once, a delete) holds the chore's guard
+(:meth:`ChoreRunner.guard`) and reads the chore again under it, so a chore
+deleted a moment ago starts nothing. A run is the person's work in
 that chat as a task they asked for is: it has the browser, works in the chore's
 own folder, which every run shares and which goes with the chore
 (:func:`~localmelo.support.gateway.task_policy.chore_workspace`), and its chat
-follows up on how it ended. Its approvals are not a task's: it neither uses nor
-records the chat's earlier approvals, and Auto blocks what it would ask. A
-one-time chore (a reminder) runs once, late if the computer slept through its
-time, and is then switched off with no next time; it never waits for an earlier
-run to end, and its run only tells the reminder: no browser, no folder of its
-own beyond the run's, no follow-up.
+follows up on how it ended. A run already accepted when its chore is deleted
+goes on and ends in place; :meth:`ChoreRunner.sweep` removes the folder after
+it, and any folder a failed removal left. Its approvals are not a task's: it
+neither uses nor records the chat's earlier approvals, and Auto blocks what it
+would ask. A one-time chore (a reminder) runs once, late if the computer slept
+through its time, and is then switched off with no next time; it never waits
+for an earlier run to end, and its run only tells the reminder: no browser, no
+folder of its own beyond the run's, no follow-up.
 
 The check-in comes every :data:`CHECKIN_S` seconds while the gateway runs and
 the switch is on. It looks for something to say in code: a chore's finished
@@ -34,9 +42,11 @@ import contextlib
 import dataclasses
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import tzinfo
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.schema import Message
@@ -55,13 +65,20 @@ from localmelo.support.gateway.task_policy import (
     MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
     TaskSpec,
+    chore_folder_ids,
+    chore_folder_path,
     chore_workspace,
     remove_chore_workspace,
 )
-from localmelo.support.gateway.task_store import TaskConflictError, TaskStoreError
+from localmelo.support.gateway.task_store import (
+    TaskConflictError,
+    TaskRecord,
+    TaskStoreError,
+)
 from localmelo.support.sessions.store import SessionStoreError
 
 from .activity import result_line
+from .errors import ApiError
 from .front import thinking_off
 from .running import WAITS_FOR_YOU
 
@@ -76,8 +93,13 @@ SUMMARY_TIMEOUT_S: Final = 60.0
 SUMMARY_CHARS: Final = 400
 # A one-time chore that starts this long after its time ran late (the jitter and a beat are not late).
 LATE_S: Final = 300.0
-# A chore whose last task is in one of these states has not finished: its next slot is skipped.
-_ACTIVE: Final = frozenset({"queued", "running", "held", "waiting"})
+# A run that has waited on the person this long (an approval, an answer, a pause) gives
+# its chore's slot to the next one: the next slot ends it and starts its own.
+WAIT_LIMIT_S: Final = 3600.0
+# How long a run stopped for that is given to end before its slot is left alone this time.
+STOP_WAIT_S: Final = 10.0
+# The chores whose guard the running task holds (see :meth:`ChoreRunner.guard`).
+_HELD: ContextVar[frozenset[str]] = ContextVar("chore_guards_held", default=frozenset())
 _SUMMARY_PROMPT: Final = (
     "You write one short note for the user's main chat. In at most two plain "
     "sentences, say what the scheduled chores that just finished produced and "
@@ -122,6 +144,27 @@ class ChoreRunner:
         self._mentioned: set[str] = set()
         # Runs whose chat was told a slot was skipped for them (the same).
         self._skipped_for: set[str] = set()
+        # One lock for each chore: whoever decides whether it may start holds it.
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    @contextlib.asynccontextmanager
+    async def guard(self, chore_id: str) -> AsyncIterator[None]:
+        """One at a time for chore *chore_id*: whoever checks that it may start, starts it and links its run, or deletes it, holds this.
+
+        The timer, Run now, a chat that saves a chore and starts its first run,
+        and a delete all go through it, so none acts on what another has just
+        changed. The task that holds it may ask again (a save that starts the run).
+        """
+        held = _HELD.get()
+        if chore_id in held:
+            yield
+            return
+        async with self._locks.setdefault(chore_id, asyncio.Lock()):
+            token = _HELD.set(held | {chore_id})
+            try:
+                yield
+            finally:
+                _HELD.reset(token)
 
     # ── Lifecycle ──
 
@@ -162,15 +205,33 @@ class ChoreRunner:
             self.next_checkin = now + self.options.checkin_s
             if self.checkin_task is None or self.checkin_task.done():
                 self.checkin_task = asyncio.create_task(self._checkin_quietly())
+            try:
+                await self.sweep()
+            except Exception:
+                logger.exception("The sweep of chore folders failed")
         return started
 
     async def _run_due(self, chore: Chore, now: float) -> str | None:
+        async with self.guard(chore.chore_id):
+            # The tick read the chore a while ago: it may be deleted, moved or switched
+            # off by now, and then it starts nothing and makes no folder.
+            fresh = await self.store.find(chore.chore_id)
+            if (
+                fresh is None
+                or not fresh.enabled
+                or fresh.next_run is None
+                or fresh.next_run > now
+            ):
+                return None
+            return await self._start_due(fresh, now)
+
+    async def _start_due(self, chore: Chore, now: float) -> str | None:
         # Planned from now: a slot missed while asleep is not run again. A one-time
         # chore has no next slot: it is switched off whatever its run does.
         once = chore.schedule.kind == "once"
         next_run = None if once else self.store.plan(chore.schedule, now)
         over = False if once else None
-        if not once and await self.busy(chore):
+        if not once and await self._holds(chore, now):
             await self.store.advance(chore, next_run=next_run)
             await self._skipped(chore)
             return None
@@ -192,27 +253,87 @@ class ChoreRunner:
         )
         return task
 
+    async def _say(self, chore: Chore, key: str, **params: str) -> None:
+        """Tell the chat that saved *chore* something in plain words; a line that cannot be written is logged."""
+        try:
+            await self.console.front_for(chore.front_id).notice(key, **params)
+        except Exception:
+            logger.exception("Could not tell a chat about a chore")
+
     async def _skipped(self, chore: Chore) -> None:
         """Tell the chat that saved *chore* its slot was skipped: once for each run that holds it up."""
         if chore.last_task_id in self._skipped_for:
             return
         self._skipped_for.add(chore.last_task_id)
+        await self._say(chore, "chores.skipped", title=chore.title)
+
+    async def _last_run(self, chore: Chore) -> TaskRecord | None:
+        """*chore*'s newest run as its task stands, or ``None`` when it has none."""
+        if not chore.last_task_id:
+            return None
         try:
-            await self.console.front_for(chore.front_id).notice(
-                "chores.skipped", title=chore.title
-            )
-        except Exception:
-            logger.exception("Could not tell a chat that a chore's slot was skipped")
+            return await self.console.workers.tasks.get_task(chore.last_task_id)
+        except TaskStoreError:
+            return None
 
     async def busy(self, chore: Chore) -> bool:
-        """Whether *chore*'s last run has not ended: its runs are one at a time."""
-        if not chore.last_task_id:
+        """Whether *chore*'s last run has not ended: its runs are one at a time.
+
+        Paused and interrupted runs have not ended: they go on when resumed.
+        """
+        record = await self._last_run(chore)
+        return record is not None and record.state not in FINISHED
+
+    async def _holds(self, chore: Chore, now: float) -> bool:
+        """Whether *chore*'s last run still holds its slot at *now*.
+
+        A run that has not ended does, unless it has waited on the person for
+        :data:`WAIT_LIMIT_S`: then it is ended with a plain line and the slot is free.
+        """
+        record = await self._last_run(chore)
+        if record is None or record.state in FINISHED:
             return False
+        if not self._waited_out(record, now):
+            return True
+        return not await self._end(chore, record)
+
+    def _waited_out(self, record: TaskRecord, now: float) -> bool:
+        """Whether *record* has waited on the person (an approval, an answer, a pause) for :data:`WAIT_LIMIT_S`.
+
+        A run whose page the person holds is theirs: it is never ended for waiting.
+        """
+        asks = self.console.asks.waiting_on_person(
+            str(record.front_id or self.console.main_id)
+        )
+        waits = (
+            record.state in ("parked", "interrupted")
+            or (record.state == "held" and record.wait_reason in WAITS_FOR_YOU)
+            or any(ask.task_id == record.task_id for ask in asks)
+        )
+        if not waits or record.updated_at > now - WAIT_LIMIT_S:
+            return False
+        browsers = self.console.workers.browsers
+        return browsers is None or not browsers.holds_page(record.task_id)
+
+    async def _end(self, chore: Chore, record: TaskRecord) -> bool:
+        """Stop *record*, a run that waited too long, and wait for it to end; whether it has.
+
+        Nothing it waited on is answered for the person: the step it held never runs.
+        """
         try:
-            record = await self.console.workers.tasks.get_task(chore.last_task_id)
-        except TaskStoreError:
-            return False
-        return record.state in _ACTIVE
+            await self.console.workers.update(record.task_id, state="stop")
+        except Exception:
+            logger.exception("Could not stop a run that waited too long")
+        deadline = time.monotonic() + STOP_WAIT_S
+        while True:
+            now = await self._last_run(chore)
+            if now is None or now.state in FINISHED:
+                break
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+        await self._say(chore, "chores.waitedOut", title=chore.title)
+        return True
 
     async def _start(self, chore: Chore, key: str) -> str:
         reminder = chore.is_reminder
@@ -224,11 +345,13 @@ class ChoreRunner:
         reason = REMINDER_REASON if reminder else f"Chore, {chore.schedule.describe()}"
         # A review reads the person's words, never the note or the model's reading.
         # A chore's runs share one folder; a reminder's run only tells the reminder.
+        # Every run of a repeating chore says so to its posting review, from code.
         spec = dataclasses.replace(
             spec,
             level=chore.level,
             reason=reason,
             user_words="" if reminder else chore.words,
+            repeats=chore.schedule.kind != "once",
             workspace=(
                 ""
                 if reminder
@@ -245,23 +368,84 @@ class ChoreRunner:
         )
         return str(task["task_id"])
 
-    async def delete(self, chore_id: str, *, revision: int | None = None) -> None:
-        """Delete a chore, and the folder its runs shared with it."""
-        await self.store.delete(chore_id, revision=revision)
-        await asyncio.to_thread(
-            remove_chore_workspace, self.console.workers.settings(), chore_id
+    async def delete(self, chore_id: str, *, revision: int | None = None) -> str:
+        """Delete a chore, and the folder its runs shared with it.
+
+        A run already accepted goes on and ends in place; its folder is removed
+        once it has ended (:meth:`sweep`). Returns ``""`` when the folder is gone,
+        ``"running"`` when a run still uses it and ``"left"`` when it could not be
+        removed: in both of those the chat is told where it is.
+        """
+        async with self.guard(chore_id):
+            chore = await self.store.get(chore_id)
+            await self.store.delete(chore_id, revision=revision)
+            left = await self._clear(chore)
+        if left:
+            path = str(chore_folder_path(self.console.workers.settings(), chore_id))
+            key = "chores.folderRunning" if left == "running" else "chores.folderLeft"
+            await self._say(chore, key, title=chore.title, path=path)
+        return left
+
+    async def _clear(self, chore: Chore) -> str:
+        """Remove *chore*'s folder unless a run still works in it: ``""``, ``"running"`` or ``"left"``."""
+        if await self._in_use(chore.chore_id):
+            return "running"
+        try:
+            await asyncio.to_thread(
+                remove_chore_workspace,
+                self.console.workers.settings(),
+                chore.chore_id,
+            )
+        except OSError:
+            logger.exception("Could not remove the folder of a deleted chore")
+            return "left"
+        return ""
+
+    async def _in_use(self, chore_id: str) -> bool:
+        """Whether a run that has not ended works in chore *chore_id*'s folder."""
+        name = f"chore-{chore_id}"
+        return any(
+            Path(str(r.spec.get("workspace") or "")).name == name
+            for r in await self.console.workers.tasks.open_tasks()
         )
 
+    async def sweep(self) -> None:
+        """Remove the folders of deleted chores that were left: a run was in them, or removing failed.
+
+        Only folders melo made for a chore (``chore-`` and its 12-hex id), whose
+        chore is gone and which no run that has not ended works in.
+        """
+        settings = self.console.workers.settings()
+        ids = await asyncio.to_thread(chore_folder_ids, settings)
+        if not ids:
+            return
+        owned = {c.chore_id for c in await self.store.list_chores()}
+        for chore_id in ids:
+            if chore_id in owned or await self._in_use(chore_id):
+                continue
+            try:
+                await asyncio.to_thread(remove_chore_workspace, settings, chore_id)
+            except OSError:
+                logger.exception("Could not remove a folder left by a deleted chore")
+
     async def run_now(self, chore: Chore) -> dict[str, Any]:
-        """The person's Run now: a task at once; the chore's schedule stays as it was."""
-        now = self.clock()
-        task_id = await self._start(
-            chore, f"chore:{chore.chore_id}:now:{int(now * 1000)}"
-        )
-        fresh = await self.store.get(chore.chore_id)
-        await self.store.advance(
-            fresh, next_run=fresh.next_run, task_id=task_id, ran_at=now
-        )
+        """The person's Run now: a task at once; the chore's schedule stays as it was.
+
+        One run at a time: it is refused (409) while the chore's last run has not
+        ended, and nothing starts for a chore deleted in the meantime.
+        """
+        async with self.guard(chore.chore_id):
+            fresh = await self.store.get(chore.chore_id)  # gone: not found
+            if await self.busy(fresh):
+                raise ApiError(409, "invalid_transition", t("errors.choreRunning"))
+            now = self.clock()
+            task_id = await self._start(
+                fresh, f"chore:{fresh.chore_id}:now:{int(now * 1000)}"
+            )
+            fresh = await self.store.get(fresh.chore_id)
+            await self.store.advance(
+                fresh, next_run=fresh.next_run, task_id=task_id, ran_at=now
+            )
         return await self.console.workers.get(task_id)
 
     async def ran_in_chat(self, chore_id: str, task_id: str) -> None:
@@ -330,26 +514,30 @@ class ChoreRunner:
         return results, await self._waiting(now)
 
     async def _waiting(self, now: float) -> list[tuple[str, str]]:
-        """The main chat's tasks that have waited a whole beat for the person, not yet mentioned.
+        """The tasks of any chat that have waited a whole beat for the person, not yet mentioned.
 
         A task on an approval or an answer is ``held`` (:data:`WAITS_FOR_YOU`); one
         on a question to the person stays ``running``, and the ask says so. A task
         that just began waiting has its card or its reply box in front of the person.
+        A side chat's tasks count as the main chat's do: the card is one for all.
         """
         main = self.console.main_id
         since = now - self.options.checkin_s
-        asked = {ask.task_id for ask in self.console.asks.waiting_on_person(str(main))}
-        records = await self.console.workers.tasks.list_tasks(["held", "running"])
+        records = [
+            r
+            for r in await self.console.workers.tasks.list_tasks(["held", "running"])
+            if r.task_id not in self._mentioned and r.updated_at <= since
+        ]
+        asked = {
+            ask.task_id
+            for chat in {str(r.front_id or main) for r in records}
+            for ask in self.console.asks.waiting_on_person(chat)
+        }
         return [
             (r.task_id, r.title)
             for r in records
-            if r.task_id not in self._mentioned
-            and r.front_id in (None, main)
-            and r.updated_at <= since
-            and (
-                r.task_id in asked
-                or (r.state == "held" and r.wait_reason in WAITS_FOR_YOU)
-            )
+            if r.task_id in asked
+            or (r.state == "held" and r.wait_reason in WAITS_FOR_YOU)
         ]
 
     async def _note(self, facts: list[str]) -> str:

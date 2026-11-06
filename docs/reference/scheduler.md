@@ -426,6 +426,30 @@ case, scheme, port and spelling do not matter) or any other page of that site;
 `denied_records` counts only real blocks (a `call_key`, no `earlier`), so
 refusals of repeats never push a block out of its window.
 
+### A chore's runs are one at a time
+
+`ChoreRunner.guard(chore_id)` (`support/gateway/console/chores.py`) is the one
+place that decides whether a chore may start: the tick, `POST /api/chores/{id}/run`,
+`Front.save_chore` with `Front.delegate` (a message that saves a chore and runs it
+at once) and `ChoreRunner.delete` hold it, and the starters read the chore again
+under it, so a chore deleted after the tick read it starts nothing and makes no
+folder. A chore is busy while its last task is in any state outside `FINISHED`
+(`front_rules.FINISHED`, the scheduler's terminal phases), parked and interrupted
+included, because those resume. A run that has waited on the person (a `held`
+run on an approval or an input, an open ask, a `parked` or `interrupted` run) for
+`WAIT_LIMIT_S` (one hour) and whose page the person does not hold is ended with
+a `user_stop` at the next slot, the chat gets a `notice` echo (`chores.waitedOut`)
+and the slot's run starts; a run that does not end within `STOP_WAIT_S` keeps the
+slot for that time. A run accepted before its chore is deleted goes on to its end;
+`ChoreRunner.sweep`, at every check-in beat, removes the `chore-<12 hex>`
+folders of chores that are gone once no task that has not ended works in them
+(`TaskStore.open_tasks`), and so retries a folder that could not be removed
+(`task_policy.remove_chore_workspace` raises `OSError`; `delete` says so with a
+`notice` echo). A chore's run takes no project instructions from its folder
+(`TaskWorkers.create_spec`), and `TaskSpec.repeats` becomes
+`AgentOptions.repeats`, which makes the posting review ask each time
+(`StepReviewer`, `post_stop(repeating=True)`).
+
 ## S3b.1a foundations
 
 Pause saves the prior level, source, reason and rank in `park_priority` in the

@@ -117,6 +117,9 @@ class TaskSpec:
     ``GEMINI.md``); ``project_files`` lists what was read as (path, characters,
     cut) and ``project_skipped`` the files too big to read. Only trusted code
     sets them.
+    ``repeats`` says the task is one run of a saved chore that repeats on a
+    schedule: the posting review then asks before each post whatever the words
+    say. Only trusted code sets it.
     """
 
     title: str
@@ -133,6 +136,7 @@ class TaskSpec:
     project_instructions: str = ""
     project_files: tuple[tuple[str, int, bool], ...] = ()
     project_skipped: tuple[str, ...] = ()
+    repeats: bool = False
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
@@ -220,6 +224,8 @@ class TaskSpec:
             ]
         if self.project_skipped:
             out["project_skipped"] = list(self.project_skipped)
+        if self.repeats:
+            out["repeats"] = True
         return out
 
 
@@ -442,22 +448,49 @@ def chore_workspace(cfg: object, chore_id: str) -> str:
     )
 
 
+def chore_folder_path(cfg: object, chore_id: str) -> str:
+    """Where chore *chore_id*'s folder is (or would be): inside the workspace root, nothing made."""
+    root, _ = _root_and_home(cfg)
+    return os.path.join(root, _chore_folder(chore_id))
+
+
 def remove_chore_workspace(cfg: object, chore_id: str) -> None:
     """Delete chore *chore_id*'s folder with what its runs left; nothing when it has none.
 
     Only that one child of the root goes. A link is unlinked, never followed,
-    and so are the links inside it; a folder that cannot be deleted whole is
-    left as far as it goes.
+    and so are the links inside it. A folder that cannot be deleted whole raises
+    :class:`OSError`, left as far as it went: the caller says so and tries again.
     """
     try:
         root, _ = _root_and_home(cfg)
-        path = os.path.join(root, _chore_folder(chore_id))
+        path = chore_folder_path(cfg, chore_id)
     except WorkspaceError:
         return
     if os.path.islink(path):
         os.unlink(path)
     elif os.path.isdir(path) and _inside(os.path.realpath(path), root):
-        shutil.rmtree(path, ignore_errors=True)
+        shutil.rmtree(path)
+
+
+_MADE_FOLDER: Final = re.compile(r"chore-([0-9a-f]{12})")
+
+
+def chore_folder_ids(cfg: object) -> list[str]:
+    """The ids whose chore folders (``chore-`` and twelve hex digits, as melo makes them) are in the workspace root.
+
+    Only real folders by that exact name: a link or any other name is not one.
+    """
+    try:
+        root, _ = _root_and_home(cfg)
+        with os.scandir(root) as entries:
+            return sorted(
+                found.group(1)
+                for entry in entries
+                if (found := _MADE_FOLDER.fullmatch(entry.name))
+                and entry.is_dir(follow_symlinks=False)
+            )
+    except (WorkspaceError, OSError):
+        return []
 
 
 def _user_refusal(path: str, home: str) -> str:
@@ -544,6 +577,8 @@ __all__ = [
     "WorkerToolPolicy",
     "WorkspaceError",
     "check_origin",
+    "chore_folder_ids",
+    "chore_folder_path",
     "chore_workspace",
     "configured_root",
     "folder_problem",

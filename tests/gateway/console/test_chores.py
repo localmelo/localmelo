@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import itertools
 import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -27,6 +28,7 @@ from localmelo.support.gateway.chore_store import CHORE_NOTE
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
+from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.front import ECHO_EVENT
 from localmelo.support.gateway.task_policy import configured_root
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer
@@ -1345,8 +1347,10 @@ async def test_a_chore_keeps_one_folder_across_its_runs_and_it_goes_with_the_cho
         await finish(console, again, clock.now)
         run = await client.post(f"/api/chores/{chore['id']}/run")
         assert run.status_code == 202, run.text
-        assert await folder_of(console, run.json()["task"]["task_id"]) == folder
-        # It goes when the chore is deleted; another chore's folder stays.
+        now_run = run.json()["task"]["task_id"]
+        assert await folder_of(console, now_run) == folder
+        # It goes when the chore is deleted (its runs ended); another chore's folder stays.
+        await finish(console, now_run, clock.now)
         deleted = await client.delete(f"/api/chores/{chore['id']}")
         assert deleted.status_code == 200, deleted.text
         assert not folder.exists()
@@ -1402,12 +1406,17 @@ async def test_run_now_is_refused_while_the_last_run_has_not_ended(
         assert (await client.post(f"/api/chores/{chore['id']}/run")).status_code == 202
 
 
-async def skipped(console: Console, chat: str) -> list[dict[str, Any]]:
+async def rows_of(console: Console, chat: str) -> list[dict[str, Any]]:
+    """The echoes *chat* shows, oldest first."""
     found = await console.store.events_of_type(chat, ECHO_EVENT)
+    return [e.event["data"] for e in found]
+
+
+async def skipped(console: Console, chat: str) -> list[dict[str, Any]]:
     return [
-        e.event["data"]
-        for e in found
-        if e.event["data"].get("said", {}).get("key") == "chores.skipped"
+        e
+        for e in await rows_of(console, chat)
+        if e.get("said", {}).get("key") == "chores.skipped"
     ]
 
 
@@ -1424,8 +1433,9 @@ async def test_a_slot_skipped_for_a_run_that_has_not_ended_is_said_once_in_its_c
         clock.to("2026-10-28 08:31")
         shop, photos = await runner.tick()
         assert await skipped(console, main) == []
-        # Wednesday's runs wait (one on an approval): Thursday's slot is skipped, and said.
-        await set_waiting(console, shop, clock.now)
+        # Wednesday's runs have not ended (one is going, one has not begun): Thursday's
+        # slot is skipped, and said. (A run that waits on the person is ended instead.)
+        await set_state(console, shop, "running", clock.now)
         clock.to("2026-10-29 08:31")
         assert await runner.tick() == []
         [line] = await skipped(console, main)
@@ -1446,7 +1456,7 @@ async def test_a_slot_skipped_for_a_run_that_has_not_ended_is_said_once_in_its_c
         await finish(console, photos, clock.now)
         clock.to("2026-10-31 08:31")
         [third, _] = await runner.tick()
-        await set_waiting(console, third, clock.now)
+        await set_state(console, third, "running", clock.now)
         clock.to("2026-11-01 08:31")
         await runner.tick()
         assert len(await skipped(console, main)) == 2
@@ -1480,3 +1490,178 @@ async def test_a_chore_run_waiting_on_the_person_is_in_the_checkin_once(
             ["Shop check-in: waiting for the user"]
         ]
         assert await console.chore_runner.checkin() is None  # said once
+
+
+# ── One place decides whether a chore may start (#570) ──
+
+
+async def test_two_starts_of_one_chore_at_once_admit_one_run(tmp_path: Path) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        runner = console.chore_runner
+        row = await runner.store.get(chore["id"])
+        ticks = itertools.count()
+        runner.clock = lambda: clock.now + next(ticks)  # a new key for each start
+        both = await asyncio.gather(
+            runner.run_now(row), runner.run_now(row), return_exceptions=True
+        )
+        assert sum(isinstance(r, dict) for r in both) == 1, both
+        assert [r.status_code for r in both if isinstance(r, ApiError)] == [409]
+        assert len(await tasks_of(console)) == 1
+        # The timer and Run now at once: still one.
+        await finish(console, (await tasks_of(console))[0].task_id, clock.now)
+        clock.to("2026-10-28 08:31")
+        raced = await asyncio.gather(
+            runner.tick(), runner.run_now(row), return_exceptions=True
+        )
+        assert len(await tasks_of(console)) == 2, raced
+
+
+async def test_a_paused_run_still_holds_its_chores_slot(tmp_path: Path) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        hourly = await add(client, "Brief me", {"kind": "hours", "every": 1})
+        clock.to("2026-10-28 08:00")
+        runner = console.chore_runner
+        row = await runner.store.get(hourly["id"])
+        task = await runner.run_now(row)
+        # Paused (parked) half an hour ago: the next hour's slot and Run now wait.
+        await set_state(console, task["task_id"], "parked", at("2026-10-28 08:50"))
+        clock.to("2026-10-28 09:20")
+        assert await runner.tick() == []
+        assert len(await tasks_of(console)) == 1
+        refused = await client.post(f"/api/chores/{hourly['id']}/run")
+        assert refused.status_code == 409, refused.text
+
+
+async def test_a_chore_deleted_after_the_tick_read_it_starts_nothing_and_leaves_no_folder(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        clock.to("2026-10-28 08:31")
+        runner = console.chore_runner
+        [due] = await runner.store.due(clock.now)  # the tick has read it ...
+        assert (await client.delete(f"/api/chores/{chore['id']}")).status_code == 200
+        assert await runner._run_due(due, clock.now) is None  # ... and then it is gone
+        assert await tasks_of(console) == []
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        assert not (root / f"chore-{chore['id']}").exists()
+
+
+async def test_a_run_that_waited_an_hour_ends_when_the_next_slot_comes(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        await add(client, "Check in at the shop", {"kind": "daily", "at": "08:30"})
+        runner = console.chore_runner
+        clock.to("2026-10-28 08:31")
+        [old] = await runner.tick()
+        await set_waiting(console, old, clock.now)
+        clock.to("2026-10-29 08:31")
+        [new] = await runner.tick()
+        assert new != old
+        assert (await console.workers.tasks.get_task(old)).state == "cancelled"
+        [line] = [
+            e
+            for e in await rows_of(console, str(console.main_id))
+            if e.get("said", {}).get("key") == "chores.waitedOut"
+        ]
+        assert line["echo"] == "notice" and line["said"]["params"] == {
+            "title": "Check in at the shop"
+        }
+        assert await skipped(console, str(console.main_id)) == []
+
+
+async def test_a_run_that_waited_less_than_an_hour_or_whose_page_you_hold_stays(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        hourly = await add(client, "Brief me", {"kind": "hours", "every": 1})
+        runner = console.chore_runner
+        clock.to("2026-10-28 08:00")
+        old = (await runner.run_now(await runner.store.get(hourly["id"])))["task_id"]
+        await set_waiting(console, old, at("2026-10-28 08:50"))
+        clock.to("2026-10-28 09:20")
+        assert await runner.tick() == []  # waited 30 minutes
+        # Waited two hours, but you hold its page.
+        await set_waiting(console, old, at("2026-10-28 07:00"))
+
+        class Held:
+            def holds_page(self, task_id: str) -> bool:
+                return bool(task_id == old)
+
+        console.workers.browsers = Held()  # type: ignore[assignment]
+        assert await runner.tick() == []
+        assert (await console.workers.tasks.get_task(old)).state == "held"
+
+
+async def test_a_side_chat_chore_waiting_on_you_is_in_the_checkin_once(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path, summary=Summary("Waiting.")) as (
+        console, client, clock, summary, _
+    ):  # fmt: skip
+        side = (await seed_turn(console.store, str(tmp_path))).session_id
+        await add(client, "Sort the photos", BRIEF, title="Photo sort", front_id=side)
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await set_waiting(console, task_id, clock.now)
+        clock.now += CHECKIN_S + 1
+        card = await console.chore_runner.checkin()
+        assert card is not None and summary.facts == [
+            ["Photo sort: waiting for the user"]
+        ]
+        assert await console.chore_runner.checkin() is None
+
+
+async def test_a_deleted_chore_whose_folder_cannot_go_says_so_and_it_is_tried_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        folder = root / f"chore-{chore['id']}"
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        await finish(console, task_id, clock.now)
+        (folder / "points.txt").write_text("42")
+        (root / "chore-notes").mkdir()  # not a chore's folder: never touched
+        real = chores_module.remove_chore_workspace
+
+        def fails(cfg: Any, chore_id: str) -> None:
+            raise OSError("busy")
+
+        monkeypatch.setattr(chores_module, "remove_chore_workspace", fails)
+        deleted = await client.delete(f"/api/chores/{chore['id']}")
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json() == {"deleted": chore["id"], "folder": "left"}
+        found = [
+            e.get("said", {}).get("key")
+            for e in await rows_of(console, str(console.main_id))
+        ]
+        assert "chores.folderLeft" in found
+        assert folder.is_dir()
+        # The folder is found and removed on a later beat, when it can be.
+        monkeypatch.setattr(chores_module, "remove_chore_workspace", real)
+        await console.chore_runner.sweep()
+        assert not folder.exists() and (root / "chore-notes").is_dir()
+
+
+async def test_a_deleted_chores_folder_stays_while_its_run_goes_on_then_goes(
+    tmp_path: Path,
+) -> None:
+    async with chore_console(tmp_path) as (console, client, clock, _, _):
+        chore = await add(client, "Brief me", BRIEF)
+        root = Path(os.path.realpath(configured_root(console.cfg)))
+        folder = root / f"chore-{chore['id']}"
+        clock.to("2026-10-28 08:31")
+        [task_id] = await console.chore_runner.tick()
+        deleted = await client.delete(f"/api/chores/{chore['id']}")
+        # Nothing cancels the run: it finishes in place, and the sweep takes the folder.
+        assert deleted.json() == {"deleted": chore["id"], "folder": "running"}
+        assert folder.is_dir()
+        await console.chore_runner.sweep()
+        assert folder.is_dir()
+        await finish(console, task_id, clock.now)
+        await console.chore_runner.sweep()
+        assert not folder.exists()

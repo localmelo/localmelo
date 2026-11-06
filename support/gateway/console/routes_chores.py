@@ -156,16 +156,17 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.delete("/api/chores/{chore_id}")
     async def delete(chore_id: str, revision: int | None = None) -> JSONResponse:
         console.require_store()
-        await _call(runner.delete(chore_id, revision=revision))
-        return JSONResponse(content={"deleted": chore_id})
+        left = await _call(runner.delete(chore_id, revision=revision))
+        # "folder" says why the folder is still there ("running" or "left"), else absent.
+        return JSONResponse(
+            content={"deleted": chore_id, **({"folder": left} if left else {})}
+        )
 
     @app.post("/api/chores/{chore_id}/run")
     async def run_now(chore_id: str) -> JSONResponse:
         console.require_store()
         chore = await _call(runner.store.get(chore_id))
-        if await runner.busy(chore):
-            # One run at a time: the runs of a chore share its folder.
-            raise ApiError(409, "invalid_transition", t("errors.choreRunning"))
+        # One run at a time (409), decided under the chore's guard in run_now.
         task = await _call(runner.run_now(chore))
         fresh = await _call(runner.store.get(chore_id))
         return JSONResponse(

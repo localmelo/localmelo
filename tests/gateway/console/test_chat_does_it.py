@@ -385,6 +385,49 @@ async def test_now_and_every_day_saves_the_whole_request_and_runs_it_now(
         assert (await chores(console))[0].next_run == chore.next_run
 
 
+async def test_the_run_started_now_works_in_the_chores_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One folder across the chore's runs, the one started with the schedule too (#570)."""
+    async with owner_console(
+        tmp_path, monkeypatch, main=[schedules(True), OK], run=False
+    ) as (console, client, models, _):
+        await say(client, console, BOTH)
+        [chore] = await chores(console)
+        [task] = await console.workers.tasks.list_tasks()
+        info = await console.store.get_session(task.task_id)
+        assert info is not None and info.workspace is not None
+        assert Path(info.workspace).name == f"chore-{chore.chore_id}"
+
+
+@pytest.mark.parametrize(
+    "main",
+    [[schedules(True), OK], [creates("Invoice"), schedules(False), OK]],
+    ids=["schedule first", "task first"],
+)
+async def test_a_chores_first_run_is_linked_while_the_chore_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, main: list[Reply]
+) -> None:
+    """The tick cannot start a second run between the chore's save and its run's link (#570)."""
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        runner = console.chore_runner
+        held: list[bool] = []
+        link = runner.ran_in_chat
+
+        async def spy(chore_id: str, task_id: str) -> None:
+            held.append(runner._locks[chore_id].locked())
+            await link(chore_id, task_id)
+
+        monkeypatch.setattr(runner, "ran_in_chat", spy)
+        await say(client, console, BOTH)
+        assert held == [True]
+
+
 async def test_a_message_that_only_sets_a_schedule_just_saves_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
