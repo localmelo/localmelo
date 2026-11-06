@@ -642,6 +642,66 @@ setup card calls it, and only while the card is shown.
   elsewhere, `commands` are the lines to run, `note` is the one thing to do besides
   running them, and `guide` is the model servers guide. The card shows them while
   `state` is `none`.
+- `job` is in every answer: the setup job the card started, or `null` before the
+  first one (a gateway restart forgets it). It has the shape of the `job` in
+  [`POST /api/setup/start`](#post-apisetupstart), so the card follows a setup with
+  this one request and there is no route for the job alone.
+
+## GET /api/setup/plan
+
+What this Mac can run and what the first-run setup would do: the list the terminal
+prints before its one OK, in the language of the request. It asks melo_serve, which
+takes seconds, so one asker serves every caller at once and the answer is kept for
+60 s (5 s when there was nothing to offer); it is not part of `GET /api/setup/detect`.
+It writes nothing. Where setup is not offered, `available` is `false` and `reason`
+says why (another system, an Intel Mac, too little memory, no `uv`, a failed check).
+
+```json
+{"available": true, "reason": "", "hint": "", "pick": {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx", "backend_name": "oMLX"}, "mac": "This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free", "intro": "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.", "rows": [{"id": "model:qwen3-8b-omlx", "name": "Qwen3 8B", "kind": "chat model", "size": "4.9 GB", "where": "Hugging Face → ~/models/huggingface", "state": "todo", "off": true}], "download": "Download about 6.6 GB.", "free": "83 GB free.", "notes": [], "action": "Set up Qwen3 8B (6.6 GB)", "can_set_up": true}
+```
+
+- `skip` (optional, comma-separated) words the list for what the person left out:
+  `rows`, `download`, `notes`, `action` and `can_set_up` change, from the last plan
+  served. An id that is not one of the plan's items is 400 `invalid_request`.
+- Each row has `id`, `name`, `kind` (`chat backend`, `chat model`, ...), `size`
+  (empty when nothing downloads), `where`, `state` (`todo`, `partial` for a
+  download that goes on, `here` for what is already here, `skipped`) and `off`, whether the
+  person may turn it off. The words are the terminal's, from the same table.
+- `action` is the button: `Set up <model> (<size>)`, `Continue (<size> left)` after
+  a stop, or `Set up <model> (nothing to download)`. `can_set_up` is `false` when
+  the list does not fit the disk or leaves out what cannot be set up without.
+- When `available` is `false` only `reason` and `hint` are said; the card keeps its
+  commands then.
+
+## POST /api/setup/start
+
+Start the setup of the last plan `GET /api/setup/plan` served: the terminal's job
+(`melo-serve` through argv, never a shell), in a thread of its own, with no login
+item for the gateway (installing it would restart the gateway that runs the job).
+Answers 202 `{"job": ...}`.
+
+```json
+{"pick": "qwen3-8b-omlx", "skip": ["model:embed"]}
+```
+
+- `pick` must be the plan's pick or one of its alternatives; `skip` holds ids of
+  the plan's items, or of the rows the job adds (`service:melo_serve`,
+  `service:gateway`, `melo_serve`). Both are checked against the last plan served,
+  the list the person said yes to. Other fields are refused.
+- 400 `invalid_request`: an unknown pick or item. 409 `no_plan`: no plan was served
+  yet. 409 `setup_running`: a job runs. It needs the same sign-in and origin check
+  as the other routes under `/api`.
+- The job has `id`, `state` (`running`, `done`, `failed` or `cancelled`),
+  `stopping`, `error`, `pick`, `name`, `saved` (the chat model answered and
+  melo_serve was saved as the chat server) and `rows`, each with `id`, `name`,
+  `state` (`waiting`, `running`, `done`, `skipped`, `failed`), `line`, `done_bytes`,
+  `total_bytes` and `progress` (for example `310 of 881 MB`).
+- A gateway that shuts down ends the job `cancelled`; what was downloaded stays.
+
+## POST /api/setup/cancel
+
+Stop the job that runs, keeping what it downloaded; answers `{"job": ...}` (the job
+says `stopping` until it ends as `cancelled`). 409 `no_setup`: none runs.
 
 ## Scheduler tasks (S3a.2)
 

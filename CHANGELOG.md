@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Set up a model from the welcome card. With no server on a supported Apple-silicon Mac, the console's and the app's
+  welcome card shows the terminal's list (what this Mac can run, each item with its size and where it goes, the total
+  to download), lets each optional item be turned off, and sets it up after one button: a row per step with its own
+  progress, **Stop** that keeps what was downloaded, **Continue**, and a connection to the chat model when it answers.
+  The same job and the same words as the terminal's first run. The macOS app now carries a pinned, checksummed `uv`
+  (0.13.4) next to its Python, so none is needed on the Mac. `GET /api/setup/plan`, `POST /api/setup/start` and
+  `POST /api/setup/cancel` are new, and `GET /api/setup/detect` gains `job` (#NNN).
 - Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at

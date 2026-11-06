@@ -105,7 +105,7 @@ No model server is running yet.
 ```
 
 - **原因：** 四个常用端口（8000、8400、11434、30000，或 `LOCALMELO_DETECT_URLS` 中的 URL）都没有响应 `GET /v1/models`，而且 melo 无法提议帮你设置：这不是 Apple silicon Mac，或者 melo_serve 没有找到能在这台 Mac 上运行的东西（这一行后面的一行会说明原因），或者检查失败了。
-- **修复：** 用显示的命令自行启动服务器，然后选择 `Check again`；使用非默认端口时选择 `Enter an address`；选择 `Use a hosted service` 则改为设置一个云端服务（见[云端模型](../guides/hosted-models.md)）。`Quit`（或 Esc）不保存任何内容。在受支持的 Apple silicon Mac 上，melo 通常会提议[帮你设置服务器](../guides/model-servers.md#first-run-setup)，而不是打印这一行；管道和 `TERM=dumb` 会被告知请在终端中运行 melo。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片保留手动命令，并自动再次检查。
+- **修复：** 用显示的命令自行启动服务器，然后选择 `Check again`；使用非默认端口时选择 `Enter an address`；选择 `Use a hosted service` 则改为设置一个云端服务（见[云端模型](../guides/hosted-models.md)）。`Quit`（或 Esc）不保存任何内容。在受支持的 Apple silicon Mac 上，melo 通常会提议[帮你设置服务器](../guides/model-servers.md#first-run-setup)，而不是打印这一行；管道和 `TERM=dumb` 会被告知请在终端中运行 melo。若已经保存后端但没有找到服务器，`melo setup` 会打开完整后端菜单。网页/应用设置卡片在受支持的 Mac 上提供同样的设置；做不到时它会说明原因，保留手动命令，并自动再次检查。
 
 ### A model server cannot be used at the first run
 

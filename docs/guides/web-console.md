@@ -25,18 +25,27 @@ server) with its model, **A model server needs an API key**, or **No model serve
 is running on this Mac**. **Use this model** saves the server, tests it and makes
 the welcome ready without opening settings. With several chat models and none
 known to be loaded, the card lists them, marks the loaded one and waits for you to
-choose; it never picks one for you. With no server running, the
-card shows the commands that start one (oMLX on a Mac, Ollama elsewhere, as in the
+choose; it never picks one for you. With no server running, a supported
+Apple-silicon Mac sets one up from the card, as the terminal's first run does, with
+[the same list and the same job](model-servers.md#first-run-setup): what this Mac can
+run, each item with its size and where it goes, and the total to download. An item
+that is optional has a box to turn it off, and one button (`Set up Qwen3 8B (6.6 GB)`)
+starts it after that one OK. Each step then shows its own progress, **Stop** keeps what
+was downloaded, and **Continue** goes on after a stop or a failure. When the chat model
+answers, the card connects it as **Use this model** does. Where setup is not offered
+(another system, an Intel Mac, too little memory, or a check that failed) the card says
+why and shows the commands that start a server (oMLX on a Mac, Ollama elsewhere, as in the
 [model servers guide](model-servers.md)) in a block that one click selects, with a
-**Copy commands** button for the keyboard, and asks
+**Copy commands** button for the keyboard. It asks
 again every three seconds while it is on screen and the tab is visible, so the model
-appears once the server answers. **Check again** asks at once, and **Enter a server
+appears once a server answers. **Check again** asks at once, and **Enter a server
 address…** opens connection settings. The card names the other way too, under **Or use an account or a key**: **Choose a service…** opens
 Settings → Model server, where a model that runs online is set up with your own key.
 Until a model is set up the composer reads `Connect a model to start` and nothing is sent: words you typed stay in the box, and the banner
 (**No model is configured yet.**) has a **Connect a model** button that opens the same settings. The card also shows when
 the configured server stops answering, and it looks for a server only while it is
-on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect)).
+on screen ([`GET /api/setup/detect`](../reference/api-v2.md#get-apisetupdetect), with the
+list from [`GET /api/setup/plan`](../reference/api-v2.md#get-apisetupplan)).
 
 The page opens in default mode, which leaves out what only a developer needs: the chat's
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the

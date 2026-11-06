@@ -368,6 +368,37 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 - `suggested` 是要提供的模型：唯一的对话模型，或一个已加载的模型。当提供了多个模型而且不知道哪个已加载时为 `null`，客户端必须让用户自己选择。
 - 没有任何服务器回应时 `url` 为空。`problem` 说明已回应的服务器为什么不能使用。URL 中的用户名或密码绝不会返回。
 - 每个回答都带有 `start`：如何在这台电脑上启动模型服务器，来源与终端的首次运行相同。`name` 在 Mac 上是 `oMLX`，其他系统是 `Ollama`；`commands` 是要运行的命令，`note` 是运行命令之外要做的一件事，`guide` 是模型服务器指南。`state` 为 `none` 时，卡片会显示它们。
+- 每个回答都带有 `job`：卡片启动的设置任务；还没有启动过时为 `null`（网关重启后会忘记它）。它的形状与 [`POST /api/setup/start`](#post-apisetupstart) 里的 `job` 相同，所以卡片用这一个请求就能跟着设置，没有单独读取任务的路由。
+
+## GET /api/setup/plan
+
+这台 Mac 能运行什么、首次运行的设置会做什么：终端在那一次确认之前打印的清单，用请求的语言。它要问 melo_serve，要几秒，所以同一时刻只有一个提问者，所有调用方共用它的答案，答案保留 60 秒（没有可提供的内容时 5 秒）；它不属于 `GET /api/setup/detect`。不写入任何内容。没有提供设置的地方，`available` 为 `false`，`reason` 说明原因（其他系统、Intel Mac、内存太小、没有 `uv`、检查失败）。
+
+```json
+{"available": true, "reason": "", "hint": "", "pick": {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx", "backend_name": "oMLX"}, "mac": "This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free", "intro": "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.", "rows": [{"id": "model:qwen3-8b-omlx", "name": "Qwen3 8B", "kind": "chat model", "size": "4.9 GB", "where": "Hugging Face → ~/models/huggingface", "state": "todo", "off": true}], "download": "Download about 6.6 GB.", "free": "83 GB free.", "notes": [], "action": "Set up Qwen3 8B (6.6 GB)", "can_set_up": true}
+```
+
+- `skip`（可选，逗号分隔）按这个人去掉的项目重新写出清单：`rows`、`download`、`notes`、`action` 和 `can_set_up` 会变，依据最近一次给出的计划。不属于该计划的 id 返回 400 `invalid_request`。
+- 每一行有 `id`、`name`、`kind`（`chat backend`、`chat model` 等）、`size`（不下载时为空）、`where`、`state`（`todo`；`partial` 表示下载会接着做；`here` 表示已经有了；`skipped`）和 `off`（这个人能否把它关掉）。用词就是终端的，出自同一张表。
+- `action` 是按钮：`Set up <model> (<size>)`，停止之后是 `Continue (<size> left)`，不下载时是 `Set up <model> (nothing to download)`。清单装不下磁盘，或去掉了没有它就无法设置的项目时，`can_set_up` 为 `false`。
+- `available` 为 `false` 时只说 `reason` 和 `hint`，卡片这时保留它的命令。
+
+## POST /api/setup/start
+
+按 `GET /api/setup/plan` 最近给出的计划开始设置：终端的那个任务（通过 argv 运行 `melo-serve`，从不经过 shell），在自己的线程里运行，不为网关注册登录项（安装它会重启正在运行这个任务的网关）。返回 202 `{"job": ...}`。
+
+```json
+{"pick": "qwen3-8b-omlx", "skip": ["model:embed"]}
+```
+
+- `pick` 必须是该计划的推荐或它的备选之一；`skip` 里是该计划的项目 id，或任务自己加的行（`service:melo_serve`、`service:gateway`、`melo_serve`）。两者都对照最近给出的计划检查，也就是这个人点头同意的那张清单。其他字段会被拒绝。
+- 400 `invalid_request`：未知的推荐或项目。409 `no_plan`：还没有给出过计划。409 `setup_running`：已有任务在运行。需要和 `/api` 下其他路由相同的登录和来源检查。
+- 任务有 `id`、`state`（`running`、`done`、`failed` 或 `cancelled`）、`stopping`、`error`、`pick`、`name`、`saved`（对话模型已能回答，且 melo_serve 已保存为对话服务器）和 `rows`；每行有 `id`、`name`、`state`（`waiting`、`running`、`done`、`skipped`、`failed`）、`line`、`done_bytes`、`total_bytes` 和 `progress`（例如 `310 of 881 MB`）。
+- 网关关闭会让任务以 `cancelled` 结束，已下载的部分保留。
+
+## POST /api/setup/cancel
+
+停止正在运行的任务，保留已下载的部分；返回 `{"job": ...}`（任务在以 `cancelled` 结束之前显示 `stopping`）。409 `no_setup`：没有任务在运行。
 
 ## Scheduler tasks (S3a.2)
 
