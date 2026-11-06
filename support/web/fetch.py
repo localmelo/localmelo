@@ -42,7 +42,7 @@ from localmelo.support.web.guard import (
 USER_AGENT = "localmelo-web-fetch/1.0 (+https://github.com/localmelo/localmelo)"
 ACCEPT = (
     "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.9,"
-    "text/*;q=0.8,*/*;q=0.1"
+    "application/pdf;q=0.9,text/*;q=0.8,*/*;q=0.1"
 )
 MAX_REDIRECTS = 5
 MAX_BYTES = 2_000_000

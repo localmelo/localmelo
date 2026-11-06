@@ -9,7 +9,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 |---|---|---|
 | `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. Takes `command` and an optional `why`, one short sentence that starts the approval card; it changes nothing about what runs. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. Takes `code` and an optional `why`, as `shell_exec` does. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
-| `file_read` | Reads a text file. Takes `path` and, to read a part, `start_line` and `end_line` (1-based, inclusive). | Any file your account can read. A part that does not show the whole file ends with a note of how many lines the file has and the `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`). |
+| `file_read` | Reads a text file. Takes `path` and, to read a part, `start_line` and `end_line` (1-based, inclusive). | Any file your account can read. A part that does not show the whole file ends with a note of how many lines the file has and the `start_line` to go on from (`... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`). A file that starts with `%PDF-` is read as a PDF (see [Reading a PDF](#reading-a-pdf)). |
 | `list_files` | Lists a folder: its folders first, each ending in `/`, then its files with their sizes; a link ends in `@`. Takes `path` (default: the workspace folder) and `depth` (1 to 3, default 1). Never reads a file, never follows a link and skips `.git`. | Shows 200 entries, then `... and N more`. Read-only, so it never asks for approval. The interactive UI and gateway and console sessions offer it by default; a direct run and the Python API's default mode do not (`--builtins list_files` or `all` names it). |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
 | `file_edit` | Replaces one exact piece of a file (`old`, which must occur once) with `new`. | Files up to 1 MB. `old` is checked first: an edit whose text is missing or occurs more than once fails at once with a plain error, and asks no one. Otherwise it asks as `file_write` does; the approval card shows the change as a diff. Only a task's worker offers it (name it in `builtins` elsewhere). |
@@ -101,13 +101,13 @@ call itself asks nothing; each site passes the site gate below first.
 - **Input.** `url`, and `part` (from 1) for a later part of a long page.
 - **Output.** One line with the final address after redirects and the kind of page, then the
   page in the block the browser tools use,
-  `<<page id=wN nonce=N url=URL type=html|text|json title="…" [part=i/n]>>` …
+  `<<page id=wN nonce=N url=URL type=html|text|json|pdf title="…" [part=i/n]>>` …
   `<<end page wN nonce=N>>`, then melo's notes: `[…cut: …]` when more parts follow or the
   download reached its limit, and a note when a page has little text without its scripts.
 - **HTML.** The title, headings (`# …`), the main text (only `<main>` or `<article>` when it
   holds enough text), list items, table cells joined with ` | `, and up to 40 links. Scripts,
   styles and hidden text (`hidden`, `aria-hidden`, `display: none`) are left out. `text/*`,
-  JSON and XML come back as they are; PDFs, images and other files are refused with their type.
+  JSON and XML come back as they are; a PDF is read as text (see [Reading a PDF](#reading-a-pdf)); images and other files are refused with their type.
 - **Server text.** Nothing a server writes in its status line or headers reaches the model: an
   error says the status code only, and a media type or an encoding is named only when it is a
   plain token (else "an unknown type"). Runs of `<` or `>` in a page are spaced out, so a page
@@ -198,6 +198,17 @@ computer. `[tools] web_fetch_allow_local` is empty, so off, by default.
   server on this computer, which [tools] web_fetch_allow_local lists.]` to what the call shows,
   an error included. While the list has an entry, the model's note about `web_fetch` gains one
   sentence that names the exception.
+
+## Reading a PDF
+
+`file_read` and `web_fetch` read a PDF through one reader. A file or a download is a PDF when its first bytes are `%PDF-`, whatever its name or type says; `web_fetch` also takes one served as `application/pdf`, `application/x-pdf` or as a plain file (`application/octet-stream`).
+
+- **Text.** The pages in order, each under a line `--- page N of M ---`. A row stays whole: a place and a date stay on the line of their school or employer. `file_read` counts the lines of that text (`start_line`, `end_line`) and cuts a long one as it cuts any file; `web_fetch` gives it in parts (`part`), as for a page of plain text, between the same markers with `type=pdf`, cleaned as a page's text is.
+- **Pages with no text.** A page with fewer than 20 characters, spaces left out (a scan, a drawing), reads `[page N: no text, picture attached]` and the result carries a picture of it: a PNG at 150 dpi, at most 1,280 pixels wide and 2,048 tall, the size of a screenshot. At most 3 pictures come with one result, in page order, and only for pages in the lines or the part the result shows. Another such page reads `picture not sent`; a note names it and gives the `start_line` or `part` to read on from. A page that cannot be drawn reads `picture failed`. A model that is not sent pictures (`tool_images`) is told so as for any picture, and the note asks it to say which pages could not be read. An empty page never reads as an empty document.
+- **The child process.** The bytes go to a child Python started with `-I` on its standard input, and nothing else goes with them. pypdfium2 is imported only in the child, so a broken file ends the child and not the gateway. The child has a process group of its own that a cancellation or the time limit kills, the environment `child_env` gives, and no output but one JSON object, read up to 24 MB.
+- **Limits.** `file_read`: 50 MB a file. `web_fetch`: its 2 MB download limit, and a longer PDF is refused with a line that says so. Both: the first 300 pages and 1,000,000 characters (a note names the pages left unread), 20 seconds on the clock and 25 of CPU for the child.
+- **Refusals.** One plain line, never a traceback: password-protected, damaged or not a PDF, larger than the limit, longer than the time limit, "the PDF reader stopped on it", or no PDF reader installed.
+- **Checks first.** `file_read`'s path checks and `web_fetch`'s site gate run exactly as for any other file or page, before a byte is parsed.
 
 ## Searching the web
 

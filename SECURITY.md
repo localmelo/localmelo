@@ -31,6 +31,23 @@ those tools can do.
   the Python API unless an agent sets the options below. The interactive UI
   (bare `melo`) keeps the file tools inside its workspace, the current
   folder or `--workspace DIR`.
+- **A PDF is parsed in a child process.** `file_read` and `web_fetch` read a
+  PDF (a file or a download that starts with `%PDF-`) with pypdfium2, a native
+  library that parses untrusted bytes. The bytes go to a child Python
+  (`python -I`, a script run by path, so melo's own modules are not loaded)
+  on its standard input and nothing else goes with them: no path, no
+  descriptor, no secret in the environment (only the variables `child_env`
+  names). The child has a process group of its own that a cancellation or its
+  20-second time limit kills, ends by itself after 25 seconds of CPU, and its
+  answer is read up to 24 MB. A file over 50 MB is never sent (`web_fetch`
+  keeps its 2 MB download limit), and only the first 300 pages and 1,000,000
+  characters are read. A file that breaks the reader ends the child, not the
+  gateway, and the model gets one plain line. The child is not sandboxed: it
+  can read what you can, and the library is not memory-safe, so a PDF that
+  exploits it runs with your permissions. The path checks of `file_read` and
+  the site gate of `web_fetch` run before any byte is parsed. A PDF's words and
+  pictures are untrusted like any file's or page's: `web_fetch` frames and
+  cleans the text as it does a page's, and the note gate treats it as a page.
 - **Approvals apply only with a policy.** In the Python API, an approval
   policy passed to `Agent.run_task` decides whether each call of
   `shell_exec`, `python_exec`, `file_write` and other tools marked as

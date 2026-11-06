@@ -12,7 +12,7 @@
 |---|---|---|
 | `shell_exec` | 以 `/dev/null` 作为标准输入运行 shell 命令，并返回它的输出。接受 `command` 和可选的 `why`：一句简短的话，作为审批卡片的开头，不会改变实际运行的内容。 | 30 秒后连同它启动的所有进程一起终止。只有 `interactive` 模式默认提供它：直接运行和 Python 调用方需要显式点名它的 `builtins` 集合；网关或控制台会话默认不提供它，即使点名也会拒绝。 |
 | `python_exec` | 在子进程中运行 Python 代码，并返回它打印的内容。接受 `code` 和可选的 `why`，与 `shell_exec` 相同。 | 60 秒后连同它启动的所有进程一起终止。`sys.exit()` 只结束子进程。 |
-| `file_read` | 读取文本文件。接受 `path`；只读一部分时还可用 `start_line` 和 `end_line`（从 1 开始计数，含两端）。 | 你的账户能读取的任何文件。没有显示整个文件的读取，末尾会注明文件共有多少行，以及接着读时用的 `start_line`（`... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`）。 |
+| `file_read` | 读取文本文件。接受 `path`；只读一部分时还可用 `start_line` 和 `end_line`（从 1 开始计数，含两端）。 | 你的账户能读取的任何文件。没有显示整个文件的读取，末尾会注明文件共有多少行，以及接着读时用的 `start_line`（`... [the file has 1,240 lines; showing 1-400; read more with start_line=401]`）。开头是 `%PDF-` 的文件按 PDF 读取（见[读取 PDF](#reading-a-pdf)）。 |
 | `list_files` | 列出一个文件夹：先是文件夹（以 `/` 结尾），然后是带大小的文件；符号链接以 `@` 结尾。接受 `path`（默认：工作区文件夹）和 `depth`（1 到 3，默认 1）。从不读取文件，从不跟随符号链接，并跳过 `.git`。 | 显示 200 个条目，之后是 `... and N more`。只读，因此从不请求审批。交互式界面以及网关和控制台会话默认提供它；直接运行和 Python API 的默认模式不提供（`--builtins list_files` 或 `all` 可指定它）。 |
 | `file_write` | 把文本写入文件，创建或替换它。 | 你的账户能写入的任何文件。 |
 | `file_edit` | 把文件里一段确切的文本（`old`，必须只出现一次）替换为 `new`。 | 文件最大 1 MB。先检查 `old`：文本找不到或出现多次的编辑会立刻失败并给出明白的错误，不会询问任何人。否则像 `file_write` 一样会询问；批准卡片把改动显示为 diff。只有任务的 worker 提供它（其他地方需在 `builtins` 中写明）。 |
@@ -57,12 +57,12 @@ melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点�
 
 - **输入。** `url`；长网页的后续部分再加 `part`（从 1 开始）。
 - **输出。** 一行说明重定向后的最终地址和网页类型，然后是与浏览工具相同的网页块
-  `<<page id=wN nonce=N url=URL type=html|text|json title="…" [part=i/n]>>` …
+  `<<page id=wN nonce=N url=URL type=html|text|json|pdf title="…" [part=i/n]>>` …
   `<<end page wN nonce=N>>`，最后是 melo 自己的说明：还有后续部分或下载达到上限时有 `[…cut: …]`，
   网页不运行脚本就几乎没有文字时也会说明。
 - **HTML。** 标题、各级标题（`# …`）、正文（`<main>` 或 `<article>` 中文字足够时只取这一部分）、列表项、
   用 ` | ` 连接的表格单元格，以及最多 40 个链接。脚本、样式和隐藏文字（`hidden`、`aria-hidden`、
-  `display: none`）不读。`text/*`、JSON 和 XML 原样返回；PDF、图片和其他文件会被拒绝，并说明类型。
+  `display: none`）不读。`text/*`、JSON 和 XML 原样返回；PDF 按文字读取（见[读取 PDF](#reading-a-pdf)）；图片和其他文件会被拒绝，并说明类型。
 - **服务器的文字。** 服务器写在状态行或头部里的文字不会到达模型：出错时只说状态码；媒体类型或编码只有在是一个普通标记时才写出（否则写“未知类型”）。网页中连续的 `<` 或 `>` 会被空格隔开，所以网页写不出标记。
 - **限制。** 连接 8 秒，每次读取 15 秒，总共 30 秒；下载 2 MB（按 gzip 或 deflate 解压后计算）；
   每部分约 6,000 个文本单位（一个中日韩字符算 3 个）；最多 5 次重定向，且从不从 `https` 重定向到 `http`；地址最长 2,048 个字符。
@@ -131,6 +131,19 @@ melo 自身环境中的 API 密钥不会到达任何工具，除非被显式点�
   （见[事件](events.md#toolfinished)），并在调用显示的内容里加上一行
   `[This address is a test server on this computer, which [tools] web_fetch_allow_local lists.]`，出错时
   也一样。列表中有条目时，模型关于 `web_fetch` 的说明会多一句，点明这个例外。
+
+<a id="reading-a-pdf"></a>
+
+## 读取 PDF
+
+`file_read` 和 `web_fetch` 用同一个读取器读 PDF。文件或下载内容的开头是 `%PDF-` 就是 PDF，不管名字或类型怎么说；`web_fetch` 也接受以 `application/pdf`、`application/x-pdf` 或普通文件（`application/octet-stream`）提供的 PDF。
+
+- **文字。** 按页顺序，每页前有一行 `--- page N of M ---`。一行字保持完整：地点和日期留在学校或雇主那一行。`file_read` 按行数这段文字（`start_line`、`end_line`），长文本和任何文件一样被截断；`web_fetch` 按部分给出（`part`），与纯文本网页相同，放在同样的标记之间，带 `type=pdf`，清理方式与网页文字相同。
+- **没有文字的页。** 去掉空格后少于 20 个字符的页（扫描件、图画）显示为 `[page N: no text, picture attached]`，结果附带这一页的图片：150 dpi 的 PNG，最宽 1,280 像素、最高 2,048 像素，与截图大小相当。一个结果最多带 3 张图片，按页顺序，并且只给结果所显示的行或部分里的页。其他这样的页显示 `picture not sent`；说明里会点出它们，并给出接着读用的 `start_line` 或 `part`。画不出来的页显示 `picture failed`。不接收图片的模型（`tool_images`）会像对待任何图片那样被告知，说明还会请它说出哪些页没有读到。没有文字的页绝不会被当成空文档。
+- **子进程。** 字节通过标准输入交给以 `-I` 启动的子 Python，不带别的东西。pypdfium2 只在子进程里导入，所以坏文件只会让子进程结束，不会拖垮网关。子进程有自己的进程组，取消或时限到了会把它杀掉；环境是 `child_env` 给出的；除一个 JSON 对象外没有别的输出，最多读取 24 MB。
+- **限制。** `file_read`：文件最大 50 MB。`web_fetch`：保持 2 MB 的下载上限，更大的 PDF 会被拒绝并说明原因。两者都是：前 300 页和 1,000,000 个字符（说明会点出没读的页），挂钟 20 秒，子进程 CPU 25 秒。
+- **拒绝。** 一行朴素的话，绝不给回溯：有密码、损坏或不是 PDF、超过大小上限、超过时限、“the PDF reader stopped on it”，或没有安装 PDF 读取器。
+- **先检查。** `file_read` 的路径检查和 `web_fetch` 的网站闸门与读取其他文件或网页时完全一样，在解析任何字节之前运行。
 
 <a id="searching-the-web"></a>
 

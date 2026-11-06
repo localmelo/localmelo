@@ -10,6 +10,13 @@ tools clean it, so it cannot close its own block, and nothing a server writes
 in its status line or headers reaches the model (a status code, a media type
 or an encoding name only when it is one plain token).
 
+A PDF is read like a page of plain text: by its first bytes (``%PDF-``), whatever
+type the server says, through the same fetcher and its size limit, so a PDF over
+that limit is refused with a line that says so. Its pages come as text in parts,
+each under a page line, and the pictures of pages with no text ride with the
+part that holds them (:mod:`localmelo.melo.executor.pdf`). The text is cleaned
+and framed as any page's is.
+
 The tool is read-only: one GET, no cookies, no logins, no forms, and never an
 address on this computer or its local network (see
 :mod:`localmelo.support.web.guard`). Its tier is ``read``
@@ -43,13 +50,14 @@ from urllib.parse import urlsplit, urlunsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK
 from localmelo.melo.contracts.tools import TOOL_MARKS, BaseToolProvider, ProvidedTool
+from localmelo.melo.executor import pdf
 from localmelo.melo.executor.models import ToolOutput
-from localmelo.melo.schema import ToolDef
+from localmelo.melo.schema import ImagePart, ToolDef
 from localmelo.support import config, local_ports, web_local
 from localmelo.support.browser import render, sites
 from localmelo.support.browser.driver import BrowserError
 from localmelo.support.web.extract import extract
-from localmelo.support.web.fetch import FetchError, WebFetcher
+from localmelo.support.web.fetch import FetchError, Response, WebFetcher
 from localmelo.support.web.guard import AddressError, LocalAllow, Target
 
 if TYPE_CHECKING:
@@ -67,7 +75,8 @@ KEPT_S = 300.0
 
 NOTE = (
     "Public web pages: web_fetch reads an http or https page and returns its "
-    "title, headings, text and links, or plain text and JSON as they are. When "
+    "title, headings, text and links, or plain text and JSON as they are, and a "
+    "PDF as text page by page (a page with no text comes as a picture). When "
     "the user asks about a website or gives a web address, call web_fetch. Do "
     "not fetch pages with shell_exec, python_exec, curl or wget, and do not look "
     "for a web address as a file. web_fetch returns a page between a start marker "
@@ -89,9 +98,9 @@ TOOL = ToolDef(
     name=NAME,
     description=(
         "Read a public web page by its http or https address: its title, headings, "
-        "text and links (plain text and JSON as they are), and the final address "
-        "after redirects. Read only: no logins, cookies or forms. A long page comes "
-        "in parts."
+        "text and links (plain text and JSON as they are, a PDF as text by page), "
+        "and the final address after redirects. Read only: no logins, cookies or "
+        "forms. A long page comes in parts."
     ),
     parameters={
         "type": "object",
@@ -108,13 +117,16 @@ TOOL = ToolDef(
         },
         "required": ["url"],
     },
-    semantic_tags=["web", "page", "website", "url", "link", "fetch", "internet"],
+    semantic_tags=["web", "page", "website", "url", "link", "fetch", "internet", "pdf"],
     # Read tier on purpose (see the module docstring): no openWorldHint, which
     # would make it a network tool that asks before every call.
     annotations={"readOnlyHint": True},
 )
 
 _HTML = frozenset({"text/html", "application/xhtml+xml"})
+_PDF = frozenset({"application/pdf", "application/x-pdf"})
+# Types a server gives any file; the first bytes say whether it is a PDF.
+_GENERIC = frozenset({"application/octet-stream", "binary/octet-stream"})
 # A media type melo names back: two plain tokens. Anything else is "an unknown type".
 _MEDIA = re.compile(r"[a-z0-9.+-]{1,60}/[a-z0-9.+-]{1,60}")
 _META_CHARSET = re.compile(
@@ -134,7 +146,14 @@ def readable(media: str) -> bool:
     )
 
 
+def _wanted(media: str) -> bool:
+    """Whether a page of *media* type has its body downloaded: what is read, and what may be a PDF."""
+    return readable(media) or media in _PDF or media in _GENERIC
+
+
 def _kind(media: str) -> str:
+    if media in _PDF:
+        return "pdf"
     if media in _HTML:
         return "html"
     if media == "application/json" or media.endswith("+json"):
@@ -146,8 +165,6 @@ def _not_read(media: str) -> str:
     """Why a page of *media* type is not read, as a sentence."""
     if not _MEDIA.fullmatch(media):
         what = "a file of an unknown type, not a web page"
-    elif media == "application/pdf":
-        what = "a PDF file; web_fetch does not read PDFs yet"
     elif media.startswith("image/"):
         what = f"an image ({media})"
     elif media.startswith(("audio/", "video/")):
@@ -183,7 +200,9 @@ def _decode(body: bytes, charset: str, html: bool) -> str:
 
 
 def _sniff(body: bytes) -> str:
-    """The media type of a page that named none: HTML, text, or binary."""
+    """The media type of a page that named none: PDF, HTML, text, or binary."""
+    if pdf.is_pdf(body):
+        return "application/pdf"
     head = body[:1024].lstrip().lower()
     if head.startswith((b"<!doctype html", b"<html")) or b"<body" in head:
         return "text/html"
@@ -235,6 +254,8 @@ class Reading:
     notes: list[str] = field(default_factory=list)
     # Read from a test server on this computer that ``[tools] web_fetch_allow_local`` lists.
     local: bool = False
+    # A PDF: its bytes and what was read of them, for the pictures of the part shown.
+    document: tuple[bytes, pdf.PdfText] | None = None
 
 
 def _mark_local() -> None:
@@ -343,7 +364,26 @@ class WebFetchProvider(BaseToolProvider):
                 text=f"The page has {len(reading.parts)} part(s); there is no part {number}.",
                 is_error=True,
             )
-        return self._show(reading, number)
+        body, note, images = await self._pictures(reading, number)
+        shown = self._show(reading, number, body, note)
+        return ToolOutput(text=shown, images=images) if images else shown
+
+    async def _pictures(
+        self, reading: Reading, part: int
+    ) -> tuple[str | None, str, list[ImagePart]]:
+        """The pictures that go with a part of a PDF, and the part's text and a note updated for them.
+
+        ``(None, "", [])`` for anything that is not a PDF: the part shows as it is.
+        """
+        if reading.document is None:
+            return None, "", []
+        data, doc = reading.document
+
+        def locate(page: int) -> str:
+            line = pdf.marker(page)
+            return f"part={next((n for n, p in enumerate(reading.parts, 1) if line in p), 1)}"
+
+        return await pdf.with_pictures(data, doc, reading.parts[part - 1], locate)
 
     def _kept_reading(self, address: str) -> Reading | None:
         found = self._kept.get(address)
@@ -438,7 +478,7 @@ class WebFetchProvider(BaseToolProvider):
             fetcher = self.fetcher.allowing(written[1])
             admit = functools.partial(self._admit, fetcher=fetcher)
             local.note = WRITTEN_NOTE
-        page = await fetcher.fetch(address, accept=readable, admit=admit, local=local)
+        page = await fetcher.fetch(address, accept=_wanted, admit=admit, local=local)
         host = urlsplit(page.url).hostname or page.url
         if page.status in _LOGIN or page.status in _BLOCKED:
             what = _LOGIN.get(page.status) or _BLOCKED[page.status]
@@ -451,14 +491,18 @@ class WebFetchProvider(BaseToolProvider):
             # The status code only: the reason phrase is the server's own words.
             raise FetchError(f"{host} answered HTTP {page.status}.")
         media = page.content_type or _sniff(page.body)
-        if not readable(media):
+        if media in _GENERIC and pdf.is_pdf(page.body):
+            media = "application/pdf"
+        if not (readable(media) or media in _PDF):
             raise FetchError(_not_read(media))
         kind = _kind(media)
-        text = _decode(page.body, page.charset, kind == "html")
         reading = Reading(page.url, kind, "", [""], local=local.used)
         if page.redirects:
             reading.redirected_from = page.redirects[0]
-        if kind == "html":
+        if kind == "pdf":
+            await self._read_pdf(page, reading)
+        elif kind == "html":
+            text = _decode(page.body, page.charset, True)
             found = await asyncio.to_thread(extract, text, page.url)
             reading.title = found.title
             body = found.text or found.description
@@ -474,7 +518,7 @@ class WebFetchProvider(BaseToolProvider):
                     "not run scripts." + self._browser_hint() + "]"
                 )
         else:
-            reading.parts = _plain_parts(text)
+            reading.parts = _plain_parts(_decode(page.body, page.charset, False))
         if local.used:
             reading.notes.append(local.note)
         if page.cut:
@@ -485,6 +529,24 @@ class WebFetchProvider(BaseToolProvider):
             )
         return reading
 
+    async def _read_pdf(self, page: Response, reading: Reading) -> None:
+        """Fill *reading* with the text of the PDF *page*; :class:`FetchError` says why not."""
+        limit = self.fetcher.max_bytes / 1_000_000
+        if page.cut:
+            raise FetchError(
+                f"The PDF is larger than {limit:g} MB, and web_fetch reads a PDF only up "
+                "to that size. Tell the user; a copy saved on this computer can be read "
+                "with file_read."
+            )
+        if not pdf.is_pdf(page.body):
+            raise FetchError("The address says it is a PDF, but the file is not one.")
+        try:
+            doc = await pdf.read_text(page.body)
+        except pdf.PdfError as exc:
+            raise FetchError(str(exc)) from None
+        reading.parts = _plain_parts(doc.text)
+        reading.document = (page.body, doc)
+
     @staticmethod
     def _link_line(n: int, text: str, href: str, origin: str) -> str:
         if href.startswith(origin + "/"):
@@ -492,13 +554,24 @@ class WebFetchProvider(BaseToolProvider):
         label = render.field_text(text, render.LABEL_CHARS) or "(no text)"
         return f'[{n}] "{label}" -> {render.field_text(href, render.HREF_CHARS)}'
 
-    def _show(self, reading: Reading, part: int) -> str:
+    def _show(
+        self, reading: Reading, part: int, body: str | None = None, note: str = ""
+    ) -> str:
+        """*part* of *reading* as the model reads it.
+
+        *body* stands in for the part's text (a PDF's, with the lines of its
+        pictures brought up to date), and *note* is melo's own line about them,
+        after the block.
+        """
         total = len(reading.parts)
         self._n += 1
         url = render.field_text(reading.url, 300)
-        kind = {"html": "a web page", "json": "JSON", "text": "plain text"}[
-            reading.kind
-        ]
+        kind = {
+            "html": "a web page",
+            "json": "JSON",
+            "text": "plain text",
+            "pdf": "a PDF file",
+        }[reading.kind]
         head = f"Read {url}"
         if reading.redirected_from:
             head += (
@@ -510,7 +583,9 @@ class WebFetchProvider(BaseToolProvider):
             attrs += f' title="{render.field_text(reading.title, render.TITLE_CHARS)}"'
         if total > 1:
             attrs += f" part={part}/{total}"
-        lines = [reading.parts[part - 1] or "(no readable text)"]
+        lines = [
+            (reading.parts[part - 1] if body is None else body) or "(no readable text)"
+        ]
         if part == 1 and reading.links:
             shown = reading.links[:SHOWN_LINKS]
             lines.append("links:")
@@ -523,6 +598,8 @@ class WebFetchProvider(BaseToolProvider):
                 f"[…cut: this is part {part} of {total}. web_fetch with part={part + 1} "
                 "reads on.]"
             )
+        if note:
+            out.append(note)
         out.extend(reading.notes)
         return "\n".join(out)
 

@@ -7,9 +7,13 @@ import contextlib
 import contextvars
 import json
 import os
+import signal
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+
+# Seconds to wait for a killed process to be reaped.
+REAP_TIMEOUT_S = 5.0
 
 PROCESS_RECORD: contextvars.ContextVar[Callable[[int], Awaitable[None]] | None] = (
     contextvars.ContextVar("PROCESS_RECORD", default=None)
@@ -23,6 +27,18 @@ class UnsupportedProcessGateError(RuntimeError):
 def gate_supported() -> bool:
     """Whether this platform can run a gated launch and record its identity."""
     return sys.platform.startswith("linux") or sys.platform == "darwin"
+
+
+async def kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """SIGKILL the process group *proc* leads, then reap *proc*."""
+    # ProcessLookupError: the group is gone already. PermissionError: a
+    # member switched users. Neither may replace the error being handled.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    # Bounded: before Python 3.13, wait() also waits for the output pipes
+    # to close, and a process that left the group could hold them open.
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(proc.wait(), timeout=REAP_TIMEOUT_S)
 
 
 # This trusted bootstrap performs no task action before the parent releases it.
