@@ -85,13 +85,13 @@ from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
-from .front import Front, FrontAgent, SideAgent, build_front_agent
+from .front import Front, FrontAgent, build_front_agent
 from .idle_encode import IdleEncode
 from .idle_gates import IdleOptions
 from .idle_sleep import IdleSleep, IdleSleepOptions
 from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
-from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions, default_builder
+from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
 from .serve_switch import ServeSwitch
 from .setup_flow import SetupFlow
 from .shapes import session_json
@@ -197,7 +197,7 @@ class Console:
             self.store,
             self.broker,
             lambda: self.cfg,
-            builder=self.options.builder or self._side_agent,
+            builder=self.options.builder or self._chat_agent,
             front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
@@ -218,6 +218,7 @@ class Console:
             ledger=self.approvals,
         )
         self.workers.grants = self.grants
+        self.workers.browsers = self.browser_cards
         # A task asks the chat that started it when it is stuck (#369).
         self.asks = OwnerAsks(self)
         self.workers.owner = self.asks
@@ -294,22 +295,31 @@ class Console:
     async def _front_agent(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
-        """The main chat's Agent, whose turns that run out of steps become tasks."""
-        if self.options.front_builder is not None:
-            agent = await self.options.front_builder(
-                settings, workspace, mcp_config, session_id
-            )
-        else:
-            agent = await build_front_agent(
-                settings,
-                workspace,
-                session_id,
-                tools=self.front.tools,
-                gate=self.gate,
-                memory=self.memory,
-            )
+        """The main chat's Agent: a test's own builder's, else a chat's like any other."""
+        if self.options.front_builder is None:
+            return await self._chat_agent(settings, workspace, mcp_config, session_id)
+        agent = await self.options.front_builder(
+            settings, workspace, mcp_config, session_id
+        )
         if isinstance(agent, FrontAgent):
             agent.front = self.front
+        return agent
+
+    async def _chat_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        """A chat's Agent, main or side: the same class, tools and options, on its own front."""
+        front = self.front_for(session_id)
+        agent = await build_front_agent(
+            settings,
+            workspace,
+            session_id,
+            tools=front.tools,
+            gate=self.gate,
+            memory=self.memory,
+        )
+        if isinstance(agent, FrontAgent):
+            agent.front = front
         return agent
 
     def front_for(self, chat_id: str | None) -> Front:
@@ -391,6 +401,7 @@ class Console:
             going = await self.workers.tasks.unfinished(chat_id)
             await self.sessions.delete(chat_id, forget_notes=forget_notes)
             moved = set(await self.workers.tasks.rehome(chat_id, main, also=going))
+            self.browser_cards.rehome(chat_id, main)
             await self.chore_runner.store.rehome(chat_id, main)
             pending = {
                 request.request_id
@@ -408,25 +419,6 @@ class Console:
         await self.forget_front(chat_id)
         # The Allows given in it go with it: its tasks ask the main chat's.
         self.approvals.drop(chat_id)
-
-    async def _side_agent(
-        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
-    ) -> Agent:
-        """A side chat's Agent: the full agent loop with the task tools of its own front."""
-        front = self.front_for(session_id)
-        agent = await default_builder(
-            settings,
-            workspace,
-            mcp_config,
-            session_id,
-            gate=self.gate,
-            memory=self.memory,
-            tools=[front.tools],
-            agent_class=SideAgent,
-        )
-        if isinstance(agent, FrontAgent):
-            agent.front = front
-        return agent
 
     # ── The gate ──
 

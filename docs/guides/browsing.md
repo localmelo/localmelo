@@ -28,7 +28,7 @@ The rest of this page is about browsing in Safari, which also follows links, cli
 - For Safari windows: a Mac with Safari 27 or later. melo uses the automation server that Safari ships, `/usr/bin/safaridriver --mcp`; nothing is installed. Two switches in Safari, turned on once (see [Set up Safari](#set-up-safari)).
 - For Chrome in the background: [Google Chrome](https://www.google.com/chrome/) in `/Applications` (or `~/Applications`). Nothing else.
 - Optional, for [windows from other apps](#windows-from-other-apps): the desktop control helper, [Cua Driver](https://cua.ai/docs/cua-driver), installed as `/Applications/CuaDriver.app` (melo also finds `cua-driver` on your `PATH`). Give it Accessibility in System Settings → Privacy & Security; Screen Recording adds a picture of the window. melo itself needs neither.
-- The terminal chat (`melo`) or the web console. Direct runs (`melo "task"`), worker runs and saved tasks never get the browser tools.
+- The terminal chat (`melo`) or the web console. A task you ask for in a chat gets the browser tools too. Direct runs (`melo "task"`), worker runs, saved tasks and tasks given with no chat (`melo task`) never do.
 
 ## Turn it on
 
@@ -109,9 +109,10 @@ With `driver = "chrome"`, melo browses in Google Chrome with no window at all, u
 
 In the web console and the app, melo's browser shows in the chat while melo browses, live. It needs Chrome in the background; Safari's windows are already on your screen.
 
-- **A card in the chat.** When melo browses, the reply holds a **Browser** card with the live page, what melo is doing, one state word (Working, Waiting for you, You're in control, Done or Stopped) and an **Open browser** button. It works in the main chat and in side chats, a web search counts, and you can keep typing under it. It says only what the program wrote: the state, the kind of step and the site's name, never a typed value, a full address or a query. When it scrolls out of view, a bar at the top of the chat keeps the page in sight.
+- **A card in the chat.** In the console and the app, browsing is a task, and the chat that asked holds its card: **Working for this chat**, the goal, the live page, what melo is doing, one state word (Working, Waiting for you, You're in control, Done or Stopped), **Open browser** and **Stop**. It works in the main chat and in side chats, a web search counts, and you can keep typing under it. It says only what the program wrote: the state, the kind of step and the site's name, never a typed value, a full address or a query. When it scrolls out of view, a bar at the top of the chat keeps the page in sight.
 - **The panel opens when you ask.** **Open browser** (or the **Browser** button in the header) shows the page in a panel beside the chat. It never opens by itself, and closing it only stops watching: melo goes on.
-- **It follows Settings.** Switch to Chrome in the middle of a chat, and the card appears at the chat's next browser step.
+- **It follows Settings.** Switch to Chrome in the middle of a chat, and the next task browses there.
+- **Who may browse.** A task you asked for in a chat. A saved chore, a task given with no chat, or one another agent or channel starts, has no browser. Other apps stay out of a task: it neither reads their windows nor opens them, and a page that asks for one is told no. The terminal's local chat is the one place melo does either.
 - **Hide browser** closes the panel, and it stays closed in that chat until you open it again. On a narrow window it opens as a sheet when you ask.
 - **It shows** the page's title and address, a live picture, and a blue ring around the picture with "melo is browsing" while melo is in the middle of a step. It follows melo to another tab.
 - **It stays calm.** "No page open" before melo browses; "Opening the page…" until the first picture arrives; a dimmed last picture marked "Not updating" while the picture stops, or "Reconnecting…" while the link is made again; and one sentence of why when it ends (the tab was closed, melo's browser stopped, the chat ended, or the live view is not available).
@@ -236,7 +237,7 @@ A page can ask the browser to open an address meant for an app, such as a chat a
 
 ## Windows from other apps
 
-A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. melo looks for one after each of its own steps in the browser.
+A page melo acts on can make another app open a window, such as a chat app's sign-in window that asks you to authorize. In the terminal's local chat, melo looks for one after each of its own steps in the browser; a task in the console does not.
 
 - **A window that comes a moment late is still seen.** An app often opens its window a second or two after the click. After a click, a click on a point of a picture or a send that changes nothing on the page, melo watches the screen for up to 3 seconds in all (slow calls included) and stops as soon as a window appears or the tab goes to another address or opens another tab. For 15 seconds after such a step, melo also looks at the screen about once a second in the background, so a window that comes while the model is still working out its next step is noticed when it appears, and the next step, whatever it is (reading, waiting, a picture), tells it once, even if that step comes after the 15 seconds. Only that click, point click or send opens those 15 seconds; reading, waiting, pictures and searching never do and never extend them. A window that opens later than that is taken to be one you opened yourself: melo does not name it, read it or press it, whichever app it is from. Inside the 15 seconds, a window of the app the page asked for is read right away and said to be that app's. A window of any other app asks you first.
 

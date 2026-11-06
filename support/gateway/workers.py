@@ -36,7 +36,14 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
-from localmelo.melo.schema import Message, ToolDef, broken_tool_call, split_thinking
+from localmelo.melo.schema import (
+    MAX_EXTENSIONS,
+    Message,
+    ToolDef,
+    broken_tool_call,
+    split_thinking,
+)
+from localmelo.support.browser import configured_driver
 from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     block_to_allow,
@@ -146,11 +153,9 @@ from localmelo.support.sessions.approvals import (
 )
 from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.identity import ACTING_RULE
+from localmelo.support.sessions.identity import ACTING_NOTE, ACTING_RULE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
-from localmelo.support.web import WebFetchProvider
-from localmelo.support.web.search_tool import WebSearchProvider
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
@@ -249,6 +254,19 @@ class OwnerChannel(Protocol):
 
     def waiting(self, task_id: str) -> dict[str, Any] | None:
         """*task_id*'s pending ask: ``ask_id``, ``chat_id``, ``chat_title`` and ``on``."""
+
+
+class BrowserSources(Protocol):
+    """Who shows a task's browser in its chat (``console.browser_cards.BrowserCards``)."""
+
+    def attach_task(self, task_id: str, agent: Agent, owner: str) -> None:
+        """Follow the browser tools of *task_id*'s new Agent, for chat *owner*."""
+
+    def detach_task(self, task_id: str) -> None:
+        """*task_id*'s Agent goes: its browser is no source any more."""
+
+    def holds_page(self, task_id: str) -> bool:
+        """Whether the person has a page of *task_id*'s browser now."""
 
 
 class AskOwner(BaseToolProvider):
@@ -590,6 +608,8 @@ class TaskWorkers:
         self._auto: dict[str, AutoPolicy] = {}
         # The chat a task asks when it is stuck (#369); the console sets it.
         self.owner: OwnerChannel | None = None
+        # Who shows a task's browser in the chat that owns it; the console sets it.
+        self.browsers: BrowserSources | None = None
         # The person's Allows per chat: a task uses its chat's (#369). The
         # console sets the chat that owns work a chat started (the main chat
         # once that chat is gone), what a step that ran on an earlier
@@ -737,7 +757,9 @@ class TaskWorkers:
 
         *chat_started*: a chat started it from the person's message, so that
         chat follows up when it stops (#411); its session's ``meta`` says
-        ``started_by: chat``.
+        ``started_by: chat``. That, or a *front_id* given here, is the task's
+        chat, kept as ``meta.in_chat``: a task with neither is stored under the
+        main chat without having been asked for in it.
 
         *handover* is what that chat's turn hands the task (#463): its earlier
         turns and what its turn recalled, searched or opened, kept with the
@@ -810,6 +832,7 @@ class TaskWorkers:
                 meta={
                     "approvals": mode,
                     **({"started_by": "chat"} if chat_started else {}),
+                    **({"in_chat": True} if chat_started or front else {}),
                 },
                 _recovery_proof=True,
             )
@@ -2108,6 +2131,8 @@ class TaskWorkers:
             and not self.broker.pending(task_id)
             # A worker waiting for its chat's answer is left alone, like an approval.
             and not (self.owner is not None and self.owner.waiting(task_id))
+            # So is one whose page the person has: Done goes on with this very run.
+            and not (self.browsers is not None and self.browsers.holds_page(task_id))
             and not (
                 {task_id}
                 & (
@@ -2364,28 +2389,48 @@ class TaskWorkers:
             # Ask or Auto, as the task was made (#339).
             task_session = await self.store.get_session(task_id)
             task_mode = chat_mode(task_session.meta if task_session else None)
+            # The chat this is a person's work for, if it is: only that work has
+            # a browser and goes on for as long as it makes progress.
+            chat = await self._person_chat(record)
+            settings = self.settings()
             try:
                 agent = await build_session_agent(
-                    cfg=self.settings(),
+                    cfg=settings,
                     base_url=None,
                     model=None,
                     workspace=workspace,
                     options=configured_attempt_options(
-                        self.settings(),
+                        settings,
                         configured_cache_options(
-                            self.settings(),
+                            settings,
                             AgentOptions(
                                 mode="gateway",
                                 memory=False,
                                 timeout_s=None,
                                 builtins=worker_tool_allowlist("user").builtins,
-                                confine_writes=self.settings().agent.confine_writes,
+                                confine_writes=settings.agent.confine_writes,
                                 tool_env=tool_env,
                                 identity=WORKER_GUIDE,
                                 task_aids=True,
+                                max_extensions=(
+                                    MAX_EXTENSIONS if chat is None else None
+                                ),
                             ),
                         ),
                     ),
+                    browser_driver=(
+                        "off" if chat is None else configured_driver(settings)
+                    ),
+                    # What it opens stays in melo's browser: another app's window is
+                    # the person's to see, and nobody is at this task's side.
+                    desktop=False,
+                    # A task reads public pages too; a site its words do not name
+                    # asks the chat that owns it.
+                    web_fetch=settings.tools.web_fetch is True,
+                    web_task=True,
+                    # Searching the web ([web] search), asking the chat that owns
+                    # the task about words that look like a secret.
+                    web_search=settings.web.search is True,
                     wrap_llm=lambda inner: _WorkerLLM(
                         inner,
                         client,
@@ -2405,26 +2450,14 @@ class TaskWorkers:
                     tools=[
                         WorkerSearch(workspace),
                         AskOwner(task_id, lambda: self.owner),
-                        # A task reads public pages too (it has no browser); a
-                        # site its words do not name asks the chat that owns it.
-                        *(
-                            [WebFetchProvider(task=True, cfg=self.settings())]
-                            if self.settings().tools.web_fetch is True
-                            else []
-                        ),
-                        # Searching the web ([web] search), asking the chat that owns
-                        # the task about words that look like a secret.
-                        *(
-                            [WebSearchProvider(cfg=self.settings())]
-                            if self.settings().web.search is True
-                            else []
-                        ),
                     ],
                 )
             except BaseException:
                 self._homes.discard(home)
                 shutil.rmtree(home, ignore_errors=True)
                 raise
+            if chat is not None and self.browsers is not None:
+                self.browsers.attach_task(task_id, agent, chat)
             base = await self._baseline(workspace, record)
             # Set below when the task uses its chat's approvals and grants.
             owned: list[OwnedTaskPolicy] = []
@@ -2440,8 +2473,12 @@ class TaskWorkers:
                 memory=self.memory,
                 index_only=True,
                 # The pack and the project's files the task was made with, on every run
-                # (a continue or a restart too).
-                context=_task_blocks(record.spec),
+                # (a continue or a restart too), and for a person's work the reminder a
+                # chat's message used to end with.
+                context=(
+                    *_task_blocks(record.spec),
+                    *(() if chat is None else (ACTING_NOTE,)),
+                ),
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
                 observe=lambda event: self._observe(task_id, event),
                 review_since=review_since,
@@ -2611,6 +2648,8 @@ class TaskWorkers:
                 PROCESS_RECORD.reset(process_token)
             if tool_token is not None:
                 TOOL_ENTRY.reset(tool_token)
+            if self.browsers is not None:
+                self.browsers.detach_task(task_id)
             park = task_id in self._park_winners and not (
                 self._closed
                 or task_id in self._stopping
@@ -2797,6 +2836,24 @@ class TaskWorkers:
             )
 
         return CardWatch(viewers, self.broker.ends)
+
+    async def _person_chat(self, record: TaskRecord) -> str | None:
+        """The chat *record* is work of, when a person asked for it there; else ``None``.
+
+        The task's own record says so, never a model: origin ``user``, a chat
+        named when it was made (``meta.in_chat``), and an owner that stands as
+        a console chat. Anything else (a chore, a channel, another agent, melo
+        itself, a task given directly with no chat, a console that names no
+        owners) is ``None``, and such a task gets no browser.
+        """
+        if record.origin != "user" or self.chat_of is None:
+            return None
+        session = await self.store.get_session(record.task_id)
+        if session is None or not (session.meta or {}).get("in_chat"):
+            return None
+        chat = await self.chat_of(record.front_id)
+        info = await self.store.get_session(chat) if chat else None
+        return chat if info is not None and info.kind in ("front", "chat") else None
 
     async def _owner_chat(self, task_id: str) -> str | None:
         """The chat that owns *task_id* now: the one that started it, else the main chat."""

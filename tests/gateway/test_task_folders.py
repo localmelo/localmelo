@@ -18,10 +18,15 @@ from typing import Any
 import pytest
 
 from localmelo.melo.executor.builtins import _run_python
+from localmelo.melo.schema import MAX_EXTENSIONS
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.finishing import commit_command, not_committed
-from localmelo.support.gateway.task_policy import WorkspaceError
+from localmelo.support.gateway.task_policy import (
+    TaskSpec,
+    WorkspaceError,
+    worker_tool_allowlist,
+)
 from localmelo.support.gateway.workers import WORKER_GUIDE, TaskWorkers, task_home
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
@@ -76,6 +81,47 @@ async def setup(
         await hub.aclose()
         await gate.close()
         await store.aclose()
+
+
+@pytest.mark.parametrize(
+    ("origin", "owned", "browses"),
+    [
+        ("user", True, True),
+        # No chat was named when it was made: closed, though it is stored under main.
+        ("user", False, False),
+        ("user_rule", True, False),
+        ("front", True, False),
+        ("harness", True, False),
+        ("agent", True, False),
+        ("channel", True, False),
+        ("sleep", True, False),
+    ],
+)
+async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_open_ended_steps(
+    setup: Setup, origin: str, owned: bool, browses: bool
+) -> None:
+    workers, cfg, _, built, home = setup
+    cfg.browser.driver = "chrome"
+    (home / "localmelo-workspace" / "t").mkdir(parents=True)
+
+    async def chat_of(front_id: str | None) -> str | None:
+        return front_id
+
+    workers.chat_of = chat_of
+    spec = TaskSpec.from_payload(
+        {"objective": "browse", "workspace": str(home / "localmelo-workspace" / "t")}
+    )
+    await workers.create_spec(
+        spec,
+        origin=origin,  # type: ignore[arg-type]
+        chat_started=owned,
+    )
+    await eventually(lambda: len(built) == 1)
+    assert built[0]["browser_driver"] == ("chrome" if browses else "off")
+    assert built[0]["desktop"] is False, "another app's window never, for anyone"
+    assert built[0]["options"].builtins == worker_tool_allowlist("user").builtins
+    assert not any(name.startswith("browser") for name in built[0]["options"].builtins)
+    assert built[0]["options"].max_extensions == (None if browses else MAX_EXTENSIONS)
 
 
 async def test_a_main_chat_task_works_in_the_default_folder(setup: Setup) -> None:
@@ -239,10 +285,10 @@ async def test_a_worker_searches_its_task_folder_without_asking(setup: Setup) ->
     await workers.create({"objective": "find it", "workspace": str(project)})
     await eventually(lambda: len(built) == 1)
     # The second provider is ask_owner (#369): the worker asks its chat, never its folder.
-    # The third reads public web pages (#406), on by default.
-    provider, asks, web = built[0]["tools"]
+    provider, asks = built[0]["tools"]
     assert [t.definition.name for t in await asks.start()] == ["ask_owner"]
-    assert [t.definition.name for t in await web.start()] == ["web_fetch"]
+    # It reads public web pages (#406), on by default, as a task does.
+    assert (built[0]["web_fetch"], built[0]["web_task"]) == (True, True)
     [tool] = await provider.start()
     assert tool.definition.name == "search_files"
     assert tool.requires_approval is False
@@ -263,6 +309,7 @@ async def test_a_workers_web_fetch_refuses_the_port_the_console_is_on(
     """
     import ipaddress
 
+    from localmelo.support.web import WebFetchProvider
     from localmelo.support.web.guard import LocalAllow
 
     workers, cfg, _, built, home = setup
@@ -272,7 +319,7 @@ async def test_a_workers_web_fetch_refuses_the_port_the_console_is_on(
     project.mkdir()
     await workers.create({"objective": "read it", "workspace": str(project)})
     await eventually(lambda: len(built) == 1)
-    web = built[0]["tools"][2]
+    web = WebFetchProvider(task=built[0]["web_task"], cfg=built[0]["cfg"])
     allow = web.fetcher._allow
     assert isinstance(allow, LocalAllow)
     address = ipaddress.ip_address("127.0.0.1")

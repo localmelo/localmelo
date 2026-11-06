@@ -106,11 +106,11 @@ Three limits apply at different levels:
 
 ![The main chat starts tasks and shows their levels](../assets/img/main-chat-tasks.webp)
 
-- The main chat is a short run: at most 4 steps, no reflection, thinking off, and tools to start, list and change tasks, read files and search memory.
+- Every chat reads and answers: no reflection, thinking off, and tools to start, list and change tasks, read files and search memory. It acts on nothing itself.
 - Code reads your message first. `/task` and control phrases ("pause the slides") need no model call; a greeting or a short question is answered at once, never started as a task.
-- Bigger work becomes a task: a worker runs it beside the conversation at a level from your words, and its result comes back as a card.
-- A run that does not settle in 4 steps ends with "This needs more than a quick answer, so I started it as a task", or asks first when you asked a question.
-- Side chats, direct runs and workers run the full loop above, as before.
+- Work that acts is a task from its start: a worker runs it beside the conversation at a level from your words, with the browser and for as long as it makes progress, and its result comes back as a card.
+- A reply that only says what it will do starts the task ("This needs more than a quick answer, so I started it as a task"), or asks first when you asked a question.
+- Direct runs and workers run the full loop above, as before.
 
 ## Code layout
 

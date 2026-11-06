@@ -130,33 +130,10 @@ async def test_the_chinese_request_starts_its_task_at_once(
         assert turn.answer == "已经作为任务开始了，结果会回到这里。"
 
 
-# ── 2. Refused calls don't use up the steps ──
+# ── 2. A refused start, and a turn that only says what it will do ──
 
 
-async def test_refused_calls_do_not_use_up_the_chats_steps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    memory = RefusingMemory()
-    main: list[Reply] = [
-        remembers(1),
-        remembers(2),
-        lists(1),
-        gets(2),
-        gets(3),
-        answer("还没有任务在跑。"),
-    ]
-    async with owner_console(
-        tmp_path, monkeypatch, main=main, run=False, front_tools=[memory]
-    ) as (console, client, models, _):
-        await say(client, console, IS_IT_DONE)
-        turn = await turn_of(console)
-        assert (turn.status, turn.answer) == ("completed", "还没有任务在跑。")
-        assert memory.calls == 2
-        assert len(models["main"].requests) == 6, "two refused steps were free"
-        assert await echo_kinds(console) == []
-
-
-async def test_a_refused_task_create_is_free_too(
+async def test_a_status_question_refuses_a_task_and_answers_from_the_tasks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     main: list[Reply] = [
@@ -181,8 +158,8 @@ async def test_a_refused_task_create_is_free_too(
         assert await console.workers.tasks.list_tasks() == []
 
 
-def _out_of_steps() -> list[Reply]:
-    return [lists(1), gets(2), lists(3), gets(4)]
+def _promised() -> list[Reply]:
+    return [lists(1), gets(2), answer("Let me look at the task list.")]
 
 
 @pytest.mark.parametrize(
@@ -197,11 +174,11 @@ def _out_of_steps() -> list[Reply]:
         "check the slides task and tell me its progress",
     ],
 )
-async def test_a_turn_out_of_steps_answers_with_what_it_has(
+async def test_a_turn_that_only_promises_answers_with_what_it_has(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
 ) -> None:
     best = "任务已经完成：它的回答在这里。"
-    main: list[Reply] = [*_out_of_steps(), answer(best)]
+    main: list[Reply] = [*_promised(), answer(best)]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -237,7 +214,7 @@ async def test_a_preamble_to_a_status_question_gets_an_answer(
 async def test_with_no_answer_at_all_the_turn_says_so_and_offers_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    main: list[Reply] = [*_out_of_steps(), answer("")]
+    main: list[Reply] = [*_promised(), answer("")]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -251,11 +228,11 @@ async def test_with_no_answer_at_all_the_turn_says_so_and_offers_nothing(
         assert await echo_kinds(console) == []
 
 
-async def test_a_question_out_of_steps_answers_and_still_offers_a_task(
+async def test_a_question_it_only_promised_answers_and_still_offers_a_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     best = "From the files I read, the fixture is missing; a run would tell for sure."
-    main: list[Reply] = [*_out_of_steps(), answer(best)]
+    main: list[Reply] = [*_promised(), answer(best)]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -547,13 +524,14 @@ def test_a_long_chinese_answer_is_cut_at_its_length() -> None:
         "no need for a task, look at my website and tell me what is wrong",
     ],
 )
-async def test_words_against_a_task_never_start_one_even_at_the_cap(
+async def test_words_against_a_task_never_start_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
 ) -> None:
     best = "From what I could read here: research and ML systems roles fit best."
     main: list[Reply] = [
         tool_call("task_create", {"title": "Jobs", "objective": "x"}, "c-1"),
-        *_out_of_steps(),
+        lists(1),
+        gets(2),
         answer(best),
     ]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (

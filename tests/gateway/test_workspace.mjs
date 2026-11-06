@@ -29,7 +29,7 @@ import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as serve from '../../support/gateway/static/serve.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
-import {mergeBrowsers, setupBrowserCards} from '../../support/gateway/static/browser-card.mjs';
+import {ACTIVE as BROWSING, mergeBrowsers, setupBrowserCards, sourceOf as browserSource} from '../../support/gateway/static/browser-card.mjs';
 import {stepWords} from '../../support/gateway/static/step-words.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
@@ -977,6 +977,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     }),
     setupBrowserCards,
     mergeBrowsers,
+    BROWSING,
+    browserSource,
     setupBrowser: () => {
       let said = null;
       return {
@@ -986,7 +988,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
       card: (card) => {
         if ((card?.state ?? null) !== said) browserLog.push(['card', said = card?.state ?? null]);
       },
-      open: (card) => { browserLog.push(['open', card.run]); },
+      open: (card) => { browserLog.push(['open', card.run]); return true; },
+      takeOver() { browserLog.push(['takeOver']); },
       toggle() { browserLog.push(['toggle']); },
       hide() { browserLog.push(['hide']); },
       closeSheet() { return false; },
@@ -6590,6 +6593,44 @@ for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
     assert.equal(card.dataset.own, 'done');
     assert.equal(h.watched[0].open, false);
     assert.equal(h.element('input').value, 'half a thought');
+  });
+}
+
+for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
+  test(`a task's card shows under its Started line in the ${kind} chat, and Stop and Done name that task's run`, async () => {
+    const task = {source_kind: 'task', source_session_id: 't9', card_key: 't9:run-1', source_turn: 1, goal: 'Find ML jobs', owner_chat_id: id};
+    const started = {id: 5, ts: 30, echo: 'started', task_id: 't9', title: 'Find ML jobs', line: 'Started: Find ML jobs · P2', level: 2};
+    const page = {turns: [turnRow()], has_earlier: false, replay_from: 7, echoes: [started], cards: [], browser: [{id: 6, ts: 40, ...browserData(id, task)}]};
+    const sent = [];
+    const acts = {
+      'PATCH /tasks/t9': (body) => { sent.push(['stop', body]); return {task: taskRow('t9')}; },
+      [`POST /sessions/t9/browser/done?gen=a1b2c3d4&run=run-1&owner=${id}`]: () => { sent.push(['done']); return {ok: true}; },
+    };
+    const h = harness(id === 'm'
+      ? mainRoutes({'GET /sessions/m/turns?limit=10': page, ...acts})
+      : baseRoutes({'GET /sessions/a/turns?limit=10': page, ...acts}));
+    await h.run('init()');
+    const [card] = findNodes(h.element('messages'), (node) => node.className === 'bcard');
+    assert.ok(card, 'the card is in the chat that asked');
+    const reply = findNode(h.element('messages'), (node) => node.className === 'msg assistant');
+    assert.equal(findNode(reply, (node) => node === card), null, 'it is no reply of this chat: its turn numbers are the task\'s');
+    const shown = h.element('messages').children;
+    const line = shown.findIndex((node) => flatten(node).includes('Started: Find ML jobs'));
+    assert.ok(line >= 0 && shown[line + 1] === card, 'right under the line that started it');
+    assert.deepEqual(h.watched.map((found) => found.source), [{session: 't9', gen: 'a1b2c3d4', run: 'run-1', owner: id}]);
+    assert.equal(findNode(card, (node) => node.className === 'bcard-name').textContent, 'Working for this chat');
+    assert.equal(findNode(card, (node) => node.className === 'bcard-goal').textContent, 'Find ML jobs');
+    const button = (word) => findNode(card, (node) => node.tag === 'button' && node.textContent === word && !node.hidden);
+    await button('Stop').click();
+    assert.deepEqual(sent, [['stop', {state: 'stop'}]]);
+    h.stream().emit(browserFrame(id, 21, {...task, state: 'you', action: ''}));
+    await button('Done').click();
+    assert.deepEqual(sent.at(-1), ['done']);
+    assert.equal(await h.run("takeTaskPage('t9')"), true);
+    assert.deepEqual(h.browserLog.slice(-2), [['open', 'run-1'], ['takeOver']]);
+    const before = h.browserLog.length;
+    assert.equal(await h.run("takeTaskPage('another-task')"), false, 'no card of that task: no page is taken');
+    assert.equal(h.browserLog.length, before);
   });
 }
 

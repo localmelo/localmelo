@@ -43,6 +43,16 @@ DIALOG_PREFIX = "browser-dialog:"
 # ``takeover:<site>``, a card that offers to take the page over in the Browser
 # panel. Asked when needed, never kept for the chat, only the person answers it.
 TAKEOVER_PREFIX = "takeover:"
+QUESTIONS = (
+    PREFIX,
+    ACT_PREFIX,
+    TYPE_PREFIX,
+    SUBMIT_PREFIX,
+    POINT_PREFIX,
+    HANDOFF_PREFIX,
+    DIALOG_PREFIX,
+    TAKEOVER_PREFIX,
+)
 TAKEOVER_NEEDS = {
     "sign-in": "a sign-in",
     "password": "a password field",
@@ -325,6 +335,11 @@ async def require_point(
         raise BrowserError(
             f"melo did not {how} there on {host}. " + denial_text(decision)
         )
+
+
+def is_browser_question(tool_name: str) -> bool:
+    """Whether *tool_name* is one of these questions: its call can hold typed words and a page's own."""
+    return tool_name.startswith(QUESTIONS)
 
 
 async def require_handoff(origin: str, url: str, app: str) -> bool:

@@ -112,17 +112,28 @@ def chrome_watch(screen: Screen) -> DesktopWatch:
 
 
 async def tools(
-    driver: FakeDriver, opener: Opener, desk: DesktopWatch | None = None
+    driver: FakeDriver,
+    opener: Opener,
+    desk: DesktopWatch | None = None,
+    opens_apps: bool = True,
 ) -> tuple[BrowserToolProvider, dict[str, Any]]:
-    provider = BrowserToolProvider(driver, desktop=desk, opener=opener)  # type: ignore[arg-type]
+    provider = BrowserToolProvider(
+        driver,
+        desktop=desk,
+        opener=opener,  # type: ignore[arg-type]
+        opens_apps=opens_apps,
+    )
     return provider, {t.definition.name: t for t in await provider.start()}
 
 
 async def clicked(
-    opener: Opener, asks: Asks | None, desk: DesktopWatch | None = None
+    opener: Opener,
+    asks: Asks | None,
+    desk: DesktopWatch | None = None,
+    opens_apps: bool = True,
 ) -> Any:
     driver = handing_off(world(button("Open in Chat")), {"Open in Chat": CHAT})
-    provider, found = await tools(driver, opener, desk)
+    provider, found = await tools(driver, opener, desk, opens_apps)
     try:
         with asking(asks):
             await run(found, "browser_open", url=HOME)
@@ -132,6 +143,14 @@ async def clicked(
 
 
 # ── The hand-off ──
+
+
+async def test_a_task_opens_no_other_app_and_asks_nobody_about_it() -> None:
+    opener, asks = Opener(), Asks()
+    out = await clicked(opener, asks, opens_apps=False)
+    assert "a task opens no other app" in out.text
+    assert opener.named == [] and opener.opened == []
+    assert not [name for name, *_ in asks.asked if name.startswith("handoff:")]
 
 
 async def test_a_page_that_asks_for_an_app_is_offered_to_the_person_and_opened_on_yes() -> (

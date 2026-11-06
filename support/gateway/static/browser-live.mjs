@@ -1,6 +1,6 @@
 import {t} from './i18n.mjs';
 import {createStreams, parseMeta} from './browser-stream.mjs';
-import {ACTIVE, stateWord} from './browser-card.mjs';
+import {ACTIVE, sourceOf as cardSource, stateWord} from './browser-card.mjs';
 
 export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-stream.mjs';
 
@@ -8,7 +8,8 @@ export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-strea
  * The Browser panel: a live window onto the page melo is working in, which the person can take over.
  *
  * It sits beside the chat and never opens by itself: the **Open browser** button of the browser card in the
- * conversation (and of the dock above it) opens it on that card's source (`open(card)`), and the chat's header chip,
+ * conversation (and of the dock above it) opens it on that card's source (`open(card)`), the chat's own browser or a
+ * task's, whose page the chat stays beside, and the chat's header chip,
  * which names the state of the chat's browser, shows or hides it. Hiding it only stops watching: the page, melo's
  * run and the card stay as they are, and the panel is never Done or Stop. Whether the chat can be watched
  * (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, on `recheck()`
@@ -352,7 +353,8 @@ export function setupBrowser({
     els.note.dataset.over = String(v.picture);
     els.canvas.hidden = !v.picture;
     els.canvas.setAttribute('aria-label', `${t('browser.picture')}: ${v.title}`);
-    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && v.state !== 'closed');
+    // Pop out is the chat's address alone: a task's browser stays in the panel of the chat it works for.
+    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && v.state !== 'closed' && !S.pin?.owner);
     if (els.hide) els.hide.hidden = S.liveOnly;
     if (chip) {
       chip.hidden = S.liveOnly || !(S.available && (S.known || S.shown));
@@ -437,7 +439,7 @@ export function setupBrowser({
     },
   };
 
-  /** The source the panel shows: the chat's browser, pinned to a card's run and generation when there is one. */
+  /** The source the panel shows: the chat's browser, or the one a card names, pinned to the card's run and generation. */
   const sourceOf = () => ({session: S.session, ...(S.pin ?? {})});
 
   function watch() {
@@ -665,13 +667,14 @@ export function setupBrowser({
   /** The page in a real Chrome window: moved there from the panel, or that window brought to the front. */
   function showWindow() {
     if (!S.session) return;
-    const query = new URLSearchParams(S.source ? {...(S.source.gen ? {gen: S.source.gen} : {}), ...(S.source.run ? {run: S.source.run} : {})} : {}).toString();
-    api(`/sessions/${encodeURIComponent(S.session)}/browser/window${query ? `?${query}` : ''}`, {method: 'POST'}).catch(() => {});
+    const {session = S.session, ...pin} = S.source ?? {};
+    const query = new URLSearchParams(Object.entries(pin).filter(([, value]) => value)).toString();
+    api(`/sessions/${encodeURIComponent(session)}/browser/window${query ? `?${query}` : ''}`, {method: 'POST'}).catch(() => {});
   }
 
   // ── Showing and hiding ──
 
-  const sameSource = (a, b) => a?.session === b?.session && (a?.gen ?? '') === (b?.gen ?? '') && (a?.run ?? '') === (b?.run ?? '');
+  const sameSource = (a, b) => a?.session === b?.session && (a?.gen ?? '') === (b?.gen ?? '') && (a?.run ?? '') === (b?.run ?? '') && (a?.owner ?? '') === (b?.owner ?? '');
 
   /** Show the panel (never by itself: the person asked); one that shows another source moves to the one asked for. */
   function show() {
@@ -758,15 +761,15 @@ export function setupBrowser({
     },
 
     /**
-     * The state of the chat's newest browser card (`{gen, run, state}`, or null when it has none): the chip says it in
-     * the card's words, and while the card is active its source is the one the chip (and a panel not asked for a
-     * card) shows. A panel that shows the chat's browser moves to the card's source when a new card begins.
+     * The state of the chat's newest browser card (a card as `readBrowser` gives it, or null when it has none): the chip
+     * says it in the card's words, and while the card is active its source is the one the chip (and a panel not asked
+     * for a card) shows. A panel that shows the chat's browser moves to the card's source when a new card begins.
      */
     card(card) {
       if (!S.session || S.liveOnly) return;
       const live = Boolean(card) && ACTIVE.has(card.state);
-      const pin = live ? {gen: card.gen, run: card.run} : null;
-      const moved = pin !== null && !sameSource({session: S.session, ...pin}, {session: S.session, ...(S.pin ?? {})});
+      const pin = live ? cardSource(card) : null;
+      const moved = pin !== null && !sameSource(pin, sourceOf());
       S.card = card ? {gen: card.gen, run: card.run, state: card.state} : null;
       S.known = S.known || S.card !== null;
       S.pin = pin;
@@ -786,15 +789,16 @@ export function setupBrowser({
       await probe();
     },
 
-    /** Open browser, on a card or the dock: the panel shows that card's source (`{gen, run}`). */
+    /** Open browser, on a card or the dock: the panel shows that card's source. */
     async open(card) {
-      if (!S.session || S.liveOnly) return;
+      if (!S.session || S.liveOnly) return false;
       const id = S.session;
       if (S.available === false) await probe(); // the browser may have changed since this page last asked
-      if (S.session !== id || S.available === false) return;
-      S.pin = {gen: card.gen, run: card.run};
+      if (S.session !== id || S.available === false) return false;
+      S.pin = cardSource(card);
       S.available = S.available ?? true;
       show();
+      return true;
     },
 
     /** The header chip: show the panel, or hide it. Hiding only stops watching. */

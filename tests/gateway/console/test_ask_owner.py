@@ -28,7 +28,6 @@ from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.front import (
     ECHO_EVENT,
     FrontAgent,
-    SideAgent,
     front_options,
 )
 from localmelo.support.gateway.console.running import item_activity
@@ -128,10 +127,14 @@ async def ask_console(
     gate: ChatGate | None = None,
     run: bool = True,
     vision: Vision | None = None,
+    browser: Callable[[], Any] | None = None,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, Any]]]:
-    """A console whose main chat, side chats and workers run on scripted models, through *gate*."""
+    """A console whose main chat, side chats and workers run on scripted models, through *gate*.
+
+    *browser* makes the browser tools a worker the code lets browse is built with.
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
-    models: dict[str, Any] = {"main": Script(main or []), "workers": []}
+    models: dict[str, Any] = {"main": Script(main or []), "workers": [], "browsers": []}
     side_scripts, worker_scripts = list(sides or []), list(workers or [])
     holder: list[Console] = []
 
@@ -156,7 +159,7 @@ async def ask_console(
         )
         llm = models[session_id] = Script(script)
         options = session_options(AgentOptions(mode="gateway"), workspace)
-        agent = SideAgent(
+        agent = FrontAgent(
             llm=gated(llm, session_id), options=options, tool_providers=[mine.tools]
         )
         agent.front = mine
@@ -166,10 +169,14 @@ async def ask_console(
     async def worker(**kwargs: Any) -> Agent:
         llm = Script(worker_scripts.pop(0) if worker_scripts else [answer("done")])
         models["workers"].append(llm)
+        tools = list(kwargs["tools"])
+        if browser is not None and kwargs["browser_driver"] != "off":
+            models["browsers"].append(browser())
+            tools.append(models["browsers"][-1])
         agent = Agent(
             llm=kwargs["wrap_llm"](llm),
             options=session_options(kwargs["options"], kwargs["workspace"]),
-            tool_providers=kwargs["tools"],
+            tool_providers=tools,
         )
         await agent.start()
         return agent
@@ -179,6 +186,8 @@ async def ask_console(
     folder.mkdir(exist_ok=True)
     cfg = make_cfg()
     cfg.gateway.workspace = str(folder)
+    if browser is not None:
+        cfg.browser.driver = "chrome"
     console = Console(
         cfg,
         port=PORT,

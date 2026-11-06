@@ -24,6 +24,7 @@ from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
     MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
+    MAX_EXTENSIONS,
     STEPS_PER_ATTEMPT,
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
@@ -307,11 +308,16 @@ class AgentOptions:
     - ``extend_steps``: how many steps a run still making progress is given
       by itself when it is :data:`~localmelo.melo.schema.EXTEND_WHEN` steps
       from the end of its last attempt (so the steps left finish the work and
-      report), at most :data:`~localmelo.melo.schema.MAX_EXTENSIONS` times
-      (#547). Progress is two different steps with no error among the last
-      five. Default 0: a run ends at ``max_steps`` as before; the sessions
-      of the gateway, the console and the CLI chats turn it on
+      report), at most ``max_extensions`` times (#547). Progress is three
+      different steps with no error among the last five, each with a call the
+      run had not made before. Default 0: a run ends at ``max_steps`` as
+      before; the sessions of the gateway, the console and the CLI chats turn
+      it on
       (:func:`~localmelo.support.sessions.agents.configured_attempt_options`).
+    - ``max_extensions``: how many times ``extend_steps`` may extend a run;
+      ``None`` is as long as it makes progress, which a person's chat gives
+      the work it owns (#536). The steps stay one count: nothing restarts, and
+      a run that stalls ends at the steps it has.
     - ``refused_steps``: how many steps of a run may go uncounted toward
       ``max_steps`` because a policy check refused every call in them: the
       tool's own check (it returned ``refuse_call(...)``, see
@@ -384,6 +390,7 @@ class AgentOptions:
     task_aids: bool = False
     refused_steps: int = 0
     extend_steps: int = 0
+    max_extensions: int | None = MAX_EXTENSIONS
     empty_reply_fallback: EmptyReplyFallback = "on"
 
     def __post_init__(self) -> None:
@@ -428,6 +435,14 @@ class AgentOptions:
         ):
             raise ValueError(
                 f"extend_steps must be an int >= 0, got {self.extend_steps!r}"
+            )
+        if self.max_extensions is not None and (
+            isinstance(self.max_extensions, bool)
+            or not isinstance(self.max_extensions, int)
+            or self.max_extensions < 0
+        ):
+            raise ValueError(
+                f"max_extensions must be None or an int >= 0, got {self.max_extensions!r}"
             )
         if (
             isinstance(self.refused_steps, bool)

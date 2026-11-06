@@ -39,6 +39,7 @@ def provider_for(
     *,
     keep_tabs: bool = False,
     app_windows: bool = False,
+    opens_apps: bool = True,
     live: bool = True,
     live_fps: float = 15.0,
 ) -> BrowserToolProvider | None:
@@ -47,7 +48,8 @@ def provider_for(
     With *keep_tabs* (``[browser] keep_tabs``) the tabs melo opened are left
     open when the chat ends or goes idle. With *app_windows* (``[browser]
     app_windows``) melo watches for windows other apps open after its acts
-    (:mod:`localmelo.support.browser.desktop`). With *live* (``[browser] live``) the
+    (:mod:`localmelo.support.browser.desktop`). Without *opens_apps* a page that
+    asks for another app is told no, and nobody is asked. With *live* (``[browser] live``) the
     person can watch the Chrome browser (:mod:`localmelo.support.browser.live`), its
     pictures held to *live_fps* a second.
     """
@@ -65,6 +67,7 @@ def provider_for(
             SafariAutomationDriver(command=command, args=(*args, "--mcp")),
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows),
+            opens_apps=opens_apps,
         )
     if driver == "chrome":
         from localmelo.support.browser.chrome import ChromeBackgroundDriver

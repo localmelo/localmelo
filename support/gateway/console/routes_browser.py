@@ -1,6 +1,7 @@
-"""The live view of a chat's browser: ``GET /api/sessions/{id}/browser``, the stream ``/browser/live``, and the person's Done.
+"""The live view of a browser: ``GET /api/sessions/{id}/browser``, the stream ``/browser/live``, and the person's Done.
 
-``GET`` says whether the chat has a page open in melo's browser (the current tab, its
+``{id}`` is the source of the browser: a chat, or a running task whose card a chat shows. ``GET`` says whether the
+chat has a page open in melo's browser (the current tab, its
 address and title), whether melo is in the middle of a browser step
 (``browsing``), whether the person has one of its pages (``yours``, and
 ``place``: ``window`` or ``app``), and whether
@@ -41,7 +42,10 @@ generation, so a card of an old Agent can never reach a new one, nor an ended ru
 a later one. A source that is not the chat's now is refused: ``409
 stale_source`` on the HTTP routes, and a close with 1008 and the reason
 ``stale_source`` before the stream starts. Nothing falls back to the chat's
-current browser. A stream that names a ``run`` is for that run alone: when the run
+current browser. A running task's browser takes all three parts or nothing: ``gen``,
+``run`` and ``owner``, the chat the card shows in, as the task's record says it now
+(a card from a chat the task moved away from is refused like any stale source), so
+Done, Show window and the stream reach that task's run from its card alone. A stream that names a ``run`` is for that run alone: when the run
 ends, the chat begins another or its Agent is rebuilt, the gateway sends the meta
 ``closed`` with the reason ``browser`` and ends the stream (1000), and the stream
 never carries a picture or takes a message for the next run. A client that names no
@@ -117,15 +121,21 @@ def resolve(
     *,
     gen: str | None = None,
     run: str | None = None,
+    owner: str | None = None,
 ) -> BrowserToolProvider | None:
-    """The browser tools a request is for: the chat's own, or None when it has none open.
+    """The browser tools a request is for: the chat's or the task's own, or None when it has none open.
 
     The one resolver of state, the stream, Done and Show window. A *gen* (the
-    browser tools' generation) or a *run* the chat does not have now raises
+    browser tools' generation), a *run* or an *owner* that does not fit raises
     :class:`StaleSourceError`: nothing falls back to whatever the chat has now.
-    It starts nothing.
+    A running task's browser is reached only with all three. It starts nothing.
     """
     browser = browser_of(console, session_id)
+    works_for = console.browser_cards.owner_of(session_id)
+    if works_for is not None and (gen is None or run is None or owner is None):
+        raise StaleSourceError
+    if owner is not None and owner != (works_for or session_id):
+        raise StaleSourceError
     if gen is not None and (
         browser is None
         or _GENERATION.fullmatch(gen) is None
@@ -145,11 +155,11 @@ def _stale() -> ApiError:
 
 
 def browser_of(console: Console, session_id: str) -> BrowserToolProvider | None:
-    """The browser tools of open chat *session_id*, or None when it is not open or has no browser."""
+    """The browser tools of open chat or running task *session_id*, or None when it has none."""
     entry = console.sessions.get(session_id)
     agent = entry.agent if entry is not None else None
     if agent is None:
-        return None
+        return console.browser_cards.task_browser(session_id)
     for provider in agent.tool_providers:
         if isinstance(provider, BrowserToolProvider):
             return provider
@@ -163,20 +173,18 @@ def live_of(console: Console, session_id: str) -> LiveView | None:
 
 
 def available(console: Console, session_id: str) -> bool:
-    """Whether chat *session_id*'s browser can be watched now.
+    """Whether the browser of *session_id*, or of the work it will start, can be watched now.
 
-    The live view must be on (turning it off holds at once). Then a chat with
-    an Agent open is watched in the browser that Agent has, which streams or
-    not; a chat with none open will get the browser the settings name:
-    Chrome streams, Safari's windows do not.
+    The live view must be on (turning it off holds at once). Then a source with
+    a browser open is watched in that browser, which streams or not; one with
+    none open gets the browser the settings name: Chrome streams, Safari's
+    windows do not.
     """
     browser = console.cfg.browser
     if browser.live is not True:
         return False
-    entry = console.sessions.get(session_id)
-    if entry is not None and entry.agent is not None:
-        return live_of(console, session_id) is not None
-    return browser.driver == "chrome"
+    found = browser_of(console, session_id)
+    return found.live is not None if found is not None else browser.driver == "chrome"
 
 
 def add_routes(app: FastAPI, console: Console) -> None:
@@ -185,12 +193,15 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/sessions/{session_id}/browser")
     async def browser_state(
-        session_id: str, gen: str | None = None, run: str | None = None
+        session_id: str,
+        gen: str | None = None,
+        run: str | None = None,
+        owner: str | None = None,
     ) -> JSONResponse:
         console.require_store()
         await console.require_session(session_id)
         try:
-            resolved = resolve(console, session_id, gen=gen, run=run)
+            resolved = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
             raise _stale() from None
         live = resolved.live if resolved is not None else None
@@ -214,24 +225,30 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.post("/api/sessions/{session_id}/browser/done")
     async def browser_done(
-        session_id: str, gen: str | None = None, run: str | None = None
+        session_id: str,
+        gen: str | None = None,
+        run: str | None = None,
+        owner: str | None = None,
     ) -> JSONResponse:
         console.require_store()
         await console.require_session(session_id)
         try:
-            browser = resolve(console, session_id, gen=gen, run=run)
+            browser = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
             raise _stale() from None
         return JSONResponse({"ok": browser is not None and browser.hand_back()})
 
     @app.post("/api/sessions/{session_id}/browser/window")
     async def browser_window(
-        session_id: str, gen: str | None = None, run: str | None = None
+        session_id: str,
+        gen: str | None = None,
+        run: str | None = None,
+        owner: str | None = None,
     ) -> JSONResponse:
         console.require_store()
         await console.require_session(session_id)
         try:
-            browser = resolve(console, session_id, gen=gen, run=run)
+            browser = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
             raise _stale() from None
         return JSONResponse({"ok": browser is not None and browser.show_to_person()})
@@ -243,6 +260,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         tab: str | None = None,
         gen: str | None = None,
         run: str | None = None,
+        owner: str | None = None,
     ) -> None:
         if console.store_state() != "ok":
             await websocket.close(code=_RETRY)
@@ -262,7 +280,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             await websocket.close(code=_POLICY, reason="not_available")
             return
         try:
-            resolved = resolve(console, session_id, gen=gen, run=run)
+            resolved = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
             await websocket.close(code=_POLICY, reason="stale_source")
             return

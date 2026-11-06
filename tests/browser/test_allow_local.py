@@ -142,6 +142,8 @@ def test_the_browser_tools_take_no_hook() -> None:
         "settle_s",
         "desktop",
         "opener",
+        # It only takes away: a task opens no other app.
+        "opens_apps",
         # The live view only watches; it opens and reads nothing.
         "live",
         "live_fps",

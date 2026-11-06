@@ -43,9 +43,10 @@ MAX_ATTEMPTS = 5
 
 # A run that is still making progress when its last steps are near is given more
 # steps by itself, instead of stopping for the person to press Continue (#547):
-# EXTEND_STEPS more (``AgentOptions.extend_steps``, 0 turns it off), at most
-# MAX_EXTENSIONS times, decided EXTEND_WHEN steps before the end so the steps
-# that are left are still there to finish the work and report.
+# EXTEND_STEPS more (``AgentOptions.extend_steps``, 0 turns it off), by default
+# at most MAX_EXTENSIONS times (``AgentOptions.max_extensions``), decided
+# EXTEND_WHEN steps before the end so the steps that are left are still there to
+# finish the work and report.
 EXTEND_STEPS = 30
 MAX_EXTENSIONS = 2
 EXTEND_WHEN = 4
