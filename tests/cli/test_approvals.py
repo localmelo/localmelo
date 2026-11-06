@@ -176,6 +176,22 @@ def test_a_site_web_fetch_would_read_asks_to_read_it_not_to_open_it() -> None:
     )
 
 
+def test_taking_over_a_page_says_where_it_opens_and_how_melo_gets_it_back() -> None:
+    def words(**extra: Any) -> tuple[str, str]:
+        args = {"site": "example.com", "access": "takeover", "need": "code", **extra}
+        text = panel_text(_request("takeover:https://example.com", **args), width=200)
+        return text.title, " ".join(line for _, line in text.body)
+
+    title, chrome = words(browser="chrome")
+    assert title == "Take over example.com?"
+    assert "a one-time code on example.com" in chrome
+    assert "real Chrome window" in chrome and "Enter on an empty line here" in chrome
+    assert "Safari's window comes to the front" in words()[1]
+    # A form the person began stays in the console's panel: a window would clear it.
+    form = words(browser="chrome", form=True)[1]
+    assert "web console's Browser panel" in form and "Chrome window" not in form
+
+
 def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> None:
     acting = panel_text(
         _request("browser-act:https://example.com", site="example.com", access="act"),

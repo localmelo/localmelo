@@ -172,6 +172,8 @@ asyncio.run(main())
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `flags`, `stop_reason`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `unreadable_reason`, `repaired`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
+| `run.paused` | A tool handed the run to the person (melo's browser hands them a page): the run waits, with no model call and no time limit counting. Again when what it says changes. | `what`, `detail` |
+| `run.resumed` | That hold ended. | `what`, `how`, `held_s` |
 | `run.finished` | Last. | `result`, `reviews` |
 
 ### run.started
@@ -633,6 +635,30 @@ that fails or takes longer gives level 0.
 A failure inside the tracker
 ends the run's `run.progress` events, never the run.
 
+### run.paused
+
+- `what`: what has the run: `browser` (a page the person took over).
+- `detail`: what the surfaces show. For `browser`: `tab`, `place` (`window`, a
+  real browser window, or `app`, the console's Browser panel), and when known
+  `site`, `form` (a page melo has open holds a form the person began, which a
+  window would clear, so this one stays in the app), `failed` (a window could not open, so the page is in the app) and
+  `busy` (that was because another chat's window is open).
+
+While the run is held no request goes to the model, whichever part of the run
+asks, and neither the run's own time limit (`timeout_s`) nor the running call's
+counts. No tool call starts either, also one the model already chose; a call
+already running when the hold began goes on. Stop (a cancellation) goes through
+at once.
+
+### run.resumed
+
+- `what`: as on `run.paused`.
+- `how`: `done` (the person said so: Done, an empty Enter in the terminal),
+  `closed` (they closed the window they were given), `gone` (the page closed
+  its own window), `lost` (the browser stopped), `stopped` (the run was stopped
+  while held) or `ended` (the run ended another way).
+- `held_s`: the seconds the run was held, to a tenth.
+
 ### run.finished
 
 - `result`: the run's `RunResult`, as `RunResult.to_dict()`. Nothing in it
@@ -697,6 +723,10 @@ returned.
   - the second request of a reflection failed after the first had returned;
   - with persistence on, a cancellation interrupted the recording of a
     reply in history.
+- **A hold ends before the run.** Each `run.paused` that starts a hold is
+  followed by one `run.resumed` before `run.finished`; a run stopped while
+  held gets `run.resumed` with `how` `stopped`. A second `run.paused` while
+  held says what changed and needs no second `run.resumed`.
 - **One id.** Every event's `run_id` is the run's `task_id`, as in the
   `RunResult` and the task record.
 

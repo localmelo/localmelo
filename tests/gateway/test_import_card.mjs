@@ -328,6 +328,7 @@ function tab({records = [], on = true, ...options} = {}) {
   h.records = records;
   const api = async (path, call = {}) => {
     if (path === '/memory/records') return {on, records: h.records, documents: 0, embedding_model: '', last_error: ''};
+    if (path === '/memory/items') return {items: []};
     const answer = await h.api(path, call);
     if (call.method === 'POST') h.records = [row(7, 'Use uv for new Python projects.'), row(8, 'Keep commits small.')];
     if (call.method === 'DELETE') h.records = [];

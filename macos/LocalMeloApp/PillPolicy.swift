@@ -12,23 +12,23 @@ let petDoneAfterPill: TimeInterval = 3
 let pillStaleAfter: TimeInterval = 12
 
 enum PillState: Equatable {
-    case working, waiting, done, failed, serverDown
+    case working, waiting, control, done, failed, serverDown
 
-    /// Something runs or waits now (as against an ended run, which only shows for a few seconds).
+    /// Something runs, waits or is held by the person now (as against an ended run, which only shows for a few seconds).
     var isActive: Bool { self != .done && self != .failed }
 }
 
 /// What a running thing is doing, as the gateway names it (`ActivityText.icon`); an unknown name reads as a tool.
 enum PillIcon: String {
-    case wait, held, paused, read, write, run, web, memory, think, tool
+    case wait, held, paused, you, read, write, run, web, memory, think, tool
 
     init(name: String?) { self = name.flatMap(PillIcon.init(rawValue:)) ?? .tool }
 
     /// The same glyphs as the console's panel, so a row reads the same everywhere.
     var glyph: String {
-        let glyphs: [PillIcon: String] = [.wait: "!", .held: "\u{25F7}", .paused: "\u{2016}", .read: "\u{25A4}",
-                                          .write: "\u{270E}", .run: ">_", .web: "\u{2295}", .memory: "\u{25CE}",
-                                          .think: "\u{2026}", .tool: "\u{2699}"]
+        let glyphs: [PillIcon: String] = [.wait: "!", .held: "\u{25F7}", .paused: "\u{2016}", .you: "\u{2016}",
+                                          .read: "\u{25A4}", .write: "\u{270E}", .run: ">_", .web: "\u{2295}",
+                                          .memory: "\u{25CE}", .think: "\u{2026}", .tool: "\u{2699}"]
         return glyphs[self] ?? "\u{2699}"
     }
 }
@@ -51,7 +51,7 @@ enum PillPortrait: Equatable, Hashable {
     static func working(_ icon: PillIcon) -> PillPortrait {
         switch icon {
         case .read, .web: return .workRead
-        case .think, .memory, .held, .paused, .wait: return .workThink
+        case .think, .memory, .held, .paused, .you, .wait: return .workThink
         case .write, .run, .tool: return .workLaptop
         }
     }
@@ -76,11 +76,16 @@ struct PillModel: Equatable {
     var more: Int
     var portrait: PillPortrait
     var click: PillClick
+    /// The chat whose page the person holds: the "Done" button in the capsule gives it back to melo.
+    var giveBack: String? = nil
+
+    /// The small line under the line while the person holds a page.
+    var note: String? { state == .control ? L10n.t("app.pill.controlNote", "melo is paused") : nil }
 
     /// The mark before the line: the kind of work while it runs, else the end's own.
     var glyph: String {
         switch state {
-        case .working, .waiting: return icon.glyph
+        case .working, .waiting, .control: return icon.glyph
         case .done: return "\u{2713}"
         case .failed: return "\u{2717}"
         case .serverDown: return "\u{2298}"
@@ -95,6 +100,7 @@ struct PillModel: Equatable {
         case .working, .waiting, .done: subject = L10n.t("app.pill.is", "Melo is {line}.", ["line": line])
         case .failed: subject = L10n.t("app.pill.failed", "Melo {line}.", ["line": line])
         case .serverDown: subject = L10n.t("app.pill.down", "Melo: {line}.", ["line": line])
+        case .control: subject = "\(text). \(note ?? "")."
         }
         if case .route(let route) = click, route.hasPrefix("#/tasks/") {
             return subject + L10n.t("app.pill.opensTask", " Opens the task.")
@@ -149,6 +155,13 @@ func pillSnapshot(health data: Data, age: TimeInterval) -> PillSnapshot? {
         PillSnapshot(model: PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click),
                      ids: ids.isEmpty ? ["running"] : ids)
     }
+    if let chat = controlledChats(data).first {
+        // The person holds a page: the run waits for them, so this beats a wait and work; the chip is left out for the button.
+        let model = PillModel(state: .control, text: L10n.t("app.pill.control", "You're in control"), icon: .you, more: 0,
+                              portrait: .waitAlert, click: consoleRoute(kind: "chat", id: chat).map(PillClick.route) ?? .window,
+                              giveBack: chat)
+        return PillSnapshot(model: model, ids: ids.union([chat]))
+    }
     if !waits.isEmpty {
         return active(.waiting, L10n.t("app.menu.waiting", "Waiting for your approval"), .wait, .waitAlert, .waiting)
     }
@@ -188,6 +201,9 @@ struct PillDecision: Equatable {
 
 /// The pill's memory: what it shows, when its line last changed, and what "×" hid. It is asked on each health reply,
 /// each change of window or menu choice, and when it asked to be (`recheckIn`); `now` is any clock in seconds.
+///
+/// While the person holds a page (`.control`) the pill is the way back (its "Done" button), so it shows with the window
+/// in front too, with "Melo only" chosen, and after a "×" (which that state does not offer); only "Nothing" hides it.
 struct PillPolicy {
     private var shown: PillModel?
     private var changedAt = -TimeInterval.infinity
@@ -197,6 +213,7 @@ struct PillPolicy {
 
     /// "×": hide the pill until the next task starts: something that is not running now, or anything once all has stopped.
     mutating func dismiss() {
+        guard last?.model.state != .control else { return }
         hidden = last?.ids ?? []
         quietSinceHidden = false
         shown = nil
@@ -210,7 +227,8 @@ struct PillPolicy {
         last = live
         trackDismissal(live)
         let previous = shown
-        guard mode == .pill, !windowShown, hidden == nil, var model = live?.model else {
+        let allowed = live?.model.state == .control ? mode != .nothing : mode == .pill && !windowShown && hidden == nil
+        guard allowed, var model = live?.model else {
             shown = nil
             // "Done" goes on for a "Done" that ran out on the desktop, not one the person's window or choice cut short.
             let done = previous?.state == .done && mode == .pill && !windowShown && hidden == nil && !stopped
@@ -241,17 +259,29 @@ struct PillPolicy {
 }
 
 /// The capsule's height and the clear strip around it in the panel (room for the "×" and the shadow); the line is cut
-/// with an ellipsis at `pillTextMost`; points before the line (portrait and mark) and after it; the "+1" chip's width.
+/// with an ellipsis at `pillTextMost`; points before the line (portrait and mark) and after it; the "+1" chip's width;
+/// the "Done" button's height, the gap before it and the space after it.
 let pillHeight: CGFloat = 48
 let pillMargin: CGFloat = 5
 let pillTextMost: CGFloat = 320
 let pillLead: CGFloat = 74
 let pillTail: CGFloat = 18
 let pillChip: CGFloat = 30
+let pillGiveHeight: CGFloat = 28
+let pillGiveGap: CGFloat = 12
+let pillGiveEdge: CGFloat = 10
 
-/// The capsule's width for a line of `text` points and the "+1" chip when `more` is above 0.
-func pillWidth(text: CGFloat, more: Int) -> CGFloat {
-    pillLead + min(max(text, 0), pillTextMost) + (more > 0 ? 8 + pillChip + 14 : pillTail)
+/// The room after the line: for the "Done" button of `give` points when there is one, else the "+1" chip when `more`
+/// is above 0, else a small margin.
+func pillTailWidth(more: Int, give: CGFloat) -> CGFloat {
+    if give > 0 { return pillGiveGap + give + pillGiveEdge }
+    return more > 0 ? 8 + pillChip + 14 : pillTail
+}
+
+/// The capsule's width for a line of `text` points, the "+1" chip when `more` is above 0, or a "Done" button of `give`
+/// points.
+func pillWidth(text: CGFloat, more: Int, give: CGFloat = 0) -> CGFloat {
+    pillLead + min(max(text, 0), pillTextMost) + pillTailWidth(more: more, give: give)
 }
 
 /// The panel around a capsule of `width`.

@@ -1,29 +1,24 @@
-"""The person takes over melo's browser from the Browser panel: who has each tab, and the person's input.
+"""The person takes over melo's browser: who has each tab, where they have it, and their input.
 
 **Who has a tab.** Each tab of a chat is held by ``melo`` or by ``you`` (the
 person), in :class:`Owners`, which melo's browser tools and the live view share.
-The person takes a tab from the panel (or from the "melo needs you to sign in"
-card) and gives it back from the panel. While they hold it:
+The person takes a tab from the "melo needs you" card or the Browser panel, and
+has it in a real Chrome window (``window``) or in the app's Browser panel
+(``app``: a page with a form they began, which a window would clear, or a
+window that could not open). While they hold it the run is on hold (see
+:mod:`localmelo.melo.contracts.pause`): no model call, and nothing counts down.
+They give it back with Done (the panel, the app's pill, Enter in the terminal)
+or by closing the window; a Stop ends it too. Then melo reads the page again
+before it acts: its refs are of a page the person may have changed.
 
-* melo's browser steps on that tab wait (:meth:`Owners.wait_for_melo`), each for a
-  bounded time, and the model is told plainly that the person is using the page;
-* the page's boxes (``alert``, ``confirm``, ``prompt``) are the person's to
-  answer, in the panel;
-* when they give it back, melo reads the page again before it acts: its refs are
-  of a page the person may have changed.
-
-When nobody watches a held tab any more (the panel closed, the page hidden, the
-gateway's token rotated), the tab stays the person's for :data:`GRACE_S` seconds
-and then comes back to melo (:meth:`Owners.watching`). The panel says so.
-
-**The person's input** comes over the live view's socket as small JSON
-messages (:func:`cdp_events`): mouse moves, presses and releases, the wheel,
-keys, text (an input method's commit and a paste, text only) and an input
-method's composition. Each is checked for its shape, its coordinates are kept on
-the page's view, and it becomes the browser's own trusted input
+**The person's input** in the app comes over the live view's socket as small
+JSON messages (:func:`cdp_events`): mouse moves, presses and releases, the
+wheel, keys, text (an input method's commit and a paste, text only) and an
+input method's composition. Each is checked for its shape, its coordinates are
+kept on the page's view, and it becomes the browser's own trusted input
 (``Input.dispatchMouseEvent``, ``Input.dispatchKeyEvent``, ``Input.insertText``,
-``Input.imeSetComposition``). :class:`Bucket` holds a viewer to
-:data:`RATE` messages a second.
+``Input.imeSetComposition``). :class:`Bucket` holds a viewer to :data:`RATE`
+messages a second.
 
 **Nothing typed is kept.** The input goes from the panel to the browser and
 nowhere else: no log line, event, store, memory or model ever holds a key or a
@@ -50,15 +45,16 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
+from localmelo.melo.contracts.pause import Resumed
+
 Owner = Literal["melo", "you"]
 MELO: Final = "melo"
 YOU: Final = "you"
 
-# Seconds a held tab stays the person's once nobody watches it.
-GRACE_S: Final = 120.0
-# Seconds one browser step of melo's waits for the person to give a tab back.
-# A step runs under the tool timeout of the run (60 s), so it waits less.
-STEP_WAIT_S: Final = 45.0
+# Where the person has a tab: a real Chrome window, or the app's Browser panel.
+Place = Literal["window", "app"]
+# How a tab came back: the run's ``run.resumed`` says the same (see the pause contract).
+How = Resumed
 # The person's input: messages a second a viewer may send, and the burst above that.
 RATE: Final = 120.0
 BURST: Final = 240.0
@@ -148,46 +144,51 @@ class InputRefusedError(ValueError):
 
 @dataclass(frozen=True)
 class Returned:
-    """A tab the person gave back (or left): how long they had it, and how it came back.
-
-    ``how`` is ``gave`` (Give back to melo), ``left`` (nobody watched it for the
-    grace period) or ``card`` (they never took it after the card).
-    """
+    """A tab the person gave back: how long they had it, and how it came back (:data:`How`)."""
 
     tab: str
     seconds: float
-    how: Literal["gave", "left"]
+    how: How
 
 
 @dataclass
-class _Held:
-    since: float
-    away: float | None = None  # when nobody watched it any more, on the owners' clock
-    timer: Any = None
+class Where:
+    """Where the person has a tab.
+
+    ``form`` says the page had a form they began when they took it (``None``
+    until melo looked), which a window would clear; ``failed`` that the window
+    could not open, so the page is in the app, and ``busy`` that it could not
+    because another chat's window is open.
+    """
+
+    place: Place
+    form: bool | None = None
+    failed: bool = False
+    busy: bool = False
+    since: float = 0.0
 
 
 class Owners:
     """Who has each tab of one chat: ``melo`` unless the person took it. See the module docstring.
 
-    *on_change* is called after every change (the live view tells its viewers,
-    and a waiting step looks again). *clock* and *later* (``later(seconds, fn)``
-    returning something with ``cancel()``) are a test's fake time; by default the
-    running loop's.
+    *on_change* is called after every change (the live view tells its viewers);
+    *on_take* with the tab the person took and *on_give* with what came back
+    (the browser tools hold the run, open or close the window).
     """
 
     def __init__(
         self,
         *,
         on_change: Callable[[], None] | None = None,
-        grace_s: float = GRACE_S,
+        on_take: Callable[[str], None] | None = None,
+        on_give: Callable[[Returned], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
-        later: Callable[[float, Callable[[], None]], Any] | None = None,
     ) -> None:
         self._on_change = on_change
-        self.grace_s = grace_s
+        self._on_take = on_take
+        self._on_give = on_give
         self._clock = clock
-        self._later = later
-        self._held: dict[str, _Held] = {}
+        self._held: dict[str, Where] = {}
         self._returned: list[Returned] = []
         self._changed = asyncio.Event()
 
@@ -199,69 +200,63 @@ class Owners:
         """The tabs the person has now."""
         return frozenset(self._held)
 
-    def since(self, tab: str) -> float | None:
-        """When the person took *tab*, on the owners' clock; None when melo has it."""
-        held = self._held.get(tab)
-        return held.since if held is not None else None
+    def where(self, tab: str) -> Where | None:
+        """Where the person has *tab*; None when melo has it."""
+        return self._held.get(tab)
 
-    def take(self, tab: str, *, watched: bool = True) -> bool:
-        """The person takes *tab*; whether it changed hands (False when they had it).
-
-        *watched* says whether a panel shows the tab now; one that does not
-        starts the grace period at once (the card was answered with no panel open).
-        """
+    def take(
+        self, tab: str, place: Place = "window", *, form: bool | None = None
+    ) -> bool:
+        """The person takes *tab*, in *place*; whether it changed hands (False when they had it)."""
         if tab in self._held:
-            if watched:
-                self.watching(tab, 1)
             return False
-        self._held[tab] = _Held(self._clock())
-        if not watched:
-            self._go_away(tab)
+        self._held[tab] = Where(place, form, since=self._clock())
+        self._tell(self._on_take, tab)
         self._changed_now()
         return True
 
-    def give(self, tab: str, how: Literal["gave", "left"] = "gave") -> Returned | None:
+    def move(
+        self,
+        tab: str,
+        place: Place,
+        *,
+        form: bool | None = None,
+        failed: bool = False,
+        busy: bool = False,
+    ) -> None:
+        """Say where the person has *tab* now (the window opened, or could not)."""
+        held = self._held.get(tab)
+        if held is None:
+            return
+        held.place, held.failed, held.busy = place, failed, busy
+        if form is not None:
+            held.form = form
+        self._changed_now()
+
+    def give(self, tab: str, how: How = "done") -> Returned | None:
         """*tab* comes back to melo; what the next step of melo's is told (None when the person did not have it)."""
         held = self._held.pop(tab, None)
         if held is None:
             return None
-        self._cancel(held)
         back = Returned(tab, max(0.0, self._clock() - held.since), how)
         self._returned.append(back)
+        self._tell(self._on_give, back)
         self._changed_now()
         return back
 
     def forget(self, tab: str) -> None:
         """*tab* is gone (closed, or no longer the chat's): nobody has it, and nothing is told about it."""
         held = self._held.pop(tab, None)
-        if held is not None:
-            self._cancel(held)
         self._returned = [r for r in self._returned if r.tab != tab]
         if held is not None:
             self._changed_now()
 
     def clear(self) -> None:
         """The chat is over: every tab is melo's again, and nothing waits."""
-        for held in self._held.values():
-            self._cancel(held)
         had = bool(self._held)
         self._held.clear()
         self._returned.clear()
         if had:
-            self._changed_now()
-
-    def watching(self, tab: str, viewers: int) -> None:
-        """How many panels show *tab* now: none starts the grace period of a held tab, one or more ends it."""
-        held = self._held.get(tab)
-        if held is None:
-            return
-        if viewers > 0:
-            if held.away is not None:
-                self._cancel(held)
-                held.away = None
-                self._changed_now()
-        elif held.away is None:
-            self._go_away(tab)
             self._changed_now()
 
     def returned(self) -> list[Returned]:
@@ -269,46 +264,21 @@ class Owners:
         back, self._returned = self._returned, []
         return back
 
-    async def wait_for_melo(self, tab: str, timeout_s: float) -> bool:
-        """Wait until melo has *tab*, at most *timeout_s* seconds; whether it has."""
-        loop = asyncio.get_running_loop()
-        end = loop.time() + max(0.0, timeout_s)
+    async def wait_for_melo(self, tab: str) -> None:
+        """Wait until melo has *tab*: as long as the person needs, with no time limit."""
         while tab in self._held:
-            left = end - loop.time()
-            if left <= 0:
-                return False
             self._changed.clear()
-            with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(left):
-                    await self._changed.wait()
-        return True
+            await self._changed.wait()
 
     # ── Inside ──
 
-    def _go_away(self, tab: str) -> None:
-        held = self._held[tab]
-        held.away = self._clock()
-        held.timer = self._schedule(self.grace_s, lambda: self._expire(tab, held))
-
-    def _expire(self, tab: str, held: _Held) -> None:
-        if self._held.get(tab) is held and held.away is not None:
-            held.timer = None
-            self.give(tab, "left")
-
-    def _schedule(self, seconds: float, fn: Callable[[], None]) -> Any:
-        if self._later is not None:
-            return self._later(seconds, fn)
-        try:
-            return asyncio.get_running_loop().call_later(seconds, fn)
-        except RuntimeError:
-            return None
-
     @staticmethod
-    def _cancel(held: _Held) -> None:
-        timer, held.timer = held.timer, None
-        if timer is not None:
-            with contextlib.suppress(Exception):
-                timer.cancel()
+    def _tell(hook: Callable[[Any], None] | None, value: object) -> None:
+        if hook is not None:
+            with contextlib.suppress(
+                Exception
+            ):  # a hook's failure never stops a hand-over
+                hook(value)
 
     def _changed_now(self) -> None:
         self._changed.set()

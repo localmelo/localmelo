@@ -45,6 +45,7 @@ from localmelo.melo.contracts.approvals import (
     never_granted,
 )
 from localmelo.melo.contracts.review import because, review_title, url_site
+from localmelo.support.browser.sites import TAKEOVER_NEEDS
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.config import SavedFolders
@@ -347,6 +348,8 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith("takeover:"):
+        return _takeover_panel(arguments, mark, width, escaped_any)
     background = arguments.get("browser") == "chrome"
     window = (
         "in melo's browser, which runs in the background"
@@ -529,6 +532,46 @@ def _tool_panel(
     text = json.dumps(dict(arguments), indent=2, ensure_ascii=False, default=str)
     body = [("", row) for row in _wrapped(shown(text).split("\n"), width)]
     return PanelText(f"Call {shown(tool)}?", f"{shown(tool)}{mark}", body, escaped_any)
+
+
+def _takeover_panel(
+    arguments: Mapping[str, Any], mark: str, width: int, escaped: bool
+) -> PanelText:
+    """Taking over a page: where it opens, and how melo gets it back (Enter here, or closing the window).
+
+    While a form the person began is open on any of melo's pages, the page opens
+    in the web console's Browser panel: a Chrome window would reload them all and
+    clear the form.
+    """
+    site, changed = escape_arguments(str(arguments.get("site") or "a page"))
+    what = TAKEOVER_NEEDS.get(
+        str(arguments.get("need") or ""), TAKEOVER_NEEDS["sign-in"]
+    )
+    said = f"melo needs you for {what} on {site}. melo is paused until you give the page back."
+    if arguments.get("form") is True:
+        where = (
+            "A page melo has open holds a filled-in form, so this one opens in the web "
+            "console's Browser panel (melo console), and the form stays. Press Enter "
+            "on an empty line here, or Done there, when you're done."
+        )
+    elif arguments.get("browser") == "chrome":
+        where = (
+            "The page opens in a real Chrome window: melo's own Chrome, not your "
+            "everyday one. Press Enter on an empty line here, or close the window, "
+            "when you're done."
+        )
+    else:
+        where = (
+            "Safari's window comes to the front. Press Enter on an empty line here "
+            "when you're done."
+        )
+    note = "melo never keeps what you type in a password or private field. Asked every time."
+    body = [("", row) for row in _wrapped([said], width)]
+    body += [("", row) for row in _wrapped([where], width)]
+    body += [("muted", row) for row in _wrapped([note], width)]
+    return PanelText(
+        f"Take over {site}?", f"{site}{mark} · melo needs you", body, escaped or changed
+    )
 
 
 def _outside_panel(

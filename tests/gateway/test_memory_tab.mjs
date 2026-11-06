@@ -1,7 +1,8 @@
 /**
  * The panel's Memory tab (memory-tab.mjs) in a DOM double: the notes newest first with where each came from,
  * the search box, rewording and deleting a note, "Forget everything" with a confirm that names what goes, the
- * switch, the empty state, and the question a deleted chat with notes asks.
+ * switch, the empty state, and the question a deleted chat with notes asks. Memory items melo wrote from chats
+ * share the list: marked, linked to their chat, deleted at once with an Undo, and always shown as text.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -33,22 +34,32 @@ doc.body = new Element('body');
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const note = (id, text, extra = {}) => ({id, text, topic: 'preferences', quote: '', source: '', from: 'from chat “Planning”, Oct 30',
   chat_gone: false, edited: false, session_id: 's1', created_at: id, ...extra});
+const item = (id, title, text, extra = {}) => ({id, title, text, kind: 'semantic', status: 'active', replaced_by: null, conflicts: [],
+  from: 'from chat “Garden”, Oct 31', chat_gone: false, link: '#/s/s2', session_id: 's2', created_at: id, ...extra});
 const page = (records, extra = {}) => ({on: true, records, documents: 4, embedding_model: '', last_error: '', ...extra});
 
-function harness({records = [], developer = false, fail = {}, extra = {}} = {}) {
-  const h = {calls: [], records};
+function harness({records = [], items = [], developer = false, fail = {}, extra = {}} = {}) {
+  const h = {calls: [], records, items, trash: [], now: 0};
   const api = async (path, options = {}) => {
     const method = options.method ?? 'GET';
     h.calls.push([method, path, options.body]);
     if (fail[`${method} ${path}`]) throw new Error(fail[`${method} ${path}`]);
     if (path === '/memory/records' && method === 'GET') return page(h.records, extra);
+    if (path === '/memory/items') return {items: h.items};
+    if (method === 'DELETE' && path.startsWith('/memory/items/')) {
+      const id = Number(path.split('/').pop());
+      h.trash = h.items.filter((row) => row.id === id);
+      h.items = h.items.filter((row) => row.id !== id);
+      return {undo_seconds: 600};
+    }
+    if (method === 'POST' && path.endsWith('/restore')) { h.items = [...h.items, ...h.trash]; return {}; }
     if (method === 'PATCH') return {...h.records.find((item) => `/memory/records/${item.id}` === path), text: options.body.text, edited: true};
     if (path === '/memory/records?all=true') return {notes: h.records.length, turns: 4};
     if (path === '/memory') return {on: options.body.on};
     if (path === '/memory/reindex') return {notes: 0, turns: 4};
     return {};
   };
-  h.tab = setupMemoryTab({doc, api, developer: () => developer});
+  h.tab = setupMemoryTab({doc, api, developer: () => developer, clock: () => h.now});
   h.text = () => h.tab.root.text();
   return h;
 }
@@ -66,6 +77,8 @@ test('the words: what a search matches, how memory searches, and what forgetting
   assert.match(searchLine(true, 'Qwen3-Embedding-0.6B', 'embedding'), /by meaning with Qwen3-Embedding-0.6B/);
   assert.equal(forgetLine(2, 5), "This removes 2 notes and melo's search index of 5 chat turns. Your chats stay. It cannot be undone.");
   assert.equal(forgetLine(1, 0), 'This removes 1 note. Your chats stay. It cannot be undone.');
+  assert.equal(forgetLine(2, 5, 3), "This removes 2 notes, 3 memory items and melo's search index of 5 chat turns. Your chats stay. It cannot be undone.");
+  assert.ok(matches(item(1, 'Tomato garden stakes', 'The user uses bamboo.'), 'tomato BAMBOO'), 'an item is found by its title and its text');
 });
 
 test('the notes are listed as the server sent them, each with its source, and a gone chat says so', async () => {
@@ -208,4 +221,120 @@ test('a deleted chat with notes asks: keep them first, forget them too, or leave
   assert.match(dialog.text(), /Also forget the 1 note from this chat\?/);
   dialog.dispatch('cancel');
   assert.equal(await escaped, 'cancel', 'Escape leaves the chat alone');
+});
+
+// ── Memory items: what melo wrote from the chats, in the notes' list ──
+
+const rowsOf = (h) => h.tab.root.findAll((node) => node.tagName === 'LI').map((row) => row.text());
+
+test('the items share the notes\' list newest first, marked as melo\'s, with the chat as a link', async () => {
+  const h = harness({
+    records: [note(4, 'You prefer short answers.'), note(1, 'Your dentist is Lee Park.', {topic: 'about'})],
+    items: [item(3, 'Tomato garden stakes', 'The user stakes the tomato garden with bamboo.'),
+      item(2, 'Old chat', 'The user planted peas.', {from: 'from a deleted chat, Oct 30', chat_gone: true, link: ''})],
+  });
+  await h.tab.show();
+  assert.deepEqual(rowsOf(h), [
+    'You prefer short answers. Preferences From chat “Planning”, Oct 30 Edit Delete',
+    'Tomato garden stakes The user stakes the tomato garden with bamboo. Written by melo From chat “Garden”, Oct 31 Delete',
+    'Old chat The user planted peas. Written by melo From a deleted chat, Oct 30 Delete',
+    'Your dentist is Lee Park. About you From chat “Planning”, Oct 30 Edit Delete',
+  ]);
+  const links = h.tab.root.findAll((node) => node.tagName === 'A');
+  assert.deepEqual(links.map((link) => [link.href, link.text()]), [['#/s/s2', 'From chat “Garden”, Oct 31']]);
+  assert.equal(h.tab.root.findAll((node) => node.className === 'memory-from gone').length, 1, 'a gone chat is plain words, not a link');
+  assert.equal(h.tab.root.findAll((node) => node.tagName === 'LI' && node.text().includes('Edit')).length, 2, 'only notes can be edited');
+  assert.equal(h.tab.root.findAll((node) => node.tagName === 'INPUT')[0].parent.hidden, false, 'items alone give the search box too');
+});
+
+test('with no items the tab is the notes as sent: no mark, and the same words as before', async () => {
+  const h = harness({records: [note(1, 'You prefer short answers.')]});
+  await h.tab.show();
+  assert.deepEqual(rowsOf(h), ['You prefer short answers. Preferences From chat “Planning”, Oct 30 Edit Delete']);
+  assert.doesNotMatch(h.text(), /Written by melo/);
+  h.tab.root.button('Forget everything…').click();
+  assert.match(h.text(), /^.*This removes 1 note and melo's search index of 4 chat turns\. Your chats stay\./);
+});
+
+test('an item\'s title and text are set as text, whatever characters they hold', async () => {
+  const markup = '<img src=x onerror=alert(1)> & <b>bold</b>';
+  const h = harness({items: [item(1, markup, '"><script>alert(2)</script> `code`')]});
+  await h.tab.show();
+  const [title] = h.tab.root.findAll((node) => node.className === 'memory-item-title');
+  const [text] = h.tab.root.findAll((node) => node.className === 'memory-text');
+  assert.equal(title.textContent, markup);
+  assert.equal(text.textContent, '"><script>alert(2)</script> `code`');
+  assert.deepEqual([title.children.length, text.children.length], [0, 0], 'no element is made from them');
+  assert.ok(h.tab.root.findAll((node) => node.attributes['aria-label'] === `Delete: ${markup}`).length === 1);
+});
+
+test('only what a person can settle is named: a disagreement shows, history only for a developer', async () => {
+  const items = [item(4, 'Spice', 'The user likes spicy food.', {status: 'conflict', conflicts: [5], kind: 'profile'}),
+    item(3, 'Home', 'The user lives in Pittsburgh.', {status: 'replaced', replaced_by: 2}),
+    item(1, 'Sync', 'The sync is on Wednesday.', {status: 'replaced', replaced_by: null})];
+  const plain = harness({items});
+  await plain.tab.show();
+  assert.deepEqual(rowsOf(plain), ['Spice The user likes spicy food. Written by melo From chat “Garden”, Oct 31 Disagrees with another item Delete']);
+  const dev = harness({items, developer: true});
+  await dev.tab.show();
+  assert.deepEqual(rowsOf(dev), [
+    'Spice The user likes spicy food. Written by melo About you From chat “Garden”, Oct 31 Disagrees with another item Delete',
+    'Home The user lives in Pittsburgh. Written by melo Fact From chat “Garden”, Oct 31 Replaced by a newer item Delete',
+    'Sync The sync is on Wednesday. Written by melo Fact From chat “Garden”, Oct 31 Replaced; the newer item was deleted Delete',
+  ]);
+});
+
+test('deleting an item takes effect at once and leaves an Undo that puts it back', async () => {
+  const h = harness({records: [note(1, 'You prefer short answers.')], items: [item(3, 'Tomato garden stakes', 'The user uses bamboo.'), item(2, 'Peas', 'The user planted peas.')]});
+  await h.tab.show();
+  h.tab.root.findAll((node) => node.attributes['aria-label'] === 'Delete: Tomato garden stakes')[0].click();
+  await settle();
+  assert.deepEqual(h.calls.find(([method]) => method === 'DELETE'), ['DELETE', '/memory/items/3', undefined], 'no question first');
+  assert.deepEqual(rowsOf(h), [
+    'Deleted “Tomato garden stakes”. Undo',
+    'Peas The user planted peas. Written by melo From chat “Garden”, Oct 31 Delete',
+    'You prefer short answers. Preferences From chat “Planning”, Oct 30 Edit Delete',
+  ]);
+  h.tab.root.button('Undo').click();
+  await settle();
+  assert.deepEqual(h.calls.find(([method]) => method === 'POST'), ['POST', '/memory/items/3/restore', {}]);
+  assert.deepEqual(rowsOf(h).slice(0, 2), [
+    'Tomato garden stakes The user uses bamboo. Written by melo From chat “Garden”, Oct 31 Delete',
+    'Peas The user planted peas. Written by melo From chat “Garden”, Oct 31 Delete',
+  ]);
+  assert.equal(h.tab.root.button('Undo'), null);
+});
+
+test('an Undo line goes when the server\'s time is up, stays when an undo fails, and a refused delete says so', async () => {
+  const h = harness({items: [item(3, 'Tomato garden stakes', 'The user uses bamboo.')], fail: {'POST /memory/items/3/restore': 'That item can no longer be put back.'}});
+  await h.tab.show();
+  h.tab.root.button('Delete').click();
+  await settle();
+  h.now = 599_000;
+  h.tab.root.button('Undo').click();
+  await settle();
+  assert.match(h.text(), /That item can no longer be put back\./);
+  assert.ok(h.tab.root.button('Undo'), 'the line stays so the person can try again');
+  h.now = 600_000;
+  h.tab.reload();
+  await settle();
+  assert.equal(h.tab.root.button('Undo'), null, 'after the time the line is gone');
+  assert.match(h.text(), /Nothing remembered yet\./);
+  const refused = harness({items: [item(3, 'Tomato garden stakes', 'The user uses bamboo.')], fail: {'DELETE /memory/items/3': 'That item is not in melo\'s memory.'}});
+  await refused.tab.show();
+  refused.tab.root.button('Delete').click();
+  await settle();
+  assert.match(refused.text(), /That item is not in melo's memory\./);
+  assert.equal(rowsOf(refused).length, 1, 'the item stays listed');
+});
+
+test('forget everything names the items too and empties them with the notes', async () => {
+  const h = harness({records: [note(1, 'You prefer short answers.')], items: [item(2, 'Peas', 'The user planted peas.')]});
+  await h.tab.show();
+  h.tab.root.button('Forget everything…').click();
+  assert.match(h.text(), /This removes 1 note, 1 memory item and melo's search index of 4 chat turns\./);
+  h.tab.root.button('Forget everything').click();
+  await settle();
+  assert.match(h.text(), /Nothing remembered yet\./);
+  assert.doesNotMatch(h.text(), /Peas/);
 });

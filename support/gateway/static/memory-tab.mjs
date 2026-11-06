@@ -5,7 +5,11 @@
  * deleted chat": a note outlives its chat). A note is reworded with `PATCH /api/memory/records/{id}` and
  * deleted with `DELETE` on the same path; "Forget everything" names what goes before it calls
  * `DELETE /api/memory/records?all=true`; the switch is `PUT /api/memory`. The search box filters the loaded
- * list. `root` is mounted in the panel's body while the tab is open; `show()` reads the notes again.
+ * list. `GET /api/memory/items` adds the memory items melo wrote from the chats to the same list (nothing
+ * when there are none), each marked as melo's, with its chat as a link. An item is deleted at once with
+ * `DELETE /api/memory/items/{id}`; its place then holds "Deleted … Undo" (`POST …/restore`) for as long as
+ * the server says it can be put back. A replaced item shows in developer mode only. Item text is always
+ * set as text. `root` is mounted in the panel's body while the tab is open; `show()` reads the notes again.
  * `askAboutNotes` is the question a deleted chat with notes asks. "From other assistants" (import-card.mjs)
  * looks for notes other assistants keep, brings in the checked files, and takes a batch back.
  */
@@ -14,6 +18,7 @@ import {maker} from './dom.mjs';
 import {importSection} from './import-card.mjs';
 
 export const TOPICS = ['about', 'preferences', 'people', 'projects', 'decisions'];
+const ITEM_KINDS = ['profile', 'semantic', 'episodic'];
 
 /** A topic's name in the page's language, or '' for a topic the page does not know. */
 export function topicName(topic) {
@@ -25,7 +30,7 @@ const capital = (text) => String(text ?? '').charAt(0).toUpperCase() + String(te
 /** How the search finds a note: every word typed is in its text, topic or source. */
 export function matches(row, query) {
   const words = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = `${row.text} ${topicName(row.topic)} ${row.from ?? ''}`.toLowerCase();
+  const hay = `${row.title ?? ''} ${row.text} ${topicName(row.topic)} ${row.from ?? ''}`.toLowerCase();
   return words.every((word) => hay.includes(word));
 }
 
@@ -38,16 +43,17 @@ export function searchLine(on, model, retriever = 'auto') {
 }
 
 /** What "Forget everything" will remove, in the confirm's words. */
-export function forgetLine(notes, turns) {
-  const what = t('memoryTab.notes', {n: notes});
+export function forgetLine(notes, turns, items = 0) {
+  const what = items ? t('memoryTab.notesAndItems', {notes: t('memoryTab.notes', {n: notes}), items: t('memoryTab.items', {n: items})})
+    : t('memoryTab.notes', {n: notes});
   return turns
     ? t('memoryTab.forgetLineIndex', {notes: what, index: t('memoryTab.index', {n: turns})})
     : t('memoryTab.forgetLine', {notes: what});
 }
 
-export function setupMemoryTab({doc, api, developer = () => false}) {
-  const state = {loaded: false, error: '', on: true, rows: [], documents: 0, model: '', retriever: 'auto', query: '', edit: null, draft: '', fault: '',
-    ask: null, forgetting: false, notice: '', busy: false, focus: false};
+export function setupMemoryTab({doc, api, developer = () => false, clock = Date.now}) {
+  const state = {loaded: false, error: '', on: true, rows: [], items: [], removed: [], documents: 0, model: '', retriever: 'auto', query: '', edit: null,
+    draft: '', fault: '', ask: null, forgetting: false, notice: '', busy: false, focus: false};
   let reads = 0;
   const {node, button} = maker(doc);
   const root = node('div', 'memory-tab');
@@ -67,9 +73,9 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
   async function load({quiet = false} = {}) {
     const mine = ++reads;
     try {
-      const page = await api('/memory/records');
+      const [page, written] = await Promise.all([api('/memory/records'), api('/memory/items')]);
       if (mine !== reads) return;
-      Object.assign(state, {rows: page.records ?? [], on: page.on !== false, documents: page.documents ?? 0,
+      Object.assign(state, {rows: page.records ?? [], items: written.items ?? [], on: page.on !== false, documents: page.documents ?? 0,
         model: page.embedding_model ?? '', retriever: page.retriever ?? 'auto', loaded: true, error: ''});
     } catch (error) {
       if (mine !== reads || quiet) return;
@@ -146,10 +152,54 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     item.append(actions);
     return item;
   }
+  /** What melo wrote from a chat: its title and text as text, whose chat it is, and what the person can act on. */
+  function itemNode(row) {
+    const item = node('li', 'memory-note memory-item');
+    item.dataset.item = String(row.id);
+    if (row.title) item.append(node('p', 'memory-item-title', row.title));
+    item.append(node('p', 'memory-text', row.text));
+    const meta = node('p', 'memory-meta');
+    meta.append(node('span', 'memory-topic memory-by', t('memoryTab.item.by')));
+    if (developer() && ITEM_KINDS.includes(row.kind)) meta.append(node('span', 'memory-topic', t(`memoryTab.item.kind.${row.kind}`)));
+    const from = capital(row.from);
+    if (row.link && !row.chat_gone) {
+      const chat = node('a', 'memory-from', from);
+      chat.href = row.link;
+      meta.append(chat);
+    } else meta.append(node('span', row.chat_gone ? 'memory-from gone' : 'memory-from', from));
+    // A disagreement is the one status a person can settle (delete the wrong item); a replaced item is history.
+    if (row.status === 'conflict') meta.append(node('span', 'memory-status', t('memoryTab.item.conflict')));
+    if (row.status === 'replaced') meta.append(node('span', 'memory-status', t(row.replaced_by ? 'memoryTab.item.replaced' : 'memoryTab.item.replacedGone')));
+    item.append(meta);
+    const actions = node('div', 'memory-actions');
+    actions.append(button('quiet-button', t('memoryTab.delete'), () => removeItem(row), {label: t('memoryTab.deleteNote', {note: row.title || row.text})}));
+    item.append(actions);
+    return item;
+  }
+  /** The place of an item just deleted: what went, and Undo while the server can still put it back. */
+  function goneNode(gone) {
+    const item = node('li', 'memory-note memory-gone');
+    item.dataset.item = String(gone.row.id);
+    const line = node('p', 'memory-gone-line');
+    line.append(node('span', 'memory-gone-text', t('memoryTab.item.deleted', {item: gone.row.title || gone.row.text})),
+      button('quiet-button', t('memory.undo'), () => putBack(gone)));
+    item.append(line);
+    return item;
+  }
+  /** The notes and the items worth showing in one list, newest first; with no items it is the notes as sent. */
+  function listed() {
+    state.removed = state.removed.filter((gone) => clock() - gone.at < gone.window);
+    const items = state.items.filter((row) => row.status !== 'replaced' || developer());
+    if (!items.length && !state.removed.length) return state.rows.map((row) => ({draw: noteNode, row}));
+    return [...state.rows.map((row) => ({draw: noteNode, row, at: row.created_at})),
+      ...items.map((row) => ({draw: itemNode, row, at: row.created_at})),
+      ...state.removed.map((gone) => ({draw: goneNode, row: gone, at: gone.row.created_at, always: true}))].sort((a, b) => b.at - a.at);
+  }
   function drawList() {
     if (!state.loaded) { list.replaceChildren(node('p', 'panel-note', state.error || t('memoryTab.reading'))); return; }
-    const shown = state.rows.filter((row) => matches(row, state.query));
-    if (!state.rows.length) {
+    const entries = listed();
+    const shown = entries.filter((entry) => entry.always || matches(entry.row, state.query));
+    if (!entries.length) {
       const empty = node('div', 'memory-empty');
       empty.append(node('p', 'memory-empty-title', t('memoryTab.empty')), node('p', 'panel-note', t('memoryTab.how')));
       list.replaceChildren(empty);
@@ -157,7 +207,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     }
     if (!shown.length) { list.replaceChildren(node('p', 'panel-note', t('memoryTab.noMatch', {query: state.query.trim()}))); return; }
     const notes = node('ul', 'memory-notes-list');
-    notes.append(...shown.map(noteNode));
+    notes.append(...shown.map((entry) => entry.draw(entry.row)));
     list.replaceChildren(notes);
     if (state.focus) { state.focus = false; list.querySelector?.('textarea')?.focus?.(); }
   }
@@ -166,13 +216,13 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     if (state.notice) nodes.push(node('p', 'memory-fault', state.notice));
     if (state.forgetting) {
       const box = node('div', 'memory-forget');
-      box.append(node('strong', '', t('memoryTab.forgetAllAsk')), node('p', '', forgetLine(state.rows.length, state.documents)));
+      box.append(node('strong', '', t('memoryTab.forgetAllAsk')), node('p', '', forgetLine(state.rows.length, state.documents, state.items.length)));
       const actions = node('div', 'memory-actions');
       actions.append(button('outline-button', t('memoryTab.keepAll'), () => { state.forgetting = false; draw(); }),
         button('outline-button danger', t('memoryTab.forgetAll'), forgetAll));
       box.append(actions);
       nodes.push(box);
-    } else if (state.rows.length || state.documents) {
+    } else if (state.rows.length || state.items.length || state.documents) {
       const links = node('div', 'panel-foot');
       links.append(button('link-button danger', t('memoryTab.forgetAllLink'), () => { state.forgetting = true; draw(); }));
       if (developer()) links.append(button('link-button', t('memoryTab.reindex'), reindex));
@@ -186,7 +236,7 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     drawFoot();
     importing.root.hidden = !state.loaded || !state.on;
     if (!importing.root.hidden) importing.draw();
-    searchBox.hidden = !state.rows.length;
+    searchBox.hidden = !state.rows.length && !state.items.length;
   }
 
   async function save(row) {
@@ -202,10 +252,26 @@ export function setupMemoryTab({doc, api, developer = () => false}) {
     state.ask = null;
     draw();
   }
+  async function removeItem(row) {
+    const done = await call(`/memory/items/${encodeURIComponent(row.id)}`, {method: 'DELETE'}, t('memoryTab.item.deleteFailed'));
+    if (done) {
+      state.items = state.items.filter((item) => item.id !== row.id);
+      state.removed.push({row, at: clock(), window: (Number(done.undo_seconds) || 0) * 1000});
+    }
+    draw();
+  }
+  async function putBack(gone) {
+    const done = await call(`/memory/items/${encodeURIComponent(gone.row.id)}/restore`, {method: 'POST', body: {}}, t('memoryTab.item.undoFailed'));
+    if (done !== null) {
+      state.removed = state.removed.filter((other) => other !== gone);
+      await load({quiet: true});
+    }
+    draw();
+  }
   async function forgetAll() {
     const done = await call('/memory/records?all=true', {method: 'DELETE'}, t('memoryTab.forgetAllFailed'));
     if (done) {
-      Object.assign(state, {rows: [], documents: 0, forgetting: false, edit: null, ask: null, query: '', notice: ''});
+      Object.assign(state, {rows: [], items: [], removed: [], documents: 0, forgetting: false, edit: null, ask: null, query: '', notice: ''});
       search.value = '';
     }
     draw();

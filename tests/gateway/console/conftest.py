@@ -330,7 +330,7 @@ def core_event(
         },
         "run.finished": {"result": run_result()},
     }
-    payload = dict(defaults[type_])
+    payload = dict(defaults.get(type_, {}))
     payload.update(data)
     # A key the agent may leave out (run.finished's reviews, #339) may be absent.
     assert set(payload) <= EVENT_FIELDS[type_]

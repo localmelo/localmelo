@@ -1188,6 +1188,7 @@ dialog.picture-box {
 .starters button { padding: 6px var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink-2); font-size: var(--text-small); }
 .starters button:hover { background: var(--soft); }
 .send-button {
+  flex: none;
   width: 32px;
   height: 32px;
   background: var(--primary);
@@ -1198,11 +1199,13 @@ dialog.picture-box {
   line-height: 1;
 }
 .stop-button {
+  flex: none;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--soft);
   padding: 6px 10px;
   font-size: var(--text-caption);
+  white-space: nowrap;
 }
 .stop-button span {
   margin-left: 4px;
@@ -1217,6 +1220,10 @@ dialog.picture-box {
   gap: 12px;
 }
 #run-status {
+  /* Gives way first in a narrow composer, whole: the state is on the chip and the row too. */
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--text-caption);
   color: var(--muted);
   white-space: nowrap;
@@ -2283,6 +2290,14 @@ dialog::backdrop {
 .memory-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--space-2); margin: var(--space-1) 0 0; color: var(--ink-3); font-size: var(--text-caption); }
 .memory-topic { padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-2); font-weight: 600; }
 .memory-from.gone { font-style: italic; }
+.memory-item-title { margin: 0 0 2px; color: var(--ink-2); font-size: var(--text-small); font-weight: 600; overflow-wrap: anywhere; text-wrap: pretty; }
+.memory-by { padding: 0 7px; border: 1px dashed var(--control); background: none; font-weight: 500; }
+a.memory-from { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.memory-status { color: var(--ink-2); font-weight: 600; }
+.memory-note.memory-gone { padding: var(--space-2) 2px; }
+.memory-gone-line { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: 0; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); border-radius: var(--radius-control); background: var(--raised); color: var(--ink-2); font-size: var(--text-small); }
+.memory-gone-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-gone-line .quiet-button { flex: none; min-height: 28px; padding: 2px 10px; color: var(--accent); font-weight: 600; }
 .memory-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--space-2); margin-top: var(--space-1); }
 .memory-actions .quiet-button, .memory-actions .outline-button { min-height: 28px; padding: 2px 10px; }
 .memory-actions .quiet-button:first-child { padding-left: 0; }
@@ -2416,7 +2431,7 @@ dialog::backdrop {
   .panel-backdrop { position: fixed; inset: 0; z-index: 29; display: block; border: 0; background: var(--scrim); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-foot .link-button, .memory-search, .sched-head, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
+  .panel-chip, .activity-head, .activity-level, .task-back, .task-level, .panel .task-panel .task-actions button:not(.primary-button, .outline-button, .quiet-button), .activity-actions .outline-button, .approval-toggle, .approval-choices .outline-button, .memory-actions .quiet-button, .memory-actions .outline-button, .memory-gone-line .quiet-button, a.memory-from, .memory-foot .link-button, .memory-search, .sched-head, .sched-actions .quiet-button, .sched-actions .outline-button, .sched-input { min-height: 44px; }
 }
 /* Settings: the sections on the left, the chosen one on the right; on a phone the list, and the section as a sheet. */
 dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); max-height: none; padding: 0; overflow: hidden; }
@@ -2753,6 +2768,10 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .browser-panel[data-owner="you"] .bp-foot { background: var(--tint); border-top-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
 .browser-panel[data-owner="you"] .bp-status { color: var(--ink); font-weight: 600; }
 .browser-panel[data-owner="you"] .bp-status::before { background: var(--accent); animation: none; }
+/* In a real Chrome window the picture here is only a copy: a thin ring, and no pointer of its own. The button that
+   brings the window to the front (or moves a page with a form there) sits with Done at the end of the bar. */
+.browser-panel[data-place="window"] .bp-canvas { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--line)), var(--tab-shadow); cursor: default; }
+.bp-window { flex: none; margin-left: auto; padding: 5px 12px; font-size: var(--text-small); }
 /* The keys' box: invisible, over the point last clicked, so an input method's window opens where the person types. */
 .bp-keys { position: absolute; left: 0; top: 0; z-index: 1; width: 2px; height: 1.4em; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; opacity: 0; color: transparent; background: transparent; caret-color: transparent; font-size: var(--text-reading); pointer-events: none; }
 /* A box the page put up while the person has it: answered here, over the bottom of the picture. */
@@ -2772,13 +2791,23 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @media (min-width: 900px) and (max-width: 1179px) {
   .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr) clamp(300px, 36vw, 400px); }
 }
+/* The page in the app while the person has it (a form they began, or no window could open): the page takes the room,
+   and the chat narrows to a column beside it. */
+@media (min-width: 1180px) {
+  .app:has(> .browser-panel[data-place="app"]:not([hidden])) { grid-template-columns: 248px clamp(320px, 28vw, 420px) minmax(0, 1fr); }
+  .app:has(> .browser-panel[data-place="app"]:not([hidden])) > .panel { display: none; }
+}
+@media (min-width: 900px) and (max-width: 1179px) {
+  .app:has(> .browser-panel[data-place="app"]:not([hidden])) { grid-template-columns: 64px clamp(280px, 34vw, 360px) minmax(0, 1fr); }
+}
 @media (max-width: 899px) {
   .app:has(> .browser-panel:not([hidden])) { grid-template-columns: 64px minmax(0, 1fr); }
   .app:has(> .browser-panel:not([hidden])) > .panel { display: flex; }
   :root:not([data-view="live"]) .browser-panel { position: fixed; inset: auto 0 0; z-index: 28; height: min(60dvh, 520px); border: 0; border-top: 1px solid var(--line); border-top-left-radius: var(--radius-panel); border-top-right-radius: var(--radius-panel); box-shadow: var(--shadow-float); }
+  :root:not([data-view="live"]) .browser-panel[data-place="app"] { height: min(88dvh, 860px); }
 }
 @media (pointer: coarse), (max-width: 700px) {
-  .browser-chip, .bp-pop, .bp-hide, .bp-take, .bp-give, .bp-dialog-actions button { min-height: 44px; }
+  .browser-chip, .bp-pop, .bp-hide, .bp-take, .bp-give, .bp-window, .bp-dialog-actions button { min-height: 44px; }
   .bp-hide { min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {

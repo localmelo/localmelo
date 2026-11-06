@@ -6,7 +6,7 @@ const SUPPORTED_EVENTS = new Set([
   'assistant.message', 'tool.started', 'approval.requested', 'approval.resolved',
   'tool.finished', 'notice', 'reflection.started', 'reflection', 'run.progress',
   'run.finished', 'turn.finished', 'turn.undone', 'context_budget', 'note',
-  'inbox.accepted', 'memory', 'recall',
+  'inbox.accepted', 'memory', 'recall', 'run.paused', 'run.resumed',
 ]);
 
 /** Fold stored events once into a separate, non-streaming worker view. */
