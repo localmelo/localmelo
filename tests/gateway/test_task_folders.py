@@ -203,31 +203,52 @@ async def test_a_reminders_run_tells_the_reminder_and_has_no_browser(
 
 
 @pytest.mark.parametrize(
-    ("origin", "chat_started", "attended"),
-    [("user", True, True), ("user_rule", False, False)],
+    ("origin", "reason", "words", "browses", "own_words"),
+    [
+        # A chore saved from the person's request: the words are theirs, and its run
+        # may work through a picture check itself, with nobody at its side (#570).
+        ("user_rule", "Chore, every day at 9:00", "sign in to the shop", True, True),
+        # A reminder has no browser, so no check to work through.
+        ("user_rule", REMINDER_REASON, "Reminder: call", False, True),
+        # What no words of the person's stand behind never may.
+        ("agent", "", "", False, False),
+        ("channel", "", "", False, False),
+    ],
 )
-async def test_a_chores_run_has_nobody_at_its_side_for_a_picture_check(
-    setup: Setup, origin: str, chat_started: bool, attended: bool
+async def test_only_a_run_from_the_persons_words_may_solve_a_picture_check(
+    setup: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
+    reason: str,
+    words: str,
+    browses: bool,
+    own_words: bool,
 ) -> None:
-    workers, cfg, _, built, home = setup
+    """The handle the browser reads is the run's ``from_person``: a chore's stays true."""
+    workers, cfg, _, built, _ = setup
     cfg.browser.driver = "chrome"
-    (home / "localmelo-workspace" / "t").mkdir(parents=True)
+    seen: dict[str, Any] = {}
+
+    class Recording(FakeRunner):
+        async def start_turn(self, text: str, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            await super().start_turn(text, approval=kwargs["approval"])
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.SessionRunner", Recording)
 
     async def chat_of(front_id: str | None) -> str | None:
         return front_id
 
     workers.chat_of = chat_of
-    spec = TaskSpec.from_payload(
-        {"objective": "browse", "workspace": str(home / "localmelo-workspace" / "t")}
-    )
+    spec = TaskSpec.from_payload({"objective": "sign in", "title": "Sign in"})
     await workers.create_spec(
-        spec,
+        dataclasses.replace(spec, reason=reason, user_words=words),
         origin=origin,  # type: ignore[arg-type]
         front_id=workers.front_id,
-        chat_started=chat_started,
     )
-    await eventually(lambda: len(built) == 1)
-    assert built[0]["options"].attended is attended
+    await eventually(lambda: len(built) == 1 and "approval" in seen)
+    assert (built[0]["browser_driver"] == "chrome") is browses
+    assert seen.get("from_person", True) is own_words
 
 
 async def test_a_chore_with_browsing_off_is_told_so_as_any_task_is(

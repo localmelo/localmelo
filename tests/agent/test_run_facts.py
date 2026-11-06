@@ -77,34 +77,3 @@ async def test_a_run_states_who_started_it_and_whether_its_model_reads_pictures(
         from_person=from_person,
     )
     assert tool.facts == [expected]
-
-
-@pytest.mark.parametrize(("attended", "expected"), [(True, True), (False, False)])
-async def test_a_run_nobody_attends_is_not_one_the_person_started(
-    tmp_path: Path, attended: bool, expected: bool
-) -> None:
-    """A saved chore's query is the person's words, but nobody sent it as they sat there (#570).
-
-    The words still count for the rules that read them (``from_person`` of the
-    run); only the question handle's answer, which lets the browser work through a
-    picture check itself, says no.
-    """
-    tool = Asks()
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    agent = Agent(
-        llm=FakeModel([_calls(("facts", {}, "c1")), _answer("done")]),
-        options=AgentOptions(
-            builtins=frozenset(),
-            tool_exposure="all",
-            workspace_root=str(workspace),
-            tool_images="on",
-            attended=attended,
-        ),
-        tool_providers=[tool],
-    )
-    agent.chat.sleep = _no_wait
-    await agent.run_task(
-        "Check in", on_event=Recorder(), approval=AutoPolicy(), from_person=True
-    )
-    assert tool.facts == [(expected, True)]

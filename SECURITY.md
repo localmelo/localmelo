@@ -197,10 +197,17 @@ those tools can do.
   nobody at its side. Nothing is wider than a task you started: its steps ask
   in that chat's cards on every run, as before, use and record no earlier
   approval or chat grant, Auto blocks what it would ask, a post, send or
-  purchase is reviewed from your saved words as they stand, and melo never
-  works through a picture check for a chore (a run nobody attends leaves it to
-  you). Each chore keeps one work folder, `chore-<id>` inside the gateway
-  workspace, which every run shares and deleting the chore removes (a link
+  purchase is reviewed from your saved words as they stand. A chore saved
+  from your own request is a task you started, so its run works through a
+  picture check on a page itself, **with nobody at its side**, every time it
+  fires; so a daily run can solve a check while you are away. The limits of a
+  task you started hold: a model that reads pictures, a frame proved a check's
+  by what Chrome says (a page's words never turn it on), melo's own model only
+  and no outside service, 3 tries and then the take-over card, a step in the
+  record that says plainly what it pressed, and nothing that hides that a
+  program is pressing. A reminder has no browser at all. Each chore keeps
+  one work folder, `chore-<id>` inside the gateway workspace, which every run
+  shares and deleting the chore removes (a link
   there is unlinked, never followed); a run that has not ended makes the next
   slot skip and blocks Run now, so two runs never share that folder at once.
   What a run leaves in its folder, and a page it keeps open, stay until then.

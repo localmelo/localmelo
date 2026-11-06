@@ -2107,7 +2107,6 @@ class Agent(_RecallLoop, _NotesLoop):
                     self._reviewer,
                     refused,
                     lambda: self._images_on is True,
-                    self.options.attended,
                 )
             )
         try:

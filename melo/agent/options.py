@@ -248,12 +248,6 @@ class AgentOptions:
       the environment refused) starts with a line that names that cause (see
       :func:`~localmelo.melo.agent._task_aids.refusal_note`). Default false:
       nothing changes.
-    - ``attended``: whether a person is at the run's side. Default true. The
-      gateway sets it false for a saved chore's runs: the query is the
-      person's own saved words and counts as theirs wherever a rule reads
-      them, but nobody sent it as they sat there, so the run's question
-      handle says ``from_person()`` is false and the browser leaves a picture
-      check to the person (#570).
     - ``answer_on_stop``: when true, a run that ends ``gate_stopped`` or
       ``budget_exhausted`` with no answer makes one more request, without
       tools, for the final answer from the evidence gathered (the working
@@ -408,7 +402,6 @@ class AgentOptions:
     answer_on_stop: bool = True
     max_calls: int | None = None
     task_aids: bool = False
-    attended: bool = True
     refused_steps: int = 0
     extend_steps: int = 0
     max_extensions: int = MAX_EXTENSIONS
@@ -563,7 +556,6 @@ class AgentOptions:
             "answer_on_stop",
             "confine_writes",
             "task_aids",
-            "attended",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")

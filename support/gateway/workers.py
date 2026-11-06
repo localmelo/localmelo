@@ -363,9 +363,9 @@ def _remembers(origin: str) -> bool:
     """Whether a task of *origin* uses and records the person's approvals in its chat.
 
     Only a task the person started: not a chore (``user_rule``), which runs on a
-    rule the person set before with nobody at its side (it asks, and Auto
-    blocks, as it always did, browser or not), nor any task another agent, a
-    channel or melo itself started.
+    rule the person set before (it asks, and Auto blocks, as it always did,
+    browser or not), nor any task another agent, a channel or melo itself
+    started.
     """
     try:
         return origin == "user" and worker_tool_allowlist(origin).remember_approvals
@@ -2445,8 +2445,6 @@ class TaskWorkers:
                                 tool_env=tool_env,
                                 identity=guide,
                                 task_aids=True,
-                                # Nobody sits beside a saved chore's run (#570).
-                                attended=record.origin != "user_rule",
                                 max_extensions=(
                                     MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
                                 ),
