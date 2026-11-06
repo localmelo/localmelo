@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 from localmelo.support.memory import ChatMemory
-from localmelo.support.memory.index import MemoryItem
+from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     ITEM_LIST_GUIDE,
@@ -442,11 +442,10 @@ async def test_open_memory_says_why_an_id_opens_nothing(
         tools = MemoryTools(memory)
         assert await tools.open_memory(ids=[]) == OPEN_USAGE_ITEMS
         assert OPEN_USAGE_ITEMS == "Pass 1 to 5 ids from the list, such as m12 or t123."
-        # The chat is encoded, so its turn is no longer listed to open.
-        reply = await tools.open_memory(ids=["m99999", f"t{fill.doc}", "r1", "nope"])
+        reply = await tools.open_memory(ids=["m99999", "t99999", "r1", "nope"])
         assert reply.split("\n\n") == [
             f"m99999: {NO_SUCH_TURN}",
-            f"t{fill.doc}: {NO_SUCH_TURN}",
+            f"t99999: {NO_SUCH_TURN}",
             "r1: that is a note, which is shown in full already.",
             "nope: not an id from the list; ids look like m12 or t123.",
         ]
@@ -872,6 +871,28 @@ async def test_a_chat_with_no_mark_is_not_encoded_whatever_the_items_say(
         await memory.aclose()
 
 
+async def test_a_summary_stays_recalled_when_its_chat_has_a_mark(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    fill = await held(tmp_path, store, cfg)
+    memory = fill.memory
+    try:
+        await memory.side_summary(
+            fill.session_id, "Garden", "The tomato garden is staked with bamboo."
+        )
+        _, index = memory.stores()
+        assert await index.encoded_turn(fill.session_id) == 1
+        found = await ask(memory, store)
+        (summary,) = (i for i in found.used if i.is_turn)
+        # The summary (turn -1) is recalled beside the item; the encoded turn is not.
+        assert summary.turn == SUMMARY_TURN and summary.key != f"d:{fill.doc}"
+        assert {i.key for i in found.used} == {f"m:{fill.item}", summary.key}
+        assert f"d:{fill.doc}" not in memory._corpus.items
+    finally:
+        await memory.aclose()
+
+
 async def test_open_memory_opens_an_item_and_a_turn_in_one_call(
     tmp_path: Path, store: SessionStore
 ) -> None:
@@ -887,7 +908,9 @@ async def test_open_memory_opens_an_item_and_a_turn_in_one_call(
         assert item == f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}"
         assert turn.startswith(f"[t{fill.later}] {when} · chat “Garden”\n")
         assert LATER[0] in turn and LATER[1] in turn
-        assert encoded == f"t{fill.doc}: {NO_SUCH_TURN}"
+        # An encoded turn is no longer listed, but the index has it, so it opens.
+        assert encoded.startswith(f"[t{fill.doc}] {when} · chat “Garden”\n")
+        assert TURN[0] in encoded and TURN[1] in encoded
         # Without the items source a turn id still opens a turn and an item id does not.
         cfg.memory.recall_source = "turns"
         again = await MemoryTools(memory).open_memory(

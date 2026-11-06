@@ -1401,6 +1401,8 @@ class ChatMemory:
         """The whole chat turn that index document *doc_id* belongs to, or the line
         that says why it is not opened.
 
+        The turn is read from the index, not the corpus: an encoded turn, which recall
+        no longer lists, opens too (a mark may move past a turn the model was shown).
         The rules are the block's: only a turn of the memory index opens (never a
         note, which is shown whole already), a turn a chat's user deleted is gone,
         a turn the chat *exclude_session* still shows (from *keep_from_turn*, as
@@ -1410,19 +1412,12 @@ class ChatMemory:
         """
         async with self._lock:
             corpus = await self._sync()
-            item = corpus.items.get(f"d:{doc_id}")
-            if item is None:
+            index = self.stores()[1]
+            heads = await index.fetch([doc_id])
+            if not heads:
                 return NO_SUCH_TURN
-            chunks = sorted(
-                (
-                    other
-                    for other in corpus.items.values()
-                    if not other.is_record
-                    and other.session_id == item.session_id
-                    and other.turn == item.turn
-                ),
-                key=lambda other: other.chunk,
-            )
+            item = _doc_item(heads[0])
+            chunks = await index.turn_documents([(item.session_id, item.turn)])
             replaced = self._replaced(corpus)
         if in_view(item, exclude_session, keep_from_turn):
             return IN_THIS_CHAT

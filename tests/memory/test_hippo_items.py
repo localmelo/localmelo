@@ -291,7 +291,8 @@ async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
 async def test_a_mark_moves_forward_and_leaves_the_turns_past_it_unencoded(
     index: ConversationIndex,
 ) -> None:
-    for session, turns in (("s1", (1, 2, 3)), ("s2", (1, 2))):
+    # A summary sits at a turn below 1: no encoder reads it, so no mark covers it.
+    for session, turns in (("s1", (1, 2, 3, -1)), ("s2", (1, 2))):
         for turn in turns:
             await add_turn(index, session, turn)
 
@@ -300,13 +301,13 @@ async def test_a_mark_moves_forward_and_leaves_the_turns_past_it_unencoded(
         return {(doc.session_id, doc.turn) for doc in docs}
 
     assert await index.encoded_turn("s1") is None
-    assert len(await unencoded()) == 5  # no mark: nothing is encoded
+    assert len(await unencoded()) == 6  # no mark: nothing is encoded
     await index.mark_encoded("s1", 2)
-    assert await unencoded() == {("s1", 3), ("s2", 1), ("s2", 2)}
+    assert await unencoded() == {("s1", 3), ("s1", -1), ("s2", 1), ("s2", 2)}
     await index.mark_encoded("s1", 1)  # a mark never moves back
     assert await index.encoded_turn("s1") == 2
     await index.mark_encoded("s1", 3)
-    assert await unencoded() == {("s2", 1), ("s2", 2)}
+    assert await unencoded() == {("s1", -1), ("s2", 1), ("s2", 2)}
 
 
 async def test_forgetting_clears_the_marks_but_one_turn_and_a_rebuild_do_not(

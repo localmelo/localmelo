@@ -17,7 +17,8 @@ each names the turns it came from, and deleting a chat deletes the items that ca
 from it alone and takes its turns out of the sources of the rest. Its ``encoded``
 table holds, per chat, the last turn a chat model encoded into items
 (:meth:`mark_encoded`); recall reads the turns past it too (:meth:`ids`), and a chat
-with no mark counts as not encoded.
+with no mark counts as not encoded; a summary or an exchange (a turn below 1) is never
+encoded and is always read.
 """
 
 from __future__ import annotations
@@ -543,13 +544,16 @@ class ConversationIndex:
 
     async def ids(self, *, unencoded: bool = False) -> set[int]:
         """The id of every document; with *unencoded*, only those of turns past
-        their chat's mark (:meth:`mark_encoded`), every one of a chat with no mark."""
+        their chat's mark (:meth:`mark_encoded`), every one of a chat with no mark.
+        A document at a turn below 1 (a side chat's summary, a task's exchange) is
+        never encoded, so it always stays."""
         conn = await self._ready()
         query = "SELECT id FROM documents"
         if unencoded:
             query += (
                 " LEFT JOIN encoded ON encoded.session_id = documents.session_id"
-                " WHERE encoded.turn IS NULL OR documents.turn > encoded.turn"
+                " WHERE encoded.turn IS NULL OR documents.turn <= 0"
+                " OR documents.turn > encoded.turn"
             )
         async with conn.execute(query) as cur:
             return {int(row[0]) for row in await cur.fetchall()}
