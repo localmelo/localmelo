@@ -215,10 +215,10 @@ def test_two_fits_do_not_repreview_or_recount() -> None:
     second, counts = fit(
         first, estimate(first, None) + 100, threshold=estimate(first, None)
     )
-    assert "4744 characters omitted" in second[2].content
-    assert (
-        counts["tool_results"] == 1 and "4744 characters omitted" in second[4].content
-    )
+    # The preview is not made or counted again: the older unit goes whole, and
+    # the newest result stays in full.
+    assert counts == {"tool_results": 0, "thinking": 0, "units": 1}
+    assert [m.content for m in second] == ["task", "", "y" * 5000]
 
 
 def test_preview_keeps_exit_code_across_boundary() -> None:
@@ -357,6 +357,22 @@ def test_the_latest_failing_check_goes_when_the_newest_call_needs_the_room() -> 
     assert chars(result, None) <= 20_000
     assert [m.content for m in result][:2] == ["s" * 400, "t" * 3_900]
     assert result[-2].tool_calls == [write]
+
+
+def test_older_units_go_before_the_newest_result_is_cut() -> None:
+    # An older call whose arguments no preview can shorten, then the newest result.
+    write = ToolCall("file_write", {"path": "game.py", "content": "c" * 12_000}, id="w")
+    newest = "n" * 9_000
+    messages = [
+        Message("system", "s" * 400),
+        Message("user", "t" * 1_000),
+        Message("assistant", tool_calls=[write]),
+        Message("tool", "Wrote 12000 characters", tool_call_id="w"),
+        *pair(1, newest),
+    ]
+    result, _ = cap_fit(messages)
+    assert result[-1].content == newest
+    assert all(write not in m.tool_calls for m in result)
 
 
 async def test_the_answer_on_stop_is_sent_over_the_prompt_cap() -> None:

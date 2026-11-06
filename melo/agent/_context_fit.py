@@ -139,14 +139,15 @@ def fit_request(
 
     Counts are ``tool_results``, ``thinking`` and ``units``. A retry must
     additionally estimate strictly below ``force_smaller_than``. Once the fit
-    must act, it shortens (old results to previews, old thinking, old recall)
+    must act, it shortens (older results to previews, old thinking, old recall)
     and then drops whole units, oldest first, down to *drop_target* of
     *limit*, so the next requests fit as they are. The drops go in three
     levels, each only when the one before cannot reach the target: plain old
     turns; then images and failure evidence too, but the latest failing
     check; then any unit but the system prompt, the task's own message, the
     newest reflections block and the last unit, so the floor is those alone.
-    Only when they do not fit does the fit fail.
+    The newest result becomes a preview only when that floor is over *limit*,
+    as the last step before the fit fails.
 
     *history* names, by identity, messages of *messages* from the turns
     before the current task (a chat's earlier tasks): a unit made only of
@@ -272,10 +273,11 @@ def fit_request(
 
     def steps() -> list[tuple[str, list[Message], Message]]:
         """The shortening steps in order: previews, then thinking, then recall."""
+        # The newest result is previewed last of all (see below).
         found = [
             ("preview", unit, m)
             for unit in units
-            if _complete_tool_unit(unit)
+            if _complete_tool_unit(unit) and unit is not newest
             for m in unit
             if m.role == "tool"
         ]
@@ -362,6 +364,14 @@ def fit_request(
                 hold.level = fitting[3]
             hold.shortened = done
         return fitting[0], fitting[1]
+
+    # The last step before a refusal: the newest result becomes a preview.
+    if newest is not None and any(unit is newest for unit in units):
+        for message in newest:
+            if message.role == "tool":
+                shorten("preview", newest, message)
+        if fits():
+            return finish()
 
     raise ContextFitError(
         "Request cannot fit without removing pinned context; increase the input "
