@@ -56,6 +56,7 @@ OK = answer("It is on its way.")
         "帮我投简历",
         "sign in to example.com",
         "order me a pizza",
+        "book the table for tonight and just tell me the time",
         # A polite opening with no listed verb, long or short.
         "please buy the blue one from the list on example.com and pay with the card I "
         "keep there, then send me nothing more than the order number when it is done",
@@ -87,14 +88,12 @@ async def test_the_models_call_on_a_persons_turn_starts_the_task(
     "typed",
     [
         "",
-        "只解释一下这个错误",
         "don't change anything, only tell me what is wrong",
         "不用开任务，看一下我的简历然后告诉我适合什么工作",
         "don't do anything yet",
-        "先别动手",
+        "先别动手，只解释一下这个错误",
         # A word that looks like a verb in what it is about changes nothing.
-        "the fix report: just explain it",
-        "the deploy notes, only tell me what they say",
+        "the fix report: don't start a task, just explain it",
     ],
 )
 def test_words_that_plainly_say_not_to_act_are_offered(typed: str) -> None:
@@ -110,6 +109,10 @@ def test_words_that_plainly_say_not_to_act_are_offered(typed: str) -> None:
         "帮我订机票，别改其他东西",
         "book the hotel, don't touch anything else",
         "don't do it before noon, book it at one",
+        # A limit on what comes back is no word against the work.
+        "do it and just tell me the result",
+        "book the table and only tell me the time",
+        "订好机票，只告诉我结果就行",
         # A question and work in one message: the model read them both.
         "到底好了没，好了就去订票",
         "is it done, and book the table for tonight",
@@ -266,7 +269,8 @@ async def test_words_that_say_not_to_act_start_no_worker_through_a_finished_one(
     ) as (console, client, _, _):
         old = ids["task"] = await task_of(client, console, "write the vendors list")
         await _finished(console, old, REPORT)
-        await say(client, console, "only tell me what the vendors list says")
+        typed = "don't start a task, only tell me what the vendors list says"
+        await say(client, console, typed)
         assert await others(console, old) == []
         assert await state(console, old) == "done"
 
