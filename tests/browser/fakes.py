@@ -195,8 +195,10 @@ class FakeDriver:
         self.tabs_[self.current].append(landed)
         return self._info(self.current)
 
-    async def page(self, tab: str | None) -> RawPage:
+    async def page(self, tab: str | None, whole: bool = False) -> RawPage:
         self.calls.append(("page", tab or ""))
+        if whole:
+            self.calls.append(("whole", tab or ""))
         here = tab or self.current or ""
         raw = self.pages[self._url(tab)]
         return dataclasses.replace(raw, doc=self.docs.get(here, raw.doc))

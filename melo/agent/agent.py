@@ -1233,7 +1233,10 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         self.checker = Checker(mode=self.options.mode, builtins=self.options.builtins)
         self.executor = Executor(
-            self.hippo, self.checker, workspace_root=workspace_root
+            self.hippo,
+            self.checker,
+            workspace_root=workspace_root,
+            read_roots=self.options.read_folders,
         )
         # R5's retriever plan, resolved once: the effective trigger map, the
         # data note and (after Chat) the lazily built retrievers.

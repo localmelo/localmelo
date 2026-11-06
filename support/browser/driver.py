@@ -239,14 +239,17 @@ class Download:
 
     ``name`` is the name the page suggested (the page's own words: shown
     cleaned and never used as the saved name), ``size`` the bytes received,
-    ``state`` ``done``, ``failed`` or ``too big`` (stopped at the limit) and
-    ``folder`` the folder melo saves downloads in.
+    ``state`` ``done``, ``failed`` or ``too big`` (stopped at the limit),
+    ``folder`` the folder the browser saved it in and ``file`` the name it has
+    there (an id, never the page's). The chat that owns the page moves it into
+    its own work folder (:mod:`localmelo.melo.contracts.work_folder`).
     """
 
     name: str
     size: int
     state: str
     folder: str = ""
+    file: str = ""
 
 
 @dataclass(frozen=True)
@@ -378,7 +381,8 @@ class BrowserDriver(Protocol):
     async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         """Load *url* in a new tab, or in *tab* (the current one when None); return where it landed."""
 
-    async def page(self, tab: str | None) -> RawPage: ...
+    async def page(self, tab: str | None, whole: bool = False) -> RawPage:
+        """The page of *tab* as a reading lists it. With *whole* (``browser_find``) every element of the page is listed, not only the first few hundred."""
 
     async def back(self, tab: str | None) -> TabInfo: ...
 

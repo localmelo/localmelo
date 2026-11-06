@@ -20,6 +20,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import EXTEND_STEPS
@@ -327,6 +328,7 @@ async def build_session_agent(
     memory: ChatMemory | None = None,
     tools: Sequence[BaseToolProvider] = (),
     agent_class: type[Agent] | None = None,
+    chat_id: str | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -372,6 +374,11 @@ async def build_session_agent(
     tools), and *agent_class* the class it is made of (the main chat's
     :class:`~localmelo.support.gateway.console.front.FrontAgent`); every other
     caller passes neither.
+
+    *chat_id* is the chat this Agent is for: its browser keeps the files its
+    pages hand over in the chat's work folder, which the Agent may read (see
+    :mod:`localmelo.melo.contracts.work_folder`). Without one the folder is
+    this run's own and goes when the run ends.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace
@@ -402,9 +409,17 @@ async def build_session_agent(
             app_windows=cfg is None or cfg.browser.app_windows is True,
             live=cfg is None or cfg.browser.live is True,
             live_fps=cfg.browser.live_fps if cfg is not None else 15,
+            chat_id=chat_id,
         )
         if browser is not None:
             providers.append(browser)
+            agent_options = dataclasses.replace(
+                agent_options,
+                read_folders=(
+                    *agent_options.read_folders,
+                    work_folder.path_for(browser.work_id),
+                ),
+            )
     if web_fetch:
         from localmelo.support import web_local
         from localmelo.support.web import WebFetchProvider

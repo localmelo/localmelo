@@ -278,6 +278,32 @@ async def test_find_reads_the_page_again_and_searches_it() -> None:
     assert "0 of 2" in (await run(tools, "browser_find", query="zzz")).text
 
 
+async def test_find_searches_the_whole_page_and_says_how_many_it_cannot_show() -> None:
+    """A search lists every element (a reading lists the first few hundred) and counts the matches it hides."""
+    many = [link(f"Job {n}", f"{HOME}job/{n}") for n in range(30)]
+    driver = FakeDriver(page(HOME, "Jobs.", *many))
+    tools = await tools_of(driver)
+    await run(tools, "browser_open", url=HOME)
+    assert ("whole", "t1") not in driver.calls, "a reading lists the usual"
+    out = await run(tools, "browser_find", query="job")
+    assert ("whole", "t1") in driver.calls
+    assert '30 of 30 elements match "job"; the first 20 are shown' in out.text
+    assert out.text.count("[e") == 20
+    few = await run(tools, "browser_find", query="job/29")
+    assert '1 of 30 elements match "job/29":' in few.text and "shown" not in few.text
+
+
+def test_the_script_of_a_search_lists_far_more_than_the_script_of_a_reading() -> None:
+    from localmelo.support.browser import pagescript as ps
+
+    assert ps.PAGE_JS == ps.page_script()
+    assert f"i < {ps.READ_NODES};" in ps.PAGE_JS
+    assert f"length >= {ps.READ_ELEMENTS})" in ps.PAGE_JS
+    whole = ps.page_script(whole=True)
+    assert f"i < {ps.FIND_NODES};" in whole and f"length >= {ps.FIND_ELEMENTS})" in whole
+    assert "__" not in whole.replace("__proto__", "")
+
+
 async def test_find_after_a_reload_gives_refs_of_the_page_as_it_is_now() -> None:
     """A page reloaded since it was read: find never serves the old reading's refs."""
     driver = world()
@@ -409,8 +435,8 @@ async def test_the_boxes_note_reads_no_page_nobody_admitted() -> None:
     elsewhere = dataclasses.replace(driver.pages[HOME], url=OTHER)
     original = driver.page
 
-    async def other_page(tab: str | None) -> Any:
-        await original(tab)
+    async def other_page(tab: str | None, whole: bool = False) -> Any:
+        await original(tab, whole)
         return elsewhere
 
     driver.page = other_page  # type: ignore[method-assign]

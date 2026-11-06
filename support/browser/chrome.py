@@ -18,8 +18,9 @@ next and across restarts, those whose cookie lasts only for the session too:
 such cookies are on disk in the profile while melo is not running. Chrome
 offers to save no password, address or card there. The pages Chrome brings back
 with the session go at once on a fresh start. A page's download is saved in
-melo's own downloads folder (:func:`downloads_folder`), never opened or run,
-and the next step says so.
+melo's own downloads folder (:func:`downloads_folder`), never opened or run;
+the chat whose page made it moves it into the chat's work folder, and the next
+step says where it is.
 
 **A window for the person.** To take a page over the person needs a real
 window, and a Chrome without one cannot show one. :meth:`ChromeBackgroundDriver.show_window`
@@ -340,7 +341,10 @@ MAX_DOWNLOADS = 50
 
 
 def downloads_folder(profile: str) -> str:
-    """Where a page's downloads are saved: ``downloads`` next to the profile, private like it."""
+    """Where Chrome saves a page's downloads first: ``downloads`` next to the profile, private like it.
+
+    It is a landing place only: each chat moves its own files out to its work folder.
+    """
     return os.path.join(os.path.dirname(profile.rstrip("/")), "downloads")
 
 
@@ -1826,6 +1830,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                     int(entry["size"]),
                     state,
                     downloads_folder(browser.profile),
+                    guid,
                 )
             )
         return found

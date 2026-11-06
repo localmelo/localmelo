@@ -329,6 +329,11 @@ class AgentOptions:
       of the two happened, and each comes with a ``notice`` event
       (``thinking_off_retry``, ``answer_from_thinking``). ``"off"``: neither;
       the run ends ``failed`` as it did before the fallback existed.
+    - ``read_folders``: folders outside the workspace that the read tools
+      (``file_read``, ``list_files``) may read without a question: the agent's
+      own, such as a chat's work folder (:mod:`~localmelo.melo.contracts.work_folder`).
+      A place never offered stays refused, and what ``file_read`` returns from
+      there is marked as a web page's text. Default empty.
     """
 
     context_window: int | None = None
@@ -385,6 +390,7 @@ class AgentOptions:
     refused_steps: int = 0
     extend_steps: int = 0
     empty_reply_fallback: EmptyReplyFallback = "on"
+    read_folders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if (

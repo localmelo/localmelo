@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support import config, settings
 from localmelo.support.cli.agents import AgentFactory, url_backend
@@ -93,6 +95,33 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             options=AgentOptions(),
             browser_driver="firefox",
         )
+
+
+async def test_a_session_with_a_browser_reads_its_chats_work_folder_and_no_other() -> (
+    None
+):
+    cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+    cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
+    roots = {}
+    for driver, chat_id in (("off", "abc123"), ("chrome", "abc123"), ("chrome", None)):
+        agent = await session_agents.build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=None,
+            workspace=str(Path.cwd()),
+            options=AgentOptions(mode="interactive"),
+            browser_driver=driver,
+            chat_id=chat_id,
+        )
+        try:
+            roots[driver, chat_id] = agent.executor._read_roots
+        finally:
+            await agent.close()
+    assert roots["off", "abc123"] == ()
+    assert roots["chrome", "abc123"] == (work_folder.path_for("abc123"),)
+    [own] = roots["chrome", None]
+    assert os.path.basename(own).startswith("run-"), "a run with no chat has its own"
+    assert not os.path.exists(own), "and leaves nothing when it ends"
 
 
 async def test_the_terminal_and_the_console_pass_the_configured_driver(

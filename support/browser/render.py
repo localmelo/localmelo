@@ -358,9 +358,10 @@ def find_elements(
 
 def render_find(snap: Snapshot, query: str, role: str = "any") -> str:
     found, total = find_elements(snap, query, role)
-    lines = [
-        f'{total} of {len(snap.elements)} elements match "{field_text(query, 60)}":'
-    ]
+    said = f'{total} of {len(snap.elements)} elements match "{field_text(query, 60)}"'
+    if total > len(found):
+        said += f"; the first {len(found)} are shown, so narrow the words for the rest"
+    lines = [said + ":"]
     lines.extend(element_line(ref, item, snap.origin) for ref, item in found)
     if snap.skipped:
         lines.append(
