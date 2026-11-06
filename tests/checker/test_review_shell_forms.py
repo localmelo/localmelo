@@ -346,23 +346,29 @@ def test_a_program_word_melo_cannot_name_is_no_milder_than_an_unnamed_one(
     any place where it is the program; in a shell's own place and in a process
     call behind a wrapper too."""
     unnamed = SEVERITY[sh(ws, place.format("$A b")).verdict]
-    for word in ("$A", "`a`", "A=1", "A[1=2", "A[$B", "A[", "x/y=z"):
+    for word in ("$A", "`a`", "A=1", "A[1=2", "A[$B", "A[", "A[B[1]", "x/y=z"):
         assert SEVERITY[sh(ws, place.format(f"{word} b")).verdict] >= unnamed, word
 
 
-@pytest.mark.parametrize("word", ["$A", "`a`", "A[1=2", "A[$B", "A[", "x/y=z"])
+@pytest.mark.parametrize(
+    "word", ["$A", "`a`", "A[1=2", "A[$B", "A[", "A[B[1]", "A[[B[1]]", "x/y=z"]
+)
 def test_a_shell_or_a_process_call_gives_such_a_word_the_doubt(
     ws: Path, word: str
 ) -> None:
     assert sh(ws, f"{word} b").verdict != "routine"
+    assert sh(ws, f"if {word} b; then c; fi").verdict != "routine"
     call = f"import subprocess\nsubprocess.run({['nohup', word, 'b']!r})"
     assert py(ws, call).verdict != "routine"
 
 
-def test_an_element_cut_at_a_space_keeps_what_follows_it_asked_about(ws: Path) -> None:
+@pytest.mark.parametrize("element", ["A[1 + 2]=3", "A[B[1] + 2]=3"])
+def test_an_element_cut_at_a_space_keeps_what_follows_it_asked_about(
+    ws: Path, element: str
+) -> None:
     """A shell runs the program after an array element whose subscript holds a
     space; melo does not read past it, and asks."""
-    found = sh(ws, "A[1 + 2]=3 rm -rf ~/x")
+    found = sh(ws, f"{element} rm -rf ~/x")
     assert found.verdict != "routine"
 
 
@@ -392,8 +398,8 @@ def test_a_shared_record_reads_what_a_fresh_one_reads(
 
 
 def test_find_exec_past_the_depth_is_a_doubt(ws: Path) -> None:
-    """Each wrapper after ``-exec`` is read again, and that stops at the depth limit
-    of the other re-reads; the words as they stand are still reviewed."""
+    """The words after ``-exec`` are read again, as they stand and past a wrapper,
+    and that stops at the depth limit of the other re-reads."""
     command = "find . -exec nice " * 8 + "rm -rf ~/x ';'" + " ';'" * 7
     found = sh(ws, command)
     assert shell.UNREAD in (*found.reasons, *found.doubts)
@@ -431,6 +437,7 @@ def test_find_exec_reads_the_wrapper_in_front_of_its_command(
         "-- -a/busybox -a/nice ",
         "-- -a/npx -a/nice ",
         "find find . -exec env -Z ",
+        "find . -exec find . -ok find . -execdir ",
         "watch -Z a -Z b c; ",
     ],
 )
@@ -444,10 +451,10 @@ def test_options_melo_cannot_read_cost_time_in_proportion(ws: Path, unit: str) -
     add a reading at each step (the two of ``time A=1``, an unlisted ``--``)
     or a line for a shell (``watch``, read again past ``busybox``). The next
     four are words that are both options and places to read from: each is
-    read once for each program, however many places reach it. The last two
-    are read again by ``find -exec`` behind a wrapper with two readings, and
-    as many short commands with several lines each, within one room for the
-    whole review. 12 000
+    read once for each program, however many places reach it. The last three
+    are read again by ``find -exec`` behind a wrapper with two readings, by a
+    ``find`` in each of the flags of a ``find``, and as many short commands
+    with several lines each, within one room for the whole review. 12 000
     and 48 000 characters for the time, 3 000 and 12 000 for the memory
     (measured exactly): enough that a cost growing with the square of the
     text takes 16 times as much, past the bound of 8.

@@ -822,10 +822,9 @@ def _backticks(text: str) -> tuple[list[str], bool]:
 
 
 _NAME = re.compile(r"[A-Za-z_]\w*")
-# A program word melo cannot name: one filled in when the step runs, one with
-# ``=`` (a program only because a wrapper's manual says so), or one that opens
-# a subscript (an array element cut at a space: a shell runs what follows it).
-_UNNAMED = re.compile(r"[$`=]|^[A-Za-z_]\w*\[[^\]]*\Z")
+# A program word filled in when the step runs, or one with ``=`` (a program only
+# because a wrapper's manual says so): see ``_unnamed``.
+_UNNAMED = re.compile(r"[$`=]")
 _DECLARERS = frozenset(
     ["export", "local", "declare", "typeset", "readonly", "builtin", "command"]
 )
@@ -1380,14 +1379,23 @@ def _unwrap(
     return programs
 
 
-def _past_exec(ctx: Context, f: Findings, words: list[str]) -> list[list[str]]:
-    """What the words after ``find -exec`` run past a wrapper. They are read again
-    as a line is: within ``MAX_DEPTH`` and ``Findings.room``, past them a doubt."""
+def _reads_again(ctx: Context, f: Findings, words: list[str]) -> bool:
+    """Whether the words after ``find -exec`` are read: as a line is, within
+    ``MAX_DEPTH`` and ``Findings.room``, past them a doubt."""
     if ctx.depth >= MAX_DEPTH or f.room <= 0:
         f.doubt(UNREAD)
-        return []
+        return False
     f.room -= sum(map(len, words)) + _READ_AGAIN
-    return _unwrap(ctx.deeper(), f, words, False)
+    return True
+
+
+def _unnamed(word: str) -> bool:
+    """Whether a shell or a wrapper may run something else than *word* names. More
+    ``[`` than ``]`` after a name leaves a subscript open: an array element cut at
+    a space, and a shell runs what follows it."""
+    name = _NAME.match(word)
+    rest = word[name.end() :] if name else ""
+    return bool(_UNNAMED.search(word)) or rest.count("[") > rest.count("]")
 
 
 def _found_runs(
@@ -1546,7 +1554,7 @@ def run_argv(
     """
     prog, args = os.path.basename(argv[0]).lower(), argv[1:]
     prog = _GNU_NAMES.get(prog, prog)
-    if _UNNAMED.search(argv[0]):
+    if _unnamed(argv[0]):
         f.doubt("Runs a program melo could not name.")
     # Hard links: one file under two names, so the source counts as written.
     _link_sources(ctx, f, prog, args, cwd)
@@ -1601,14 +1609,16 @@ def run_argv(
         if {"-exec", "-execdir", "-ok", "-okdir"} & set(args):
             for root in roots:
                 search(ctx, f, root, cwd)
-        for flag in {"-exec", "-execdir", "-ok"} & set(args):
+        for flag in (a for a in ("-exec", "-execdir", "-ok") if a in args):
             rest = args[args.index(flag) + 1 :]
             rest = rest[: next((i for i, a in enumerate(rest) if a in ";+"), len(rest))]
-            if rest:  # find runs them as they are, and what a wrapper there runs
-                _found_runs(ctx, f, rest, roots[0], cwd)
-                for program in _past_exec(ctx, f, rest):
+            if rest and _reads_again(ctx, f, rest):
+                # find runs them as they are, and what a wrapper there runs
+                deeper = ctx.deeper()
+                _found_runs(deeper, f, rest, roots[0], cwd)
+                for program in _unwrap(deeper, f, rest, False):
                     if program and program != rest:
-                        _found_runs(ctx.deeper(), f, program, roots[0], cwd)
+                        _found_runs(deeper, f, program, roots[0], cwd)
     elif prog in _WRITERS and not re.search(r"\s[\w.-]+@?[\w.-]*:", line):
         mode = _WRITERS[prog]
         targets = words[-1:] if mode == "last" and len(words) > 1 else words
