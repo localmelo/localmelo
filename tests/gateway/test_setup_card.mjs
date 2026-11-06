@@ -40,7 +40,7 @@ const found = (job = null) => ({...none(job), state: 'found', backend: 'melo_ser
 
 const row = (id, name, kind, size, where, state, off = true) => ({id, name, kind, size, where, state, off});
 const PLAN = {
-  available: true, reason: '', hint: '',
+  available: true, code: '', reason: '', detail: '', hint: '',
   pick: {id: 'qwen3-8b-omlx', name: 'Qwen3 8B', backend: 'omlx', backend_name: 'oMLX'},
   mac: 'This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free',
   intro: 'Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.',
@@ -164,6 +164,14 @@ test('one OK starts the job with the pick and what was left out, and the steps a
   assert.equal(h.waiting().length, 1, 'and it goes on looking');
 });
 
+test('each step says its state in the card\'s words and keeps the job\'s own line apart, smaller', async () => {
+  const rows = [step('melo_serve', 'melo_serve', 'done', 'installed melo_serve 0.4.0'), step('backend:omlx', 'oMLX', 'stopped'), step('save', 'Saving the settings', 'failed', 'failed: boom')];
+  const h = harness({detect: none(job('running', rows))});
+  await h.open();
+  const parts = (item) => [item.find((n) => n.className === 'setup-state').text(), item.find((n) => n.className === 'setup-line').text()];
+  assert.deepEqual(h.root.rows('setup-step').map(parts), [['done', 'installed melo_serve 0.4.0'], ['stopped', ''], ['failed', 'failed: boom']]);
+});
+
 test('Stop asks the gateway to stop, says it is stopping, and keeps the focus on its button', async () => {
   const h = harness({detect: none(job('running', GOING))});
   await h.open();
@@ -239,6 +247,19 @@ test('a start the gateway refuses is said under the list, which stays', async ()
   assert.equal(h.root.button('Set up Qwen3 8B (6.6 GB)').disabled, false, 'it can be tried again');
 });
 
+test('a list that went out of date is asked again, and the person looks before the next OK', async () => {
+  const stale = Object.assign(new Error('The list of what this Mac can run is out of date.'), {status: 409, code: 'no_plan'});
+  const h = harness({answers: {'POST /setup/start': stale}});
+  await h.open();
+  h.plan = {...PLAN, action: 'Continue (5.7 GB left)'};
+  await h.root.button('Set up Qwen3 8B (6.6 GB)').click();
+  await settle();
+  assert.equal(h.paths().filter((path) => path.startsWith('GET /setup/plan')).length, 2, 'the list is asked again');
+  assert.match(h.text(), /The list was out of date, so it was refreshed\. Check it, then press the button again\./);
+  assert.ok(h.root.button('Continue (5.7 GB left)'));
+  assert.equal(h.paths().filter((path) => path === 'POST /setup/start').length, 1, 'nothing runs until the next OK');
+});
+
 test('a list that does not fit the disk cannot be started until something is left out', async () => {
   const h = harness({plan: {...PLAN, can_set_up: false, notes: ['There is not enough free space for this. Another model may fit.']}});
   await h.open();
@@ -247,10 +268,18 @@ test('a list that does not fit the disk cannot be started until something is lef
 });
 
 test('with no plan the commands that start a server by hand stay, with why there is no setup', async () => {
-  const h = harness({plan: {available: false, reason: 'uv is not installed (https://docs.astral.sh/uv/)', hint: ''}});
+  const uv = {available: false, code: 'uv', reason: 'Automatic setup needs uv, which is not installed on this Mac (https://docs.astral.sh/uv/).', detail: '', hint: ''};
+  const h = harness({plan: uv});
   await h.open();
-  assert.match(h.text(), /No model server is running on this Mac.*Automatic setup is not available: uv is not installed.*To start one with oMLX, run this in a terminal:.*brew install/);
+  assert.match(h.text(), /No model server is running on this Mac.*Automatic setup needs uv, which is not installed on this Mac.*To start one with oMLX, run this in a terminal:.*brew install/);
   assert.equal(h.root.rows('setup-row').length, 0);
+  // melo_serve's own words are not translated: our sentence leads, its words follow in smaller type.
+  const said = {available: false, code: 'unsupported', reason: 'melo_serve found no model that this Mac can run.', detail: 'no model fits 8 GB', hint: 'Add memory.'};
+  const own = harness({plan: said});
+  await own.open();
+  assert.equal(own.root.find((n) => n.className === 'setup-lead-in').text(), said.reason);
+  assert.equal(own.root.find((n) => n.className === 'setup-aside').text(), 'no model fits 8 GB Add memory.');
+  assert.equal(h.root.find((n) => n.className === 'setup-aside'), null, 'no words of its own, no second line');
   const quiet = harness({plan: new Error('Unexpected request')});
   await quiet.open();
   assert.match(quiet.text(), /No model server is running on this Mac.*brew install/, 'a plan that cannot be asked leaves the commands, with no words about it');
@@ -261,7 +290,8 @@ test('while the plan is asked the card says so, and a server found meanwhile tak
   let release;
   const h = harness({answers: {'GET /setup/plan': () => new Promise((resolve) => { release = () => resolve(PLAN); })}});
   await h.open();
-  assert.match(h.text(), /Checking what this Mac can run…/);
+  assert.match(h.text(), /Checking what this Mac can run….*To start one with oMLX, run this in a terminal:.*brew install/, 'the commands are there while it waits');
+  assert.ok(h.root.button('Copy commands'));
   assert.equal(h.root.attributes['aria-busy'], 'true');
   h.detect = found();
   await h.look();

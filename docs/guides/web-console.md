@@ -30,13 +30,15 @@ Apple-silicon Mac sets one up from the card, as the terminal's first run does, w
 [the same list and the same job](model-servers.md#first-run-setup): what this Mac can
 run, each item with its size and where it goes, and the total to download. An item
 that is optional has a box to turn it off, and one button (`Set up Qwen3 8B (6.6 GB)`)
-starts it after that one OK. Each step then shows its own progress, **Stop** keeps what
-was downloaded, and **Continue** goes on after a stop or a failure. When the chat model
+starts it after that one OK; a list left on screen for more than a minute is refreshed
+first, and the button asks for another OK once you have looked. Each step then shows
+its own progress and its state in words, **Stop** keeps what was downloaded, and
+**Continue** goes on after a stop or a failure. When the chat model
 answers, the card connects it as **Use this model** does. Where setup is not offered
 (another system, an Intel Mac, too little memory, or a check that failed) the card says
-why and shows the commands that start a server (oMLX on a Mac, Ollama elsewhere, as in the
+why, with the words of whoever said no in smaller type under it, and shows the commands that start a server (oMLX on a Mac, Ollama elsewhere, as in the
 [model servers guide](model-servers.md)) in a block that one click selects, with a
-**Copy commands** button for the keyboard. It asks
+**Copy commands** button for the keyboard (they are there while the card still checks too). It asks
 again every three seconds while it is on screen and the tab is visible, so the model
 appears once a server answers. **Check again** asks at once, and **Enter a server
 address…** opens connection settings. The card names the other way too, under **Or use an account or a key**: **Choose a service…** opens

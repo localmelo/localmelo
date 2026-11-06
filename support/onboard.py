@@ -756,7 +756,7 @@ def _manual_way(plan: run.Plan | None) -> None:
     _say(f"To start one yourself, run {how.name}:")
     for command in how.commands:
         print(command)
-    _say(how.note)
+    _say(t_in("en", how.note))
     print(discovery.GUIDE_URL)
 
 

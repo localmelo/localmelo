@@ -26,7 +26,7 @@ import {maker} from "./dom.mjs";
 const RECHECK_MS = 3000;
 const JOB_MS = 1500;
 // One shape for each state of a step: the glyph differs, not only the colour.
-const MARKS = {waiting: "○", running: "●", done: "✓", skipped: "·", failed: "✕"};
+const MARKS = {waiting: "○", running: "●", done: "✓", skipped: "·", stopped: "■", failed: "✕"};
 
 const host = (url) => {
   try {
@@ -94,20 +94,24 @@ export function setupModelCard({
     if (data.state === "needs_key") {
       return {title: t("setup.needsKey"), text: t("setup.needsKeyText", {address: where}), label: t("setup.checkAgain"), run: detect};
     }
-    if (!plan) return {title: t("setup.planning")};
-    if (plan.available) return {title: t("setup.planTitle"), view: "plan"};
+    if (plan?.available) return {title: t("setup.planTitle"), view: "plan"};
+    // Until the list is known, and when there is none, the commands that start a server by hand stay.
     const answered = data.url !== "";
     const {name, commands, note, guide} = data.start;
-    const why = [plan.reason, plan.hint].filter(Boolean).join(" ");
-    return {
-      title: answered ? t("setup.noModel", {server: who}) : t("setup.none"),
+    const by = {
       text: answered ? t("setup.answeredAt", {address: where, problem: data.problem}) : t("setup.startOne", {server: name}),
-      lead: why ? t("setup.cannotSet", {reason: why}) : "",
       commands: answered ? [] : commands,
       note: answered ? "" : t("setup.note", {note}),
+      guide,
+    };
+    if (!plan) return {title: t("setup.planning"), ...by};
+    return {
+      title: answered ? t("setup.noModel", {server: who}) : t("setup.none"),
+      ...by,
+      lead: plan.reason,
+      aside: [plan.detail, plan.hint].filter(Boolean).join(" "),
       label: t("setup.checkAgain"),
       run: detect,
-      guide,
     };
   }
 
@@ -232,7 +236,7 @@ export function setupModelCard({
       plan = found;
     } catch {
       if (mine !== version) return;
-      plan = {available: false, reason: "", hint: ""}; // No list: the commands stay.
+      plan = {available: false, reason: "", detail: "", hint: ""}; // No list: the commands stay.
     }
     render();
   }
@@ -244,6 +248,7 @@ export function setupModelCard({
     starting = true;
     startError = "";
     live?.update?.();
+    let stale = false;
     try {
       const started = await api("/setup/start", {method: "POST", body: {pick: plan.pick.id, skip: [...off]}});
       if (mine !== version) return;
@@ -251,11 +256,13 @@ export function setupModelCard({
       seen = started.job.id;
     } catch (error) {
       if (mine !== version) return;
-      startError = firstLine(error);
+      stale = error.code === "no_plan"; // The list is out of date: ask again, and let the person look before the next OK.
+      startError = stale ? t("setup.refreshed") : firstLine(error);
     } finally {
       starting = false;
     }
-    render();
+    if (stale) await askPlan();
+    else render();
     watch();
   }
 
@@ -267,7 +274,7 @@ export function setupModelCard({
     const mark = el("span", "setup-mark");
     mark.setAttribute("aria-hidden", "true");
     const name = el("span", "setup-name");
-    const word = el("span", "sr-only");
+    const word = el("span", "setup-state");
     const line = el("span", "setup-line");
     const bar = el("progress", "setup-bar");
     bar.setAttribute("max", "100");
@@ -277,7 +284,7 @@ export function setupModelCard({
       node.dataset.state = found.state;
       mark.textContent = MARKS[found.state] ?? "·";
       name.textContent = found.name;
-      word.textContent = t(`setup.state.${found.state}`);
+      word.textContent = t(`setup.state.${found.state}`); // Ours, so translated; the line is the job's own words.
       line.textContent = found.state === "running" ? found.progress : found.line;
       const bytes = found.state === "running" && found.total_bytes > 0;
       bar.hidden = found.state !== "running";
@@ -351,7 +358,7 @@ export function setupModelCard({
       return;
     }
     refocus = root.contains(doc.activeElement);
-    const {title, text, lead, commands = [], note, label, run, guide} = view;
+    const {title, text, lead, aside, commands = [], note, label, run, guide} = view;
     const settled = phase === "ready" || phase === "failed";
     const found = settled && data?.state === "found" && !view.view;
     const list = found && phase === "ready" && (choosing || !data.suggested);
@@ -370,6 +377,7 @@ export function setupModelCard({
       }
     }
     if (lead) parts.push(el("p", "setup-lead-in", lead));
+    if (aside) parts.push(el("p", "setup-aside", aside)); // The words of whoever said no: not translated, so smaller.
     if (text) parts.push(el("p", "", text));
     // The commands, each on one line (the block scrolls, so a flag never breaks): one click selects
     // them all, a focusable group lets the keyboard scroll it, and a button copies them.

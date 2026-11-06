@@ -451,20 +451,26 @@ def command() -> str | None:
     return _find_command()
 
 
-def refusal() -> str | None:
-    """The line for a ``melo-serve`` that was found but is not run, or None.
+def refusal(
+    name: str = COMMAND,
+    before: tuple[str, ...] = (),
+    after: tuple[str, ...] | None = None,
+) -> str | None:
+    """The line for a command *name* that was found but is not run, or None.
 
-    None when one runs, and when none was found (then it is not installed).
+    The places are those of :func:`find_executable`; for ``melo-serve``, the
+    uv tool folder comes after PATH. None when one runs, and when none was
+    found (then it is not installed).
     """
-    checked = [
-        (path, _check(path))
-        for path in _candidates(COMMAND, after=(_uv_tool_folder(),))
-    ]
+    if after is None:
+        after = (_uv_tool_folder(),) if name == COMMAND else ()
+    checked = [(path, _check(path)) for path in _candidates(name, before, after)]
     if any(why == "" for _, why in checked):
         return None
+    label = "melo_serve" if name == COMMAND else name
     for path, why in checked:
         if why:
-            return clean(f"melo_serve: {path} is not run: {why}")
+            return clean(f"{label}: {path} is not run: {why}")
     return None
 
 

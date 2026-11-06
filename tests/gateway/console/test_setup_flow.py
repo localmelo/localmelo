@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -198,17 +199,29 @@ async def test_a_plan_that_cannot_run_says_why_and_is_asked_again_soon(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     counted = Counted(
-        run.Plan(False, "no model can run on this Mac", hint="Add memory.")
+        run.Plan(
+            False,
+            "no model can run on this Mac",
+            hint="Add memory.",
+            code="unsupported",
+        )
     )
     monkeypatch.setattr(run, "plan", counted)
     now = [0.0]
     console.setup.clock = lambda: now[0]
     found = (await client.get("/api/setup/plan")).json()
+    # Our sentence is in the request's language; melo_serve's words stay as they are.
     assert found == {
         "available": False,
-        "reason": "no model can run on this Mac",
+        "code": "unsupported",
+        "reason": "melo_serve found no model that this Mac can run.",
+        "detail": "no model can run on this Mac",
         "hint": "Add memory.",
     }
+    zh = {"X-LocalMelo-Language": "zh-Hans"}
+    chinese = (await client.get("/api/setup/plan", headers=zh)).json()
+    assert chinese["reason"].startswith("melo_serve 没有找到")
+    assert (chinese["detail"], chinese["hint"]) == (found["detail"], found["hint"])
     await client.get("/api/setup/plan")
     assert counted.calls == 1
     now[0] += 6  # the network may be back: not kept for a minute
@@ -216,21 +229,41 @@ async def test_a_plan_that_cannot_run_says_why_and_is_asked_again_soon(
     assert counted.calls == 2
     monkeypatch.setattr(setup_flow.sys, "platform", "linux")
     other = (await client.get("/api/setup/plan")).json()
-    assert other["available"] is False and other["reason"] == "this is not a Mac"
+    assert (other["code"], other["reason"]) == (
+        "not_mac",
+        "Automatic setup is only for Macs.",
+    )
     assert counted.calls == 2  # nothing was asked of uv
+
+
+async def test_a_plan_without_uv_names_the_cause_not_the_words_of_the_tool(
+    setup_fakes: Fakes, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(run, "plan", Counted(run.Plan(False, run.NO_UV, code="uv")))
+    found = (await client.get("/api/setup/plan")).json()
+    assert found["code"] == "uv" and found["detail"] == ""
+    assert found["reason"] == (
+        "Automatic setup needs uv, which is not installed on this Mac "
+        "(https://docs.astral.sh/uv/)."
+    )
 
 
 # ── Starting and stopping ──
 
 
-async def test_a_start_is_checked_against_the_last_plan_that_was_served(
+async def test_a_start_is_checked_against_the_plan_the_person_said_yes_to(
     setup_fakes: Fakes, client: httpx.AsyncClient
 ) -> None:
     first = await start(client)
     assert (first.status_code, first.json()["error"]["code"]) == (409, "no_plan")
-    await client.get("/api/setup/plan")
+    plan = (await client.get("/api/setup/plan")).json()
+    # A row the list locks cannot be left out, and neither can one it does not have.
+    locked = [r["id"] for r in plan["rows"] if not r["off"]]
+    assert locked == ["melo_serve"]
     for body in (
         {"pick": "nope-omlx", "skip": []},
+        {"pick": "qwen3-4b-omlx", "skip": []},  # the card has no picker: the pick only
+        *({"pick": CHAT, "skip": [row]} for row in (*locked, "service:gateway")),
         {"pick": CHAT, "skip": ["model:nope"]},
         {"pick": CHAT, "skip": ["--hf-home"]},
         {"pick": CHAT, "extra": 1},
@@ -241,10 +274,124 @@ async def test_a_start_is_checked_against_the_last_plan_that_was_served(
             "invalid_request",
         )
     assert await job(client) is None and setup_fakes.calls("melo-serve", "get") == []
-    # An alternative of the plan is a pick too, and so are the rows the job adds.
-    ok = await start(client, "service:gateway", "melo_serve", pick="qwen3-4b-omlx")
+    ok = await start(client, "service:melo_serve")
     assert ok.status_code == 202
     await ended(client)
+
+
+async def test_a_model_that_is_here_cannot_be_left_out(
+    setup_fakes: Fakes, client: httpx.AsyncClient
+) -> None:
+    data = json.loads(PLAN.read_text())
+    data["items"][1]["state"] = "done"
+    setup_fakes.put("plan.json", json.dumps(data))
+    plan = (await client.get("/api/setup/plan")).json()
+    assert plan["rows"][2]["id"] == CHAT_ID and plan["rows"][2]["off"] is False
+    refused = await start(client, CHAT_ID)
+    assert (refused.status_code, refused.json()["error"]["code"]) == (
+        400,
+        "invalid_request",
+    )
+    assert (
+        await client.get("/api/setup/plan", params={"skip": CHAT_ID})
+    ).status_code == 400
+
+
+async def test_a_start_needs_a_plan_that_is_current_available_and_young(
+    setup_fakes: Fakes, client: httpx.AsyncClient, console: Console
+) -> None:
+    now = [0.0]
+    console.setup.clock = lambda: now[0]
+    refused = lambda r: (r.status_code, r.json()["error"]["code"])  # noqa: E731
+    await client.get("/api/setup/plan")
+    now[0] += 61  # older than the cache window: the list on screen may be out of date
+    assert refused(await start(client)) == (409, "no_plan")
+    assert (await client.get("/api/setup/plan")).json()["available"] is True
+    data = json.loads(PLAN.read_text())
+    data["supported"] = False
+    data["reason"] = "no model can run on this Mac"
+    setup_fakes.put("plan.json", json.dumps(data))
+    now[0] += 61
+    assert (await client.get("/api/setup/plan")).json()["available"] is False
+    assert refused(await start(client)) == (409, "no_plan")  # the current plan has none
+    assert await job(client) is None
+
+
+async def test_a_list_that_does_not_fit_the_disk_starts_only_with_a_row_left_out(
+    setup_fakes: Fakes, client: httpx.AsyncClient
+) -> None:
+    data = json.loads(PLAN.read_text())
+    data["enough_disk"] = False
+    setup_fakes.put("plan.json", json.dumps(data))
+    assert (await client.get("/api/setup/plan")).json()["can_set_up"] is False
+    refused = await start(client)
+    assert (refused.status_code, refused.json()["error"]["code"]) == (409, "no_room")
+    assert await job(client) is None
+    left = (await client.get("/api/setup/plan", params={"skip": EMBED_ID})).json()
+    assert left["can_set_up"] is True
+    assert (await start(client, EMBED_ID)).status_code == 202
+    await ended(client)
+
+
+async def test_the_list_after_a_stop_is_asked_again_with_a_row_still_off(
+    setup_fakes: Fakes, client: httpx.AsyncClient
+) -> None:
+    """Continue: what the job did shows in the list, though the card keeps its row off."""
+    setup_fakes.put("get_hangs", "")
+    before = (await client.get("/api/setup/plan", params={"skip": EMBED_ID})).json()
+    assert before["rows"][0]["state"] == "todo"  # melo_serve is not installed yet
+    assert (await start(client, EMBED_ID)).status_code == 202
+    await until(lambda: setup_fakes.calls("melo-serve", "get"))
+    await client.post("/api/setup/cancel")
+    assert (await ended(client))["state"] == "cancelled"
+    # A start on the list from before the job is refused: the person looks again.
+    stale = await start(client, EMBED_ID)
+    assert (stale.status_code, stale.json()["error"]["code"]) == (409, "no_plan")
+    # melo_serve says what the stop left: the chat model is partly here.
+    data = json.loads(PLAN.read_text())
+    data["items"][1].update(state="partial", cached_bytes=1_000_000_000)
+    setup_fakes.put("plan.json", json.dumps(data))
+    after = (await client.get("/api/setup/plan", params={"skip": EMBED_ID})).json()
+    assert after["rows"][0]["state"] == "here"  # installed before the stop
+    assert (after["rows"][2]["state"], after["rows"][3]["state"]) == (
+        "partial",
+        "skipped",
+    )
+    assert after["action"].startswith("Continue")
+
+
+class Gated:
+    """A ``run.plan`` that waits for a gate, so a look at the plan can still be on its way."""
+
+    def __init__(self, answer: run.Plan) -> None:
+        self.answer, self.gate, self.entered = (
+            answer,
+            threading.Event(),
+            threading.Event(),
+        )
+
+    def __call__(self, timeout: float = 0.0, pick: str = "") -> run.Plan:
+        self.entered.set()
+        self.gate.wait(10)
+        return self.answer
+
+
+async def test_a_look_at_the_plan_that_began_before_a_job_ended_is_not_the_list_after_it(
+    setup_fakes: Fakes, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup_fakes.put("get_hangs", "")
+    await client.get("/api/setup/plan")
+    assert (await start(client)).status_code == 202
+    gated = Gated(run.plan())
+    monkeypatch.setattr(run, "plan", gated)
+    slow = asyncio.ensure_future(client.get("/api/setup/plan"))
+    await until(gated.entered.is_set)  # asked while the job runs
+    await client.post("/api/setup/cancel")
+    await ended(client)
+    gated.gate.set()
+    assert (await slow).status_code == 200  # the caller gets its answer
+    refused = await start(client)  # but it is not what is here now
+    assert (refused.status_code, refused.json()["error"]["code"]) == (409, "no_plan")
 
 
 async def test_a_job_runs_in_the_gateway_and_its_progress_rides_on_detect(
@@ -285,12 +432,22 @@ async def test_a_job_runs_in_the_gateway_and_its_progress_rides_on_detect(
     lines = {row["id"]: row["line"] for row in done["rows"]}
     assert lines["backend:omlx"] == "installed 0.7.3 into ~/Applications/oMLX.app"
     assert lines["save"] == "saved melo_serve as the chat server"
+    assert lines[EMBED_ID] == ""  # the state says it: the screen words it
+    # Those lines are the job's own text, not translated; the state is the stable word.
+    zh = {"X-LocalMelo-Language": "zh-Hans"}
+    chinese = (await client.get("/api/setup/detect", headers=zh)).json()["job"]
+    assert [(r["state"], r["line"]) for r in chinese["rows"]] == [
+        (r["state"], r["line"]) for r in done["rows"]
+    ]
     assert setup_fakes.calls("melo-serve", "get") == [
         ["get", CHAT, EMBED, "--skip", EMBED_ID, "--json"]
     ]
     assert config.load().chat_backend == "melo_serve"
     assert _no_gateway_service == []
-    # One more may follow when the first is over.
+    # A button of a list from before the job runs nothing: the list is asked again first.
+    stale = await start(client)
+    assert (stale.status_code, stale.json()["error"]["code"]) == (409, "no_plan")
+    await client.get("/api/setup/plan")
     assert (await start(client)).status_code == 202
     await ended(client)
 
@@ -329,7 +486,7 @@ async def test_a_download_shows_how_far_it_is_and_stop_ends_the_job_keeping_the_
         "",
     )
     # The row that was downloading was stopped; what never started waits.
-    assert states(stopped)["backend:omlx"] == "skipped"
+    assert states(stopped)["backend:omlx"] == "stopped"
     assert states(stopped)["save"] == "waiting" and stopped["saved"] is False
     assert setup_fakes.calls("melo-serve", "use") == []  # nothing after the stop ran
     gone = await client.post("/api/setup/cancel")
@@ -352,7 +509,11 @@ async def test_a_failed_job_says_why_and_the_next_look_at_the_plan_asks_again(
     after = (
         await client.get("/api/setup/plan")
     ).json()  # what is here may have changed
-    assert asked() == 2 and after["reason"] == "error: network is down"
+    assert asked() == 2 and after["detail"] == "error: network is down"
+    assert (after["code"], after["reason"]) == (
+        "failed",
+        "Automatic setup could not find out what this Mac can run.",
+    )
 
 
 async def test_a_gateway_that_shuts_down_ends_the_job_cancelled(
@@ -368,3 +529,58 @@ async def test_a_gateway_that_shuts_down_ends_the_job_cancelled(
     assert flow.finished.state == "cancelled"
     assert not flow.thread.is_alive()
     assert Path(config.config_path()).exists() is False  # nothing was saved
+
+
+async def test_a_child_that_ignores_the_stop_is_killed_when_the_gateway_shuts_down(
+    setup_fakes: Fakes,
+    client: httpx.AsyncClient,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(setup_flow, "STOP_WAIT_S", 0.3)
+    setup_fakes.put("get_deaf", "")
+    setup_fakes.put("get.jsonl", json.dumps(OMLX_RUNNING))
+    await client.get("/api/setup/plan")
+    assert (await start(client)).status_code == 202
+
+    async def deaf() -> bool:  # its first line comes after it stopped listening
+        found = await job(client)
+        return found is not None and states(found).get("backend:omlx") == "running"
+
+    await until(deaf)
+    flow = console.setup.job
+    assert flow is not None
+    child = flow.job._child
+    assert child is not None and child.poll() is None
+    await console.aclose()
+    assert flow.finished is not None and flow.finished.state == "cancelled"
+    assert child.poll() is not None and not flow.thread.is_alive()
+
+
+async def test_a_job_whose_thread_cannot_start_is_not_left_running(
+    setup_fakes: Fakes,
+    client: httpx.AsyncClient,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await client.get("/api/setup/plan")
+    real = setup_flow.Job.__init__
+
+    def no_thread() -> None:
+        raise RuntimeError("can't start new thread")
+
+    def broken(self: setup_flow.Job, *args: Any, **kwargs: Any) -> None:
+        real(self, *args, **kwargs)
+        self.thread.start = no_thread  # type: ignore[method-assign]
+
+    monkeypatch.setattr(setup_flow.Job, "__init__", broken)
+    try:
+        failed = await start(client)
+    except RuntimeError as error:  # the app's error handler may let it through
+        assert "new thread" in str(error)
+    else:
+        assert failed.status_code == 500
+    assert console.setup.job is None and not console.setup.running
+    monkeypatch.setattr(setup_flow.Job, "__init__", real)
+    assert (await start(client)).status_code == 202  # the plan is still the list
+    await ended(client)

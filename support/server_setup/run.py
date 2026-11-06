@@ -264,9 +264,17 @@ def find_uv() -> str | None:
     hence the folders. The path returned is the file the links lead to (what was
     checked), so a shim that acts on the name it is run by would see another.
     """
-    return melo_serve.find_executable(
-        "uv", before=(str(Path(sys.executable).parent),), after=UV_FOLDERS
-    )
+    return melo_serve.find_executable("uv", **_uv_places())
+
+
+def _uv_places() -> dict[str, tuple[str, ...]]:
+    return {"before": (str(Path(sys.executable).parent),), "after": UV_FOLDERS}
+
+
+def uv_problem() -> tuple[str, str]:
+    """Why there is no uv to run, as ``(code, line)``: found but refused (``uv_refused``), else not installed (``uv``)."""
+    why = melo_serve.refusal("uv", **_uv_places())
+    return ("uv_refused", why) if why else ("uv", NO_UV)
 
 
 def _version(path: str) -> str:
@@ -334,13 +342,17 @@ class Plan:
 
     ``available`` is False when there is nothing to offer, and ``reason`` says
     why in one line: no uv, no network, an answer that is not a plan, or a Mac
-    that no pick runs on (``hint`` may say what would help). Otherwise ``pick``
-    is the recommended chat pick.
+    that no pick runs on (``hint`` may say what would help). ``code`` names the
+    cause for a screen that words it itself: ``uv`` (not installed),
+    ``uv_refused`` (found, not run: ``reason`` says why), ``unsupported``
+    (melo_serve says no pick runs here: ``reason`` and ``hint`` are its words)
+    or ``failed``. Otherwise ``pick`` is the recommended chat pick.
     """
 
     available: bool
     reason: str = ""
     hint: str = ""
+    code: str = ""
     machine: Machine = field(default_factory=Machine)
     pick: Pick | None = None
     items: tuple[Item, ...] = ()
@@ -349,8 +361,8 @@ class Plan:
     enough_disk: bool = True
 
 
-def _unavailable(reason: str, **kwargs: Any) -> Plan:
-    return Plan(False, _clip(reason), **kwargs)
+def _unavailable(reason: str, code: str = "failed", **kwargs: Any) -> Plan:
+    return Plan(False, _clip(reason), code=code, **kwargs)
 
 
 def _id(value: object) -> str:
@@ -418,7 +430,10 @@ def _parse(data: object) -> Plan:
     pick = _pick(data.get("pick"))
     if data.get("supported") is not True or pick is None:
         return _unavailable(
-            reason or "no model can run on this Mac", hint=hint, machine=machine
+            reason or "no model can run on this Mac",
+            "unsupported",
+            hint=hint,
+            machine=machine,
         )
     entries = data.get("items")
     alternatives = data.get("alternatives")
@@ -475,7 +490,8 @@ def _plan(timeout: float, pick: str) -> Plan:
     else:
         uv = find_uv()
         if uv is None:
-            return _unavailable(NO_UV)
+            code, why = uv_problem()
+            return _unavailable(why, code)
         argv = [
             uv,
             "tool",
@@ -610,6 +626,7 @@ class SetupJob:
             raise ValueError(
                 f"{pick!r} is not the plan's pick or one of its alternatives"
             )
+        self.pick = chat
         self.skip = frozenset(skip)
         self.gateway_service = gateway_service
         self.state = "pending"
@@ -618,6 +635,7 @@ class SetupJob:
         self._lock = threading.RLock()
         self._child: subprocess.Popen[bytes] | None = None
         self._cancelled = False
+        self._killed = False
         self._path = ""  # the melo-serve command, once the first step has found it
         embedding = embedding_item(plan)
         picked = embedding.id.removeprefix("model:") if embedding else ""
@@ -629,6 +647,15 @@ class SetupJob:
             None if self.skip & embedding_items or not embedding else picked
         )
         self._get_skips = sorted(self.skip & (chat_items | embedding_items))
+
+    @property
+    def steps(self) -> tuple[str, ...]:
+        """The rows this job adds after the plan's items: each model it loads, then the config it saves."""
+        return (
+            *([LOAD_CHAT] if self._chat is not None else []),
+            *([LOAD_EMBEDDING] if self._embedding is not None else []),
+            *([SAVE] if self._chat is not None else []),
+        )
 
     # control
 
@@ -643,10 +670,19 @@ class SetupJob:
             if self._child is not None and self._child.poll() is None:
                 _stop(self._child)
 
+    def kill(self) -> None:
+        """Cancel, and SIGKILL the running child now: for a child that ignores :meth:`cancel`."""
+        with self._lock:
+            self._cancelled = self._killed = True
+            if self._child is not None and self._child.poll() is None:
+                self._child.kill()
+
     def _hold(self, child: subprocess.Popen[bytes] | None) -> None:
         with self._lock:
             self._child = child
-            if child is not None and self._cancelled:
+            if child is not None and self._killed:
+                child.kill()
+            elif child is not None and self._cancelled:
                 _stop(child)
 
     def run(self) -> str:
@@ -746,7 +782,7 @@ class SetupJob:
             return None
         uv = find_uv()
         if uv is None:
-            return self._fail(MELO_SERVE, _failed(NO_UV, NOTHING))
+            return self._fail(MELO_SERVE, _failed(uv_problem()[1], NOTHING))
         self._item(MELO_SERVE, "running")
         argv = [uv, "tool", "install", "--managed-python", melo_serve.ARCHIVE_URL]
         if path:

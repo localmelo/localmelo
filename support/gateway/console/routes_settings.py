@@ -324,7 +324,7 @@ async def setup_detect_json(console: Console) -> dict[str, Any]:
         models=[],
         loaded=[],
         suggested=None,
-        start=discovery.how_to_start().to_json(),
+        start=discovery.how_to_start().to_json(t),
         job=console.setup.json(),
     )
     if found is None:

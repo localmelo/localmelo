@@ -421,11 +421,31 @@ def test_a_plan_that_cannot_be_read_is_unavailable_with_one_line(
     assert (found.available, found.reason, found.pick) == (False, reason, None)
 
 
-def test_a_plan_without_uv_is_unavailable(
-    fakes: Fakes, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(run, "find_uv", lambda: None)
-    assert run.plan() == run.Plan(False, run.NO_UV)
+@pytest.fixture
+def uv_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The only place a uv may be: next to the interpreter, in an empty folder."""
+    beside = tmp_path / "venv" / "bin"
+    beside.mkdir(parents=True, mode=0o755)
+    beside.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("PATH", str(tmp_path / "path"))
+    monkeypatch.setattr(sys, "executable", str(beside / "python"))
+    monkeypatch.setattr(run, "UV_FOLDERS", ())
+    return beside
+
+
+def test_a_plan_without_uv_is_unavailable(uv_folder: Path) -> None:
+    assert run.plan() == run.Plan(False, run.NO_UV, code="uv")
+
+
+def test_a_uv_that_is_passed_over_is_named_not_called_missing(uv_folder: Path) -> None:
+    """The app's own uv that others can write is refused: the plan says so, not "uv is not installed"."""
+    Fakes.script(uv_folder / "uv")
+    assert run.find_uv() == str((uv_folder / "uv").resolve())
+    (uv_folder / "uv").chmod(0o777)
+    found = run.plan()
+    assert (found.available, found.code) == (False, "uv_refused")
+    assert found.reason == f"uv: {uv_folder / 'uv'} is not run: others can write it"
 
 
 def test_a_version_that_is_not_one_is_not_trusted_and_the_plan_still_never_raises(

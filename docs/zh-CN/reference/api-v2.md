@@ -372,29 +372,29 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 
 ## GET /api/setup/plan
 
-这台 Mac 能运行什么、首次运行的设置会做什么：终端在那一次确认之前打印的清单，用请求的语言。它要问 melo_serve，要几秒，所以同一时刻只有一个提问者，所有调用方共用它的答案，答案保留 60 秒（没有可提供的内容时 5 秒）；它不属于 `GET /api/setup/detect`。不写入任何内容。没有提供设置的地方，`available` 为 `false`，`reason` 说明原因（其他系统、Intel Mac、内存太小、没有 `uv`、检查失败）。
+这台 Mac 能运行什么、首次运行的设置会做什么：终端在那一次确认之前打印的清单，用请求的语言。它要问 melo_serve，要几秒，所以同一时刻只有一个提问者，所有调用方共用它的答案，答案保留 60 秒（没有可提供的内容时 5 秒）；它不属于 `GET /api/setup/detect`。不写入任何内容。同一时刻只有一份计划，就是最近一次问到的那份：任务开始或结束时（这台 Mac 上已有的东西变了）它就被丢掉，在那之前发出的提问，答案也不会保留。没有提供设置的地方，`available` 为 `false`，由 `code`、`reason`、`detail` 和 `hint` 说明原因。
 
 ```json
-{"available": true, "reason": "", "hint": "", "pick": {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx", "backend_name": "oMLX"}, "mac": "This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free", "intro": "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.", "rows": [{"id": "model:qwen3-8b-omlx", "name": "Qwen3 8B", "kind": "chat model", "size": "4.9 GB", "where": "Hugging Face → ~/models/huggingface", "state": "todo", "off": true}], "download": "Download about 6.6 GB.", "free": "83 GB free.", "notes": [], "action": "Set up Qwen3 8B (6.6 GB)", "can_set_up": true}
+{"available": true, "code": "", "reason": "", "detail": "", "hint": "", "pick": {"id": "qwen3-8b-omlx", "name": "Qwen3 8B", "backend": "omlx", "backend_name": "oMLX"}, "mac": "This Mac: Apple M5 Pro · 32 GB · macOS 27.2 · 83 GB free", "intro": "Recommended: Qwen3 8B on oMLX. Nothing is installed until you say yes.", "rows": [{"id": "model:qwen3-8b-omlx", "name": "Qwen3 8B", "kind": "chat model", "size": "4.9 GB", "where": "Hugging Face → ~/models/huggingface", "state": "todo", "off": true}], "download": "Download about 6.6 GB.", "free": "83 GB free.", "notes": [], "action": "Set up Qwen3 8B (6.6 GB)", "can_set_up": true}
 ```
 
-- `skip`（可选，逗号分隔）按这个人去掉的项目重新写出清单：`rows`、`download`、`notes`、`action` 和 `can_set_up` 会变，依据最近一次给出的计划。不属于该计划的 id 返回 400 `invalid_request`。
+- `skip`（可选，逗号分隔）按这个人去掉的项目重新写出清单：`rows`、`download`、`notes`、`action` 和 `can_set_up` 会变。它只能包含 `off` 为 `true` 的行的 id；其他 id（必须设置的行、已经有了的行、网关的登录项、未知的 id）返回 400 `invalid_request`。
 - 每一行有 `id`、`name`、`kind`（`chat backend`、`chat model` 等）、`size`（不下载时为空）、`where`、`state`（`todo`；`partial` 表示下载会接着做；`here` 表示已经有了；`skipped`）和 `off`（这个人能否把它关掉）。用词就是终端的，出自同一张表。
-- `action` 是按钮：`Set up <model> (<size>)`，停止之后是 `Continue (<size> left)`，不下载时是 `Set up <model> (nothing to download)`。清单装不下磁盘，或去掉了没有它就无法设置的项目时，`can_set_up` 为 `false`。
-- `available` 为 `false` 时只说 `reason` 和 `hint`，卡片这时保留它的命令。
+- `action` 是按钮：`Set up <model> (<size>)`，停止之后是 `Continue (<size> left)`，不下载时是 `Set up <model> (nothing to download)`。只有在推荐的模型装不下可用磁盘空间、而且什么都没有去掉时，`can_set_up` 才为 `false`。去掉任何一行都会让它变成 `true`，不管那一行是否真的省空间，因为 melo_serve 在下载之前会再检查一次磁盘。
+- `available` 为 `false` 时只说 `code`、`reason`、`detail` 和 `hint`，卡片这时保留它的命令。`code` 是 `not_mac`、`uv`（没有安装）、`uv_refused`（找到了，但不运行：它或它所在的文件夹不只属于当前用户）、`unsupported`（melo_serve 说这台 Mac 上没有能运行的模型）或 `failed`（检查没有回答，或回答的不是计划）。`reason` 是 localmelo 对这个 `code` 写的一句话，用请求的语言。`detail` 是说“不行”的那一方自己的话（melo_serve 的 `reason`、失败命令的最后一行、点名那个文件的拒绝原因），`hint` 是 melo_serve 的 `reason_hint`：两者都原样显示，不翻译，没有时为空。
 
 ## POST /api/setup/start
 
-按 `GET /api/setup/plan` 最近给出的计划开始设置：终端的那个任务（通过 argv 运行 `melo-serve`，从不经过 shell），在自己的线程里运行，不为网关注册登录项（安装它会重启正在运行这个任务的网关）。返回 202 `{"job": ...}`。
+按这个人点头同意的计划开始设置，也就是 `GET /api/setup/plan` 最近给出的那份：终端的那个任务（通过 argv 运行 `melo-serve`，从不经过 shell），在自己的线程里运行，不为网关注册登录项（安装它会重启正在运行这个任务的网关）。返回 202 `{"job": ...}`。
 
 ```json
 {"pick": "qwen3-8b-omlx", "skip": ["model:embed"]}
 ```
 
-- `pick` 必须是该计划的推荐或它的备选之一；`skip` 里是该计划的项目 id，或任务自己加的行（`service:melo_serve`、`service:gateway`、`melo_serve`）。两者都对照最近给出的计划检查，也就是这个人点头同意的那张清单。其他字段会被拒绝。
-- 400 `invalid_request`：未知的推荐或项目。409 `no_plan`：还没有给出过计划。409 `setup_running`：已有任务在运行。需要和 `/api` 下其他路由相同的登录和来源检查。
-- 任务有 `id`、`state`（`running`、`done`、`failed` 或 `cancelled`）、`stopping`、`error`、`pick`、`name`、`saved`（对话模型已能回答，且 melo_serve 已保存为对话服务器）和 `rows`；每行有 `id`、`name`、`state`（`waiting`、`running`、`done`、`skipped`、`failed`）、`line`、`done_bytes`、`total_bytes` 和 `progress`（例如 `310 of 881 MB`）。
-- 网关关闭会让任务以 `cancelled` 结束，已下载的部分保留。
+- `pick` 必须是该计划的 `pick.id`（清单不提供其他模型）；`skip` 只能包含 `off` 为 `true` 的行的 id，所以必须设置的行、已经有了的行和网关的登录项都不能去掉。其他字段会被拒绝。
+- 400 `invalid_request`：别的推荐，或不能去掉的 id。409 `no_plan`：没有可以点头同意的计划：没有问过、已经超过 60 秒、没有可提供的内容，或者之后有任务开始或结束了。请再问一次 `GET /api/setup/plan`，看过清单再开始。409 `no_room`：清单装不下磁盘而且什么都没有去掉（`can_set_up` 为 `false`）。409 `setup_running`：已有任务在运行。需要和 `/api` 下其他路由相同的登录和来源检查。
+- 任务有 `id`、`state`（`running`、`done`、`failed` 或 `cancelled`）、`stopping`、`error`、`pick`、`name`、`saved`（对话模型已能回答，且 melo_serve 已保存为对话服务器）和 `rows`；每行有 `id`、`name`、`state`（`waiting`、`running`、`done`、`skipped` 表示这个人去掉的，`stopped` 表示停止时结束的行，`failed`）、`line`、`done_bytes`、`total_bytes` 和 `progress`（例如 `310 of 881 MB`）。`state` 是固定的词，由界面用自己的语言写出来；`line` 是任务或 melo_serve 自己的话，保持英文、原样显示（`skipped` 和 `stopped` 时为空），`error` 是失败的最后一行：界面把它们当作较小的补充说明显示，不翻译。
+- 网关关闭会让任务以 `cancelled` 结束：正在运行的命令先收到 SIGTERM，10 秒后还在就收到 SIGKILL；已下载的部分保留。
 
 ## POST /api/setup/cancel
 

@@ -44,6 +44,8 @@ DESKTOP = ROOT / "support/browser/desktop.py"
 SERVE = ROOT / "support/melo_serve.py"
 # The first-run list, as the terminal and the welcome card word it (``say``).
 LISTING = ROOT / "support/server_setup/listing.py"
+# How to start a model server by hand: it names the keys of its notes.
+DISCOVERY = ROOT / "support/backends/discovery.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -313,6 +315,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         DISPLAY,
         HOSTED_CHECK,
         LISTING,
+        DISCOVERY,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
