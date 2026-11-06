@@ -357,10 +357,11 @@ _BUILDS = {
 }
 _YARN_OWN = set(["add", "install", "remove", "init", "global", "config", "info"])
 # One rule a line: a pattern over "program args…", the category ("?" for
-# undecided) and the reason; {prog} is the program.
+# undecided), the reason ({prog} is the program) and, for a ``send_out`` that
+# posts or sends a message in the person's name, the subject ``post``.
 _RULES = [
-    (re.compile(pattern), category, reason)
-    for pattern, category, reason in (line.split(" ;; ") for line in r"""
+    (re.compile(row[0]), row[1], row[2], row[3] if len(row) > 3 else "")
+    for row in (line.split(" ;; ") for line in r"""
 ^brew (install|reinstall|upgrade|tap)\b ;; install ;; Installs software with Homebrew.
 ^brew services (start|run|restart)\b ;; persistence ;; Starts a background service.
 ^(gem|cargo|go) install\b ;; install ;; Installs software with {prog}.
@@ -387,9 +388,12 @@ _RULES = [
 ^osascript .*(System Events|administrator privileges) ;; system ;; Controls macOS through AppleScript.
 ^(ngrok|cloudflared|lt)\b|^(nc|ncat|netcat) .*-l|^socat .*LISTEN|^ssh .*-R ;; service ;; Lets other computers reach this Mac.
 \s(0\.0\.0\.0|::|\[::\])(\s|$)|=0\.0\.0\.0 ;; service ;; Opens a network service that other computers can reach.
-^(scp|sftp|ftp|mail|mailx|sendmail|ssh|nc|ncat|netcat)\b ;; ? ;; Sends data to another computer ({prog}).
-^git push .*(\s-f\b|--force|\s\+) ;; delete ;; Force-pushes, which can overwrite commits on the server.
-^git push\b ;; ? ;; Pushes commits to a server.
+^(scp|sftp|ftp|ssh|nc|ncat|netcat)\b ;; ? ;; Sends data to another computer ({prog}).
+^(mail|mailx|sendmail)\b ;; send_out ;; Sends a message with {prog}. ;; post
+^git push\b.*(\s-f\b|--force|\s\+) ;; delete ;; Force-pushes, which can overwrite commits on the server.
+^git push\b(?!.*(\s-f\b|--force|\s\+)) ;; send_out ;; Pushes commits to a server. ;; post
+^gh(\s+(-R|--repo)[ =]?\S+)*\s+(issue|pr|discussion|release|gist|repo)\s+(create|comment|review|merge|edit|close|reopen|delete|fork|transfer|rename|archive)\b ;; send_out ;; Posts to GitHub with gh. ;; post
+^gh(\s+(-R|--repo)[ =]?\S+)*\s+api\b.*(\s-X\s*(POST|PUT|PATCH|DELETE)\b|--method[ =](POST|PUT|PATCH|DELETE)\b|\s-[fF]\b|--(raw-)?field\b|--input\b) ;; send_out ;; Writes to GitHub with gh api. ;; post
 ^git reset .*--hard ;; delete ;; Resets with --hard, which discards uncommitted changes.
 ^git clean .*\s-\w*[xX] ;; delete ;; Deletes untracked and ignored files (git clean -x).
 ^direnv (allow|permit|grant)\b ;; persistence ;; Trusts a .envrc, which then runs whenever its folder is entered.
@@ -1568,10 +1572,10 @@ def run_argv(
             touch(ctx, f, arg.lstrip("@"), "read", cwd)
     plain = args[2:] if prog == "git" and args[:1] in (["-C"], ["-c"]) else args
     line = " ".join([prog, *plain])
-    for pattern, category, reason in _RULES:
+    for pattern, category, reason, subject in _RULES:
         if pattern.search(line):
             text = reason.format(prog=prog)
-            f.doubt(text) if category == "?" else f.add(category, text)
+            f.doubt(text) if category == "?" else f.add(category, text, subject)
     if _PY.match(prog) or prog == "?":
         _python(ctx, f, argv, cwd)
     elif re.fullmatch(r"pip3?(\.\d+)?", prog):

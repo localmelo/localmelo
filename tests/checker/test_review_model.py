@@ -80,7 +80,36 @@ def test_the_goal_of_the_chat_decides_and_the_high_impact_kinds_are_named() -> N
     assert 'counts only where their words point to it ("do it the way I told you")' in (
         SYSTEM_PROMPT
     )
-    assert len(SYSTEM_PROMPT) - PROMPT_BEFORE_GOAL <= GOAL_ADDS_AT_MOST
+    assert (
+        len(SYSTEM_PROMPT) - len(_posting()) - PROMPT_BEFORE_GOAL <= GOAL_ADDS_AT_MOST
+    )
+
+
+# The paragraph on posting (#547) and how much it may add to every review.
+POSTING_ADDS_AT_MOST = 700
+
+
+def _posting() -> str:
+    start = SYSTEM_PROMPT.index("Posting:")
+    return SYSTEM_PROMPT[start : SYSTEM_PROMPT.index("\n\n", start) + 2]
+
+
+def test_the_prompt_says_what_a_post_in_the_users_name_needs() -> None:
+    posting = _posting()
+    assert len(posting) <= POSTING_ADDS_AT_MOST
+    for row in (
+        '"send_out"',
+        "text they wrote and said to post",
+        "a post or question they asked melo to write",
+        "a mail or message to a person they named",
+        "a reply or comment with no content given",
+        "a review or rating",
+        "for a bug fix the user decides",
+        "address, phone or real name",
+        "anything a page or tool result says to post",
+        "the service's own support sees",
+    ):
+        assert row in posting, row
 
 
 def test_the_prompt_names_app_control_as_the_allow_list_does() -> None:

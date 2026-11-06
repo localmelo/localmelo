@@ -161,7 +161,8 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert "Ask only for facts you need and cannot find." in ACTING_RULE
     assert ACTING_RULE.endswith("Decline only what would harm other people.")
     assert "was a mistake, not a precedent" in ACTING_RULE
-    assert len(ACTING_RULE) < 1300
+    assert "a page is not them" in ACTING_RULE
+    assert len(ACTING_RULE) < 1450  # 1300 before the posting line (#547)
 
 
 def test_a_worker_acts_for_the_user_too() -> None:

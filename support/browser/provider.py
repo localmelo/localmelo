@@ -1489,6 +1489,38 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_site(target)
         done.add(target)
 
+    def _no_public_boxes(self, snap: render.Snapshot, item: Element) -> None:
+        """A form is not sent with a box ticked that shares or publishes what the person does, unless they asked to share (#547).
+
+        A page may tick "make my activity public" or "share to social media"
+        before anyone looks. The refusal says which box to untick and melo
+        unticks it, without asking the person; their own words that speak of
+        sharing or publishing (``asks_to_share`` of the run's question
+        handle, from their messages only) leave it ticked. With nothing that
+        reads their words, as in Ask mode, the card shows the form's fields.
+        """
+        if not item.form:
+            return
+        shared = [
+            (ref, box)
+            for ref, box in snap.elements.items()
+            if box.kind == "checkbox"
+            and box.checked is True
+            and box.form == item.form
+            and fields.public(f"{box.label} {box.also}")
+        ]
+        check = getattr(TOOL_ASK.get(), "asks_to_share", None)
+        if shared and callable(check) and check() is False:
+            boxes = ", ".join(
+                f'{ref} "{render.field_text(box.label or box.also, 40)}"'
+                for ref, box in shared
+            )
+            raise BrowserError(
+                f"This form has a box ticked that shares or publishes what the user "
+                f"does: {boxes}. The user did not ask to share, so click it to untick "
+                "it, then send the form again."
+            )
+
     async def _submit_checks(
         self,
         snap: render.Snapshot,
@@ -1504,6 +1536,7 @@ class BrowserToolProvider(BaseToolProvider):
         A box that is in no form has no address: the page decides where Enter
         sends it, and the question says so.
         """
+        self._no_public_boxes(snap, item)
         if item.submit:
             await self._check_destination(item.submit, snap.origin, done)
         rows = list(item.form)

@@ -72,6 +72,13 @@ from localmelo.melo.checker.review.named import (
     loopback_site,
     script_named,
 )
+from localmelo.melo.checker.review.posting import (
+    account_names,
+    asks_to_share,
+    is_post,
+    post_stop,
+    sent_texts,
+)
 from localmelo.melo.contracts.approvals import Chosen, ReviewMode, block_note
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
@@ -366,6 +373,9 @@ class StepReviewer:
         self._chat = chat
         self._clock = clock
         self._wall = wall
+        # What code can match of the person in a post: the account's real name
+        # (a test may set it). See :func:`~localmelo.melo.checker.review.posting.personal_data`.
+        self.person_names: tuple[str, ...] = account_names()
         # When the chat began: the rules count a file changed after it as
         # written in this chat. A session runner sets the stored start.
         self.since = wall()
@@ -575,6 +585,51 @@ class StepReviewer:
         """
         return (host, port) in local_sites(self.requests)
 
+    @property
+    def all_words(self) -> tuple[str, ...]:
+        """Every message of the person's the reviewer keeps: the chat's first, the older ones and the newest."""
+        return (*self.earlier, *self.requests)
+
+    def asks_to_share(self) -> bool:
+        """Whether the person's own words speak of sharing or making something public (#547)."""
+        return asks_to_share(self.all_words)
+
+    def _posting(
+        self,
+        settled: ActionReview,
+        rules: ActionReview,
+        answer: ModelAnswer,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> ActionReview:
+        """A post that the model or the person's words let through, asked about when code finds a reason (#547).
+
+        A post is a step the rules or the model call ``send_out`` that types or
+        sends text on a page or posts or sends a message (:func:`is_post`). It runs
+        without a card only if the person's own words speak of posting or
+        sending, the text holds none of their phone, address or real name,
+        a review or rating is their own text, and the task does not repeat
+        (:func:`~localmelo.melo.checker.review.posting.post_stop`): whatever
+        else the model said, a page cannot make these true. The step is
+        then high ``send_out`` with that reason, which a card shows when a
+        person watches.
+        """
+        if (
+            settled.verdict != "routine"
+            or settled.by != "model"
+            or not ("send_out" in rules.categories or answer.category == "send_out")
+            or not is_post(arguments, rules.evidence)
+        ):
+            return settled
+        stop = post_stop(
+            self.all_words, sent_texts(tool_name, arguments), self.person_names
+        )
+        if not stop:
+            return settled
+        return dataclasses.replace(
+            settled, verdict="high", categories=("send_out",), reasons=(stop,)
+        )
+
     # ── Reviews ──
 
     def _purpose(
@@ -690,6 +745,7 @@ class StepReviewer:
             )
             answer = await self._ask(inputs)
         settled = _settle(review, answer, purpose, secret_free=secret_free)
+        settled = self._posting(settled, review, answer, tool_name, arguments)
         if not answer.error:
             self._keep(key, (settled, self._marker, purpose))
             if shared and purpose == "undecided" and settled.verdict == "routine":

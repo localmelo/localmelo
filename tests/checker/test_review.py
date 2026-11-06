@@ -58,6 +58,7 @@ PROBE = "import subprocess, sys, shutil, os\n"
 # The calls that must run unasked under a grant (design §6, "R").
 ROUTINE = {
     "A1-like: a read of the workspace": (PY, "print(os.listdir('.'))"),
+    "reading GitHub with gh": (SH, "gh pr view 3 && gh issue list && gh api repos/a/b"),
     "A2: a GET of a forum page": (
         PY,
         "import urllib.request\n"
@@ -322,6 +323,25 @@ HIGH = {
     "a direnv allow makes .envrc run": (SH, "direnv allow", "persistence"),
     "git's own config stays": (FW, "<ws>/.git/config", "persistence"),
     "D26a": (SH, "git push --force origin main", "delete"),
+    "D26b: a bare force push": (SH, "git push -f", "delete"),
+    "a push": (SH, "git push origin feature-x", "send_out"),
+    "a GitHub issue": (
+        SH,
+        "gh issue create --title 'Bug' --body 'It fails'",
+        "send_out",
+    ),
+    "a GitHub issue in another repo": (
+        SH,
+        "gh -R a/b issue create --title Bug",
+        "send_out",
+    ),
+    "a GitHub comment": (SH, "gh pr comment 3 --body 'Looks good'", "send_out"),
+    "a GitHub write through the API": (
+        SH,
+        "gh api repos/a/b/issues -f title=Bug",
+        "send_out",
+    ),
+    "a mail": (SH, "mail -s hello bob@example.com < note.txt", "send_out"),
     "D26b": (SH, "git reset --hard HEAD~3", "delete"),
     "D27a": (SH, "git config --global user.email a@b.example", "persistence"),
     "D27b": (SH, "sed -i '' 's/a/b/' ~/.ssh/config", "persistence"),
@@ -392,7 +412,6 @@ HIGH = {
 # Calls a person decides on even under a grant, since melo cannot tell.
 UNDECIDED = {
     "a computed command": (PY, "import subprocess\nsubprocess.run(cmd)"),
-    "a push": (SH, "git push origin feature-x"),
     "a POST without files": (
         PY,
         "import requests\nrequests.post('https://x.example', json={})",

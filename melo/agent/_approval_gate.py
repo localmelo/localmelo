@@ -25,6 +25,7 @@ from localmelo.melo.agent._step_review import (
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.posting import personal_data, sent_texts
 from localmelo.melo.contracts.approvals import (
     ALLOWED_ONCE,
     BLOCKED_ALIKE,
@@ -637,6 +638,11 @@ _TYPING_DOUBT = (
 )
 # A click on a site the person's words name: still reviewed, by what it is on.
 _NAMED_SITE = " The user's words name this site."
+# What the text holds that code found of the person (#547).
+_PERSONAL = " The text holds the user's {kinds}."
+# The longest text melo types on a site the person named without a review of its
+# own: what the question about sending a form can show of a field (80).
+FIELD_CHARS: Final = 80
 # A click whose target melo cannot tell (#465): the person is asked.
 _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # The site questions that carry no value of melo's (#465): a click or a choice
@@ -644,6 +650,16 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # ``credentials`` into no category; a read (its address can hold a key), a
 # search, typing, a form sent, or any access not listed never does.
 _VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
+
+
+def _personal(
+    reviewer: StepReviewer, tool_name: str, arguments: Mapping[str, Any]
+) -> str:
+    """What of the person's own the text a step sends holds, in words (``phone number and address``), or ``""``."""
+    found = personal_data(
+        "\n".join(sent_texts(tool_name, arguments)), reviewer.person_names
+    )
+    return " and ".join(found)
 
 
 def _site_doubt(access: str, site: str, preview: str) -> str:
@@ -714,6 +730,10 @@ class _ToolAsk:
         """
         reviewer = self._reviewer
         return None if reviewer is None else reviewer.sign_in_value(handle, site)
+
+    def asks_to_share(self) -> bool | None:
+        """Whether the person's own words speak of sharing or making something public; None when nothing reads them (#547)."""
+        return None if self._reviewer is None else self._reviewer.asks_to_share()
 
     def written_local(self, host: str, port: int) -> bool:
         """Whether the person's own words write the server ``host:port`` on this computer (#547)."""
@@ -898,11 +918,16 @@ class _ToolAsk:
                     typing
                     and reviewer.names_host(site)
                     and not holds_secret(arguments, preview)
+                    and len(str(arguments.get("text") or "")) <= FIELD_CHARS
+                    and not _personal(reviewer, tool_name, arguments)
                 ):
-                    # The rules judge it: text with no secret in it, typed on a
-                    # site the person wrote themselves. Nothing leaves the page
-                    # until a form is sent, and that is reviewed on its own, so
-                    # a long form does not use up the turn's reviews (#547).
+                    # The rules judge it: a field's worth of text with no secret
+                    # in it and nothing of the person's own, typed on a site the
+                    # person wrote themselves. Nothing leaves the page until a
+                    # form is sent, and that is reviewed on its own, so a long
+                    # form does not use up the turn's reviews (#547). A longer
+                    # text is a post or a message: it is reviewed whole, with
+                    # all its words, before any of it is typed.
                     review = ActionReview(
                         "routine", (), (f"Types on {site}, which you named.",)
                     )
@@ -910,6 +935,8 @@ class _ToolAsk:
                     doubt = _site_doubt(access, site, preview)
                     if site and not reading and reviewer.names_host(site):
                         doubt += _NAMED_SITE
+                    if kinds := _personal(reviewer, tool_name, arguments):
+                        doubt += _PERSONAL.format(kinds=kinds)
                     review = await reviewer.review(
                         self._run.reviews,
                         tool_name=tool_name,

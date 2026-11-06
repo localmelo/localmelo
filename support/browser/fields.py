@@ -232,6 +232,22 @@ def consent(words: str) -> bool:
     return bool(_CONSENT.search(words))
 
 
+# Words of a box that makes what the person does public or shares it: "make my
+# activity public", "share to social media". A page may tick one before the person
+# sees the form; melo does not send the form with it ticked unless the person asked
+# to share (#547).
+PUBLIC_WORDS = (
+    r"\bpublic(ly)?\b|\bshar(e|es|ed|ing)\b|\bsocial\b|\bfacebook\b|\btwitter\b"
+    r"|\bcross-?post|\bpost (to|on) |公开|分享|朋友圈|同步到|社交"
+)
+_PUBLIC = re.compile(PUBLIC_WORDS, re.IGNORECASE)
+
+
+def public(words: str) -> bool:
+    """Whether a box's *words* make what the person does public or share it."""
+    return bool(_PUBLIC.search(words))
+
+
 def _js(pattern: str) -> str:
     return f"new RegExp({json.dumps(pattern)})"
 
@@ -282,6 +298,7 @@ var secretKind = function (a) {
 
 __all__ = [
     "CONSENT_WORDS",
+    "PUBLIC_WORDS",
     "HIDDEN",
     "consent",
     "JS_RULES",

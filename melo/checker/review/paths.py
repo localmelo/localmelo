@@ -189,7 +189,7 @@ class Findings:
     def add(self, category: str, reason: str, subject: str = "") -> None:
         """Record a finding; *subject* is what it is about, for the categories a person's words may name."""
         self.hits.append((category, self.site or reason, reason))
-        if category in NAMED_CAN_ASK:
+        if category in NAMED_CAN_ASK or subject:
             self.evidence.append((category, subject))
         self.high.setdefault(category, [])
         if reason not in self.high[category]:
