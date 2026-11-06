@@ -51,6 +51,7 @@ from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import (
     CARD_ONLY,
     CATEGORY_WORDS,
+    NAMED_CAN_ASK,
     SITE_KEY,
     UNREADABLE_SITE,
     WORDS_CAN_ALLOW,
@@ -234,13 +235,15 @@ class Chosen(ApprovalDecision):
 
     Allow once, allow on this site for this chat (``remember``), or Don't
     allow with the person's optional note as ``reason``: origin ``user``. A
-    card nobody answered counts as Don't allow: origin ``timeout``, with the
+    card nobody answered is no answer, not a no: origin ``timeout``, with the
     human text of what happened as ``reason`` and its code as ``unanswered``:
     ``time`` (no answer in ``wait_s`` seconds, :data:`AUTO_ASK_WAIT_S`) or
-    ``left`` (every viewer left first). On a denial, :func:`denial_text` says
-    what happened and not to try the step again in this turn. ``again`` is set
-    on the refusal of a step declined earlier in the turn: nobody was asked
-    this time.
+    ``left`` (every viewer left first). :func:`denial_text` tells the model what
+    happened: after a Don't allow, not to try the step again in this turn;
+    after no answer, to go on with the rest and try it again in their next
+    turn, when melo asks again. ``again`` is set on the refusal of a step
+    declined, or left unanswered, earlier in the turn: nobody was asked this
+    time (a card for the same step does not wait again in the same turn).
     """
 
     again: bool = False
@@ -608,31 +611,37 @@ ALLOW_ONCE_S: Final = 30 * 60
 ALLOWED_ONCE: Final = "allowed once"
 
 # Auto mode (#465): the categories of a stopped step a person may allow from a
-# card: those the user's words can allow, a step melo could not check, and the
-# kinds only a person allows (paying, an account's settings). A step with any
-# other category (credentials, system settings, an app driven by a script,
-# something that runs later, code from the internet, a failed review, localmelo
-# itself) stays blocked, as before.
-ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque"} | CARD_ONLY
+# card: those the user's words can allow, a step melo could not check, a step
+# whose review failed (it timed out, could not be read or ran out of room: the
+# person decides it instead of the step stopping without a word), and the kinds
+# only a person allows (paying, an account's settings). Credentials and code
+# from the internet count too when every finding is about a key or a script the
+# person's own words name (:data:`NAMED_CAN_ASK`, set by code in the run). A step
+# with any other category (system settings, an app driven by a script,
+# something that runs later, localmelo itself) stays blocked, as before.
+ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque", "unreviewed"} | CARD_ONLY
 
 
 def asks_in_auto(review: ActionReview | None) -> bool:
     """Whether auto mode asks a person about a step it stopped, when one can be asked (#465).
 
     A step whose review is not routine and whose every category is in
-    :data:`ASKS_IN_AUTO`. A step nothing reviewed, or one without a
-    category (undecided and never settled), is not asked about.
+    :data:`ASKS_IN_AUTO`, or one the person's words name
+    (``review.named``, only :data:`NAMED_CAN_ASK` categories count). A step
+    nothing reviewed, or one without a category (undecided and never
+    settled), is not asked about.
     """
     return (
         review is not None
         and review.verdict != "routine"
         and bool(review.categories)
-        and set(review.categories) <= ASKS_IN_AUTO
+        and set(review.categories) <= ASKS_IN_AUTO | set(review.named) & NAMED_CAN_ASK
     )
 
 
 # How long the card auto mode shows waits for the person (#465): a card nobody
-# answers in this time counts as Don't allow. The one place this time is set.
+# answers in this time did not run its step, and is not a no: the step waits for
+# their answer (:data:`UNANSWERED_NOTE`). The one place this time is set.
 AUTO_ASK_WAIT_S: Final = 60.0
 
 
@@ -645,7 +654,7 @@ def wait_words(seconds: float) -> str:
 
 
 # The human text of a card nobody answered in time, and of one whose every
-# viewer left before an answer (each counts as Don't allow); code reads
+# viewer left before an answer (each is no answer yet, not a Don't allow); code reads
 # ``Chosen.unanswered`` ("time", "left"), never these.
 NO_ANSWER: Final = f"no answer within {wait_words(AUTO_ASK_WAIT_S)}"
 LEFT_UNANSWERED: Final = "the chat was closed before an answer"
@@ -657,7 +666,7 @@ class AskWatch(Protocol):
     Auto mode asks only while :meth:`watched` (a console, the app or the
     terminal shows the chat); with nobody watching, the step is blocked as
     before. :meth:`ask` asks through *asking* and ends a card nobody answers
-    as a deny with origin ``timeout``.
+    as a refusal with origin ``timeout``: the step did not run and waits.
     """
 
     async def watched(self) -> bool:
@@ -681,7 +690,7 @@ class AutoPolicy:
     (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
     (the chat's card, #465), and the answer comes back as :class:`Chosen`.
     With a *watch*, it asks only while a person sees the chat, and a card
-    nobody answers counts as Don't allow (:data:`AUTO_ASK_WAIT_S`). Without
+    nobody answers did not run its step and is not a no (:data:`AUTO_ASK_WAIT_S`). Without
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
     watching, and for any other stopped call, it is denied with origin
     ``auto`` and the category in a few words as its reason. A call nothing
@@ -797,7 +806,7 @@ class AutoPolicy:
             # The person chooses on the card instead of a block (#465). A
             # grant of the chat that covers the step answers with origin
             # "session"; a withdrawn card stays what it is. A card nobody
-            # answered counts as Don't allow.
+            # answered did not run: no answer, not a no.
             decided = await (
                 asking.decide(request) if watch is None else watch.ask(request, asking)
             )
@@ -1115,20 +1124,23 @@ DECLINED_AGAIN: Final = (
 
 
 # A card nobody answered (#465), and the same step tried again in the turn;
-# {reason} is what happened (:data:`NO_ANSWER`, :data:`LEFT_UNANSWERED`).
+# {reason} is what happened (:data:`NO_ANSWER`, :data:`LEFT_UNANSWERED`). No
+# answer is not a no: the person may be away. The step waits, the model goes on
+# with the rest of the work, and melo asks again when they are back (the next
+# turn: a new run asks about the step again).
 UNANSWERED_NOTE: Final = (
-    "The user did not answer the card for this step ({reason}), so it counts as "
-    "Don't allow and the step did not run.\n"
-    "Do not try it again in this turn or reach the same result another way: "
-    "melo will not ask them again. Go on with any work that does not need it, "
-    "and say in your answer what you could not do."
+    "The user has not answered the card for this step yet ({reason}), so it did "
+    "not run. That is not a no: they may be away.\n"
+    "Go on with the parts of the task that do not need it, and say in your answer "
+    "which part waits for their answer. melo asks them again when they are back: "
+    "try the step again in their next turn."
 )
 UNANSWERED_AGAIN: Final = (
-    "The user did not answer the card for this step earlier in this turn "
-    "({reason}), so it did not run and they were not asked again.\n"
-    "Do not try it again in this turn or reach the same result another way. Go on "
-    "with any work that does not need it, and say in your answer what you could "
-    "not do."
+    "The user has not answered the card for this step yet ({reason}), so it did "
+    "not run, and melo did not ask again in this turn.\n"
+    "Go on with the parts of the task that do not need it, and say in your answer "
+    "which part waits for their answer. melo asks them again when they are back: "
+    "try the step again in their next turn."
 )
 
 

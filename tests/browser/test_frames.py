@@ -15,6 +15,7 @@ from localmelo.support.browser.driver import (
     View,
 )
 from localmelo.support.browser.pagescript import CHECKBOX_INSET, PageScriptActs, _aims
+from localmelo.support.browser.sites import TYPE_PREFIX
 from localmelo.tests.browser.fakes import button
 from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
 from localmelo.tests.browser.test_native_input import native, opened
@@ -285,3 +286,21 @@ async def test_the_controls_of_a_box_from_another_site_are_listed_and_clicked_by
             await driver.act(None, Act("click", raw.url, gone, doc=raw.doc))
     finally:
         await driver.close()
+
+
+async def test_typing_in_a_box_from_another_site_asks_about_that_site_not_the_page() -> (
+    None
+):
+    """A page the person named says nothing of the box from another site in it (#547)."""
+    box = Element(
+        "textbox", "Comment", frame="x2_1_90", site="https://accounts.example.org"
+    )
+    driver = world(box, button("Post"))
+    asks = Asks()
+    tools = await tools_of(driver)
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_type", ref="e1", text="hello")
+    [(name, arguments, _)] = [q for q in asks.asked if q[0].startswith(TYPE_PREFIX)]
+    assert name == TYPE_PREFIX + "https://accounts.example.org"
+    assert arguments["site"] == "accounts.example.org"

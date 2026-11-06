@@ -17,7 +17,9 @@ passes ``--restore-last-session``), so sign-ins are kept from one chat to the
 next and across restarts, those whose cookie lasts only for the session too:
 such cookies are on disk in the profile while melo is not running. Chrome
 offers to save no password, address or card there. The pages Chrome brings back
-with the session go at once on a fresh start. Downloads are refused.
+with the session go at once on a fresh start. A page's download is saved in
+melo's own downloads folder (:func:`downloads_folder`), never opened or run,
+and the next step says so.
 
 **A window for the person.** To take a page over the person needs a real
 window, and a Chrome without one cannot show one. :meth:`ChromeBackgroundDriver.show_window`
@@ -76,7 +78,10 @@ listed sign-in helper and to addresses that name this computer or its
 network (``Fetch`` for the whole browser). melo answers a listed helper's
 request from its own sign-in page itself, blocks the others before they are
 sent and tells the step (:meth:`ChromeBackgroundDriver.local_attempts`), and
-lets anything else go on. No permission is ever granted.
+lets anything else go on. No permission is ever granted. One server on this
+computer is let through for a page: the exact host and port the person wrote
+in their own words (:meth:`ChromeBackgroundDriver.allow_local`, #547), never
+another local address and never one of melo's own ports.
 
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
@@ -106,7 +111,7 @@ import shutil
 import signal
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, Final, cast
 from urllib.parse import urlsplit
@@ -120,6 +125,7 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Dialog,
+    Download,
     Shot,
     StaleElementError,
     TabInfo,
@@ -162,6 +168,9 @@ MISSING_MESSAGE = (
     "windows (/browser safari), which come to the front."
 )
 STOPPED_MESSAGE = "Chrome stopped. Ask again: melo starts it again."
+# What says which servers on this computer a driver's pages may reach, as
+# ``(address, port)``, whenever a request asks (see allow_local).
+LocalGrant = Callable[[], Iterable[tuple[str, int]]]
 # The size of a tab's window, in page pixels; the page's view (and its picture)
 # is as wide, and lower by the window's own bar.
 VIEW_W = 1280
@@ -323,6 +332,18 @@ def launch_args(
     return args
 
 
+# A page's download is saved by an id, not by the name the page chose: no name or
+# extension of the page's is on this disk. A download past this size is cut, and
+# at most this many are followed at once (#547).
+MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
+MAX_DOWNLOADS = 50
+
+
+def downloads_folder(profile: str) -> str:
+    """Where a page's downloads are saved: ``downloads`` next to the profile, private like it."""
+    return os.path.join(os.path.dirname(profile.rstrip("/")), "downloads")
+
+
 def keep_sessions(profile: str) -> None:
     """Have Chrome keep melo's last session in *profile*, its session cookies with it.
 
@@ -446,6 +467,13 @@ class _Chrome:
         self.local: LocalRule | None = None
         self.jobs: set[asyncio.Task[None]] = set()
         self.attempts: dict[str, list[LocalAttempt]] = {}
+        # What says which servers on this computer a page's driver may reach (the
+        # person wrote them, in a run that is still going), by page; a page
+        # with none here reaches no local address.
+        self.written: dict[str, LocalGrant] = {}
+        # Downloads in progress or finished and not told yet, by id: the page's
+        # suggested name, its frame, the bytes so far, and the state.
+        self.saving: dict[str, dict[str, Any]] = {}
         self.relays = asyncio.Semaphore(local_apps.MAX_RELAYS)
         # Starting again (see "A window for the person"): the command line with a
         # window or without, and how long a start may take; whether this one has
@@ -525,7 +553,16 @@ class _Chrome:
             chrome._reader = asyncio.ensure_future(chrome._read(reader))
             async with asyncio.timeout(timeout_s):
                 await chrome.request("Browser.getVersion")
-            await chrome.request("Browser.setDownloadBehavior", {"behavior": "deny"})
+            folder = downloads_folder(profile)
+            make_profile(folder)
+            await chrome.request(
+                "Browser.setDownloadBehavior",
+                {
+                    "behavior": "allowAndName",
+                    "downloadPath": folder,
+                    "eventsEnabled": True,
+                },
+            )
             if local is not None:
                 # For the whole browser: every tab, frame and worker, before any loads.
                 chrome.local = local
@@ -606,6 +643,21 @@ class _Chrome:
         elif method == "Page.navigatedWithinDocument":
             if params.get("frameId") == self.main.get(session):
                 self.navs[session] = self.navs.get(session, 0) + 1
+        elif method == "Browser.downloadWillBegin":
+            guid = str(params.get("guid") or "")
+            if guid and len(self.saving) < MAX_DOWNLOADS:
+                self.saving[guid] = {
+                    "name": str(params.get("suggestedFilename") or "")[:200],
+                    "frame": str(params.get("frameId") or ""),
+                    "size": 0,
+                    "state": "started",
+                }
+            elif guid:
+                # One that cannot be tracked is not cut at MAX_DOWNLOAD_BYTES
+                # either, so it is not saved.
+                self._cancel(guid)
+        elif method == "Browser.downloadProgress":
+            self._downloading(str(params.get("guid") or ""), params)
         elif method == "Target.targetDestroyed":
             target = str(params.get("targetId") or "")
             told = self.watch.pop(target, None)
@@ -636,11 +688,19 @@ class _Chrome:
         method = "Fetch.failRequest"
         answer: dict[str, Any] = {"requestId": ident, "errorReason": "Failed"}
         blocked: LocalAttempt | None = None
+        frame, page = str(params.get("frameId") or ""), ""
         try:
             request = params.get("request")
             request = request if isinstance(request, dict) else {}
             origin = local_apps.origin_of(request.get("headers"))
-            verdict = rule.decide(str(request.get("url") or ""), origin)
+            url = str(request.get("url") or "")
+            verdict = rule.decide(url, origin)
+            if verdict.kind == "block" and verdict.helper is None and self.written:
+                # The person may have written this server: judged for the page
+                # that sent the request (its driver's words), never for another.
+                page = await self._page_of(frame)
+                if page in self.written:
+                    verdict = rule.decide(url, origin, frozenset(self.written[page]()))
             if verdict.kind == "pass":
                 method, answer = "Fetch.continueRequest", {"requestId": ident}
             elif verdict.kind == "relay" and verdict.helper is not None:
@@ -658,7 +718,8 @@ class _Chrome:
             else:
                 answer["errorReason"] = "BlockedByClient"
                 named = verdict.helper.name if verdict.helper is not None else None
-                blocked = LocalAttempt(verdict.host, verdict.port, origin, named)
+                if verdict.port:  # a URL melo could not read has no port to tell
+                    blocked = LocalAttempt(verdict.host, verdict.port, origin, named)
         except local_apps.RelayError as exc:
             answer["errorReason"] = exc.reason
         except Exception:  # never leave a request paused: it fails instead
@@ -677,7 +738,7 @@ class _Chrome:
             pass  # Chrome stopped
         if blocked is not None:
             with contextlib.suppress(BrowserError):
-                page = await self._page_of(str(params.get("frameId") or ""))
+                page = page or await self._page_of(frame)
                 if page:
                     self._keep(page, blocked)
 
@@ -812,6 +873,29 @@ class _Chrome:
             stream.cancel()
             with contextlib.suppress(Exception):
                 stream.on_end()
+
+    def _downloading(self, guid: str, params: dict[str, Any]) -> None:
+        """A download's progress: its size, its end, and a stop at :data:`MAX_DOWNLOAD_BYTES`."""
+        entry = self.saving.get(guid)
+        if entry is None:
+            return
+        got = params.get("receivedBytes")
+        entry["size"] = got if isinstance(got, int) and got >= 0 else entry["size"]
+        state = str(params.get("state") or "")
+        if state in ("completed", "canceled"):
+            entry["state"] = state
+        elif entry["size"] > MAX_DOWNLOAD_BYTES and not entry.get("cut"):
+            entry["cut"] = True
+            self._cancel(guid)
+
+    def _cancel(self, guid: str) -> None:
+        job = self.loop.create_task(self._cut(guid))
+        self.jobs.add(job)
+        job.add_done_callback(self.jobs.discard)
+
+    async def _cut(self, guid: str) -> None:
+        with contextlib.suppress(BrowserError):
+            await self.request("Browser.cancelDownload", {"guid": guid})
 
     def request(
         self,
@@ -1196,6 +1280,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._call_s = call_timeout_s
         self._browser: _Chrome | None = None
         self._mine: set[str] = set()
+        self._written: LocalGrant | None = None
         # The id each tab was given (its first target id) and its target now: a
         # restart of Chrome changes the target, never the id (see _follow).
         self._ids: dict[str, str] = {}
@@ -1263,6 +1348,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                     kept.pop(session, None)
             for target in self._mine:
                 browser.attempts.pop(target, None)
+                browser.written.pop(target, None)
         self._mine.clear()
         self._ids.clear()
         self._lost.clear()
@@ -1288,6 +1374,9 @@ class ChromeBackgroundDriver(PageScriptActs):
             self._said = {renamed[t]: d for t, d in self._said.items() if t in renamed}
             self._sessions.clear()
             self._targets.clear()
+        if browser is not self._browser and browser is not None:
+            for target in self._mine:  # the new Chrome has no grant for them yet
+                self._grant(browser, target)
         self._browser = browser
 
     async def _settled(self) -> None:
@@ -1583,12 +1672,38 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._mine.add(target)
         self._ids[target] = target
         browser.claimed.add(target)
+        self._grant(browser, target)
         # The page Chrome started with is nobody's: it goes once melo has one of its own.
         for spare in list(browser.spare):
             browser.spare.discard(spare)
             with contextlib.suppress(BrowserError):
                 await self._cmd("Target.closeTarget", {"targetId": spare})
         return target
+
+    def allow_local(self, grant: LocalGrant | None) -> None:
+        """Let this driver's pages reach exactly the servers on this computer *grant* says, as ``(address, port)`` (#547).
+
+        *grant* says which servers the person wrote in their own words in this
+        run (``localhost`` is ``127.0.0.1``), each time a request asks, so it
+        ends with the run it belongs to: a run that is over says none. It
+        replaces the last one, for every tab of this driver, new ones and the
+        pages of a Chrome started again included; ``None`` (the default, and
+        what a chat that forgets its approvals gives) reaches no local
+        address. Only :class:`LocalRule` lets a request go on, and only to
+        exactly one of these: melo's own ports and every other local address
+        stay blocked.
+        """
+        self._written = grant
+        if self._browser is not None:
+            for target in self._mine:
+                self._grant(self._browser, target)
+
+    def _grant(self, browser: _Chrome, target: str) -> None:
+        """Give *target* (one of this driver's pages) what :meth:`allow_local` set, or nothing."""
+        if self._written is not None:
+            browser.written[target] = self._written
+        else:
+            browser.written.pop(target, None)
 
     def _drop(self, target: str) -> None:
         self._mine.discard(target)
@@ -1601,6 +1716,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                 self._browser.end_cast(session)
             self._browser.claimed.discard(target)
             self._browser.attempts.pop(target, None)
+            self._browser.written.pop(target, None)
         if self._current == target:
             self._current = None
 
@@ -1658,6 +1774,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                     self._mine.add(target)
                     self._ids[target] = target
                     browser.claimed.add(target)
+                    self._grant(browser, target)
                     grew = True
         for gone in self._mine - alive:
             self._drop(gone)
@@ -1677,6 +1794,41 @@ class ChromeBackgroundDriver(PageScriptActs):
             raise BrowserError("Chrome no longer has that tab.")
         self._current = target
         return await self._here(target)
+
+    async def downloads(self) -> list[Download]:
+        """The downloads this driver's pages made that ended since the last call, once (#547).
+
+        A download is this driver's when the frame that started it is in one
+        of its pages; one whose page cannot be told is dropped, not given to
+        another chat.
+        """
+        browser = self._browser
+        if browser is None:
+            return []
+        found: list[Download] = []
+        for guid, entry in list(browser.saving.items()):
+            if entry["state"] == "started":
+                continue
+            target = await browser._page_of(entry["frame"])
+            if target and target not in self._mine:
+                continue  # another chat's: it tells its own
+            browser.saving.pop(guid, None)
+            if not target:
+                continue
+            state = (
+                "done"
+                if entry["state"] == "completed"
+                else "too big" if entry.get("cut") else "failed"
+            )
+            found.append(
+                Download(
+                    entry["name"],
+                    int(entry["size"]),
+                    state,
+                    downloads_folder(browser.profile),
+                )
+            )
+        return found
 
     def local_attempts(self) -> list[LocalAttempt]:
         """The requests to this computer melo blocked on this driver's pages since the last call, once."""

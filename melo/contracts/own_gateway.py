@@ -43,7 +43,7 @@ _registered: list[tuple[int | None, tuple[str, ...]]] = []
 _expected: list[int] = []
 
 
-def _homes() -> list[str]:
+def homes() -> list[str]:
     """The home folder of this process, and the account's own when they differ."""
     homes = [os.path.expanduser("~")]
     with contextlib.suppress(KeyError, OSError):
@@ -103,7 +103,7 @@ def current() -> OwnGateway:
     The ports are the registered gateways' (newest first) and the expected ones.
     """
     found: list[str] = []
-    named = [f for home in _homes() for f in default_files(home)]
+    named = [f for home in homes() for f in default_files(home)]
     named += [
         part for _, files in _registered for f in files for part in _with_parts(f)
     ]

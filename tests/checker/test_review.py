@@ -58,6 +58,7 @@ PROBE = "import subprocess, sys, shutil, os\n"
 # The calls that must run unasked under a grant (design §6, "R").
 ROUTINE = {
     "A1-like: a read of the workspace": (PY, "print(os.listdir('.'))"),
+    "reading GitHub with gh": (SH, "gh pr view 3 && gh issue list && gh api repos/a/b"),
     "A2: a GET of a forum page": (
         PY,
         "import urllib.request\n"
@@ -173,6 +174,9 @@ ROUTINE = {
         "npm test && npm run build && make test && "
         "mkdir -p out && echo hi > out/a.txt && ls -la ~",
     ),
+    # The project's own .envrc is the user's convention for its variables (#547).
+    "the workspace's .envrc by the file tool": (FW, "<ws>/.envrc"),
+    "the workspace's .envrc by a redirect": (SH, "echo 'export A=1' > .envrc"),
     "other: a comment and a heredoc to a file in the workspace": (
         SH,
         "# write notes\ncat > notes.txt <<EOF\nrm -rf ~\nEOF",
@@ -315,7 +319,58 @@ HIGH = {
     "D23": (SH, "nohup python bot.py > bot.log 2>&1 &", "persistence"),
     "D24": (PY, "import base64\nexec(base64.b64decode('cHJpbnQoMSk='))", "opaque"),
     "D25": (FW, "<ws>/.git/hooks/pre-commit", "persistence"),
+    # Writing .envrc runs nothing until direnv trusts it, so trusting it stops.
+    "a direnv allow makes .envrc run": (SH, "direnv allow", "persistence"),
+    "git's own config stays": (FW, "<ws>/.git/config", "persistence"),
     "D26a": (SH, "git push --force origin main", "delete"),
+    "D26b: a bare force push": (SH, "git push -f", "delete"),
+    "a push": (SH, "git push origin feature-x", "send_out"),
+    "a GitHub issue": (
+        SH,
+        "gh issue create --title 'Bug' --body 'It fails'",
+        "send_out",
+    ),
+    "a GitHub issue in another repo": (
+        SH,
+        "gh -R a/b issue create --title Bug",
+        "send_out",
+    ),
+    "a GitHub comment": (SH, "gh pr comment 3 --body 'Looks good'", "send_out"),
+    "a GitHub write through the API": (
+        SH,
+        "gh api repos/a/b/issues -f title=Bug",
+        "send_out",
+    ),
+    # gh takes options between its words, and writes more than issues.
+    "a GitHub issue with the repo between": (
+        SH,
+        "gh issue -R a/b create --title Bug",
+        "send_out",
+    ),
+    "a GitHub review with the repo after the noun": (
+        SH,
+        "gh pr --repo a/b review 3 --approve",
+        "send_out",
+    ),
+    "a GitHub secret": (SH, "gh secret set TOKEN --body x", "send_out"),
+    "a GitHub workflow": (SH, "gh workflow run ci.yml", "send_out"),
+    "a GitHub write through the API, any case": (
+        SH,
+        "gh api --method=patch repos/a/b -f name=c",
+        "send_out",
+    ),
+    "a GitHub repo deleted": (SH, "gh repo delete a/b --yes", "delete"),
+    "a GitHub release deleted, the repo between": (
+        SH,
+        "gh release -R a/b delete v1",
+        "delete",
+    ),
+    "a GitHub deletion through the API": (
+        SH,
+        "gh api -X DELETE repos/a/b",
+        "delete",
+    ),
+    "a mail": (SH, "mail -s hello bob@example.com < note.txt", "send_out"),
     "D26b": (SH, "git reset --hard HEAD~3", "delete"),
     "D27a": (SH, "git config --global user.email a@b.example", "persistence"),
     "D27b": (SH, "sed -i '' 's/a/b/' ~/.ssh/config", "persistence"),
@@ -386,7 +441,6 @@ HIGH = {
 # Calls a person decides on even under a grant, since melo cannot tell.
 UNDECIDED = {
     "a computed command": (PY, "import subprocess\nsubprocess.run(cmd)"),
-    "a push": (SH, "git push origin feature-x"),
     "a POST without files": (
         PY,
         "import requests\nrequests.post('https://x.example', json={})",

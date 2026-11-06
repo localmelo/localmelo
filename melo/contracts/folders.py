@@ -91,6 +91,22 @@ CREDENTIAL_PLACES: Final = (
     ".vault-token",
     ".oci",
 )
+# Under the home folder: a write here makes something run later on its own
+# (launch agents, shell startup files, git and ssh settings).
+PERSISTENCE_PLACES: Final = (
+    "Library/LaunchAgents",
+    ".zshrc",
+    ".zprofile",
+    ".zshenv",
+    ".zlogin",
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+    ".config/fish",
+    ".ssh/config",
+    ".gitconfig",
+    ".config/git",
+)
 # melo's own data folder, under the home folder. ``LOCALMELO_MEMORY_DIR``
 # names another one when it is set.
 MELO_DATA: Final = ".cache/localmelo"
@@ -141,6 +157,11 @@ NEVER_TEXT: Final[dict[str, str]] = {
 ASKED_TEXT: Final = (
     "{access} {folder} outside the workspace needs the user's OK; they were asked."
 )
+
+
+# The reason of the decision that lets a call on a path outside the workspace run
+# because the person's own words name the folder (#547).
+NAMED_FOLDER: Final = "you named this folder"
 
 
 @dataclass(frozen=True)
@@ -370,6 +391,23 @@ def melo_data_folders(home: str | None = None) -> tuple[str, ...]:
     return tuple(folders)
 
 
+def closed_places(home: str | None = None) -> tuple[str, ...]:
+    """The places no step may write, whoever allowed it: melo's data, credentials, and what runs later.
+
+    Real paths in the file system's own case: melo's data folders, the key
+    and credential places (:data:`CREDENTIAL_PLACES`, which includes the
+    keychains) and :data:`PERSISTENCE_PLACES`, under the home folder.
+    """
+    base = _home(home)
+    return (
+        *melo_data_folders(home),
+        *(
+            canonical_path(os.path.join(base, place))
+            for place in (*CREDENTIAL_PLACES, *PERSISTENCE_PLACES)
+        ),
+    )
+
+
 def never_offered(
     path: str, *, home: str | None = None, canonical: bool = False
 ) -> NeverReason | None:
@@ -487,6 +525,7 @@ __all__ = [
     "DEVICE_PLACES",
     "MELO_DATA",
     "NEVER_TEXT",
+    "PERSISTENCE_PLACES",
     "SYSTEM_OPEN",
     "SYSTEM_PLACES",
     "WRITE_TOOLS",
@@ -504,6 +543,7 @@ __all__ = [
     "fd_path",
     "home_label",
     "is_alias",
+    "closed_places",
     "melo_data_folders",
     "never_offered",
     "never_text",

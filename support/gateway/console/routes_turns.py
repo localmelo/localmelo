@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
     block_to_allow,
@@ -187,7 +188,7 @@ def _compose(request: CancelRequest) -> str:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
         )
-    words = request.text.strip()
+    words = hide_passwords(request.text).strip()
     if not words:
         if not request.images and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
@@ -229,9 +230,15 @@ async def _staged(console: Console, ids: list[str]) -> list[Staged]:
 
 
 class _Sent:
-    """A checked send: its words, the whole text a code rule reads, and what it carries."""
+    """A checked send: what the person typed, its words, the whole text a code rule reads, and what it carries.
 
-    def __init__(self, words: str, whole: str, extras: TurnExtras) -> None:
+    ``typed`` is the person's text as it is kept and shown (the chat's title,
+    the message, a queued message, a routed echo, a task's words): a password
+    in it is already cut out, once, where it came in (:func:`_sent`).
+    """
+
+    def __init__(self, typed: str, words: str, whole: str, extras: TurnExtras) -> None:
+        self.typed = typed
         self.words = words
         self.whole = whole
         self.extras = extras
@@ -258,7 +265,10 @@ async def _sent(
     """
     attached = _files(request.attachments)
     staged = await _staged(console, request.images)
-    words = request.text.strip()
+    # The one place a message's password is cut out: before it is checked,
+    # routed, queued, titled or stored, so no copy of it exists below (#547).
+    typed = hide_passwords(request.text)
+    words = typed.strip()
     if not words:
         if not staged and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
@@ -269,7 +279,9 @@ async def _sent(
         raise ApiError(
             400, "invalid_request", t("errors.filesTooLong", n=MAX_QUERY_LEN)
         )
-    return _Sent(words, whole, TurnExtras(tuple(attached), tuple(images_of(staged))))
+    return _Sent(
+        typed, words, whole, TurnExtras(tuple(attached), tuple(images_of(staged)))
+    )
 
 
 def _submission_error(exc: SubmissionError) -> ApiError:
@@ -307,7 +319,7 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
 
 
 async def _create_for_task(
-    console: Console, body: CreateRequest, composed: str, key: str | None
+    console: Console, body: CreateRequest, typed: str, composed: str, key: str | None
 ) -> JSONResponse:
     """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
 
@@ -321,7 +333,7 @@ async def _create_for_task(
     key go one at a time, with its cancel.
     """
     assert body.turn is not None
-    text = body.turn.text
+    text = typed
     # After the creates of a message under the key, and with the cancel of the key;
     # a cancel may still overtake a create of a message while it builds.
     async with console.sessions.keyed(key), console.sessions.keyed(lock_name(key)):
@@ -399,14 +411,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
         sent: _Sent | None = None
         if body.turn is not None:
             sent = await _sent(console, body.turn, None)
-            first = (body.turn.text, sent.words)
+            first = (sent.typed, sent.words)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
         if body.turn is not None and body.turn.as_task:
             assert sent is not None
             if sent.extras.images:
                 raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
-            return await _create_for_task(console, body, sent.whole, key)
+            return await _create_for_task(console, body, sent.typed, sent.whole, key)
         try:
             entry, turn = await console.sessions.create(
                 body.workspace,
@@ -455,7 +467,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 None
                 if pictured
                 else await console.front_for(session_id).route(
-                    body.text, sent.whole, as_task=body.as_task, key=key
+                    sent.typed, sent.whole, as_task=body.as_task, key=key
                 )
             )
             if echo is not None:
@@ -467,14 +479,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
-                echo = await console.asks.queue(session_id, body.text, sent.whole, key)
+                echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")
         try:
             turn, resumed = await console.sessions.start_turn(
                 session_id,
-                body.text,
+                sent.typed,
                 sent.words,
                 client_request_id=key,
                 extras=sent.extras,
@@ -557,7 +569,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         ):
             raise ApiError(409, "not_your_turn", t("errors.noteInternalTurn"))
         staged = await _staged(console, body.images)
-        text = body.text.strip()
+        text = hide_passwords(body.text).strip()
         if not text and not staged:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
         if len(text) > MAX_NOTE_CHARS:
@@ -714,7 +726,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         title: str | None = None
         if body.title is not None:
             try:
-                title = check_title(body.title)
+                title = check_title(hide_passwords(body.title))
             except ValueError as exc:
                 raise ApiError(400, "invalid_request", str(exc)) from exc
         if body.workspace is not None:

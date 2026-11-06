@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
+from localmelo.melo.schema import EXTEND_STEPS
 from localmelo.support.backends import providers_for
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.thinking import is_local, thinking_off_fields
@@ -119,7 +120,8 @@ def configured_attempt_options(
     never reflects and goes straight to its total. ``true`` leaves the policy
     as the caller set it, so an explicit ``none`` stays. ``[agent]
     steps_per_attempt``, when set, is the attempt length. The names in *keep*
-    (``attempt_policy``, ``steps_per_attempt``) retain the caller's values; a
+    (``attempt_policy``, ``steps_per_attempt``, ``extend_steps``) retain the
+    caller's values, and ``max_steps`` there turns the extension off; a
     value the config holds that the options refuse raises ``ValueError``.
     """
     if cfg is None:
@@ -129,6 +131,11 @@ def configured_attempt_options(
         changes["attempt_policy"] = "none"
     if "steps_per_attempt" not in keep and cfg.agent.steps_per_attempt is not None:
         changes["steps_per_attempt"] = cfg.agent.steps_per_attempt
+    if not options.extend_steps and not {"extend_steps", "max_steps"} & set(keep):
+        # A person's session goes on by itself while it makes progress, instead
+        # of stopping for them to press Continue (#547). A step budget the
+        # person typed (--max-steps) is exact: it is not extended.
+        changes["extend_steps"] = EXTEND_STEPS
     changes = {
         name: value
         for name, value in changes.items()

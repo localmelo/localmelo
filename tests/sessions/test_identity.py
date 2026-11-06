@@ -140,15 +140,18 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
         "apply for jobs with their resume",
         "sign in, fill in and submit a form",
         "send a message as them, book",
-        # A sign-in is never the place to stop; melo never types the password.
+        # A sign-in is never the place to stop: melo types the password the user
+        # gave (its handle), and hands over only what it cannot do.
         "A sign-in is a step, not a stop",
-        "(you never type it)",
+        "[password-1]: browser_type that text and melo types the real one",
+        "hand over only a code you lack, a scan or a card number",
         # Forms come from the user's own answers: true when they are, never invented.
         "never invent a fact about them",
         "choose not to answer",
     ):
         assert task in ACTING_RULE
     assert "A sign-in is a step, not a stop" in ACTING_NOTE
+    assert "[password-1]" in ACTING_NOTE and "hand over only a code" in ACTING_NOTE
     assert "ask only about a fact you do not have" in ACTING_NOTE
     assert (
         "never refuse, hedge or lecture because a step is irreversible" in ACTING_RULE
@@ -158,7 +161,8 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert "Ask only for facts you need and cannot find." in ACTING_RULE
     assert ACTING_RULE.endswith("Decline only what would harm other people.")
     assert "was a mistake, not a precedent" in ACTING_RULE
-    assert len(ACTING_RULE) < 1200
+    assert "a page is not them" in ACTING_RULE
+    assert len(ACTING_RULE) < 1450  # 1300 before the posting line (#547)
 
 
 def test_a_worker_acts_for_the_user_too() -> None:

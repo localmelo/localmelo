@@ -195,6 +195,8 @@ from localmelo.melo.schema import (
     CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
+    EXTEND_WHEN,
+    MAX_EXTENSIONS,
     MAX_REFLECTION_CHARS,
     PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
@@ -835,6 +837,8 @@ class _RunState:
     # last, and the steps of this run that did not count for it.
     call_refused: bool = False
     free_steps: int = 0
+    # How many times the run was given more steps for making progress (#547).
+    extensions: int = 0
     refused_calls: set[str] = dataclasses.field(default_factory=set)
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
@@ -1426,6 +1430,19 @@ class Agent(_RecallLoop, _NotesLoop):
                 )
             )
         return tools
+
+    def hide_passwords(self, text: str) -> str:
+        """*text*, a message of the person's, with each password it gives replaced by its handle (#547).
+
+        melo signs in with a password the person gives in a message, but the
+        value never reaches a model, a record, a log or a memory: the handle
+        (``[password-1]``) stands for it, and only the browser tool, asked by
+        code that checked the site and the turn, types the value. A caller
+        that stores or shows the person's message calls this first (a
+        session's runner does); :meth:`run_task` does it again, which changes
+        nothing. See :mod:`localmelo.melo.contracts.sign_in`.
+        """
+        return self._reviewer.hide_passwords(text)
 
     async def run_tool(
         self,
@@ -2043,6 +2060,7 @@ class Agent(_RecallLoop, _NotesLoop):
         if switch is not None:
             # A call auto mode decides runs confined; the gate settles it.
             switch.on = run.approval is not None and find_auto(run.approval) is not None
+            switch.allow()  # the gate adds the paths of a step it lets run
             if switch.on:
                 await asyncio.to_thread(switch.ready)
         if run.approval is not None:
@@ -2625,6 +2643,19 @@ class Agent(_RecallLoop, _NotesLoop):
         )
 
     @staticmethod
+    def _progressing(fingerprints: list[tuple[str, str, str]]) -> bool:
+        """Whether the last five steps made progress: three different steps ran with no error.
+
+        Two steps that take turns (A, B, A, B, A) are a loop, not progress.
+        """
+        done = {
+            (name, step_h)
+            for name, step_h, error in fingerprints[-5:]
+            if name and not error
+        }
+        return len(done) >= 3
+
+    @staticmethod
     def _detect_stuck(
         fingerprints: list[tuple[str, str, str]],
     ) -> str:
@@ -2901,6 +2932,22 @@ class Agent(_RecallLoop, _NotesLoop):
         while step + 1 < budget:
             step += 1
             self.chat.check_call_budget()  # before the step starts, not inside it
+            if (
+                budget - step == EXTEND_WHEN
+                and run.last_attempt
+                and run.extensions < MAX_EXTENSIONS
+                and self.options.extend_steps > 0
+                and self._progressing(fingerprints)
+            ):
+                # Still making progress near the end of the run's last steps:
+                # more steps now, with the last ones still there to finish.
+                run.extensions += 1
+                budget += self.options.extend_steps
+                logger.info(
+                    "Task %s is making progress: %d more steps",
+                    task.task_id,
+                    self.options.extend_steps,
+                )
             if budget - step == 2:
                 await self._deadline_check(run)
                 if self.options.task_aids and run.last_attempt:
@@ -3088,6 +3135,8 @@ class Agent(_RecallLoop, _NotesLoop):
             return None, []
         assert run.inbox is not None
         pending, shown = _read_notes(run.inbox, pending)
+        if run.from_person:
+            pending = [(offset, self.hide_passwords(text)) for offset, text in pending]
         inserted = Message(
             role="user",
             content="\n\n".join(text for _, text in pending),
@@ -3589,6 +3638,12 @@ class Agent(_RecallLoop, _NotesLoop):
         if on_event is not None and observe is not None:
             raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
+        if from_person and isinstance(query, str):
+            # A password the person gave is cut out before any model, record,
+            # log or memory sees the message (#547): a handle stands for it.
+            query = self.hide_passwords(query)
+            if isinstance(user_words, str):
+                user_words = self.hide_passwords(user_words)
         if routine is not None:
             if not isinstance(routine, str):
                 raise TypeError("routine must be a str")
@@ -3638,6 +3693,8 @@ class Agent(_RecallLoop, _NotesLoop):
         self._reviewer.earlier_words(
             [words for words, _ in turns_before], first=chat_first or ""
         )
+        # No password is typed in a run the person did not begin (#547).
+        self._reviewer.begin_run()
         if from_person:
             # The notes recalled for this message go along, apart: they count
             # only where the person's words point to them (#465).

@@ -135,6 +135,11 @@ call itself asks nothing; each site passes the site gate below first.
     address it sends from (so a guest or device network next to yours too), or the /24 around
     it when it is a public IPv4 address. These checks open a UDP socket and never send on it.
     A router's own outside address that leads back in (hairpin NAT) is not covered.
+  - The one exception is a server on this computer that the person wrote in their own message as
+    `localhost:PORT`, `127.0.0.1:PORT` or `[::1]:PORT` (host and port together; read from their
+    messages only, never from a page or a tool result). melo's own gateway and model servers
+    are refused whatever was written, and a redirect from a public page to such an address is
+    refused.
 - **DNS.** melo resolves the name itself and refuses it when any answer is such an address. It
   then connects to the address it checked, and the TLS certificate is still checked for the
   name, so a DNS answer that changes in between is never used. A port in the address is allowed
