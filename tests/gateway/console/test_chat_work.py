@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.contracts.sign_in import handles_in, hide_passwords
 from localmelo.melo.schema import EXTEND_STEPS, MAX_AGENT_STEPS
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.gateway import workers as workers_module
@@ -51,8 +52,8 @@ async def chat_of(client: httpx.AsyncClient, console: Console, kind: str) -> str
     return chat
 
 
-async def begin(client: httpx.AsyncClient, chat: str) -> str:
-    response = await _post_turn(client, chat, ASK)
+async def begin(client: httpx.AsyncClient, chat: str, words: str = ASK) -> str:
+    response = await _post_turn(client, chat, words)
     assert response.status_code == 200, response.text
     return str(response.json()["echo"]["task_id"])
 
@@ -78,6 +79,15 @@ async def card(console: Console, chat: str, wanted: str = "working") -> dict[str
     rows = await console.store.events_of_type(chat, BROWSER_EVENT, limit=50)
     data: dict[str, Any] = rows[-1].event["data"]
     return data
+
+
+async def stop(
+    client: httpx.AsyncClient, task: str, named: dict[str, str]
+) -> httpx.Response:
+    """Stop on a task's card: the task, and the source the card names."""
+    return await client.patch(
+        f"/api/tasks/{task}", json={"state": "stop", "source": named}
+    )
 
 
 def source(found: dict[str, Any], **change: str) -> dict[str, str]:
@@ -184,6 +194,10 @@ async def test_a_tasks_browser_is_reached_only_by_its_exact_source_and_moves_wit
             ):
                 answered = await client.request(method, path, params=wrong)
                 assert answered.status_code == 409, (method, wrong)
+            if wrong.keys() == exact.keys():
+                refused = await stop(client, task, wrong)
+                assert refused.status_code == 409, refused.text
+        assert await state(console, task) in LIVE
 
         # The chat is deleted: the card and its controls are the main chat's now.
         deleted = await client.delete(f"/api/sessions/{chat}")
@@ -193,6 +207,7 @@ async def test_a_tasks_browser_is_reached_only_by_its_exact_source_and_moves_wit
         assert moved["card_key"] == found["card_key"]
         old = await client.post(f"{url}/done", params=exact)
         assert old.status_code == 409
+        assert (await stop(client, task, exact)).status_code == 409
         new = await client.post(f"{url}/done", params=source(moved))
         assert new.status_code == 200
         entry = console.sessions.get(main)
@@ -253,6 +268,80 @@ async def test_a_page_the_person_takes_holds_that_run_until_done_or_stop(
 
 async def _turns(console: Console, task: str) -> int:
     return len(await console.store.list_turns(task))
+
+
+async def test_stop_on_a_tasks_card_reaches_its_run_and_never_a_later_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, later = asyncio.Event(), asyncio.Event()
+    runs: list[list[Reply]] = [
+        [OPEN, held(first, answer("Read it."))],
+        [OPEN, held(later, answer("Read it again."))],
+    ]
+    async with ask_console(tmp_path, monkeypatch, workers=runs, browser=browser) as (
+        console,
+        client,
+        _,
+    ):
+        chat = str(console.main_id)
+        task = await begin(client, chat)
+        await allow_site(client, console, task)
+        old = await card(console, chat)
+        first.set()
+        await ended(console, task)
+        await console.workers.message(task, f"read {HOME} once more")
+        await allow_site(client, console, task)
+
+        async def next_card() -> bool:
+            rows = await console.store.events_of_type(chat, BROWSER_EVENT, limit=50)
+            data = rows[-1].event["data"]
+            return bool(data["run_id"] != old["run_id"] and data["state"] == "working")
+
+        await until(next_card)
+        new = await card(console, chat)
+        refused = await stop(client, task, source(old))
+        assert refused.status_code == 409, refused.text
+        assert await state(console, task) in LIVE
+        stopped = await stop(client, task, source(new))
+        assert stopped.status_code == 200, stopped.text
+        later.set()
+        await ended(console, task, "cancelled")
+
+
+async def test_a_password_is_good_for_the_persons_run_and_not_a_chats_own_continue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs: list[list[Reply]] = [[answer("Done.")] for _ in range(3)]
+    named = "example.com"
+    async with ask_console(tmp_path, monkeypatch, workers=runs) as (
+        console,
+        client,
+        models,
+    ):
+        task = await begin(
+            client,
+            str(console.main_id),
+            f"/task sign in to {named}, my password is hunter2-xy",
+        )
+        await ended(console, task)
+        record = await console.workers.tasks.get_task(task)
+        [given] = handles_in(str(record.spec["objective"]))
+        assert models["agents"][0]._reviewer.sign_in_value(given, named)
+
+        await console.workers.message(task, "look at it again", automatic=True)
+        await ended(console, task)
+        assert models["agents"][1]._reviewer.sign_in_value(given, named) is None
+        assert not models["agents"][1]._reviewer.signs_in(named)
+
+        # The person's own message gives one again, and only that one.
+        await console.workers.message(
+            task,
+            hide_passwords(f"sign in to {named}, my password is other-pass-9"),
+        )
+        await ended(console, task)
+        again = models["agents"][2]._reviewer
+        assert again.sign_in_value(given, named) is None
+        assert again.signs_in(named)
 
 
 async def test_a_job_past_the_fifth_step_goes_on_while_the_chat_answers(

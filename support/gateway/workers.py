@@ -30,7 +30,7 @@ from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
 )
-from localmelo.melo.contracts.sign_in import hide_passwords
+from localmelo.melo.contracts.sign_in import hide_passwords, spent
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
@@ -1175,8 +1175,20 @@ class TaskWorkers:
         return record
 
     async def update(
-        self, task_id: str, level: object = None, state: str | None = None
+        self,
+        task_id: str,
+        level: object = None,
+        state: str | None = None,
+        *,
+        check: Callable[[], None] | None = None,
     ) -> dict:
+        """Change *task_id*'s level or state.
+
+        *check* raises when the change is no longer wanted. Nothing is awaited
+        between it and a stop's cancel, so what it saw is what is stopped.
+        """
+        if check is not None:
+            check()
         if state is not None and state not in ("pause", "resume", "stop"):
             raise ValueError("state must be pause, resume or stop")
         if level is None and state is None:
@@ -2581,6 +2593,13 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
+                            if task_session and (task_session.meta or {}).get(
+                                "followup_guard"
+                            ):
+                                # Its chat continued it, not the person: the reviews
+                                # still read the request, and no password in it is
+                                # given again. A park and resume stays under this.
+                                words = spent(text if words is None else words)
                             # Only when set: a stand-in runner takes no words.
                             own: dict[str, Any] = (
                                 {} if words is None else {"words": words}

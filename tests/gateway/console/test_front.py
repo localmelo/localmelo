@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from localmelo.melo.schema import MAX_AGENT_STEPS, Message, ToolCall, ToolResult
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
@@ -387,6 +388,34 @@ async def test_a_retried_turn_admits_its_work_once_whatever_the_model_writes(
         [task] = await console.workers.tasks.list_tasks()
         assert task.title == "Slides"
         assert [e["echo"] for e in await _echoes(console)] == ["started"]
+
+
+async def test_a_retry_many_turns_after_its_message_still_finds_the_one_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(front_module, "RETRIES_READ", 2)
+    make = tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"})
+    other = tool_call("task_create", {"title": "Other", "objective": "Make ten"})
+    # The last retry only says what it will do: its key alone keeps it from starting.
+    replies = (
+        make,
+        answer("Started."),
+        *((other, answer("It is going.")) * 4),
+        answer("I'll start by reading your notes."),
+    )
+    async with front_console(tmp_path, *replies) as (console, client, _):
+        chat = str(console.main_id)
+        await _say(client, console, "make slides from my notes")
+        turn = await _wait_turn(client, chat)
+        for _ in range(5):
+            console.front.made.clear()
+            retried = await client.post(
+                f"/api/sessions/{chat}/retry", json={"turn_id": turn["id"]}
+            )
+            assert retried.status_code == 202, retried.text
+            turn = await _wait_turn(client, chat)
+        [task] = await console.workers.tasks.list_tasks()
+        assert task.title == "Slides"
 
 
 async def test_the_same_words_typed_again_after_an_undo_are_a_new_message(

@@ -22,7 +22,7 @@ from localmelo.support.sessions.store import SessionStore
 
 @pytest.mark.parametrize("payload", [{"state": "pause"}, {"level": "P5"}])
 async def test_pause_does_not_park_an_inflight_provider(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: dict[str, str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: dict[str, Any]
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     workspace = tmp_path / "workspace"

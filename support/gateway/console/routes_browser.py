@@ -150,7 +150,7 @@ def resolve(
     return browser
 
 
-def _stale() -> ApiError:
+def stale_source() -> ApiError:
     return ApiError(409, "stale_source", t("errors.staleBrowser"))
 
 
@@ -203,7 +203,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         try:
             resolved = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
-            raise _stale() from None
+            raise stale_source() from None
         live = resolved.live if resolved is not None else None
         state: dict[str, Any] = (
             await live.snapshot()
@@ -235,7 +235,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         try:
             browser = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
-            raise _stale() from None
+            raise stale_source() from None
         return JSONResponse({"ok": browser is not None and browser.hand_back()})
 
     @app.post("/api/sessions/{session_id}/browser/window")
@@ -250,7 +250,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         try:
             browser = resolve(console, session_id, gen=gen, run=run, owner=owner)
         except StaleSourceError:
-            raise _stale() from None
+            raise stale_source() from None
         return JSONResponse({"ok": browser is not None and browser.show_to_person()})
 
     @app.websocket("/api/sessions/{session_id}/browser/live")

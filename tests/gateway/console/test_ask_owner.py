@@ -134,7 +134,12 @@ async def ask_console(
     *browser* makes the browser tools a worker the code lets browse is built with.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
-    models: dict[str, Any] = {"main": Script(main or []), "workers": [], "browsers": []}
+    models: dict[str, Any] = {
+        "main": Script(main or []),
+        "workers": [],
+        "browsers": [],
+        "agents": [],
+    }
     side_scripts, worker_scripts = list(sides or []), list(workers or [])
     holder: list[Console] = []
 
@@ -178,6 +183,7 @@ async def ask_console(
             options=session_options(kwargs["options"], kwargs["workspace"]),
             tool_providers=tools,
         )
+        models["agents"].append(agent)
         await agent.start()
         return agent
 

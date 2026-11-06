@@ -80,6 +80,7 @@ def provider_for(
             ChromeBackgroundDriver(local=LocalRule()),
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows, driver),
+            opens_apps=opens_apps,
             live=live,
             live_fps=live_fps,
         )

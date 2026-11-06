@@ -172,7 +172,7 @@ SIDE_SUMMARY_EVENT: Final = "side.summary"
 BRIEF_STEPS: Final = 2
 # A follow-up turn's step cap (#411): look, continue once or ask, then report.
 FOLLOWUP_STEPS: Final = 4
-# How far back a retried turn's accepted turn is looked for.
+# How many turns a retry's walk back to its accepted turn reads at a time.
 RETRIES_READ: Final = 32
 # What every chat is told about itself, after melo's identity. The language
 # of the reply is set once, in that identity (sessions/identity.py LANGUAGE_RULE).
@@ -1793,22 +1793,27 @@ class Front:
 
         A retry runs as a new turn right after the undone one with the same
         words and nothing typed; the accepted turn is the one those retries go
-        back to, so every retry has its key. The same words typed again, after
-        an Undo too, are a new message.
+        back to, however many there were, so every retry has its key. The same
+        words typed again, after an Undo too, are a new message.
         """
+        return f"turn:{turn.session_id}:{(await self._accepted(turn)).id}"
+
+    async def _accepted(self, turn: TurnInfo) -> TurnInfo:
+        """The turn *turn*'s words were accepted in: itself, or the one its retries go back to."""
         accepted = turn
-        if turn.typed_text.strip():
-            return f"turn:{turn.session_id}:{accepted.id}"
-        earlier = await self.console.store.list_turns(
-            turn.session_id, before=turn.turn, limit=RETRIES_READ
-        )
-        for row in reversed(earlier):
-            if not row.undone or row.user_text != turn.user_text:
-                break
-            accepted = row
-            if row.typed_text.strip():
-                break
-        return f"turn:{turn.session_id}:{accepted.id}"
+        while not accepted.typed_text.strip():
+            earlier = await self.console.store.list_turns(
+                turn.session_id, before=accepted.turn, limit=RETRIES_READ
+            )
+            for row in reversed(earlier):
+                if not row.undone or row.user_text != turn.user_text:
+                    return accepted
+                accepted = row
+                if row.typed_text.strip():
+                    return accepted
+            if len(earlier) < RETRIES_READ:
+                return accepted
+        return accepted
 
     async def _start(
         self,

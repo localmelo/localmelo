@@ -1390,10 +1390,11 @@ async function takeTaskPage(id) {
   return true;
 }
 
-/** Stop on a task's browser card: that task ends, by its own id. False when it did not take. */
+/** Stop on a task's browser card: that task ends, if the run the card shows is the one going. False when it did not take. */
 async function stopBrowsingTask(card) {
+  const { session, ...source } = browserSource(card);
   try {
-    await api(`/tasks/${encodeURIComponent(card.session)}`, { method: "PATCH", body: { state: "stop" } });
+    await api(`/tasks/${encodeURIComponent(session)}`, { method: "PATCH", body: { state: "stop", source } });
     return true;
   } catch (error) {
     notify(error.message || t("panel.taskChangeFailed"));

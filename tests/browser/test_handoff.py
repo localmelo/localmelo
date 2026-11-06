@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import never_granted
-from localmelo.support.browser import apps, sites
+from localmelo.support.browser import apps, provider_for, sites
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
 from localmelo.support.browser.desktop import MELO_APPS, DesktopHelper, DesktopWatch
 from localmelo.support.browser.driver import Act, ActResult, Dialog
@@ -143,6 +143,23 @@ async def clicked(
 
 
 # ── The hand-off ──
+
+
+@pytest.mark.parametrize("driver", ["safari-automation", "chrome"])
+@pytest.mark.parametrize("opens", [True, False], ids=["a chat", "a task"])
+async def test_each_browser_keeps_the_rule_it_was_made_with(
+    driver: str, opens: bool
+) -> None:
+    provider = provider_for(driver, opens_apps=opens)
+    assert provider is not None
+    opener, asks = Opener(), Asks()
+    provider._opener = opener  # type: ignore[assignment]
+    with asking(asks):
+        await provider._hand_off(CHAT, HOME)
+    assert opener.opened == ([CHAT] if opens else [])
+    assert [n for n, *_ in asks.asked if n.startswith("handoff:")] == (
+        ["handoff:chat"] if opens else []
+    )
 
 
 async def test_a_task_opens_no_other_app_and_asks_nobody_about_it() -> None:

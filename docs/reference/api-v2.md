@@ -783,7 +783,9 @@ Tools run with the user's permissions, not in a sandbox.
   did not run out of steps.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
-  `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
+  `{"task": ...}`. A browser card's Stop adds `source` (`gen`, `run`,
+  `owner`, the card's own): a card of an earlier run is refused with 409
+  `stale_source` and stops nothing. `first` is rejected with 400 `invalid_request`; it is
   not supported yet. Pause parks at P5; resume restores the priority before
   pause unless a new runnable level is supplied. The saved priority survives
   audit-log retention. If there is no saved snapshot (for example, a task

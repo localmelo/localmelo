@@ -6622,7 +6622,7 @@ for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
     assert.equal(findNode(card, (node) => node.className === 'bcard-goal').textContent, 'Find ML jobs');
     const button = (word) => findNode(card, (node) => node.tag === 'button' && node.textContent === word && !node.hidden);
     await button('Stop').click();
-    assert.deepEqual(sent, [['stop', {state: 'stop'}]]);
+    assert.deepEqual(sent, [['stop', {state: 'stop', source: {gen: 'a1b2c3d4', run: 'run-1', owner: id}}]]);
     h.stream().emit(browserFrame(id, 21, {...task, state: 'you', action: ''}));
     await button('Done').click();
     assert.deepEqual(sent.at(-1), ['done']);

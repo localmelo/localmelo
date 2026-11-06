@@ -48,7 +48,9 @@ def stored(path: Path) -> str:
 def seen_by_models(models: dict[str, Any]) -> str:
     scripts: list[Script] = [models["main"], *models["workers"]]
     scripts += [
-        v for k, v in models.items() if k not in ("main", "workers", "browsers")
+        v
+        for k, v in models.items()
+        if k not in ("main", "workers", "browsers", "agents")
     ]
     return "\n".join(
         str(message.content)
