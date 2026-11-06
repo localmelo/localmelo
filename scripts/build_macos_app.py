@@ -33,6 +33,17 @@ PYTHON_URL = (
     "cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only_stripped.tar.gz"
 )
 PYTHON_SHA256 = "e1d745b07b6acc0641dbb3237d3c5953deeeed182141bab2242684076fd86547"
+# The app carries uv, so the first-run setup works on a Mac that has none. It goes next
+# to the bundled Python, the first place the setup looks for uv. The digest is the
+# official uv GitHub release asset's, as for Python above.
+UV_VERSION = "0.13.4"
+UV_URL = (
+    f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/"
+    "uv-aarch64-apple-darwin.tar.gz"
+)
+UV_SHA256 = "e0b1d4743ce64c55d9f0f4a444afa6b81125680070ee04e853fcd0f6c1ebf8f1"
+UV_MEMBER = "uv-aarch64-apple-darwin/uv"  # the one file taken from the archive
+UV_PATH = "bin/uv"  # below the runtime folder (python/ in the bundle)
 # The standard library folder, below the runtime folder (python/ in the bundle).
 STDLIB = f"lib/python{'.'.join(PYTHON_VERSION.split('.')[:2])}"
 # What the app never runs in the standalone Python, as patterns below the runtime folder.
@@ -151,40 +162,43 @@ def trim_python(python: Path) -> None:
             path.unlink()
 
 
-def download_python(archive: Path) -> None:
-    """Download the pinned archive and reject it unless it has the pinned digest."""
+def verified_archive(stage: Path, name: str, url: str, sha256: str, what: str) -> Path:
+    """Fetch a pinned archive and reject it unless it has the pinned digest.
+
+    A verified archive is cached by digest in ~/Library/Caches/LocalMelo and hashed on
+    every use, so a damaged cache is downloaded again.
+    """
+    cached = Path.home() / f"Library/Caches/LocalMelo/{name}-{sha256}.tar.gz"
+    try:
+        with cached.open("rb") as f:
+            if hashlib.file_digest(f, "sha256").hexdigest() == sha256:
+                return cached
+    except OSError:
+        pass
+    (stage / "download").mkdir(exist_ok=True)
+    archive = stage / f"download/{name}.tar.gz"
     digest = hashlib.sha256()
     with (
-        urllib.request.urlopen(PYTHON_URL, timeout=120) as response,
+        urllib.request.urlopen(url, timeout=120) as response,
         archive.open("wb") as out,
     ):
         while chunk := response.read(1024 * 1024):
             digest.update(chunk)
             out.write(chunk)
-    if digest.hexdigest() != PYTHON_SHA256:
-        raise ValueError("Standalone Python archive SHA-256 mismatch")
+    if digest.hexdigest() != sha256:
+        raise ValueError(f"{what} archive SHA-256 mismatch")
+    with contextlib.suppress(OSError):  # the cache only saves time
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(archive, cached.with_suffix(".part"))
+        os.replace(cached.with_suffix(".part"), cached)
+    return archive
 
 
 def fetch_python(stage: Path) -> Path:
-    """Verify the exact official archive before opening or extracting it.
-
-    A verified archive is cached by digest in ~/Library/Caches/LocalMelo and hashed on every use.
-    """
-    cached = Path.home() / f"Library/Caches/LocalMelo/python-{PYTHON_SHA256}.tar.gz"
-    archive = cached
-    try:
-        with cached.open("rb") as f:
-            hit = hashlib.file_digest(f, "sha256").hexdigest() == PYTHON_SHA256
-    except OSError:
-        hit = False
-    if not hit:
-        (stage / "download").mkdir()
-        archive = stage / "download/python.tar.gz"
-        download_python(archive)
-        with contextlib.suppress(OSError):  # the cache only saves time
-            cached.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(archive, cached.with_suffix(".part"))
-            os.replace(cached.with_suffix(".part"), cached)
+    """Verify the exact official archive before opening or extracting it."""
+    archive = verified_archive(
+        stage, "python", PYTHON_URL, PYTHON_SHA256, "Standalone Python"
+    )
     extracted = stage / "extracted"
     extracted.mkdir()
     with tarfile.open(archive, "r:gz") as tar:
@@ -194,6 +208,26 @@ def fetch_python(stage: Path) -> Path:
         raise ValueError("Standalone Python archive has an unexpected layout")
     verify_links(python)
     return python
+
+
+def install_uv(stage: Path, python: Path) -> None:
+    """Put the pinned uv next to the bundled Python: the one file, and nothing else.
+
+    Mode 0755 and the build user as owner: the setup passes a file over unless it is
+    the user's and nobody else can write it.
+    """
+    archive = verified_archive(stage, "uv", UV_URL, UV_SHA256, "uv")
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            member = tar.getmember(UV_MEMBER)
+        except KeyError:
+            raise ValueError("uv archive has an unexpected layout") from None
+        source = tar.extractfile(member) if member.isfile() else None
+        if source is None:
+            raise ValueError("uv archive has an unexpected layout")
+        with source, (python / UV_PATH).open("wb") as out:
+            shutil.copyfileobj(source, out)
+    (python / UV_PATH).chmod(0o755)
 
 
 def is_macho(path: Path) -> bool:
@@ -322,6 +356,7 @@ def build(output: Path) -> None:
         verify_links(python)
         # Before the dependencies go in: a pattern can only meet what the archive has.
         trim_python(python)
+        install_uv(stage, python)
         interpreter = python / "bin/python3"
         requirements = stage / "requirements.txt"
         run(
