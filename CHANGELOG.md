@@ -16,7 +16,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the person began stays in the Browser panel unless they choose the window, and a window that cannot open falls back to
   the panel. New events `run.paused` and `run.resumed`, `POST /api/sessions/{id}/browser/done` and `/browser/window`,
   and health `status.control`. melo's Chrome now restores its last session on every start, so session cookies stay in
-  its 0700 profile too (#NNN).
+  its 0700 profile too (#529).
 - Set up a model from the welcome card. With no server on a supported Apple-silicon Mac, the console's and the app's
   welcome card shows the terminal's list (what this Mac can run, each item with its size and where it goes, the total
   to download), lets each optional item be turned off, and sets it up after one button: a row per step with its own
