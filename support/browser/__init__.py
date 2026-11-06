@@ -42,6 +42,7 @@ def provider_for(
     opens_apps: bool = True,
     live: bool = True,
     live_fps: float = 15.0,
+    chat_id: str | None = None,
 ) -> BrowserToolProvider | None:
     """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name.
 
@@ -51,7 +52,9 @@ def provider_for(
     (:mod:`localmelo.support.browser.desktop`). Without *opens_apps* a page that
     asks for another app is told no, and nobody is asked. With *live* (``[browser] live``) the
     person can watch the Chrome browser (:mod:`localmelo.support.browser.live`), its
-    pictures held to *live_fps* a second.
+    pictures held to *live_fps* a second. *chat_id* names the chat's work folder
+    (:mod:`localmelo.melo.contracts.work_folder`); without one the folder is the
+    run's own and goes with it.
     """
     if driver == "off":
         return None
@@ -68,6 +71,7 @@ def provider_for(
             keep_tabs=keep_tabs,
             desktop=watch_for(app_windows),
             opens_apps=opens_apps,
+            chat_id=chat_id,
         )
     if driver == "chrome":
         from localmelo.support.browser.chrome import ChromeBackgroundDriver
@@ -83,6 +87,7 @@ def provider_for(
             opens_apps=opens_apps,
             live=live,
             live_fps=live_fps,
+            chat_id=chat_id,
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

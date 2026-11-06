@@ -53,7 +53,7 @@ class Anywhere(FakeDriver):
     def shown(self, url: str) -> RawPage:
         return self.pages.get(url) or page(url, SECRET, title="localmelo console")
 
-    async def page(self, tab: str | None) -> RawPage:
+    async def page(self, tab: str | None, whole: bool = False) -> RawPage:
         self.calls.append(("page", tab or ""))
         return self.shown(self._url(tab))
 

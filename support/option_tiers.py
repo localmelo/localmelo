@@ -121,6 +121,7 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.confine_direct_runs": "#183",
     "agent.answer_on_stop": "#185",
     "agent.max_calls": "#185",
+    "agent.thinking_steps": "#551",
     "agent.steps_per_attempt": "#185",
     "agent.tool_images": "#280",
     "agent.tool_images_keep": "#280",

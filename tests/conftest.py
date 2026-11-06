@@ -61,6 +61,18 @@ def fake_keychain(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
 
 
 @pytest.fixture(autouse=True)
+def _own_temporary_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """The chats' work folders (``$TMPDIR/localmelo``) of a test are in a folder of its own (#551)."""
+    import tempfile
+
+    monkeypatch.setattr(
+        tempfile, "tempdir", str(tmp_path_factory.mktemp("tmpdir", numbered=True))
+    )
+
+
+@pytest.fixture(autouse=True)
 def _no_env_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let the environment point a test at a real memory dir.
 

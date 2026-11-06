@@ -259,3 +259,14 @@ test('in Chinese the kind, its reason with the apps, the sentence, the label and
   assert.match(text(blockCard(fakeDoc(), facts)), /查看代码/);
   await useLanguage('en');
 });
+
+test('a question about attaching a file says the file, its folder, the site and that you did not name it, in Chinese as in English', async () => {
+  const attach = (named) => ({file: 'resume.pdf', folder: '~/Documents', site: 'example.com', named});
+  const asked = (named) => ({...INSTALL, review: {verdict: 'high', categories: ['send_out'], reasons: ['Sends the file resume.pdf.'], gist: {say: {id: 'tool', params: {tool: 'browser-attach:https://example.com'}}, by: 'code', attach: attach(named)}}});
+  assert.equal(await useLanguage('zh-Hans'), 'zh-Hans');
+  assert.deepEqual(blockFacts(item(asked(false))).reasons, ['这一步会把文件 resume.pdf（来自 ~/Documents）发送到 example.com。你没有点名这个文件。']);
+  assert.deepEqual(blockFacts(item(asked(true))).reasons, ['这一步会把文件 resume.pdf（来自 ~/Documents）发送到 example.com。']);
+  // The same path in English: the wording comes from the catalog, not from the rule's own sentence.
+  await useLanguage('en');
+  assert.deepEqual(blockFacts(item(asked(false))).reasons, ['Sends the file resume.pdf from ~/Documents to example.com; you did not name it.']);
+});

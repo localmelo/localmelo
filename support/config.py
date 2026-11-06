@@ -66,6 +66,7 @@ NOTE_WRITERS = ("auto", "heuristic")
 WINDOW_EVICTIONS = ("chunk", "boundary")
 TOOL_IMAGES = ("auto", "on", "off")
 EMPTY_REPLY_FALLBACKS = ("on", "off")
+THINKING_STEPS = ("all", "first_and_failed")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 # How memory across chats finds notes: see MemoryConfig.retriever.
@@ -303,6 +304,11 @@ class AgentConfig:
     # then answered with the end of its thinking, marked as such
     # (AgentOptions.empty_reply_fallback). "off" ends such a run as failed.
     empty_reply_fallback: str = "on"  # on | off
+    # Developer setting, for comparing (#551): on which planning steps the model
+    # thinks (AgentOptions.thinking_steps). "all" is every step; "first_and_failed"
+    # thinks on the first plan and after a failed step and turns thinking off on
+    # the others, where the server has a switch for it.
+    thinking_steps: str = "all"  # all | first_and_failed
     # Reflect when stuck after many steps (AgentOptions.attempt_policy): true runs
     # attempts of steps_per_attempt steps with a reflection between them; false
     # never reflects and runs straight to the run's total.
@@ -340,6 +346,16 @@ def empty_reply_fallback_errors(agent: AgentConfig) -> list[str]:
     return [
         f"[agent] empty_reply_fallback {agent.empty_reply_fallback!r} is not "
         f"recognised. Must be one of {EMPTY_REPLY_FALLBACKS}."
+    ]
+
+
+def thinking_steps_errors(agent: AgentConfig) -> list[str]:
+    """What is wrong with ``[agent] thinking_steps``."""
+    if agent.thinking_steps in THINKING_STEPS:
+        return []
+    return [
+        f"[agent] thinking_steps {agent.thinking_steps!r} is not "
+        f"recognised. Must be one of {THINKING_STEPS}."
     ]
 
 
@@ -1097,6 +1113,7 @@ class Config:
             errors.append(f"[agent] max_calls must be an int >= 2, got {calls!r}")
         errors.extend(tool_images_errors(agent))
         errors.extend(empty_reply_fallback_errors(agent))
+        errors.extend(thinking_steps_errors(agent))
         for name, allowed in (
             ("reasoning", REASONING_MODES),
             ("note_writer", NOTE_WRITERS),

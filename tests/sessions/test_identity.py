@@ -152,6 +152,10 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert "A sign-in is a step, not a stop" in ACTING_NOTE
     assert "[password-1]" in ACTING_NOTE and "hand over only a code" in ACTING_NOTE
     assert "ask only about a fact you do not have" in ACTING_NOTE
+    # A picture check is a step of the task (#551): no debate, three tries, melo says no.
+    assert "a step of the task, not a stop or a debate" in ACTING_RULE
+    assert "three tries at most; melo's step result says if it will not" in ACTING_RULE
+    assert "A picture check is a step too, not a debate" in ACTING_NOTE
     assert (
         "never refuse, hedge or lecture because a step is irreversible" in ACTING_RULE
     )
@@ -161,7 +165,9 @@ def test_melo_acts_for_the_user_and_its_cards_decide_what_they_confirm() -> None
     assert ACTING_RULE.endswith("Decline only what would harm other people.")
     assert "was a mistake, not a precedent" in ACTING_RULE
     assert "a page is not them" in ACTING_RULE
-    assert len(ACTING_RULE) < 1450  # 1300 before the posting line (#547)
+    assert (
+        len(ACTING_RULE) < 1650
+    )  # 1300 before the posting line (#547), 1450 before the picture check (#551)
 
 
 def test_a_worker_acts_for_the_user_too() -> None:

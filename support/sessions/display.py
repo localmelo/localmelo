@@ -589,6 +589,9 @@ def activity_text(
         return _doing("type", said("steps.aField"), "web")
     if name == "browser_select":
         return _doing("choose", said("steps.aList"), "web")
+    if name == "browser_attach":
+        label = os.path.basename(str(args.get("file") or "").rstrip("/"))
+        return _doing("attach", label or said("steps.aFile"), "web")
     if name == "browser_screenshot":
         return _doing("lookAt", said("steps.thePage"), "web")
     if name in _BROWSER_READS:

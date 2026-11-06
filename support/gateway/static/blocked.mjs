@@ -47,9 +47,16 @@ export function reviewWords(review, folder = '') {
  * sentences, which name the package, the file or the host; another language names the kind of step
  * in its own words (the step itself is on the card, as written), and the apps a script operates when
  * the review's `gist` names them. A review the model settled says what it found by its category. A
- * review with no sentences of its own reads by category in any language.
+ * review with no sentences of its own reads by category in any language. A question about attaching
+ * a file to a page (#551) says the file, its folder and the site, and when the person did not name the
+ * file, in every language alike, from the facts its `gist` carries.
  */
 export function reasonLines(review, categories) {
+  const attach = isObject(review.gist) && isObject(review.gist.attach) ? review.gist.attach : null;
+  if (attach) {
+    const key = attach.named === false ? 'auto.reason.attachUnnamed' : 'auto.reason.attach';
+    return [t(key, {file: String(attach.file ?? ''), folder: String(attach.folder ?? ''), site: String(attach.site ?? '')})];
+  }
   const written = (Array.isArray(review.reasons) ? review.reasons : []).map(String).filter(Boolean);
   if (written.length && language() === 'en') return written;
   const modelFound = review.by === 'model' && !['beyond_request', 'opaque', 'unreviewed'].includes(categories[0]);

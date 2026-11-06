@@ -39,6 +39,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `max_attempts` | `5` | 使用 `"reflect"` 时每次运行最多的尝试次数。 |
 | `answer_on_stop` | `True` | `True`：以 `gate_stopped` 或 `budget_exhausted` 结束且没有答案的运行，会再发出一次不带工具的请求，根据已收集的证据索要答案；答案里没有任务要求的收尾行时，再发出一次请求把它加上；`False` 两种请求都不发。见[运行结果](run-results.md#statuses)。 |
 | `empty_reply_fallback` | `"on"` | `"on"`：会思考的模型以没有答案、也没有工具调用结束一个回合时，在提供方设置了 `thinking_off_body` 的情况下关闭思考再问一次，仍为空时以带标记的思考末尾作为答案；`RunResult.empty_reply` 以及 `thinking_off_retry` 和 `answer_from_thinking` 通知会说明这一点。`"off"`：运行像以前一样以 `failed` 结束。见[运行结果](run-results.md#statuses)。 |
+| `thinking_steps` | `"all"` | `"all"`：模型在每一步规划都思考。`"first_and_failed"`：一次尝试的第一步规划和失败步骤之后的规划会思考，成功的工具步骤之后的规划用提供方的 `thinking_off_body` 发出（提供方没设置它时什么都不变）。用于对比这两种做法。 |
 | `max_calls` | `None` | 不小于 2 的整数：一次运行最多发出的模型请求数；在会超出它的那个请求之前运行以 `budget_exhausted` 结束（开启 `answer_on_stop` 时，最后一次调用留给答案）。`None`：没有上限。见[运行结果](run-results.md#statuses)。 |
 | `refused_steps` | `0` | 一步里的每个调用都被策略检查拒绝时（工具返回了 `localmelo.melo.contracts.tools` 的 `refuse_call(...)`，或策略、Auto 拒绝了工具提出的询问或这个调用），这一步不计入 `max_steps`，每次运行最多这么多步。这些步仍然会发出请求。你自己点的拒绝、没有及时回答的询问，以及同一次运行里已被拒绝过的同一个调用（同一工具、同样参数）始终计数。`0`：每一步都计数。 |
 | `tool_exposure` | `"retrieve"` | `"retrieve"` 或 `"all"`；见[如何提供工具](tools.md#how-tools-are-offered)。 |

@@ -18,8 +18,9 @@ next and across restarts, those whose cookie lasts only for the session too:
 such cookies are on disk in the profile while melo is not running. Chrome
 offers to save no password, address or card there. The pages Chrome brings back
 with the session go at once on a fresh start. A page's download is saved in
-melo's own downloads folder (:func:`downloads_folder`), never opened or run,
-and the next step says so.
+melo's own downloads folder (:func:`downloads_folder`), never opened or run;
+the chat whose page made it moves it into the chat's work folder, and the next
+step says where it is.
 
 **A window for the person.** To take a page over the person needs a real
 window, and a Chrome without one cannot show one. :meth:`ChromeBackgroundDriver.show_window`
@@ -129,6 +130,7 @@ from localmelo.support.browser.driver import (
     Shot,
     StaleElementError,
     TabInfo,
+    Upload,
     View,
     WindowBusyError,
 )
@@ -337,10 +339,15 @@ def launch_args(
 # at most this many are followed at once (#547).
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 MAX_DOWNLOADS = 50
+# How long a click that is to open a file chooser waits for it, in seconds.
+CHOOSER_S = 5.0
 
 
 def downloads_folder(profile: str) -> str:
-    """Where a page's downloads are saved: ``downloads`` next to the profile, private like it."""
+    """Where Chrome saves a page's downloads first: ``downloads`` next to the profile, private like it.
+
+    It is a landing place only: each chat moves its own files out to its work folder.
+    """
     return os.path.join(os.path.dirname(profile.rstrip("/")), "downloads")
 
 
@@ -456,6 +463,9 @@ class _Chrome:
         self._n = 0
         self.dialogs: dict[str, dict[str, Any]] = {}
         self.woken: dict[str, asyncio.Event] = {}
+        # A file chooser a page opened while melo intercepted them (#551), by session.
+        self.choosers: dict[str, dict[str, Any]] = {}
+        self.chooser_woken: dict[str, asyncio.Event] = {}
         self.handoffs: dict[str, list[str]] = {}
         self.navs: dict[str, int] = {}
         self.main: dict[str, str] = {}  # session -> its main frame
@@ -627,6 +637,9 @@ class _Chrome:
         elif method == "Page.javascriptDialogClosed":
             self.dialogs.pop(session, None)
             self._dialog_changed(session)
+        elif method == "Page.fileChooserOpened":
+            self.choosers[session] = params
+            self.chooser_woken.setdefault(session, asyncio.Event()).set()
         elif method == "Page.screencastFrame":
             self._frame(session, params)
         elif method == "Page.frameRequestedNavigation":
@@ -1259,6 +1272,8 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     name = "chrome"
     label = "Chrome"
+    # A click that opens a file chooser can be answered with a file (:meth:`attach`).
+    attaches = True
 
     def __init__(
         self,
@@ -1344,7 +1359,13 @@ class ChromeBackgroundDriver(PageScriptActs):
             browser.claimed -= self._mine
             for session in self._sessions.values():
                 browser.end_cast(session)
-                for kept in (browser.dialogs, browser.handoffs, browser.navs):
+                for kept in (
+                    browser.dialogs,
+                    browser.handoffs,
+                    browser.navs,
+                    browser.choosers,
+                    browser.chooser_woken,
+                ):
                     kept.pop(session, None)
             for target in self._mine:
                 browser.attempts.pop(target, None)
@@ -1826,6 +1847,7 @@ class ChromeBackgroundDriver(PageScriptActs):
                     int(entry["size"]),
                     state,
                     downloads_folder(browser.profile),
+                    guid,
                 )
             )
         return found
@@ -2246,6 +2268,98 @@ class ChromeBackgroundDriver(PageScriptActs):
             late=tuple(late),
             dialogs=tuple(self._said.pop(target, [])),
         )
+
+    async def attach(self, tab: str | None, act: Act, upload: Upload) -> ActResult:
+        """Do the click *act* with Chrome's own input and answer the file chooser it opens with *upload* (#551).
+
+        Chrome is told to hand the chooser to melo instead of putting up a
+        window (``Page.setInterceptFileChooserDialog``), for this call only.
+        The click is a real one (a script's click has no user gesture and opens
+        no chooser), on a file field or on the button a page opens one with, a
+        hidden field included: the chooser says which field it is for, and the
+        file goes to that field (``DOM.setFileInputFiles``), which fires the
+        page's own ``input`` and ``change`` events. A click that opens no
+        chooser attaches nothing. ``upload.check()`` runs after the chooser
+        opened, right before the file is given, so a file that changed during
+        any wait is refused.
+
+        The interception is turned off whatever happened, and an off that
+        cannot be confirmed is told: melo closes the tab (the interception goes
+        with it), or stops this browser when that fails too, and says so.
+        """
+        if act.kind != "click" or act.point is not None:
+            raise BrowserError("A file is attached by a click on a field or a button.")
+        session = await self._focus(tab)
+        browser = await self._live()
+        browser.choosers.pop(session, None)
+        browser.chooser_woken.setdefault(session, asyncio.Event()).clear()
+        target = self._current
+        try:
+            # Inside the try: an enable that failed after Chrome took it is turned off too.
+            await self._cmd(
+                "Page.setInterceptFileChooserDialog", {"enabled": True}, session
+            )
+            result = await self.act(tab, dataclasses.replace(act, native=True))
+            opened = await self._chooser(browser, session)
+            node = opened.get("backendNodeId") if opened else None
+            if not isinstance(node, int):
+                raise BrowserError(
+                    "That click opened no file chooser, so nothing was attached. "
+                    "Click the page's file field or its Upload button."
+                )
+            upload.check()  # as late as it can be: after every wait of this call
+            await self._cmd(
+                "DOM.setFileInputFiles",
+                {"files": [upload.path], "backendNodeId": node},
+                session,
+            )
+        except BaseException as error:
+            retired = await self._stop_intercepting(session, target)
+            if retired and isinstance(error, BrowserError):
+                raise BrowserError(f"{error} {retired}") from error
+            raise
+        else:
+            if retired := await self._stop_intercepting(session, target):
+                raise BrowserError(f"The file was attached, but {retired}")
+        finally:
+            browser.choosers.pop(session, None)
+        return result
+
+    async def _stop_intercepting(self, session: str, target: str | None) -> str:
+        """Turn the file-chooser interception of *session* off; ``""`` when Chrome says it is off.
+
+        When that fails (a second try included) the page keeps handing its
+        choosers to melo, so melo retires it: the tab is closed, which ends the
+        interception with it, and when even that fails this browser is let go
+        (the next step starts a new one). The words say which, for the model.
+        """
+        for _ in range(2):
+            try:
+                await self._cmd(
+                    "Page.setInterceptFileChooserDialog", {"enabled": False}, session
+                )
+                return ""
+            except BrowserError:
+                continue
+        said = "melo could not turn off its file-chooser hook on this tab, so "
+        try:
+            if target is None:
+                raise BrowserError("no tab")
+            await self._cmd("Target.closeTarget", {"targetId": target})
+            self._drop(target)
+            return said + "it closed the tab. Open the page again."
+        except BrowserError:
+            with contextlib.suppress(BrowserError):
+                await self.close()
+            return said + "it stopped this browser. The next step starts a new one."
+
+    async def _chooser(self, browser: _Chrome, session: str) -> dict[str, Any] | None:
+        """The file chooser the page opened on *session* (it may be here already), or None after :data:`CHOOSER_S` seconds."""
+        if session not in browser.choosers:
+            event = browser.chooser_woken.setdefault(session, asyncio.Event())
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(), CHOOSER_S)
+        return browser.choosers.get(session)
 
     async def _native(
         self, session: str, spec: dict[str, Any], act: Act

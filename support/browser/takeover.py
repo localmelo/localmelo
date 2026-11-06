@@ -610,7 +610,15 @@ ANSWER_FIELDS: Final = (
     "geetest_validate",
 )
 # How many times melo presses inside a check that stays there before it is the person's to pass.
+# This holds wherever melo does not work through a check's pictures (see CHECK_TRIES).
 CHECK_PRESSES: Final = 8
+# In a task the person started, with a model that reads pictures (#551), melo works through
+# a check's pictures itself: it counts tries, not presses, since one try can take a press
+# on each picture of a grid. A try ends when melo presses the check's Verify, Next or Skip
+# button (``confirm`` of browser_click_point). After CHECK_TRIES tries that did not pass, or
+# CHECK_TRY_PRESSES presses without ending one, the check is the person's to pass.
+CHECK_TRIES: Final = 3
+CHECK_TRY_PRESSES: Final = 24
 # A page this small that holds a password field is a sign-in form, whatever its address says.
 SMALL_PAGE: Final = 30
 
