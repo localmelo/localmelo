@@ -23,7 +23,14 @@ from collections.abc import Iterable
 
 from localmelo.melo.contracts.folders import above_home
 
-__all__ = ["folder_named", "key_named", "local_sites", "loopback_site", "script_named"]
+__all__ = [
+    "file_named",
+    "folder_named",
+    "key_named",
+    "local_sites",
+    "loopback_site",
+    "script_named",
+]
 
 # A file name is specific when it holds a digit or one of _ . - : "id_ed25519"
 # and ".npmrc", not "credentials" or "config".
@@ -110,6 +117,19 @@ def folder_named(path: str, texts: Iterable[str], home: str) -> bool:
             return True
         here = os.path.dirname(here)
     return False
+
+
+def file_named(path: str, texts: Iterable[str], home: str) -> bool:
+    """Whether a text names the file *path* (an absolute, canonical path) itself.
+
+    By its path as the person writes it, or by a specific file name
+    (``resume.pdf``, not ``notes``). A folder that holds the file does not name
+    it: the person spoke of the folder, not of this file. A specific name
+    stands for any file of that name, so it proves only that the person spoke of
+    such a file, never where it is: the caller refuses places that are never
+    offered before it asks.
+    """
+    return key_named(path, texts, home)
 
 
 def script_named(url: str, texts: Iterable[str]) -> bool:

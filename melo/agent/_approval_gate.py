@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent._step_review import (
     StepReviewer,
+    attach_review,
     holds_secret,
     plain_page_key,
 )
@@ -53,7 +54,14 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_key,
 )
-from localmelo.melo.contracts.folders import NAMED_FOLDER, OutsideAccess, home_label
+from localmelo.melo.contracts.folders import (
+    NAMED_FOLDER,
+    OutsideAccess,
+    attach_refusal,
+    canonical_path,
+    covers,
+    home_label,
+)
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
@@ -715,12 +723,14 @@ class _ToolAsk:
         workspace_root: str | None,
         reviewer: StepReviewer | None = None,
         refused: list[dict[str, Any]] | None = None,
+        sees_images: Callable[[], bool] = lambda: False,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
         self._reviewer = reviewer
+        self._sees_images = sees_images
         self.refused: list[dict[str, Any]] = [] if refused is None else refused
 
     def names_host(self, host: str) -> bool:
@@ -735,6 +745,40 @@ class _ToolAsk:
         """
         reviewer = self._reviewer
         return None if reviewer is None else reviewer.sign_in_value(handle, site)
+
+    def from_person(self) -> bool:
+        """Whether the person started this run: their own message, not a chore, a follow-up or a task's own (#551).
+
+        The browser works through a picture check itself only in such a run.
+        """
+        return self._run.from_person
+
+    def sees_pictures(self) -> bool:
+        """Whether the model reads the pictures tools return (#551): the run's own answer, never a page's."""
+        return self._sees_images()
+
+    def attachable(self, path: str) -> str | None:
+        """Who vouches for the file *path* as one to attach to a page: ``folder`` or ``named``; None when nobody does (#551).
+
+        ``folder``: it lies in the chat's folder (the workspace). ``named``:
+        the person's own words name this file, by its path or its specific name
+        (see :meth:`StepReviewer.names_file`); a folder they named vouches for
+        nothing in it. A place never offered, or a file that looks like a key,
+        is neither, however the person worded it. The chat's work folder is the
+        browser's own to vouch for; a page's text, a tool's result and the
+        model's own words name nothing. A file nobody vouches for is asked
+        about, by name, whoever suggested it.
+        """
+        real = canonical_path(path)
+        if attach_refusal(real) is not None:
+            return None
+        root = self._workspace_root
+        if root and covers(canonical_path(root), real):
+            return "folder"
+        reviewer = self._reviewer
+        if reviewer is not None and reviewer.names_file(real):
+            return "named"
+        return None
 
     def asks_to_share(self) -> bool | None:
         """Whether the person's own words speak of sharing or making something public; None when nothing reads them (#547)."""
@@ -897,6 +941,19 @@ class _ToolAsk:
             # The review is asked in the same guard as the policy, as the
             # gate does: a failure of either refuses the question alike.
             nonlocal request
+            if arguments.get("access") == "attach":
+                # A file sent to a site (#551): decided by code alone, a card in
+                # Ask and unless the person's words ask for the send.
+                request = dataclasses.replace(
+                    asked,
+                    review=attach_review(
+                        arguments,
+                        asked=auto
+                        and reviewer is not None
+                        and reviewer.asks_to_attach(),
+                    ),
+                )
+                return await self._policy.decide(request)
             if auto and reviewer is not None:
                 site = str(arguments.get("site") or "")
                 access = str(arguments.get("access") or "")

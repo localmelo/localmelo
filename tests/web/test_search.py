@@ -104,7 +104,7 @@ class Window(FakeDriver):
             self.redirects[url] = self.redirects[ENGINE]
         return await super().open(url, new_tab=new_tab, tab=tab)
 
-    async def page(self, tab: str | None) -> Any:
+    async def page(self, tab: str | None, whole: bool = False) -> Any:
         self.calls.append(("page", tab or ""))
         url = self._url(tab)
         if self._engine(url) and self.moved is not None:

@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
@@ -238,10 +239,12 @@ async def test_delete_removes_the_row_and_closes_the_agent(
     reg = registry(console, builder)
     entry = await open_session(reg, turn.session_id)
     agent = cast(FakeAgent, entry.agent)
+    folder = work_folder.ensure(turn.session_id)  # the files its pages handed over
     await reg.delete(turn.session_id)
     assert reg.get(turn.session_id) is None
     assert agent.closed
     assert await console.store.get_session(turn.session_id) is None
+    assert not Path(folder).exists(), "the chat's work folder goes with it"
 
 
 async def test_open_returns_the_same_entry_without_a_rebuild(

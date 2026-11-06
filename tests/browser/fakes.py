@@ -20,6 +20,7 @@ from localmelo.support.browser.driver import (
     Shot,
     StaleElementError,
     TabInfo,
+    Upload,
     View,
 )
 from localmelo.support.browser.sites import origin_of
@@ -111,6 +112,7 @@ class FakeDriver:
     """
 
     name = "fake"
+    attaches = True
 
     def __init__(
         self,
@@ -195,8 +197,10 @@ class FakeDriver:
         self.tabs_[self.current].append(landed)
         return self._info(self.current)
 
-    async def page(self, tab: str | None) -> RawPage:
+    async def page(self, tab: str | None, whole: bool = False) -> RawPage:
         self.calls.append(("page", tab or ""))
+        if whole:
+            self.calls.append(("whole", tab or ""))
         here = tab or self.current or ""
         raw = self.pages[self._url(tab)]
         return dataclasses.replace(raw, doc=self.docs.get(here, raw.doc))
@@ -284,6 +288,13 @@ class FakeDriver:
             # As the real driver does it, with location.replace: the page's own
             # entry is swapped, so Back never returns to the page that was refused.
             self.tabs_[here][-1:] = ["about:blank"]
+
+    async def attach(self, tab: str | None, act: Act, upload: Upload) -> ActResult:
+        """A click that opens a file chooser, which is answered with the upload after its check."""
+        result = await self.act(tab, act)
+        upload.check()
+        self.calls.append(("attach", upload.path))
+        return result
 
     async def act(self, tab: str | None, act: Act) -> ActResult:
         self.calls.append(("act", f"{act.kind}:{act.element.label}"))

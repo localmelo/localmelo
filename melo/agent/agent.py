@@ -1233,7 +1233,10 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         self.checker = Checker(mode=self.options.mode, builtins=self.options.builtins)
         self.executor = Executor(
-            self.hippo, self.checker, workspace_root=workspace_root
+            self.hippo,
+            self.checker,
+            workspace_root=workspace_root,
+            read_roots=self.options.read_folders,
         )
         # R5's retriever plan, resolved once: the effective trigger map, the
         # data note and (after Chat) the lazily built retrievers.
@@ -1924,6 +1927,19 @@ class Agent(_RecallLoop, _NotesLoop):
         body = find() if callable(find) else None
         return body if isinstance(body, Mapping) else {}
 
+    def _quiet_step(self, fingerprints: list[tuple[str, str, str]]) -> bool:
+        """Whether this planning call goes out with thinking off (``thinking_steps``, #551).
+
+        Under ``"first_and_failed"`` the plan that follows a tool step that
+        worked is quiet; the first plan of an attempt (no tool step yet) and
+        the plan after a step with an error think.
+        """
+        return (
+            self.options.thinking_steps == "first_and_failed"
+            and bool(fingerprints)
+            and not fingerprints[-1][2]
+        )
+
     async def _do_plan(
         self,
         long_context: list[Message],
@@ -2089,6 +2105,7 @@ class Agent(_RecallLoop, _NotesLoop):
                     self.executor.workspace_root,
                     self._reviewer,
                     refused,
+                    lambda: self._images_on is True,
                 )
             )
         try:
@@ -2983,6 +3000,8 @@ class Agent(_RecallLoop, _NotesLoop):
             # the provider's thinking switched off, for this call only.
             retry_body = self._thinking_retry_body() if run.thinking_retry_armed else {}
             run.thinking_retry_armed = False
+            if not retry_body and self._quiet_step(fingerprints):
+                retry_body = self._thinking_retry_body()
             retry_token = LLM_REQUEST_EXTRA_BODY.set(retry_body) if retry_body else None
             try:
                 response, fail = await self._do_plan(
@@ -4613,6 +4632,8 @@ class Agent(_RecallLoop, _NotesLoop):
             config["answer_on_stop"] = True
         if opts.empty_reply_fallback != "on":
             config["empty_reply_fallback"] = opts.empty_reply_fallback
+        if opts.thinking_steps != "all":
+            config["thinking_steps"] = opts.thinking_steps
         if opts.refused_steps:
             config["refused_steps"] = opts.refused_steps
         if opts.max_calls is not None:

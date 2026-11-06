@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support import config, settings
 from localmelo.support.cli.agents import AgentFactory, url_backend
@@ -82,7 +84,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             ]
         finally:
             await agent.close()
-    assert names["off"] == [] and len(names["safari-automation"]) == 12
+    assert names["off"] == [] and len(names["safari-automation"]) == 13
     assert names["chrome"] == names["safari-automation"]
     with pytest.raises(ValueError, match="unknown browser driver"):
         await session_agents.build_session_agent(
@@ -93,6 +95,33 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             options=AgentOptions(),
             browser_driver="firefox",
         )
+
+
+async def test_a_session_with_a_browser_reads_its_chats_work_folder_and_no_other() -> (
+    None
+):
+    cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+    cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
+    roots = {}
+    for driver, chat_id in (("off", "abc123"), ("chrome", "abc123"), ("chrome", None)):
+        agent = await session_agents.build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=None,
+            workspace=str(Path.cwd()),
+            options=AgentOptions(mode="interactive"),
+            browser_driver=driver,
+            chat_id=chat_id,
+        )
+        try:
+            roots[driver, chat_id] = agent.executor._read_roots
+        finally:
+            await agent.close()
+    assert roots["off", "abc123"] == ()
+    assert roots["chrome", "abc123"] == (work_folder.path_for("abc123"),)
+    [own] = roots["chrome", None]
+    assert os.path.basename(own).startswith("run-"), "a run with no chat has its own"
+    assert not os.path.exists(own), "and leaves nothing when it ends"
 
 
 async def test_the_terminal_and_the_console_pass_the_configured_driver(
@@ -137,7 +166,7 @@ class _NoTools(BaseToolProvider):
 
 @pytest.mark.parametrize(
     ("driver", "count"),
-    [("safari-automation", 12), ("chrome", 12), ("off", 0), ("firefox", 0)],
+    [("safari-automation", 13), ("chrome", 13), ("off", 0), ("firefox", 0)],
 )
 async def test_every_console_chat_has_the_browser_tools_the_setting_names(
     driver: str, count: int
@@ -162,6 +191,7 @@ async def test_every_console_chat_has_the_browser_tools_the_setting_names(
                 "browser_type",
                 "browser_select",
                 "browser_click_point",
+                "browser_attach",
             }
             # Reading is read tier; what acts is not, so a surface that trusts the
             # read tier does not get it.

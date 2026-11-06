@@ -716,6 +716,7 @@ async def build_front_agent(
         memory=memory,
         tools=[tools],
         agent_class=FrontAgent,
+        chat_id=session_id,
     )
 
 

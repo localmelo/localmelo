@@ -586,10 +586,26 @@ var linesOf = function (node, into, limit) {
 )
 
 
+# What a reading lists at most: the nodes it looks at and the elements it keeps
+# (the rest are counted as skipped), and the same for ``browser_find``, which
+# searches the whole page and so reads far more of it (the cost is one search,
+# not every reading).
+READ_NODES, READ_ELEMENTS = 4000, 400
+FIND_NODES, FIND_ELEMENTS = 60000, 8000
+
+
 # Returns JSON: the page's text (the main part when there is one) and its
 # visible links, buttons and fields, each with its place (``at``) among the
 # page's possible targets. Secret fields are marked, their values never read.
-PAGE_JS = (
+def page_script(whole: bool = False) -> str:
+    """The script that reads a page; with *whole*, up to :data:`FIND_NODES` nodes and :data:`FIND_ELEMENTS` elements (a search), else the usual reading's."""
+    nodes, listed = (
+        (FIND_NODES, FIND_ELEMENTS) if whole else (READ_NODES, READ_ELEMENTS)
+    )
+    return _PAGE_JS.replace("__NODES__", str(nodes)).replace("__LISTED__", str(listed))
+
+
+_PAGE_JS = (
     r"""(function () {"""
     + COMMON_JS
     + r"""
@@ -642,12 +658,12 @@ PAGE_JS = (
   }
   for (var di = 0; di < docs.length; di++) {
     var D = docs[di][0], nodes = P.qsa.call(D, SEL), counts = {};
-    for (var i = 0; i < nodes.length && i < 4000; i++) {
+    for (var i = 0; i < nodes.length && i < __NODES__; i++) {
       var d = lookAt(nodes[i], counts);
       if (!d.el) { out.skipped += d.skip; continue; }
       var key = d.el.kind + "|" + d.el.label;
       counts[key] = (counts[key] || 0) + 1;
-      if (out.elements.length >= 400) { out.skipped += 1; continue; }
+      if (out.elements.length >= __LISTED__) { out.skipped += 1; continue; }
       d.el.at = i;
       if (docs[di][1]) d.el.frame = docs[di][1];
       out.elements.push(d.el);
@@ -657,6 +673,8 @@ PAGE_JS = (
   return P.json(out);
 })()"""
 )
+
+PAGE_JS = page_script()
 
 
 def _data(value: Any) -> str:
@@ -1604,10 +1622,10 @@ class PageScriptActs:
         """
         return None
 
-    async def page(self, tab: str | None) -> RawPage:
+    async def page(self, tab: str | None, whole: bool = False) -> RawPage:
         await self._focus(tab)
         url = await self._address(tab)
-        data = await self._read(PAGE_JS)
+        data = await self._read(page_script(whole))
         if not isinstance(data, dict):
             raise BrowserError(f"{self.label} returned a page melo could not read.")
         # The address was checked before the script ran. If the page is no longer
