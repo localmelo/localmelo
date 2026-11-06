@@ -233,6 +233,7 @@ _STATE_HINTS: Final = {
     "switching": "Switching the chat or model; esc cancels it.",
     "shell": "A ! command is running.",
 }
+SWITCH_ENDING_HINT: Final = "Finishing the switch; it ends in a moment."
 # Why a "! command" draft waits: the draft is kept.
 _SHELL_REFUSED: Final = {
     "running": "! runs only when melo is idle (esc stops the turn).",
@@ -577,9 +578,11 @@ class CliSession:
             self.queued = text
             self._hint("Sent when this turn completes · ↑ edits it · ctrl+c clears it")
             return None
-        return (
-            UNDO_HINT if self._pending_command == "undo" else _STATE_HINTS[self._state]
-        )
+        if self._pending_command == "undo":
+            return UNDO_HINT
+        if self._state == "switching" and self._work is None:
+            return SWITCH_ENDING_HINT  # past the point Esc can stop
+        return _STATE_HINTS[self._state]
 
     def _main_chat_command(
         self, command: commands.Command | None, name: str, arguments: str, text: str

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -163,6 +164,35 @@ async def test_a_message_sent_while_the_picks_load_gets_no_switch_under_its_turn
     assert session.stop()  # Esc while they load: nothing is sent
     await _until(lambda: session.state == "idle")
     assert len(serve_fake.switches) == 1
+
+
+async def test_a_switch_claims_only_what_it_knows(
+    chat: tuple[CliSession, PickingApp, RecordingOut],
+    serve_fake: FakeServe,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _, out = chat
+    gate = asyncio.Event()
+    build = session.factory.build
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        await gate.wait()
+        return await build(*args, **kwargs)
+
+    monkeypatch.setattr(session.factory, "build", slow)
+    session.enter("/model 8b")
+    await _until(lambda: serve_fake.switches and session._work is None)
+    hint = session.enter("hello")  # the rebuild: Esc is past its point
+    assert hint is not None and "esc" not in hint
+    gate.set()
+    await _until(lambda: "Switched to" in out.text() and session.state == "idle")
+
+    monkeypatch.setattr(melo_serve, "LOAD_BOUND_S", 0.05)
+    serve_fake.gate = threading.Event()  # melo_serve takes it and never answers
+    session.enter("/model 4b")
+    await _until(lambda: "load may still be running" in out.text())
+    await _until(lambda: session.state == "idle")
+    assert "Still using" not in out.text()
 
 
 async def test_the_token_goes_only_to_a_gateway_on_this_mac(

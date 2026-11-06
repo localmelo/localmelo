@@ -109,9 +109,9 @@ func modelMenuRows(_ list: ServeList, switching: ServeSwitch?) -> [ModelMenuRow]
 }
 
 /// Whether to draw *rows*: a poll with nothing new leaves the submenu as it is, and an open one is not rebuilt under
-/// the pointer (the first poll after it closes draws it).
+/// the pointer (the first poll after it closes draws it), unless it opened before the first list came and is empty.
 func modelMenuNeedsDrawing(_ rows: [ModelMenuRow], shown: [ModelMenuRow], open: Bool) -> Bool {
-    rows != shown && !open
+    rows != shown && (!open || shown.isEmpty)
 }
 
 /// The Model item's subtitle: the switch under way, else the current model's name.

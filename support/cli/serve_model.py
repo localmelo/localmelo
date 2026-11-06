@@ -178,6 +178,11 @@ async def _switch(session: CliSession, pick: melo_serve.Pick, still: str) -> Non
     except (melo_serve.MeloServeError, GatewayError) as exc:
         if isinstance(exc, GatewayError) and not exc.code:
             _unknown(session)  # no answer: the gateway may have started it
+        elif (
+            isinstance(exc, melo_serve.MeloServeError)
+            and exc.kind == melo_serve.NO_ANSWER
+        ):
+            _unknown(session, str(exc), "load")
         else:
             session.out.print(session._text(f"✗ {exc}. Still using {still}.", "error"))
         return
@@ -188,12 +193,15 @@ async def _switch(session: CliSession, pick: melo_serve.Pick, still: str) -> Non
     await _ended(session, pick, ended, still)
 
 
-def _unknown(session: CliSession) -> None:
-    """The gateway stopped answering: the switch may go on, so nothing is claimed."""
+def _unknown(
+    session: CliSession,
+    why: str = "The gateway stopped answering",
+    what: str = "switch",
+) -> None:
+    """*why* the end is not known: it may go on, so nothing is claimed about the model."""
     session.out.print(
         session._text(
-            "✗ The gateway stopped answering. The switch may still be running; "
-            "/model shows what is served.",
+            f"✗ {why}. The {what} may still be running; /model shows what is served.",
             "error",
         )
     )

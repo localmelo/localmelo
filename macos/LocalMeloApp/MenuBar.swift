@@ -14,6 +14,7 @@ final class MenuBar {
     /// melo_serve's chat models (ModelMenu.swift): shown only while melo_serve serves the chats.
     let modelItem: NSMenuItem
     private let models: NSMenu
+    private let menuOpened = MenuOpened()
     private let modelsOpened = MenuOpened()
     private var modelRows: [ModelMenuRow] = []
     private let choose: Selector
@@ -25,10 +26,10 @@ final class MenuBar {
     private var state = MenuBarState.unknown
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries. *chooseModel* and
-    /// *cancelSwitch* are what a pick of the Model submenu and its Cancel Switch send; *modelsOpened* runs as the
-    /// submenu opens, so its picks are read again.
+    /// *cancelSwitch* are what a pick of the Model submenu and its Cancel Switch send; *menuOpens* runs as the menu
+    /// opens, so the picks are read again before the submenu shows.
     init(menu: NSMenu, waiting: Selector, showPet: Selector, chooseModel: Selector, cancelSwitch: Selector,
-         modelsOpened: @escaping () -> Void) {
+         menuOpens: @escaping () -> Void) {
         let logo = MenuBar.logo()
         waitingLine = NSMenuItem(title: "", action: waiting, keyEquivalent: "").word(.waiting)
         showPetLine = NSMenuItem(title: "", action: showPet, keyEquivalent: "").word(.showPet)
@@ -51,8 +52,9 @@ final class MenuBar {
         statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeft
         models.autoenablesItems = false
-        self.modelsOpened.opened = modelsOpened
-        models.delegate = self.modelsOpened
+        menuOpened.opened = menuOpens
+        menu.delegate = menuOpened
+        models.delegate = modelsOpened
         show(.unknown)
     }
 

@@ -50,9 +50,11 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
-# The longest a load may take. melo_serve's own worst case is about 42 minutes (a
-# drain, a start and a rollback), so this is only for one that never answers: past
-# it a switch ends failed, and a request that waited for the load gives its error.
+# The longest a load may take. Without a ``before_load`` hook melo_serve's own worst
+# case is about 42 minutes (a drain, a start and a rollback), so this is for one that
+# never answers: past it a switch ends failed, and a request that waited for the load
+# gives its error. A hook may add its 30 minutes; a setup that slow is deliberate, and
+# then the switch can end failed, its turns going on, while melo_serve still works.
 LOAD_BOUND_S: Final = 45 * 60.0
 # The kind of the MeloServeError for that.
 NO_ANSWER: Final = "no_answer"

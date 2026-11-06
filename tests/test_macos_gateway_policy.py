@@ -425,6 +425,7 @@ precondition(modelMenuSubtitle(list, switching: failed) == "Qwen3.8 27B")
 precondition(!modelMenuNeedsDrawing(idle, shown: idle, open: false))  // a poll with nothing new
 precondition(!modelMenuNeedsDrawing(told, shown: idle, open: true))  // never under the pointer
 precondition(modelMenuNeedsDrawing(told, shown: idle, open: false))
+precondition(modelMenuNeedsDrawing(idle, shown: [], open: true))  // an open one still empty
 """,
         "ModelMenu.swift",
     )

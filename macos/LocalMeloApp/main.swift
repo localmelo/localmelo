@@ -130,7 +130,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         NSApp.mainMenu = root
         menuBar = MenuBar(menu: appMenu.copy() as? NSMenu ?? NSMenu(), waiting: #selector(openWaiting),
                           showPet: #selector(showPet), chooseModel: #selector(chooseModel(_:)),
-                          cancelSwitch: #selector(cancelSwitch), modelsOpened: { [weak self] in self?.fetchModels() })
+                          cancelSwitch: #selector(cancelSwitch), menuOpens: { [weak self] in self?.fetchModels() })
         signInItems = [signIn] + (menuBar.statusItem.menu?.items.filter { $0.action == #selector(signInAgain) } ?? [])
         let quit = #selector(NSApplication.terminate(_:))
         quitItems = appMenu.items.filter { $0.action == quit }
