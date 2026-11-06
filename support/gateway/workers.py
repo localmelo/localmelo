@@ -38,6 +38,7 @@ from localmelo.melo.executor.sandbox import user_temp_dir
 from localmelo.melo.executor.search_files import SEARCH_FILES_TOOL, rooted_search_files
 from localmelo.melo.schema import (
     MAX_EXTENSIONS,
+    TASK_EXTENSIONS,
     Message,
     ToolDef,
     broken_tool_call,
@@ -2390,7 +2391,7 @@ class TaskWorkers:
             task_session = await self.store.get_session(task_id)
             task_mode = chat_mode(task_session.meta if task_session else None)
             # The chat this is a person's work for, if it is: only that work has
-            # a browser and goes on for as long as it makes progress.
+            # a browser and the longer step bound.
             chat = await self._person_chat(record)
             settings = self.settings()
             try:
@@ -2413,7 +2414,7 @@ class TaskWorkers:
                                 identity=WORKER_GUIDE,
                                 task_aids=True,
                                 max_extensions=(
-                                    MAX_EXTENSIONS if chat is None else None
+                                    MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
                                 ),
                             ),
                         ),

@@ -50,6 +50,11 @@ MAX_ATTEMPTS = 5
 EXTEND_STEPS = 30
 MAX_EXTENSIONS = 2
 EXTEND_WHEN = 4
+# Work a person's chat owns goes on longer, and still ends: near TASK_STEPS, so a
+# task that keeps finding new calls never runs all night on a paid key or holds
+# the GPU. It ends as any run out of steps does, and Continue is the person's.
+TASK_STEPS = 500
+TASK_EXTENSIONS = (TASK_STEPS - MAX_AGENT_STEPS) // EXTEND_STEPS
 
 # Reflection budget. Only one reflection is carried into the next attempt's
 # prompt. If its serialized form exceeds the char cap, the agent trims it to

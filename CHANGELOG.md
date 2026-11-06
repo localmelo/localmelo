@@ -31,8 +31,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   work before its first step: the main chat's four-step stop and the resend behind it are gone, **Retry** finds the
   task instead of starting a second, and the chat takes your next message while the task runs. A task you asked for in
   a chat can browse, and its card shows in that chat as **Working for this chat** with the goal, **Stop** and **Done**;
-  a task with no person and no chat behind it gets no browser, and no task opens another app. Such a task goes on while it makes real progress and stops honestly
-  when it stalls; `--max-steps` and direct runs are unchanged. Side chats now answer with thinking off and leave file
+  a task with no person and no chat behind it gets no browser, and no task opens another app. Such a task goes on while it makes real progress, to about 500 steps, and stops honestly
+  with **Continue** when it stalls or gets there; `--max-steps` and direct runs are unchanged. Side chats now answer with thinking off and leave file
   changes and code to a task (#536).
 - Set up a model from the welcome card. With no server on a supported Apple-silicon Mac, the console's and the app's
   welcome card shows the terminal's list (what this Mac can run, each item with its size and where it goes, the total

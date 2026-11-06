@@ -12,7 +12,15 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.schema import MAX_EXTENSIONS, Message, RunResult
+from localmelo.melo.schema import (
+    EXTEND_STEPS,
+    MAX_AGENT_STEPS,
+    MAX_EXTENSIONS,
+    TASK_EXTENSIONS,
+    TASK_STEPS,
+    Message,
+    RunResult,
+)
 from localmelo.support import config
 from localmelo.support.sessions.agents import configured_attempt_options
 from localmelo.tests.agent.test_approvals import _answer, _calls, _no_wait
@@ -49,7 +57,7 @@ async def _run(
     extend: int,
     fails: bool = False,
     same: bool = False,
-    times: int | None = MAX_EXTENSIONS,
+    times: int = MAX_EXTENSIONS,
 ) -> tuple[RunResult, Tool]:
     (tmp_path / "ws").mkdir()
     agent = Agent(
@@ -82,17 +90,17 @@ async def _run(
         (12, MORE, True, False, 2, "budget_exhausted", STEPS),
         # Progress, but past the extensions it was given: it ends.
         (40, MORE, False, False, 2, "budget_exhausted", STEPS + MORE * 2),
-        # Work a chat owns goes on as long as it makes progress, on one count.
-        (40, MORE, False, False, None, "completed", 41),
+        # Work a chat owns has more of them, on one count.
+        (40, MORE, False, False, TASK_EXTENSIONS, "completed", 41),
         # The same call reading something new each time is a stall, whatever the limit.
-        (40, MORE, False, True, None, "budget_exhausted", STEPS),
+        (40, MORE, False, True, TASK_EXTENSIONS, "budget_exhausted", STEPS),
     ],
     ids=[
         "progress",
         "off",
         "no progress",
         "extensions used up",
-        "while progress",
+        "a chat's work",
         "same call",
     ],
 )
@@ -102,7 +110,7 @@ async def test_a_run_making_progress_is_given_more_steps_and_nothing_else_is(
     extend: int,
     fails: bool,
     same: bool,
-    times: int | None,
+    times: int,
     status: str,
     steps: int,
 ) -> None:
@@ -110,6 +118,11 @@ async def test_a_run_making_progress_is_given_more_steps_and_nothing_else_is(
         tmp_path, calls, extend=extend, fails=fails, same=same, times=times
     )
     assert (result.status, result.steps) == (status, steps)
+
+
+def test_a_chats_work_ends_near_its_step_bound_and_never_past_it() -> None:
+    last = MAX_AGENT_STEPS + TASK_EXTENSIONS * EXTEND_STEPS
+    assert TASK_STEPS - EXTEND_STEPS < last <= TASK_STEPS
 
 
 def test_a_persons_session_has_it_on_and_a_caller_keeps_its_own() -> None:

@@ -15,9 +15,12 @@ import httpx
 import pytest
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.schema import EXTEND_STEPS, MAX_AGENT_STEPS
 from localmelo.support.browser.provider import BrowserToolProvider
+from localmelo.support.gateway import workers as workers_module
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.browser_cards import BROWSER_EVENT
+from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.tests.browser.test_live import HOME, site
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -280,6 +283,29 @@ async def test_a_job_past_the_fifth_step_goes_on_while_the_chat_answers(
         assert await _turns(console, task) == 1
         assert len(models["workers"]) == 1
         assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+async def test_work_that_keeps_finding_new_calls_ends_at_its_bound_and_can_continue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound is the ordinary step limit, further on: the same stop, the same Continue."""
+    monkeypatch.setattr(workers_module, "TASK_EXTENSIONS", 1)
+    last = MAX_AGENT_STEPS + EXTEND_STEPS
+    work: list[Reply] = [
+        tool_call("search_files", {"pattern": f"word{n}"}, f"s-{n}")
+        for n in range(last + 5)
+    ]
+    async with ask_console(
+        tmp_path, monkeypatch, workers=[work, [answer("Finished.")]]
+    ) as (console, client, _):
+        task = await begin(client, str(console.main_id))
+        await ended(console, task, "failed")
+        record = await console.workers.tasks.get_task(task)
+        assert is_out_of_steps(record.state, record.wait_reason)
+        [turn] = await console.store.list_turns(task)
+        assert turn.result is not None and turn.result["steps"] == last
+        again = await client.post(f"/api/tasks/{task}/continue")
+        assert again.status_code == 202, again.text
 
 
 async def test_a_step_a_chat_task_must_ask_about_waits_for_the_person_not_its_chat(

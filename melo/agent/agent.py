@@ -2966,10 +2966,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 budget - step == EXTEND_WHEN
                 and run.last_attempt
                 and self.options.extend_steps > 0
-                and (
-                    self.options.max_extensions is None
-                    or run.extensions < self.options.max_extensions
-                )
+                and run.extensions < self.options.max_extensions
                 and self._progressing(fingerprints, fresh)
             ):
                 # Still making progress near the end of the run's last steps:

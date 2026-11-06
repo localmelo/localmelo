@@ -108,7 +108,7 @@ Three limits apply at different levels:
 
 - Every chat reads and answers: no reflection, thinking off, and tools to start, list and change tasks, read files and search memory. It acts on nothing itself.
 - Code reads your message first. `/task` and control phrases ("pause the slides") need no model call; a greeting or a short question is answered at once, never started as a task.
-- Work that acts is a task from its start: a worker runs it beside the conversation at a level from your words, with the browser and for as long as it makes progress, and its result comes back as a card.
+- Work that acts is a task from its start: a worker runs it beside the conversation at a level from your words, with the browser and while it makes progress, to about 500 steps, and its result comes back as a card.
 - A reply that only says what it will do starts the task ("This needs more than a quick answer, so I started it as a task"), or asks first when you asked a question.
 - Direct runs and workers run the full loop above, as before.
 

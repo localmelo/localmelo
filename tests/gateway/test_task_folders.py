@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.executor.builtins import _run_python
-from localmelo.melo.schema import MAX_EXTENSIONS
+from localmelo.melo.schema import MAX_EXTENSIONS, TASK_EXTENSIONS
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.finishing import commit_command, not_committed
@@ -97,7 +97,7 @@ async def setup(
         ("sleep", True, False),
     ],
 )
-async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_open_ended_steps(
+async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_long_steps(
     setup: Setup, origin: str, owned: bool, browses: bool
 ) -> None:
     workers, cfg, _, built, home = setup
@@ -121,7 +121,9 @@ async def test_only_a_persons_work_in_a_chat_gets_a_browser_and_open_ended_steps
     assert built[0]["desktop"] is False, "another app's window never, for anyone"
     assert built[0]["options"].builtins == worker_tool_allowlist("user").builtins
     assert not any(name.startswith("browser") for name in built[0]["options"].builtins)
-    assert built[0]["options"].max_extensions == (None if browses else MAX_EXTENSIONS)
+    assert built[0]["options"].max_extensions == (
+        TASK_EXTENSIONS if browses else MAX_EXTENSIONS
+    )
 
 
 async def test_a_main_chat_task_works_in_the_default_folder(setup: Setup) -> None:

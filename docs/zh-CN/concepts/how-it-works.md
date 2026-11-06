@@ -124,7 +124,7 @@ an attempt that runs out of steps (50), or repeats itself ─► reflection ─�
 
 - 每个对话都读取和回答：不做反思，关闭思考，带有开始、列出和改变任务、读取文件和搜索记忆的工具。它自己不动手。
 - 代码先读你的消息。`/task` 和控制短语（"pause the slides"、"暂停 Fix CI"）不需要调用模型；问候或简短的问题会立刻得到回答，不会被作为任务开始。
-- 要动手的工作从一开始就是任务：一个 worker 在对话旁边运行它，级别由你的话决定，它有浏览器，只要有进展就继续，结果以卡片回来。
+- 要动手的工作从一开始就是任务：一个 worker 在对话旁边运行它，级别由你的话决定，它有浏览器，只要有进展就继续，最多约 500 步，结果以卡片回来。
 - 回复只说了打算做什么时会开始任务（"This needs more than a quick answer, so I started it as a task"）；如果你提的是问题，会先问你。
 - 直接运行和 worker 照旧运行上面完整的循环。
 
