@@ -16,7 +16,7 @@ import { blockWords } from "./blocked.mjs";
 import { mergeBrowsers } from "./browser-card.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
-import { stepWords } from "./step-words.mjs";
+import { refusedStep, stepWords } from "./step-words.mjs";
 
 const SEPARATOR = " · ";
 // `support/cli/render.py`: these two calls end after SESSION_TOOL_TIMEOUT_S.
@@ -1546,6 +1546,8 @@ export function toolState(item, {held = "", now = 0} = {}) {
         extra.push(t("turns.tool.exit", {code: item.exitCode}));
       }
       if (tag) extra.push(tag.short);
+      // A call its own check refused did nothing: no tick beside "Not done".
+      if (refusedStep(item.output)) return {state: "declined", mark: "⊘", text: extra.join(SEPARATOR)};
       return {state: "success", mark: "✓", text: extra.join(SEPARATOR)};
     }
     case "error":

@@ -1356,3 +1356,17 @@ def shown(record: TaskRecord) -> dict[str, Any] | None:
     if ended and isinstance(ending, Mapping) and ending.get("at") == record.finished_at:
         return dict(ending)
     return default_ending(record.state, record.wait_reason)
+
+
+def job_finished(record: TaskRecord) -> bool:
+    """Whether *record*'s worker is through with its one job (#567): it ended Ready
+    (or Done with no ending decided), or expired, which nothing continues.
+
+    Such a worker takes no new work: that is a new worker, with this one's record
+    as background. One that stopped before finishing (failed, stopped, out of
+    steps, Done but not finished, needing the person) may go on with the same job.
+    """
+    if record.state == "expired":
+        return True
+    ending = shown(record)
+    return record.state == "done" and (ending is None or ending.get("state") == "ready")

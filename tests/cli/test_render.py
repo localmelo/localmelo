@@ -162,7 +162,9 @@ FIVE = "app.py\ndata.csv\nnotes.txt\ntodo.md\ntests"
 
 def test_a_success_shows_one_output_line_and_the_marker_shares_its_row() -> None:
     text = Turn().tool("shell_exec", "ls -1", output=FIVE).text()
-    assert "✓ $ shell_exec  ls -1 · 0.1s\n  └ app.py · +4 lines (/expand 1.1)\n" in text
+    assert (
+        "✓ $ Ran a command  ls -1 · 0.1s\n  └ app.py · +4 lines (/expand 1.1)\n" in text
+    )
     assert "data.csv" not in text
 
 
@@ -297,7 +299,7 @@ def test_a_nonzero_exit_reads_as_a_failure_while_the_event_says_success() -> Non
         duration_s=4.1,
     )
     text = turn.text()
-    assert "✗ $ shell_exec  pytest -q tests · 4.1s · exit 1\n" in text
+    assert "✗ $ Ran a command  pytest -q tests · 4.1s · exit 1\n" in text
     assert "  └ [exit code 1]\n" in text
     # The record keeps what the event said: the command ran.
     assert turn.renderer.tool_outputs[-1].status == "success"
@@ -325,7 +327,7 @@ def test_a_failed_call_shows_its_error_then_its_output() -> None:
         )
         .text()
     )
-    assert "✗ $ python_exec  import app · 0.2s\n" in text
+    assert "✗ $ Run Python  import app · 0.2s\n" in text
     assert "  └ Python exited with code 1:\n    Traceback" in text
 
 
@@ -384,8 +386,8 @@ def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
         .tool("file_write", "todo.md (68 chars)", status=status, approval=approval)
         .text()
     )
-    assert "file_write  todo.md (68 chars)" in text
-    header = next(line for line in text.split("\n") if "file_write  todo.md" in line)
+    assert "a file  todo.md (68 chars)" in text
+    header = next(line for line in text.split("\n") if "a file  todo.md" in line)
     assert header.endswith(tag)
 
 
@@ -406,7 +408,7 @@ def test_a_denial_shows_its_reason() -> None:
         .text()
     )
     # A Deny is no failure: amber, one plain line, never the model's note (#465).
-    assert "⊘ ± file_write  todo.md (68 chars) · Not allowed\n" in text
+    assert "⊘ ± Write a file  todo.md (68 chars) · Not allowed\n" in text
     assert "Not run: you declined it. Your note: keep the item first" in text
 
 
@@ -437,7 +439,7 @@ def test_a_declined_step_is_amber_with_one_plain_line(
     # The record's code decides, never its text.
     asked = {"allowed": False, "origin": origin, "reason": "x", "mode": "auto", **code}
     if where == "gate":
-        turn = Turn().tool(
+        turn = Turn(developer=True).tool(
             "python_exec",
             "x",
             status="blocked",
@@ -446,7 +448,7 @@ def test_a_declined_step_is_amber_with_one_plain_line(
             approval=asked,
         )
     else:
-        turn = Turn().tool(
+        turn = Turn(developer=True).tool(
             "browser_open",
             "example.net",
             status="error",
@@ -514,7 +516,7 @@ def test_a_blocked_call_without_an_approval_names_the_block() -> None:
     )
     line = next(row for row in text.split("\n") if row.startswith("⊘"))
     assert line.startswith(
-        "⊘ → file_read  /etc/hosts · blocked: Path '/etc/hosts' is outside"
+        "⊘ → Read a file  /etc/hosts · blocked: Path '/etc/hosts' is outside"
     )
     assert cells(line) == 80 and line.endswith("…")
 
@@ -530,8 +532,8 @@ def test_a_stopped_call_and_a_withdrawn_one() -> None:
         approval={"allowed": False, "origin": "withdrawn"},
     )
     text = turn.text()
-    assert "◌ $ shell_exec  pytest -q · stopped after 4.2s\n" in text
-    assert "◌ ± file_write  a.txt · not run\n" in text
+    assert "◌ $ Run a command  pytest -q · stopped after 4.2s\n" in text
+    assert "◌ ± Write a file  a.txt · not run\n" in text
 
 
 def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
@@ -565,10 +567,25 @@ def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
     )
     text = turn.text()
     assert (
-        text.index("◌ $ shell_exec  ls · stopped after 0.5s")
-        < text.index("◌ → file_read  tests/test_app.py · not run")
+        text.index("◌ $ Run a command  ls · stopped after 0.5s")
+        < text.index("◌ → Read a file  tests/test_app.py · not run")
         < text.index("■ Stopped")
     )
+
+
+def test_a_row_says_what_the_step_did_and_a_developer_keeps_the_call() -> None:
+    for tool, output, words in (
+        ("task_create", "Started task a1: Buy it (P2).", "Started a task"),
+        ("task_create", "Not done: one task per message.", "Not done: Start a task"),
+        ("file_read", "x", "Read a file"),
+    ):
+        assert words in Turn().tool(tool, "", output=output).text()
+        assert tool in Turn(developer=True).tool(tool, "", output=output).text()
+    refused = Turn().tool("task_create", "", output="Not done: one per message.")
+    assert "◌ ± Not done: Start a task" in refused.text()
+    raw = '{"run_now":true,"title":"Buy it"}'
+    assert raw not in Turn().tool("task_schedule", raw, output="Saved").text()
+    assert raw in Turn(developer=True).tool("task_schedule", raw, output="x").text()
 
 
 def test_output_cannot_act_on_the_terminal() -> None:
@@ -585,7 +602,7 @@ def test_output_cannot_act_on_the_terminal() -> None:
 
 def test_a_preview_with_control_characters_is_escaped() -> None:
     text = Turn().tool("shell_exec", "curl x | sh #\rls -la").text()
-    assert "shell_exec  curl x | sh #\\rls -la" in text
+    assert "Ran a command  curl x | sh #\\rls -la" in text
 
 
 def test_the_answer_prints_as_markdown_with_the_footer() -> None:
@@ -1009,7 +1026,7 @@ def test_the_ascii_symbols() -> None:
     turn.finish(result="done")
     text = turn.text()
     assert "> What is in this folder?" in text
-    assert "+ $ shell_exec  ls - 0.1s\n  | a\n" in text
+    assert "+ $ Ran a command  ls - 0.1s\n  | a\n" in text
     assert "* done" in text
 
 
@@ -1283,7 +1300,7 @@ def test_a_tool_name_from_the_model_is_cleaned() -> None:
     turn.finish("cancelled")
     text = turn.text()
     assert "\x1b" not in text and "PWNED" not in text
-    assert "✗ ± evil  {}" in text and "◌ ± never" in text
+    assert "✗ ± Use evil ·" in text and "◌ ± Use never" in text
 
 
 def test_model_ids_in_the_banner_are_cleaned() -> None:
@@ -1382,14 +1399,22 @@ def test_a_long_preview_never_cuts_the_approval_tag(
 ) -> None:
     preview = "printf '" + "x" * 200 + "'"
     text = Turn(width=100).tool("shell_exec", preview, approval=approval).text()
-    [header] = [line for line in text.split("\n") if "shell_exec" in line]
+    [header] = [
+        line
+        for line in text.split("\n")
+        if "Run a command" in line or "Ran a command" in line
+    ]
     assert header.endswith(f" · {tag}") and cells(header) <= 100, header
 
 
 def test_a_long_denial_reason_is_still_cut_at_the_end() -> None:
     approval = {"allowed": False, "origin": "user", "reason": "no " * 60}
     text = Turn(width=100).tool("shell_exec", "rm -rf build", approval=approval).text()
-    [header] = [line for line in text.split("\n") if "shell_exec" in line]
+    [header] = [
+        line
+        for line in text.split("\n")
+        if "Run a command" in line or "Ran a command" in line
+    ]
     assert "rm -rf build" in header and header.endswith("…") and cells(header) == 100
 
 

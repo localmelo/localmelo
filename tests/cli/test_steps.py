@@ -197,8 +197,8 @@ def test_the_renderer_lists_the_turns_calls_and_the_items_to_come() -> None:
     )
     rows = turn.renderer.steps()
     assert [(row.status, row.tool, row.kind) for row in rows] == [
-        ("ok", "file_read", "read"),
-        ("failed", "shell_exec", "run"),
+        ("ok", "Read a file", "read"),
+        ("failed", "Ran a command", "run"),
         ("next", "Run the tests", ""),
     ]
     # An item that is not a mapping is skipped; after the turn none is to come.
@@ -210,6 +210,10 @@ def test_the_renderer_lists_the_turns_calls_and_the_items_to_come() -> None:
     # The next turn starts its own list.
     turn.renderer.begin_turn("again")
     assert [row.status for row in turn.renderer.steps()] == []
+    # A call its own check refused did nothing: never a tick beside its Not done.
+    turn.tool("task_create", "", output="Not done: one task per message.")
+    [row] = turn.renderer.steps()
+    assert (row.status, row.tool) == ("refused", "Not done: Start a task")
 
 
 async def test_ctrl_o_opens_the_steps_and_esc_closes_them() -> None:

@@ -78,6 +78,7 @@ export function readCard(row) {
       preview: String(data.preview ?? ""),
       review: data.review && typeof data.review === "object" ? data.review : {},
       canAllow: data.can_allow === true,
+      finished: data.finished === true,
     } : {}),
   };
 }
@@ -91,7 +92,7 @@ export function cardBlock(card) {
     preview: card.preview,
   });
   if (!facts || !facts.category) return null;
-  return card.canAllow ? facts : {...facts, allow: false};
+  return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
 }
 
 /**
@@ -258,10 +259,10 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 
 // ── Echoes: what the main chat did with a task ──
 
-const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "sent", "chore", "chore_saved", "checkin", "sleep",
+const ECHO_KINDS = new Set(["started", "control", "level", "suggest", "ask", "undone", "failed", "notice", "sent", "chore", "chore_saved", "checkin", "sleep",
   "task_ask", "task_answered", "task_escalate", "ask_end", "queued", "dequeued", "answer_sent", "answer_delivered", "earlier", "revoked",
   "followup", "followed"]);
-const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
+const MARKS = {started: "+", level: "↕", suggest: "?", ask: "?", undone: "↺", failed: "!", notice: "i", sent: "→", chore: "◷", chore_saved: "◷", checkin: "◷", sleep: "☾",
   stop: "■", pause: "‖", resume: "▶", first: "↑", send: "→", task_ask: "?", task_answered: "↩", task_escalate: "!", ask_end: "·", queued: "…", answer_sent: "↩",
   earlier: "✓", revoked: "↺", followup: "↻"};
 // A task's question (#369): its seven fields, and the five parts of a question to the person.
@@ -375,6 +376,8 @@ export function echoActions(echo, done, plain = false) {
   if (echo.kind === "earlier") return [[t("approvals.revoke"), "revoke"]];
   // A reminder runs once, at its time: there is no "just once" for it.
   if (echo.kind === "chore" && echo.reminder) return [[t("mainChat.echo.remind"), "save"], [t("common.cancel"), "cancel"]];
+  // The message started its work already: only the schedule is left to save.
+  if (echo.kind === "chore" && echo.ran) return [[t("mainChat.echo.saveChore"), "save"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore") return [[t("mainChat.echo.saveChore"), "save"], [t("mainChat.echo.once"), "once"], [t("common.cancel"), "cancel"]];
   if (echo.kind === "chore_saved" || echo.kind === "sleep") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {

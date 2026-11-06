@@ -344,15 +344,21 @@ def _tidy(text: str) -> str:
 
 
 def parse_phrase(text: str) -> ParsedChore | None:
-    """The schedule a message names and the work that is left, or ``None``.
+    """:func:`read_schedule`, or ``None`` when nothing is left to do ("every day at 9")."""
+    found = read_schedule(text)
+    return found if found is not None and len(found.work) >= 2 else None
+
+
+def read_schedule(text: str) -> ParsedChore | None:
+    """The schedule a message names and the words beside it, or ``None``.
 
     Reads "every day", "every weekday" (and "weekdays", "Monday to Friday"),
     "every morning/evening/night", "daily", "hourly" and "every N hours" in
     English, and 每天, 每个工作日, 每晚, 每小时, 每隔N小时 and the like in Chinese,
     each with an optional day part and time ("at 8:30", "at 9 pm", "早上九点半").
     A phrase with no time means its day part's hour, else 9:00. Anything else
-    ("every Monday", "every 30 minutes") is not read: the message goes on as
-    it always did. Nothing is left to do ("every day at 9") also gives ``None``.
+    ("every Monday", "every 30 minutes") is not read. ``work`` is what is left of
+    the words, for a title: the request a chore keeps is the whole message.
     """
     rules: tuple[tuple[re.Pattern[str], Kind, Reader | None], ...] = (
         (_WEEKDAYS_EN, "weekdays", _time_en),
@@ -390,10 +396,7 @@ def parse_phrase(text: str) -> ParsedChore | None:
             )
         left, right = text[: found.start()].strip(), text[end:].strip()
         joined = left + ("" if _cjk(left[-1:]) or _cjk(right[:1]) else " ") + right
-        work = _tidy(joined)
-        if len(work) < 2:
-            return None
-        return ParsedChore(schedule, work, text[found.start() : end].strip())
+        return ParsedChore(schedule, _tidy(joined), text[found.start() : end].strip())
     return None
 
 
@@ -407,4 +410,5 @@ __all__ = [
     "ScheduleError",
     "clock_text",
     "parse_phrase",
+    "read_schedule",
 ]

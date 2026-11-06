@@ -752,7 +752,8 @@ async def test_without_an_explanation_the_card_shows_and_answers(
 async def test_an_auto_tasks_block_shows_in_its_chat_with_allow_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    plans = plan(KEYS) + plan(KEYS)
+    needs_it = _answer("It needs that step.\nEnding: blocked: may it read the key?")
+    plans = [step(KEYS), needs_it, *plan(KEYS)]
     async with chat_console(tmp_path, monkeypatch, plans) as s:
         main = s.console.main_id or ""
         await s.console.store.update_session(main, meta_update={"approvals": "auto"})

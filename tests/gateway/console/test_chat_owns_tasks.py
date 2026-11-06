@@ -441,26 +441,6 @@ async def test_a_web_or_command_request_starts_a_task_with_one_line_and_stop(
         assert await state(console, started[1]["task_id"]) == "queued"
 
 
-async def test_an_answerable_question_is_answered_and_starts_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    main: list[Reply] = [
-        creates("Monads"),
-        answer("A monad chains steps that carry some context along."),
-    ]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        models,
-        _,
-    ):
-        await say(client, console, "what is a monad?")
-        refused = tool_results(models["main"], 1)[-1]
-        assert refused.startswith("Not done: this is a question or small talk")
-        assert await rows(console, console.main_id) == []
-        assert await console.workers.tasks.list_tasks() == []
-
-
 async def test_an_unclear_request_gets_one_question_and_starts_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

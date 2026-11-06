@@ -633,6 +633,12 @@ async def test_task_in_a_side_chat_not_yet_made_asks_for_its_first_message(
     assert "Tasks start from the main chat" not in setup.out.text()
 
 
+def test_a_notice_is_a_plain_line_and_a_failure_is_not() -> None:
+    notice = {"echo": "notice", "line": "Browsing is off."}
+    assert echo_line(notice, UNICODE, 80).style != "error"
+    assert echo_line({**notice, "echo": "failed"}, UNICODE, 80).style == "error"
+
+
 def test_an_echo_about_another_chats_task_says_whose_it_is() -> None:
     plain = echo_line({"echo": "control", "line": "Paused: Slides"}, UNICODE, 80)
     side = echo_line(

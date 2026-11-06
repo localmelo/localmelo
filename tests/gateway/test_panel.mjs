@@ -151,7 +151,6 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['browser_attach', {ref: 'e4'}, 'Attaching a file'],
     ['recall', {}, 'Remembering'],
     ['mcp__files__file_read', {path: 'a/b.txt'}, 'Reading b.txt'],
-    ['mcp__calendar__list_events', {}, 'Using a tool'],
   ];
   for (const [name, args, words] of cases) assert.equal(stepWords(name, args), words, name);
   assert.equal(stepWords('file_read', {path: 'notes.md'}, true), 'Read notes.md');
@@ -166,6 +165,31 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['Keeping a note', 'Kept a note', 'Could not keep a note', 'Could not keep a note'],
   );
   assert.equal(stepWords('browser_click', {ref: 'e1'}, true), 'Clicked on the page');
+  assert.equal(stepWords('web_fetch', {url: 'https://www.example.com/a'}, true), 'Read example.com');
+  // A chat's own steps say what it did, a refused call included; never "a tool".
+  const chats = [
+    ['task_create', {title: 'Buy it'}, 'Starting “Buy it”', 'Started “Buy it”', 'Start “Buy it”'],
+    ['task_create', {}, 'Starting a task', 'Started a task', 'Start a task'],
+    ['task_schedule', {}, 'Saving a schedule', 'Saved a schedule', 'Save a schedule'],
+    ['task_list', {}, 'Looking through the tasks', 'Looked through the tasks', 'Look through the tasks'],
+    ['task_get', {task_id: 'a'}, 'Reading a task', 'Read a task', 'Read a task'],
+    ['task_message', {task_id: 'a'}, 'Sending your message to a task', 'Sent your message to a task', 'Send your message to a task'],
+    ['task_set_priority', {}, 'Changing the priority of a task', 'Changed the priority of a task', 'Change the priority of a task'],
+    ['task_control', {action: 'stop'}, 'Stopping a task', 'Stopped a task', 'Stop a task'],
+    ['task_control', {action: 'pause'}, 'Pausing a task', 'Paused a task', 'Pause a task'],
+    ['task_control', {action: 'resume'}, 'Resuming a task', 'Resumed a task', 'Resume a task'],
+    ['task_answer', {}, 'Answering a task', 'Answered a task', 'Answer a task'],
+    ['task_continue', {}, 'Continuing a task', 'Continued a task', 'Continue a task'],
+    ['ask_person', {}, 'Asking you', 'Asked you', 'Ask you'],
+    ['ask_owner', {}, 'Asking its chat', 'Asked its chat', 'Ask its chat'],
+    ['search_files', {pattern: 'def main'}, 'Looking for “def main”', 'Looked for “def main”', 'Look for “def main”'],
+    ['mcp__calendar__list_events', {}, 'Using list events', 'Used list events', 'Use list events'],
+  ];
+  for (const [name, args, now, done, ask] of chats) {
+    assert.deepEqual([stepWords(name, args), stepWords(name, args, true), stepWords(name, args, 'ask')], [now, done, ask], name);
+  }
+  assert.equal(stepWords('task_create', {title: 'Buy it'}, true, 'Not done: one task per message.'), 'Not done: Start “Buy it”');
+  assert.equal(stepWords('task_message', {}, true, 'Started task b: Prices (P2).'), 'Started a task');
   assert.ok(!stepWords('browser_type', {ref: 'e2', text: 'my secret'}).includes('secret'));
   const secret = 'sk-' + 'a1b2c3'.repeat(4);
   assert.ok(!stepWords('shell_exec', {command: `curl -H ${secret}`}).includes(secret));
@@ -481,6 +505,17 @@ test('Workers says when workers appear: for a side chat and for the main chat, a
   const once = harness({rows: chats, hasTasks: true});
   await once.panel.update(health());
   assert.deepEqual(once.root.findAll((node) => node.tagName === 'A').map((link) => link.href), ['#/tasks']);
+});
+
+test('a step its own check refused has no tick in the live steps', async () => {
+  const live = row({kind: 'run', id: 'r1', state: 'running', activity: 'Reading notes.md', icon: 'read', level: 2, at: 900});
+  const h = harness({rows: [live], turns: [started, tool(2, 'c1', 'tool.started', {name: 'task_create', arguments: {title: 'Buy it'}}),
+    tool(3, 'c1', 'tool.finished', {name: 'task_create', status: 'success', output: 'Not done: one task per message.', duration_s: 0.1})]});
+  await h.panel.update(health({running: {chats: 0, tasks: 0, runs: 1, terminal: 0}}));
+  h.heads()[0].click();
+  await settle();
+  const [step] = h.root.findAll((node) => node.className === 'activity-step');
+  assert.deepEqual([step.dataset.state, step.text()], ['declined', '⊘ Not done: Start “Buy it” 0.1s']);
 });
 
 test('a running worker run opens to its live steps, which follow its stream until it ends', async () => {

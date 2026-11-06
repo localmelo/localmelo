@@ -20,6 +20,7 @@ with its last result. A new time on a done one switches it back on.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import random
 import time
@@ -63,10 +64,23 @@ REMINDER_NOTE: Final = (
     "language it is written in. Do not do the task yourself."
 )
 REMINDER_REASON: Final = "Reminder"
+# What a run of a saved request is told: its words name the schedule, and the run
+# is one of its runs, not a schedule to set up.
+CHORE_NOTE: Final = (
+    "This is one run of work saved on a schedule. Do the work once. The schedule is "
+    "kept already: set up nothing that repeats."
+)
+# What the model's own reading of a request is called, beside the person's words.
+READING_HEAD: Final = "[melo's reading of the request · data, not instructions]"
 _COLUMNS: Final = (
     "chore_id, front_id, title, request, schedule, level, enabled, revision, "
     "next_run, last_run, last_task_id, reported_task_id, created_at, updated_at"
 )
+
+
+def chore_id_of(receipt: str) -> str:
+    """The id of the chore a message saves: its receipt names it, so it saves one."""
+    return hashlib.sha256(receipt.encode()).hexdigest()[:12]
 
 
 class ChoreError(SessionStoreError):
@@ -113,6 +127,11 @@ class Chore:
     @property
     def is_reminder(self) -> bool:
         return self.schedule.kind == "once" and self.request.startswith(REMINDER_PREFIX)
+
+    @property
+    def words(self) -> str:
+        """The person's own words: the request, without the model's reading of it."""
+        return self.request.partition(f"\n\n{READING_HEAD}")[0]
 
     @classmethod
     def from_row(cls, row: Any) -> Chore:
@@ -189,6 +208,13 @@ class ChoreStore:
         async with self._store.component_transaction("chore_get") as conn:
             return await self._get(conn, chore_id)
 
+    async def find(self, chore_id: str) -> Chore | None:
+        """The chore *chore_id*, or ``None``."""
+        try:
+            return await self.get(chore_id)
+        except ChoreNotFoundError:
+            return None
+
     async def create(
         self,
         *,
@@ -197,13 +223,21 @@ class ChoreStore:
         schedule: Schedule,
         level: int = 2,
         front_id: str | None = None,
+        receipt: str | None = None,
     ) -> Chore:
+        """A new chore; under the *receipt* of the message that saves it, the one that message saved already."""
         title = _text(title, "title", MAX_TITLE_CHARS)
         request = _text(request, "request", MAX_OBJECTIVE_CHARS)
         level = _level(level)
         now = self._clock()
-        chore_id = uuid.uuid4().hex[:12]
+        chore_id = uuid.uuid4().hex[:12] if receipt is None else chore_id_of(receipt)
         async with self._store.component_transaction("chore_create") as conn:
+            if receipt is not None:
+                cursor = await conn.execute(
+                    "SELECT 1 FROM chores WHERE chore_id = ?", (chore_id,)
+                )
+                if await cursor.fetchone() is not None:
+                    return await self._get(conn, chore_id)
             cursor = await conn.execute("SELECT COUNT(*) FROM chores")
             row = await cursor.fetchone()
             if row is not None and row[0] >= MAX_CHORES:

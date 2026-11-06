@@ -209,7 +209,7 @@ async def test_a_task_the_model_made_up_starts_as_the_persons_words_in_a_side_ch
         assert str(models[side].requests[1][-1].content).startswith("Started task")
 
 
-async def test_a_question_the_model_made_a_task_of_is_offered_in_the_main_chat(
+async def test_a_question_the_model_made_a_task_of_runs_the_persons_words_only(
     tmp_path: Path,
 ) -> None:
     main = [
@@ -219,14 +219,13 @@ async def test_a_question_the_model_made_a_task_of_is_offered_in_the_main_chat(
         answer("I offered it."),
     ]
     async with chats_console(tmp_path, main=main) as (console, client, models):
-        await _say(client, console, "what does report.md say about the folders?")
+        typed = "what does report.md say about the folders?"
+        await _say(client, console, typed)
         await _wait_turn(client, str(console.main_id))
-        assert await console.workers.tasks.list_tasks() == []
-        [offer] = await _events(console, str(console.main_id), ECHO_EVENT)
-        assert (offer["echo"], offer["text"]) == (
-            "ask",
-            "what does report.md say about the folders?",
-        )
+        # The model's call starts it, and what runs is the person's words alone.
+        [task] = await console.workers.tasks.list_tasks()
+        assert task.spec["objective"] == typed
+        assert "Delete" not in str(task.spec)
 
 
 # ── 6, 7. A deleted chat's unfinished tasks and waiting cards are the main chat's ──
@@ -307,9 +306,10 @@ async def test_a_task_of_a_deleted_chat_reports_to_the_main_chat_and_its_model(
 async def test_a_deleted_chats_chore_is_the_main_chats(tmp_path: Path) -> None:
     async with chats_console(tmp_path) as (console, client, _):
         side = await _side(client, tmp_path, "Trip plan")
-        proposed = await _say_in(
-            client, side, "Brief me on the news every weekday at 8:30"
+        proposed = await console.front_for(side).propose_chore(
+            "Brief me on the news every weekday at 8:30"
         )
+        assert proposed is not None
         saved = await client.post(
             f"/api/front/echoes/{proposed['id']}",
             json={"do": "save", "session_id": side},

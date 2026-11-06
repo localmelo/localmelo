@@ -224,8 +224,9 @@ async def test_an_echo_keeps_its_english_line_and_its_words_for_the_page(
         for phrase in ("pause the slides", "先做 slides", "停止 slides"):
             echo = (await _say(client, console, phrase)).json()["echo"]
             assert (await tap(client, echo["id"], "undo")).status_code == 200
-        chore = (await _say(client, console, "every weekday at 8:30, brief me")).json()
-        saved = (await tap(client, chore["echo"]["id"], "save")).json()["echo"]
+        chore = await console.front.propose_chore("every weekday at 8:30, brief me")
+        assert chore is not None
+        saved = (await tap(client, chore["id"], "save")).json()["echo"]
         await tap(client, saved["id"], "undo")
         echoes = await _echoes(console)
     kinds = {echo["echo"] for echo in echoes}

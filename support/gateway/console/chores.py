@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.chore_store import (
+    CHORE_NOTE,
     REMINDER_NOTE,
     REMINDER_REASON,
     Chore,
@@ -42,12 +43,17 @@ from localmelo.support.gateway.chore_store import (
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import FINISHED, level_word
 from localmelo.support.gateway.i18n import current, said_text, t, using
-from localmelo.support.gateway.task_policy import TaskPolicyError, TaskSpec
+from localmelo.support.gateway.task_policy import (
+    MAX_OBJECTIVE_CHARS,
+    TaskPolicyError,
+    TaskSpec,
+)
 from localmelo.support.gateway.task_store import TaskConflictError, TaskStoreError
 from localmelo.support.sessions.store import SessionStoreError
 
 from .activity import result_line
 from .front import thinking_off
+from .running import WAITS_FOR_YOU
 
 if TYPE_CHECKING:
     from . import Console
@@ -184,10 +190,19 @@ class ChoreRunner:
 
     async def _start(self, chore: Chore, key: str) -> str:
         reminder = chore.is_reminder
-        objective = f"{chore.request}\n\n{REMINDER_NOTE}" if reminder else chore.request
-        spec = TaskSpec.from_payload({"objective": objective, "title": chore.title})
+        note = REMINDER_NOTE if reminder else CHORE_NOTE
+        room = MAX_OBJECTIVE_CHARS - len(note) - 2
+        spec = TaskSpec.from_payload(
+            {"objective": f"{chore.request[:room]}\n\n{note}", "title": chore.title}
+        )
         reason = REMINDER_REASON if reminder else f"Chore, {chore.schedule.describe()}"
-        spec = dataclasses.replace(spec, level=chore.level, reason=reason)
+        # A review reads the person's words, never the note or the model's reading.
+        spec = dataclasses.replace(
+            spec,
+            level=chore.level,
+            reason=reason,
+            user_words="" if reminder else chore.words,
+        )
         task, _ = await self.console.workers.create_spec(
             spec, front_id=chore.front_id, request_key=key, origin="user_rule"
         )
@@ -204,6 +219,16 @@ class ChoreRunner:
             fresh, next_run=fresh.next_run, task_id=task_id, ran_at=now
         )
         return await self.console.workers.get(task_id)
+
+    async def ran_in_chat(self, chore_id: str, task_id: str) -> None:
+        """The chat ran this chore for the message that saved it: that is its last
+        run, its next slot stands, and the task's card tells the person, not the check-in.
+        """
+        chore = await self.store.get(chore_id)
+        await self.store.advance(
+            chore, next_run=chore.next_run, task_id=task_id, ran_at=self.clock()
+        )
+        await self.store.mark_reported({chore_id: task_id})
 
     # ── The check-in ──
 
@@ -258,15 +283,30 @@ class ChoreRunner:
                 results.append(
                     (chore, chore.last_task_id, last["line"] or last["state"])
                 )
-        records = await self.console.workers.tasks.list_tasks(["waiting"])
-        waiting = [
+        return results, await self._waiting(now)
+
+    async def _waiting(self, now: float) -> list[tuple[str, str]]:
+        """The main chat's tasks that have waited a whole beat for the person, not yet mentioned.
+
+        A task on an approval or an answer is ``held`` (:data:`WAITS_FOR_YOU`); one
+        on a question to the person stays ``running``, and the ask says so. A task
+        that just began waiting has its card or its reply box in front of the person.
+        """
+        main = self.console.main_id
+        since = now - self.options.checkin_s
+        asked = {ask.task_id for ask in self.console.asks.waiting_on_person(str(main))}
+        records = await self.console.workers.tasks.list_tasks(["held", "running"])
+        return [
             (r.task_id, r.title)
             for r in records
             if r.task_id not in self._mentioned
             and r.front_id in (None, main)
-            and r.updated_at <= now - self.options.checkin_s
+            and r.updated_at <= since
+            and (
+                r.task_id in asked
+                or (r.state == "held" and r.wait_reason in WAITS_FOR_YOU)
+            )
         ]
-        return results, waiting
 
     async def _note(self, facts: list[str]) -> str:
         summarize = self.options.summarize or self._ask_model

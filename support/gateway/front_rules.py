@@ -700,7 +700,8 @@ def status_question(typed: str) -> bool:
     names_task = bool(_NAMES_TASK.search(bare))
     if not (_STATE_WORDS.search(text) or (names_task and _TASK_SAYS.search(bare))):
         return False
-    asked = _ASKS_RESULT.sub(r"\1", bare)
+    # A word of state is no verb that acts: 跑完 in "跑完了吗" asks how it went.
+    asked = _STATE_WORDS.sub(" ", _ASKS_RESULT.sub(r"\1", bare))
     if names_task:
         asked = _LOOKS.sub(" ", asked)
     if acts(asked):
@@ -712,21 +713,33 @@ def status_question(typed: str) -> bool:
     )
 
 
-# The person says not to act: explain, describe or answer only, change nothing, start nothing.
+# The person plainly says not to act: start nothing, change nothing, hold off.
+_STANDS_BACK: Final = re.compile(
+    r"\b(?:don['’]?t|do\s+not|no\s+need\s+to|never)\s+(?:\w+\s+){0,2}?(?:"
+    r"(?:start(?:ing)?|run(?:ning)?|do(?:ing)?)\s+"
+    r"(?:a\s+task|anything(?!\s+else)|it(?=\s*(?:$|[.,;!?，。；！？])))"
+    r"|(?:chang(?:e|ing)|touch(?:ing)?|modify(?:ing)?|edit(?:ing)?|alter(?:ing)?)\s+"
+    r"anything(?!\s+else))"
+    r"|\bno\s+need\s+for\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|\b(?:don['’]?t|do\s+not)\s+(?:make|create|open|start|add)\s+(?:a\s+)?(?:new\s+)?task\b"
+    r"|先别(?:动手|做|改)"
+    r"|(?:不要|不用|不需要|无需|不必)(?:开始|开|建|新建|创建)?(?:一个|个)?任务"
+    r"|别(?:开始|开|建|新建|创建)(?:一个|个)?任务"
+    r"|不用(?:动手|做|改)|别动手"
+)
+# Or limits what is done or what comes back, which may come with the work ("without
+# changing anything else", "just tell me the result").
 _HANDS_OFF: Final = re.compile(
-    r"\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
+    _STANDS_BACK.pattern
+    + r"|\b(?:just|only)\s+(?:tell|explain|describe|answer|say|show)\b"
+    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)"
     r"|\b(?:don['’]?t|do\s+not|no\s+need\s+to|never|without)\s+(?:\w+\s+){0,2}?"
     r"(?:start(?:ing)?|run(?:ning)?|chang(?:e|ing)|touch(?:ing)?|do(?:ing)?|"
     r"modify(?:ing)?|edit(?:ing)?|alter(?:ing)?|writ(?:e|ing)|delet(?:e|ing))\s+"
     r"(?:a\s+task|anything(?:\s+else)?|any\s+(?:other\s+)?(?:code|files?)|it|"
     r"(?:the|my|this|other)\s+(?:code|files?|repo(?:sitory)?|project|folder))\b"
     r"|\b(?:make\s+)?no\s+changes?\b"
-    r"|\bno\s+need\s+for\s+(?:a\s+)?(?:new\s+)?task\b"
-    r"|\b(?:don['’]?t|do\s+not)\s+(?:make|create|open|start|add)\s+(?:a\s+)?(?:new\s+)?task\b"
-    r"|只(?:是)?(?:说|讲|解释|回答|告诉我|介绍)|先别(?:动手|做|改)"
-    r"|(?:不要|不用|不需要|无需|不必)(?:开始|开|建|新建|创建)?(?:一个|个)?任务"
-    r"|别(?:开始|开|建|新建|创建)(?:一个|个)?任务"
-    r"|不用(?:动手|做|改)|别(?:动手|改|动|碰)|不要(?:改|动|修改|碰|删)"
+    r"|别(?:改|动|碰)|不要(?:改|动|修改|碰|删)"
 )
 
 
@@ -743,10 +756,44 @@ START_ROUTES: Final = frozenset({"delegate", "work", "plan"})
 StartRule = Literal["start", "answer", "offer"]
 
 
-def start_rule(typed: str) -> StartRule:
-    """What a chat's ``task_create`` does with the person's own words *typed* (#410).
+def _material(text: str) -> bool:
+    """Text given after a colon to explain, translate or summarize; *text* is
+    normed. Not one when it names a file or a link: that is work on the file."""
+    return (
+        bool(_MATERIAL.match(text)) and not names_files(text) and not _URL.search(text)
+    )
 
-    In this order:
+
+def _holds_back(typed: str) -> bool:
+    """Words that say not to act (:func:`hands_off`), with no verb that acts beside them."""
+    return hands_off(typed) and not acts(typed)
+
+
+def create_rule(typed: str) -> StartRule:
+    """What a chat's ``task_create`` does on a person's turn with their words *typed* (#567).
+
+    The model read the words and chose to act, so no list of words stands
+    between its call and the work. ``offer`` for no typed words (an attachment
+    alone, a retry) and for words that plainly say not to act (start nothing,
+    change nothing, hold off); a limit on the work or on what comes back
+    ("without changing anything else", "just tell me the result") is no such
+    word, and goes to the task with the rest of the message. Else ``start``, the
+    person's message the task's objective.
+
+    Only the first :data:`OPENING_CHARS` characters are read.
+    """
+    opening = typed.lstrip()[:OPENING_CHARS]
+    if not opening or _STANDS_BACK.search(norm(_QUOTED.sub(" ", opening))):
+        return "offer"
+    return "start"
+
+
+def start_rule(typed: str) -> StartRule:
+    """What code does with a turn whose model acted on nothing, from the person's words *typed* (#410).
+
+    A reply that only said what it would do did nothing: code settles the turn.
+    A model's own ``task_create`` goes by :func:`create_rule`, never by this
+    rule. In this order:
 
     - ``offer`` for no typed words (an attachment alone, a retry), and for
       words that steer a task (cancel, stop, pause, continue, follow up on …),
@@ -783,13 +830,13 @@ def start_rule(typed: str) -> StartRule:
     if status_question(typed):
         return "answer"
     # Text given to explain or translate is answered here, unless it names a file or a link.
-    if _MATERIAL.match(text) and not names_files(text) and not _URL.search(text):
+    if _material(text):
         return "answer"
+    if _holds_back(typed):
+        return "offer"
     # A request in steps acts too, unless the words say not to act.
     steps = steps_request(typed) and not hands_off(typed)
     doing = acts(typed) or steps or (authorizes(typed) and not hands_off(typed))
-    if hands_off(typed) and not doing:
-        return "offer"
     if not doing and (_REQUEST.match(text) or _EXPLAINS.match(text)):
         return "answer"
     found = route(typed).route
@@ -1219,6 +1266,7 @@ __all__ = [
     "brief_question",
     "continue_name",
     "control_action",
+    "create_rule",
     "follow_cue",
     "hands_off",
     "intention_only",

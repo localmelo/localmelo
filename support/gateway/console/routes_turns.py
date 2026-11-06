@@ -48,11 +48,14 @@ from localmelo.support.sessions.submissions import (
     SubmissionWithdrawn,
     check_client_request_id,
     check_submission,
+    text_sha256,
 )
 
 from .asks import MAX_NOTE_CHARS
 from .bodies import Body
+from .cards import card_json
 from .errors import ApiError
+from .front import ECHO_EVENT
 from .registry import STOP_REASON, TurnExtras
 from .shapes import submission_json, turn_json
 from .task_submissions import (
@@ -318,19 +321,32 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
-async def _create_for_task(
-    console: Console, body: CreateRequest, typed: str, composed: str, key: str | None
-) -> JSONResponse:
-    """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
+async def _create_for_code(
+    console: Console,
+    body: CreateRequest,
+    typed: str,
+    composed: str,
+    key: str | None,
+    *,
+    as_task: bool,
+) -> JSONResponse | None:
+    """``POST /api/sessions`` whose first message code's rules take: the chat is made first, empty, then the message is read as any later one is.
 
-    The answer is 201 with the chat and the task's ``echo``, and no turn. A
-    task that cannot start leaves no chat behind; one that is admitted keeps
-    its chat. With a *key* (the turn's ``client_request_id``) the create is a
-    submission like any other: a cancelled key is 409 ``submission_withdrawn``,
-    one accepted for another message 409 ``submission_conflict``, and a repeat
-    answers 200 with the chat and echo the first made (``repeated``), the echo
-    written again if the gateway stopped between the task and it. Creates of a
-    key go one at a time, with its cancel.
+    With *as_task* the message is a task the chat owns; without it the rules
+    decide, as for any message of any chat (#567), and ``None`` says they left it
+    to the model after all: the empty chat is gone, and the caller makes it with
+    its first turn.
+
+    The answer is 201 with the chat and the ``echo``, and no turn. A task that
+    cannot start leaves no chat behind; one that is admitted keeps its chat.
+    With a *key* (the turn's ``client_request_id``) the create is a submission
+    like any other: a cancelled key is 409 ``submission_withdrawn``, one accepted
+    for another message 409 ``submission_conflict``, and a repeat answers 200
+    with the chat and echo the first made (``repeated``), the echo written again
+    if the gateway stopped between the task and it. A message that started no
+    task leaves no row to find it by: its chat is named by the key
+    (:func:`_chat_of`), and that chat is the receipt. Creates of a key go one at a
+    time, with its cancel.
     """
     assert body.turn is not None
     text = typed
@@ -342,6 +358,8 @@ async def _create_for_task(
             try:
                 check_submission(found, composed)
             except SubmissionRepeated:
+                if not as_task:
+                    return None  # it was accepted as a first turn: that answers
                 raise conflict() from None
             except SubmissionError as exc:
                 raise _submission_error(exc) from exc
@@ -355,15 +373,24 @@ async def _create_for_task(
                         "repeated": True,
                     }
                 )
+            again = None if as_task else await _repeated(console, key, text)
+            if again is not None:
+                return again
         entry, _ = await console.sessions.create(
-            body.workspace, None, mode=body.approvals
+            body.workspace,
+            None,
+            mode=body.approvals,
+            session_id=None if key is None or as_task else _chat_of(key),
         )
         chat = entry.session_id
         try:
             echo = await console.front_for(chat).route(
-                text, composed, as_task=True, key=None, create_key=key
+                text, composed, as_task=as_task, key=None, create_key=key
             )
-            if echo is None or echo.get("echo") != "started":
+            if echo is None and not as_task:
+                await console.sessions.delete(chat)
+                return None
+            if as_task and (echo is None or echo.get("echo") != "started"):
                 # The task did not start: its echo says why, and the chat has nothing.
                 raise ApiError(
                     400, "invalid_request", str((echo or {}).get("line") or "")
@@ -379,6 +406,38 @@ async def _create_for_task(
             status_code=201,
             content={"session": console.session_body(info), "echo": echo},
         )
+
+
+def _chat_of(key: str) -> str:
+    """The id of the chat a first message code acted on made under *key*: the key's receipt."""
+    return text_sha256(f"chat\0{key}")[:12]
+
+
+async def _repeated(console: Console, key: str, text: str) -> JSONResponse | None:
+    """The answer to a repeat of *key*'s first message: the chat it made and its first echo.
+
+    A message that holds another text under the key is 409 ``submission_conflict``.
+    ``None`` for a key that made no such chat.
+    """
+    info = await console.store.get_session(_chat_of(key))
+    if info is None:
+        return None
+    found = await console.store.events_of_type(info.id, ECHO_EVENT, limit=200)
+    if not found:
+        # The gateway stopped before the message was read: nothing came of it.
+        await console.sessions.delete(info.id)
+        return None
+    first = min(found, key=lambda event: event.id or 0)
+    echo = card_json(first)
+    if echo.get("typed", text) != text:
+        raise conflict()
+    return JSONResponse(
+        content={
+            "session": console.session_body(info),
+            "echo": echo,
+            "repeated": True,
+        }
+    )
 
 
 async def _refuse_task_key(console: Console, key: str | None) -> None:
@@ -418,7 +477,27 @@ def add_routes(app: FastAPI, console: Console) -> None:
             assert sent is not None
             if sent.extras.images:
                 raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
-            return await _create_for_task(console, body, sent.typed, sent.whole, key)
+            made = await _create_for_code(
+                console, body, sent.typed, sent.whole, key, as_task=True
+            )
+            assert made is not None
+            return made
+        if (
+            sent is not None
+            and not sent.extras.images
+            and (
+                # A repeat is answered from its receipt, however the words read now.
+                (key is not None and await console.store.get_session(_chat_of(key)))
+                or await console.front.claims(sent.typed)
+            )
+        ):
+            # A new chat's first message reads code's rules like any later one; what
+            # they leave to the model is the first turn below.
+            made = await _create_for_code(
+                console, body, sent.typed, sent.whole, key, as_task=False
+            )
+            if made is not None:
+                return made
         try:
             entry, turn = await console.sessions.create(
                 body.workspace,

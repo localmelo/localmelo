@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A chat does what you ask. Say it in your own words and melo starts the work: no list of verbs stands in the way, and
+  nothing sends you to rephrase or press a card. A worker is one-time: new work after a finished task starts a new task
+  in the same folder, with the old task's answer and files as background; a task that stopped before finishing goes on
+  with that same job. "Do it, and every day at 9" saves the schedule and runs it now, and what is saved is your whole
+  message. A message starts its work once, however it arrives: a retry, a tap on its card, or a repeat of a new chat's
+  first message. A new side chat's first message goes the same way as any other. Every step says in plain words what melo did,
+  a refused one included and with no tick beside it, in the console, the app and the terminal. The check-in tells you about a task that has waited
+  on you. With browsing off, a website request says so once and how to turn it on, and no chat promises a browser it
+  does not have. (#567)
 - One click on a browser card shows the page big. The card's picture or **Open browser** (or the **Browser** button in
   the header) now opens the Browser panel over the chat at once, live, where it used to open a narrow panel beside
   it that needed a second click; on a phone it fills the screen. melo keeps working while you watch, the view says
