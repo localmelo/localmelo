@@ -770,7 +770,25 @@ class _ToolAsk:
             # Auto refused it only because nobody can be asked: say that, not the
             # category of code melo cannot check that the fixed review carries.
             return dataclasses.replace(decided, reason=NOBODY_TO_ASK)
+        self._ended_by_words(request, decided)
         return decided
+
+    def _ended_by_words(
+        self, request: ApprovalRequest, decided: ApprovalDecision, preview: str = ""
+    ) -> None:
+        """Record a question the person's message ended: for the call's ``tool_asks``, so the step shows it.
+
+        Nobody's denial, so no call key and no block: the same step may be
+        asked again. A question of a window or a page has no *preview* (it can
+        name another app's window).
+        """
+        if decided.allow or decided.origin != "words":
+            return
+        self.refused.append(
+            {"request_id": request.request_id, "tool": request.tool_name,
+             "allowed": False, "origin": "words", "reason": decided.reason,
+             **({"preview": preview} if preview else {})}
+        )  # fmt: skip
 
     async def __call__(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
@@ -865,6 +883,7 @@ class _ToolAsk:
             return await self._policy.decide(request)
 
         decided = await self._ask(settle, request)
+        self._ended_by_words(request, decided, preview)
         if (
             not decided.allow
             and decided.origin in ("user", "auto", "policy")

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from localmelo.support.browser import fields
 from localmelo.support.browser.driver import Element, RawPage
+from localmelo.support.browser.takeover import is_human_check
 
 # A part of a page's text holds this many units: a Latin character is one, a
 # CJK character three, since a Chinese character costs about as many tokens as
@@ -151,6 +152,10 @@ class Snapshot:
     unreached: tuple[
         str, ...
     ] = ()  # origins of frames from another site melo cannot read
+    aims: dict[str, tuple[int, int]] = field(
+        default_factory=dict
+    )  # where the box of a human check is: origin -> (x, y) on the 0-1000 scale
+    solved: bool = False  # a human check on the page was passed
 
 
 def make_snapshot(
@@ -158,11 +163,19 @@ def make_snapshot(
 ) -> Snapshot:
     """A :class:`Snapshot` of *raw*. Refs are ``e<first_ref>`` onward, never reused."""
     snap = Snapshot(
-        sid, tab, raw.url, origin, raw.title, [""], doc=raw.doc, skipped=raw.skipped
+        sid,
+        tab,
+        raw.url,
+        origin,
+        raw.title,
+        [""],
+        doc=raw.doc,
+        skipped=raw.skipped,
+        solved=raw.solved,
     )
-    snap.unreached = tuple(
-        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
-    )[:MAX_UNREACHED]
+    snap.unreached = boxes_of(raw, origin)
+    for url, x, y in raw.aims:
+        snap.aims.setdefault(_origin(url), (x, y))
     kept: list[Element] = []
     for item in raw.elements:
         secret = item.sensitive or (
@@ -193,14 +206,40 @@ def make_snapshot(
     return snap
 
 
+def boxes_of(raw: RawPage, origin: str) -> tuple[str, ...]:
+    """The origins of the boxes from other sites than *origin* that melo cannot read on *raw*, at most :data:`MAX_UNREACHED`."""
+    return tuple(
+        dict.fromkeys(o for o in map(_origin, raw.unreached) if o and o != origin)
+    )[:MAX_UNREACHED]
+
+
 def _origin(url: str) -> str:
     """``scheme://host[:port]`` of *url*, or ``""``."""
     match = re.match(r"(https?://[^/?#\s]+)", url.strip(), re.IGNORECASE)
     return match.group(1).lower() if match else ""
 
 
-def unreached_line(origin: str) -> str:
+def unreached_line(
+    origin: str, aim: tuple[int, int] | None = None, solved: bool = False
+) -> str:
+    """The line for a box from another site melo cannot read.
+
+    A human check is melo's to press like any control: the line says where its
+    box is (*aim*, on the 0-1000 scale of the picture) or that it was passed.
+    """
     host = field_text(origin.split("://", 1)[-1], 80)
+    if is_human_check(origin):
+        if solved:
+            return f"[a human check from {host}: passed]"
+        if aim is None:
+            where = (
+                ": browser_screenshot, then press its checkbox with browser_click_point"
+            )
+        elif 0 <= aim[0] <= 1000 and 0 <= aim[1] <= 1000:
+            where = f" at ({aim[0]}, {aim[1]}): press it with browser_click_point"
+        else:
+            where = ", out of view"
+        return f"[a human check box from {host}{where}]"
     return (
         f"[a box from {host} that melo can't reach: browser_screenshot, "
         "then browser_click_point, can click in it]"
@@ -292,7 +331,10 @@ def render_page(
             more = len(snap.elements) - len(shown)
             lines.append(f"[{more} more elements: browser_find searches them]")
     if view != "text" and (part == 1 or view == "elements"):
-        lines.extend(unreached_line(origin) for origin in snap.unreached)
+        lines.extend(
+            unreached_line(origin, snap.aims.get(origin), snap.solved)
+            for origin in snap.unreached
+        )
     if view != "elements" and part < total:
         lines.append(
             f"[part {part} of {total}: browser_read part={part + 1} continues]"

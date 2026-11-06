@@ -445,7 +445,7 @@ class SafariAutomationDriver(PageScriptActs):
     ) -> bool:
         await self._focus(tab)
         try:
-            return await self._probe(wait_probe(until, text, origin))
+            return await self._probe(wait_probe(until, text, origin)) is True
         except BrowserSetupError:
             raise
         except BrowserError:

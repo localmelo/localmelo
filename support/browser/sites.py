@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from contextvars import ContextVar
+from typing import Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
@@ -369,17 +370,20 @@ async def require_dialog(origin: str, message: str) -> None:
         raise BrowserError(f"melo answered Cancel on {host}. " + denial_text(decision))
 
 
-async def require_takeover(origin: str, need: str, tab: str) -> bool:
-    """Ask the person to take over the page on *origin* in the Browser panel; whether they will.
+async def require_takeover(
+    origin: str, need: str, tab: str
+) -> Literal["yes", "no", "words"]:
+    """Ask the person to take over the page on *origin* in the Browser panel: "yes", "no", or "words" when their message ended the card.
 
     *need* says what melo cannot do there itself (a key of :data:`TAKEOVER_NEEDS`)
     and *tab* is the chat's tab. The question is ``takeover:<origin>``: its yes is
     "Take over", which hands them the tab; nothing of it is kept for the chat.
-    Without a policy nobody is asked (False).
+    Without a policy nobody is asked ("no"). A message ended the card is not a
+    "no" to be remembered: melo may ask again.
     """
     ask = TOOL_ASK.get()
     if ask is None:
-        return False
+        return "no"
     host = host_of(origin) if origin else "a page"
     what = TAKEOVER_NEEDS.get(need, TAKEOVER_NEEDS["sign-in"])
     decision = await ask(
@@ -387,4 +391,6 @@ async def require_takeover(origin: str, need: str, tab: str) -> bool:
         _browser({"site": host, "access": "takeover", "need": need, "tab": tab}),
         f"take over {host} in the Browser panel: melo needs you for {what}",
     )
-    return bool(decision.allow)
+    if decision.allow:
+        return "yes"
+    return "words" if decision.origin == "words" else "no"

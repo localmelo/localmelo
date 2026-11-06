@@ -414,6 +414,7 @@ def test_a_denial_shows_its_reason() -> None:
     ("origin", "code", "word", "line"),
     [
         ("user", {}, "Not allowed", "Not run: you declined it"),
+        ("words", {}, "Not allowed", "Not run: you wrote instead of answering"),
         (
             "timeout",
             {"unanswered": "time", "wait_s": 60.0},

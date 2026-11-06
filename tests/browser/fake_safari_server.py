@@ -568,15 +568,16 @@ def run_script(source: str) -> Any:
         return here[-1]
     if source == "document.title":
         return page_now().get("title", "")
-    if source.startswith("location.origin === "):
-        # The wait's guard: the condition holds only on the page's own site.
-        wanted, _, source = source.removeprefix("location.origin === ").partition(
-            " && "
-        )
+    if source.startswith("(function () { var o = location.origin"):
+        # The wait's guard: the condition holds only on the page's own site (its
+        # origin without a final dot); on another web page the answer is "moved".
+        _, _, tail = source.partition("return o === ")
+        wanted, _, rest = tail.partition(" && ")
         parts = urlsplit(here[-1])
-        if json.loads(wanted) != f"{parts.scheme}://{parts.netloc}":
-            return False
-        source = source.removeprefix("(").removesuffix(")")
+        site = f"{parts.scheme}://{(parts.netloc.replace('.:', ':') if ('.:' in parts.netloc) else parts.netloc.removesuffix('.'))}"
+        if json.loads(wanted) != site:
+            return "moved" if parts.scheme in ("http", "https") else False
+        source = rest.rpartition(" || (")[0].removeprefix("(").removesuffix(")")
     if "document.readyState" in source:
         polls += 1
         state = "loading" if MODE == "slow_load" and polls <= 2 else "complete"

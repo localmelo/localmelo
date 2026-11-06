@@ -19,6 +19,7 @@ from localmelo.support.browser.driver import (
     BrowserError,
     BrowserSetupError,
     Element,
+    PageMovedError,
     StaleElementError,
 )
 from localmelo.support.browser.pagescript import same_page
@@ -124,9 +125,11 @@ async def test_where_a_tab_is_is_read_in_the_tab_and_a_wait_holds_to_its_site(
     assert await driver.location(None) == "https://example.com/"
     assert await driver.wait(None, "text", "Welcome", 2, origin="https://example.com")
     assert await driver.wait(None, "load", "", 2, origin="https://example.com")
-    # On another site the condition never counts, whatever the page says.
-    assert not await driver.wait(None, "text", "Welcome", 0.5, origin="http://a.net")
-    assert not await driver.wait(None, "load", "", 0.5, origin="http://a.net")
+    # On another site the condition never counts, whatever the page says: the wait
+    # stops there, and whoever waits checks the new site.
+    for until, text in (("text", "Welcome"), ("load", "")):
+        with pytest.raises(PageMovedError):
+            await driver.wait(None, until, text, 0.5, origin="http://a.net")
     # ``holds`` is one look at the same condition, with no waiting.
     assert await driver.holds(None, "load", "")
     assert await driver.holds(None, "text", "Welcome", origin="https://example.com")

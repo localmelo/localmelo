@@ -101,6 +101,8 @@ from localmelo.support.browser.driver import (
     BrowserError,
     Dialog,
     Element,
+    PageMovedError,
+    PointHit,
     StaleElementError,
     TabInfo,
     View,
@@ -108,11 +110,13 @@ from localmelo.support.browser.driver import (
 from localmelo.support.browser.live import DEFAULT_FPS, LiveView
 from localmelo.support.browser.local_apps import LocalAttempt
 from localmelo.support.browser.takeover import (
+    CHECK_PRESSES,
     STEP_WAIT_S,
     YOU,
     Owners,
     Returned,
     held_words,
+    is_human_check,
     needs_person,
 )
 
@@ -141,9 +145,16 @@ SETTLE_TRIES = 5
 SETTLE_S = 0.3
 # While browser_wait waits, the screen is looked at this often for another app's window.
 WATCH_S = 1.0
+# After a press inside a human check: how long melo waits for the page to show it passed, and how often it looks.
+CHECK_WAIT_S = 3.0
+CHECK_POLL_S = 0.5
+# How many times one wait follows its tab to another site before it gives up.
+MAX_MOVES = 5
 # How long the card "let melo see this window?" waits for the person (the time a window
 # stays readable); with no answer by then nothing is ever told about the window.
 CARD_S = KEEP_S
+# How often the window a card asks about is looked for, to withdraw the card once it is gone.
+WINDOW_POLL_S = 1.0
 
 PAGE_NOTE = (
     "Web pages: the browser_* tools return pages between a start marker "
@@ -390,7 +401,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                     return busy
                 self._set_busy(True)
                 await self._driver.start()
-                self._looked, self._handoff = False, False
+                self._looked, self._handoff, self._stuck = False, False, None
                 back, returned = self._back_lines()
                 stale = (
                     tab is not None
@@ -449,6 +460,19 @@ def _back_line(back: Returned, grace_s: float) -> str:
         f"The user had tab {back.tab} for {held_words(back.seconds)} and gave it back "
         "to melo."
     )
+
+
+# What the model reads when the person's message ended a take-over card: it is no "not now",
+# nothing is remembered, and the next page that needs them offers the card again.
+CARD_ENDED = (
+    "The user sent a message while melo waited for their answer to the card in "
+    "the Browser panel, so nothing was handed over and no answer was kept. Read "
+    "their message. melo asks again when it next reads a page that needs them."
+)
+
+
+class _CardEndedError(BrowserError):
+    """The person's message ended a take-over card (not their "not now")."""
 
 
 class PageRefusedError(BrowserError):
@@ -534,6 +558,11 @@ class BrowserToolProvider(BaseToolProvider):
         # and the sites where they said not now: not asked again on a read.
         self._asked_you: set[tuple[str, str, str]] = set()
         self._not_now: set[str] = set()
+        # Presses inside a human check that is still there, per (tab, site of the check),
+        # and the tab where they reached CHECK_PRESSES: the person is asked for it next.
+        self._presses: dict[tuple[str, str], int] = {}
+        self._stuck: str | None = None
+        self._moves = 0  # the moves to another site the step's wait has followed
         self._step_start = 0.0
         self._tab_now: str | None = None
         self._tab = None  # the current tab (a short id)
@@ -726,6 +755,8 @@ class BrowserToolProvider(BaseToolProvider):
         self._owners.clear()
         self._asked_you.clear()
         self._not_now.clear()
+        self._presses.clear()
+        self._stuck = None
         self._tab = None
         self._snaps.clear()
         self._origins.clear()
@@ -1189,22 +1220,31 @@ class BrowserToolProvider(BaseToolProvider):
     async def _secret_field(
         self, tab: str, snap: render.Snapshot, item: Element
     ) -> str:
-        """A field melo never types into: the person is asked to take the page over and fill it in.
-
-        With nobody to ask, or no Browser panel to do it in, the field is refused
-        as before. Their answer and the time they took are told; what they typed never is.
-        """
+        """A field melo never types into: the person is asked to take the page over and fill it in."""
         kind = item.sensitive or fields.sensitive_kind(item.attrs) or "password"
         refusal = (
             f"That is {fields.REASONS.get(kind, 'a secret field')}: melo never types into "
             "passwords, payment cards or one-time codes."
         )
+        return await self._persons_step(tab, snap.origin, kind, refusal, "fill it in")
+
+    async def _persons_step(
+        self, tab: str, origin: str, need: str, refusal: str, to_do: str
+    ) -> str:
+        """What melo never does itself (*refusal* says what): the person is asked to take *tab* over for *need* and *to_do* it.
+
+        With nobody to ask, or no Browser panel to do it in, it is refused as
+        before. Their answer and the time they took are told; what they did never is.
+        """
         if not self._can_take():
-            raise BrowserError(f"{refusal} Ask the person to fill it in themselves.")
-        said = await self._take_over(tab, snap.origin, kind)
+            raise BrowserError(f"{refusal} Ask the person to {to_do} themselves.")
+        try:
+            said = await self._take_over(tab, origin, need)
+        except _CardEndedError as ended:
+            raise BrowserError(f"{refusal} {ended}") from None
         if said is None:
             raise BrowserError(
-                f"{refusal} melo asked the user to fill it in in the Browser panel; "
+                f"{refusal} melo asked the user to {to_do} in the Browser panel; "
                 "they did not take the page over."
             )
         return f"{refusal} {said}"
@@ -1218,6 +1258,7 @@ class BrowserToolProvider(BaseToolProvider):
         they said not now, and only where they can take the page over. Taken over
         and given back, the step's page is replaced by the page as they left it.
         """
+        stuck, self._stuck = self._stuck, None
         if not self._can_take() or (isinstance(result, ToolOutput) and result.is_error):
             return result
         tab = self._tab
@@ -1232,14 +1273,20 @@ class BrowserToolProvider(BaseToolProvider):
             title=snap.title,
             text="\n".join(snap.parts),
             sensitive=[e.sensitive for e in snap.elements.values() if e.sensitive],
-            frames=snap.unreached,
             elements=len(snap.elements),
         )
+        if stuck == tab:
+            need = "captcha"  # a human check that stayed after CHECK_PRESSES presses
         key = (tab, snap.origin, need)
         if not need or key in self._asked_you or snap.origin in self._not_now:
             return result
         self._asked_you.add(key)
-        said = await self._take_over(tab, snap.origin, need)
+        try:
+            said = await self._take_over(tab, snap.origin, need)
+        except _CardEndedError as ended:
+            # Their message ended the card: no "not now", and the next read asks again.
+            self._asked_you.discard(key)
+            return _led([str(ended)], result)
         if said is None:
             self._not_now.add(snap.origin)
             line = (
@@ -1257,7 +1304,7 @@ class BrowserToolProvider(BaseToolProvider):
         return joined
 
     async def _take_over(self, tab: str, origin: str, need: str) -> str | None:
-        """Ask the person to take *tab* over for *need*; None when they do not.
+        """Ask the person to take *tab* over for *need*; None when they do not, :class:`_CardEndedError` when their message ended the card.
 
         On "Take over" the tab is theirs, and this step waits for them to give
         it back within what is left of its time. The words say how long they had
@@ -1272,7 +1319,9 @@ class BrowserToolProvider(BaseToolProvider):
                 taken = await sites.require_takeover(origin, need, tab)
         except TimeoutError:
             return None
-        if not taken or tab not in self._raw:
+        if taken == "words":
+            raise _CardEndedError(CARD_ENDED)
+        if taken != "yes" or tab not in self._raw:
             return None
         live = self._live
         self._owners.take(tab, watched=live is not None and live.watchers(tab) > 0)
@@ -1291,6 +1340,68 @@ class BrowserToolProvider(BaseToolProvider):
         back, _ = self._back_lines()
         page = await self._read_tab(TabInfo(tab), set())
         return "\n".join([*back, "The page as it is now:", page])
+
+    async def _pressed(self, tab: str, check: str, doc: str) -> str:
+        """After a press inside a human check (*check*: the address of its box): what it did, in words to add to the step.
+
+        melo sees nothing inside the box, so the page says: one of the check
+        providers' answer fields (:data:`~takeover.ANSWER_FIELDS`) that holds
+        something means it passed. A page replaced meanwhile (*doc* is the
+        document the press was made in) is told as changed, not as passed, and
+        the count of presses goes on; if neither shows within
+        :data:`CHECK_WAIT_S`, the check is still there. Every press that did not
+        pass is counted for the check: at :data:`CHECK_PRESSES` it is the
+        person's, and the step offers them the page (see
+        :meth:`_needs_you_after`).
+        """
+        loop = asyncio.get_running_loop()
+        end = loop.time() + CHECK_WAIT_S
+        passed = moved = False
+        while (raw := self._raw.get(tab)) is not None:
+            try:
+                now = await self._driver.page(raw)
+            except BrowserError:
+                break  # the step's own reading says what happened to the page
+            passed = now.solved
+            moved = bool(doc and now.doc and now.doc != doc)
+            if passed or moved or loop.time() >= end:
+                break
+            await asyncio.sleep(CHECK_POLL_S)
+        key = (tab, sites.origin_of(check) or "")
+        if passed:
+            self._presses.pop(key, None)
+            return " The check passed."
+        count = self._presses[key] = self._presses.get(key, 0) + 1
+        if count >= CHECK_PRESSES:
+            self._stuck = tab
+        if moved:
+            return f" The page changed (press {count} of this check): the page below is the new one."
+        if count >= CHECK_PRESSES:
+            return f" The check is still there after {count} presses."
+        return " The check is still there."
+
+    def _check_spent(self, tab: str, check: str, origin: str) -> None:
+        """Refuse another press in a human check that is still there after :data:`CHECK_PRESSES`, once the person cannot be offered the page.
+
+        The count is kept (a page that loops back to its check does not start
+        it again). While the take-over card can still come after the press, the
+        press is made; when it was asked already (or they said not now), or
+        nobody can take the page over here, melo says so and does nothing.
+        """
+        count = self._presses.get((tab, sites.origin_of(check) or ""), 0)
+        if count < CHECK_PRESSES:
+            return
+        if not self._can_take():
+            why = "nobody can take the page over here"
+        elif (tab, origin, "captcha") in self._asked_you or origin in self._not_now:
+            why = "the user was already offered the page"
+        else:
+            return
+        raise BrowserError(
+            f"melo pressed this human check {count} times and it is still there, "
+            f"so it does not press it again: {why}. Say in your reply what you "
+            "need the user to do."
+        )
 
     # ── Acting ──
 
@@ -1511,14 +1622,17 @@ class BrowserToolProvider(BaseToolProvider):
         """The person's say on *window*; an allow adopts it, and the next step tells it.
 
         A refusal, no answer within :data:`CARD_S` or a window gone by then tell
-        nothing, not even the app.
+        nothing, not even the app. The card is withdrawn as soon as its window
+        is gone, so it never outlives it.
         """
         watch = self._desktop
         if watch is None:
             return
         try:
             async with asyncio.timeout(CARD_S):
-                allowed = await watch.window_allowed(ask, window)
+                allowed = await self._until_gone(
+                    watch, window, watch.window_allowed(ask, window)
+                )
             seen = await watch.adopt_seen(window) if allowed else None
         except TimeoutError:
             return
@@ -1528,6 +1642,34 @@ class BrowserToolProvider(BaseToolProvider):
         if seen is not None:
             found = seen_lines([seen])
             self._held.extend(found)
+
+    async def _until_gone(
+        self, watch: DesktopWatch, window: AppWindow, asking: Awaitable[bool]
+    ) -> bool:
+        """The answer to *asking* (the card about *window*), or False once the window is gone.
+
+        The window is looked for every :data:`WINDOW_POLL_S` seconds. When two
+        listings in a row say it is gone, the card is cancelled, which
+        withdraws it (the run's approval events say so), and nothing is told.
+        One listing that missed it, or one that failed, leaves the card up.
+        """
+
+        async def gone() -> None:
+            misses = 0
+            while True:
+                misses = misses + 1 if await watch.window_gone(window) else 0
+                if misses >= 2:
+                    return
+                await watch.pace(WINDOW_POLL_S)
+
+        card, closed = asyncio.ensure_future(asking), asyncio.ensure_future(gone())
+        try:
+            await asyncio.wait({card, closed}, return_when=asyncio.FIRST_COMPLETED)
+            return card.result() if card.done() else False
+        finally:
+            for task in (card, closed):
+                task.cancel()
+            await asyncio.gather(card, closed, return_exceptions=True)
 
     def _stop_cards(self) -> None:
         cards, self._cards = self._cards, set()
@@ -1791,6 +1933,15 @@ class BrowserToolProvider(BaseToolProvider):
                 result.handoff, self._origins.get(tab_id, "")
             )
             said += f" {line}"
+        # What the page asked for while no step ran is told, never opened: no
+        # question or grant of this step is for it.
+        for shown in dict.fromkeys(
+            apps.shown_scheme(url) for url in (result.late if result else ())
+        ):
+            said += (
+                f" The page asked to open an app ({shown}) before this step; "
+                "melo did not open it."
+            )
         stop = self._page_moved(landed, urls[landed], before)
         # melo's own opening of the app is an act: its window is waited for too.
         others = await self._other_windows(
@@ -2048,6 +2199,9 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
+        check = bool(item.site) and is_human_check(item.site)
+        if check:
+            self._check_spent(tab_id, item.site, snap.origin)
         await _ask_foreign(snap.origin, item, "click")
         before = await self._acting(tab_id, snap, "click", on=_control_words(item))
         assert before is not None
@@ -2064,8 +2218,17 @@ class BrowserToolProvider(BaseToolProvider):
             before,
         )
         said = self._done_line("Clicked", used, ref, result)
+        if check:
+            said += await self._pressed(tab_id, item.site, snap.doc)
         return await self._after(
-            tab_id, said, before, done, result, snap.url, hands_off=True
+            tab_id,
+            said,
+            before,
+            done,
+            result,
+            snap.url,
+            expect=not check,
+            hands_off=True,
         )
 
     @_guarded
@@ -2162,8 +2325,8 @@ class BrowserToolProvider(BaseToolProvider):
         **rest: Any,
     ) -> ToolOutput:
         tab_id = self._approved(tab)
-        px, py = parse_point(x, y, rest)
         view = self._views.get(tab_id)
+        px, py = parse_point(x, y, rest, view)
         if view is None:
             raise BrowserError(
                 "Take a browser_screenshot of this tab first: a point is read on "
@@ -2176,23 +2339,23 @@ class BrowserToolProvider(BaseToolProvider):
         hit = await self._driver.hit(self._raw[tab_id], view, cx, cy)
         item = hit.element
         if hit.surface == "none" or item is None:
-            raise BrowserError(
-                "There is nothing to click at that point (text or background). "
-                "Pick a point on a button, link, field or drawing in the picture. "
-                + _scale_hint(px, py, view)
-            )
-        what = _point_words(hit.surface, item, hit.site)
+            raise BrowserError(_nothing_there(hit))
+        check = hit.surface == "frame" and hit.check
+        what = _point_words(hit.surface, item, hit.site, check)
+        if check:
+            self._check_spent(tab_id, hit.site, origin)
         if item.sensitive:
             await sites.require_point(origin, fields.REASONS[item.sensitive])
-        elif hit.surface == "frame" and not _named(item):
+        elif hit.surface == "frame" and not _named(item) and not check:
             # A box melo knows nothing of: it cannot tell what the click is on.
             await sites.require_point(origin, what, known=False)
         elif hit.consent:
             await sites.require_point(
                 origin, f"{what}, which agrees to terms, consent or a sign-in"
             )
-        # A box melo knows by its title is clicked like any other control: on
-        # the click's own question, which names it (#465).
+        # A box melo knows by its title, or by what the page loads for a human
+        # check, is clicked like any other control: on the click's own question,
+        # which names it (#465).
         before = await self._acting(tab_id, snap, "click", on=what)
         assert before is not None
         done: set[str] = set()
@@ -2210,12 +2373,15 @@ class BrowserToolProvider(BaseToolProvider):
             send=bool(item.submit),
             point=(cx, cy),
             view=view,
+            proof=hit.site if check else "",
         )
         result, _used = await self._run_act(tab_id, snap, "", act, before)
         self._points[tab_id] = (view, cx, cy)
         said = _said(f"Clicked {what} at ({px:g}, {py:g}) (via point).", result.note)
         boxed = hit.surface == "frame"  # melo sees nothing inside that box
-        if boxed:
+        if check:
+            said += await self._pressed(tab_id, hit.site, view.doc)
+        elif boxed:
             said += " What it did inside the box shows only in the new picture."
         page = await self._after(
             tab_id,
@@ -2330,6 +2496,7 @@ class BrowserToolProvider(BaseToolProvider):
         }[until]
         tab_id = self._approved(tab)
         await self._recheck(tab_id)
+        self._moves = 0
         # The condition counts only on the approved site, read in the same step,
         # and the tab is checked again after: a wait says nothing about a page
         # that went elsewhere while it was watched.
@@ -2357,7 +2524,67 @@ class BrowserToolProvider(BaseToolProvider):
                 line += " Another app put a window on the screen.\n"
                 line += _screen_block(others)
             return line
-        return f"Timed out after {limit:g} s: {missed_words}."
+        if self._moves >= MAX_MOVES:
+            return (
+                f"Stopped waiting early: the page went from one site to another "
+                f"{MAX_MOVES} times, so melo did not follow it further. Read it with "
+                "browser_read to see where it is."
+            )
+        return f"Timed out after {limit:g} s: {missed_words}.{await self._boxes_note(tab_id, until)}"
+
+    async def _boxes_note(self, tab_id: str, until: str) -> str:
+        """For a wait for text that timed out: the boxes from other sites melo cannot read on the page now, where the words may be.
+
+        Said so the model stops waiting blind: a picture shows what is in them.
+        """
+        if until != "text":
+            return ""
+        try:
+            raw = await self._driver.page(self._raw[tab_id])
+        except BrowserError:
+            return ""  # a hint only: it never fails the wait
+        approved = self._origins.get(tab_id, "")
+        if not approved or sites.origin_of(raw.url) != approved:
+            return ""  # a page nobody admitted: none of what it holds is told
+        hosts = [
+            render.field_text(origin.split("://", 1)[-1], 60)
+            for origin in render.boxes_of(raw, self._origins.get(tab_id, ""))
+        ]
+        if not hosts:
+            return ""
+        noun = "a box" if len(hosts) == 1 else "boxes"
+        return (
+            f" The page has {noun} from {', '.join(hosts)} that melo cannot read, "
+            "so the text may be inside: browser_screenshot shows it."
+        )
+
+    async def _wait_on(
+        self, tab_id: str, until: str, text: str, seconds: float
+    ) -> bool:
+        """The driver's wait on the tab's approved site, for the page now in the tab.
+
+        A page that goes on to another site meanwhile (a sign-in that sends the
+        browser back) ends the driver's wait: that site is checked, and asked
+        about when it is new, and the wait goes on there for what is left of
+        its time. A refusal raises, as after any wait. The moves followed are
+        counted for the whole wait (``self._moves``): after :data:`MAX_MOVES`
+        the wait ends, and the step says it stopped early.
+        """
+        loop = asyncio.get_running_loop()
+        end = loop.time() + seconds
+        while self._moves < MAX_MOVES:
+            try:
+                return await self._driver.wait(
+                    self._raw[tab_id],
+                    until,
+                    text,
+                    max(end - loop.time(), 0.0),
+                    origin=self._origins[tab_id],
+                )
+            except PageMovedError:
+                self._moves += 1
+                await self._recheck(tab_id)
+        return False
 
     async def _watched_wait(
         self, tab_id: str, until: str, text: str, limit: float
@@ -2370,9 +2597,8 @@ class BrowserToolProvider(BaseToolProvider):
         the deadline of an earlier act is open, and polls the screen no longer
         once it has closed.
         """
-        raw, origin = self._raw[tab_id], self._origins[tab_id]
         if self._desktop is None:
-            return await self._driver.wait(raw, until, text, limit, origin=origin), []
+            return await self._wait_on(tab_id, until, text, limit), []
         # A window that came since the last step is what the person has to
         # answer: it is told at once, and the wait does not start.
         first = await self._look()
@@ -2384,9 +2610,11 @@ class BrowserToolProvider(BaseToolProvider):
         while True:
             start = loop.time()
             piece = max(min(WATCH_S, end - start), 0.0)
-            if await self._driver.wait(raw, until, text, piece, origin=origin):
+            if await self._wait_on(tab_id, until, text, piece):
                 reached = await self._look()
                 return True, [*self._take_held(), *reached]
+            if self._moves >= MAX_MOVES:
+                return False, []
             # What a background sample admitted meanwhile ends the wait too, also
             # after the deadline: it was first seen inside it.
             others = await self._look_while_open()
@@ -2477,8 +2705,13 @@ _DIALOG_WORDS = {
 }
 
 
-def _dialog_line(dialog: Dialog) -> str:
-    """A box the page put up, as "what changed" says it: page words, cleaned there."""
+def _dialog_line(dialog: Dialog, origin: str) -> str:
+    """A box the page put up, as "what changed" says it: page words, cleaned there.
+
+    Its words are told only when the page that put it up is the one *origin*
+    approved: a box that came late, from a page melo has since left or refused
+    (or from a frame of another site), is told without them.
+    """
     what = _DIALOG_WORDS.get(dialog.kind, "a box")
     if dialog.kind == "alert":
         answer = "melo closed it"
@@ -2486,6 +2719,11 @@ def _dialog_line(dialog: Dialog) -> str:
         answer = "melo left the page" if dialog.accepted else "melo stayed"
     else:
         answer = "melo answered OK" if dialog.accepted else "melo answered Cancel"
+    if not origin or sites.origin_of(dialog.url) != origin:
+        return (
+            f"a page of another address showed {what} ({answer}); "
+            "its words are not told"
+        )
     return f'the page showed {what}: "{dialog.message}" ({answer})'
 
 
@@ -2545,7 +2783,7 @@ def _change_lines(
         )
     changes = result.changes if result is not None else None
     if result is not None:
-        lines.extend(_dialog_line(dialog) for dialog in result.dialogs)
+        lines.extend(_dialog_line(dialog, origin) for dialog in result.dialogs)
     if changes is not None:
         lines.extend(f'new text: "{text}"' for text in changes.texts)
         if changes.target:
@@ -2557,7 +2795,10 @@ async def _ask_foreign(origin: str, item: Element, how: str) -> None:
     """A control with no name in a box from another site: melo cannot tell what it is, so the person is asked every time.
 
     A control melo lists there by its name is acted on like any other: the
-    click's or the typing's own question names it, box and all (#465).
+    click's or the typing's own question names it, box and all (#465). A
+    box's address is no reason to skip the question: only a point the browser
+    proved is in a human check's frame is asked about by the click's own
+    question (see :meth:`_click_point`).
     """
     if not item.site or _named(item):
         return
@@ -2589,15 +2830,19 @@ def _control_words(item: Element) -> str:
     return words
 
 
-def _point_words(surface: str, item: Element, site: str) -> str:
+def _point_words(surface: str, item: Element, site: str, check: bool = False) -> str:
     """What a point lands on, in words for the person and the model.
 
     A box from another site is named by its title when it has one
-    (``inside a box "Sign in" from accounts.example.org``).
+    (``inside a box "Sign in" from accounts.example.org``); one the browser
+    said is a human check's (*check*) is told as that, and no other is, whatever
+    its address says.
     """
     if surface == "frame":
         host = sites.origin_of(site) or "another site"
         host = render.field_text(host.split("://", 1)[-1], 60)
+        if check:
+            return f"a human check box from {host}"
         title = render.field_text(item.label or item.also, 40)
         if title:
             return f'inside a box "{title}" from {host}'
@@ -2612,14 +2857,18 @@ _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 _POINT_KEYS = ("point", "point_2d", "coordinate", "coordinates", "xy", "position")
 
 
-def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
+def parse_point(
+    x: Any, y: Any, rest: dict[str, Any], view: View | None = None
+) -> tuple[float, float]:
     """A point in the 0-1000 frame of a picture, from however a model wrote it.
 
     Accepted: ``x`` and ``y`` as numbers or number strings; a pair in one value
     (``x="[512, 300]"``, ``point=[512, 300]``, ``point_2d``, ``point={"x":..,
     "y":..}``, ``coordinate``); a reply cut off after both numbers. Two numbers
     of 1 or less are fractions of the picture. Anything else, or a number
-    outside 0-1000, is an error that says how to write it.
+    outside 0-1000, is an error that says how to write it; for numbers that
+    fit inside the picture *view* as pixels, it also says where they are on
+    the scale.
     """
     numbers: list[float] = []
 
@@ -2653,25 +2902,40 @@ def parse_point(x: Any, y: Any, rest: dict[str, Any]) -> tuple[float, float]:
         px, py = px * 1000, py * 1000
     if not (0 <= px <= 1000 and 0 <= py <= 1000):
         raise BrowserError(
-            "x and y run from 0 to 1000 across and down the picture, whatever its size."
+            "x and y run from 0 to 1000 across and down the picture, whatever its "
+            "size, not in pixels." + _pixel_hint(px, py, view)
         )
     return px, py
 
 
-def _scale_hint(x: float, y: float, view: View) -> str:
-    """The scale of a point, for a click that found nothing: a model often writes pixels.
+def _pixel_hint(x: float, y: float, view: View | None) -> str:
+    """Where (*x*, *y*) is on the 0-1000 scale if it was written in pixels of *view*'s picture, for numbers that cannot be on the scale.
 
-    When (*x*, *y*) would fit inside the picture as pixels, it also says where
-    that point is on the 0-1000 scale.
+    Only for numbers beyond the scale that fit inside the picture; numbers on
+    the scale are never doubted.
     """
-    hint = "x and y run 0-1000 across and down the picture, not in pixels."
-    if x <= view.width and y <= view.height:
-        hint += (
-            f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
-            f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
-            f"{y * 1000 / view.height:.0f}) on that scale."
-        )
-    return hint
+    if view is None or x > view.width or y > view.height:
+        return ""
+    return (
+        f" As pixels of the {view.width:.0f}x{view.height:.0f} picture, "
+        f"({x:g}, {y:g}) is ({x * 1000 / view.width:.0f}, "
+        f"{y * 1000 / view.height:.0f}) on that scale."
+    )
+
+
+def _nothing_there(hit: PointHit) -> str:
+    """The error for a point on nothing melo can click: the kind of element there and whether it holds words, never the words (the page wrote them)."""
+    kind = f" ({hit.tag})" if hit.tag and hit.tag != "element" else ""
+    if hit.words:
+        there = f"what is there is text{kind}"
+    elif hit.tag:
+        there = f"what is there is background{kind}"
+    else:
+        there = "it is text or background"
+    return (
+        f"There is nothing to click at that point ({there}). Pick a point on a "
+        "button, link, field or drawing in the picture."
+    )
 
 
 def _stale_ref(ref: object) -> str:

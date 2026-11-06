@@ -270,9 +270,9 @@ function declinedTurn(how, where) {
     request_id: 'req-1',
     allowed: false,
     remember: false,
-    origin: how === 'denied' ? 'user' : 'timeout',
-    reason: {denied: 'not this site', unanswered: 'no answer within 1 minute', closed: 'the chat was closed before an answer'}[how],
-    ...{denied: {}, unanswered: {unanswered: 'time', wait_s: 60}, closed: {unanswered: 'left'}}[how],
+    origin: {denied: 'user', words: 'words'}[how] ?? 'timeout',
+    reason: {denied: 'not this site', words: '', unanswered: 'no answer within 1 minute', closed: 'the chat was closed before an answer'}[how],
+    ...{denied: {}, words: {}, unanswered: {unanswered: 'time', wait_s: 60}, closed: {unanswered: 'left'}}[how],
   };
   if (where === 'site') {
     push('tool.started', {step: 1, call_id: 'call-1', name: 'browser_open', arguments: {url: 'https://example.net/teapot'}, preview: ''});
@@ -288,11 +288,13 @@ function declinedTurn(how, where) {
 const DECLINED = {
   en: {
     denied: ['Not allowed', 'Not run: you declined it. Your note: not this site'],
+    words: ['Not allowed', 'Not run: you wrote instead of answering'],
     unanswered: ['No answer in time', 'Not run: no answer within 1 minute'],
     closed: ['No answer in time', 'Not run: the chat was closed before an answer'],
   },
   'zh-Hans': {
     denied: ['未允许', '未运行：你拒绝了。你的说明：not this site'],
+    words: ['未允许', '未运行：你发来了消息，没有回答'],
     unanswered: ['没有及时回答', '未运行：1 分钟内没有回答'],
     closed: ['没有及时回答', '未运行：回答之前对话已关闭'],
   },

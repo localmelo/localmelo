@@ -31,6 +31,16 @@ class BrowserSetupError(BrowserError):
     """The browser is not set up for melo; the message says what to turn on."""
 
 
+class PageMovedError(BrowserError):
+    """A wait found its tab on another site than the one it was asked for.
+
+    The tab's page went on to another origin while melo waited (a sign-in that
+    sends the browser back, say). The wait stops there, since a condition may
+    count only on a site that was approved; the caller checks the new one and
+    waits on for the rest of its time.
+    """
+
+
 @dataclass(frozen=True)
 class FieldAttrs:
     """How a page describes a text box, as the page script read it.
@@ -110,6 +120,10 @@ class RawPage:
     of the visible frames from another site whose insides melo cannot read or
     act in (a sign-in box from another site, say): the model is told they are
     there and that a picture and a click at a point can still reach them.
+    ``aims`` say where the boxes of a human check are: (address, x, y) on the
+    0-1000 scale of the picture of the view, at the checkbox's spot as the page
+    shows it (beyond that scale when it is out of view). ``solved`` is set when
+    an answer field of a check holds something: the check was passed.
     """
 
     url: str
@@ -122,6 +136,8 @@ class RawPage:
     doc: str = ""
     frames: tuple[str, ...] = ()
     unreached: tuple[str, ...] = ()
+    aims: tuple[tuple[str, int, int], ...] = ()
+    solved: bool = False
 
 
 @dataclass(frozen=True)
@@ -171,10 +187,18 @@ class PointHit:
     nothing melo can name. ``surface`` says what it is: ``control``; ``canvas``
     (a drawing, picture or video that takes clicks itself); ``frame`` (a box
     from another site, ``site`` its origin, whose inside melo cannot see); or
-    ``none`` (plain text or background). ``consent`` is set when the control's
+    ``none`` (plain text or background), with the ``tag`` of the element there
+    (a standard tag, else ``element``) and whether it holds ``words``, never the
+    words themselves. A frame the page script cannot see (one in a closed
+    shadow root, known by what the page loaded) is a ``frame`` too, its
+    ``element`` the empty box that holds it. ``consent`` is set when the control's
     words agree to terms, consent or a sign-in with another account, which
     melo asks the person about. ``at`` is where to click instead (page pixels),
     when the point was on a label and its field can take the click itself.
+    ``check`` is set only when the browser itself says that a frame from the
+    address of a human check provider sits at the point (``site`` is then that
+    frame's address, as the browser gives it); a driver that cannot say leaves
+    it unset, so a point in a box is asked about as a box melo cannot check.
     """
 
     surface: Literal["control", "canvas", "frame", "none"]
@@ -182,6 +206,9 @@ class PointHit:
     site: str = ""
     consent: bool = False
     at: tuple[float, float] | None = None
+    tag: str = ""
+    words: bool = False
+    check: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,12 +235,15 @@ class Dialog:
 
     ``kind`` is ``alert``, ``confirm``, ``prompt`` or ``beforeunload``;
     ``message`` is the page's own words (data, cut short); ``accepted`` is
-    whether melo answered OK (or Leave), as against Cancel.
+    whether melo answered OK (or Leave), as against Cancel; ``url`` is the
+    address of the page that put it up, as the browser says (``""``: unknown),
+    which decides whether its words are told.
     """
 
     kind: str
     message: str
     accepted: bool
+    url: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -228,9 +258,10 @@ class ActResult:
     work there, so the site starts with the page script next time.
     ``handoff`` is an address of another app's kind (``chat://...``) the page
     asked the browser to open meanwhile, which the browser did not open
-    (``""``: none); melo asks the person before it opens it itself.
-    ``dialogs`` are the boxes the page put up meanwhile and how they were
-    answered.
+    (``""``: none); melo asks the person before it opens it itself. ``late``
+    are such addresses the page asked for before this act began (while no act
+    ran): they are told, never opened. ``dialogs`` are the boxes the page put
+    up meanwhile and how they were answered.
     """
 
     note: str = ""
@@ -239,6 +270,7 @@ class ActResult:
     changes: Changes | None = None
     native_failed: bool = False
     handoff: str = ""
+    late: tuple[str, ...] = ()
     dialogs: tuple[Dialog, ...] = ()
 
 
@@ -265,7 +297,10 @@ class Act:
     did not work earlier). ``point`` is a click at that place of ``view`` (page
     pixels), with the browser's own click, on the control ``element`` that was
     found there; the driver does nothing unless the point still resolves to it
-    and the view has not scrolled.
+    and the view has not scrolled. ``proof`` is the address of the frame of a
+    human check that the browser said sits at ``point`` (:attr:`PointHit.check`):
+    a driver that can say again right before it clicks does nothing unless that
+    frame is still there.
     """
 
     kind: ActionKind
@@ -278,6 +313,7 @@ class Act:
     native: bool = True
     point: tuple[float, float] | None = None
     view: View | None = None
+    proof: str = ""
 
 
 class StaleElementError(BrowserError):
@@ -353,6 +389,8 @@ class BrowserDriver(Protocol):
         With *origin*, the condition counts only while the page is on that
         origin (``location.origin``), read in the same step as the condition,
         so a page that goes elsewhere for a moment answers nothing about it.
+        A page found on another site (a web page, not a blank one between two
+        documents) ends the wait with :class:`PageMovedError`.
         """
 
     async def holds(

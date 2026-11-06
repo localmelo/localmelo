@@ -45,6 +45,7 @@ from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
+from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.schema import ImagePart
 from localmelo.support.gateway.i18n import said, t, t_in
 from localmelo.support.sessions.display import ActivityText
@@ -60,6 +61,8 @@ from .errors import ApiError
 from .registry import TurnExtras
 
 if TYPE_CHECKING:
+    from localmelo.support.sessions.runner import SessionRunner
+
     from . import Console
     from .followups import FollowUp
     from .front import Front
@@ -630,6 +633,7 @@ class OwnerAsks:
         sent = entry.runner.publish_note(turn_id, number, text, images)
         if sent:
             item.note_ready = True
+            self._end_waits(chat_id, turn_id, entry.runner)
         else:
             # The turn ended while it was stored: it is the next message.
             item.note_of = ""
@@ -648,6 +652,21 @@ class OwnerAsks:
         while len(kept) > NOTE_KEYS_KEPT:
             del kept[next(iter(kept))]
         return body
+
+    def _end_waits(self, chat_id: str, turn_id: str, runner: SessionRunner) -> None:
+        """End every card the turn waits on: the person wrote instead of answering.
+
+        The card ends as not allowed, origin ``words`` (words never approve
+        anything, whatever they say), so the step returns at once and the
+        run reads the note at its next step. A card that belongs to no running
+        step of the turn (a task's, waiting in this chat) is left alone.
+        """
+        running = runner.running_calls(turn_id)
+        for request in self.console.broker.pending(chat_id):
+            if request.call_id in running:
+                self.console.broker.answer(
+                    request.request_id, ApprovalDecision(False, origin="words")
+                )
 
     def unread_notes(self, chat_id: str) -> list[tuple[int, str]]:
         """The words added to *chat_id*'s running turn that its run has not read, oldest first."""

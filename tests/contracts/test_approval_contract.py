@@ -83,6 +83,7 @@ class TestApprovalDecision:
             {"allow": False, "origin": "session"},
             {"allow": False, "origin": "earlier"},
             {"allow": True, "origin": "timeout"},
+            {"allow": True, "origin": "words"},
         ],
     )
     def test_refused_values_and_pairs(self, fields: dict[str, Any]) -> None:
@@ -97,6 +98,7 @@ class TestApprovalDecision:
             {"allow": True, "remember": True, "origin": "session"},
             {"allow": True, "origin": "earlier"},
             {"allow": False, "origin": "timeout"},
+            {"allow": False, "origin": "words"},
             {"allow": False, "reason": "no", "origin": "policy"},
         ],
     )

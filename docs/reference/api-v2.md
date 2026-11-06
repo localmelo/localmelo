@@ -1757,6 +1757,10 @@ With a picture ([staged first](#post-apiuploads); its id goes in `images`):
   worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note the run did not
   read before the turn ended is sent as the chat's next turn, in order with the queued messages; they live in
   the same store, so a restart keeps them. A Stop gives the unread ones back ([cancel](#post-apiturnsturn_idcancel)).
+- A card that a step of the turn is waiting on (an approval, a take-over, a question about another app's
+  window) ends when a note is sent: `approval.resolved` with `outcome` `denied` and `origin` `words`, and the
+  call returns at once, so the run reads the note at its next step. Words never allow anything, whatever they
+  say; a card that belongs to no running step of the turn (a task's) stays open.
 - `text` is trimmed, has at most 8,000 characters and goes through the same checker as a message (400
   `invalid_request`, 400 `text_rejected`). It must not be empty unless `images` names a picture; the note
   then reads `[1 picture]` to the model and `text` is `""`. A turn takes at most 20 notes.

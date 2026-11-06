@@ -69,9 +69,13 @@ from localmelo.melo.schema import ToolTier
 # session ("session"), a fixed policy ("policy"), no answer in time
 # ("timeout"), auto mode's review ("auto", #339): it runs a routine call
 # and blocks the rest, and a denial's reason is then the whole note the
-# model reads; or the person's earlier approval of the exact same step,
-# found by code in the chat that owns a task ("earlier").
-ApprovalOrigin = Literal["user", "session", "policy", "timeout", "auto", "earlier"]
+# model reads; the person's earlier approval of the exact same step,
+# found by code in the chat that owns a task ("earlier"); or the person's
+# words, sent while the card waited ("words"): they end the wait as a
+# refusal and never allow anything.
+ApprovalOrigin = Literal[
+    "user", "session", "policy", "timeout", "auto", "earlier", "words"
+]
 # How a policy wants a call reviewed before it decides: "ask" (a person
 # will be asked, or nothing runs unasked: the rules alone), "silent" (it
 # would allow the call without a person, as under a session grant: the
@@ -87,6 +91,14 @@ DENIAL_ENDING: Final = (
 # The text of a call that did not run because the policy failed; {error} is
 # "<Type>: <message>".
 APPROVAL_FAILED: Final = "Approval failed, so the call did not run: {error}"
+
+# What the model reads when the person's message ended the wait for an answer
+# (origin ``words``): the call did not run and nothing was allowed.
+WORDS_NOTE: Final = (
+    "The user sent a message while melo waited for their answer, so the call "
+    "did not run and nothing was allowed. Read their message. If the task "
+    "still needs the call, run it again: melo asks them again."
+)
 
 # After the review clause of a high-impact call: a person's denial, and a
 # policy's.
@@ -151,7 +163,8 @@ class ApprovalDecision:
     raised for an unknown origin, and for the pairs no policy may give:
     ``remember`` or ``always`` on a denial, ``origin="session"`` or
     ``"earlier"`` on a denial (a grant and an earlier approval only allow),
-    and ``origin="timeout"`` on an allow (a timeout only denies).
+    and ``origin="timeout"`` or ``"words"`` on an allow (a timeout and the
+    person's words only deny).
     """
 
     allow: bool
@@ -192,6 +205,11 @@ class ApprovalDecision:
             raise ValueError(
                 "ApprovalDecision.origin 'timeout' needs allow=False: "
                 "a timeout only denies"
+            )
+        if self.origin == "words" and self.allow:
+            raise ValueError(
+                "ApprovalDecision.origin 'words' needs allow=False: "
+                "the person's words only deny"
             )
 
 
@@ -990,6 +1008,8 @@ def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) 
             "The call was not approved in time, so it did not run. Silence is "
             "not consent: do not retry it without asking the user."
         )
+    if decision.origin == "words":
+        return WORDS_NOTE
     who = "The user" if decision.origin == "user" else "The approval policy"
     reason = decision.reason.strip()
     if reason.endswith("."):

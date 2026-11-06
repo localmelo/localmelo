@@ -48,6 +48,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 
 Owner = Literal["melo", "you"]
 MELO: Final = "melo"
@@ -612,24 +613,34 @@ _QR_WORDS = re.compile(
     re.IGNORECASE,
 )
 _SCAN_WORDS = re.compile(r"scan|扫|掃|スキャン|스캔|読み取", re.IGNORECASE)
-# A check the visitor must pass in person, in its own words (a page that only
-# says it is protected by one is not asking anything yet).
-_HUMAN_WORDS = re.compile(
-    r"i'?m not a robot|verify (that )?you are (a )?human|are you a robot|"
-    r"human verification|confirm you are human|press (and|&) hold|"
-    r"人机验证|人機驗證|我不是机器人|我不是機器人|拖动滑块|向右滑动|安全验证|"
-    r"ロボットではありません",
-    re.IGNORECASE,
+# The addresses a human check loads its box from: a host here, or under one of
+# these, is a box that checks the visitor is human. melo presses it like any
+# other control, as the person would. Only a row of this table lowers a question
+# (the ordinary click question instead of the card for a box melo cannot check),
+# and only where the browser itself says a frame from such a host sits at the
+# point pressed. A host with a label that starts with "captcha" is only named a
+# check in words (see :func:`names_a_check`); it never lowers a question.
+CHECK_HOSTS: Final = (
+    "recaptcha.net",
+    "hcaptcha.com",
+    "challenges.cloudflare.com",
+    "geetest.com",
+    "arkoselabs.com",
+    "funcaptcha.com",
+    "captcha-delivery.com",
 )
-_HUMAN_TITLES = re.compile(
-    r"^(just a moment|attention required|one more step|verify you are human|"
-    r"security check|are you a robot|请稍候|安全验证)",
-    re.IGNORECASE,
+# The field each check provider fills with its answer when the check is passed
+# (reCAPTCHA, hCaptcha, Turnstile, Arkose, GeeTest). Only these name a passed
+# check; they are not listed as fields of a page, and a form's rows leave them out.
+ANSWER_FIELDS: Final = (
+    "g-recaptcha-response",
+    "h-captcha-response",
+    "cf-turnstile-response",
+    "fc-token",
+    "geetest_validate",
 )
-_CHECK_HOSTS = re.compile(
-    r"(^|\.)(recaptcha\.net|hcaptcha\.com|challenges\.cloudflare\.com|"
-    r"geetest\.com|arkoselabs\.com|funcaptcha\.com|captcha[a-z0-9-]*\.[a-z.]+)$"
-)
+# How many times melo presses inside a check that stays there before it is the person's to pass.
+CHECK_PRESSES: Final = 8
 # A page this small that holds a password field is a sign-in form, whatever its address says.
 SMALL_PAGE: Final = 30
 
@@ -640,18 +651,16 @@ def needs_person(
     title: str,
     text: str,
     sensitive: Iterable[str],
-    frames: Iterable[str] = (),
     elements: int = 0,
 ) -> Need:
     """What on a page needs the person, from one reading of it; ``""`` when nothing does.
 
     *sensitive* are the kinds of the secret fields on it (``password``,
-    ``code``, ``card``), *frames* the origins of boxes from other sites melo
-    cannot read, *text* the page's words and *elements* how many elements the
-    reading numbered. In order:
+    ``code``, ``card``), *text* the page's words and *elements* how many
+    elements the reading numbered. A human check is not here: melo presses it
+    itself, and only a check that stays after :data:`CHECK_PRESSES` presses is
+    offered to the person (``captcha``, by the provider). In order:
 
-    * ``captcha``: a box of a known human check, a page titled as one, or words
-      that ask the visitor to prove they are human;
     * ``qr``: a QR code to scan, on a page that signs in;
     * ``sign-in``: a password field on a page whose address or title says it
       signs in, or on a page with few elements (a sign-in form); a password
@@ -659,12 +668,7 @@ def needs_person(
     * ``code``: a one-time code field on a page that says it verifies.
     """
     kinds = set(sensitive)
-    hosts = {_host(origin) for origin in frames}
     words = f"{title}\n{text}"
-    if any(_CHECK_HOSTS.search(host) for host in hosts if host) or (
-        _HUMAN_TITLES.match(title.strip()) or _HUMAN_WORDS.search(words)
-    ):
-        return "captcha"
     if (
         _QR_WORDS.search(words)
         and _SCAN_WORDS.search(words)
@@ -680,12 +684,40 @@ def needs_person(
     return ""
 
 
+def is_human_check(address: str) -> bool:
+    """Whether *address* (a page's, a box's or its origin) is where a human check loads its box from: the host is a row of :data:`CHECK_HOSTS` or under one.
+
+    This alone lowers a question; a page cannot pick a host that is not in the table.
+    """
+    host = _host(address)
+    return bool(host) and any(
+        host == known or host.endswith(f".{known}") for known in CHECK_HOSTS
+    )
+
+
+def names_a_check(address: str) -> bool:
+    """Whether *address* may be named a human check in words: a table host, or a host with a label that starts with ``captcha``.
+
+    Words only (where a box is, what a line says): a press there is asked about
+    like a press in any other box melo cannot check.
+    """
+    host = _host(address)
+    return is_human_check(address) or any(
+        label.startswith("captcha") for label in host.split(".")
+    )
+
+
 def _path(url: str) -> str:
     """The part of *url* after its host: what a sign-in page's address says about it."""
     match = re.match(r"^[a-z][a-z0-9+.-]*://[^/?#]*(.*)$", url.strip(), re.IGNORECASE)
     return match.group(1) if match else url
 
 
-def _host(origin: str) -> str:
-    match = re.match(r"^[a-z][a-z0-9+.-]*://([^/:?#]+)", origin.strip().lower())
-    return match.group(1) if match else ""
+def _host(address: str) -> str:
+    """The host of *address* as the browser reads it (lower case, one final dot dropped); never a user part or a port. ``""`` for what has none."""
+    try:
+        parts = urlsplit(address.strip())
+        host = parts.hostname or "" if parts.netloc else ""
+    except ValueError:
+        return ""
+    return host[:-1] if host.endswith(".") else host
