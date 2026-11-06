@@ -28,6 +28,8 @@ FIXTURES = Path(__file__).parents[1] / "fixtures"
 # the embedding on the other).
 PLAN = FIXTURES / "melo_serve_plan.v1.json"
 PLAN_SPLASH = FIXTURES / "melo_serve_plan_splash.v1.json"
+# The real functions, which the run-wide guard replaces (tests/conftest.py).
+REAL_PLAN, REAL_INSTALLED_VERSION = run.plan, run.installed_version
 CHAT, EMBED, SPLASH = "qwen3-8b-omlx", "qwen3-embedding-0.6b-omlx", "qwen3.8-27b-splash"
 
 # One script plays both tools: ``uv`` (named so) and ``melo-serve``. What it
@@ -53,7 +55,7 @@ if name == "uv":
         print("error: network is down", file=sys.stderr)
         sys.exit(1)
     if args[:2] == ["tool", "install"] or args[:3] == ["tool", "install", "--force"]:
-        (d / "version").write_text(text("next_version", "0.3.0"))
+        (d / "version").write_text(text("next_version", "0.4.0"))
         tool = d / "tools" / "melo-serve" / "bin"
         tool.mkdir(parents=True, exist_ok=True)
         for folder in (tool, tool.parent, tool.parent.parent):
@@ -239,6 +241,13 @@ def fakes(
 
 
 @pytest.fixture(autouse=True)
+def _real_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests run the real ``plan``, over the fake ``uv`` and ``melo-serve``."""
+    monkeypatch.setattr(run, "plan", REAL_PLAN)
+    monkeypatch.setattr(run, "installed_version", REAL_INSTALLED_VERSION)
+
+
+@pytest.fixture(autouse=True)
 def _socket(melo_serve_socket: Path) -> None:
     """A melo_serve that answers on its control socket."""
 
@@ -311,7 +320,7 @@ def test_a_full_run_skips_nothing_and_says_what_each_step_did(
     assert fakes.calls("melo-serve", "get") == [["get", CHAT, EMBED, "--json"]]
     assert fakes.calls("melo-serve", "use") == [["use", CHAT], ["use", EMBED]]
     assert _lines(events) == [
-        ("melo_serve", "done", f"installed melo_serve 0.3.0 into {tool}"),
+        ("melo_serve", "done", f"installed melo_serve 0.4.0 into {tool}"),
         *((e["item"], e["state"], e["line"]) for e in GET),
         (
             "service:melo_serve",
@@ -364,7 +373,7 @@ def test_each_skip_leaves_out_exactly_its_step(
     saved: bool,
     rows: set[str],
 ) -> None:
-    fakes.installed("0.3.0")  # at the minimum: melo_serve itself is left as it is
+    fakes.installed("0.4.0")  # at the minimum: melo_serve itself is left as it is
     fakes.plan(
         PLAN_SPLASH, GET_SPLASH
     )  # a chat pick on one backend, the embedding on the other
@@ -382,7 +391,7 @@ def test_each_skip_leaves_out_exactly_its_step(
     chosen = {i for i, e in job.items.items() if e.line == run.SKIPPED}
     assert chosen == rows
     if skip != "melo_serve":
-        assert job.items["melo_serve"].line == "already installed (0.3.0), skipped"
+        assert job.items["melo_serve"].line == "already installed (0.4.0), skipped"
     path = Path(config.config_path())
     assert path.exists() is saved
     if saved:  # without the embedding model, memory goes by words only
@@ -405,7 +414,7 @@ ALTERNATIVE = [
 def test_a_job_for_an_alternative_pick_skips_what_belongs_to_its_own_run(
     fakes: Fakes, skip: str, asked: list[str], picks: list[str], saved: bool
 ) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.plan(PLAN_SPLASH, GET_SPLASH)
     job, _ = _job((skip,), pick=CHAT)
     assert job.run() == "done"  # the fake get refuses an item that is not of its run
@@ -418,7 +427,7 @@ def test_a_job_for_an_alternative_pick_skips_what_belongs_to_its_own_run(
 
 def test_a_melo_serve_below_the_minimum_is_updated_with_force(fakes: Fakes) -> None:
     fakes.installed("0.1.0")
-    fakes.put("next_version", "0.3.0")
+    fakes.put("next_version", "0.4.0")
     job, events = _job()
     assert job.run() == "done"
     assert fakes.calls("uv", "tool", "run")  # 0.1.0 has no `plan`: asked through uv
@@ -428,7 +437,7 @@ def test_a_melo_serve_below_the_minimum_is_updated_with_force(fakes: Fakes) -> N
     assert _lines(events)[0] == (
         "melo_serve",
         "done",
-        "updated melo_serve 0.1.0 → 0.3.0",
+        "updated melo_serve 0.1.0 → 0.4.0",
     )
 
 
@@ -440,14 +449,14 @@ def test_a_melo_serve_that_stays_below_the_minimum_fails_the_job(
     job, events = _job(skip)
     assert job.run() == "failed"
     error = events[-1].error  # type: ignore[union-attr]
-    assert "0.1.0" in error and "0.3.0 or later is needed" in error
+    assert "0.1.0" in error and "0.4.0 or later is needed" in error
     assert fakes.calls("melo-serve", "get") == []
 
 
 def test_cancel_during_get_ends_the_job_cancelled_before_anything_else_runs(
     fakes: Fakes,
 ) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put("get_hangs", "1")
     job, events = _job(cancel=True)
     assert job.run() == job.state == "cancelled"
@@ -473,7 +482,7 @@ def test_a_cancel_kills_a_get_that_does_not_stop(
     fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(run, "CANCEL_GRACE_S", 0.5)
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put("get_deaf", "1")
     job, events = _job(cancel=True)
     started = time.monotonic()
@@ -486,7 +495,7 @@ def test_a_cancel_kills_a_get_that_does_not_stop(
 def test_ctrl_c_waits_for_get_to_finish_and_ends_the_job_cancelled(
     fakes: Fakes,
 ) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put(
         "get_sigint", "1"
     )  # the fake sends SIGINT to this process, as a terminal does
@@ -497,11 +506,23 @@ def test_ctrl_c_waits_for_get_to_finish_and_ends_the_job_cancelled(
     assert fakes.calls("melo-serve", "use") == []
 
 
+def test_a_get_stopped_by_the_terminal_is_a_stop_not_a_failure(fakes: Fakes) -> None:
+    fakes.installed("0.4.0")
+    line = "Stopped at 2.1 GB / 4.9 GB. The finished files are kept."
+    stopped = {"item": "model:" + CHAT, "state": "failed", "line": line}
+    fakes.put("get.jsonl", json.dumps(stopped))
+    fakes.put("get_exit", "130")
+    job, events = _job()
+    assert job.run() == "cancelled"
+    assert job.items["model:" + CHAT] == run.ItemEvent("model:" + CHAT, "skipped", line)
+    assert events[-1] == run.Finished("cancelled")
+
+
 def test_a_process_get_leaves_behind_neither_holds_the_job_nor_speaks_after_it(
     fakes: Fakes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(run, "PIPE_GRACE_S", 0.2)
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put("get_leaves", "1")  # it keeps the pipe open for a second and then prints
     job, events = _job()
     started = time.monotonic()
@@ -513,7 +534,7 @@ def test_a_process_get_leaves_behind_neither_holds_the_job_nor_speaks_after_it(
 
 
 def test_a_failed_get_stops_the_job_with_the_reason(fakes: Fakes) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put("get_exit", "2")
     fakes.put(
         "get.jsonl",
@@ -563,7 +584,7 @@ FAILURES = [
 def test_a_failure_after_the_first_steps_says_what_is_left_not_that_nothing_changed(
     fakes: Fakes, setup: Callable[[Fakes], None], line: str
 ) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     setup(fakes)
     job, events = _job()
     assert job.run() == job.state == "failed"
@@ -577,7 +598,7 @@ def test_a_job_runs_once_and_a_callback_that_raises_stops_nothing(fakes: Fakes) 
     def gone(event: run.Event) -> None:
         raise BrokenPipeError("the web socket closed")
 
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     job, _ = _job(on_event=gone)
     assert job.run() == "done"
     with pytest.raises(RuntimeError, match="runs once"):
@@ -624,7 +645,7 @@ def test_a_plan_without_uv_is_unavailable(
 def test_a_version_that_is_not_one_is_not_trusted_and_the_plan_still_never_raises(
     fakes: Fakes,
 ) -> None:
-    fakes.installed("0.3.0")
+    fakes.installed("0.4.0")
     fakes.put("version", "9" * 5000 + ".0.0")  # int() would refuse it
     found = run.plan()  # the installed one is not at the minimum: asked through uv
     assert found.available and fakes.calls("uv", "tool", "run")
