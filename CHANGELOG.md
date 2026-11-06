@@ -25,7 +25,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   uninstall` lists both login services (the gateway's and melo_serve's), asks once at a terminal, removes the
   gateway's and runs `melo-serve uninstall`; from a pipe it exits 2 and removes nothing. In the terminal chat, Esc while
   the session moves to a new melo_serve model now stops the turn before it is sent (the message comes back) instead of
-  being ignored (#NNN).
+  being ignored (#540).
 - The first-run setup job, for the terminal and the gateway to run (`support/server_setup/run.py`). `plan()`
   asks `melo-serve plan --json` what this Mac can run: the installed melo_serve when it is at least 0.4.0, otherwise
   `uv tool run --python <this interpreter> --from <archive of a pinned melo_serve commit>`, which fetches melo_serve's
