@@ -80,6 +80,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
       {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
     ],
     "waiting": [],
+    "control": [],
     "recent": {"kind": "chat", "id": "e5f60718293a", "title": "Plan the trip", "outcome": "done", "ended_s_ago": 3.2},
     "focus": {"kind": "terminal", "id": "d27a70f1bbd8", "title": "Debug the flaky test", "activity": "Running the tests", "icon": "run", "answering": false}
   },
@@ -101,8 +102,9 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `answering` 只有在该项最新的事件是已开始的步骤、轮次或反思，且其后没有未结束的工具调用、审批或暂缓时才为 true：模型正在作答。因为没有事件可读（还没读到，或存储无法读取）而说的 `Thinking` 为 `false`。macOS 应用的桌面 Melo 和控制台的头像只在它为 true 时显示 Melo 在思考。`GET /api/activity` 中运行中的行也带有它。
 - `switch` 是 melo_serve 模型最新的一次切换（[`POST /api/serve/switch`](#post-apiserveswitch)），没有时为 `null`。
 - `desktop_helper` 是桌面控制助手的状态，取最近一次对话或检查得到的结果：`state` 为 `missing`（未安装）、`installed`（还没检查）、`granted`（它能运行并有“辅助功能”权限；`pictures` 表示它是否也有“录屏”权限）、`no_grant`（“辅助功能”权限没有打开）或 `failed`（没有启动）；`app` 是要给予权限的应用，`problem` 说明问题所在。`GET /api/health?helper=check` 会启动助手一次来读取它的权限（不弹出提示，至少相隔 30 秒，并且只在浏览已开启且 `[browser] app_windows` 为 true 时）；其他情况下不会启动任何东西。
-- `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
+- `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，再取为用户暂停的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
+- `status.control` 列出因用户拿着它们的某个网页而暂停的运行中对话（最新事件里有 `run.paused`，之后没有 `run.resumed`），每项为 `{"kind": "chat", "id"}`；它们的 `activity` 是 "You're in control"。macOS 应用的胶囊显示它并带一个“完成”按钮，按钮发送 `POST /api/sessions/{id}/browser/done`。
 - `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
 
 ## GET /api/activity
@@ -744,11 +746,11 @@ worker 运行或终端对话从 CLI 的文件读取。
 ```
 
 ```json
-{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "viewers": 1, "available": true, "driver": "chrome"}
+{"open": true, "tab": "t2", "url": "https://example.com/", "title": "Example Domain", "browsing": false, "yours": false, "place": null, "viewers": 1, "available": true, "driver": "chrome"}
 ```
 
 - 对话的当前标签页存在时 `open` 为 true；`tab`、`url` 和 `title` 描述它（`open` 为 false 时，比如对话还没有浏览过或在网关里没有打开，`tab` 为 null，其余为空）。
-- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
+- 对话的浏览器步骤正在运行时 `browsing` 为 true；你接管了它的某个页面时 `yours` 为 true，`place` 说明在哪里：`window`（真实的 Chrome 窗口，面板显示实时画面）或 `app`（就在浏览器面板里）；其他时候 `place` 为 null。两者之一为 true 时，控制台会自动打开浏览器面板。`viewers` 是该对话已打开的实时画面数量。
 - `available` 表示现在能否观看这个对话的浏览器。`[browser] live` 必须开启。已打开智能体的对话，看的是这个智能体自己的浏览器：浏览器设置改变时正在进行一轮的对话，会保留原来的浏览器，直到下一轮。没有打开智能体的对话按 `[browser] driver`（`chrome`）判断。`driver` 是设置值。未知的会话是 404 `not_found`。响应带有 `Cache-Control: no-store`。
 
 ## WS /api/sessions/{id}/browser/live
@@ -760,14 +762,32 @@ worker 运行或终端对话从 CLI 的文件读取。
 <binary frame: one JPEG>
 ```
 
-- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`grace` 是没有观看者之后标签页仍归用户的秒数（120），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
+- 服务器发送文本帧和二进制帧。文本帧是 `meta` 消息：`state` 为 `idle`（没有打开的页面）、`loading`（有页面打开，但第一张画面还没到）、`live`、`stale`（画面流出错，最后一张画面不再更新）或 `closed`；`reason` 说明 `closed` 的原因（`tab`、`browser`、`chat` 或 `unavailable`）。`tab`、`url`、`title` 和 `browsing` 同上，`owner` 为 `melo` 或 `you`（用户接管了这个标签页），第一张画面到来后还会有 `w` 和 `h`（页面视口，单位为 CSS 像素）、`offsetTop` 和 `scale`（页面的缩放）。`takeover: true` 表示可以接管这个网页。`owner` 为 `you` 时，`place` 为 `window` 或 `app`（同上），`form: true` 表示网页因有用户填了一半的表单而留在应用里，`failed: true` 表示窗口打不开（`busy: true`：因为另一个对话的窗口开着），`dialog`（`kind` 为 `alert`、`confirm`、`prompt` 或 `beforeunload`，以及 `message`、`default`）是网页弹出、等用户回答的对话框。
 - 二进制帧是一张 JPEG。每个观看者只保留最新的一张画面，所以慢的观看者会跳过画面，而不是排队。不变的页面发送一张画面后不再发送；会动的页面被限制在 `[browser] live_fps`（默认 15）以内。
 - 可选的查询参数 `tab=tN` 把画面固定在该对话的一个标签页上。不带时，画面跟随 melo 正在操作的标签页，每次切换都有一条 `meta` 消息。另一个对话的标签页、未知的标签页和格式错误的名称都会被拒绝。
 - 只有在有人观看时才传送：没有观看者的对话，浏览器不会保持画面流；一个对话同时最多有 4 个观看者；传送的内容不会写入磁盘或会话存储。
 - 它与所有 `/api` 路由使用同一道防护：Host 请求头、带有时必须同源的 Origin，以及 Bearer 令牌或控制台的 Cookie。脚本发送 `Authorization: Bearer <token>`，不带 Origin。
-- 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
-- 用户手里的标签页没人观看时（最后一个观看者关闭，或令牌轮换），它还会归用户 120 秒，然后回到 melo。在此期间，melo 在这个标签页上的浏览步骤会等待，每次最多 45 秒。
+- 客户端发送 JSON 文本消息。`{"type":"take"}` 把它观看的标签页交给用户，`{"type":"give"}` 交还给 melo。标签页在用户手里、在应用中（`place` 为 `app`）、且 melo 不在某一步中间时，下面这些是用户的输入：`{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}`（页面 CSS 像素：画面上的点减去 `offsetTop` 后再除以 `scale`）、`{"type":"wheel","x","y","dx","dy","mods"}`、`{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`、`{"type":"compose","text","start","end"}`（输入法正在组字的文字）、`{"type":"text","text"}`（输入法提交的文字）和 `{"type":"paste","text"}`（纯文本），每条最多 1,000 个字符；`{"type":"dialog","accept","text"}` 回答网页的对话框。`mods` 是 Alt 1、Control 2、Meta 4 和 Shift 8 之和。每个观看者每秒最多 120 条输入。其他消息，以及 melo 持有标签页时的输入，都会被丢弃且不回复。消息里的任何内容都不会写入日志、保存或交给模型。
+- 用户手里的标签页一直归用户，没有时间限制，直到用户交还（`give`、“完成”、关掉窗口）或运行结束。在此期间对话的运行处于暂停（`run.paused`）：不调用模型，也不计任何时限。
 - 画面结束时服务器以 1000 关闭；拒绝时以 1008 关闭（原因为 `not_found`、`not_a_tab`、`not_available`（驱动不是 `chrome` 或 `live = false`）、`refused`（浏览器已停止、另一个对话的标签页，或该对话已有 4 个观看者），或网关令牌轮换时的 `token_rotated`）；客户端单条消息超过 4,096 字节时以 1009 关闭；会话存储不可用时以 1013 关闭。
+
+## POST /api/sessions/{id}/browser/done
+
+从任何地方按“完成”（应用的胶囊、终端、控制台）：用户在这个对话里拿着的每个网页都回到 melo，Chrome 的窗口关闭，暂停的运行继续。
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -X POST -H @- http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser/done
+```
+
+```json
+{"ok": true}
+```
+
+- 用户没有拿着这个对话的网页（或对话没有打开）时 `ok` 为 false。未知会话为 404 `not_found`；工作运行的会话会拒绝它，和所有写入路由一样。
+
+## POST /api/sessions/{id}/browser/window
+
+把用户的网页移到真实的 Chrome 窗口，或把这个窗口带到最前面。网页上用户填了一半的表单会丢失。接管卡片等待期间发送时，卡片的“接管”会打开窗口。回答为 `{"ok": bool}`：用户没有网页、也没有卡片在等时为 false。
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}
 

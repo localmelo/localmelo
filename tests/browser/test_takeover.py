@@ -10,17 +10,19 @@ question or the live view's messages.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
 
+from localmelo.melo.agent._pause import Hold
 from localmelo.melo.contracts.approvals import ApprovalDecision
-from localmelo.support.browser import provider as provider_mod
+from localmelo.melo.contracts.pause import PAUSE, Resumed
 from localmelo.support.browser import takeover
 from localmelo.support.browser.driver import (
     Act,
@@ -58,48 +60,23 @@ CHINESE = "密码是你好"
 VIEW = (1280.0, 713.0)
 
 
-def grace_left(owners: Owners, tab: str) -> float | None:
-    """Seconds until a held tab nobody watches comes back; None while watched or not held."""
-    held = owners._held.get(tab)
-    if held is None or held.away is None:
-        return None
-    return max(0.0, held.away + owners.grace_s - owners._clock())
-
-
-class Later:
-    """A test's timers: ``later(seconds, fn)`` keeps them, ``fire()`` runs the due ones."""
-
-    def __init__(self, clock: list[float]) -> None:
-        self.clock = clock
-        self.timers: list[list[Any]] = []
-
-    def __call__(self, seconds: float, fn: Callable[[], None]) -> Any:
-        timer = [self.clock[0] + seconds, fn, False]
-
-        class Handle:
-            def cancel(self_inner) -> None:  # noqa: N805
-                timer[2] = True
-
-        self.timers.append(timer)
-        return Handle()
-
-    def advance(self, seconds: float) -> None:
-        self.clock[0] += seconds
-        for timer in list(self.timers):
-            if not timer[2] and timer[0] <= self.clock[0]:
-                timer[2] = True
-                timer[1]()
-
-
-def owners(changes: list[int] | None = None) -> tuple[Owners, Later]:
+def owners(
+    changes: list[int] | None = None, heard: list[str] | None = None
+) -> tuple[Owners, list[float]]:
     clock = [100.0]
-    later = Later(clock)
     found = Owners(
         on_change=(lambda: changes.append(1)) if changes is not None else None,
+        on_take=(
+            (lambda tab: heard.append(f"take {tab}")) if heard is not None else None
+        ),
+        on_give=(
+            (lambda back: heard.append(f"give {back.tab} {back.how}"))
+            if heard is not None
+            else None
+        ),
         clock=lambda: clock[0],
-        later=later,
     )
-    return found, later
+    return found, clock
 
 
 # ── Who has a tab ──
@@ -107,85 +84,62 @@ def owners(changes: list[int] | None = None) -> tuple[Owners, Later]:
 
 def test_a_tab_is_melos_until_the_person_takes_it_and_back_when_they_give_it() -> None:
     changes: list[int] = []
-    found, later = owners(changes)
+    heard: list[str] = []
+    found, clock = owners(changes, heard)
     assert found.owner("t1") == "melo" and found.owner(None) == "melo"
     assert found.take("t1") is True and found.owner("t1") == "you"
     assert found.take("t1") is False, "taking a tab one has changes nothing"
-    later.advance(42)
-    back = found.give("t1")
+    clock[0] += 42
+    back = found.give("t1", "closed")
     assert back is not None and (back.tab, round(back.seconds), back.how) == (
         "t1",
         42,
-        "gave",
+        "closed",
     )
     assert found.owner("t1") == "melo" and found.give("t1") is None
     assert [r.tab for r in found.returned()] == ["t1"] and found.returned() == []
-    assert len(changes) == 2
+    assert len(changes) == 2 and heard == ["take t1", "give t1 closed"]
 
 
-def test_a_tab_nobody_watches_comes_back_after_the_grace_period() -> None:
-    found, later = owners()
-    found.take("t1")
-    found.watching("t1", 1)
-    assert grace_left(found, "t1") is None
-    found.watching(
-        "t1", 0
-    )  # the panel closed, the page was hidden or the token rotated
-    assert grace_left(found, "t1") == takeover.GRACE_S
-    later.advance(takeover.GRACE_S - 1)
-    assert found.owner("t1") == "you"
-    later.advance(2)
-    assert found.owner("t1") == "melo"
-    [back] = found.returned()
-    assert back.how == "left"
-
-
-def test_a_panel_that_comes_back_within_the_grace_period_keeps_the_tab() -> None:
-    found, later = owners()
-    found.take("t1")
-    found.watching("t1", 0)
-    later.advance(60)
-    found.watching("t1", 2)
-    assert grace_left(found, "t1") is None
-    later.advance(takeover.GRACE_S * 2)
-    assert found.owner("t1") == "you", "the cancelled timer did not give it back"
-
-
-def test_a_tab_taken_from_the_card_with_no_panel_open_starts_its_grace_at_once() -> (
-    None
-):
-    found, later = owners()
-    found.take("t1", watched=False)
-    assert grace_left(found, "t1") == takeover.GRACE_S
-    later.advance(takeover.GRACE_S + 1)
-    assert found.owner("t1") == "melo"
+def test_where_the_person_has_a_tab_and_no_clock_ever_gives_it_back() -> None:
+    found, clock = owners()
+    found.take("t1", "app", form=True)
+    where = found.where("t1")
+    assert where is not None and (where.place, where.form, where.failed) == (
+        "app",
+        True,
+        False,
+    )
+    found.move("t1", "window")
+    assert found.where("t1") == dataclasses.replace(where, place="window")
+    clock[0] += 86400
+    assert found.owner("t1") == "you", "nothing counts down"
+    assert found.where("t2") is None
 
 
 def test_a_closed_tab_and_the_end_of_the_chat_leave_nothing_held() -> None:
-    found, later = owners()
+    heard: list[str] = []
+    found, _ = owners(heard=heard)
     found.take("t1")
     found.take("t2")
     found.give("t2")
     found.forget("t2")
     assert found.returned() == [], "nothing is told about a tab that is gone"
     found.forget("t1")
-    assert found.held == frozenset()
     found.take("t3")
-    found.watching("t3", 0)
     found.clear()
-    later.advance(takeover.GRACE_S + 1)
     assert found.held == frozenset() and found.returned() == []
+    assert heard == ["take t1", "take t2", "give t2 done", "take t3"]
 
 
 async def test_a_step_waits_until_the_person_gives_the_tab_back() -> None:
     found = Owners()
     found.take("t1")
-    loop = asyncio.get_running_loop()
-    loop.call_later(0.05, found.give, "t1")
-    assert await found.wait_for_melo("t1", 2.0) is True
-    found.take("t1")
-    assert await found.wait_for_melo("t1", 0.05) is False
-    assert await found.wait_for_melo("t2", 0.0) is True
+    asyncio.get_running_loop().call_later(0.05, found.give, "t1")
+    async with asyncio.timeout(2):
+        await found.wait_for_melo("t1")
+        await found.wait_for_melo("t2")
+    assert found.owner("t1") == "melo"
 
 
 def test_how_long_the_person_had_it_reads_plainly() -> None:
@@ -657,7 +611,7 @@ async def test_the_person_takes_the_tab_from_the_panel_and_gives_it_back() -> No
     assert viewer.meta["owner"] == "melo" and viewer.meta["takeover"] is True
     assert await live.take(viewer) is True
     await until(lambda: viewer.meta["owner"] == "you")
-    assert viewer.meta["grace"] == int(takeover.GRACE_S)
+    assert viewer.meta["place"] == "app", "no window here: the panel is the place"
     assert (
         driver.cast.rates[-1] == TAKEN_FPS
     ), "the person sees what they do at full rate"
@@ -757,19 +711,18 @@ async def test_the_view_stays_on_the_persons_tab_while_melo_opens_another() -> N
     await provider.close()
 
 
-async def test_a_panel_that_goes_away_starts_the_grace_period() -> None:
+async def test_a_panel_that_goes_away_leaves_the_page_the_persons() -> None:
     driver = browser()
     provider, tools, live = await started(driver)
     await run(tools, "browser_open", url=HOME)
     viewer = await live.watch()
     framed(driver)
     await live.take(viewer)
-    assert grace_left(provider.owners, "t1") is None
     await live.release(viewer)
-    left = grace_left(provider.owners, "t1")
-    assert left is not None and left > takeover.GRACE_S - 5
+    await asyncio.sleep(0.1)
+    assert provider.owners.owner("t1") == "you", "only Done gives it back"
     again = await live.watch()
-    assert grace_left(provider.owners, "t1") is None and again.target[0] == "t1"
+    assert again.target[0] == "t1"
     await provider.close()
 
 
@@ -794,21 +747,19 @@ async def test_melos_step_waits_for_the_person_and_reads_the_page_again_after() 
     await provider.close()
 
 
-async def test_a_step_that_waits_too_long_says_the_person_is_using_the_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(provider_mod, "STEP_WAIT_S", 0.05)
+async def test_a_step_on_the_persons_page_waits_as_long_as_they_need() -> None:
     driver = browser()
     provider, tools, live = await started(driver)
     await run(tools, "browser_open", url=HOME)
     viewer = await live.watch()
     await live.take(viewer)
-    out = await run(tools, "browser_read")
-    assert not out.is_error, "waiting for the person is no failure"
-    assert "The user is using the page in tab t1" in out.text
-    # A new tab is not theirs: melo may work there meanwhile.
-    other = await run(tools, "browser_open", url=LOGIN, tab="new")
-    assert "<<page " in other.text
+    step = asyncio.ensure_future(run(tools, "browser_read"))
+    await asyncio.sleep(0.3)
+    assert not step.done(), "no time limit hands the page back"
+    assert provider.hand_back() is True
+    out = await asyncio.wait_for(step, 2)
+    assert out.text.startswith("The user had tab t1 for")
+    assert "gave it back to melo" in out.text and "<<page " in out.text
     await provider.close()
 
 
@@ -827,14 +778,11 @@ async def test_melo_never_tidies_away_the_persons_tab() -> None:
     await provider.close()
 
 
-async def test_a_step_naming_another_tab_never_acts_on_the_persons_tab(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_step_naming_another_tab_never_acts_on_the_persons_tab() -> None:
     # The person took the current tab over from the panel; its reading is kept,
     # so a ref of it is still real. A step naming another tab, a tab of no chat
     # or the person's tab spelt differently is refused or waits: the tab whose
     # owner was checked is the tab the step works on.
-    monkeypatch.setattr(provider_mod, "STEP_WAIT_S", 0.05)
     driver = browser()
     provider, tools, live = await started(driver)
     await run(tools, "browser_open", url=HOME)  # t1: e1 is the "Sign in" link
@@ -849,13 +797,13 @@ async def test_a_step_naming_another_tab_never_acts_on_the_persons_tab(
     assert other.is_error and "e1" in other.text, "t2's reading has no e1"
     unknown = await run(tools, "browser_follow", ref="e1", tab="t9")
     assert unknown.is_error and '"t9" is not a tab of this chat' in unknown.text
-    spelt = await run(tools, "browser_follow", ref="e1", tab=" T1 ")
-    assert not spelt.is_error
-    assert spelt.text.startswith("The user is using the page in tab t1")
-
     assert driver.calls[calls:] == [], "no page was opened, read or touched"
     assert driver.open_in == [], "nothing was loaded into a tab of before"
-    assert provider.owners.owner("t1") == "you"
+    asyncio.get_running_loop().call_later(0.05, provider.hand_back)
+    spelt = await run(tools, "browser_follow", ref="e1", tab=" T1 ")
+    assert not spelt.is_error
+    assert spelt.text.startswith("The user had tab t1 for")
+    assert "melo did not do this step" in spelt.text, "it waited, then read t1 again"
     await provider.close()
 
 
@@ -946,8 +894,8 @@ def the_person(
             live.send_input(viewer, {"type": "text", "text": text})
         provider.owners.give("t1")
 
-    def taken(tab: str, *, watched: bool = True) -> bool:
-        changed = original(tab, watched=watched)
+    def taken(tab: str, place: Any = "window", *, form: bool | None = None) -> bool:
+        changed = original(tab, place, form=form)
         loop.call_later(0.05, person)
         return changed
 
@@ -980,7 +928,7 @@ async def test_a_secret_field_asks_the_person_to_take_over_and_melo_carries_on()
         "tab": "t1",
         "browser": "chrome",
     }
-    assert "in the Browser panel" in preview
+    assert preview == "take over example.com: melo needs you for a one-time code"
     assert not out.is_error
     assert out.text.startswith(
         "That is a one-time or verification code field: melo never types into"
@@ -1016,6 +964,296 @@ async def test_a_sign_in_page_asks_the_person_and_melo_reads_it_again_after() ->
     assert "The user had tab t1 for 1 s and gave it back to melo." in out.text
     assert out.text.count("<<page ") == 1, "the page as the person left it, once"
     assert SECRET not in out.text
+    await provider.close()
+
+
+# ── A real window for the person, and the run's hold ──
+
+
+class Windowed(Takeable):
+    """A browser that can put a page in a real window (or fail to), as Chrome does."""
+
+    def __init__(self, *pages: Any, opens: bool = True, unsent: bool = False) -> None:
+        super().__init__(*pages)
+        self.opens = opens
+        self.unsent = unsent
+        self.shown: list[str] = []
+        self.hidden = 0
+        self.on_closed: Callable[[str], None] | None = None
+
+    async def show_window(self, tab: str, on_closed: Callable[[str], None]) -> bool:
+        self.shown.append(tab)
+        self.on_closed = on_closed
+        return self.opens
+
+    async def hide_window(self) -> None:
+        self.hidden += 1
+
+    async def unsent_input(self) -> bool:
+        return self.unsent
+
+
+def windowed(**kwargs: Any) -> Windowed:
+    return Windowed(*browser().pages.values(), **kwargs)
+
+
+def a_hold(said: list[tuple[str, Any]]) -> Hold:
+    """A run's hold that writes what it reports into *said*."""
+    return Hold(
+        lambda what, detail: said.append(("paused", detail)),
+        lambda what, how, held_s: said.append(("resumed", how)),
+    )
+
+
+@contextlib.contextmanager
+def held_run() -> Iterator[list[tuple[str, Any]]]:
+    """The run's hold, as the agent sets it around a tool call; what it reports."""
+    said: list[tuple[str, Any]] = []
+    token = PAUSE.set(a_hold(said))
+    try:
+        yield said
+    finally:
+        PAUSE.reset(token)
+
+
+async def test_take_over_puts_the_page_in_a_real_window_and_closing_it_is_done() -> (
+    None
+):
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    with asking(Asks()), held_run() as said:
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: bool(said))
+        where = provider.owners.where("t1")
+        assert driver.shown == ["t1"] and where is not None and where.place == "window"
+        assert said == [
+            ("paused", {"tab": "t1", "place": "window", "site": "example.com"})
+        ]
+        assert driver.on_closed is not None
+        driver.on_closed("closed")  # the person closed the window
+        out = await asyncio.wait_for(step, 2)
+    assert "closed its Chrome window, which gives it back to melo" in out.text
+    assert "The page as it is now:" in out.text
+    assert said[-1] == ("resumed", "closed") and driver.hidden == 1
+    await provider.close()
+
+
+async def test_a_form_the_person_began_stays_in_the_app_unless_they_pick_chrome() -> (
+    None
+):
+    driver = windowed(unsent=True)
+    provider, tools, live = await started(driver)
+    asks = Asks()
+    with asking(asks), held_run() as said:
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: bool(said))
+        assert driver.shown == [], "the form stays: no window"
+        assert said[0][1]["place"] == "app" and said[0][1]["form"] is True
+        provider.show_to_person()  # "Open in Chrome, clear the form"
+        await until(lambda: driver.shown == ["t1"])
+        await until(lambda: said[-1][1].get("place") == "window")
+        assert provider.hand_back() is True
+        out = await asyncio.wait_for(step, 2)
+    card = next(a for a in asks.asked if a[0].startswith("takeover:"))
+    assert card[1]["form"] is True
+    assert "gave it back to melo" in out.text and said[-1] == ("resumed", "done")
+    await provider.close()
+
+
+async def test_a_window_that_cannot_open_puts_the_page_in_the_app() -> None:
+    driver = windowed(opens=False)
+    provider, tools, live = await started(driver)
+    viewer = await live.watch()
+    with asking(Asks()), held_run() as said:
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: bool(said))
+        assert said[0][1]["place"] == "app" and said[0][1]["failed"] is True
+        framed(driver)
+        await until(lambda: viewer.meta.get("failed") is True)
+        assert viewer.meta["place"] == "app"
+        provider.hand_back()
+        await asyncio.wait_for(step, 2)
+    await provider.close()
+
+
+async def test_a_stop_while_the_person_has_the_page_takes_it_back() -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    with asking(Asks()), held_run():
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: driver.shown == ["t1"])
+        step.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await step
+    await until(lambda: driver.hidden == 1)
+    assert provider.owners.owner("t1") == "melo"
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    ("how", "words"),
+    [
+        ("gone", "closed its own window"),
+        ("lost", "when melo's Chrome stopped"),
+    ],
+)
+async def test_a_window_that_went_without_the_person_is_no_done(
+    how: str, words: str
+) -> None:
+    """A page that closed itself, or a Chrome that stopped, reads as what it is."""
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    with asking(Asks()), held_run() as said:
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: driver.on_closed is not None and bool(said))
+        assert driver.on_closed is not None
+        driver.on_closed(how)
+        out = await asyncio.wait_for(step, 2)
+    assert words in out.text and "gave it back" not in out.text
+    assert said[-1] == ("resumed", how)
+    await provider.close()
+
+
+async def test_a_take_between_turns_holds_the_turn_that_steps_on_the_page() -> None:
+    """Turn 1 opened t1; the person takes it from the panel between turns; turn 2 steps on it."""
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    with asking(Asks()), held_run():
+        await run(tools, "browser_open", url=HOME)
+    first = provider._pause
+    assert isinstance(first, Hold)
+    first.end("ended")  # turn 1 is over
+    viewer = await live.watch()
+    framed(driver)
+    await until(lambda: viewer.meta.get("state") == "live")
+    assert await live.take(viewer) is True
+    await until(lambda: driver.shown == ["t1"])
+    with asking(Asks()), held_run() as said:
+        step = asyncio.ensure_future(run(tools, "browser_read"))
+        await until(lambda: bool(said))
+        assert said == [
+            ("paused", {"tab": "t1", "place": "window", "site": "example.com"})
+        ], "the surfaces say You're in control, with Done in the pill and the terminal"
+        provider.hand_back()
+        await asyncio.wait_for(step, 2)
+    assert said[-1] == ("resumed", "done")
+    await provider.close()
+
+
+class Raising(Windowed):
+    """A window that fails with something other than a browser error (a full disk writing its settings)."""
+
+    async def show_window(self, tab: str, on_closed: Callable[[str], None]) -> bool:
+        self.shown.append(tab)
+        raise OSError(28, "No space left on device")
+
+
+async def test_a_window_that_fails_any_way_puts_the_page_in_the_app_and_holds() -> None:
+    driver = Raising(*browser().pages.values())
+    provider, tools, live = await started(driver)
+    with asking(Asks()), held_run() as said:
+        await run(tools, "browser_open", url=HOME)
+        step = asyncio.ensure_future(run(tools, "browser_follow", ref="e1"))
+        await until(lambda: bool(said))
+        where = provider.owners.where("t1")
+        assert where is not None and (where.place, where.failed) == ("app", True)
+        assert said[0][1]["place"] == "app" and said[0][1]["failed"] is True
+        provider.hand_back()
+        await asyncio.wait_for(step, 2)
+    await provider.close()
+
+
+async def test_the_run_stays_held_until_every_page_comes_back() -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    said: list[tuple[str, Any]] = []
+    hold = a_hold(said)
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            await run(tools, "browser_open", url=HOME, tab="new")
+    finally:
+        PAUSE.reset(token)
+    provider.owners.take("t1")
+    provider.owners.take("t2")
+    await until(lambda: hold.held)
+    await provider._switched()
+    provider.owners.give("t1", "done")
+    assert provider.owners.held == frozenset({"t2"})
+    assert hold.held, "the person still has t2"
+    assert said[-1][0] == "paused" and said[-1][1]["tab"] == "t2"
+    provider.owners.give("t2", "done")
+    assert not hold.held and said[-1] == ("resumed", "done")
+    await provider.close()
+
+
+@pytest.mark.parametrize("ended", ["stopped", "ended"])
+async def test_a_run_that_ends_takes_back_every_page_the_person_had(
+    ended: Resumed,
+) -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    hold = a_hold([])
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+            await run(tools, "browser_open", url=HOME, tab="new")
+    finally:
+        PAUSE.reset(token)
+    provider.owners.take("t1")
+    provider.owners.take("t2")
+    await until(lambda: hold.held)
+    await provider._switched()
+    hold.end(ended)
+    assert provider.owners.held == frozenset()
+    await provider._switched()
+    assert driver.hidden, "no page is left in the person's window"
+    await provider.close()
+
+
+async def test_closing_the_provider_while_held_releases_its_own_hold() -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    said: list[tuple[str, Any]] = []
+    hold = a_hold(said)
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+    finally:
+        PAUSE.reset(token)
+    provider.owners.take("t1")
+    await until(lambda: hold.held)
+    hold.release("done", by=object())  # another holder cannot end it
+    assert hold.held
+    await provider.close()
+    assert not hold.held and said[-1] == ("resumed", "stopped")
+
+
+async def test_a_turn_that_ends_while_held_takes_the_page_back_and_says_so() -> None:
+    driver = windowed()
+    provider, tools, live = await started(driver)
+    said: list[tuple[str, Any]] = []
+    hold = a_hold(said)
+    token = PAUSE.set(hold)
+    try:
+        with asking(Asks()):
+            await run(tools, "browser_open", url=HOME)
+    finally:
+        PAUSE.reset(token)
+    provider.owners.take("t1")
+    await until(lambda: hold.held)
+    hold.end("ended")
+    assert provider.owners.owner("t1") == "melo" and said[-1] == ("resumed", "ended")
+    back, _ = provider._back_lines()
+    assert back and back[0].endswith("when the turn ended.")
     await provider.close()
 
 

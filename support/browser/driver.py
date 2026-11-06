@@ -31,6 +31,10 @@ class BrowserSetupError(BrowserError):
     """The browser is not set up for melo; the message says what to turn on."""
 
 
+class WindowBusyError(BrowserError):
+    """The browser's window is open for the person in another chat: this chat waits its turn."""
+
+
 class PageMovedError(BrowserError):
     """A wait found its tab on another site than the one it was asked for.
 

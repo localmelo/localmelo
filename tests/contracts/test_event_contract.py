@@ -61,6 +61,8 @@ class TestCatalogue:
             "recall",
             "run.progress",
             "context_budget",
+            "run.paused",
+            "run.resumed",
             "run.finished",
         } == EVENT_TYPES
         assert (EVENT_SCHEMA_VERSION, EVENT_TEXT_LIMIT) == (1, 100_000)

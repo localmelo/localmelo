@@ -214,6 +214,25 @@ test('taking over a page answers once and has the chat open the page; not now an
   assert.deepEqual([c.answers.at(-1), opened], [['take-task', 'once'], 1]);
 });
 
+test('a page with a form the person began says a window clears it and offers it here first', () => {
+  const c = cards();
+  const opened = [];
+  const view = {takeOver: () => opened.push('here'), takeOverWindow: () => opened.push('window')};
+  const draw = (id, args) => c.draw({request_id: id, tool_name: 'takeover:https://example.com', workspace_label: '~/w', arguments_complete: true,
+    arguments: {site: 'example.com', access: 'takeover', need: 'sign-in', ...args}}, {view});
+  const note = (card) => findNode(card, (node) => node.className === 'approval-note').textContent;
+  const buttons = (card) => findNodes(card, (node) => node.tag === 'button' && 'approvalFocus' in node.dataset);
+  assert.match(note(draw('chrome', {browser: 'chrome'})), /real Chrome window.*melo's own Chrome/);
+  assert.match(note(draw('safari', {})), /Safari's window/);
+  const form = draw('form', {browser: 'chrome', form: true});
+  assert.match(note(form), /Opening this one in Chrome reloads melo.s pages and clears that form/);
+  assert.deepEqual(buttons(form).map((node) => node.textContent).filter((text) => text !== 'Send'),
+    ['Take over here', 'Open in Chrome, clear the form', 'Not now']);
+  c.settle('form');
+  buttons(form).find((node) => node.textContent === 'Open in Chrome, clear the form').click();
+  assert.deepEqual([c.answers.at(-1), opened], [['form', 'once'], ['window']]);
+});
+
 test("a press in another app's window says what is pressed and is asked every time", () => {
   const c = cards();
   let request;

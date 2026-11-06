@@ -1499,6 +1499,11 @@ class InteractiveApp:
             return
         text = buffer.text
         if not text.strip():
+            # While the person has a page, an empty Enter is Done.
+            give_back = getattr(self.controller, "give_back", None)
+            hint = give_back() if give_back is not None else None
+            if hint:
+                self.hint(hint)
             return
         hint = self.controller.enter(text)
         if hint is not None:  # the draft stays; "" shows no hint

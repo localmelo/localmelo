@@ -1,8 +1,9 @@
 import AppKit
 import ImageIO
 
-/// The pill's colours, light then dark, in the console's palette: moss at work, amber for a wait (the one colour that
-/// asks for the person), green for done, red for a failure and a model server that is down; the mark and words say it too.
+/// The pill's colours, light then dark, in the console's palette: moss at work and while the person holds a page, amber
+/// for a wait (the one colour that asks for the person), green for done, red for a failure and a model server that is
+/// down; the mark and words say it too.
 enum PillColors {
     static let fill = Palette.pair(0xf6f6f3, 0x1e211c)
     static let edge = Palette.pair(0xd9dbd2, 0x3a3e36)
@@ -14,7 +15,7 @@ enum PillColors {
     static let failed = Palette.pair(0xb3261e, 0xff8a80)
 
     static func ring(_ state: PillState) -> NSColor {
-        [.working: working, .waiting: waiting, .done: done][state] ?? failed
+        [.working: working, .control: working, .waiting: waiting, .done: done][state] ?? failed
     }
 }
 
@@ -44,6 +45,39 @@ final class CloseMark: NSView {
             .font: NSFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: Palette.ink])
         let size = mark.size()
         mark.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+}
+
+/// The "Done" button at the capsule's right end while the person holds a page: the ink of the text as a rounded
+/// rectangle, the word in the colour of the capsule. A press on it is its own, never a press on the pill.
+final class GiveMark: NSView {
+    var onPress: (() -> Void)?
+    var title = "" { didSet { needsDisplay = true } }
+    private static let font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+
+    /// The button's width for `title`: the word and 14 points each side, and at least 56.
+    static func width(_ title: String) -> CGFloat {
+        max(56, ceil(NSAttributedString(string: title, attributes: [.font: font]).size().width) + 28)
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        isHidden = true
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseDown(with event: NSEvent) { onPress?() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Palette.ink.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+        let word = NSAttributedString(string: title, attributes: [.font: GiveMark.font, .foregroundColor: Palette.onInk])
+        let size = word.size()
+        word.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
     }
 }
 
@@ -100,12 +134,14 @@ final class PortraitHost: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// What the pill's panel draws and hears: the capsule, the round portrait with its ring, the mark and the one line,
-/// the "+1" chip, a press that is a click or a drag, the pointer coming and going, and VoiceOver. It decides nothing.
+/// What the pill's panel draws and hears: the capsule, the round portrait with its ring, the mark and the one line
+/// (with a small one under it while the person holds a page), the "+1" chip or the "Done" button, a press that is a
+/// click or a drag, the pointer coming and going, and VoiceOver. It decides nothing.
 final class PillView: NSView {
     var onClick: (() -> Void)?
     var onDrop: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onGiveBack: (() -> Void)?
     private(set) var capsuleWidth: CGFloat = 0
     private(set) var model: PillModel?
     /// The system's blur behind the capsule: it shows only on a screen, never when the view is drawn into a bitmap.
@@ -116,7 +152,10 @@ final class PillView: NSView {
     let mark = PillView.label(13, .bold)
     let line = PillView.label(14, .medium)
     let more = PillView.label(11, .semibold)
+    let note = PillView.label(11, .regular)
     let close = CloseMark(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+    let give = GiveMark(frame: .zero)
+    private var giveWidth: CGFloat = 0
     private var pressedAt: NSPoint?
     private var panelOrigin = NSPoint.zero
     private var dragged = false
@@ -133,9 +172,12 @@ final class PillView: NSView {
         addSubview(backdrop)
         addSubview(host)
         more.alignment = .center
-        for label in [mark, line, more] { addSubview(label) }
+        for label in [mark, line, note, more] { addSubview(label) }
+        note.isHidden = true
+        addSubview(give)
         addSubview(close)
         close.onPress = { [weak self] in self?.onDismiss?() }
+        give.onPress = { [weak self] in self?.onGiveBack?() }
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         describeActions()
@@ -143,10 +185,14 @@ final class PillView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    /// The one custom action's name, in the language now in use.
+    /// The one custom action, in the language now in use: giving the page back while the person holds one (the pill
+    /// then has no "×"), else hiding the pill.
     func describeActions() {
-        setAccessibilityCustomActions([NSAccessibilityCustomAction(name: L10n.t("app.pill.hide", "Hide until the next task")) { [weak self] in
-            self?.onDismiss?()
+        let giving = model?.giveBack != nil
+        let name = giving ? L10n.t("app.pill.giveBackLabel", "Give the page back to melo")
+                          : L10n.t("app.pill.hide", "Hide until the next task")
+        setAccessibilityCustomActions([NSAccessibilityCustomAction(name: name) { [weak self] in
+            if giving { self?.onGiveBack?() } else { self?.onDismiss?() }
             return true
         }])
     }
@@ -171,14 +217,24 @@ final class PillView: NSView {
             dissolve.duration = 0.15
             for label in [mark, line] { label.layer?.add(dissolve, forKey: "dissolve") }
         }
+        let giving = model.giveBack != nil
+        let actionsChange = giving != (self.model?.giveBack != nil)
         self.model = model
         line.stringValue = model.text
         mark.stringValue = model.glyph
+        note.stringValue = model.note ?? ""
+        note.isHidden = model.note == nil
         more.stringValue = model.more > 0 ? "+\(model.more)" : ""
         more.isHidden = model.more == 0
+        give.title = giving ? L10n.t("app.pill.giveBack", "Done") : ""
+        give.isHidden = !giving
+        giveWidth = giving ? GiveMark.width(give.title) : 0
+        if giving { close.isHidden = true }
+        if actionsChange { describeActions() }
         host.picture.contents = image
         backdrop.model = model
-        capsuleWidth = pillWidth(text: ceil(line.cell?.cellSize.width ?? line.intrinsicContentSize.width), more: model.more)
+        let text = [line, note].map { ceil($0.cell?.cellSize.width ?? $0.intrinsicContentSize.width) }.max() ?? 0
+        capsuleWidth = pillWidth(text: text, more: model.more, give: giveWidth)
         setAccessibilityLabel(model.label)
         toolTip = model.text
         needsLayout = true
@@ -193,9 +249,14 @@ final class PillView: NSView {
         backdrop.frame = bounds
         host.frame.origin = CGPoint(x: body.minX + 6, y: body.minY + 6)
         mark.frame = NSRect(x: body.minX + 50, y: body.minY + 14, width: 24, height: 20)
-        let tail = (model?.more ?? 0) > 0 ? 8 + pillChip + 14 : pillTail
-        let wide = min(body.width - pillLead - tail, pillTextMost)
-        line.frame = NSRect(x: body.minX + pillLead, y: body.minY + 14, width: max(wide, 0), height: 20)
+        let tail = pillTailWidth(more: model?.more ?? 0, give: giveWidth)
+        let wide = max(min(body.width - pillLead - tail, pillTextMost), 0)
+        // Two lines while the person holds a page (the line over a smaller note), else the one line in the middle.
+        line.frame = note.isHidden ? NSRect(x: body.minX + pillLead, y: body.minY + 14, width: wide, height: 20)
+                                   : NSRect(x: body.minX + pillLead, y: body.minY + 23, width: wide, height: 18)
+        note.frame = NSRect(x: body.minX + pillLead, y: body.minY + 8, width: wide, height: 15)
+        give.frame = NSRect(x: body.maxX - pillGiveEdge - giveWidth, y: body.midY - pillGiveHeight / 2, width: giveWidth,
+                            height: pillGiveHeight)
         more.frame = NSRect(x: body.maxX - 14 - pillChip, y: body.minY + 14, width: pillChip, height: 18)
         close.frame = NSRect(x: body.minX + 4 - 9, y: body.maxY - 4 - 9, width: 18, height: 18)
     }
@@ -212,7 +273,8 @@ final class PillView: NSView {
             disc.borderColor = PillColors.ring(model.state).cgColor
             disc.backgroundColor = PillColors.disc.cgColor
         }
-        mark.textColor = model.state == .working ? Palette.ink : PillColors.ring(model.state)
+        mark.textColor = model.state == .working || model.state == .control ? Palette.ink : PillColors.ring(model.state)
+        note.textColor = Palette.secondary
         more.textColor = Palette.ink
     }
 
@@ -248,6 +310,7 @@ final class PillView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
+        if !give.isHidden && give.frame.contains(local) { return give }
         if !close.isHidden && close.frame.contains(local) { return close }
         return capsule.contains(local) ? self : nil
     }
@@ -259,7 +322,7 @@ final class PillView: NSView {
         super.updateTrackingAreas()
     }
 
-    override func mouseEntered(with event: NSEvent) { close.isHidden = false }
+    override func mouseEntered(with event: NSEvent) { close.isHidden = model?.giveBack != nil }
     override func mouseExited(with event: NSEvent) { close.isHidden = true }
 
     // The press is followed by hand, as the pet's is: a press that stays within a few points is a click, anything
@@ -338,6 +401,8 @@ final class PillController: NSObject {
     var openWindow: () -> Void = {}
     var openWaiting: () -> Void = {}
     var openRoute: (String) -> Void = { _ in }
+    /// The person pressed "Done" while they hold the page of this chat.
+    var giveBack: (String) -> Void = { _ in }
     /// Told when the pill appears or goes, and whether the pet that takes its place shows "done" (a "Done" ran out).
     var showingChanged: (_ showing: Bool, _ showsDone: Bool) -> Void = { _, _ in }
     var environment: PetEnvironment { gate.environment }
@@ -382,6 +447,9 @@ final class PillController: NSObject {
         panel.title = "Melo"
         view.onClick = { [weak self] in self?.click() }
         view.onDrop = { [weak self] in self?.drop() }
+        view.onGiveBack = { [weak self] in
+            if let chat = self?.model?.giveBack { self?.giveBack(chat) }
+        }
         view.onDismiss = { [weak self] in
             self?.policy.dismiss()
             self?.evaluate()

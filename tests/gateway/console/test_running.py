@@ -116,6 +116,7 @@ async def test_nothing_runs_on_a_fresh_console(client: TestClient) -> None:
         "tasks": {"running": 0, "queued": 0, "held": 0, "top_level": None},
         "items": [],
         "waiting": [],
+        "control": [],
         "recent": None,
         "focus": None,
     }
@@ -185,6 +186,41 @@ async def test_an_item_whose_newest_step_is_a_model_call_is_answering(
         "read",
         False,
     )
+    monkeypatch.undo()
+
+
+async def test_a_chat_paused_for_the_person_is_in_control_until_it_resumes(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The app's pill reads ``control`` for "You're in control" and its Done."""
+    turn = await seed_turn(console.store, workspace, status="running", title="Sign in")
+    entry = await open_session(console.sessions, turn.session_id)
+    monkeypatch.setattr(entry.runner, "_active", object())
+    paused = core_event("run.paused", seq=2, what="browser", detail={"tab": "t1"})
+    await console.store.append_events(
+        turn.session_id, turn.turn, [paused], holder=HOLDER
+    )
+    found = status(client)
+    assert found["control"] == [{"kind": "chat", "id": turn.session_id}]
+    assert (found["focus"]["activity"], found["focus"]["answering"]) == (
+        "You're in control",
+        False,
+    )
+    # The next step begins and waits at the gate: the person still has the run.
+    await console.store.append_events(
+        turn.session_id, turn.turn, [core_event("step.started", seq=3)], holder=HOLDER
+    )
+    found = status(client)
+    assert found["control"] == [{"kind": "chat", "id": turn.session_id}]
+    assert found["focus"]["activity"] == "You're in control"
+    resumed = core_event("run.resumed", seq=4, what="browser", how="done", held_s=4.0)
+    await console.store.append_events(
+        turn.session_id, turn.turn, [resumed], holder=HOLDER
+    )
+    assert status(client)["control"] == []
     monkeypatch.undo()
 
 

@@ -245,14 +245,17 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     if (args.delivery === "foreground_retry") why = t("approval.desktopForeground", { app });
   } else if (tool.startsWith("takeover:")) {
     // melo reached something only the person can do on a page (a sign-in, a code, a QR code, a human check): the
-    // card offers them the page in the Browser panel. Their yes is "Take over"; nothing of it is kept for the chat.
+    // card offers them the page in a real window (melo's own Chrome, or Safari's). Their yes is "Take over"; nothing
+    // of it is kept for the chat. A page with a form they began would lose it in a new window: the card says so and
+    // offers the page here first.
     const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
     const need = ["sign-in", "password", "code", "card", "qr", "captcha"].includes(args.need) ? args.need : "sign-in";
     what = t("approval.willDo");
     title = t(`approval.takeover.${need}`, { site });
     caption = t("approval.takeoverCaption");
     rule = t("approval.rule.takeover");
-    why = t("approval.takeoverContent");
+    why = args.form === true ? t("approval.takeoverForm")
+      : t(args.browser === "chrome" ? "approval.takeoverContent" : "approval.takeoverContentSafari");
     content = "";
     noBox = true;
   } else if (tool.startsWith("window-read:")) {
@@ -357,11 +360,19 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   const actions = el("div", "approval-actions");
   const denyView = el("div", "deny-view");
   // On a high-impact card the safe answer is the filled one.
-  const once = button(high ? "outline-button" : "primary-button", takeover ? t("approval.takeoverYes") : t("common.allowOnce"), () => {
+  const form = takeover && args.form === true;
+  const onceWords = form ? t("approval.takeoverHere") : takeover ? t("approval.takeoverYes") : t("common.allowOnce");
+  const once = button(high ? "outline-button" : "primary-button", onceWords, () => {
     view.answer(request, state, "once");
-    // The panel opens and the keys go to the page as soon as the gateway hands it over.
+    // The panel opens (the page's live copy, or the page itself) as soon as the gateway hands it over.
     if (takeover) view.takeOver?.();
   });
+  // A page with a form: the other way is a real Chrome window, which clears the form (the card said so).
+  const chrome = button("outline-button", t("approval.takeoverChrome"), () => {
+    view.answer(request, state, "once");
+    view.takeOverWindow?.();
+  });
+  chrome.dataset.approvalFocus = "chrome";
   once.dataset.approvalOnce = "";
   once.dataset.approvalFocus = "once";
   const seeing = tool.startsWith("window-read:");
@@ -395,7 +406,8 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
   const everyTime = high || takeover || pointing || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
     || tool.startsWith("desktop-act:");
-  const offered = everyTime ? [once, deny] : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  const offered = form ? [once, chrome, deny] : everyTime ? [once, deny]
+    : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";

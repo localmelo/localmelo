@@ -411,15 +411,14 @@ async def test_the_snapshot_says_whether_the_person_has_a_page(
     stream: Stream, host: Host
 ) -> None:
     # A console that opens the chat again shows the page the person took over.
-    owners = Owners(
-        later=lambda seconds, fn: asyncio.get_running_loop().call_later(seconds, fn)
-    )
+    owners = Owners()
     view = LiveView(stream, host, poll_s=3600, owners=owners)
     try:
         host.add("t1", "R1", HOME, "Home")
         assert (await view.snapshot())["yours"] is False
         owners.take("t1")
-        assert (await view.snapshot())["yours"] is True
+        snap = await view.snapshot()
+        assert (snap["yours"], snap["place"]) == (True, "window")
         owners.give("t1")
         assert (await view.snapshot())["yours"] is False
         no_takeover = LiveView(stream, host, poll_s=3600)

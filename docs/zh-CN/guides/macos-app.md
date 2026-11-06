@@ -54,7 +54,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 ## 浏览器窗口
 
 - 在后台 Chrome 中浏览的对话里，控制台的**浏览器**面板有一个**弹出为窗口**按钮。它把面板单独放进一个标题为“浏览器”的窗口，这样你在别的窗口工作时也能看着 melo 的页面。
-- 窗口显示同样的实时画面（[观看 melo 的浏览器](browsing.md#watching-melos-browser)），也可以在这里**接管**：点击、按键、Mac 的输入法和 Command-V 粘贴都会发给网页，Command-A、Command-X 和 Command-Z 作用在网页上（见[接管 melo 的浏览器](browsing.md#taking-over-melos-browser)）。关闭它就会结束画面流，你手里的网页 2 分钟后回到 melo；网关停止或应用退出时它也会关闭。
+- 窗口显示同样的实时画面（[观看 melo 的浏览器](browsing.md#watching-melos-browser)），也可以在这里**接管**：点击、按键、Mac 的输入法和 Command-V 粘贴都会发给网页，Command-A、Command-X 和 Command-Z 作用在网页上（见[接管 melo 的浏览器](browsing.md#taking-over-melos-browser)）。关闭它就会结束画面流；你手里的网页在你按**完成**之前一直归你。网关停止或应用退出时它也会关闭。
 - 它只能显示网关自己的页面。里面的链接从不会被打开，也不会跳转到其他网站。
 
 <a id="language"></a>
@@ -115,6 +115,7 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 窗口收起、而又有东西在运行或在等你时，一个小小的胶囊会取代 Melo，用一行话说 Melo 正在做什么。
 
 - 它用平实的话说正在运行的内容（“Reading example.com”“Running the tests”）；**+1** 表示还有几个在运行。有审批在等你时，它会变成琥珀色，并写着“Waiting for your approval”。
+- 网页在你手里时，它写着“由你操作”和“melo 已暂停”，并有一个**完成**按钮把网页交还。它浮在其他窗口上面，真实的 Chrome 窗口也一样；窗口开着或选了 **Melo only** 时也显示，只有 **Nothing** 会隐藏它。
 - 它显示“Done: …”和“Stopped: …”各 8 秒，模型服务器连不上时显示“Model server not reachable”。然后 Melo 回来，“Done” 之后会开心地闭着眼睛一会儿。
 - 点击它会打开它所说的对话或任务（审批则是在等你的那个）。像拖 Melo 一样拖它：它占用 Melo 的位置并保存。指向它并点 **×**，就在下一个任务开始之前把它隐藏。
 - 菜单栏菜单和 Melo 的菜单里的 **On the desktop** 可选 **Melo and the activity pill**（默认）、**Melo only** 或 **Nothing**。**Hide Melo** 等于 **Nothing**，**Show Melo** 会恢复你原来的选择。

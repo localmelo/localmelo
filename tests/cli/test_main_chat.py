@@ -240,6 +240,16 @@ class FakeGateway:
             }
             echo_id = self.emit(row["session_id"], "attention.echo", data, None)
             return httpx.Response(200, json={"echo": {"id": echo_id, "ts": 2000.0, **data}})  # fmt: skip
+        if parts[:2] == ["api", "sessions"] and parts[3:] == ["browser", "done"]:
+            # Done: the page goes back, the run resumes and (here) finishes.
+            turn_id = next(t for t, (s, _) in self._running.items() if s == parts[2])
+            _, number = self._running.pop(turn_id)
+            self.emit(parts[2], "run.resumed", {"what": "browser", "how": "done",
+                      "held_s": 3.0}, number)  # fmt: skip
+            self.finish(parts[2], number, "completed", "Signed in.")
+            return httpx.Response(200, json={"ok": True})
+        if parts[:2] == ["api", "turns"] and parts[3:] == ["notes"]:
+            return httpx.Response(202, json={"note": {"text": body["text"]}})
         if parts[:2] == ["api", "turns"] and parts[3:] == ["cancel"]:
             found = self._running.pop(parts[2], None)
             if found is None:
@@ -465,6 +475,35 @@ async def test_esc_stops_the_gateways_turn(chat: tuple[Setup, FakeGateway]) -> N
     await setup.idle()
     assert ("POST", f"/api/turns/{MAIN}-t1/cancel", None) in gateway.requests
     assert "■ Stopped · /retry runs it again" in setup.out.text()
+
+
+async def test_while_the_person_has_a_page_an_empty_enter_is_done_and_words_are_a_note(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long sign in") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+    assert session.give_back() is None  # no page of the person's: nothing is sent
+    detail = {"tab": "t1", "place": "window", "site": "example.com"}
+    gateway.emit(MAIN, "run.paused", {"what": "browser", "detail": detail}, 1)
+    await _until(lambda: session.renderer.in_control is not None)
+    assert session.enter("use the work account") is None
+    await _until(lambda: any(r[1].endswith("/notes") for r in gateway.requests))
+    assert session.give_back() is None
+    await setup.idle()
+    posts = [
+        (path, body) for method, path, body in gateway.requests if method == "POST"
+    ]
+    assert [path for path, _ in posts[-2:]] == [
+        f"/api/turns/{MAIN}-t1/notes",
+        f"/api/sessions/{MAIN}/browser/done",
+    ]
+    assert posts[-2][1]["text"] == "use the work account"
+    text = setup.out.text()
+    assert "↳ Note for melo: use the work account" in text
+    assert "✓ You gave the page back to melo · 3s" in text
 
 
 async def test_a_turn_sent_in_another_window_draws_here(

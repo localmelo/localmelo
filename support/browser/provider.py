@@ -64,6 +64,7 @@ import functools
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Any, NoReturn, cast
 
 from localmelo.melo.contracts.approvals import (
@@ -73,6 +74,7 @@ from localmelo.melo.contracts.approvals import (
     ToolAsk,
 )
 from localmelo.melo.contracts.folders import home_label
+from localmelo.melo.contracts.pause import PAUSE, Resumed, RunPause
 from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
@@ -110,14 +112,15 @@ from localmelo.support.browser.driver import (
     StaleElementError,
     TabInfo,
     View,
+    WindowBusyError,
 )
 from localmelo.support.browser.live import DEFAULT_FPS, LiveView
 from localmelo.support.browser.local_apps import LocalAttempt
 from localmelo.support.browser.takeover import (
     CHECK_PRESSES,
-    STEP_WAIT_S,
     YOU,
     Owners,
+    Place,
     Returned,
     held_words,
     is_human_check,
@@ -387,10 +390,11 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
 
     The step's tab is found first (:meth:`BrowserToolProvider._step_target`); a
     tab that is not one of this chat's is refused before anything is done. A
-    step on a tab the person has (take over) waits for them first, at most
-    :data:`~localmelo.support.browser.takeover.STEP_WAIT_S` seconds, and says so
-    when they still have it. A tab they gave back is told on the next step, and
-    a step that would act on it on an old reading reads its page again instead.
+    step on a tab the person has (take over) waits until they give it back, as
+    long as they need, with no time limit counting; a window opening or closing
+    for them is waited for too. A tab they gave back is told on the next step,
+    and a step that would act on it on an old reading reads its page again
+    instead.
     """
 
     @functools.wraps(fn)
@@ -401,13 +405,13 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
             back: list[str] = []
             try:
                 self._ask = TOOL_ASK.get()
+                self._pause = PAUSE.get()
                 self._step_start = asyncio.get_running_loop().time()
                 # The tab is found once: the wait for the person checks it and
                 # the step runs on it, so the two can never differ.
                 tab, arguments = self._step_target(fn.__name__, arguments)
-                busy = await self._wait_for_person(tab)
-                if busy is not None:
-                    return busy
+                await self._wait_for_person(tab)
+                await self._switched()
                 self._set_busy(True)
                 await self._driver.start()
                 self._allow_local()
@@ -450,27 +454,26 @@ def _led(lines: list[str], result: str | ToolOutput) -> str | ToolOutput:
     return _led_text(lines, result)
 
 
-def _still_yours(tab: str) -> str:
-    """What a step says while the person has *tab*."""
-    return (
-        f"The user is using the page in tab {tab} (they took it over in the Browser "
-        "panel), so melo did not act on it. Your next browser step on that tab waits "
-        f"for them to give it back, up to {int(STEP_WAIT_S)} s at a time; or say in "
-        "your reply what you need them to do."
-    )
-
-
-def _back_line(back: Returned, grace_s: float) -> str:
+def _back_line(back: Returned) -> str:
     """What the next step says about a tab the person gave back (never what they did in it)."""
-    if back.how == "left":
+    had = held_words(back.seconds)
+    if back.how == "closed":
         return (
-            f"The user left the Browser panel while they had tab {back.tab}; melo "
-            f"took it back after {held_words(grace_s)} ({held_words(back.seconds)} in all)."
+            f"The user had tab {back.tab} for {had} and closed its Chrome window, "
+            "which gives it back to melo."
         )
-    return (
-        f"The user had tab {back.tab} for {held_words(back.seconds)} and gave it back "
-        "to melo."
-    )
+    if back.how == "gone":
+        return (
+            f"The user had tab {back.tab} for {had} when its page closed its own "
+            "window (a sign-in window often does once it is done); the tab is gone."
+        )
+    if back.how == "lost":
+        return f"The user had tab {back.tab} for {had} when melo's Chrome stopped."
+    if back.how == "stopped":
+        return f"The user had tab {back.tab} for {had} when melo was stopped."
+    if back.how == "ended":
+        return f"The user had tab {back.tab} for {had} when the turn ended."
+    return f"The user had tab {back.tab} for {had} and gave it back to melo."
 
 
 # What the model reads when the person's message ended a take-over card: it is no "not now",
@@ -563,8 +566,21 @@ class BrowserToolProvider(BaseToolProvider):
         self._live_fps = live_fps
         self._live: LiveView | None = None
         self._busy = False
-        # Who has each tab: melo, or the person who took it over in the Browser panel.
-        self._owners = Owners(on_change=self._owners_changed)
+        # Who has each tab: melo, or the person who took it over (the card, the panel).
+        # Taking a tab puts its page before the person and holds the run; giving it
+        # back sends melo's browser back to the background and lets the run go on.
+        self._owners = Owners(
+            on_change=self._owners_changed,
+            on_take=self._page_taken,
+            on_give=self._page_given,
+        )
+        # The run's hold (from the latest tool call), the window opening or closing
+        # for the person, the tab whose take-over card waits for an answer, and the
+        # tabs the person asked to have in a real window (see show_to_person).
+        self._pause: RunPause | None = None
+        self._switching: asyncio.Task[None] | None = None
+        self._carded: str | None = None
+        self._want_window: set[str] = set()
         # The pages the person was asked to take over (tab, origin, what), once each,
         # and the sites where they said not now: not asked again on a read.
         self._asked_you: set[tuple[str, str, str]] = set()
@@ -663,10 +679,155 @@ class BrowserToolProvider(BaseToolProvider):
                 self._arm_idle()
 
     def _can_take(self) -> bool:
-        """Whether the person can take a page over: the console watches this chat's browser and asks are possible."""
-        return (
-            self._live is not None and self._live.can_take() and self._ask is not None
+        """Whether the person can take a page over: someone can be asked, and a real window or an open Browser panel can show it."""
+        if self._ask is None:
+            return False
+        if self._windows():
+            return True
+        return self._live is not None and self._live.can_take()
+
+    # ── The person's take over ──
+
+    def hand_back(self) -> bool:
+        """Done: every page the person has comes back to melo; whether they had one."""
+        held = sorted(self._owners.held)
+        for tab in held:
+            self._owners.give(tab, "done")
+        return bool(held)
+
+    def show_to_person(self) -> bool:
+        """The person asks for the real window: their page moves to one, or comes to the front.
+
+        A page with a form they began loses it (the card said so). While a
+        take-over card waits, its "Take over" opens the window. False when the
+        person has no page and no card waits.
+        """
+        held = sorted(self._owners.held)
+        if not held and self._carded is not None:
+            self._want_window.add(self._carded)
+            return True
+        for tab in held:
+            self._switch(functools.partial(self._to_person, tab, True))
+        return bool(held)
+
+    def _page_taken(self, tab: str) -> None:
+        """The person took *tab* (the card, the panel): the page goes before them, then the run waits."""
+        if not self._windows():
+            self._owners.move(tab, "app")  # the panel is the only place: at once
+        self._switch(functools.partial(self._to_person, tab, False))
+
+    def _windows(self) -> bool:
+        """Whether the browser can put a page before the person in a real window."""
+        return callable(getattr(self._driver, "show_window", None))
+
+    def _page_given(self, back: Returned) -> None:
+        """*back* came back to melo: the browser goes back to the background, and the run goes on once no tab is the person's."""
+        self._switch(self._to_background)
+        if self._pause is None:
+            return
+        still = sorted(self._owners.held)
+        if still:
+            self._hold_for(still[0])  # the run stays held, for the page they still have
+        else:
+            self._pause.release(back.how, by=self)
+
+    def _switch(self, job: Callable[[], Awaitable[None]]) -> None:
+        """Run *job* (a page to the person, or back) once the switch before it ended; one at a time."""
+        before = self._switching
+
+        async def run() -> None:
+            if before is not None:
+                await asyncio.wait({before})
+            try:
+                await job()
+            except Exception as exc:  # a switch never fails the chat
+                logger.info("melo's browser could not switch for the person: %s", exc)
+
+        with contextlib.suppress(RuntimeError):  # no running loop: nothing to switch
+            self._switching = asyncio.get_running_loop().create_task(run())
+
+    async def _switched(self) -> None:
+        """Wait while a window opens or closes for the person."""
+        while (job := self._switching) is not None and not job.done():
+            await asyncio.wait({job})
+
+    async def _to_person(self, tab: str, chosen: bool) -> None:
+        """Put *tab*'s page before the person, then hold the run.
+
+        A real window when it can be (Safari's window is one already); the app's
+        Browser panel while a window would clear a form they began on any page,
+        unless they *chosen* the window, and when the window could not open for
+        any reason (another chat's window is open: ``busy``). The person is never
+        left with nothing.
+        """
+        where = self._owners.where(tab)
+        raw = self._raw.get(tab)
+        if where is None or raw is None:
+            return  # given back already, or the tab is gone
+        place: Place = "window" if chosen else where.place
+        form, failed, busy = where.form, False, False
+        try:
+            if place == "window" and form is None and not chosen:
+                form = await self._unsent()
+                place = "app" if form else "window"
+            if place == "window" and not self._windows():
+                place = "app"
+            elif place == "window":
+                closed = functools.partial(self._window_closed, tab)
+                if not await self._driver.show_window(raw, closed):  # type: ignore[attr-defined]
+                    place, failed = "app", True
+        except Exception as exc:  # any failure: the page is theirs in the app
+            logger.info("melo's browser could not open a window: %s", exc)
+            place, failed, busy = "app", True, isinstance(exc, WindowBusyError)
+        if self._owners.where(tab) is None:
+            return  # they gave it back while the window opened
+        self._owners.move(tab, place, form=form, failed=failed, busy=busy)
+        self._hold_for(tab)
+
+    def _hold_for(self, tab: str) -> None:
+        """Hold the run for *tab*, which the person has: the surfaces say where (``run.paused``)."""
+        pause, where = self._pause, self._owners.where(tab)
+        if pause is None or not pause.running or where is None:
+            return
+        detail: dict[str, Any] = {"tab": tab, "place": where.place}
+        if self._origins.get(tab):
+            detail["site"] = sites.host_of(self._origins[tab])
+        if where.form:
+            detail["form"] = True
+        if where.failed:
+            detail["failed"] = True
+        if where.busy:
+            detail["busy"] = True
+        pause.hold("browser", detail, self._run_ended, by=self)
+
+    async def _to_background(self) -> None:
+        """After the person: melo's browser without a window again, on the same pages."""
+        hide = getattr(self._driver, "hide_window", None)
+        if callable(hide) and not self._owners.held:
+            await hide()
+
+    def _window_closed(self, tab: str, how: str) -> None:
+        """The page's window went: the person closed it (Done), the page closed itself, or Chrome stopped."""
+        self._owners.give(
+            tab, "gone" if how == "gone" else "lost" if how == "lost" else "closed"
         )
+
+    def _run_ended(self, how: Resumed) -> None:
+        """The run ended while the person had its pages (a Stop, or its end): melo takes them all back."""
+        for tab in sorted(self._owners.held):
+            self._owners.give(tab, "stopped" if how == "stopped" else "ended")
+
+    async def _unsent(self) -> bool:
+        """Whether a window would clear a form the person began, on any page (only a browser that starts again for one says)."""
+        check = getattr(self._driver, "unsent_input", None)
+        return bool(await check()) if callable(check) else False
+
+    def _no_limit(self) -> AbstractAsyncContextManager[None]:
+        """No time limit counts inside: the run's and the call's are stopped while melo waits for the person."""
+        pause = self._pause
+        if pause is not None and pause.running:
+            return pause.suspended()
+        return contextlib.nullcontext()
 
     def live_current(self) -> str | None:
         """The short id of the tab melo works in, or None."""
@@ -738,9 +899,20 @@ class BrowserToolProvider(BaseToolProvider):
         ]
 
     async def close(self) -> None:
-        """Close the tabs melo opened (unless ``keep_tabs``), then the driver."""
+        """Close the tabs melo opened (unless ``keep_tabs``), then the driver.
+
+        A page the person has comes back to melo first, and the hold it set on
+        the run with it.
+        """
         self._cancel_idle()
+        for tab in sorted(self._owners.held):
+            self._owners.give(tab, "stopped")
         self._owners.clear()
+        # A window open for the person goes, and melo's browser with it.
+        with contextlib.suppress(Exception):
+            async with asyncio.timeout(15):
+                await self._switched()
+                await self._to_background()
         if self._live is not None:
             with contextlib.suppress(Exception):
                 await self._live.aclose()
@@ -766,6 +938,8 @@ class BrowserToolProvider(BaseToolProvider):
 
     def forget(self) -> None:
         """Take back what this chat was allowed: tabs stay open, but nothing is approved."""
+        for tab in sorted(self._owners.held):
+            self._owners.give(tab, "stopped")
         self._owners.clear()
         self._asked_you.clear()
         self._not_now.clear()
@@ -1199,13 +1373,19 @@ class BrowserToolProvider(BaseToolProvider):
             tab = self._current(None if given is None else str(given))
         return tab, {**arguments, "tab": tab}
 
-    async def _wait_for_person(self, tab: str | None) -> ToolOutput | None:
-        """Wait while the person has *tab*, the step's tab; what to say when they still have it, else None."""
+    async def _wait_for_person(self, tab: str | None) -> None:
+        """Wait while the person has *tab*, the step's tab: as long as they need, no time limit counting.
+
+        The run is held meanwhile, also for a page they took when no run could
+        be (between two turns): the surfaces say "You're in control".
+        """
         if tab is None or self._owners.owner(tab) != YOU:
-            return None
-        if await self._owners.wait_for_melo(tab, STEP_WAIT_S):
-            return None
-        return ToolOutput(text=_still_yours(tab))
+            return
+        pause = self._pause
+        if pause is not None and pause.running and not pause.held:
+            self._hold_for(tab)
+        async with self._no_limit():
+            await self._owners.wait_for_melo(tab)
 
     def _back_lines(self) -> tuple[list[str], set[str]]:
         """What the person did with the tabs they gave back since the last step, and those tabs.
@@ -1222,7 +1402,7 @@ class BrowserToolProvider(BaseToolProvider):
             self._snaps.pop(back.tab, None)
             self._views.pop(back.tab, None)
             self._points.pop(back.tab, None)
-            lines.append(_back_line(back, self._owners.grace_s))
+            lines.append(_back_line(back))
         return lines, tabs
 
     async def _read_again(self, tab: str) -> str:
@@ -1372,39 +1552,45 @@ class BrowserToolProvider(BaseToolProvider):
     async def _take_over(self, tab: str, origin: str, need: str) -> str | None:
         """Ask the person to take *tab* over for *need*; None when they do not, :class:`_CardEndedError` when their message ended the card.
 
-        On "Take over" the tab is theirs, and this step waits for them to give
-        it back within what is left of its time. The words say how long they had
-        it and the page as it is now, or that they still have it.
+        A form they began, on this page or another, is said on the card, which
+        then offers the app's Browser panel first (a window would clear it). The card
+        waits as long as the person needs, and so does this step once they took
+        the page: the run is on hold, with no time limit counting. The words say
+        how long they had it and how it came back, and the page as it is now.
         """
-        loop = asyncio.get_running_loop()
-        budget = STEP_WAIT_S - (loop.time() - self._step_start)
-        if budget <= 1:
-            return None
+        raw = self._raw.get(tab)
+        form = raw is not None and await self._unsent()
+        self._carded = tab
         try:
-            async with asyncio.timeout(budget):
-                taken = await sites.require_takeover(origin, need, tab)
-        except TimeoutError:
-            return None
+            async with self._no_limit():
+                taken = await sites.require_takeover(origin, need, tab, form=form)
+        finally:
+            self._carded = None
+        chosen = tab in self._want_window
+        self._want_window.discard(tab)
         if taken == "words":
             raise _CardEndedError(CARD_ENDED)
         if taken != "yes" or tab not in self._raw:
             return None
-        live = self._live
-        self._owners.take(tab, watched=live is not None and live.watchers(tab) > 0)
         self._set_busy(False)  # the step waits for the person: their input goes through
         try:
-            left = STEP_WAIT_S - (loop.time() - self._step_start)
-            gave = await self._owners.wait_for_melo(tab, max(left, 0.0))
+            if chosen:
+                self._owners.take(tab, "window", form=False)
+            else:
+                self._owners.take(tab, "app" if form else "window", form=form)
+            async with self._no_limit():
+                await self._owners.wait_for_melo(tab)
+                await self._switched()
+        except asyncio.CancelledError:
+            self._owners.give(tab, "stopped")  # the Stop: melo takes the page back
+            raise
         finally:
             self._set_busy(True)
-        what = sites.TAKEOVER_NEEDS.get(need, "a sign-in")
-        if not gave:
-            return (
-                f"melo asked the user for {what} here, and they took the page over "
-                f"in the Browser panel. {_still_yours(tab)}"
-            )
         back, _ = self._back_lines()
-        page = await self._read_tab(TabInfo(tab), set())
+        try:
+            page = await self._read_tab(TabInfo(tab), set())
+        except BrowserError:  # the page went with its window: only how it ended is left
+            return "\n".join(back)
         return "\n".join([*back, "The page as it is now:", page])
 
     async def _pressed(self, tab: str, check: str, doc: str) -> str:
@@ -1745,7 +1931,7 @@ class BrowserToolProvider(BaseToolProvider):
             seen = await watch.adopt_seen(window) if allowed else None
         except TimeoutError:
             return
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Asking about another app's window failed", exc_info=True)
             return
         if seen is not None:
@@ -1803,7 +1989,7 @@ class BrowserToolProvider(BaseToolProvider):
                 # tells waits for the next step, however late that comes.
                 found = await self._look(sampling=True)
                 self._held.extend(found)
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Sampling the screen failed", exc_info=True)
 
     async def _refind(
@@ -2094,7 +2280,7 @@ class BrowserToolProvider(BaseToolProvider):
         shown = apps.shown_scheme(url)
         try:
             app = await self._opener.name_for(url)
-        except Exception:  # noqa: BLE001 - which app it is, is a hint
+        except Exception:  # which app it is, is a hint
             app = ""
         app = " ".join(app.split())[:80]
         if not app:
@@ -2174,7 +2360,7 @@ class BrowserToolProvider(BaseToolProvider):
                 )
                 note = watch.notice()
                 pending = watch.take_pending()
-        except Exception:  # noqa: BLE001 - the screen is a hint, never a failure
+        except Exception:  # the screen is a hint, never a failure
             logger.debug("Looking at other apps' windows failed", exc_info=True)
             return []
         self._offer(pending)

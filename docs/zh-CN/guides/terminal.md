@@ -108,7 +108,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 | 按键 | 作用 |
 |---|---|
-| Enter | 发送消息。轮次运行期间将消息加入队列，在该轮完成时发送。 |
+| Enter | 发送消息。轮次运行期间将消息加入队列，在该轮完成时发送。网页在你手里时（见[接管](browsing.md#taking-over-melos-browser)），在空行上按 Enter 就是“完成”；在主对话里输入的一行会作为留言发给 melo。 |
 | Alt+Enter、Ctrl+J 或 `\` 后按 Enter | 在消息中换行。 |
 | Esc | 关闭补全菜单；否则停止当前轮次。 |
 | Ctrl+C | 依次尝试关闭菜单、清除草稿、清除排队消息、停止当前轮次；2 秒内再次按 Ctrl+C 则退出。 |

@@ -573,6 +573,17 @@ class CliSession:
             self.submit(text)
             return None
         if self._state == "running":
+            # While the person has a page, words go to the paused run as a note (main chat).
+            if (
+                self.renderer.in_control is not None
+                and self.remote is not None
+                and self.remote.note(text)
+            ):
+                symbols = self.renderer.symbols
+                self.out.print(
+                    self._text(f"{symbols.queued} Note for melo: {text}", "muted")
+                )
+                return None
             if self.queued is not None:
                 return "One message is already queued (↑ edits it)."
             self.queued = text
@@ -583,6 +594,22 @@ class CliSession:
         if self._state == "switching" and self._work is None:
             return SWITCH_ENDING_HINT  # past the point Esc can stop
         return _STATE_HINTS[self._state]
+
+    def give_back(self) -> str | None:
+        """Enter on an empty line: Done while the person has a page of the turn's run.
+
+        None when they have none (an empty Enter does nothing); a hint when the
+        page is melo's already.
+        """
+        if self._state != "running" or self.renderer.in_control is None:
+            return None
+        if self.remote is not None:
+            self.remote.give_back()
+            return None
+        provider = browsing._provider(self)
+        if provider is None or not provider.hand_back():
+            return "melo has the page already."
+        return None
 
     def _main_chat_command(
         self, command: commands.Command | None, name: str, arguments: str, text: str

@@ -36,6 +36,7 @@ from localmelo.melo.agent._request_accounting import (
 )
 from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, prompt_chars
 from localmelo.melo.checker.stream_filter import StreamFilter
+from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_EXTRA_BODY,
@@ -806,6 +807,9 @@ class Chat:
         error of the last attempt, and any other exception at once,
         propagates.
 
+        While the run is held (:data:`~localmelo.melo.contracts.pause.PAUSE`),
+        the request waits first, with no time limit counting.
+
         With ``max_calls`` set, the check comes before the first attempt and
         before each retry's delay: a request that would pass the limit is not
         sent (see :meth:`check_call_budget`; *closing* is for the request
@@ -824,6 +828,7 @@ class Chat:
         by default). *on_ready*, when given, receives the messages as they will
         be sent, before the first attempt.
         """
+        pause = PAUSE.get()
         self.check_call_budget(closing)
         if kind == "plan":
             schema = json.dumps(
@@ -903,9 +908,16 @@ class Chat:
             check = await self.prompt_check(messages, count_thinking=replay)
             if not check.allowed:
                 raise PromptCapError(check.reason)
-        if on_ready is not None:
-            on_ready(messages)
         while True:
+            # The run's gate, before every send: while the person has the run (a page
+            # they took over), nothing goes to the model, whichever part of the run
+            # asks, and a take during a failed send stops its retry too. A request
+            # that waits here has accepted nothing yet.
+            if pause is not None:
+                await pause.wait()
+            if on_ready is not None:
+                on_ready(messages)
+                on_ready = None
             record = None
             proxy = 0
             if accounting is not None:
