@@ -134,20 +134,20 @@ test('a chore that changed meanwhile reloads the list and says so', async () => 
   assert.equal(h.tab.state.busy, false);
 });
 
-test('a row opens to what it runs, its priority and the three actions', async () => {
+test('a row opens to what it runs and the three actions, and a developer also reads its priority', async () => {
   const h = harness({chores: [chore('a', {level: 1, level_word: 'Today'})]});
   await h.tab.show();
   await h.open();
   assert.ok(h.text().includes('Do a'));
-  assert.ok(h.text().includes('Priority: P1 · today'), 'the code and its meaning, not the API\'s level_word');
+  assert.ok(!h.text().includes('Priority'), 'default mode names no P-code');
   for (const label of ['Run now: Chore a', 'Edit time: Chore a', 'Delete: Chore a']) assert.ok(h.button(label), label);
   assert.equal(h.tab.root.findAll((node) => node.attributes['aria-expanded'] === 'true').length, 1);
-  await h.open();
-  assert.ok(!h.text().includes('Priority'), 'it closes again');
   const dev = harness({chores: [chore('a', {level: 3, level_word: 'Whenever'})], developer: true});
   await dev.tab.show();
   await dev.open();
-  assert.ok(dev.text().includes('Priority: P3 · when there is time'), 'developer mode reads the same');
+  assert.ok(dev.text().includes('Priority: P3 · when there is time'), 'the code and its meaning, not the API\'s level_word');
+  await dev.open();
+  assert.ok(!dev.text().includes('Priority'), 'it closes again');
 });
 
 test('Run now starts the chore and says where the result will be', async () => {

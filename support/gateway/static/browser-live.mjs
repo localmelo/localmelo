@@ -22,7 +22,8 @@ export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-strea
  * newest browser card (the chip's words, and the source the chip opens), and a page that is hidden for a while, or
  * kept by the browser for Back, lets go of its sockets (`suspend`) and asks again when it is back (`resume`).
  * `#/live/<id>` (`liveRoute`, `liveUrl`) is the panel alone, which **Pop out** opens large: in its own window in the
- * macOS app, in a window of the browser elsewhere. The pure helpers (`parseMeta`, `view`, `layout`, `toPage`,
+ * macOS app, in a window of the browser elsewhere. A running task's browser pops out too: its address names the
+ * source as the card does (`?gen=&run=&owner=`), so the window shows that run alone and never another. The pure helpers (`parseMeta`, `view`, `layout`, `toPage`,
  * `addressParts`, `control` and the input messages) are what the tests check.
  *
  * Take over: **Take over** (or the "melo needs you" card, `takeOver()`) hands the tab to the person (`meta.owner` is
@@ -55,11 +56,29 @@ const WHEEL_UNIT = [1, 40, 800];
 // The hidden text box keeps one space, so a "select all" from the app's menu shows as a selection of it.
 const SENTINEL = ' ';
 
-/** The chat id of a `#/live/<id>` address, or ''. */
-export const liveRoute = (hash) => /^#\/live\/([A-Za-z0-9._:-]+)$/.exec(hash ?? '')?.[1] ?? '';
+// What names a task's browser beside its id: the run and browser generation of its card, and the chat the card shows in.
+const SOURCE_PARTS = ['gen', 'run', 'owner'];
 
-/** The page that shows one chat's Browser panel alone (`#/live/<id>`) on this page's own origin: Pop out opens it. */
-export const liveUrl = (location, session) => `${location.origin}/#/live/${encodeURIComponent(session)}`;
+/**
+ * The source of a `#/live/<id>` address: `{session}` for a chat's browser, with `gen`, `run` and `owner` for a running
+ * task's (`?gen=&run=&owner=`, the parts a card's source has); null for any other address.
+ */
+export function liveRoute(hash) {
+  const found = /^#\/live\/([A-Za-z0-9._:-]+)(?:\?([A-Za-z0-9._:=&-]*))?$/.exec(hash ?? '');
+  if (!found) return null;
+  const query = new URLSearchParams(found[2] ?? '');
+  return {session: found[1], ...Object.fromEntries(SOURCE_PARTS.filter((part) => query.get(part)).map((part) => [part, query.get(part)]))};
+}
+
+/**
+ * The page that shows one source's Browser panel alone (`#/live/<id>`, with the task's `gen`, `run` and `owner`) on this
+ * page's own origin: Pop out opens it. *source* is `{session, gen?, run?, owner?}`.
+ */
+export function liveUrl(location, source) {
+  const {session, ...pin} = typeof source === 'string' ? {session: source} : source;
+  const query = new URLSearchParams(SOURCE_PARTS.filter((part) => pin[part]).map((part) => [part, pin[part]])).toString();
+  return `${location.origin}/#/live/${encodeURIComponent(session)}${query ? `?${query}` : ''}`;
+}
 
 /** A page address as two parts: the site (`host`, which the panel stresses) and what follows it. */
 export function addressParts(address) {
@@ -280,7 +299,7 @@ function on(target, type, fn, options) {
  * (`createStreams`: the card and the dock watch the same sources); without it the panel makes its own from
  * *openSocket* (a WebSocket, so a test can give it a fake), *decode* (a picture's bytes to a bitmap the canvas draws),
  * *schedule*, *cancel* and *denied()* (the gateway refused the stream for the token's sake). *popOut* is set only
- * inside the macOS app. *changed({shown})* tells the page the panel opened or closed (it makes room for it).
+ * inside the macOS app (called with the source to show: `{session}`, and for a task's browser `gen`, `run` and `owner` too). *changed({shown})* tells the page the panel opened or closed (it makes room for it).
  * *frame* runs a function before the next paint (pointer moves and wheel steps are sent at most once a frame).
  */
 export function setupBrowser({
@@ -353,8 +372,7 @@ export function setupBrowser({
     els.note.dataset.over = String(v.picture);
     els.canvas.hidden = !v.picture;
     els.canvas.setAttribute('aria-label', `${t('browser.picture')}: ${v.title}`);
-    // Pop out is the chat's address alone: a task's browser stays in the panel of the chat it works for.
-    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && v.state !== 'closed' && !S.pin?.owner);
+    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && v.state !== 'closed');
     if (els.hide) els.hide.hidden = S.liveOnly;
     if (chip) {
       chip.hidden = S.liveOnly || !(S.available && (S.known || S.shown));
@@ -712,13 +730,15 @@ export function setupBrowser({
     if (was) changed({shown: false});
   }
 
-  async function probe() {
+  /** Ask whether the chat can be watched; a pop-out window of a task's browser names its run (*pin*: the routes refuse a task's browser without it). */
+  async function probe(pin = null) {
     const id = S.session;
     const generation = S.generation;
     let state = null;
     S.asking = true;
+    const query = new URLSearchParams(SOURCE_PARTS.filter((part) => pin?.[part]).map((part) => [part, pin[part]])).toString();
     try {
-      state = await api(`/sessions/${encodeURIComponent(id)}/browser`);
+      state = await api(`/sessions/${encodeURIComponent(id)}/browser${query ? `?${query}` : ''}`);
     } catch {
       state = null;
     }
@@ -738,8 +758,11 @@ export function setupBrowser({
   }
 
   return {
-    /** Bind the panel to chat *id* (the same chat again keeps what it has). `liveOnly`: the pop-out window's panel. */
-    async follow(id, {liveOnly = false} = {}) {
+    /**
+     * Bind the panel to chat *id* (the same chat again keeps what it has). `liveOnly`: the pop-out window's panel, which
+     * may show a running task's browser: *pin* is then its `{gen, run, owner}`, and the window shows that run alone.
+     */
+    async follow(id, {liveOnly = false, pin = null} = {}) {
       if (!id) return;
       if (id === S.session && S.liveOnly === liveOnly) {
         if (S.shown && !S.unwatch) watch();
@@ -748,8 +771,9 @@ export function setupBrowser({
       reset();
       S.session = id;
       S.liveOnly = liveOnly;
+      S.pin = liveOnly && pin && Object.keys(pin).length ? pin : null;
       render();
-      await probe();
+      await probe(S.pin);
     },
 
     /** The chat is left (for chat *next*, or for none): the panel goes, unless *next* is the chat it already follows. */
@@ -822,9 +846,9 @@ export function setupBrowser({
       return true;
     },
 
-    /** The pop-out button: the app shows this chat's panel alone in a window. */
+    /** The pop-out button: the app (or a window of the browser) shows this panel's source alone, a task's by its exact run. */
     popOut() {
-      if (popOut && S.session && S.shown && !S.liveOnly) popOut(S.session);
+      if (popOut && S.session && S.shown && !S.liveOnly) popOut(S.pin?.owner ? sourceOf() : {session: S.session});
     },
 
     /**

@@ -445,7 +445,7 @@
   "browser.closed.browser": "melo 的浏览器已停止。",
   "browser.closed.chat": "这个对话已结束。",
   "browser.closed.tab": "这个标签页已关闭。",
-  "browser.closed.unavailable": "这个对话没有可用的实时画面。",
+  "browser.closed.unavailable": "现在没有可用的实时画面。",
   "browser.dialog.answer": "你的回答",
   "browser.dialog.cancel": "取消",
   "browser.dialog.leave": "离开前网页要你确认",

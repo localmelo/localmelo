@@ -2,28 +2,28 @@ import AppKit
 import WebKit
 
 /// The console's Browser panel in a window of its own, which floats beside other work. It shows the page the gateway
-/// serves for one chat (`browserLiveURL`) and nothing else: it signs in with the cookie the main window's web view
+/// serves for one source, a chat's browser or a running task's (`browserLiveURL`), and nothing else: it signs in with the cookie the main window's web view
 /// already holds (they share the default website data store), and it never goes to another site. Closing the window
 /// takes its web view down, so no stream stays open behind it.
 final class BrowserWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow?
     private var content: NSView?
     private var webView: WKWebView?
-    // What the web view shows now; the same chat again only brings the window forward.
-    private var shown: (session: String, port: Int)?
+    // What the web view shows now; the same source again only brings the window forward.
+    private var shown: (source: BrowserSource, port: Int)?
     // The gateway's port, which the navigation policy checks every address against.
     private var port = 0
 
-    /// Shows *session*'s browser and brings the window to the front. Another chat loads in place of the one shown.
-    func show(session: String, port: Int) {
-        guard let url = browserLiveURL(session: session, port: port) else { return }
+    /// Shows *source*'s browser and brings the window to the front. Another source loads in place of the one shown.
+    func show(source: BrowserSource, port: Int) {
+        guard let url = browserLiveURL(source, port: port) else { return }
         let window = self.window ?? makeWindow()
-        if webView == nil || shown?.session != session || shown?.port != port {
-            // A fresh web view for each chat: the page starts from its address, and the old chat's stream ends.
+        if webView == nil || shown?.source != source || shown?.port != port {
+            // A fresh web view for each source: the page starts from its address, and the old source's stream ends.
             tearDownWebView()
             self.port = port
             load(url)
-            shown = (session, port)
+            shown = (source, port)
         }
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)

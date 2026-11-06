@@ -104,7 +104,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `desktop_helper` 是桌面控制助手的状态，取最近一次对话或检查得到的结果：`state` 为 `missing`（未安装）、`installed`（还没检查）、`granted`（它能运行并有“辅助功能”权限；`pictures` 表示它是否也有“录屏”权限）、`no_grant`（“辅助功能”权限没有打开）或 `failed`（没有启动）；`app` 是要给予权限的应用，`problem` 说明问题所在。`GET /api/health?helper=check` 会启动助手一次来读取它的权限（不弹出提示，至少相隔 30 秒，并且只在浏览已开启且 `[browser] app_windows` 为 true 时）；其他情况下不会启动任何东西。
 - `status.focus` 是一眼看过去时显示的那一项（形式与 `status.items` 中的相同）：先取等待审批的一项，再取为用户暂停的一项，否则取最新事件最晚的一项；没有任何内容运行时为 `null`。
 - `status.waiting` 列出有工具审批请求在等待回答的对话和任务，先是对话，最多 20 项，每项为 `{"kind", "id"}`（`kind` 为 `chat` 或 `task`）。控制台用 `#/s/<id>` 和 `#/tasks/<id>` 打开它们，macOS 应用的菜单栏在每次轮询时读取这个列表。`sessions.pending_approvals` 只统计已打开对话的请求。
-- `status.control` 列出因用户拿着它们的某个网页而暂停的运行中对话（最新事件里有 `run.paused`，之后没有 `run.resumed`），每项为 `{"kind": "chat", "id"}`；它们的 `activity` 是 "You're in control"。macOS 应用的胶囊显示它并带一个“完成”按钮，按钮发送 `POST /api/sessions/{id}/browser/done`。
+- `status.control` 列出因用户拿着它们的某个网页而暂停的运行中对话和任务（最新事件里有 `run.paused`，之后没有 `run.resumed`），每项为 `{"kind", "id"}`，`kind` 是 `chat` 或 `task`；它们的 `activity` 是 "You're in control"。每项写明它的确切来源：任务还有 `owner`（它的卡片显示在哪个对话里）、`gen` 和 `run`（卡片的 `browser_session_id` 和 `run_id`），对话的浏览器有来源时也有 `gen` 和 `run`。macOS 应用的胶囊显示它并带一个“完成”按钮，按钮带着这些查询参数发送 `POST /api/sessions/{id}/browser/done`，所以“完成”只交还那一次运行，不会碰更新的一次。
 - `status.recent` 说明最近结束的对话轮次、任务、运行或终端对话轮次是怎么结束的：`{"kind", "id", "title", "outcome", "ended_s_ago"}`；还没有结束过任何一个（或读不到任何存储）时为 `null`。`kind` 与 `status.items` 中的相同；`title` 是它的名称（最多 200 个字符，读不到时为空）。`outcome` 为 `done`（运行已完成，或任务已完成）、`stopped`（用户停止了它，或任务被取消或已过期）或 `failed`（运行的其他任何结局，例如 `provider_error`、`budget_exhausted` 或 `stuck`，以及失败的任务）；用词与控制台一致，控制台显示为警告或错误的都是 `failed`。`ended_s_ago` 是它结束至今的秒数，精确到十分之一秒。因关机、崩溃恢复、接管、关闭或挂起而结束的轮次不算结果，已撤销的轮次也不计。它供展示上一次运行结果的客户端使用：macOS 应用中的桌面 Melo 和活动胶囊会读取它。一次调用通过索引读取每个文件中最近更新的几个会话里最新结束的轮次。
 
 ## GET /api/activity
@@ -800,7 +800,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"ok": true}
 ```
 
-- 用户没有拿着这个对话的网页（或对话没有打开）时 `ok` 为 false。未知会话为 404 `not_found`；工作运行的会话会拒绝它，和所有写入路由一样。
+- 用户没有拿着这个对话的网页（或对话没有打开）时 `ok` 为 false。对任务来说，`{id}` 是任务的 id，并带上 `gen`、`run` 和 `owner`（见上面的**同一个来源**），用户没有拿着那次运行的网页时 `ok` 为 false。未知会话为 404 `not_found`；工作运行的会话会拒绝它，和所有写入路由一样。
 
 ## POST /api/sessions/{id}/browser/window
 

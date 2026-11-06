@@ -457,7 +457,7 @@
   "browser.closed.browser": "melo's browser stopped.",
   "browser.closed.chat": "This chat ended.",
   "browser.closed.tab": "This tab was closed.",
-  "browser.closed.unavailable": "The live view is not available for this chat.",
+  "browser.closed.unavailable": "The live view is not available now.",
   "browser.dialog.answer": "Your answer",
   "browser.dialog.cancel": "Cancel",
   "browser.dialog.leave": "The page asks before you leave it",

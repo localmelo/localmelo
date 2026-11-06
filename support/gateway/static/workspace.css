@@ -2206,7 +2206,7 @@ dialog::backdrop {
 .panel[data-mood="waiting"] .panel-dot { background: var(--warn); }
 .panel[data-mood="error"] .panel-dot { background: var(--error); }
 .panel[data-mood="waiting"] .panel-status { color: var(--warn); }
-.panel-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; margin: 6px 16px 0; padding: 3px; border-radius: var(--radius-card); background: var(--raised); }
+.panel-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; margin: 6px 16px 0; padding: 3px; border-radius: var(--radius-card); background: var(--raised); }
 .panel-tab { display: grid; justify-items: center; padding: 6px 2px 5px; border: 0; border-radius: var(--radius-control); background: none; color: var(--ink-3); font-size: var(--text-caption); }
 .panel-tab-glyph { font-size: 15px; line-height: 1.2; }
 .panel-tab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--tab-shadow); }

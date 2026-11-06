@@ -303,9 +303,13 @@ def test_the_browser_bridge_takes_one_message_from_the_gateway_page_and_the_pop_
     run_policy(
         r"""
 // The Browser panel asks for its own window with exactly this message.
-precondition(browserRequest(["action": "popOut", "session": "abc"]) == .popOut("abc"))
-precondition(browserRequest(["action": "popOut", "session": "a.b:c-d_9"]) == .popOut("a.b:c-d_9"))
+func source(_ session: String) -> BrowserRequest? { BrowserSource(session: session).map { .popOut($0) } }
+precondition(browserRequest(["action": "popOut", "session": "abc"]) == source("abc"))
+precondition(browserRequest(["action": "popOut", "session": "a.b:c-d_9"]) == source("a.b:c-d_9"))
 precondition(browserRequest(["action": "popOut", "session": String(repeating: "a", count: 128)]) != nil)
+// A running task's browser names its exact source with the same fields the gateway's routes take: all three, or none.
+let task = BrowserSource(session: "t9", owner: "c1", gen: "a1b2c3d4", run: "run-1")!
+precondition(browserRequest(["action": "popOut", "session": "t9", "owner": "c1", "gen": "a1b2c3d4", "run": "run-1"]) == .popOut(task))
 let refused: [Any] = [
     ["action": "close", "session": "abc"], ["action": 1, "session": "abc"], ["session": "abc"], ["action": "popOut"],
     ["action": "popOut", "session": "abc", "force": true],
@@ -314,6 +318,12 @@ let refused: [Any] = [
     ["action": "popOut", "session": String(repeating: "a", count: 129)],
     ["action": "popOut", "session": 7], ["action": "popOut", "session": ["abc"]], ["action": "popOut", "session": NSNull()],
     [String: Any](), "popOut", ["popOut", "abc"], 7,
+    ["action": "popOut", "session": "t9", "owner": "c1"], ["action": "popOut", "session": "t9", "owner": "c1", "gen": "a1b2c3d4"],
+    ["action": "popOut", "session": "t9", "owner": "c/1", "gen": "a1b2c3d4", "run": "r"],
+    ["action": "popOut", "session": "t9", "owner": "c1", "gen": "A1B2C3D4", "run": "r"],
+    ["action": "popOut", "session": "t9", "owner": "c1", "gen": "a1b2c3d4", "run": "a b"],
+    ["action": "popOut", "session": "t9", "owner": 7, "gen": "a1b2c3d4", "run": "r"],
+    ["action": "popOut", "session": "t9", "owner": "c1", "gen": "a1b2c3d4", "run": "r", "url": "http://x"],
 ]
 precondition(refused.allSatisfy { browserRequest($0) == nil })
 // Only the gateway's own page is heard, as for the other bridges.
@@ -321,16 +331,20 @@ precondition(acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, is
 precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: false, gatewayPort: 9))
 precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, isMainFrame: true, gatewayPort: 9))
 
-// The window shows the chat's live page; an id the console would not open, or no port, gives none.
-precondition(browserLiveURL(session: "abc", port: 9)?.absoluteString == "http://127.0.0.1:9/#/live/abc")
-precondition(browserLiveURL(session: "a.b:c-d_9", port: 51234)?.absoluteString == "http://127.0.0.1:51234/#/live/a.b:c-d_9")
+// The window shows the source's live page; a source the console would not open, or no port, gives none.
+func live(_ session: String, _ port: Int = 9) -> URL? { BrowserSource(session: session).flatMap { browserLiveURL($0, port: port) } }
+precondition(live("abc")?.absoluteString == "http://127.0.0.1:9/#/live/abc")
+precondition(live("a.b:c-d_9", 51234)?.absoluteString == "http://127.0.0.1:51234/#/live/a.b:c-d_9")
 for session in ["", "a/b", "a#b", "a b", "a\u{0}b", "a%2Fb", String(repeating: "a", count: 129)] {
-    precondition(browserLiveURL(session: session, port: 9) == nil, session)
+    precondition(BrowserSource(session: session) == nil, session)
 }
-precondition(browserLiveURL(session: "abc", port: 0) == nil && browserLiveURL(session: "abc", port: -1) == nil)
-precondition(browserLiveURL(session: "abc", port: 65536) == nil)
+let abc = BrowserSource(session: "abc")!
+precondition(browserLiveURL(abc, port: 0) == nil && browserLiveURL(abc, port: -1) == nil)
+precondition(browserLiveURL(abc, port: 65536) == nil)
+// A task's window names the run it shows: the page reads `gen`, `run` and `owner` from the address.
+precondition(browserLiveURL(task, port: 9)?.absoluteString == "http://127.0.0.1:9/#/live/t9?gen=a1b2c3d4&run=run-1&owner=c1")
 // That address is a gateway page, so the pop-out's own navigation rule lets it in.
-precondition(isGatewayPage(browserLiveURL(session: "abc", port: 9)!, port: 9))
+precondition(isGatewayPage(live("abc")!, port: 9) && isGatewayPage(browserLiveURL(task, port: 9)!, port: 9))
 
 // The pop-out's main frame goes to the gateway's page alone, its subframes to the gateway; nothing else.
 func allows(_ text: String, main: Bool = true, port: Int = 9) -> Bool {

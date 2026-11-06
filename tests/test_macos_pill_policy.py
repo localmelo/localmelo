@@ -141,14 +141,31 @@ func snap(_ data: Data) -> PillSnapshot? { pillSnapshot(health: data, age: 0) }
 let held = snap(health(items: [tests, reading], focus: tests, waiting: ["t1"], control: ["c1"]))!
 precondition(held.model.state == .control && held.model.text == "You're in control" && held.model.note == "melo is paused")
 precondition(held.model.glyph == "\u{2016}" && held.model.portrait == .waitAlert && held.model.more == 0)
-precondition(held.model.giveBack == "c1" && held.model.click == .route("#/s/c1") && held.ids.contains("c1"))
+precondition(held.model.giveBack == BrowserSource(session: "c1") && held.model.click == .route("#/s/c1") && held.ids.contains("c1"))
 precondition(held.model.label == "You're in control. melo is paused. Opens the chat.")
 // It shows even when nothing counts as running. The gateway's own icon for it ("you") reads as the same bar.
 precondition(snap(health(control: ["c1"]))!.model.state == .control)
 precondition(PillIcon(name: "you") == .you && PillIcon.you.glyph == "\u{2016}" && PillPortrait.working(.you) == .workThink)
-// Only a chat the console would open counts: a task, or an id that is no route, is left out.
-let odd = #"{"status":{"control":[{"kind":"task","id":"t1"},{"kind":"chat","id":"a/b"},{"kind":"chat","id":"c2"}]}}"#
-precondition(controlledChats(Data(odd.utf8)) == ["c2"])
+// Only a source the console would open counts: an id that is no route, and a task that does not name its chat, run and
+// generation, are left out (Done could not reach that run).
+let odd = #"{"status":{"control":[{"kind":"task","id":"t1"},{"kind":"chat","id":"a/b"},{"kind":"chat","id":"c2"},{"kind":"run","id":"r1"}]}}"#
+precondition(controlSources(Data(odd.utf8)) == [BrowserSource(session: "c2")!])
+// A task's page is named exactly, and Done and the press follow it: the task's own session, its run and generation, and
+// the chat the card shows in (never that chat's newest run).
+let task = #"{"kind":"task","id":"t9","owner":"c1","gen":"a1b2c3d4","run":"run-1"}"#
+let withTask = String(data: health(items: [tests]), encoding: .utf8)!.replacingOccurrences(of: #""control":[]"#, with: #""control":[\#(task)]"#)
+let heldTask = snap(Data(withTask.utf8))!
+precondition(heldTask.model.state == .control && heldTask.model.click == .route("#/s/c1"))
+let exact = BrowserSource(session: "t9", owner: "c1", gen: "a1b2c3d4", run: "run-1")!
+precondition(heldTask.model.giveBack == exact && heldTask.ids.contains("t9"))
+precondition(exact.donePath == "/api/sessions/t9/browser/done?gen=a1b2c3d4&run=run-1&owner=c1")
+precondition(BrowserSource(session: "c1")!.donePath == "/api/sessions/c1/browser/done")
+precondition(BrowserSource(session: "c1", gen: "a1b2c3d4", run: "r2")!.donePath == "/api/sessions/c1/browser/done?gen=a1b2c3d4&run=r2")
+for bad in [#"{"kind":"task","id":"t9","owner":"c1","gen":"a1b2c3d4"}"#, #"{"kind":"task","id":"t9","owner":"c1","gen":"A1B2C3D4","run":"r"}"#,
+            #"{"kind":"task","id":"t9","owner":"c/1","gen":"a1b2c3d4","run":"r"}"#, #"{"kind":"task","id":"t9","owner":"c1","gen":"a1b2c3d4","run":"r r"}"#,
+            #"{"kind":"task","id":"t9","gen":"a1b2c3d4","run":"r"}"#, #"{"kind":"chat","id":"c1","gen":"a1b2c3d4"}"#] {
+    precondition(controlSources(Data(#"{"status":{"control":[\#(bad)]}}"#.utf8)).isEmpty, bad)
+}
 // The Done button's room: the gap, the button and its margin take the place of the chip or the tail.
 precondition(pillWidth(text: 120, more: 0, give: 56) == 74 + 120 + 12 + 56 + 10)
 precondition(pillWidth(text: 120, more: 0) == 74 + 120 + 18 && pillWidth(text: 900, more: 0, give: 56) == 74 + 320 + 78)

@@ -60,6 +60,8 @@ class FakeGateway:
         self.closed = False
         self.lose_stream = False
         self.refuse_mode = False
+        # The task runs Done named: session id and the query that says which run.
+        self.done_sources: list[tuple[str, dict[str, str]]] = []
         self._running: dict[str, tuple[str, int]] = {}  # turn id -> session, number
 
     # ── Events ──
@@ -241,6 +243,12 @@ class FakeGateway:
             echo_id = self.emit(row["session_id"], "attention.echo", data, None)
             return httpx.Response(200, json={"echo": {"id": echo_id, "ts": 2000.0, **data}})  # fmt: skip
         if parts[:2] == ["api", "sessions"] and parts[3:] == ["browser", "done"]:
+            owner = request.url.params.get("owner")
+            if owner:
+                # A task's page goes back to that run alone; its card says melo has it again.
+                self.done_sources.append((parts[2], dict(request.url.params)))
+                self.emit(owner, "attention.browser", {**TASK_CARD, "state": "working"}, None)  # fmt: skip
+                return httpx.Response(200, json={"ok": True})
             # Done: the page goes back, the run resumes and (here) finishes.
             turn_id = next(t for t, (s, _) in self._running.items() if s == parts[2])
             _, number = self._running.pop(turn_id)
@@ -270,6 +278,15 @@ class FakeGateway:
             if self.lose_stream:
                 return
             await asyncio.sleep(0.01)
+
+
+# A task's browser card as the gateway writes it into the chat the task works for.
+TASK_CARD: dict[str, Any] = {
+    "card_key": "t7:r1", "owner_chat_id": MAIN, "source_kind": "task",
+    "source_session_id": "t7", "source_turn": 1, "run_id": "r1",
+    "browser_session_id": "g1", "goal": "Book the table", "state": "working",
+    "action": "read", "site": "example.com",
+}  # fmt: skip
 
 
 def _error(status: int, code: str, message: str) -> httpx.Response:
@@ -504,6 +521,35 @@ async def test_while_the_person_has_a_page_an_empty_enter_is_done_and_words_are_
     text = setup.out.text()
     assert "↳ Note for melo: use the work account" in text
     assert "✓ You gave the page back to melo · 3s" in text
+
+
+async def test_a_tasks_browser_is_one_status_line_and_done_gives_back_that_run(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    remote = session.remote
+    assert remote is not None
+    # The chat is idle and holds no page: Enter on an empty line sends nothing.
+    assert session.give_back() is None
+    gateway.emit(MAIN, "attention.browser", TASK_CARD, None)
+    gateway.emit(MAIN, "attention.browser", {**TASK_CARD, "action": "type"}, None)
+    gateway.emit(MAIN, "attention.browser", {**TASK_CARD, "state": "you"}, None)
+    await _until(lambda: "gives it back" in setup.out.text())
+    text = setup.out.text()
+    # A step is no new line; a change of state is.
+    assert text.count("Working for this chat: Book the table") == 1
+    assert "melo console opens it" in text
+    assert "You're in control: Book the table" in text
+    assert session.state == "idle" and remote.holds_page()
+    # Done in the idle chat gives that task's run its page back, by the exact source.
+    assert session.give_back() is None
+    await _until(lambda: not remote.holds_page())
+    assert gateway.done_sources == [("t7", {"gen": "g1", "run": "r1", "owner": MAIN})]
+    gateway.emit(MAIN, "attention.browser", {**TASK_CARD, "state": "done"}, None)
+    await _until(lambda: "Done: Book the table" in setup.out.text())
+    assert session.give_back() is None
+    assert len(gateway.done_sources) == 1
 
 
 async def test_a_turn_sent_in_another_window_draws_here(
