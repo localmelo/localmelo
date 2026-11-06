@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config, MemoryConfig
 from localmelo.support.memory import ChatMemory, hippo_encode
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
@@ -303,6 +304,38 @@ async def test_a_chat_that_is_gone_is_not_read(
     assert await store.delete_session(sid)
     assert await memory.encode_window(store, sid, "Chat", waiting) is None
     assert stub.prompts == []
+
+
+class UndoingEncoder(StubEncoder):
+    """A chat model the person undoes the chat's last turn under, as it reads."""
+
+    def __init__(self, store: SessionStore, session_id: str) -> None:
+        super().__init__(reply)
+        self.store, self.session_id = store, session_id
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        assert await self.store.undo_last_turn(self.session_id) is not None
+        return await super().chat(messages, tools)
+
+
+async def test_an_undo_while_the_model_reads_the_window_keeps_it_out(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    sid = await padded_chat(store, 2)
+    stub = UndoingEncoder(store, sid)
+    memory.chat_provider = lambda: stub  # type: ignore[method-assign]
+    out = await memory.encode_window(
+        store, sid, "Chat", await memory.waiting_turns(store, sid)
+    )
+    # The model read turn 2, then the person took it back: the item it made from it
+    # is not stored, and no mark says the window was read.
+    assert len(stub.prompts) == 1
+    assert out is not None and out.forgotten and out.routed == []
+    _, index = memory.stores()
+    assert await index.count_items() == 0 and await index.encoded_turn(sid) is None
+    assert await numbers(memory, store, sid) == [1]
 
 
 async def test_a_guard_that_says_no_keeps_the_window_out(

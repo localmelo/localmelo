@@ -1,11 +1,13 @@
 """Memory items in the conversation index, and Hippo's routing of a new item.
 
 The ``items`` table is created with the others and holds what a chat model encoded
-from chats; deleting a chat takes its items with it and trims the sources of the
-rest, and ``forget_all`` clears them. A new item is routed by the pure policy
-against the active items of its kind: NEW, UPDATE (the target is marked replaced),
+from chats; deleting a chat, or one turn an item names, takes the item with it, and
+``forget_all`` clears them. A turn is hidden from recall only while a stored item
+cites it. A new item is routed by the pure policy against the active items of its
+kind: NEW, UPDATE (the target is marked replaced, unless it is the newer fact),
 RELATED (linked both ways), CONFLICT (both marked, both stay) or IGNORE (not
-stored). Synthetic items, no model.
+stored), and is stored in one transaction with its update or link. Synthetic items,
+no model.
 """
 
 from __future__ import annotations
@@ -128,10 +130,11 @@ async def test_the_table_is_made_on_open_beside_an_older_index(tmp_path: Path) -
     index = ConversationIndex(str(path))
     try:
         assert await index.count() == 1 and await index.count_items() == 0
-        assert await index.add_item(make("An item for an older index.")) == 1
-        # No mark is no migration: the chat counts as not encoded.
+        # No mark is no migration, and no item cites the turn: it is recalled.
         assert await index.encoded_turn("s1") is None
-        assert await index.ids(unencoded=True) == await index.ids()
+        assert await index.ids(uncited=True) == await index.ids()
+        assert await index.add_item(make("An item for an older index.")) == 1
+        assert await index.ids(uncited=True) == set()  # the item cites turn 1
         await index.mark_encoded("s1", 1)
         assert await index.encoded_turn("s1") == 1
     finally:
@@ -198,7 +201,13 @@ async def test_a_conflict_marks_both_and_replacing_one_ends_it(
 # ── Deleting ──
 
 
-async def test_deleting_a_chat_deletes_its_items_and_trims_the_sources_of_others(
+async def uncited(index: ConversationIndex) -> set[tuple[str, int]]:
+    """The ``(chat, turn)`` of every turn no item cites: what recall reads as a turn."""
+    docs = await index.fetch(await index.ids(uncited=True))
+    return {(doc.session_id, doc.turn) for doc in docs}
+
+
+async def test_deleting_a_chat_deletes_every_item_that_names_it(
     index: ConversationIndex,
 ) -> None:
     for session in ("s1", "s2"):
@@ -217,18 +226,14 @@ async def test_deleting_a_chat_deletes_its_items_and_trims_the_sources_of_others
     )
     other = await index.add_item(make("Only in the second.", session="s2", turns=(2,)))
     assert await index.delete("s1") == 3
-    assert [i.id for i in await index.fetch_items([own, shared, other])] == [
-        shared,
-        other,
-    ]
-    (kept,) = await index.fetch_items([shared])
-    assert kept.sources == (("s2", 1),)
-    (untouched,) = await index.fetch_items([other])
-    assert untouched.sources == (("s2", 2),)
+    # The shared item rested on a turn that is gone: it goes whole.
+    assert [i.id for i in await index.fetch_items([own, shared, other])] == [other]
     assert await index.count() == 3
+    # Its other turn has no item now: it is recalled as a turn again.
+    assert await uncited(index) == {("s2", 1), ("s2", 3)}
 
 
-async def test_deleting_one_turn_trims_the_items_that_name_it(
+async def test_deleting_one_turn_deletes_the_items_that_name_it_and_frees_their_other_turns(
     index: ConversationIndex,
 ) -> None:
     for turn in (1, 2, 3):
@@ -236,14 +241,14 @@ async def test_deleting_one_turn_trims_the_items_that_name_it(
     both = await index.add_item(make("Said in two turns.", turns=(1, 2)))
     one = await index.add_item(make("Said in one turn.", turns=(2,)))
     elsewhere = await index.add_item(make("Said in the third.", turns=(3,)))
+    assert await uncited(index) == set()
     assert await index.delete("s1", 2) == 1
+    # A text that rested on two turns cannot be shown to rest on the one that is
+    # left: both items go, and turn 1 comes back to recall.
     assert [i.id for i in await index.fetch_items([both, one, elsewhere])] == [
-        both,
-        elsewhere,
+        elsewhere
     ]
-    (trimmed,) = await index.fetch_items([both])
-    assert trimmed.sources == (("s1", 1),)
-    assert [i.id for i in await index.fetch_items([elsewhere])] == [elsewhere]
+    assert await uncited(index) == {("s1", 1)}
 
 
 async def test_deleting_an_item_makes_what_it_replaced_current_and_ends_a_conflict(
@@ -290,26 +295,34 @@ async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
     assert await index.add_item(make("A new item after forgetting.")) >= 1
 
 
-async def test_a_mark_moves_forward_and_leaves_the_turns_past_it_unencoded(
+async def test_a_turn_is_hidden_from_recall_only_while_an_item_cites_it(
     index: ConversationIndex,
 ) -> None:
-    # A summary sits at a turn below 1: no encoder reads it, so no mark covers it.
+    # A summary sits at a turn below 1: no item cites it, so it is always recalled.
     for session, turns in (("s1", (1, 2, 3, -1)), ("s2", (1, 2))):
         for turn in turns:
             await add_turn(index, session, turn)
+    every = await uncited(index)
+    assert len(every) == 6  # no item: every turn is recalled
+    await index.add_item(make("One turn.", turns=(1,)))
+    assert await uncited(index) == every - {("s1", 1)}
+    # A replaced item still stands for its turns: its old fact does not come back
+    # as a turn.
+    old = await index.add_item(make("Old fact.", turns=(2,)))
+    new = await index.add_item(make("New fact.", turns=(3,)))
+    await index.mark_replaced(old, new)
+    assert await uncited(index) == {("s1", -1), ("s2", 1), ("s2", 2)}
+    # A mark says a turn was read, not that an item stands for it.
+    await index.mark_encoded("s2", 2)
+    assert await uncited(index) == {("s1", -1), ("s2", 1), ("s2", 2)}
 
-    async def unencoded() -> set[tuple[str, int]]:
-        docs = await index.fetch(await index.ids(unencoded=True))
-        return {(doc.session_id, doc.turn) for doc in docs}
 
-    assert await index.encoded_turn("s1") is None
-    assert len(await unencoded()) == 6  # no mark: nothing is encoded
+async def test_a_mark_only_moves_forward(index: ConversationIndex) -> None:
     await index.mark_encoded("s1", 2)
-    assert await unencoded() == {("s1", 3), ("s1", -1), ("s2", 1), ("s2", 2)}
-    await index.mark_encoded("s1", 1)  # a mark never moves back
+    await index.mark_encoded("s1", 1)
     assert await index.encoded_turn("s1") == 2
     await index.mark_encoded("s1", 3)
-    assert await unencoded() == {("s1", -1), ("s2", 1), ("s2", 2)}
+    assert await index.encoded_turn("s1") == 3
 
 
 async def test_forgetting_clears_the_marks_but_one_turn_and_a_rebuild_do_not(
@@ -413,6 +426,50 @@ async def test_an_update_stores_the_new_item_and_marks_the_old_one_replaced(
         router, "The user said they now live in Lisbon.", kind="profile"
     )
     assert (third.action, third.target) == ("UPDATE", 2)
+
+
+@pytest.mark.parametrize("newer_first", [False, True], ids=["in order", "reversed"])
+async def test_the_newer_fact_stays_current_whatever_order_they_are_routed_in(
+    index: ConversationIndex, newer_first: bool
+) -> None:
+    router = Router(index)
+    facts = [(PITTSBURGH, 1.0), (UTRECHT, 2.0)]
+    for text, at in reversed(facts) if newer_first else facts:
+        await route(router, text, kind="profile", at=at)
+    # An older statement that arrives late is kept, but already replaced.
+    by_text = {i.text: i for i in await index.fetch_items([1, 2])}
+    older, newer = by_text[PITTSBURGH], by_text[UTRECHT]
+    assert (older.status, older.replaced_by) == ("replaced", newer.id)
+    assert (newer.status, newer.replaced_by) == ("active", None)
+    assert [i.id for i in await index.active_items("profile")] == [newer.id]
+    # The router keeps comparing with the newer one only.
+    third = await route(
+        router, "The user said they now live in Lisbon.", kind="profile"
+    )
+    assert (third.action, third.target) == ("UPDATE", newer.id)
+
+
+async def test_an_update_and_its_item_are_stored_together_or_not_at_all(
+    index: ConversationIndex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=1.0)
+
+    async def fail(*_: object) -> None:
+        raise RuntimeError("the gateway stopped between the two writes")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ConversationIndex, "_replace", fail)
+        with pytest.raises(RuntimeError):
+            await route(router, UTRECHT, kind="profile", at=2.0)
+    # Neither the new item nor the replacement was kept.
+    assert await index.count_items() == 1
+    (old,) = await index.fetch_items([1])
+    assert (old.status, old.replaced_by) == ("active", None)
+    # A retry is not mistaken for a duplicate: it completes the update.
+    again = await route(router, UTRECHT, kind="profile", at=2.0)
+    assert (again.action, again.item, again.target) == ("UPDATE", 2, 1)
+    assert [i.status for i in await index.fetch_items([1, 2])] == ["replaced", "active"]
 
 
 async def test_a_related_item_is_stored_and_linked_both_ways(

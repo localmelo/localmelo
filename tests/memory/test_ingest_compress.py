@@ -171,10 +171,10 @@ async def test_the_turns_are_written_as_ever_and_the_items_follow(
         assert (book.status, utrecht.status) == ("active", "active")
         assert first.session_id == may and utrecht.session_id == june
         assert first.encoder == "3:stub-encoder" and first.embed_model == ""
-        # Each chat is marked encoded up to its last turn, so recall reads none of
-        # them as a turn any more.
+        # Each chat is marked encoded up to its last turn, and every turn is cited by
+        # an item, so recall reads none of them as a turn any more.
         assert (await index.encoded_turn(may), await index.encoded_turn(june)) == (2, 1)
-        assert await index.ids(unencoded=True) == set()
+        assert await index.ids(uncited=True) == set()
         # The item's time is that of the last turn it came from.
         stored = await chats.get_session(may)
         assert stored is not None and stored.title == "Moving"
@@ -460,6 +460,74 @@ async def test_the_router_refuses_what_the_gate_before_it_let_through(
         await close(chats, memory)
 
 
+async def recalled_as_turns(index: Any) -> set[tuple[str, int]]:
+    """The ``(chat, turn)`` of the turns no item cites: recall reads them as turns."""
+    docs = await index.fetch(await index.ids(uncited=True))
+    return {(doc.session_id, doc.turn) for doc in docs}
+
+
+async def test_a_turn_the_encoder_left_out_stays_recalled_after_its_window(
+    tmp_path: Path,
+) -> None:
+    stub = StubEncoder(says([item("Home city", PITTSBURGH, "profile", [0])]))
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, stub)
+    try:
+        index = memory.stores()[1]
+        may = report.ids["may"]
+        # Both exchanges were read, and only the first has an item.
+        assert await index.encoded_turn(may) == 2 and await index.count_items() == 1
+        assert await recalled_as_turns(index) == {(may, 2)}
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_turn_whose_only_item_was_refused_stays_recalled(
+    tmp_path: Path,
+) -> None:
+    card = "The user said their card number is 4111 1111 1111 1111."
+    stub = StubEncoder(
+        says(
+            [
+                item("Home city", PITTSBURGH, "profile", [0]),
+                item("Card", card, "profile", [1]),
+            ]
+        )
+    )
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY]}, stub)
+    try:
+        index = memory.stores()[1]
+        may = report.ids["may"]
+        assert report.refused == 1 and await index.count_items() == 1
+        assert await index.encoded_turn(may) == 2
+        assert await recalled_as_turns(index) == {(may, 2)}
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_duplicates_turns_stay_recalled_and_deleting_the_first_chat_loses_nothing(
+    tmp_path: Path,
+) -> None:
+    again = {**MAY, "id": "again", "title": "Again", "date": "2023-05-27T10:00:00"}
+    stub = StubEncoder(reply)
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY, again]}, stub)
+    try:
+        index = memory.stores()[1]
+        first, second = report.ids["may"], report.ids["again"]
+        # The second chat says what the first did: its items are ignored, so no item
+        # cites its turns, which stay recalled as turns beside the first chat's items.
+        assert await index.count_items() == 2
+        assert await index.encoded_turn(second) == 2
+        assert await recalled_as_turns(index) == {(second, 1), (second, 2)}
+        await memory.forget_session(first)
+        # The items rested on the first chat alone: they go, and the second chat's
+        # turns, still recalled, are all that is left, with no mark to re-encode them.
+        assert await index.count_items() == 0
+        assert await recalled_as_turns(index) == {(second, 1), (second, 2)}
+        assert await index.encoded_turn(second) == 2
+    finally:
+        await close(chats, memory)
+
+
 @pytest.mark.parametrize(
     ("bad", "mark"), [(None, 4), (2, 2), (0, None)], ids=["none", "third", "first"]
 )
@@ -467,8 +535,9 @@ async def test_the_mark_does_not_pass_a_window_that_failed(
     tmp_path: Path, bad: int | None, mark: int | None
 ) -> None:
     # One exchange to a window: four long exchanges, the window of exchange *bad*
-    # fails. The turns before it are marked encoded and the ones from it on stay
-    # recalled as turns; the items of the windows that went through are kept.
+    # fails. The mark stops before it, so its turn is read again; the items of the
+    # windows that went through are kept, and the only turn recall still reads is
+    # the one no item cites, the failed window's.
     data = {
         "id": "long",
         "date": "2023-05-20T13:40:00",
@@ -494,13 +563,12 @@ async def test_the_mark_does_not_pass_a_window_that_failed(
         assert await index.encoded_turn(report.ids["long"]) == mark
         windows = report.to_json()["compress"]["long"]["windows"]
         assert [w["failed"] for w in windows] == [bad == n for n in range(4)]
-        unencoded, every = await index.ids(unencoded=True), await index.ids()
-        if mark == 4:
-            assert unencoded == set()
-        elif mark is None:
-            assert unencoded == every
-        else:
-            assert unencoded and unencoded < every
+        failed = {
+            doc.id
+            for doc in await index.fetch(await index.ids())
+            if bad is not None and doc.turn == bad + 1
+        }
+        assert await index.ids(uncited=True) == failed
     finally:
         await close(chats, memory)
 

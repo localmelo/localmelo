@@ -25,6 +25,7 @@ from localmelo.support.config import (
     MemoryConfig,
 )
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.index import MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     GATHER_COSINE,
@@ -617,8 +618,19 @@ async def test_guide_follows_the_item_guide_of_the_items_arm(
     )
     try:
         _, index = memory.stores()
-        for doc in await index.fetch(await index.ids()):  # the five turns are encoded
-            await index.mark_encoded(doc.session_id, doc.turn)
+        # One item that cites the five turns, so none of them is recalled as a turn
+        # (it has no vector and no words of the question, so it is not listed).
+        docs = await index.fetch(await index.ids())
+        await index.add_item(
+            MemoryItem(
+                session_id=docs[0].session_id,
+                title="Notes",
+                text="Five chats were kept.",
+                kind="semantic",
+                created_at=1.0,
+                sources=tuple((doc.session_id, doc.turn) for doc in docs),
+            )
+        )
         session_id = (await _turn(store, "Clinics")).session_id
         number = await put(
             memory, session_id, "Hearing aid fitting", "Fitted last week.", cosine=0.45
