@@ -621,6 +621,8 @@ class TestFields:
                 "image_allowance",
                 "pruned",
             },
+            "run.paused": {"what", "detail"},
+            "run.resumed": {"what", "how", "held_s"},
             "run.finished": {"result", "reviews"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
 
@@ -745,7 +747,13 @@ class TestFields:
         # The memory event is emitted only by a store-backed admission;
         # test_memory_admission.py emits and pins it.
         # Budget events need an opted-in run; test_request_accounting pins one.
-        assert seen == set(EVENT_FIELDS) - {"memory", "context_budget"}
+        # A hold needs a tool that hands the run to the person; test_pause pins it.
+        assert seen == set(EVENT_FIELDS) - {
+            "memory",
+            "context_budget",
+            "run.paused",
+            "run.resumed",
+        }
         for event in events:
             # These runs have no approval policy: no reviews key (#339), and no
             # tool asked a question: no tool_asks key (#431).

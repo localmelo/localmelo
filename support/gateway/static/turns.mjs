@@ -13,7 +13,7 @@
  */
 
 import { blockWords } from "./blocked.mjs";
-import { t } from "./i18n.mjs";
+import { formatTime, t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
 import { stepWords } from "./step-words.mjs";
 
@@ -689,6 +689,8 @@ export function newTurn(row) {
     memoryOpen: false,
     // Whether the other chats' digest under the message is open (`turn.memory`'s digest).
     digestOpen: false,
+    // The person has the run (`run.paused`: a page they took over), until `run.resumed`: where, or null.
+    control: null,
     error: "",
   };
 }
@@ -1092,6 +1094,26 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       });
       break;
     }
+    case "run.paused": {
+      // The person took a page over: the run waits for them, with no timer. The latest says where they have it.
+      const detail = objectOf(data.detail);
+      turn.control = {
+        place: detail.place === "window" ? "window" : "app",
+        form: detail.form === true,
+        failed: detail.failed === true,
+        site: String(detail.site ?? ""),
+      };
+      break;
+    }
+    case "run.resumed": {
+      // How the page came back is one line of the record: Done, the window closed, or a stop.
+      turn.control = null;
+      if (["done", "closed", "stopped"].includes(data.how)) {
+        const time = formatTime(new Date((ts || Date.now() / 1000) * 1000));
+        turn.items.push({kind: "fact", factKind: type, step: turn.step, how: data.how, message: t(`turns.resumed.${data.how}`, {time})});
+      }
+      break;
+    }
     case "run.progress": {
       turn.progress = data;
       const step = int(data.step);
@@ -1115,6 +1137,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       turn.status = String(data.status ?? "");
       turn.cause = String(data.cause ?? "run");
       turn.runningHere = false;
+      turn.control = null;
       turn.finishedAt = ts || turn.finishedAt;
       if (!turn.result && data.error) turn.error = String(data.error);
       for (const item of turn.items) {
@@ -1373,7 +1396,7 @@ export function workSummary(turn, {held = "", plain = false} = {}) {
   const calls = plain ? 0 : toolCount(turn);
   const callWord = t("turns.summary.calls", {n: calls});
   if (!turn.finishedAt) {
-    const activity = held ? holdText(held) : t("turns.summary.working");
+    const activity = held ? holdText(held) : turn.control ? t("browser.inControl") : t("turns.summary.working");
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
   if (turn.status === "completed" && toolCount(turn) === 0) {
@@ -1404,6 +1427,7 @@ export function workSummary(turn, {held = "", plain = false} = {}) {
  */
 export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0, plain = false} = {}) {
   if (held) return holdText(held);
+  if (turn.control) return t("browser.inControl");
   if (pending > 0) return t("turns.activity.approval");
   if (cancelling) return t("turns.activity.stopping");
   if (turn.retryUntil > now) {

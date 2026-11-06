@@ -87,6 +87,23 @@ async def test_enter_sends_and_blank_drafts_are_not_sent() -> None:
         assert app.ui.buffer.text == ""
 
 
+async def test_an_empty_enter_asks_the_session_to_give_the_page_back() -> None:
+    """While the person has a page, an empty Enter is Done; the session says when there is none."""
+
+    class Controller(FakeController):
+        gave = 0
+
+        def give_back(self) -> str | None:
+            self.gave += 1
+            return "melo has the page already."
+
+    controller = Controller()
+    async with running_app(controller) as app:
+        app.type(ENTER)
+        await app.wait(lambda: "melo has the page already." in app.text())
+        assert controller.gave == 1 and controller.entered == []
+
+
 @pytest.mark.parametrize("newline", [ESC + ENTER, CTRL_J, "\\" + ENTER])
 async def test_new_line_keys_add_a_line(newline: str) -> None:
     controller = FakeController()

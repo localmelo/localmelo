@@ -22,12 +22,16 @@ import {t} from './i18n.mjs';
  * (`parseMeta`, `view`, `layout`, `toPage`, `addressParts`, `control` and the input messages) are what the tests check.
  *
  * Take over: **Take over** (or the "melo needs you" card, `takeOver()`) hands the tab to the person (`meta.owner` is
- * then `you`). Their clicks, drags and wheel on the picture, and their keys, input-method text and pastes in a hidden
- * text box over it, go to the gateway as small JSON messages (`mouseMessage`, `wheelMessage`, `keyMessage`,
- * `composeMessage`, `commitMessage`, `pasteMessage`) and from there to melo's browser as its own input. A point on the
- * picture becomes a point on the page by the frame's own metadata (`toPage`: its size, the space above it and its
- * zoom). The page's boxes are answered in the panel. **Give back to melo** returns the tab. Nothing typed is kept here
- * either: the text box is emptied after every key.
+ * then `you`) and melo is paused, with no timer. Where they have it is `meta.place`: `window`, a real Chrome window
+ * in front of them, of which this panel is a live copy (**Show Chrome window** brings it back to the front); or
+ * `app`, this panel, when the page has a form they began (`form`: **Open in Chrome, clear the form** moves it to a
+ * window) or the window could not open (`failed`). In the panel their clicks, drags and wheel on the picture, and
+ * their keys, input-method text and pastes in a hidden text box over it, go to the gateway as small JSON messages
+ * (`mouseMessage`, `wheelMessage`, `keyMessage`, `composeMessage`, `commitMessage`, `pasteMessage`) and from there to
+ * melo's browser as its own input. A point on the picture becomes a point on the page by the frame's own metadata
+ * (`toPage`: its size, the space above it and its zoom). The page's boxes are answered in the panel. **Done** gives the
+ * page back (closing the Chrome window does too). Nothing typed is kept here either: the text box is emptied after
+ * every key.
  */
 
 export const RETRY_S = [1, 2, 4, 8, 16, 30];
@@ -119,7 +123,10 @@ export function parseMeta(text) {
     meta.scale = scale > 0 ? scale : 1;
   }
   meta.takeover = raw.takeover === true;
-  meta.grace = meta.owner === 'you' ? Math.max(0, Math.round(finite(raw.grace) ?? 0)) : 0;
+  const yours = meta.owner === 'you';
+  meta.place = yours ? (raw.place === 'window' ? 'window' : 'app') : '';
+  meta.form = yours && raw.form === true;
+  meta.failed = yours && raw.failed === true;
   const box = raw.dialog;
   meta.dialog = meta.owner === 'you' && box && typeof box === 'object' && DIALOGS.has(box.kind)
     ? {kind: box.kind, message: words(box.message).slice(0, 300), default: words(box.default).slice(0, 300)}
@@ -253,21 +260,29 @@ export function pasteMessage(text) {
 /**
  * Who has the page, in what the panel shows: `you` once the person took it over (with the words of the control bar
  * and the page's box, if it shows one), `canTake` when they may take it, `finishing` while melo ends a step it was in
- * when they took it (their input waits). A *touch* screen has no Control-Esc, so its note leaves that out.
+ * when they took it (their input waits). `place` is where they have it; `input` whether their input goes through
+ * this panel (not while the page is in a Chrome window); `window` the words of the button that shows the window, or ''
+ * for none. A *touch* screen has no Control-Esc, so its note leaves that out.
  */
 export function control(meta, {focused = false, link = 'open', touch = false} = {}) {
   const live = Boolean(meta) && ['live', 'loading', 'stale'].includes(meta.state) && link === 'open';
   const you = live && meta.owner === 'you';
   const finishing = you && meta.browsing === true;
+  const place = you ? meta.place || 'app' : '';
   let hint = '';
-  if (you) {
-    hint = finishing ? t('browser.finishing') : focused ? t(touch ? 'browser.inControlNoteTouch' : 'browser.inControlNote') : t('browser.clickToType');
-    if (meta.grace > 0) hint += ` ${t('browser.grace', {minutes: Math.max(1, Math.round(meta.grace / 60))})}`;
+  if (place === 'window') hint = `${t('browser.paused')} ${t('browser.liveCopy')}`;
+  else if (you) {
+    const why = meta.failed ? t('browser.failed') : meta.form ? t('browser.formHere') : '';
+    const keys = finishing ? t('browser.finishing') : focused ? t(touch ? 'browser.inControlNoteTouch' : 'browser.inControlNote') : t('browser.clickToType');
+    hint = [t('browser.pausedHere'), why, keys].filter(Boolean).join(' ');
   }
   return {
     you,
     canTake: live && !you && meta.takeover === true,
     finishing,
+    place,
+    input: place === 'app' && !finishing,
+    window: place === 'window' ? t('browser.showWindow') : place === 'app' && meta.form ? t('browser.openWindow') : '',
     status: you ? t('browser.inControl') : '',
     hint,
     dialog: you ? meta.dialog ?? null : null,
@@ -388,7 +403,8 @@ export function setupBrowser({
     root.dataset.state = v.state;
     root.dataset.browsing = String(browsing && !c.you);
     root.dataset.owner = c.you ? 'you' : 'melo';
-    root.dataset.keys = String(c.you && S.focused);
+    root.dataset.place = c.place;
+    root.dataset.keys = String(c.input && S.focused);
     setText(els.title, v.title);
     setText(els.host, v.host);
     setText(els.rest, v.rest);
@@ -416,18 +432,22 @@ export function setupBrowser({
   function renderControl(c) {
     if (els.take) els.take.hidden = !c.canTake;
     if (els.give) els.give.hidden = !c.you;
+    if (els.window) {
+      els.window.hidden = !c.window;
+      setText(els.window, c.window);
+    }
     if (els.viewOnly) els.viewOnly.hidden = c.canTake || c.you;
     if (els.hint) {
       setText(els.hint, S.tooLong && c.you ? t('browser.pasteTooLong', {n: MAX_PASTE}) : c.hint);
       els.hint.hidden = !c.you;
     }
     if (els.keys) {
-      els.keys.disabled = !c.you;
-      els.keys.tabIndex = c.you ? 0 : -1;
+      els.keys.disabled = !c.input;
+      els.keys.tabIndex = c.input ? 0 : -1;
     }
-    if (els.canvas) els.canvas.dataset.input = String(c.you && !c.finishing);
-    if (!c.you && S.focused && els.keys?.blur) els.keys.blur();
-    if (c.you && S.wantFocus && !c.finishing) {
+    if (els.canvas) els.canvas.dataset.input = String(c.input);
+    if (!c.input && S.focused && els.keys?.blur) els.keys.blur();
+    if (c.input && S.wantFocus) {
       S.wantFocus = false;
       focusKeys(null);
     }
@@ -603,10 +623,7 @@ export function setupBrowser({
     }
   }
 
-  const inControl = () => {
-    const c = control(S.meta, {link: S.link});
-    return c.you && !c.finishing;
-  };
+  const inControl = () => control(S.meta, {link: S.link}).input;
   const box = () => ({width: els.viewport?.clientWidth ?? 0, height: els.viewport?.clientHeight ?? 0});
 
   /** Where *event* is in the picture's box. */
@@ -782,6 +799,7 @@ export function setupBrowser({
     send({type: 'give'});
     els.keys?.blur?.();
   });
+  on(els.window, 'click', () => showWindow());
   const answer = (accept) => {
     const text = els.dialogInput && !els.dialogInput.hidden ? String(els.dialogInput.value ?? '') : '';
     send({type: 'dialog', accept, text});
@@ -807,6 +825,12 @@ export function setupBrowser({
     show();
     if (ask) send({type: 'take'});
     render();
+  }
+
+  /** The page in a real Chrome window: moved there from the panel, or that window brought to the front. */
+  function showWindow() {
+    if (!S.session) return;
+    api(`/sessions/${encodeURIComponent(S.session)}/browser/window`, {method: 'POST'}).catch(() => {});
   }
 
   // ── Showing and hiding ──
@@ -1010,8 +1034,11 @@ export function setupBrowser({
     /** The panel's Take over button. */
     take: () => takeOver({ask: true}),
 
-    /** The panel's Give back to melo button. */
+    /** The panel's Done button. */
     give: () => send({type: 'give'}),
+
+    /** Show Chrome window, or Open in Chrome (the card's choice for a page with a form). */
+    showWindow,
 
     relayout,
     isShown: () => S.shown,

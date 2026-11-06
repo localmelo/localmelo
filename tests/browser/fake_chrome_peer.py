@@ -29,6 +29,16 @@ at a time, as Chrome does: the next one comes only after an acknowledgement
 Modes (``FAKE_CHROME_MODE``): ``silent`` (never answers), ``exit`` (quits at
 once), ``native_missed`` (a real click reaches nothing), ``no_world`` (no
 isolated world can be made), ``nav_error`` (every navigation fails), ``cast_error`` (a screencast cannot start).
+
+The last session: ``Browser.close`` writes the pages' addresses to
+``fake-session.json`` in the profile, and a start with ``--restore-last-session``
+brings them back with new target ids (numbering goes on), as Chrome's own
+"continue where you left off" does. A start without ``--headless=new`` has
+windows: it answers the window calls, and ``FAKE_CHROME_NO_WINDOW=1`` makes such a
+start quit at once (no window can open). ``FAKE_CHROME_PERSON_CLOSES`` (seconds)
+is the person closing the window of the page brought to the front that long
+after (``Target.targetDestroyed``). A page with ``unsent`` has a form the person
+began.
 """
 
 from __future__ import annotations
@@ -36,6 +46,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import select
 import sys
 import time
 from typing import Any, cast
@@ -57,6 +68,11 @@ PAGES: dict[str, dict[str, Any]] = {
         ],
     },
     "https://example.com/news": {"title": "News", "text": "Today's news."},
+    "https://example.com/filled": {
+        "title": "Filled",
+        "text": "A form the person began.",
+        "unsent": True,
+    },
     "https://example.com/done": {"title": "Done", "text": "Checked in."},
     "https://example.com/deleted": {"title": "Deleted", "text": "It is gone."},
     "https://example.com/form": {
@@ -194,6 +210,14 @@ FRAMES = int(os.environ.get("FAKE_CHROME_FRAMES", "60"))
 casts: dict[str, dict[str, int]] = (
     {}
 )  # session -> how many pictures are left, in flight, sent
+ARGV = sys.argv[1:]
+WINDOWS = "--headless=new" not in ARGV
+PROFILE = next(
+    (a.split("=", 1)[1] for a in ARGV if a.startswith("--user-data-dir=")), ""
+)
+SESSION = os.path.join(PROFILE, "fake-session.json") if PROFILE else ""
+CLOSES = float(os.environ.get("FAKE_CHROME_PERSON_CLOSES") or 0)
+closing: list[tuple[float, str]] = []  # (when, target) the person closes
 
 
 def log(entry: dict[str, Any]) -> None:
@@ -414,6 +438,8 @@ def run_script(target: str, source: str) -> Any:
             "seen": look.get("seen", {}),
             "count": look.get("count", 0),
         }
+    if source.startswith("(function unsent()"):
+        return bool(PAGES.get(here, {}).get("unsent"))
     if source.startswith("(function (at)"):
         return json.dumps({"surface": "none"})
     if source.startswith("(function (view)"):
@@ -492,8 +518,27 @@ def handle(message: dict[str, Any]) -> dict[str, Any] | None:
     if method == "Browser.getVersion":
         return {"product": "HeadlessChrome/156.0.0.0", "protocolVersion": "1.3"}
     if method == "Browser.close":
+        if SESSION:
+            with open(SESSION, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"urls": [url_of(t) for t in targets], "n": n_targets}, handle
+                )
         send({"id": message["id"], "result": {}})
         sys.exit(0)
+    if method == "Target.setDiscoverTargets":
+        for known in targets:
+            event("Target.targetCreated", {"targetInfo": info(known)})
+        return {}
+    if method == "Browser.getWindowForTarget" and WINDOWS:
+        if params["targetId"] not in targets:
+            return {"__error": "No target with given id found"}
+        return {"windowId": int(params["targetId"][1:]), "bounds": {"width": 500}}
+    if method == "Browser.setWindowBounds" and WINDOWS:
+        return {}
+    if method == "Page.bringToFront":
+        if CLOSES and WINDOWS:
+            closing.append((time.time() + CLOSES, target))
+        return {}
     if method == "Target.getTargets":
         return {"targetInfos": [info(t) for t in targets]}
     if method == "Target.createTarget":
@@ -639,13 +684,46 @@ def answer(message: dict[str, Any]) -> None:
     send({"id": message["id"], "result": result})
 
 
+def restore() -> None:
+    """The pages of the last session, with new ids, when the start asks for them."""
+    global n_targets
+    if (
+        "--restore-last-session" not in ARGV
+        or not SESSION
+        or not os.path.exists(SESSION)
+    ):
+        return
+    with open(SESSION, encoding="utf-8") as handle:
+        last = json.load(handle)
+    n_targets = int(last.get("n") or 0)
+    for url in last.get("urls") or []:
+        new_target(url)
+
+
+def person_closes() -> None:
+    """The windows whose time came: the person closed them."""
+    now = time.time()
+    for when, target in list(closing):
+        if when <= now:
+            closing.remove((when, target))
+            if targets.pop(target, None) is not None:
+                event("Target.targetDestroyed", {"targetId": target})
+
+
 def main() -> None:
-    log({"argv": sys.argv[1:], "fds": [3, 4]})
-    if MODE == "exit":
+    log({"argv": ARGV, "fds": [3, 4]})
+    if MODE == "exit" or (WINDOWS and os.environ.get("FAKE_CHROME_NO_WINDOW")):
         sys.exit(1)
-    new_target("about:blank")  # the page Chrome starts with
+    restore()
+    if not WINDOWS:
+        new_target("about:blank")  # the page Chrome starts with
     buffer = b""
     while True:
+        if closing:
+            ready, _, _ = select.select([reader], [], [], 0.05)
+            person_closes()
+            if not ready:
+                continue
         chunk = reader.read(65536)
         if not chunk:
             return

@@ -140,6 +140,8 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "pruned",
             }
         ),
+        "run.paused": frozenset({"what", "detail"}),
+        "run.resumed": frozenset({"what", "how", "held_s"}),
         "run.finished": frozenset({"result", "reviews"}),
     }
 )

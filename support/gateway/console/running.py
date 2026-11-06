@@ -5,7 +5,9 @@ and the worker runs and terminal chats that hold a live lease in the CLI file.
 ``tasks`` is the scheduler's queue, as the status row shows it. ``items`` lists
 what runs, newest kinds first, for the header's list: it is capped, and the
 counts are not. ``waiting`` lists the chats and tasks that wait for the
-person's answer to a tool approval, for the macOS app's menu bar. ``recent``
+person's answer to a tool approval, for the macOS app's menu bar, and
+``control`` the chats whose run is paused while the person has one of its
+pages (their newest events say so), for the app's pill and its Done. ``recent``
 says how the newest finished chat turn, task, run or terminal turn ended, what
 it was called and how many seconds ago (``null`` when none did), for the app's
 desktop pet and activity pill.
@@ -14,8 +16,8 @@ Each item says what it is doing in plain words (``activity``, with its kind
 ``answering`` is true while its newest step is a model call with no tool,
 approval or hold open (the pet and the console's portrait show it thinking);
 ``focus`` names the one item a glance shows: one that waits for the person
-first, else the one whose newest event is the latest (``null`` when nothing
-runs). A part whose store cannot be read counts as nothing running and
+first, then one whose page the person has, else the one whose newest event is
+the latest (``null`` when nothing runs). A part whose store cannot be read counts as nothing running and
 nothing recent: health is served while a store is unavailable.
 """
 
@@ -245,8 +247,23 @@ async def item_activity(
     return found or activity_text(state="thinking"), changed
 
 
+# The icon of "You're in control": a run paused while the person has its page.
+_CONTROL_ICON = activity_text(state="control").icon
+
+
+def _control(items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The running chats paused while the person has their page ("You're in control")."""
+    return [
+        {"kind": "chat", "id": item["id"]}
+        for item in items
+        if item["kind"] == "chat" and item.get("icon") == _CONTROL_ICON
+    ]
+
+
 async def _with_activity(
-    console: Console, items: list[dict[str, Any]], waiting: list[dict[str, str]]
+    console: Console,
+    items: list[dict[str, Any]],
+    waiting: list[dict[str, str]],
 ) -> dict[str, Any] | None:
     """Add ``activity`` and ``icon`` to each item; the item ``focus`` names."""
     changed: dict[str, float] = {}
@@ -258,7 +275,9 @@ async def _with_activity(
     if not items:
         return None
     asking = {entry["id"] for entry in waiting}
+    yours = {entry["id"] for entry in _control(items)}
     first = next((item for item in items if item["id"] in asking), None)
+    first = first or next((item for item in items if item["id"] in yours), None)
     return dict(first or max(items, key=lambda item: changed[item["id"]]))
 
 
@@ -311,6 +330,7 @@ async def running_status(console: Console) -> dict[str, Any]:
         },
         "items": items,
         "waiting": waiting,
+        "control": _control(items),
         "recent": await recent_outcome(console),
         "focus": focus,
     }

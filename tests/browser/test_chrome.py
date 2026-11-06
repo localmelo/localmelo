@@ -7,6 +7,7 @@ profile of its own under ``tmp_path``.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -195,6 +196,125 @@ async def test_one_chrome_serves_every_driver_of_a_profile_and_each_sees_its_own
     finally:
         await second.close()
     assert peer.calls("Browser.close")
+
+
+# ── A window for the person (take over) ──
+
+
+def starts(peer: Peer) -> list[list[str]]:
+    """The command line of every Chrome the test started, in order."""
+    return [line["argv"] for line in peer.lines() if "argv" in line]
+
+
+async def test_every_start_keeps_the_last_session_in_melos_private_profile(
+    peer: Peer,
+) -> None:
+    os.makedirs(peer.profile, mode=0o700)
+    with open(os.path.join(peer.profile, "fake-session.json"), "w") as handle:
+        json.dump({"urls": ["https://example.com/news"], "n": 7}, handle)
+    driver = make(peer)
+    await driver.start()
+    try:
+        assert "--restore-last-session" in peer.argv()
+        prefs = Path(peer.profile) / "Default" / "Preferences"
+        saved = json.loads(prefs.read_text())
+        assert saved["session"]["restore_on_startup"] == 1
+        assert saved["profile"]["exit_type"] == "Normal"
+        assert stat.S_IMODE(prefs.stat().st_mode) == 0o600
+        # The page the session brought back is nobody's: it goes at once.
+        await driver.open("https://example.com/", new_tab=True)
+        closed = [c["params"]["targetId"] for c in peer.calls("Target.closeTarget")]
+        assert "T8" in closed
+    finally:
+        await driver.close()
+
+
+async def test_taking_over_opens_a_window_on_the_same_pages_and_done_goes_back(
+    driver: ChromeBackgroundDriver, peer: Peer
+) -> None:
+    mine = await driver.open("https://example.com/", new_tab=True)
+    other = await driver.open("https://example.com/news", new_tab=True)
+    closed: list[str] = []
+    assert await driver.show_window(mine.id, lambda: closed.append("x")) is True
+    window = starts(peer)[-1]
+    assert "--headless=new" not in window and "about:blank" not in window
+    assert {(t.id, t.url) for t in await driver.tabs()} == {
+        (mine.id, "https://example.com/"),
+        (other.id, "https://example.com/news"),
+    }, "the same ids on the restored pages"
+    bounds = [c["params"]["bounds"] for c in peer.calls("Browser.setWindowBounds")]
+    assert {"windowState": "minimized"} in bounds and {
+        "windowState": "normal"
+    } in bounds
+    assert {"left": 80, "top": 60, "width": 1280, "height": 800} in bounds
+    assert peer.calls("Page.bringToFront")
+    await driver.hide_window()
+    assert "--headless=new" in starts(peer)[-1] and len(starts(peer)) == 3
+    assert {t.id for t in await driver.tabs()} == {mine.id, other.id}
+    assert (await driver.page(mine.id)).title == "Example Home"
+    assert closed == [], "melo's own restart is no Done"
+
+
+async def test_closing_the_window_is_done_and_the_page_comes_back_in_the_background(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CHROME_PERSON_CLOSES", "0.2")
+    driver = make(peer)
+    await driver.start()
+    try:
+        tab = await driver.open("https://example.com/news", new_tab=True)
+        done = asyncio.Event()
+        assert await driver.show_window(tab.id, done.set) is True
+        await asyncio.wait_for(done.wait(), 3)
+        await driver.hide_window()
+        assert [(t.id, t.url) for t in await driver.tabs()] == [
+            (tab.id, "https://example.com/news")
+        ], "opened again at its last address, under the same id"
+    finally:
+        await driver.close()
+
+
+async def test_a_window_that_cannot_open_leaves_melo_in_the_background(
+    peer: Peer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CHROME_NO_WINDOW", "1")
+    driver = make(peer)
+    await driver.start()
+    try:
+        tab = await driver.open("https://example.com/", new_tab=True)
+        assert await driver.show_window(tab.id, lambda: None) is False
+        assert "--headless=new" in starts(peer)[-1]
+        assert [t.id for t in await driver.tabs()] == [tab.id]
+    finally:
+        await driver.close()
+
+
+async def test_while_the_window_is_open_another_chat_waits_and_keeps_its_tab(
+    peer: Peer,
+) -> None:
+    first, second = make(peer), make(peer)
+    await first.start()
+    await second.start()
+    try:
+        a = await first.open("https://example.com/", new_tab=True)
+        b = await second.open("https://example.com/news", new_tab=True)
+        assert await first.show_window(a.id, lambda: None) is True
+        with pytest.raises(BrowserError, match="open in a window for the person"):
+            await second.tabs()
+        await first.hide_window()
+        assert [t.id for t in await second.tabs()] == [b.id]
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_a_form_the_person_began_is_told_and_nothing_it_holds(
+    driver: ChromeBackgroundDriver,
+) -> None:
+    filled = await driver.open("https://example.com/filled", new_tab=True)
+    home = await driver.open("https://example.com/", new_tab=True)
+    assert await driver.unsent_input(filled.id) is True
+    assert await driver.unsent_input(home.id) is False
 
 
 # ── Reading ──

@@ -40,6 +40,7 @@ import stat
 import tempfile
 import uuid
 from base64 import b64encode
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -93,6 +94,7 @@ _SETUP_TEXT = re.compile(
     re.IGNORECASE,
 )
 
+SAFARIDRIVER = "/usr/bin/safaridriver"
 # The tools melo calls, by what they do, and the names Safari gives them.
 TOOL_NAMES = {
     "open": "navigate_to_url",
@@ -168,7 +170,7 @@ class SafariAutomationDriver(PageScriptActs):
     def __init__(
         self,
         *,
-        command: str = "/usr/bin/safaridriver",
+        command: str = SAFARIDRIVER,
         args: tuple[str, ...] = ("--mcp",),
         client_factory: type[StdioMcpClient] = StdioMcpClient,
         startup_timeout_s: float = 30.0,
@@ -436,6 +438,33 @@ class SafariAutomationDriver(PageScriptActs):
         await self._call("close", tab=tab)
         if self._current == tab:
             self._current = None
+
+    # ── A window for the person (take over) ──
+
+    async def show_window(self, tab: str, on_closed: Callable[[], None]) -> bool:
+        """Bring *tab*'s page before the person: Safari's automation window is a real one already.
+
+        The tab comes to the front of its window and Safari to the front of the
+        screen. Its window is not watched: the person says Done.
+        """
+        await self._focus(tab)
+        if self._config.command != SAFARIDRIVER:
+            return True  # a stand-in for Safari (tests): the real Safari is left alone
+        with contextlib.suppress(OSError, TimeoutError):
+            front = await asyncio.create_subprocess_exec(
+                "/usr/bin/osascript",
+                "-e",
+                'tell application id "com.apple.Safari" to activate',
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            async with asyncio.timeout(5):
+                await front.wait()
+        return True
+
+    async def hide_window(self) -> None:
+        """After the person's take over: Safari's window stays as it is."""
 
     async def location(self, tab: str | None) -> str:
         return await self._address(tab)

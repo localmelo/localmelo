@@ -1137,6 +1137,26 @@ FOCUS_JS = r"""(function () {
 })()"""
 
 
+# Whether the page has a form the person began: a field that differs from how the
+# page set it. Only true or false comes back, never what a field holds.
+UNSENT_JS = r"""(function unsent() {
+  const skip = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file']);
+  for (const el of document.querySelectorAll('input, textarea, select')) {
+    if (el.disabled) continue;
+    if (el.tagName === 'SELECT') {
+      const opts = Array.from(el.options);
+      const set = opts.some((o) => o.defaultSelected);
+      if (opts.some((o, i) => o.selected !== (set ? o.defaultSelected : !el.multiple && i === 0))) return true;
+    } else if (el.type === 'checkbox' || el.type === 'radio') {
+      if (el.checked !== el.defaultChecked) return true;
+    } else if (!skip.has(el.type) && el.value !== el.defaultValue) {
+      return true;
+    }
+  }
+  return false;
+})()"""
+
+
 def wait_probe(until: str, text: str, origin: str = "") -> str:
     """The script that says whether what ``wait`` waits for (*until*: ``load``, ``text``, ``gone``) holds now.
 

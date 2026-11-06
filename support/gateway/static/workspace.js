@@ -439,7 +439,8 @@ function composerBlocked() {
 function connectionState({ turn, held, pending, session }) {
   if (!S.online) return { text: t("header.offline"), offline: true };
   if (developerMode) {
-    const text = turn ? (held ? holdText(held, S.health?.switch?.name) : t(pending > 0 ? "header.approvalNeeded" : "header.working")) : session ? t("header.ready") : t("chat.new");
+    const doing = pending > 0 ? "header.approvalNeeded" : turn?.control ? "browser.inControl" : "header.working";
+    const text = turn ? (held ? holdText(held, S.health?.switch?.name) : t(doing)) : session ? t("header.ready") : t("chat.new");
     return { text, offline: false };
   }
   const model = S.health?.model;
@@ -580,7 +581,9 @@ function syncUI() {
   // Run as a task: a chat starts the message as a task, without asking the model.
   $("task-btn").hidden = !S.activeId || !!busy || media.hasPictures();
   $("task-btn").disabled = $("send-btn").disabled;
-  $("run-status").textContent = turn ? (held ? holdText(held, S.health?.switch?.name) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
+  // The person has a page of the run (take over): one state, the same word as the panel's.
+  const working = turn?.control ? "browser.inControl" : developerMode ? "header.runningOnBackend" : "header.workingDots";
+  $("run-status").textContent = turn ? (held ? holdText(held, S.health?.switch?.name) : t(working)) : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -1886,6 +1889,11 @@ const chatApproval = {
   reload: (id) => refreshApproval(S.activeId, id),
   // The person agreed to take over a page: the Browser panel opens and the keys go to it.
   takeOver: () => browser.takeOver(),
+  // "Open in Chrome, clear the form": the page goes to a real Chrome window instead of the panel.
+  takeOverWindow: () => {
+    browser.takeOver();
+    browser.showWindow();
+  },
 };
 
 const approvalCard = (request, view = chatApproval, asked = "") => drawApprovalCard({
@@ -3026,6 +3034,7 @@ const browser = setupBrowser({
     pop: $("bp-pop"),
     take: $("bp-take"),
     give: $("bp-give"),
+    window: $("bp-window"),
     viewOnly: $("bp-view-only"),
     hint: $("bp-hint"),
     keys: $("bp-keys"),

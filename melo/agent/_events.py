@@ -712,6 +712,22 @@ class _Emitter:
             return
         self._emit("run.progress", lambda: json_safe_payload(state.as_dict()))
 
+    def run_paused(self, what: str, detail: dict[str, Any]) -> None:
+        """The person has the run (*what*: ``browser``); a hold that changes says so again."""
+        if self._sink is not None:
+            self._emit(
+                "run.paused",
+                lambda: json_safe_payload({"what": what, "detail": detail}),
+            )
+
+    def run_resumed(self, what: str, how: str, held_s: float) -> None:
+        """The hold ended: *how* (``done``, ``closed``, ``stopped``, ``ended``) after *held_s* seconds."""
+        if self._sink is not None:
+            self._emit(
+                "run.resumed",
+                lambda: {"what": what, "how": how, "held_s": round(held_s, 1)},
+            )
+
     def run_finished(
         self, result: RunResult, reviews: dict[str, Any] | None = None
     ) -> None:

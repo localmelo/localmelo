@@ -448,6 +448,7 @@ _TEST_COMMAND: Final = re.compile(
 # A state's words (a catalog key) and icon.
 _STATES: Final[Mapping[str, tuple[str, str]]] = {
     "waiting": ("panel.state.waiting", "wait"),
+    "control": ("browser.inControl", "you"),
     "held": ("panel.state.held", "held"),
     "queued": ("panel.state.queued", "held"),
     "paused": ("panel.state.paused", "paused"),
@@ -525,8 +526,8 @@ def activity_text(
     root: str | None = None,
     reason: str = "",
 ) -> ActivityText:
-    """The words for a *state* (``waiting``, ``held``, ``queued``, ``paused``,
-    ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
+    """The words for a *state* (``waiting``, ``control``, ``held``, ``queued``,
+    ``paused``, ``reflecting``, ``remembering``, ``thinking``), else for a running *tool*.
 
     A ``held`` state with the scheduler's *reason* code says why: ``Waiting for
     a higher-priority task``, ``Waiting for a free model slot``.
@@ -623,20 +624,26 @@ def event_activity(
 ) -> ActivityText | None:
     """What a session's turn is doing, from its stored events, newest first.
 
-    An approval that waits wins, then a call still running, then a
+    An approval that waits wins, then a hold the person has (``run.paused``
+    not yet resumed: "You're in control"), then a call still running, then a
     reflection; any other event of a running turn reads ``Thinking``. A turn
     whose end is among them is doing nothing: ``None``. A step, a turn or a
     reflection that started last is the model answering (``answering``).
     """
     finished: set[str] = set()
     resolved: set[str] = set()
+    resumed = False
     for event in newest_first:
         kind = event.get("type")
         data = event.get("data")
         data = data if isinstance(data, Mapping) else {}
         if kind in ("turn.finished", "run.finished"):
             return None
-        if kind == "tool.finished":
+        if kind == "run.resumed":
+            resumed = True
+        elif kind == "run.paused" and not resumed:
+            return _state("control")
+        elif kind == "tool.finished":
             finished.add(str(data.get("call_id", "")))
         elif kind == "approval.resolved":
             resolved.add(str(data.get("request_id", "")))

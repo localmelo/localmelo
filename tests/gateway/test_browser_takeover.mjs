@@ -95,10 +95,18 @@ test('the panel offers Take over while melo has the page and says who is in cont
   assert.deepEqual([melo.you, melo.canTake, melo.status, melo.hint], [false, true, '', '']);
   assert.equal(control(parseMeta(message({takeover: false}))).canTake, false);
   assert.equal(control(parseMeta(message()), {link: 'retry'}).canTake, false);
-  const you = control(parseMeta(message({owner: 'you', grace: 120})), {focused: false});
-  assert.equal(you.you, true);
-  assert.equal(you.status, 'You are in control');
-  assert.equal(you.hint, 'Click the page to type. If you leave this panel, melo gets the page back after 2 min.');
+  const you = control(parseMeta(message({owner: 'you', place: 'app'})), {focused: false});
+  assert.deepEqual([you.you, you.place, you.input, you.window], [true, 'app', true, '']);
+  assert.equal(you.status, "You're in control");
+  assert.equal(you.hint, 'melo is paused. Press Done to give the page back. Click the page to type.');
+  // In a real Chrome window the panel is a live copy: no input here, and a button that shows the window.
+  const windowed = control(parseMeta(message({owner: 'you', place: 'window'})));
+  assert.deepEqual([windowed.input, windowed.window], [false, 'Show Chrome window']);
+  assert.match(windowed.hint, /close the window to give the page back\. .*live copy/);
+  // A form they began keeps the page here, with the way to Chrome; a window that could not open has none.
+  assert.equal(control(parseMeta(message({owner: 'you', place: 'app', form: true}))).window, 'Open in Chrome, clear the form');
+  const failed = control(parseMeta(message({owner: 'you', place: 'app', failed: true})));
+  assert.deepEqual([failed.window, /could not open a window/.test(failed.hint)], ['', true]);
   assert.match(control(parseMeta(message({owner: 'you'})), {focused: true}).hint, /Control-Esc/);
   assert.doesNotMatch(control(parseMeta(message({owner: 'you'})), {focused: true, touch: true}).hint, /Control-Esc/, 'a touch screen has no Control key');
   const finishing = control(parseMeta(message({owner: 'you', browsing: true})));
@@ -154,14 +162,18 @@ class FakeSocket {
 
 async function panel() {
   FakeSocket.all = [];
-  const names = ['root', 'chip', 'chipText', 'title', 'host', 'rest', 'status', 'note', 'hide', 'pop', 'take', 'give', 'viewOnly', 'hint', 'dialog', 'dialogTitle', 'dialogText', 'dialogInput', 'dialogOk', 'dialogCancel'];
+  const names = ['root', 'chip', 'chipText', 'title', 'host', 'rest', 'status', 'note', 'hide', 'pop', 'take', 'give', 'window', 'viewOnly', 'hint', 'dialog', 'dialogTitle', 'dialogText', 'dialogInput', 'dialogOk', 'dialogCancel'];
   const els = Object.fromEntries(names.map((name) => [name, node()]));
   els.viewport = node({clientWidth: 640, clientHeight: 400});
   els.canvas = node({width: 300, height: 150, getContext() { return {drawImage() {}}; }});
   els.keys = node();
   const frames = [];
+  const posted = [];
   const browser = setupBrowser({
-    api: async () => ({available: true, open: true, browsing: true}),
+    api: async (path, options = {}) => {
+      if (options.method === 'POST') posted.push(path);
+      return {available: true, open: true, browsing: true};
+    },
     els,
     openSocket: (url) => new FakeSocket(url),
     decode: () => Promise.resolve({width: 1280, height: 713, close() {}}),
@@ -174,7 +186,7 @@ async function panel() {
   const socket = FakeSocket.all[0];
   socket.open();
   socket.say(message());
-  return {browser, els, socket, frames, sent: () => socket.sent};
+  return {browser, els, socket, frames, posted, sent: () => socket.sent};
 }
 
 test('Take over asks the gateway, and the keys go to the page once it is the person\'s', async () => {
@@ -184,9 +196,9 @@ test('Take over asks the gateway, and the keys go to the page once it is the per
   assert.equal(els.give.hidden, true);
   els.take.fire('click');
   assert.deepEqual(socket.sent, [{type: 'take'}]);
-  socket.say(message({owner: 'you', grace: 120}));
+  socket.say(message({owner: 'you', place: 'app'}));
   assert.equal(els.root.dataset.owner, 'you');
-  assert.equal(els.status.textContent, 'You are in control');
+  assert.equal(els.status.textContent, "You're in control");
   assert.equal(els.take.hidden, true);
   assert.equal(els.give.hidden, false);
   assert.equal(els.keys.focused, true, 'the keys went to the page');
@@ -197,6 +209,18 @@ test('Take over asks the gateway, and the keys go to the page once it is the per
   socket.say(message());
   assert.equal(els.root.dataset.owner, 'melo');
   assert.equal(els.keys.focused, false);
+});
+
+test('in a real Chrome window the panel is a live copy, and Show Chrome window asks the gateway', async () => {
+  const {els, socket, posted} = await panel();
+  socket.say(message({owner: 'you', place: 'window'}));
+  assert.equal(els.root.dataset.place, 'window');
+  assert.deepEqual([els.give.hidden, els.window.hidden, els.window.textContent], [false, false, 'Show Chrome window']);
+  assert.equal(els.keys.disabled, true, 'the keys go to the window, not here');
+  els.canvas.fire('pointerdown', {clientX: 120, clientY: 60, button: 0, buttons: 1, detail: 1});
+  els.window.fire('click');
+  assert.deepEqual(socket.sent, [], 'nothing went to the page from here');
+  assert.deepEqual(posted, ['/sessions/s1/browser/window']);
 });
 
 test('nothing is sent while melo has the page', async () => {

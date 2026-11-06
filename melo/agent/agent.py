@@ -83,6 +83,7 @@ from localmelo.melo.agent._earlier import (
 )
 from localmelo.melo.agent._events import _Emitter, check_sink
 from localmelo.melo.agent._notes_loop import _NotesLoop
+from localmelo.melo.agent._pause import Hold
 from localmelo.melo.agent._picture_refusal import names_pictures
 from localmelo.melo.agent._recall import RECALL_RUN, _RecallLoop
 from localmelo.melo.agent._reflection import (
@@ -133,6 +134,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.inbox import InboxError, InboxSource
+from localmelo.melo.contracts.pause import PAUSE
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_EXTRA_BODY,
     BaseEmbeddingProvider,
@@ -1003,6 +1005,11 @@ class _RunState:
     retrieve_completion_tokens: int = 0
     thought_chunks: int = 0
     recall_log: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # The person's hold on the run, such as a page they took over (contracts.pause).
+    hold: Hold = dataclasses.field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.hold = Hold(self.events.run_paused, self.events.run_resumed)
 
     @property
     def running(self) -> bool:
@@ -3145,6 +3152,8 @@ class Agent(_RecallLoop, _NotesLoop):
         step = -1
         while step + 1 < budget:
             step += 1
+            # The person has the run (a page they took over): no model call meanwhile.
+            await run.hold.wait()
             self.chat.check_call_budget()  # before the step starts, not inside it
             if budget - step == 2:
                 await self._deadline_check(run)
@@ -3282,6 +3291,7 @@ class Agent(_RecallLoop, _NotesLoop):
             )
             refused_all = bool(calls)
             for call in calls:
+                await run.hold.wait()
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
                 run.n_tool += 1
@@ -3566,9 +3576,11 @@ class Agent(_RecallLoop, _NotesLoop):
             CallLog(history, task_id, run) if isinstance(history, CallHistory) else None
         )
         recall_run = RECALL_RUN.set(run)
+        pause = PAUSE.set(run.hold)
         try:
             yield
         finally:
+            PAUSE.reset(pause)
             PREFIX_RUN.reset(prefix_run)
             BUDGET_HOOK.reset(budget_hook)
             BUDGET_ACCOUNTING.reset(budget_accounting)
@@ -3889,6 +3901,7 @@ class Agent(_RecallLoop, _NotesLoop):
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
+        run.hold.deadline = deadline
         with self._run_scope(run, task.task_id):
             self._active_runs += 1
             try:
@@ -4045,6 +4058,8 @@ class Agent(_RecallLoop, _NotesLoop):
                         # Every path above ends the run; this keeps the record
                         # terminal should a later change miss one.
                         run.end("crashed", error="The run ended without a status")
+                    # A hold still on (the person had a page) ends with the run.
+                    run.hold.end("stopped" if run.status == "cancelled" else "ended")
                     self._record_answer(run)
                     if run.status == "cancelled":
                         # Only _on_cancelled ends a run so. Its finalizer saves the
@@ -5093,6 +5108,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 out_of = "Max steps reached"
             else:
                 out_of = ""  # another attempt can start
+            await run.hold.wait()
             run.events.reflection_started(failure_type)
             run.note(Trace.reflection)
             reflection = await self._do_reflect(

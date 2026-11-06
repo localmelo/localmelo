@@ -491,6 +491,19 @@ class GatewayClient:
             "POST", "/".join(["/api/turns", quote(turn_id, safe=""), "cancel"])
         )
 
+    async def give_back(self, session_id: str) -> bool:
+        """Done: every page the person has in chat *session_id* goes back to melo."""
+        body = await self.call("POST", _path(session_id, "browser", "done"))
+        return body.get("ok") is True
+
+    async def note(self, turn_id: str, text: str) -> None:
+        """Words for a running turn: its run reads them at its next step."""
+        await self.call(
+            "POST",
+            f"/api/turns/{quote(turn_id, safe='')}/notes",
+            json={"text": text, "client_request_id": uuid.uuid4().hex},
+        )
+
     async def answer(self, request_id: str, choice: str, reason: str = "") -> None:
         body = {"choice": choice, "reason": reason}
         await self.call(
@@ -1086,6 +1099,34 @@ class MainChat:
         finally:
             if self._asks.get(request_id) is asyncio.current_task():
                 del self._asks[request_id]
+
+    # ── The person's page ──
+
+    def give_back(self) -> None:
+        """Enter on an empty line while the person has a page: Done, through the gateway."""
+        if self.chat.id is not None:
+            self.host.spawn(self._give_back(self.chat.id))
+
+    async def _give_back(self, chat_id: str) -> None:
+        try:
+            if not await self.client.give_back(chat_id):
+                self._say("melo has the page already.", "muted")
+        except GatewayError as exc:
+            self._say(f"Could not give the page back: {exc}", "error")
+
+    def note(self, text: str) -> bool:
+        """Send *text* to the running turn as a note; False when its id is not known yet."""
+        turn = self._turn
+        if turn is None or not turn.turn_id:
+            return False
+        self.host.spawn(self._note(turn.turn_id, text))
+        return True
+
+    async def _note(self, turn_id: str, text: str) -> None:
+        try:
+            await self.client.note(turn_id, text)
+        except GatewayError as exc:
+            self._say(f"Could not send the note: {exc}", "error")
 
     # ── Turns ──
 
