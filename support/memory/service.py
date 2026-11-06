@@ -2323,6 +2323,90 @@ class ChatMemory:
                 await index.mark_encoded(session_id, max(t.turn for t in done))
         return out
 
+    async def waiting_turns(
+        self, chats: SessionStore, session_id: str
+    ) -> list[TurnInfo]:
+        """The turns of chat *session_id* that wait to be encoded into items, oldest
+        first: those past its progress mark (none counts as nothing encoded) that
+        the live index holds, or would, as :meth:`reindex` does: completed, not
+        undone, the person's own (:func:`is_owner_question`), with an answer, and
+        ended after the last time the user forgot everything. A turn below 1 is
+        never one. The list stops before the first turn that is still running or
+        did not complete: it is not encoded, and nor is anything after it yet.
+        """
+        async with self._lock:
+            index = self.stores()[1]
+            mark = await index.encoded_turn(session_id) or 0
+            since = await index.forgotten_at()
+        newest = await chats.list_turns(session_id, limit=1)
+        if not newest or newest[0].turn <= mark:
+            return []
+        waiting: list[TurnInfo] = []
+        for turn in await chats.list_turns(session_id, limit=newest[0].turn - mark):
+            if turn.turn <= mark or turn.turn < 1 or turn.undone:
+                continue
+            if turn.status != "completed":
+                break
+            if (
+                (turn.finished_at or 0) > since
+                and not is_owner_question(turn)
+                and split_thinking(turn.answer)[1].strip()
+            ):
+                waiting.append(turn)
+        return waiting
+
+    async def encode_window(
+        self,
+        chats: SessionStore,
+        session_id: str,
+        title: str,
+        waiting: Sequence[TurnInfo],
+    ) -> Compressed | None:
+        """Encode the first window of the turns *waiting* of a chat
+        (:meth:`waiting_turns`) with :meth:`compress_chat`; ``None`` when none of
+        them holds anything to remember (:func:`turn_document`).
+
+        Each turn is built as the live index holds it (the words and the answer,
+        :func:`turn_document`; the encoder cleans them as it renders them), and
+        :func:`~.hippo_encode.pack` with the window size of the settings says which
+        turns the first window holds: those, and no others, go to
+        :meth:`compress_chat`, so the chat's mark moves at most to that window's
+        end. A turn longer than the window is a window of its own, read in its
+        parts. The encoder's replies are kept in memory for this call only: nothing
+        is written to the cache file, which holds raw replies a forget does not clear.
+        """
+        limit = self.compress_window()
+        turns: list[hippo_encode.Turn] = []
+        size = 0
+        for info in waiting:
+            held = await turn_document(
+                chats, info, _typed_words(info), split_thinking(info.answer)[1]
+            )
+            if held is None:
+                continue
+            typed, answer = held[0], held[1] or ""
+            turns.append(
+                hippo_encode.Turn(
+                    info.turn,
+                    info.started_at,
+                    info.finished_at or info.started_at,
+                    typed,
+                    answer,
+                )
+            )
+            size += len(typed) + len(answer)
+            if size >= limit:  # the first window is closed: no need to read on
+                break
+        if not turns:
+            return None
+        first = hippo_encode.pack(turns, limit)[0]
+        return await self.compress_chat(
+            session_id,
+            title,
+            [turns[n] for n in first.positions],
+            cache=hippo_encode.Cache(""),
+        )
+
     async def forget_session(self, session_id: str, turn: int | None = None) -> int:
         """Delete indexed chat text and its inactive sleep negatives; keep active notes."""
         await self.drain()

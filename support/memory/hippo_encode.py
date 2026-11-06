@@ -577,7 +577,8 @@ class Cache:
 
     Read whole on first use and appended to on each new reply; a line that cannot
     be read is skipped. The file holds text from chats, so it is private (0600).
-    One path may serve several runs, whatever store each writes.
+    One path may serve several runs, whatever store each writes. With no path
+    (``""``) the replies are kept in memory only, and nothing is read or written.
 
     :meth:`put` is synchronous (no ``await`` between its read and its write), so
     coroutines of one event loop may call it as their replies arrive.
@@ -593,6 +594,8 @@ class Cache:
     def _load(self) -> dict[str, dict[str, Any]]:
         if self._replies is None:
             self._replies = {}
+            if not self.path:
+                return self._replies
             try:
                 with open(self.path, encoding="utf-8") as handle:
                     for line in handle:
@@ -615,6 +618,8 @@ class Cache:
 
     def put(self, key: str, reply: dict[str, Any]) -> None:
         self._load()[key] = reply
+        if not self.path:
+            return
         folder = os.path.dirname(self.path)
         if folder:
             os.makedirs(folder, exist_ok=True)

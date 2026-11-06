@@ -84,6 +84,8 @@ from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
 from .front import Front, FrontAgent, SideAgent, build_front_agent
+from .idle_encode import IdleEncode
+from .idle_gates import IdleOptions
 from .idle_sleep import IdleSleep, IdleSleepOptions
 from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
@@ -146,6 +148,8 @@ class ConsoleOptions:
     explainer: Explainer | None = None
     # The idle sleep's clock, beats and readers of the GPU lock and the power; a test replaces them.
     idle_sleep: IdleSleepOptions | None = None
+    # The same for the idle encoder, which writes memory items from the chats.
+    idle_encode: IdleOptions | None = None
     # Whether the chat model reads pictures; None asks the model's provider.
     # A test passes one, so no request leaves the machine.
     vision: Vision | None = None
@@ -237,6 +241,11 @@ class Console:
         self.chore_runner = ChoreRunner(self, self.options.chores)
         # Tidies the notes while the computer is idle (``[memory] sleep``, off by default).
         self.idle_sleep = IdleSleep(self, self.options.idle_sleep)
+        # Writes memory items from the chats while it is idle (``recall_source = "items"``);
+        # it and the sleep take turns on the memory.
+        self.idle_encode = IdleEncode(
+            self, self.options.idle_encode, busy=self.idle_sleep.busy
+        )
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
@@ -521,6 +530,7 @@ class Console:
                 )
             self.chore_runner.start()
             self.idle_sleep.start()
+            self.idle_encode.start()
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_open_reason = (
@@ -592,6 +602,7 @@ class Console:
         await self.chore_runner.aclose()
         await self.serve.aclose()
         await self.idle_sleep.aclose()
+        await self.idle_encode.aclose()
         await self.explanations.aclose()
         for each in (self.front, *self._side_fronts.values()):
             await each.aclose()
