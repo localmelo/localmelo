@@ -197,8 +197,8 @@ def test_the_renderer_lists_the_turns_calls_and_the_items_to_come() -> None:
     )
     rows = turn.renderer.steps()
     assert [(row.status, row.tool, row.kind) for row in rows] == [
-        ("ok", "file_read", "read"),
-        ("failed", "shell_exec", "run"),
+        ("ok", "Read a file", "read"),
+        ("failed", "Ran a command", "run"),
         ("next", "Run the tests", ""),
     ]
     # An item that is not a mapping is skipped; after the turn none is to come.

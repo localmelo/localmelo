@@ -22,6 +22,7 @@ import pytest
 
 from localmelo.support.config import ConsoleConfig
 from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
+from localmelo.support.gateway.chore_store import CHORE_NOTE
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import chores as chores_module
 from localmelo.support.gateway.console.chores import CHECKIN_S, ChoreOptions
@@ -117,6 +118,15 @@ async def set_state(console: Console, task_id: str, state: str, at: float) -> No
             "UPDATE tasks SET state = ?, started_at = COALESCE(started_at, ?), "
             "finished_at = ?, updated_at = ? WHERE task_id = ?",
             (state, at, ended, at, task_id),
+        )
+
+
+async def set_waiting(console: Console, task_id: str, at: float) -> None:
+    """*task_id* holds on an approval as of *at*."""
+    await set_state(console, task_id, "held", at)
+    async with console.store.component_transaction("test_state") as conn:
+        await conn.execute(
+            "UPDATE tasks SET wait_reason = 'approval' WHERE task_id = ?", (task_id,)
         )
 
 
@@ -336,7 +346,8 @@ async def test_a_due_chore_starts_one_user_rule_task_and_plans_its_next_run(
         assert (record.origin, record.front_id, record.title, record.level) == (
             "user_rule", console.main_id, "Calendar brief", 1
         )  # fmt: skip
-        assert record.spec["objective"] == "Brief me on my calendar"
+        assert record.spec["objective"] == f"Brief me on my calendar\n\n{CHORE_NOTE}"
+        assert record.spec["user_words"] == "Brief me on my calendar"
         assert record.reason == "Chore, every weekday at 8:30"
         assert (
             record.request_key == f"chore:{chore['id']}:{int(at('2026-10-28 08:30'))}"
@@ -589,28 +600,6 @@ async def test_a_finished_chore_run_is_summarized_once_in_one_card(
         assert llm.requests == []
 
 
-async def test_a_task_that_waits_for_the_person_is_mentioned_after_a_whole_beat(
-    tmp_path: Path,
-) -> None:
-    async with chore_console(tmp_path, summary=Summary("Slides waits for you.")) as (
-        console, client, clock, summary, _
-    ):  # fmt: skip
-        task, _ = await console.workers.create(
-            {"objective": "Make slides", "title": "Slides"}
-        )
-        await set_state(console, task["task_id"], "waiting", clock.now)
-        # Just began waiting: the approval card already told the person, so not yet.
-        await console.chore_runner.checkin()
-        assert summary.facts == []
-        clock.now += CHECKIN_S + 1
-        card = await console.chore_runner.checkin()
-        assert card is not None and card["line"] == "Slides waits for you."
-        assert summary.facts == [["Slides: waiting for the user"]]
-        # Mentioned once; the next check-in says nothing.
-        clock.now += CHECKIN_S
-        assert await console.chore_runner.checkin() is None
-
-
 async def test_the_checkin_switch_off_posts_nothing_and_keeps_results_for_later(
     tmp_path: Path,
 ) -> None:
@@ -723,44 +712,44 @@ async def tap(client: httpx.AsyncClient, echo_id: int, do: str) -> httpx.Respons
     return await client.post(f"/api/front/echoes/{echo_id}", json={"do": do})
 
 
-async def test_a_repeating_phrase_proposes_a_chore_and_saves_nothing(
+BRIEFING = "every weekday at 8:30, brief me on my calendar"
+
+
+async def test_the_card_for_a_repeating_phrase_keeps_the_whole_message(
     tmp_path: Path,
 ) -> None:
     async with chore_console(tmp_path) as (console, client, _, _, llm):
-        response = await _say(
-            client, console, "every weekday at 8:30, brief me on my calendar"
-        )
-        assert response.status_code == 200, response.text
-        echo = response.json()["echo"]
+        echo = await console.front.propose_chore(BRIEFING)
+        assert echo is not None
         assert (
             echo["echo"] == "chore"
             and echo["line"] == "Run this every weekday at 8:30?"
         )
-        assert echo["typed"] == "every weekday at 8:30, brief me on my calendar"
         assert (echo["title"], echo["text"], echo["when"], echo["level"]) == (
-            "brief me on my calendar", "brief me on my calendar", "every weekday at 8:30", 2
+            "brief me on my calendar", BRIEFING, "every weekday at 8:30", 2
         )  # fmt: skip
         assert echo["schedule"] == {"kind": "weekdays", "at": "08:30"}
-        # No model call for the schedule, and nothing is saved or started without the tap.
-        assert llm.requests == []
+        # Nothing is saved or started without the tap.
         assert (await client.get("/api/chores")).json()["chores"] == []
         assert await tasks_of(console) == []
 
 
 async def test_a_chinese_phrase_is_read_the_same_way(tmp_path: Path) -> None:
     async with chore_console(tmp_path) as (console, client, _, _, llm):
-        echo = (await _say(client, console, "每天早上九点 总结我的邮件")).json()["echo"]
-        assert (echo["line"], echo["text"], echo["schedule"]) == (
-            "Run this every day at 9:00?", "总结我的邮件", {"kind": "daily", "at": "09:00"}
+        typed = "每天早上九点 总结我的邮件"
+        echo = await console.front.propose_chore(typed)
+        assert echo is not None
+        assert (echo["line"], echo["title"], echo["text"], echo["schedule"]) == (
+            "Run this every day at 9:00?", "总结我的邮件", typed, {"kind": "daily", "at": "09:00"}
         )  # fmt: skip
-        assert llm.requests == []
 
 
 async def test_save_chore_keeps_it_and_undo_removes_it(tmp_path: Path) -> None:
     async with chore_console(tmp_path) as (console, client, _, _, _):
-        proposal = (
-            await _say(client, console, "every day at 21:00 urgent: back up notes.md")
-        ).json()["echo"]
+        proposal = await console.front.propose_chore(
+            "every day at 21:00 urgent: back up notes.md"
+        )
+        assert proposal is not None
         assert proposal["level"] == 1  # an urgency word in the work, as for a task
         saved = await tap(client, proposal["id"], "save")
         assert saved.status_code == 200, saved.text
@@ -785,40 +774,30 @@ async def test_save_chore_keeps_it_and_undo_removes_it(tmp_path: Path) -> None:
 
 async def test_just_once_runs_it_as_a_task_and_saves_no_chore(tmp_path: Path) -> None:
     async with chore_console(tmp_path) as (console, client, _, _, _):
-        proposal = (
-            await _say(
-                client, console, "every weekday at 8:30, brief me on my calendar"
-            )
-        ).json()["echo"]
+        proposal = await console.front.propose_chore(BRIEFING)
+        assert proposal is not None
         started = await tap(client, proposal["id"], "once")
         assert started.status_code == 200, started.text
         echo = started.json()["echo"]
         assert (echo["echo"], echo["of"]) == ("started", proposal["id"])
         [record] = await tasks_of(console)
-        assert (record.origin, record.spec["objective"]) == (
-            "user",
-            "brief me on my calendar",
-        )
+        assert (record.origin, record.spec["objective"]) == ("user", BRIEFING)
         assert (await client.get("/api/chores")).json()["chores"] == []
         assert (await tap(client, proposal["id"], "cancel")).status_code == 409
 
 
 async def test_cancel_saves_and_starts_nothing(tmp_path: Path) -> None:
     async with chore_console(tmp_path) as (console, client, _, _, _):
-        proposal = (
-            await _say(
-                client, console, "every weekday at 8:30, brief me on my calendar"
-            )
-        ).json()["echo"]
+        proposal = await console.front.propose_chore(BRIEFING)
+        assert proposal is not None
         done = await tap(client, proposal["id"], "cancel")
         assert done.json()["echo"]["line"] == "Not saved: brief me on my calendar"
         assert (await client.get("/api/chores")).json()[
             "chores"
         ] == [] and await tasks_of(console) == []
         # A save and an undo only fit their own lines.
-        other = (await _say(client, console, "daily at 9 check the news")).json()[
-            "echo"
-        ]
+        other = await console.front.propose_chore("daily at 9 check the news")
+        assert other is not None
         assert (await tap(client, other["id"], "undo")).status_code == 400
         assert (await tap(client, other["id"], "apply")).status_code in (400, 404)
 
@@ -850,26 +829,31 @@ async def test_other_messages_reach_the_model_as_before(tmp_path: Path) -> None:
         assert await echoes(console, "chore") == []
 
 
-async def test_a_polite_request_with_a_schedule_is_a_proposal_but_an_attachment_is_not(
+async def test_a_polite_request_with_a_schedule_is_a_proposal(tmp_path: Path) -> None:
+    typed = "every day at 9, can you check the news?"
+    async with chore_console(tmp_path) as (console, _, _, _, _):
+        echo = await console.front.propose_chore(typed)
+        assert echo is not None
+        assert (echo["echo"], echo["text"]) == ("chore", typed)
+
+
+async def test_a_schedule_is_the_models_to_read_and_an_attachment_gets_no_card(
     tmp_path: Path,
 ) -> None:
-    async with chore_console(tmp_path) as (console, client, _, _, llm):
-        echo = (
-            await _say(client, console, "every day at 9, can you check the news?")
-        ).json()["echo"]
-        assert (echo["echo"], echo["text"]) == ("chore", "can you check the news?")
+    typed = "every day at 9 check the news"
+    async with chore_console(tmp_path, answer("Noted.")) as (console, client, _, _, _):
+        # Code leaves the words to the model, as it leaves any other message.
+        assert await console.front.route(typed, typed, as_task=False, key=None) is None
         # An attached file is one-time: the message is not turned into a chore.
-        front = console.front
-        assert (
-            await front.route(
-                "every day at 9 check the news",
-                "every day at 9 check the news\n[file]",
-                as_task=False,
-                key=None,
-            )
-            is None
+        response = await _say(
+            client,
+            console,
+            typed,
+            attachments=[{"name": "a.txt", "text": "x", "chars": 1}],
         )
-        assert llm.requests == []
+        assert response.status_code == 202, response.text
+        await _wait_turn(client, str(console.main_id))
+        assert await echoes(console, "chore") == []
 
 
 # ── Reminders: a one-time chore ──
@@ -1239,7 +1223,7 @@ async def test_the_checkin_is_written_in_the_console_s_language(
         task, _ = await console.workers.create(
             {"objective": "Make slides", "title": "Slides"}
         )
-        await set_state(console, task["task_id"], "waiting", clock.now)
+        await set_waiting(console, task["task_id"], clock.now)
         clock.now += CHECKIN_S + 1
         # The setting wins; with the setting on auto, the language a page asked for last.
         assert console.language() == "en"
@@ -1265,7 +1249,7 @@ async def test_the_checkin_the_code_writes_is_in_the_console_s_language(
             task, _ = await console.workers.create(
                 {"objective": "Do it", "title": title}
             )
-            await set_state(console, task["task_id"], "waiting", clock.now)
+            await set_waiting(console, task["task_id"], clock.now)
         clock.now += CHECKIN_S + 1
         card = await console.chore_runner.checkin()
         assert card is not None and card["line"] in (

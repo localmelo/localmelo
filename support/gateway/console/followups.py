@@ -77,7 +77,7 @@ from localmelo.support.task_cli import ending_words
 from ..auto_blocks import denied_steps
 from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..front_rules import FINISHED, reply_language
-from ..task_endings import shown
+from ..task_endings import job_finished, shown
 from ..task_files import files_line
 from ..task_store import TaskRecord, TaskStoreError
 from .asks import FOLLOWUP_ORIGIN
@@ -166,17 +166,14 @@ def why_follow(record: TaskRecord, status: str | None) -> str | None:
     """
     if is_out_of_steps(record.state, record.wait_reason):
         return "out_of_steps"
-    found = shown(record)
-    ending = found or {}
-    state = ending.get("state")
     if record.state == "done":
-        if found is None or state == "ready":
+        if job_finished(record):
             return "ready"
         return {
             "draft": "not_finished",
             "blocked": "needs_you",
             "failed": "failed",
-        }.get(str(state))
+        }.get(str((shown(record) or {}).get("state")))
     if record.state != "failed":
         return None
     reason = record.wait_reason or ""

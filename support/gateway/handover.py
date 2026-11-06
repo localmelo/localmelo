@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any, Final, NamedTuple
 
 from localmelo.melo.agent._earlier import EARLIER_END, EARLIER_HEAD, earlier_block
+from localmelo.support.gateway.task_files import files_line
 from localmelo.support.memory import ChatMemory, note_gate
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import (
@@ -72,6 +73,9 @@ LEFT_OUT_TOPICS: Final = frozenset({"people", "decisions"})
 # How a turn of the chat itself is named once a task reads it.
 _THIS_CHAT: Final = "this chat"
 _STARTING_CHAT: Final = "the chat that started this task"
+# The room of a finished task's record in what a new task is handed (#567): the
+# rest of :data:`PICKED_CHARS` is what the chat's turn recalled.
+TASK_LINE_CHARS: Final = 600
 # What a memory item says, without ids, when another item disagrees with it.
 DISAGREES: Final = " (another memory item disagrees with it)"
 # A bracketed span shaped like a block's heading or end line: melo's headings
@@ -105,6 +109,8 @@ class Handover:
     # none), and the earlier turns an opened line carries whole.
     kept: tuple[tuple[str, str], ...] = ()
     kept_over: tuple[tuple[str, int], ...] = ()
+    # The finished task this work follows on, as one ``- `` line (:func:`task_line`).
+    finished_task: str = ""
 
 
 async def handover_of(
@@ -156,6 +162,20 @@ async def handover_of(
         opened=tuple(dict(entry) for entry in chat.opened),
         digest=chat.digest.items if chat.digest is not None else (),
     )
+
+
+def task_line(title: str, answer: str, files: Sequence[str]) -> str:
+    """A finished task's record as one ``- `` line of what a new task is handed.
+
+    A worker is one-time (#567): new work on what it did is a new worker, which
+    reads this as data: its title, its answer cut at a sentence end, and the files
+    it wrote. Its record is the chat's own, so it comes with memory off too.
+    """
+    named = f"the finished task “{_plain(title)}”"
+    written = f" (files it wrote: {files_line(files)})" if files else ""
+    room = max(TASK_LINE_CHARS - len(named) - len(written) - 4, OPENED_FLOOR)
+    said = cut_at_sentence(_flat(_plain(answer)), room)
+    return f"- {named}: {said}{written}" if said else f"- {named}{written}"
 
 
 def own_words(words: str, objective: str) -> str:

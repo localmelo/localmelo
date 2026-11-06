@@ -29,6 +29,7 @@ from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
+    BROWSING_OFF_NOTE,
     CHAT_NOTE,
     ECHO_EVENT,
     FRONT_TEXT,
@@ -171,7 +172,8 @@ def _hear(console: Console, session: str, kind: str, data: dict[str, Any]) -> No
 
 def _asked(llm: ScriptedLLM, request: int = -1) -> str:
     """The user message the model was last sent, without the chat's reminder."""
-    return str(llm.requests[request][-1].content).removesuffix("\n\n" + CHAT_NOTE)
+    said = str(llm.requests[request][-1].content).removesuffix("\n\n" + CHAT_NOTE)
+    return said.removesuffix("\n\n" + BROWSING_OFF_NOTE)
 
 
 # ── 1. The task tools and code's rules ──
@@ -715,10 +717,10 @@ async def test_a_chore_made_in_a_side_chat_belongs_to_it_and_reports_there(
 ) -> None:
     async with chats_console(tmp_path) as (console, client, _):
         side = await _side(client, tmp_path, "Trip plan")
-        proposed = await _say_in(
-            client, side, "Brief me on the news every weekday at 8:30"
+        proposed = await console.front_for(side).propose_chore(
+            "Brief me on the news every weekday at 8:30"
         )
-        assert proposed["echo"] == "chore"
+        assert proposed is not None and proposed["echo"] == "chore"
         assert await _events(console, str(console.main_id), ECHO_EVENT) == []
         saved = await client.post(
             f"/api/front/echoes/{proposed['id']}",
@@ -748,9 +750,10 @@ async def test_the_main_chats_chores_still_report_in_the_check_in(
         client,
         _,
     ):
-        proposed = (
-            await _say(client, console, "Brief me on the news every weekday at 8:30")
-        ).json()["echo"]
+        proposed = await console.front.propose_chore(
+            "Brief me on the news every weekday at 8:30"
+        )
+        assert proposed is not None
         await client.post(f"/api/front/echoes/{proposed['id']}", json={"do": "save"})
         [chore] = await console.chore_runner.store.list_chores()
         assert chore.front_id == console.main_id

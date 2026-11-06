@@ -67,6 +67,7 @@ from localmelo.support.gateway.finishing import (
 )
 from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.handover import (
+    PICKED_CHARS,
     Handover,
     inert,
     kept_lines,
@@ -189,6 +190,12 @@ WORKER_GUIDE = (
     "Ending: ready (done as asked), Ending: blocked: <what only the person can "
     "give> (say blocked only then), Ending: failed or Ending: dropped (made "
     "moot); code checks it against your own test runs and commits. " + ACTING_RULE
+)
+# What a worker with no browser is told after its guide (#567).
+NO_BROWSER_NOTE: Final = (
+    "This run has no browser: read public pages with web_fetch. For what needs a "
+    "website (signing in, clicking, filling in a form), say in your report that "
+    "browsing is off and that Settings, Browser or /browser chrome turns it on."
 )
 # The heading of a task's context pack on its first request: the notes are data.
 TASK_PACK_HEADER: Final = (
@@ -885,30 +892,35 @@ class TaskWorkers:
         what its turn picked, and the keys of the notes among them.
 
         Nothing without a handover. The turns are the chat's own conversation,
-        which its run carries with memory on or off; with memory off nothing is
-        picked. A task started from a card gets what the offering turn kept
-        (``handover.kept``), checked again now. A failed read of the picked
-        items keeps the turns, and is logged.
+        which its run carries with memory on or off, and so is the record of a
+        finished task the work follows on, the first picked line and in the same
+        room; with memory off nothing else is picked. A task started from a card
+        gets what the offering turn kept (``handover.kept``), checked again now.
+        A failed read of the picked items keeps the rest, and is logged.
         """
         if handover is None:
             return "", "", frozenset()
         turns, shown = turn_lines(handover)
+        task = handover.finished_task
         if self.memory is None or not self._memory_on():
-            return turns, "", frozenset()
+            return turns, task, frozenset()
         try:
             picked = await (
                 kept_lines(self.memory, handover)
                 if handover.kept
-                else picked_lines(self.memory, handover, shown=shown)
+                else picked_lines(
+                    self.memory, handover, shown=shown, chars=PICKED_CHARS - len(task)
+                )
             )
         except Exception:
             log.warning(
                 "Could not read what the chat recalled for a task", exc_info=True
             )
-            return turns, "", frozenset()
+            return turns, task, frozenset()
         if picked.over:  # an opened line carries those turns whole
             turns, _ = turn_lines(handover, leave_out=picked.over)
-        return turns, picked.lines, picked.notes
+        lines = "\n".join(line for line in (task, picked.lines) if line)
+        return turns, lines, picked.notes
 
     async def _task_pack(
         self,
@@ -2406,6 +2418,10 @@ class TaskWorkers:
             # a browser and the longer step bound.
             chat = await self._person_chat(record)
             settings = self.settings()
+            driver = "off" if chat is None else configured_driver(settings)
+            guide = (
+                f"{WORKER_GUIDE} {NO_BROWSER_NOTE}" if driver == "off" else WORKER_GUIDE
+            )
             try:
                 agent = await build_session_agent(
                     cfg=settings,
@@ -2423,7 +2439,7 @@ class TaskWorkers:
                                 builtins=worker_tool_allowlist("user").builtins,
                                 confine_writes=settings.agent.confine_writes,
                                 tool_env=tool_env,
-                                identity=WORKER_GUIDE,
+                                identity=guide,
                                 task_aids=True,
                                 max_extensions=(
                                     MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
@@ -2431,9 +2447,7 @@ class TaskWorkers:
                             ),
                         ),
                     ),
-                    browser_driver=(
-                        "off" if chat is None else configured_driver(settings)
-                    ),
+                    browser_driver=driver,
                     # What its pages hand over stays in its chat's work folder.
                     chat_id=chat,
                     # What it opens stays in melo's browser: another app's window is

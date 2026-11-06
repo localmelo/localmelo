@@ -45,22 +45,11 @@ from .test_turn_writes import _post_turn, _wait_turn
 # ── R1. A question, a matching title, a negation: no task from the model's call ──
 
 
-@pytest.mark.parametrize(
-    ("typed", "call"),
-    [
-        (
-            "What does report.md say?",
-            {"title": "Delete report", "objective": "Delete report.md"},
-        ),
-        (
-            "Do not delete report.md; just explain what it contains.",
-            {"title": "Delete report", "objective": "Delete report.md"},
-        ),
-    ],
-)
-async def test_a_title_that_matches_the_words_is_no_authority_to_start_a_task(
-    tmp_path: Path, typed: str, call: dict[str, str]
+async def test_a_title_that_matches_words_that_say_not_to_act_starts_no_task(
+    tmp_path: Path,
 ) -> None:
+    typed = "Do not delete report.md; just explain what it contains."
+    call = {"title": "Delete report", "objective": "Delete report.md"}
     scripts = [[tool_call("task_create", call), answer("I offered it.")]]
     async with chats_console(tmp_path, sides=scripts) as (console, client, models):
         side = (await _open(client, typed))["session"]["id"]
@@ -71,20 +60,19 @@ async def test_a_title_that_matches_the_words_is_no_authority_to_start_a_task(
         assert str(models[side].requests[1][-1].content).startswith("Not done")
 
 
-async def test_words_that_ask_to_be_told_start_no_task_whatever_the_model_wrote(
+async def test_what_runs_is_the_persons_words_whatever_the_model_wrote(
     tmp_path: Path,
 ) -> None:
-    # #410: "Tell me about …" asks to be told; the model's objective is never a task.
+    # The model's call starts the task; its objective is never what the task does.
     typed = "Tell me about report.md"
     call = {"title": "Report", "objective": "Delete every other file"}
     scripts = [[tool_call("task_create", call), answer("Here is what it says.")]]
-    async with chats_console(tmp_path, sides=scripts) as (console, client, models):
+    async with chats_console(tmp_path, sides=scripts) as (console, client, _):
         side = (await _open(client, typed))["session"]["id"]
         await _wait_turn(client, side)
-        assert await console.workers.tasks.list_tasks() == []
-        assert await _events(console, side, ECHO_EVENT) == []
-        result = str(models[side].requests[1][-1].content)
-        assert result.startswith("Not done") and "Delete every other file" not in result
+        [task] = await console.workers.tasks.list_tasks()
+        assert task.spec["objective"] == typed
+        assert "Delete every other file" not in str(task.spec)
 
 
 async def test_an_admitted_task_is_the_persons_message_and_the_models_reading_is_data(

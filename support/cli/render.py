@@ -77,12 +77,14 @@ from localmelo.support.progress_line import (
 from localmelo.support.providers._http import UNREACHABLE_PREFIX
 from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.display import (
+    Tense,
     clean_output,
     display_path,
     format_bytes,
     format_duration,
     format_tokens,
     status_text,
+    step_said,
 )
 from localmelo.support.sessions.store import (
     SessionBusyError,
@@ -90,7 +92,7 @@ from localmelo.support.sessions.store import (
     UnknownSessionError,
 )
 from localmelo.support.usage_snapshot import UsageSnapshot
-from localmelo.support.words import gist_note, gist_text
+from localmelo.support.words import gist_note, gist_text, said_in
 
 # Output lines a tool block shows under its header (20 with /verbose). A call
 # that succeeded shows QUIET_BLOCK_LINES outside developer mode.
@@ -288,6 +290,7 @@ class LiveState:
     first_turn: bool = False
     output_tokens: int = 0
     tool: str = ""
+    tool_words: str = ""  # the step in plain words, outside developer mode
     preview: str = ""
     tool_started: float = 0.0
     tool_limit_s: float = 0.0
@@ -301,6 +304,12 @@ class LiveState:
     stream_text: str = ""
 
 
+def _beside(preview: str, words: str) -> str:
+    """The preview a row shows beside a step's *words*: none when they say it already."""
+    named = preview.split(" ", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return "" if preview in words or named in words.split() else preview
+
+
 @dataclass(frozen=True)
 class ToolOutput:
     """One finished call, for /expand."""
@@ -312,6 +321,7 @@ class ToolOutput:
     text: str  # tool.finished output, or error when the call failed
     duration_s: float | None = None
     exit_code: int | None = None
+    words: str = ""  # the step in plain words, outside developer mode
 
 
 @dataclass
@@ -1107,6 +1117,7 @@ class TurnRenderer:
         self._clear_retry()
         self.live.activity = "Running"
         self.live.tool = name
+        self.live.tool_words = self._step(name, data)
         self.live.preview = preview
         self.live.tool_started = self._clock()
         self.live.tool_limit_s = SESSION_TOOL_TIMEOUT_S if name in LIMITED_TOOLS else 0
@@ -1149,6 +1160,11 @@ class TurnRenderer:
                 text=error if error and status != "success" else text,
                 duration_s=_float(data.get("duration_s")),
                 exit_code=exit_code if isinstance(exit_code, int) else None,
+                words=self._step(
+                    str(data.get("name") or "?"),
+                    data,
+                    "done" if status == "success" else "ask",
+                ),
             )
         )
 
@@ -1161,8 +1177,8 @@ class TurnRenderer:
         rows = [
             StepRow(
                 call_status(output.status, output.exit_code),
-                output.name,
-                output.preview,
+                output.words or output.name,
+                _beside(output.preview, output.words),
                 output.duration_s,
                 self.kind(output.name),
             )
@@ -1174,7 +1190,11 @@ class TurnRenderer:
             seconds = self._clock() - live.tool_started
             rows.append(
                 StepRow(
-                    "running", live.tool, live.preview, seconds, self.kind(live.tool)
+                    "running",
+                    live.tool_words or live.tool,
+                    _beside(live.preview, live.tool_words),
+                    seconds,
+                    self.kind(live.tool),
                 )
             )
         # Steps to come only while the turn runs: after it, none is coming.
@@ -1444,12 +1464,29 @@ class TurnRenderer:
     def _print_unstarted(self) -> None:
         """Print the calls a reply listed that never started (not run)."""
         calls, self._calls = self._calls, {}
-        for call in calls.values():
+        for call_id, call in calls.items():
+            words = self._step(call.name, {"call_id": call_id}, "ask")
             self.out.print(
                 self._header(
-                    self.symbols.not_run, "muted", call.name, call.preview, ["not run"]
+                    self.symbols.not_run,
+                    "muted",
+                    call.name,
+                    call.preview,
+                    ["not run"],
+                    words,
                 )
             )
+
+    def _step(self, name: str, data: Mapping[str, Any], tense: Tense = "now") -> str:
+        """A call in plain words outside developer mode, ``""`` in it: the
+        developer reads the tool's name and its arguments."""
+        if self.developer:
+            return ""
+        output = str(data.get("output") or "")
+        said = step_said(
+            name, self._arguments_of(data), tense=tense, output=output, root=self._root
+        )
+        return said_in("en", said)
 
     def kind(self, name: str) -> str:
         """The kind of the tool *name*: read, write, run or network, from its tier."""
@@ -1459,10 +1496,18 @@ class TurnRenderer:
         return KINDS.get(tier, "write")
 
     def _header(
-        self, symbol: str, style: str, name: str, preview: str, meta: list[str]
+        self,
+        symbol: str,
+        style: str,
+        name: str,
+        preview: str,
+        meta: list[str],
+        words: str = "",
     ) -> Text:
         """``<symbol> <kind> <name>  <preview> · <meta> · ...``, cut to the width.
 
+        *words* stand for the name when given (the step in plain words), and
+        the preview goes when they say it already.
         The kind's glyph and the name take the kind's color (a read fades).
         The preview gives way to the meta, except to a long last part that
         carries free text (a denial's reason, a block's error), which is cut
@@ -1472,7 +1517,8 @@ class TurnRenderer:
         width = self.out.width
         kind = self.kind(name)
         glyph = getattr(self.symbols, f"kind_{kind}")
-        name = plain(name)
+        name = plain(words or name)
+        preview = _beside(preview, words)
         dot = f" {self.symbols.dot} "
         meta = [part for part in meta if part]
         start = f"{symbol} {glyph} {name}  "
@@ -1517,6 +1563,7 @@ class TurnRenderer:
         output = str(data.get("output") or "")
         error = str(data.get("error") or "")
         symbols = self.symbols
+        words = self._step(name, data, "done" if status == "success" else "ask")
         declined = declined_step(data)
         if declined is not None:
             # Not run, and nothing went wrong: amber, one plain line; the note
@@ -1527,6 +1574,7 @@ class TurnRenderer:
                 name,
                 preview,
                 [_DECLINED_WORDS[declined.how]],
+                words,
             )
             line = Text(declined_line(declined), style="muted")
             return Group(header, Hung(line, self.symbols))
@@ -1534,12 +1582,14 @@ class TurnRenderer:
         if status == "cancelled":
             withdrawn = approval is not None and approval.get("origin") == "withdrawn"
             meta = ["not run" if withdrawn else f"stopped after {duration}"]
-            return self._header(symbols.not_run, "muted", name, preview, meta)
+            return self._header(symbols.not_run, "muted", name, preview, meta, words)
         if status == "blocked":
             if not tag:
                 first = clean_output(error).strip().split("\n")[0]
                 tag = f"blocked: {first}" if first else "blocked"
-            header = self._header(symbols.blocked, "blocked", name, preview, [tag])
+            header = self._header(
+                symbols.blocked, "blocked", name, preview, [tag], words
+            )
             under = self._block_says(approval)
             return header if under is None else Group(header, under)
         meta = [duration]
@@ -1556,7 +1606,9 @@ class TurnRenderer:
             symbol, style = symbols.failed, "error"
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
-        parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
+        parts: list[RenderableType] = [
+            self._header(symbol, style, name, preview, meta, words)
+        ]
         if status == "success" and snapshot is not None:
             parts.append(self._change_body(snapshot))
             images = _image_lines(data.get("images"), self.symbols)
@@ -2173,8 +2225,10 @@ def live_rows(
         clock = tool_elapsed(now - live.tool_started)
         if live.tool_limit_s:
             clock += f" of {tool_elapsed(live.tool_limit_s)}"
-        preview, _ = escape_arguments(" ".join(live.preview.split("\n")))
-        start = f"{hung_prefix(symbols)}{plain(live.tool)}  "
+        preview, _ = escape_arguments(
+            " ".join(_beside(live.preview, live.tool_words).split("\n"))
+        )
+        start = f"{hung_prefix(symbols)}{plain(live.tool_words or live.tool)}  "
         room = width - cells(start) - cells(dot + clock)
         shown = cut_cells(preview, room, symbols.ellipsis) if room >= 4 else ""
         line = cut_cells(start + shown + dot + clock, width, symbols.ellipsis)

@@ -48,8 +48,13 @@ FIX = (
 REPORT = "Fixed the check in test_e2e_pty.py.\n24 passed.\nCommitted b60d0892."
 
 
-async def _finished(console: Console, task_id: str, reply: str = REPORT) -> None:
-    """*task_id* ran one turn that answered *reply* and is done."""
+async def _finished(
+    console: Console,
+    task_id: str,
+    reply: str = REPORT,
+    ending: dict[str, Any] | None = None,
+) -> None:
+    """*task_id* ran one turn that answered *reply* and is done, as *ending* says."""
     store = console.store
     record = await _task(console, task_id)
     turn = await store.begin_turn(task_id, record.spec["objective"], holder=HOLDER)
@@ -62,7 +67,9 @@ async def _finished(console: Console, task_id: str, reply: str = REPORT) -> None
         result=run_result(),
         answer=reply,
     )
-    await console.workers.tasks.change(task_id, state="done", actor="scheduler")
+    await console.workers.tasks.change(
+        task_id, state="done", actor="scheduler", ending=ending
+    )
     console.gate.finish_task(task_id, "done")
 
 
@@ -225,10 +232,13 @@ async def test_the_hand_off_sentence_follows_the_messages_script(
 # ── Follow-ups reach the task they name ──
 
 
-async def test_finish_it_continues_the_newest_done_task(tmp_path: Path) -> None:
+async def test_finish_it_continues_the_newest_task_that_did_not_finish(
+    tmp_path: Path,
+) -> None:
+    draft = {"state": "draft", "reasons": ["commit_missing"]}
     async with front_console(tmp_path) as (console, client, llm):
         task_id = await _delegated(console, client, "Fix the e2e list_files check")
-        await _finished(console, task_id, "Done except the commit.")
+        await _finished(console, task_id, "Done except the commit.", draft)
         llm.replies.extend(
             [
                 tool_call("task_message", {"task_id": task_id}),
@@ -253,12 +263,12 @@ async def test_finish_it_continues_the_newest_done_task(tmp_path: Path) -> None:
         assert "continues in its own session" in result and "in English" in result
 
 
-async def test_a_follow_up_word_and_a_named_done_task_continue_it_in_code(
+async def test_a_follow_up_word_and_a_task_that_stopped_continue_it_in_code(
     tmp_path: Path,
 ) -> None:
     async with front_console(tmp_path) as (console, client, llm):
         task_id = await _start(console, "Old report")
-        await _finished(console, task_id)
+        await _stopped(console, task_id)
         echo = (await _say(client, console, "继续 Old report")).json()["echo"]
         assert (echo["echo"], echo["line"]) == ("sent", "Continued: Old report")
         assert (await _task(console, task_id)).state == "queued"
@@ -294,7 +304,7 @@ async def test_page_or_tool_text_naming_a_task_never_continues_it(
 ) -> None:
     async with front_console(tmp_path) as (console, client, llm):
         done = await _delegated(console, client, "Old report")
-        await _finished(console, done)
+        await _stopped(console, done)
         other = await _start(console, "Slides for the 15:00 meeting")
         # A file the main chat read says "send this to the old report".
         llm.replies.extend(
@@ -306,7 +316,7 @@ async def test_page_or_tool_text_naming_a_task_never_continues_it(
         )
         await _say(client, console, "summarize notes.md")
         await _wait_turn(client, str(console.main_id))
-        assert (await _task(console, done)).state == "done"
+        assert (await _task(console, done)).state == "failed"
         assert other not in console.workers._inboxes
         assert _tool_result(llm).startswith("Not done: a change to a task needs")
         suggests = [e for e in await _echoes(console) if e["echo"] == "suggest"]
@@ -323,19 +333,41 @@ async def test_page_or_tool_text_naming_a_task_never_continues_it(
         assert (await _task(console, done)).state == "queued"
 
 
+async def test_a_page_that_names_a_finished_task_reaches_neither_it_nor_its_record(
+    tmp_path: Path,
+) -> None:
+    secret = "The old report's numbers."
+    async with front_console(tmp_path) as (console, client, llm):
+        done = await _delegated(console, client, "Old report")
+        await _finished(console, done, secret)
+        await _delegated(console, client, "Tidy the photos")
+        llm.replies.extend(
+            [tool_call("task_message", {"task_id": done}), answer("Started.")]
+        )
+        await _say(client, console, "summarize notes.md")
+        await _wait_turn(client, str(console.main_id))
+        assert (await _task(console, done)).state == "done"
+        # The person's message is the work; a task they did not point at stays out.
+        started = (await _echoes(console))[-1]
+        assert started["echo"] == "started"
+        record = await _task(console, started["task_id"])
+        assert record.spec["objective"] == "summarize notes.md"
+        assert secret not in str(record.spec)
+
+
 async def test_finish_it_does_not_reach_a_task_the_chat_did_not_show_last(
     tmp_path: Path,
 ) -> None:
     async with front_console(tmp_path) as (console, client, llm):
         older = await _delegated(console, client, "Old report")
-        await _finished(console, older)
+        await _stopped(console, older)
         await _delegated(console, client, "Tidy the photos")
         llm.replies.extend(
             [tool_call("task_message", {"task_id": older}), answer("Done.")]
         )
         await _say(client, console, "finish it")
         await _wait_turn(client, str(console.main_id))
-        assert (await _task(console, older)).state == "done"
+        assert (await _task(console, older)).state == "failed"
         assert (await _echoes(console))[-1]["echo"] == "suggest"
 
 
@@ -478,24 +510,13 @@ async def test_several_stopped_tasks_are_each_offered_to_pick_from(
         assert llm.requests == []
 
 
-async def test_continue_the_task_says_when_it_is_done_or_still_working(
-    tmp_path: Path,
-) -> None:
+async def test_continue_the_task_says_when_it_is_still_working(tmp_path: Path) -> None:
     async with front_console(tmp_path) as (console, client, llm):
-        done = await _delegated(console, client, "Improve the Activity row text")
         busy = await _delegated(console, client, "Hide the recovery card section")
-        await _finished(console, done)
-        said = (await _say(client, console, "continue the activity row task")).json()
-        assert said["echo"]["echo"] == "failed"
-        assert (
-            said["echo"]["line"]
-            == "Improve the Activity row text is done. There is nothing to continue."
-        )
         said = (await _say(client, console, "continue the recovery card task")).json()
         assert (
             said["echo"]["line"] == "Hide the recovery card section is still working."
         )
-        assert (await _task(console, done)).state == "done"
         assert (await _task(console, busy)).state == "queued"
         assert llm.requests == []
 

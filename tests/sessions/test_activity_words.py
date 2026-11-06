@@ -14,6 +14,7 @@ from localmelo.support.sessions.display import (
     event_activity,
     request_said,
     request_words,
+    step_said,
 )
 from localmelo.support.words import said_in
 
@@ -110,7 +111,23 @@ def test_a_leading_done_gives_way_to_what_followed_it(
             "memory",
         ),
         ("mcp__files__file_read", {"path": "a/b.txt"}, "Reading b.txt", "read"),
-        ("mcp__calendar__list_events", {}, "Using a tool", "tool"),
+        ("mcp__calendar__list_events", {}, "Using list events", "tool"),
+        ("task_create", {"title": "Buy it"}, "Starting “Buy it”", "tool"),
+        ("task_create", {}, "Starting a task", "tool"),
+        ("task_schedule", {}, "Saving a schedule", "tool"),
+        ("task_list", {}, "Looking through the tasks", "tool"),
+        ("task_get", {"task_id": "abc"}, "Reading a task", "tool"),
+        ("task_message", {"task_id": "abc"}, "Sending your message to a task", "tool"),
+        ("task_set_priority", {}, "Changing the priority of a task", "tool"),
+        ("task_control", {"action": "stop"}, "Stopping a task", "tool"),
+        ("task_control", {"action": "pause"}, "Pausing a task", "tool"),
+        ("task_control", {"action": "resume"}, "Resuming a task", "tool"),
+        ("task_answer", {}, "Answering a task", "tool"),
+        ("task_continue", {}, "Continuing a task", "tool"),
+        ("ask_person", {}, "Asking you", "tool"),
+        ("ask_owner", {}, "Asking its chat", "tool"),
+        ("search_files", {"pattern": "def main"}, "Looking for “def main”", "read"),
+        ("some_new_tool", {}, "Using some new tool", "tool"),
         ("", None, "Thinking", "think"),
     ],
 )
@@ -118,6 +135,47 @@ def test_each_tool_reads_by_what_it_does(
     tool: str, arguments: Any, words: str, icon: str
 ) -> None:
     assert activity_text(tool, arguments) == ActivityText(words, icon)
+
+
+@pytest.mark.parametrize(
+    "tool, arguments, tense, output, words",
+    [
+        ("file_read", {"path": "a/notes.md"}, "done", "x", "Read notes.md"),
+        ("shell_exec", {"command": "ls"}, "ask", "", "Run a command"),
+        ("task_create", {"title": "Buy it"}, "done", "Started", "Started “Buy it”"),
+        # A call its own check refused did nothing, and its row says so.
+        (
+            "task_create",
+            {"title": "Buy it"},
+            "done",
+            "Not done: one task per message.",
+            "Not done: Start “Buy it”",
+        ),
+        ("task_message", {}, "done", "Sent to task a", "Sent your message to a task"),
+        # A finished task takes no new work: the message started a new one.
+        ("task_message", {}, "done", "Started task b: Prices", "Started a task"),
+        ("remember", {}, "done", "Not remembered: no.", "Could not keep a note"),
+        ("remember", {}, "done", "Noted.", "Kept a note"),
+    ],
+)
+def test_a_step_says_what_it_did(
+    tool: str, arguments: Any, tense: Any, output: str, words: str
+) -> None:
+    said = step_said(tool, arguments, tense=tense, output=output)
+    assert said_in("en", said) == words
+
+
+def test_every_step_has_its_words_in_chinese_too() -> None:
+    for tool, arguments in (
+        ("task_create", {}),
+        ("task_schedule", {}),
+        ("task_message", {}),
+        ("task_control", {"action": "stop"}),
+        ("ask_person", {}),
+    ):
+        for tense in ("now", "done", "ask"):
+            words = said_in("zh-Hans", step_said(tool, arguments, tense=tense))
+            assert words and "steps." not in words and "a task" not in words
 
 
 def test_a_folder_inside_the_workspace_reads_relative_to_it() -> None:
@@ -232,7 +290,7 @@ def test_only_a_model_call_under_way_is_the_model_answering() -> None:
         ("browser_click_point", {"x": 1, "y": 2}, "Click on the page"),
         ("browser_type", {"ref": "e1", "text": "hunter2"}, "Type into a field"),
         ("browser_select", {"ref": "e1", "option": "x"}, "Choose from a list"),
-        ("mcp__calendar__list_events", {}, "Use a tool"),
+        ("mcp__calendar__list_events", {}, "Use list events"),
         ("", None, "Thinking"),
     ],
 )
@@ -286,7 +344,7 @@ def test_a_reason_changes_only_a_held_state() -> None:
             "正在读取 example.com",
         ),
         ("list_files", {"path": "/w"}, {"root": "/w"}, "正在浏览 文件夹"),
-        ("mcp__x__y", {}, {}, "正在使用 一个工具"),
+        ("mcp__x__y", {}, {}, "正在使用 y"),
         ("remember", {"text": "You prefer tea."}, {}, "正在记下"),
         ("", None, {}, "正在思考"),
         ("", None, {"state": "waiting"}, "在等你批准"),

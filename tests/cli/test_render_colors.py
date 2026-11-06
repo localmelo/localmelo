@@ -70,13 +70,13 @@ def _drawn(palette: Palette, renderable: RenderableType, part: str) -> Style:
 def test_a_tool_row_shows_its_kind_glyph_and_name_in_the_kind(
     name: str, glyph: str, role: str
 ) -> None:
-    header = _header_text(Turn(), name=name, duration_s=0.1)
+    header = _header_text(Turn(developer=True), name=name, duration_s=0.1)
     assert header.plain.startswith(f"✓ {glyph} {name} · ")
     assert _roles(header)[f"{glyph} {name}"] == role
 
 
 def test_the_kind_comes_from_the_sessions_tiers() -> None:
-    turn = Turn()
+    turn = Turn(developer=True)
     calls: list[int] = []
 
     def tiers() -> dict[str, str]:
@@ -98,7 +98,7 @@ def test_the_kind_comes_from_the_sessions_tiers() -> None:
 
 
 def test_the_kind_glyphs_have_ascii_stand_ins() -> None:
-    turn = Turn(symbols=ASCII)
+    turn = Turn(symbols=ASCII, developer=True)
     turn.renderer.tool_tiers = lambda: {"fetch_page": "network"}
     rows = [
         _header_text(turn, name=name).plain.split(" - ")[0]
@@ -127,7 +127,7 @@ def test_the_kind_glyphs_have_ascii_stand_ins() -> None:
     ],
 )
 def test_the_mark_takes_the_outcome(data: dict[str, Any], mark: str, role: str) -> None:
-    header = _header_text(Turn(), duration_s=0.1, **data)
+    header = _header_text(Turn(developer=True), duration_s=0.1, **data)
     assert header.plain[0] == mark
     assert _roles(header)[mark] == role
     exit_code = data.get("exit_code")
@@ -136,13 +136,13 @@ def test_the_mark_takes_the_outcome(data: dict[str, Any], mark: str, role: str) 
 
 
 def test_a_call_that_did_not_run_is_dim_as_a_whole_glyph_too() -> None:
-    header = _header_text(Turn(), status="cancelled", duration_s=1.0)
+    header = _header_text(Turn(developer=True), status="cancelled", duration_s=1.0)
     assert header.style == "muted" and header.plain.startswith("◌ $ shell_exec")
 
 
 def test_a_failed_first_line_is_in_the_error_role_and_a_success_is_not() -> None:
     for data, first in (({"exit_code": 1}, "error"), ({}, "")):
-        body = _hung_text(_block(Turn(), output="F..\nmore", **data)[-1])
+        body = _hung_text(_block(Turn(developer=True), output="F..\nmore", **data)[-1])
         assert _roles(body).get("F..", "") == first
 
 
@@ -150,7 +150,7 @@ def test_a_failed_first_line_is_in_the_error_role_and_a_success_is_not() -> None
 
 
 def test_a_write_body_colors_its_change() -> None:
-    renderer = Turn().renderer
+    renderer = Turn(developer=True).renderer
     new = Snapshot("r1", edits.Target("/w/n.md", exists=False), "a\n", 1, 0)
     old = Snapshot("r2", edits.Target("/w/o.md", exists=True, text="y\n"), "x\n", 1, 1)
     new_hung, old_hung = renderer._change_body(new), renderer._change_body(old)
@@ -196,7 +196,7 @@ def test_the_file_states_have_ascii_stand_ins() -> None:
 
 
 def test_kinds_and_outcomes_draw_in_their_colors_at_truecolor() -> None:
-    turn = Turn()
+    turn = Turn(developer=True)
     write = _header_text(turn, name="file_write", duration_s=0.1)
     failed = _header_text(turn, name="shell_exec", exit_code=1)
     read = _header_text(turn, name="file_read")
@@ -211,7 +211,7 @@ def test_kinds_and_outcomes_draw_in_their_colors_at_truecolor() -> None:
 
 
 def test_no_color_keeps_the_kinds_apart_by_glyph_and_weight() -> None:
-    turn = Turn()
+    turn = Turn(developer=True)
     none = Palette("none")
     write = _drawn(none, _header_text(turn, name="file_write"), "file_write")
     read = _drawn(none, _header_text(turn, name="file_read"), "file_read")
@@ -244,7 +244,7 @@ class _Kept(RecordingOut):
 
 def _turn_with_answer(answer: str = ANSWER) -> _Kept:
     out = _Kept()
-    turn = Turn()
+    turn = Turn(developer=True)
     turn.out = out
     turn.renderer.out = out
     turn.renderer.begin_turn("Write app.py.")
@@ -322,7 +322,7 @@ def test_the_answer_at_each_depth(
 
 def test_the_user_band_needs_a_fill() -> None:
     out = _Kept()
-    renderer = Turn().renderer
+    renderer = Turn(developer=True).renderer
     renderer.out = out
     renderer.echo("Write it.")
     [band] = out.kept

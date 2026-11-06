@@ -475,6 +475,23 @@ _HELD_CODES: Final = frozenset(
 _BROWSER_READS: Final = frozenset(
     {"browser_read", "browser_find", "browser_back", "browser_tabs", "browser_wait"}
 )
+# A chat's own steps (and a task's question to it): the verb, and what it acts on.
+_CHAT_STEPS: Final[Mapping[str, tuple[str, str]]] = {
+    "task_schedule": ("save", "steps.aSchedule"),
+    "task_list": ("look", "steps.theTasks"),
+    "task_get": ("read", "steps.aTask"),
+    "task_message": ("send", "steps.aTask"),
+    "task_set_priority": ("priority", "steps.aTask"),
+    "task_answer": ("reply", "steps.aTask"),
+    "task_continue": ("continue", "steps.aTask"),
+    "ask_person": ("asks", "steps.you"),
+    "ask_owner": ("asks", "steps.itsChat"),
+}
+_TASK_ACTIONS: Final = frozenset({"stop", "pause", "resume"})
+# A tool this table does not know reads by its own name, at most this long.
+_NAME_SHOWN: Final = 40
+# A step while it runs, once done, and as what a step that did not finish was to do.
+Tense = Literal["now", "done", "ask"]
 
 
 def _host(url: object) -> str:
@@ -535,10 +552,12 @@ def activity_text(
     A tool reads by what it does: ``Reading notes.md``, ``Looking through
     ~/talk``, ``Writing slides.md``, ``Running the tests``, ``Running a
     command``, ``Running Python``, ``Reading example.com``, ``Searching the web
-    for “asyncio TaskGroup”``. Only a file's name, a folder relative to *root*
-    (or with ``~``), a page's host and a search's words (a secret in them
-    hidden) are shown, never a command line, code or text. A tool this table
-    does not know reads ``Using a tool``; no state and no tool reads ``Thinking``.
+    for “asyncio TaskGroup”``, ``Starting “Buy it”``. Only a file's name, a folder
+    relative to *root* (or with ``~``), a page's host, a task's title and a
+    search's words (a secret in them hidden) are shown, never a command line,
+    code or text. A tool this table does not know (an outside tool, a name a
+    model made up) reads by its own name, ``Using list events``; no state and no
+    tool reads ``Thinking``.
     """
     if state == "held" and reason in _HELD_CODES:
         return _activity(
@@ -596,25 +615,64 @@ def activity_text(
         return _doing("lookAt", said("steps.thePage"), "web")
     if name in _BROWSER_READS:
         return _doing("read", said("steps.thePage"), "web")
+    if name == "search_files":
+        return _doing("find", _words_shown(args.get("pattern")), "read")
+    if name == "task_create":
+        title = args.get("title")
+        return _doing(
+            "start", _words_shown(title) if title else said("steps.aTask"), "tool"
+        )
+    if name == "task_control":
+        action = str(args.get("action") or "")
+        verb = action if action in _TASK_ACTIONS else "use"
+        return _doing(verb, said("steps.aTask"), "tool")
+    if name in _CHAT_STEPS:
+        verb, what = _CHAT_STEPS[name]
+        return _doing(verb, said(what), "tool")
     if not name:
         return _state("thinking")
-    return _doing("use", said("steps.aTool"), "tool")
+    words = redact_secrets(" ".join(name.replace("_", " ").split()))[0]
+    return _doing("use", words[:_NAME_SHOWN] or said("steps.aTool"), "tool")
+
+
+def step_said(
+    tool: str,
+    arguments: object = None,
+    *,
+    tense: Tense = "now",
+    output: str = "",
+    root: str | None = None,
+) -> dict[str, Any]:
+    """One step in plain words, as a ``said``: ``Reading notes.md`` while it runs
+    (``now``), ``Read notes.md`` once done (``done``), and ``Read notes.md`` as what
+    a step that did not finish was to do (``ask``).
+
+    The words of :func:`activity_text` in that tense, so a command line, code or
+    text is never shown. Only a call's *output* says what a finished call came
+    to: a task tool's own check refused it (``Not done: …``, which says so with
+    what it was to do), a note was not kept, a message started a new task.
+    """
+    if tense == "done":
+        said_back = output.lstrip()
+        if said_back.startswith("Not done"):
+            return said("steps.refused", step=step_said(tool, arguments, tense="ask"))
+        if tool == "remember" and said_back.startswith("Not remembered"):
+            return said("steps.failed.keep")
+        if tool == "task_message" and said_back.startswith("Started task"):
+            return step_said("task_create", tense="done")
+    words = activity_text(tool, arguments, root=root).words
+    key = str(words["key"])
+    if tense != "now" and key.startswith("steps.now."):
+        verb = key.removeprefix("steps.now.")
+        return said(f"steps.{tense}.{verb}", **words["params"])
+    return words
 
 
 def request_said(
     tool: str, arguments: object = None, *, root: str | None = None
 ) -> dict[str, Any]:
-    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``.
-
-    The same words as :func:`activity_text`, put as a request (``steps.ask.*``
-    for ``steps.now.*``), so a command line, code or text is never shown.
-    """
-    words = activity_text(tool, arguments, root=root).words
-    key = str(words["key"])
-    if key.startswith("steps.now."):
-        verb = key.removeprefix("steps.now.")
-        return said(f"steps.ask.{verb}", **words["params"])
-    return words
+    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``."""
+    return step_said(tool, arguments, tense="ask", root=root)
 
 
 def request_words(

@@ -318,19 +318,30 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
-async def _create_for_task(
-    console: Console, body: CreateRequest, typed: str, composed: str, key: str | None
-) -> JSONResponse:
-    """``POST /api/sessions`` with ``as_task``: the chat is made first, empty, and the message is a task it owns.
+async def _create_for_code(
+    console: Console,
+    body: CreateRequest,
+    typed: str,
+    composed: str,
+    key: str | None,
+    *,
+    as_task: bool,
+) -> JSONResponse | None:
+    """``POST /api/sessions`` whose first message code's rules take: the chat is made first, empty, then the message is read as any later one is.
 
-    The answer is 201 with the chat and the task's ``echo``, and no turn. A
-    task that cannot start leaves no chat behind; one that is admitted keeps
-    its chat. With a *key* (the turn's ``client_request_id``) the create is a
-    submission like any other: a cancelled key is 409 ``submission_withdrawn``,
-    one accepted for another message 409 ``submission_conflict``, and a repeat
-    answers 200 with the chat and echo the first made (``repeated``), the echo
-    written again if the gateway stopped between the task and it. Creates of a
-    key go one at a time, with its cancel.
+    With *as_task* the message is a task the chat owns; without it the rules
+    decide, as for any message of any chat (#567), and ``None`` says they left it
+    to the model after all: the empty chat is gone, and the caller makes it with
+    its first turn.
+
+    The answer is 201 with the chat and the ``echo``, and no turn. A task that
+    cannot start leaves no chat behind; one that is admitted keeps its chat.
+    With a *key* (the turn's ``client_request_id``) the create is a submission
+    like any other: a cancelled key is 409 ``submission_withdrawn``, one accepted
+    for another message 409 ``submission_conflict``, and a repeat answers 200
+    with the chat and echo the first made (``repeated``), the echo written again
+    if the gateway stopped between the task and it. Creates of a key go one at a
+    time, with its cancel.
     """
     assert body.turn is not None
     text = typed
@@ -342,6 +353,8 @@ async def _create_for_task(
             try:
                 check_submission(found, composed)
             except SubmissionRepeated:
+                if not as_task:
+                    return None  # it was accepted as a first turn: that answers
                 raise conflict() from None
             except SubmissionError as exc:
                 raise _submission_error(exc) from exc
@@ -361,9 +374,12 @@ async def _create_for_task(
         chat = entry.session_id
         try:
             echo = await console.front_for(chat).route(
-                text, composed, as_task=True, key=None, create_key=key
+                text, composed, as_task=as_task, key=None, create_key=key
             )
-            if echo is None or echo.get("echo") != "started":
+            if echo is None and not as_task:
+                await console.sessions.delete(chat)
+                return None
+            if as_task and (echo is None or echo.get("echo") != "started"):
                 # The task did not start: its echo says why, and the chat has nothing.
                 raise ApiError(
                     400, "invalid_request", str((echo or {}).get("line") or "")
@@ -418,7 +434,23 @@ def add_routes(app: FastAPI, console: Console) -> None:
             assert sent is not None
             if sent.extras.images:
                 raise ApiError(400, "invalid_request", t("errors.picturesNoTask"))
-            return await _create_for_task(console, body, sent.typed, sent.whole, key)
+            made = await _create_for_code(
+                console, body, sent.typed, sent.whole, key, as_task=True
+            )
+            assert made is not None
+            return made
+        if (
+            sent is not None
+            and not sent.extras.images
+            and await console.front.claims(sent.typed)
+        ):
+            # A new chat's first message reads code's rules like any later one; what
+            # they leave to the model is the first turn below.
+            made = await _create_for_code(
+                console, body, sent.typed, sent.whole, key, as_task=False
+            )
+            if made is not None:
+                return made
         try:
             entry, turn = await console.sessions.create(
                 body.workspace,
