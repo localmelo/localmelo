@@ -79,6 +79,7 @@ from . import (
     uploads,
 )
 from .asks import OwnerAsks
+from .browser_cards import BrowserCards
 from .cards import CARD_EVENT, MainChatCards
 from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError, store_message, store_unavailable
@@ -204,6 +205,9 @@ class Console:
             viewers=self.hub.viewers,
             grants=self.grants,
         )
+        # What each chat's browser says in the conversation (its card), from the browser tools' own changes.
+        self.browser_cards = BrowserCards(self)
+        self.sessions.on_agent = self.browser_cards.attach
         self.workers = TaskWorkers(
             self.store,
             self.gate,
@@ -522,6 +526,7 @@ class Console:
             self.main_id = main.id
             self.workers.front_id = main.id
             await self.cards.start(main.id)
+            self.browser_cards.listen()
             self.followups.listen()
             self.vision.listen(self.store)
             try:

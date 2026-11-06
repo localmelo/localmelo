@@ -13,6 +13,7 @@
  */
 
 import { blockWords } from "./blocked.mjs";
+import { mergeBrowsers } from "./browser-card.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
 import { stepWords } from "./step-words.mjs";
@@ -639,6 +640,8 @@ export function newView(id) {
     pending: new Map(),
     resumed: null,
     turns: [],
+    // The browser cards of the chat (`attention.browser`): one per run that browsed, as it stands (browser-card.mjs).
+    browsers: [],
   };
 }
 
@@ -863,6 +866,11 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       if (data.workspace_label !== undefined) view.session.workspace_label = data.workspace_label;
     }
     return {model: data.model, workspace: data.workspace, ...(data.workspace_label === undefined ? {} : {workspaceLabel: data.workspace_label})};
+  }
+  // A browser card belongs to no turn: its run's turn may not be on the page, and the card still says where it stands.
+  if (type === "attention.browser") {
+    view.browsers = mergeBrowsers(view.browsers ?? [], [frame]);
+    return {};
   }
   if (turn === null) return {};
 

@@ -29,6 +29,7 @@ import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as serve from '../../support/gateway/static/serve.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
+import {mergeBrowsers, setupBrowserCards} from '../../support/gateway/static/browser-card.mjs';
 import {stepWords} from '../../support/gateway/static/step-words.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
@@ -712,6 +713,8 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
   .replace(/^import \{ stepWords \} from "\.\/step-words\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/browser-live\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/browser-stream\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/browser-card\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
   .replace(/^import \{ setupImportCard \} from "\.\/import-card\.mjs";\n/m, '')
@@ -884,6 +887,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
   const asked = [];
   const answer = {notes: 'keep'};
   const browserLog = [];
+  // The sources the page's browser cards watch on the one transport (the stream itself has its own tests).
+  const watched = [];
   const documentListeners = {};
   const windowListeners = {};
   const root = makeElement('html');
@@ -963,10 +968,25 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // The Browser panel has its own tests (test_browser_live.mjs); here the page only has to bind it to the open chat.
     liveRoute,
     liveUrl,
-    setupBrowser: () => ({
+    createStreams: () => ({
+      watch(source, sink) {
+        const entry = {source, sink, open: true};
+        watched.push(entry);
+        return () => { entry.open = false; };
+      },
+    }),
+    setupBrowserCards,
+    mergeBrowsers,
+    setupBrowser: () => {
+      let said = null;
+      return {
       follow: async (id, options = {}) => { browserLog.push(['follow', id, options.liveOnly === true]); },
       release: (next = '') => { browserLog.push(['release', next]); },
-      note: (frame) => { browserLog.push(['note', frame.type]); },
+      // The state of the chat's newest browser card, logged when it changes.
+      card: (card) => {
+        if ((card?.state ?? null) !== said) browserLog.push(['card', said = card?.state ?? null]);
+      },
+      open: (card) => { browserLog.push(['open', card.run]); },
       toggle() { browserLog.push(['toggle']); },
       hide() { browserLog.push(['hide']); },
       closeSheet() { return false; },
@@ -974,7 +994,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
       suspend() { browserLog.push(['suspend']); },
       resume() { browserLog.push(['resume']); },
       recheck: async () => { browserLog.push(['recheck']); },
-    }),
+      };
+    },
     // The panel beside the chat has its own tests (test_panel.mjs); here it only hears health.
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
@@ -1038,6 +1059,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     asked,
     answer,
     browserLog,
+    watched,
     run: (expression) => vm.runInContext(expression, context),
     state: () => vm.runInContext('S', context),
     text: (id) => flatten(element(id)),
@@ -4473,6 +4495,25 @@ test('a person sees what melo is doing and how long, never a tool name, a step n
   assert.equal(findNode(done, (node) => node.className === 'message-actions').children[0].textContent, '14s', 'the footer gives the time alone');
 });
 
+test('a note melo kept reads as kept, and one the gate refused as not kept, never as a look at memory', async () => {
+  const h = harness(defaultMode());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  const call = (id, output) => {
+    const args = {text: 'You prefer tea.', topic: 'taste'};
+    push('assistant.message', {step: 1, content: '', tool_calls: [{id, name: 'remember', arguments: args, preview: ''}], usage: {completion_tokens: 5}, duration_s: 1});
+    push('tool.started', {step: 1, call_id: id, name: 'remember', arguments: args, preview: ''});
+    push('tool.finished', {step: 1, call_id: id, name: 'remember', status: 'success', error_category: 'none', output, output_chars: output.length, error: '', duration_s: 0.1, images: [], approval: null, exit_code: null});
+  };
+  call('call-1', 'Noted.');
+  call('call-2', 'Not remembered: write the user as "you" and the assistant as "melo".');
+  push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 3, n_tool: 2, steps: 2}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const words = findNodes(h.run('assistantNode(turn)'), (node) => node.className === 'tool-words').map((node) => node.textContent);
+  assert.deepEqual(words, ['Kept a note', 'Could not keep a note']);
+});
+
 // ── Default mode: fewer choices, the same page ──
 
 /** The page in default mode: no run, terminal chat or task exists unless a test says so. */
@@ -6431,11 +6472,11 @@ test('the Browser panel follows the open chat, reads its events and lets go when
     'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0}}));
   await h.run('init()');
   assert.deepEqual(h.browserLog.filter(([kind]) => kind === 'follow'), [['follow', 'a', false]]);
-  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'tool.started', data: {call_id: 'c1', name: 'browser_open', step: 1, arguments: {}}});
-  assert.ok(h.browserLog.some((entry) => entry[0] === 'note' && entry[1] === 'tool.started'));
+  h.stream().emit({id: 20, turn: null, ts: 50, type: 'attention.browser', data: {card_key: 'a:run-1', owner_chat_id: 'a', source_session_id: 'a', source_turn: 1, run_id: 'run-1', browser_session_id: 'a1b2c3d4', state: 'working', action: 'open', site: 'example.com'}});
+  assert.deepEqual(h.browserLog.filter(([kind]) => kind === 'card'), [['card', 'working']], 'the panel hears what the chat\'s browser card says');
   h.browserLog.length = 0;
   await h.run('openSession("b")');
-  assert.deepEqual(h.browserLog.filter(([kind]) => kind !== 'note'), [['release', 'b'], ['follow', 'b', false]]);
+  assert.deepEqual(h.browserLog.filter(([kind]) => kind !== 'card'), [['release', 'b'], ['follow', 'b', false]]);
   h.browserLog.length = 0;
   h.run('newChat()');
   assert.deepEqual(h.browserLog, [['release', '']]);
@@ -6504,4 +6545,67 @@ test('a page that is hidden for a while, or kept for Back, lets go of the Browse
   h.windowListeners.pagehide[0]({persisted: true});
   h.windowListeners.pageshow[0]({persisted: true});
   assert.deepEqual(h.browserLog, [['suspend'], ['resume']]);
+});
+
+// ── The browser card in the conversation (browser-card.mjs; its own tests are in test_browser_live.mjs) ──
+
+const browserData = (id, extra = {}) => ({
+  card_key: `${id}:run-1`, owner_chat_id: id, source_session_id: id, source_turn: 1, run_id: 'run-1',
+  browser_session_id: 'a1b2c3d4', state: 'working', action: 'open', site: 'example.com', ...extra,
+});
+const browserFrame = (id, eventId, extra = {}) => ({id: eventId, turn: null, ts: 50 + eventId, type: 'attention.browser', data: browserData(id, extra)});
+
+for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
+  test(`the ${kind} chat keeps one browser card, with its picture, through replays and redraws, and the draft stays`, async () => {
+    const running = turnRow({status: 'running', answer: '', finished_at: 0, result: null, running_here: true});
+    const page = {turns: [running], has_earlier: false, replay_from: 7, browser: [{id: 6, ts: 40, ...browserData(id)}]};
+    const h = harness(id === 'm'
+      ? mainRoutes({'GET /sessions/m/turns?limit=10': page})
+      : baseRoutes({'GET /sessions/a/turns?limit=10': page}));
+    await h.run('init()');
+    const cards = () => findNodes(h.element('messages'), (node) => node.className === 'bcard');
+    const [card] = cards();
+    assert.equal(cards().length, 1, 'the run\'s card sits in its reply, among the turns');
+    const reply = findNode(h.element('messages'), (node) => node.className === 'msg assistant');
+    assert.ok(findNode(reply, (node) => node === card), 'it is part of the reply, outside the folded steps');
+    assert.equal(findNode(card, (node) => node.className === 'own-word').textContent, 'Working');
+    const picture = findNode(card, (node) => node.tag === 'canvas');
+    assert.deepEqual(h.watched.map((found) => [found.source, found.open]), [[{session: id, gen: 'a1b2c3d4', run: 'run-1'}, true]], 'one watcher for the card');
+    h.element('input').value = 'half a thought';
+
+    // The chat's own stream replays the card, newer rows first or last: the newest stands, in the same node.
+    h.stream().emit(browserFrame(id, 21, {state: 'waiting', action: ''}));
+    h.stream().emit(browserFrame(id, 20, {action: 'press'}));
+    h.run('renderMessages(true)');
+    h.stream().emit({id: 22, turn: 1, ts: 80, type: 'assistant.message', data: {step: 1, content: 'Looking.', tool_calls: []}});
+    assert.deepEqual(cards(), [card], 'a redraw moves the same card');
+    assert.equal(findNode(card, (node) => node.tag === 'canvas'), picture, 'and the same canvas');
+    assert.equal(card.dataset.own, 'waiting');
+    assert.equal(h.watched.length, 1, 'nothing watches the source again');
+    assert.equal(h.element('input').value, 'half a thought');
+
+    // The run ends: the card is updated in place and lets go of the page.
+    h.stream().emit(browserFrame(id, 30, {state: 'done', action: ''}));
+    assert.deepEqual(cards(), [card]);
+    assert.equal(card.dataset.own, 'done');
+    assert.equal(h.watched[0].open, false);
+    assert.equal(h.element('input').value, 'half a thought');
+  });
+}
+
+test('while the person has the page, the turn box and the live row say so together', async () => {
+  const running = turnRow({status: 'running', answer: '', finished_at: 0, result: null, running_here: true});
+  const h = harness(baseRoutes({'GET /sessions/a/turns?limit=10': {turns: [running], has_earlier: false, replay_from: 7}}));
+  await h.run('init()');
+  const heading = () => findNode(h.element('messages'), (node) => node.className === 'work-summary')?.textContent ?? flatten(h.element('messages'));
+  assert.match(heading(), /Working/);
+  h.stream().emit({id: 20, turn: 1, ts: 60, type: 'run.paused', data: {what: 'browser', detail: {tab: 't1', place: 'window', site: 'example.com'}}});
+  assert.match(heading(), /You're in control/, 'the box does not wait for the next event to say it');
+  h.stream().emit({id: 21, turn: 1, ts: 70, type: 'run.resumed', data: {what: 'browser', how: 'closed', held_s: 2}});
+  assert.doesNotMatch(heading(), /You're in control/);
+});
+
+test('beside the Browser panel the composer drops what the narrow column cannot hold, not the model name\'s letters', () => {
+  const css = readFileSync(new URL('../../support/gateway/static/workspace.css', import.meta.url), 'utf8');
+  assert.match(css, /\.app:has\(> \.browser-panel:not\(\[hidden\]\)\) :is\(#run-status, \.composer-models, \.composer-hint\) \{ display: none; \}/);
 });

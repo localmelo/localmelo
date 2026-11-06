@@ -24,6 +24,7 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import check_client_request_id
 
+from .browser_cards import BROWSER_EVENT, BROWSER_ROWS
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
 from .explain import remembered
@@ -296,11 +297,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
             has_earlier = bool(older)
         cards: list[StoredEvent] = []
         echoes: list[StoredEvent] = []
+        browsers: list[StoredEvent] = []
         if info.kind in ("front", "chat"):
             # Every console chat's page is as new as what has come back to it.
             await console.cards.flush()
             cards = await _page_cards(console, session_id, turns, before)
             echoes = await _page_cards(console, session_id, turns, before, ECHO_EVENT)
+            browsers = await _page_browsers(console, session_id, turns, before)
         body: dict[str, Any] = {
             "turns": [
                 turn_json(
@@ -326,6 +329,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
             # A side chat has them only once it started a task.
             body["cards"] = [card_json(event) for event in cards]
             body["echoes"] = [card_json(event) for event in echoes]
+        if browsers:
+            # The browser card of each run the page's turns browsed in, as it stands.
+            body["browser"] = [card_json(event) for event in browsers]
         return JSONResponse(content=body)
 
     @app.get("/api/sessions/{session_id}/events")
@@ -481,6 +487,7 @@ async def _page_cards(
     turns: list[TurnInfo],
     before: int | None,
     type_: str = CARD_EVENT,
+    limit: int = CARD_PAGE,
 ) -> list[StoredEvent]:
     """A chat's cards (or echoes) beside a page of its turns, the newest :data:`CARD_PAGE`.
 
@@ -497,9 +504,31 @@ async def _page_cards(
     high = None if before is None else await _turn_start(console, session_id, before)
     return list(
         await console.store.events_of_type(
-            session_id, type_, after_id=low, before_id=high, limit=CARD_PAGE
+            session_id, type_, after_id=low, before_id=high, limit=limit
         )
     )
+
+
+async def _page_browsers(
+    console: Console, session_id: str, turns: list[TurnInfo], before: int | None
+) -> list[StoredEvent]:
+    """The newest row of each browser card beside a page of a chat's turns, the newest :data:`CARD_PAGE` cards.
+
+    A card is written again at each change, every row whole, so the newest row
+    of a card says all of it.
+    """
+    rows = await _page_cards(
+        console, session_id, turns, before, BROWSER_EVENT, BROWSER_ROWS
+    )
+    newest: dict[str, StoredEvent] = {}
+    for row in rows:
+        data = row.event.get("data")
+        key = data.get("card_key") if isinstance(data, dict) else None
+        if isinstance(key, str):
+            # The order of the cards is the order of their newest rows.
+            newest.pop(key, None)
+            newest[key] = row
+    return await console.browser_cards.close_orphans(list(newest.values())[-CARD_PAGE:])
 
 
 async def _replay_from(
