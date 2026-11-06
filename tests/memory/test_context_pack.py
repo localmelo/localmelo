@@ -24,6 +24,7 @@ from localmelo.support.memory.service import (
     CHAT_TURN,
     NOT_THE_USER,
     PACK_HEADER,
+    TRY_ONCE_MORE,
     is_owner_question,
 )
 from localmelo.support.sessions.store import (
@@ -461,7 +462,8 @@ async def test_a_task_question_remembers_nothing(
         store, ask, "My weekly sync is on Friday. Remember that I like jazz."
     )
     assert found.remembered == () and found.recall is not None
-    assert await memory.remember("Your favourite music is jazz.") == NOT_THE_USER
+    wanted = await memory.remember("Your favourite music is jazz.")
+    assert wanted == NOT_THE_USER + TRY_ONCE_MORE
     assert await memory.keep_claims(ask, "Noted: your weekly sync is on Friday.") == []
     assert await memory.keep_changes(ask) == []
     assert await memory.keep_statements(ask) == []
