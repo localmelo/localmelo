@@ -68,7 +68,7 @@ keep_tabs = false   # 设为 true 会让 melo 打开的标签页留在窗口里
 app_windows = true  # 设为 false 后 melo 不再留意其他应用的窗口
 ```
 
-默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里的设置中或用 `/browser` 修改，或用 `melo config set browser.driver chrome`，然后打开新对话。
+默认是 `"off"`。网页控制台和 App 在打开每个对话（包括主对话）时读取同一个设置：在那里的设置中或用 `/browser` 修改，然后打开新对话。`melo config set browser.driver chrome` 修改的是文件：终端启动时读取它，已在运行的网关要在 `melo serve stop` 并重新启动后才会读取。
 
 <a id="set-up-safari"></a>
 

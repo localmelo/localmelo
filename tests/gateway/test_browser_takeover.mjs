@@ -100,6 +100,7 @@ test('the panel offers Take over while melo has the page and says who is in cont
   assert.equal(you.status, 'You are in control');
   assert.equal(you.hint, 'Click the page to type. If you leave this panel, melo gets the page back after 2 min.');
   assert.match(control(parseMeta(message({owner: 'you'})), {focused: true}).hint, /Control-Esc/);
+  assert.doesNotMatch(control(parseMeta(message({owner: 'you'})), {focused: true, touch: true}).hint, /Control-Esc/, 'a touch screen has no Control key');
   const finishing = control(parseMeta(message({owner: 'you', browsing: true})));
   assert.equal(finishing.finishing, true);
   assert.match(finishing.hint, /finishing a step/);

@@ -60,7 +60,7 @@ keep_tabs = false   # true leaves the tabs melo opened in the window
 app_windows = true  # false: melo no longer looks for other apps' windows
 ```
 
-`"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it in Settings or with `/browser` there, or `melo config set browser.driver chrome`, and open a new chat.
+`"off"` is the default. The web console and the app read the same setting when they open a chat, the main chat included: change it in Settings or with `/browser` there, and open a new chat. `melo config set browser.driver chrome` changes the file: the terminal reads it when it starts, and a gateway that already runs reads it only after `melo serve stop` and a new start.
 
 ## Set up Safari
 

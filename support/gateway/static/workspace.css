@@ -1361,6 +1361,10 @@ dialog::backdrop {
   .header-titles > span {
     max-width: 48vw;
   }
+  /* The title keeps room to read: the chips beside it wrap to a line of their own before they squeeze it. */
+  .header-titles {
+    flex: 1 1 160px;
+  }
   .machine-chip {
     max-width: 120px;
   }

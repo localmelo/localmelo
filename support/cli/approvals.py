@@ -610,7 +610,7 @@ FOLDER_RULE: Final = (
 
 
 def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str:
-    """The label of the answer that allows *request* for the rest of the session.
+    """The label of the answer that allows *request* for the rest of the chat.
 
     In the main chat (*everywhere*) it says the answer counts in every chat.
     """
@@ -629,7 +629,7 @@ def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str
     if request.tool_name.startswith("window-read:"):
         app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
         return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
-    where = "in every chat" if everywhere else "in this session"
+    where = "in every chat" if everywhere else "for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call {where}"
 
 
@@ -643,7 +643,7 @@ def session_warning(tool: str, workspace: str) -> list[str]:
         return []
     return [
         f'"Allow every" lets routine {what} run without asking for the rest of '
-        "this session.",
+        "this chat.",
         f"Installs, downloads and changes outside {workspace} still ask.",
     ]
 
@@ -925,7 +925,7 @@ def approval_words(mode: Mode, grants: Iterable[str]) -> str:
         names = [name for name in names if grant_site(name)]
     allowed = ", ".join(grant_words(name) for name in names)
     if mode in ("ask", "auto") and allowed:
-        return f"{_MODE_WORDS[mode]} · allowed this session: {allowed}"
+        return f"{_MODE_WORDS[mode]} · allowed in this chat: {allowed}"
     return _MODE_WORDS[mode]
 
 

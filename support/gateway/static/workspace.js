@@ -529,6 +529,8 @@ function syncUI() {
   const connection = connectionState({ turn, held, pending, session });
   $("connection-label").textContent = connection.text;
   $("connection-dot").classList.toggle("offline", connection.offline);
+  // A Stop was answered but the turn has not ended: the panel says Stopping, not Working.
+  panel.stopping(turn?.stopping === true ? 1 : 0);
   // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
   $("connection-btn").classList.toggle("names-model", !developerMode && !connection.offline);
   if (developerMode) $("connection-btn").removeAttribute("aria-label");
@@ -912,6 +914,7 @@ function startStream(id) {
       if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
       if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
       noteFrame(frame);
+      if (frame.type === "turn.finished") refreshHealthSoon();
       browser.note(frame);
       chatStatus.bump();
       renderMessages(false);
@@ -2044,7 +2047,7 @@ function activityOptions(turn, now) {
     plain: !developerMode,
     held: heldOf(turn),
     pending: S.view?.pending.size ?? 0,
-    cancelling: S.cancelling.has(turn.id),
+    cancelling: S.cancelling.has(turn.id) || turn.stopping === true,
     now,
   };
 }
@@ -2420,6 +2423,8 @@ async function stop() {
   syncUI();
   try {
     const stopped = await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    // The run stops at its next step, not on the instant: the panel says so until the turn ends.
+    turn.stopping = true;
     // Words the run never read do not start another turn after a Stop: they are in the box again.
     const unread = stopped.unread_notes ?? [];
     if (unread.length > 0) {
@@ -2438,6 +2443,24 @@ async function stop() {
     S.cancelling.delete(turn.id);
     syncUI();
   }
+}
+
+// The panel reads the gateway's health, which the poll refreshes every few seconds. A turn this page watches
+// ending is known here first: the health is read again at once, so the panel does not keep saying a chat works
+// after its answer or its Stop. The short wait lets the gateway finish the turn it just announced.
+const HEALTH_SETTLE_MS = 300;
+let healthSoon = null;
+function refreshHealthSoon() {
+  if (healthSoon !== null) return;
+  healthSoon = setTimeout(async () => {
+    healthSoon = null;
+    try {
+      setHealth(await api("/health"));
+      syncUI();
+    } catch {
+      /* the poll reads it again */
+    }
+  }, HEALTH_SETTLE_MS);
 }
 
 async function deleteSession(id) {

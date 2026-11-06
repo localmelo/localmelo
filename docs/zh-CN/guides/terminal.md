@@ -335,9 +335,9 @@ from-the-child
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
-  2. Yes, and allow every shell_exec call in this session
+  2. Yes, and allow every shell_exec call for the rest of this chat
   3. No, and tell melo why
-  "Allow every" lets routine shell commands run without asking for the rest of this session.
+  "Allow every" lets routine shell commands run without asking for the rest of this chat.
   Installs, downloads and changes outside ~/demo-project still ask.
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```

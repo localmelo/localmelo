@@ -307,9 +307,9 @@ Whether a reply shows as it is written depends on how its model frames reasoning
 │   ls -1                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
 ❯ 1. Yes
-  2. Yes, and allow every shell_exec call in this session
+  2. Yes, and allow every shell_exec call for the rest of this chat
   3. No, and tell melo why
-  "Allow every" lets routine shell commands run without asking for the rest of this session.
+  "Allow every" lets routine shell commands run without asking for the rest of this chat.
   Installs, downloads and changes outside ~/demo-project still ask.
   ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
 ```
@@ -370,7 +370,7 @@ A file outside the folder gets a panel that names its real folder. A read offers
   ↑↓ select · enter confirm · 1-4 · v view all · esc stop the turn
 ```
 
-- `1` allows this call, `2` allows the tool's routine calls for the rest of the session, and `3` opens a field for a reason (at most 500 characters) that the model reads; ↑ ↓ and Enter choose too.
+- `1` allows this call, `2` allows the tool's routine calls for the rest of this chat, and `3` opens a field for a reason (at most 500 characters) that the model reads; ↑ ↓ and Enter choose too.
 - For 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a message you were typing cannot answer it; Esc or Ctrl+C stops the turn.
 - The command, code or file content shows exactly as it will run, wrapped and never cut; control characters and text-reordering characters show escaped with a warning line.
 - The panel shows at most 8 lines of the body, then `… +N lines (v views all)`.

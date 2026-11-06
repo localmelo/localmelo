@@ -955,7 +955,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
     setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
-      lost: [], offline(value) { this.lost.push(value); },
+      lost: [], offline(value) { this.lost.push(value); }, stopped: [], stopping(count) { this.stopped.push(count); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
@@ -2746,6 +2746,24 @@ test('stop posts the running turn\'s id', async () => {
   await h.run('stop()');
   assert.deepEqual(h.net.callsTo('/turns/turn-2/cancel').map((call) => call.method), ['POST']);
   assert.equal(h.state().cancelling.size, 0);
+});
+
+test('after a Stop the panel says Stopping at once, and reads the health again when the turn ends', async () => {
+  const h = harness(baseRoutes({
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
+  }));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}});
+  await h.run('stop()');
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel is told a Stop is under way');
+  assert.equal(h.run('activity(S.view.turns.at(-1), {now: 100, cancelling: S.view.turns.at(-1).stopping})'), 'Stopping');
+  const reads = () => h.net.callsTo('/health').length;
+  const before = reads();
+  h.stream().emit({id: 21, turn: 2, ts: 52, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', cause: 'user_stop', error: ''}});
+  assert.equal(reads(), before, 'the gateway gets a moment to finish the turn it announced');
+  await h.timers.findLast((timer) => !timer.interval && timer.ms === 300).handler();
+  assert.equal(reads(), before + 1, 'then the health is read, not left to the poll');
+  assert.equal(h.run('panel.stopped.at(-1)'), 0, 'no Stopping once the turn has ended');
 });
 
 // ── Words added while melo works ──

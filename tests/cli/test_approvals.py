@@ -78,7 +78,7 @@ def _request(
         (
             "ask",
             ["shell_exec", "file_write", "mcp__files__read"],
-            "asks before running commands or changing files · allowed this session: "
+            "asks before running commands or changing files · allowed in this chat: "
             "file writes, mcp__files__read, shell commands",
         ),
         (
@@ -585,7 +585,7 @@ def test_control_characters_show_escaped_and_nothing_is_dropped(
 
 def test_the_session_warning_is_for_shell_and_python_only() -> None:
     assert session_warning("shell_exec", "~/demo") == [
-        '"Allow every" lets routine shell commands run without asking for the rest of this session.',
+        '"Allow every" lets routine shell commands run without asking for the rest of this chat.',
         "Installs, downloads and changes outside ~/demo still ask.",
     ]
     assert session_warning("python_exec", "~/demo")[0].startswith(
@@ -730,7 +730,7 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         assert f"│ shell_exec · in {WORKSPACE}" in text
         assert "│   ls -1" in text
         assert "❯ 1. Yes" in text
-        assert "  2. Yes, and allow every shell_exec call in this session" in text
+        assert "  2. Yes, and allow every shell_exec call for the rest of this chat" in text
         assert "  3. No, and tell melo why" in text
         assert '"Allow every" lets routine shell commands run without asking' in text
         assert (
@@ -973,7 +973,7 @@ async def test_the_warning_under_option_two_wraps_rather_than_hides_the_folder(
         assert (
             f"Installs, downloads and changes outside {WORKSPACE} still ask." in joined
         )
-        assert "allow every shell_exec call in this session" in joined
+        assert "allow every shell_exec call for the rest of this chat" in joined
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
@@ -1732,7 +1732,7 @@ async def test_the_terminal_lists_a_site_by_its_site_and_forgets_it_by_name() ->
     assert grant_listed("shell_exec") == "shell_exec"
     # Auto names the sites it may use, the only grants it reads.
     assert approval_words("auto", approvals.allowed_tools).endswith(
-        "· allowed this session: clicking and choosing on news.example"
+        "· allowed in this chat: clicking and choosing on news.example"
     )
     approvals.forget("www.news.example")
     assert approvals.allowed_tools == {"shell_exec"}

@@ -253,15 +253,15 @@ export function pasteMessage(text) {
 /**
  * Who has the page, in what the panel shows: `you` once the person took it over (with the words of the control bar
  * and the page's box, if it shows one), `canTake` when they may take it, `finishing` while melo ends a step it was in
- * when they took it (their input waits).
+ * when they took it (their input waits). A *touch* screen has no Control-Esc, so its note leaves that out.
  */
-export function control(meta, {focused = false, link = 'open'} = {}) {
+export function control(meta, {focused = false, link = 'open', touch = false} = {}) {
   const live = Boolean(meta) && ['live', 'loading', 'stale'].includes(meta.state) && link === 'open';
   const you = live && meta.owner === 'you';
   const finishing = you && meta.browsing === true;
   let hint = '';
   if (you) {
-    hint = finishing ? t('browser.finishing') : focused ? t('browser.inControlNote') : t('browser.clickToType');
+    hint = finishing ? t('browser.finishing') : focused ? t(touch ? 'browser.inControlNoteTouch' : 'browser.inControlNote') : t('browser.clickToType');
     if (meta.grace > 0) hint += ` ${t('browser.grace', {minutes: Math.max(1, Math.round(meta.grace / 60))})}`;
   }
   return {
@@ -375,10 +375,12 @@ export function setupBrowser({
   };
 
   const hint = () => S.calls.size > 0;
+  // A phone or a tablet has no Control key to leave the page with.
+  const touchScreen = () => globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
 
   function render() {
     const v = view(S.meta, S.link, {picture: S.picture, known: S.known});
-    const c = control(S.meta, {focused: S.focused, link: S.link});
+    const c = control(S.meta, {focused: S.focused, link: S.link, touch: touchScreen()});
     // Melo is mid-step before the stream says so (the event came first): show it on the chip and the panel.
     const browsing = v.browsing || (hint() && S.shown && v.state !== 'closed' && v.state !== 'idle');
     const {root, chip} = els;

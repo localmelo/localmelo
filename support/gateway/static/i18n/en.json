@@ -454,6 +454,7 @@
   "browser.idle.title": "No page open",
   "browser.inControl": "You are in control",
   "browser.inControlNote": "Clicks and keys go to the page, and melo waits. Control-Esc moves out of the page.",
+  "browser.inControlNoteTouch": "Taps and typing go to the page, and melo waits.",
   "browser.keys": "Type into the page",
   "browser.live": "Live",
   "browser.loading.note": "The first picture is on its way.",
@@ -1273,6 +1274,10 @@
     "one": "{n} approval",
     "other": "{n} approvals"
   },
+  "panel.approvalsAllWaiting": {
+    "one": "{n} approval waiting",
+    "other": "{n} approvals waiting"
+  },
   "panel.approvalsWaiting": "{approvals}, {n} waiting",
   "panel.chipLabel": "Activity: {text}",
   "panel.closeActivity": "Close activity",
@@ -1288,6 +1293,7 @@
   "panel.head.connectedModelOn": "Connected · {model} on {server}",
   "panel.head.connecting": "Connecting…",
   "panel.head.noModel": "No model set up yet",
+  "panel.head.stopping": "Stopping…",
   "panel.head.unreachable": "Model server not reachable",
   "panel.head.waiting": "Waiting for you",
   "panel.head.working": {

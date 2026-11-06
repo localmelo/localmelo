@@ -1397,7 +1397,7 @@ class CliSession:
             grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
             self._row(
                 "approvals",
-                f"{self.approvals.mode} · allowed in this session: {grants}",
+                f"{self.approvals.mode} · allowed in this chat: {grants}",
             )
         tools = self.agent.list_tools()
         builtin = [tool for tool in tools if tool.source == "builtin"]

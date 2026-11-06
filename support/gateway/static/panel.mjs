@@ -67,9 +67,10 @@ const onTaskAddress = () => /^#\/tasks(?:\/|$)/.test(globalThis.location?.hash ?
 /**
  * What the header says, and the link it offers: the model's state first, then what runs. For a side chat,
  * `scoped` is that chat's rows and what runs is read from them instead of the whole console. `plain` (the default mode)
- * names the model and leaves out the kind of server it runs on.
+ * names the model and leaves out the kind of server it runs on. `stopping` is how many of the running things the
+ * person has just told to stop: when it covers all of them the header says so at once, before the gateway's count drops.
  */
-export function headline(health, scoped = null, {plain = false} = {}) {
+export function headline(health, scoped = null, {plain = false, stopping = 0} = {}) {
   if (!health) return {text: t('panel.head.connecting'), mood: 'idle', fix: false};
   if (health.configured === false) return {text: t('panel.head.noModel'), mood: 'error', fix: true};
   if (health.model_server?.reachable === false) return {text: t('panel.head.unreachable'), mood: 'error', fix: true};
@@ -77,6 +78,7 @@ export function headline(health, scoped = null, {plain = false} = {}) {
   const count = scoped ? scoped.filter((row) => row.state === 'running' || row.state === 'held').length
     : Object.values(status.running ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
   if (scoped ? scoped.some((row) => row.state === 'waiting') : status.waiting?.length) return {text: t('panel.head.waiting'), mood: 'waiting', fix: false, count};
+  if (count > 0 && stopping >= count) return {text: t('panel.head.stopping'), mood: 'working', fix: false, count};
   if (count > 0) return {text: t('panel.head.working', {n: count}), mood: 'working', fix: false, count};
   const recent = scoped && !scoped.some((row) => row.id === status.recent?.id) ? null : status.recent;
   const mood = recent && recent.ended_s_ago < 8 && recent.outcome !== 'stopped' ? (recent.outcome === 'done' ? 'done' : 'error') : 'idle';
@@ -122,7 +124,7 @@ export function setupPanel({
   const doc = root.ownerDocument;
   const state = {health: null, rows: [], more: false, unavailable: [], loaded: false, error: '', notice: '', noticeFor: '',
     tab: 'activity', open: null, all: false, sheet: false, busy: '', fetchedAt: 0, seen: null, day: 0,
-    chat: chat(), scope: 'all', folds: new Set(), task: null, from: '', offline: false};
+    chat: chat(), scope: 'all', folds: new Set(), task: null, from: '', offline: false, stopping: 0};
   try { if (TABS.some(([id]) => id === storage?.getItem(KEY))) state.tab = storage.getItem(KEY); } catch { /* no storage */ }
   // A row's steps are its session's newest turn: a long chat is not read back to its first turn.
   const newest = (path, options) => (/\/turns\?/.test(path)
@@ -292,7 +294,7 @@ export function setupPanel({
 
   function drawHeader() {
     const scoped = state.scope === 'chat' && state.loaded ? state.rows : null;
-    const said = headline(state.health, scoped, {plain: !developer()});
+    const said = headline(state.health, scoped, {plain: !developer(), stopping: state.stopping});
     root.dataset.mood = said.mood;
     // Not connected yet, or the gateway is lost: the offline still, faded.
     const away = !state.health || state.offline;
@@ -376,7 +378,9 @@ export function setupPanel({
     const box = node('div', 'approval-fold');
     box.dataset.waiting = String(waiting > 0);
     const approvals = t('panel.approvals', {n: asked.length});
-    const toggler = button('approval-toggle', waiting ? t('panel.approvalsWaiting', {approvals, n: waiting}) : approvals, () => {
+    // When every approval waits they are one set: "1 approval waiting", not "1 approval, 1 waiting".
+    const words = waiting === asked.length ? t('panel.approvalsAllWaiting', {n: waiting}) : waiting ? t('panel.approvalsWaiting', {approvals, n: waiting}) : approvals;
+    const toggler = button('approval-toggle', words, () => {
       if (!state.folds.delete(key(row))) state.folds.add(key(row));
       drawBody();
     });
@@ -718,5 +722,12 @@ export function setupPanel({
     drawHeader();
   }
 
-  return {update, refresh, follow, select, state, offline, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
+  /** How many of the running things the person has told to stop and that still run: the header says "Stopping" meanwhile. */
+  function stopping(count) {
+    if (state.stopping === count) return;
+    state.stopping = count;
+    drawHeader();
+  }
+
+  return {update, refresh, follow, select, state, offline, stopping, openTask, closeTask, focusOpener, stepBack, remember, closeSheet: () => setSheet(false), openSheet: () => setSheet(true), lookForNotes: () => memory.lookForNotes()};
 }

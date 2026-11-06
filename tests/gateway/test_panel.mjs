@@ -164,6 +164,9 @@ test('a step reads as the server words it, in the present while it runs and the 
 test('the header says the model, what runs, a wait, or what to fix', () => {
   assert.deepEqual(headline(health()), {text: 'Connected · Qwen3.8 Flash on oMLX', mood: 'idle', fix: false, count: 0});
   assert.equal(headline(health(), null, {plain: true}).text, 'Connected · Qwen3.8 Flash', 'default mode names the model, not the kind of server');
+  const stopping = health({running: {chats: 1, tasks: 0, runs: 0, terminal: 0}});
+  assert.equal(headline(stopping, null, {stopping: 1}).text, 'Stopping…', 'a Stop answered says so before the count drops');
+  assert.equal(headline(stopping, null, {stopping: 0}).text, 'Working on 1 thing');
   const busy = headline(health({running: {chats: 1, tasks: 1, runs: 0, terminal: 0}}));
   assert.equal(busy.text, 'Working on 2 things');
   assert.equal(busy.mood, 'working');
@@ -351,6 +354,7 @@ test('a waiting approval is answered from its fold with the calls the chat card 
   // Deny, and an answer that came too late.
   h.rows = [row({id: 'c9', kind: 'chat', title: 'Add the date', state: 'waiting', approvals: [ask('q3', 'Write a.md', 'waiting')]})];
   await h.panel.refresh();
+  assert.equal(fold().text(), '1 approval waiting', 'one request that waits is counted once');
   h.answerError = Object.assign(new Error('This approval was answered already.'), {status: 409});
   h.click('Deny');
   await settle();
