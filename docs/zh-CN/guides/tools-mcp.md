@@ -156,7 +156,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 - 用 Safari 时，在 Safari 里打开“设置 > 开发者”，把 “Allow remote automation” 打开一次。用 Chrome 时只需要安装 Google Chrome。
 - 之后终端聊天以及网页控制台和 App 的每个聊天会得到十二个工具：`browser_open`、`browser_read`、`browser_find`、`browser_follow`、`browser_click`、`browser_type`、`browser_select`、`browser_back`、`browser_tabs`、`browser_wait`、`browser_screenshot` 和 `browser_click_point`。
 - 它们在 Safari 自己的自动化窗口里工作，这些窗口启动时不带你的任何登录状态；或在使用 melo 自己配置的 Chrome 里工作，从不使用你的配置。
-- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击、输入或选择前会再问一次，发送表单前每次都会单独问（会显示表单发往哪里、里面有什么；发送表单没有“在这个聊天里允许”）；它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
+- melo 加载网页之前会问 “Open a website?”，每个网站在一个聊天里问一次（`auto` 模式同样会问），在网站上点击或选择前会再问一次。输入文字和发送表单都不会为对话保留：“询问”模式每次都问；“自动”模式逐个对照你的请求检查，任务明显需要的直接运行，其余的拦下（询问你，涉及密钥则直接拦下）。输入的文字会完整显示，发送的表单会显示发往哪里、里面有什么。它在一个标签页里工作，从不输入密码、银行卡号或一次性验证码，也不会替你登录或发布。直接运行、worker 和保存的任务从不会得到这些工具。
 
 不用 Safari 时，每个聊天和任务都可以用 `web_fetch` 读取公开网页，它默认开启（见[不用浏览器读取网页](browsing.md#read-a-page-without-the-browser)）。
 
@@ -220,7 +220,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
 - 内置工具的级别按名称固定：`file_read` 和 `list_files` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。
-- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击和输入、发送表单与读取分开问）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
+- `web_fetch` 和浏览工具虽然会访问互联网，但有意定为 `read`：它们不在任何地方做更改，调用本身也不需要审批。它们请求的地址仍可能把数据带出去，所以改由网站关卡来问：浏览器每个网站每个对话问一次（点击、输入和发送表单与读取分开决定）；`web_fetch` 直接读取你自己最近的消息提到的网站（就是那个主机，`www.` 不计），其他网站每个对话问一次，并与浏览器共用同一个回答。`web_fetch` 从不访问这台电脑或它的局域网。
 - 该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 - 模式决定实际提供哪些内置工具（见[选择内置工具](#choose-the-built-in-tools)）；网关或控制台会话在通常的三个之外还获得 `list_files`。
 - 除交互式界面外，各模式都不注册 `shell_exec`，因此模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。
@@ -263,7 +263,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 ### 设置审批策略时
 
-![终端询问“Change a file?”并显示差异，提供“Yes”、“Yes, and allow every … call in this session”和“No, and tell melo why”三个选项。](../../assets/img/terminal-approval.webp)
+![终端询问“Change a file?”并显示差异，提供“Yes”、“Yes, and allow every … call for the rest of this chat”和“No, and tell melo why”三个选项。](../../assets/img/terminal-approval.webp)
 
 通过 Python 使用 `approval=policy` 启动的运行，在每次调用级别不是 `read` 的内置工具或提供的工具前都会询问策略（见[权限级别](#permission-tiers)）：
 
@@ -336,7 +336,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 | 主题 | 行为 |
 |---|---|
-| 会话授权 | “Allow for this chat”（终端中为 “Yes, and allow every … call in this session”）只覆盖常规调用。它会一直保留到你收回为止，重启后也一样；你在主对话里允许的，在每个对话里都算（见[你允许过的事](terminal.md#what-you-allowed)和[授权](web-console.md#permissions)）。同一工具的高影响或无法判定的调用每次都会询问，对它选择授权只允许这一次调用。终端的 `auto` 模式运行常规调用，其余调用会先询问。在自动模式下，你没要求的网站可以授权给整个对话，它覆盖在那个对话里打开这个网站，或在上面点击和选择；输入文字和发送表单从不授权。在自动模式的卡片上点 **Deny** 后，模型读到 `The user chose Don't allow for this step, so it did not run.` 和你的说明，在你发下一条消息之前不会再问同一步。 |
+| 会话授权 | “Allow for this chat”（终端中为 “Yes, and allow every … call for the rest of this chat”）只覆盖常规调用。它会一直保留到你收回为止，重启后也一样；你在主对话里允许的，在每个对话里都算（见[你允许过的事](terminal.md#what-you-allowed)和[授权](web-console.md#permissions)）。同一工具的高影响或无法判定的调用每次都会询问，对它选择授权只允许这一次调用。终端的 `auto` 模式运行常规调用，其余调用会先询问。在自动模式下，你没要求的网站可以授权给整个对话，它覆盖在那个对话里打开这个网站，或在上面点击和选择；输入文字和发送表单从不授权。在自动模式的卡片上点 **Deny** 后，模型读到 `The user chose Don't allow for this step, so it did not run.` 和你的说明，在你发下一条消息之前不会再问同一步。 |
 | localmelo 本身 | 安装到运行 localmelo 的 Python、或写入 `~/.cache/localmelo` 或应用程序的调用会被直接拒绝，不会询问：`The approval policy denied this call: melo never lets a call change its own runtime, settings or keys. …` |
 | 模型会读到什么 | 拒绝会说明调用的作用，例如 `The user denied this call: not now. melo asked because it installs httpx with pip into .venv. Do not run it again or reach the same result another way unless the user asks. If the task needs it, say in your answer what for and ask the user.` |
 | 任务中被拒绝的网站 | 在对话继续的任务里，`shell_exec` 或 `python_exec` 调用如果写出了你或 Auto 拒绝过的网站上的地址，会在审查之前就被拒绝：`curl` 和 `wget` 的参数（不带 `http://` 的地址也算，但选项的值从不算，例如 `-o out.txt`），不管命令写在哪里（`if curl …`、`( … )`、`$( … )`、`bash -c`、`eval`、跟在 `watch` 这类程序后面），它们经过的代理（`-x`、`https_proxy=`、`git -c http.proxy=`），Python 里的任何字符串（`urllib`、换了导入名的 `requests`、`httpx`、`pycurl`、`httplib2`、变量、写出了主机名的 f-string），`http.client` 和 socket 连接的主机，嵌在另一个地址路径里或编码在查询参数里的地址（阅读器或存档网站），主机名用大写、带端口、百分号编码、国际化的拼写，或者 IP 地址写成一个数字，都一样。没有写出被拒绝网站的调用从不会因此被拒绝。运行时才拼出来的主机名（`$HOST`、`{host}`、要展开的花括号或范围、从文件读出的变量、运行时拼出的命令）无法读取：有网站被拒绝时，这样的调用即使规则认为是常规的，也会由你的模型审查（Auto 下和会话授权下都是），审查时会被告知任务中哪些网站已被拒绝（只有网站名，从不包括原因）。没有网站被拒绝的运行不受影响。melo 无法解码的编码主机名，只要有网站被拒绝过就会被拒绝。 |

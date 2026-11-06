@@ -726,9 +726,11 @@ button:hover:not(:disabled) {
 .setup-model-id { min-width: 0; overflow-wrap: anywhere; font: var(--text-body)/20px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; }
 .setup-loaded { margin-left: auto; font-size: var(--text-caption); color: var(--ok); }
 .setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.setup-other { display: grid; justify-items: start; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.setup-other h3 { margin: 0; font-size: var(--text-body); font-weight: 600; line-height: 20px; }
 .setup-card .primary-button { min-height: 40px; padding: var(--space-2) var(--space-5); font-size: var(--text-body); }
 .setup-card .link-button { padding: 0; font-size: var(--text-small); }
-@media (max-width: 700px) { .setup-card .primary-button { width: 100%; min-height: 44px; } }
+@media (max-width: 700px) { .setup-card .primary-button, .setup-other .outline-button { width: 100%; min-height: 44px; } }
 /* Bringing in what other assistants know (import-card.mjs): the main chat's card, and the Memory tab's section, share the list. */
 .import-card { display: grid; gap: var(--space-3); max-width: 520px; margin: var(--space-5) auto 0; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); text-align: left; }
 .import-card:has(.import-done) { grid-template-columns: 1fr auto; align-items: center; padding-block: var(--space-3); }
@@ -1359,6 +1361,10 @@ dialog::backdrop {
   .header-titles > span {
     max-width: 48vw;
   }
+  /* The title keeps room to read: the chips beside it wrap to a line of their own before they squeeze it. */
+  .header-titles {
+    flex: 1 1 160px;
+  }
   .machine-chip {
     max-width: 120px;
   }
@@ -1518,6 +1524,15 @@ dialog::backdrop {
   white-space: nowrap;
   overflow: hidden;
 }
+/* Default mode: the step in words, in the page's own font; the developer mode keeps the tool's name. */
+.tool-card > summary.tool-summary.plain {
+  font: inherit;
+  font-size: var(--text-small);
+}
+.tool-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tool-mark {
   flex: none;
   min-width: 1.25em;
@@ -1634,6 +1649,11 @@ dialog::backdrop {
   color: var(--ink-3);
   font: var(--text-caption)/16px ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+.approval-caption[data-words] {
+  font-family: inherit;
+  font-size: var(--text-small);
+  line-height: 18px;
+}
 .failure-title {
   display: flex;
   gap: 8px;
@@ -1693,7 +1713,7 @@ dialog::backdrop {
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: 6px 14px; }
 .approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
-.approval-remembered { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.approval-remembered, .approval-sending { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
 .failure-hint { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
 .failure-error { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
 .failure-card[data-severity="error"] .failure-error,
