@@ -439,6 +439,7 @@
   "browser.action.type": "正在网页里输入",
   "browser.action.wait": "正在等网页",
   "browser.addressLabel": "地址",
+  "browser.back": "返回聊天",
   "browser.browsing": "melo 正在浏览",
   "browser.busy": "另一个对话正在用 melo 的 Chrome 窗口，所以网页在这里。",
   "browser.clickToType": "点一下网页再打字。",

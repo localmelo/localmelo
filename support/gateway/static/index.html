@@ -265,14 +265,14 @@
           </p>
         </div>
       </main>
-      <aside class="browser-panel" id="browser-panel" aria-label="Browser" data-i18n-aria-label="browser.title" data-state="idle" hidden>
+      <aside class="browser-panel" id="browser-panel" aria-label="Browser" data-i18n-aria-label="browser.title" data-state="idle" tabindex="-1" hidden>
         <header class="bp-head">
+          <button type="button" class="task-back bp-back" id="bp-hide" data-i18n="browser.back">Back to chat</button>
           <div class="bp-titles">
             <strong class="bp-title" id="bp-title"></strong>
             <p class="bp-address" aria-label="Address" data-i18n-aria-label="browser.addressLabel"><span class="bp-host" id="bp-host"></span><span class="bp-rest" id="bp-rest"></span></p>
           </div>
           <button type="button" class="bp-pop" id="bp-pop" hidden data-i18n="browser.popOut">Pop out</button>
-          <button type="button" class="icon-button bp-hide" id="bp-hide" aria-label="Hide browser" data-i18n-aria-label="browser.hide">×</button>
         </header>
         <div class="bp-stage">
           <div class="bp-viewport" id="bp-viewport">
@@ -294,6 +294,7 @@
           <div class="bp-foot-row">
             <span class="bp-status" id="bp-status" role="status" aria-live="polite"></span>
             <span class="bp-view-only" id="bp-view-only" data-i18n="browser.viewOnly">View only</span>
+            <button type="button" class="quiet-button bp-stop" id="bp-stop" hidden data-i18n="common.stop">Stop</button>
             <button type="button" class="outline-button bp-take" id="bp-take" hidden data-i18n="browser.takeOver">Take over</button>
             <button type="button" class="outline-button bp-window" id="bp-window" hidden></button>
             <button type="button" class="primary-button bp-give" id="bp-give" hidden data-i18n="browser.giveBack" aria-label="Done: give the page back to melo" data-i18n-aria-label="browser.giveBackLabel">Done</button>

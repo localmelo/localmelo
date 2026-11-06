@@ -887,6 +887,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
   const asked = [];
   const answer = {notes: 'keep'};
   const browserLog = [];
+  // The Browser view the page binds (its options, and whether it is shown for Escape to close).
+  const browserView = {shown: false, options: null};
   // The sources the page's browser cards watch on the one transport (the stream itself has its own tests).
   const watched = [];
   const documentListeners = {};
@@ -979,8 +981,9 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     mergeBrowsers,
     BROWSING,
     browserSource,
-    setupBrowser: () => {
+    setupBrowser: (options) => {
       let said = null;
+      browserView.options = options;
       return {
       follow: async (id, options = {}) => { browserLog.push(['follow', id, options.liveOnly === true]); },
       release: (next = '') => { browserLog.push(['release', next]); },
@@ -992,7 +995,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
       takeOver() { browserLog.push(['takeOver']); },
       toggle() { browserLog.push(['toggle']); },
       hide() { browserLog.push(['hide']); },
-      closeSheet() { return false; },
+      close() { browserLog.push(['close']); const was = browserView.shown; browserView.shown = false; return was; },
       popOut() { browserLog.push(['popOut']); },
       suspend() { browserLog.push(['suspend']); },
       resume() { browserLog.push(['resume']); },
@@ -1062,6 +1065,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     asked,
     answer,
     browserLog,
+    browserView,
     watched,
     run: (expression) => vm.runInContext(expression, context),
     state: () => vm.runInContext('S', context),
@@ -6550,12 +6554,51 @@ test('#/live/<chat> shows the Browser panel alone and loads no chats', async () 
   assert.deepEqual(h.browserLog, [['follow', 'a', true]], 'a changed address does not turn the window into the workspace');
 });
 
-test('a task or the schedule shown in Melo\'s panel gives way to the Browser panel where they do not both fit', async () => {
+test('a task or the schedule shown in Melo\'s panel takes the room the Browser view covers', async () => {
   const h = harness(baseRoutes({'GET /tasks/t1': {id: 't1'}}));
   await h.run('init()');
   h.browserLog.length = 0;
   await h.run('showScheduled()');
   assert.ok(h.browserLog.some(([kind]) => kind === 'hide'));
+});
+
+test('Escape closes the Browser view before anything behind it, and leaves an Escape the page took to the page', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task'}});
+  h.drawer.open('tools');
+  h.browserView.shown = true;
+  h.browserLog.length = 0;
+  const [escape] = h.documentListeners.keydown;
+  // The person has the page and the key went to it: no view or panel behind reacts to it.
+  escape({key: 'Escape', isComposing: false, keyCode: 27, defaultPrevented: true});
+  assert.deepEqual(h.browserLog, []);
+  assert.equal(h.drawer.opened, true);
+  escape({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.deepEqual(h.browserLog, [['close']], 'the view covers the chat and Melo\'s panel: it is the first to close');
+  assert.equal(h.drawer.opened, true, 'the drawer behind it waits for the next Escape');
+  escape({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.equal(h.drawer.opened, false);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+});
+
+test('Stop in the Browser view stops a task by its run and a chat by its own turn, and does nothing with no run to stop', async () => {
+  const h = harness(baseRoutes({
+    'PATCH /tasks/t1': () => ({task: {id: 't1', state: 'stopped'}}),
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
+  }));
+  await h.run('init()');
+  const {stop, returned} = h.browserView.options;
+  const task = {session: 't1', task: true, gen: 'a1b2c3d4', run: 'run-1', owner: 'a', key: 't1:run-1', state: 'working'};
+  assert.equal(await stop(task), true);
+  assert.deepEqual(h.net.callsTo('/tasks/t1').map((call) => call.body), [{state: 'stop', source: {gen: 'a1b2c3d4', run: 'run-1', owner: 'a'}}], 'the card\'s own stop, naming the run');
+  const chat = {session: 'a', task: false, gen: 'a1b2c3d4', run: 'run-2', key: 'a:run-2', state: 'working'};
+  assert.equal(await stop(chat), false, 'the chat has no run going');
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Look at the page'}});
+  assert.equal(await stop(chat), true);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1, 'the composer\'s Stop, which the view covers');
+  assert.equal(typeof returned, 'function', 'closing the view gives the keys to the card');
 });
 
 test('a page that is hidden for a while, or kept for Back, lets go of the Browser stream and takes it up again', async () => {
@@ -6681,7 +6724,10 @@ test('while the person has the page, the turn box and the live row say so togeth
   assert.doesNotMatch(heading(), /You're in control/);
 });
 
-test('beside the Browser panel the composer drops what the narrow column cannot hold, not the model name\'s letters', () => {
+test('the Browser view covers the work area, and the whole screen on a phone, and makes no column beside the chat', () => {
   const css = readFileSync(new URL('../../support/gateway/static/workspace.css', import.meta.url), 'utf8');
-  assert.match(css, /\.app:has\(> \.browser-panel:not\(\[hidden\]\)\) :is\(#run-status, \.composer-models, \.composer-hint\) \{ display: none; \}/);
+  assert.ok(css.includes('.app > .browser-panel { grid-area: 1 / 2 / 2 / -1; }'), 'over the chat and Melo\'s panel columns');
+  assert.ok(css.includes('.app:has(> .browser-panel:not([hidden])) > :is(.chat, .panel) { visibility: hidden; }'), 'what it covers is out of reach, and still there');
+  assert.ok(css.includes(':root:not([data-view="live"]) .browser-panel { position: fixed; inset: 0;'), 'a phone: the whole screen');
+  assert.ok(!/\.browser-panel[^{]*\{[^}]*grid-template-columns/.test(css) && !css.includes(':has(> .browser-panel:not([hidden])) { grid-template-columns'), 'no column is made for it, so the chat is not squeezed beside it');
 });

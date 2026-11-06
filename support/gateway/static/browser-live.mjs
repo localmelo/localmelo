@@ -1,40 +1,45 @@
 import {t} from './i18n.mjs';
 import {createStreams, parseMeta} from './browser-stream.mjs';
-import {ACTIVE, sourceOf as cardSource, stateWord} from './browser-card.mjs';
+import {ACTIVE, browserLook, sourceOf as cardSource, stateWord} from './browser-card.mjs';
 
 export {RETRY_S, STATES, parseMeta, retryDelay, socketUrl} from './browser-stream.mjs';
 
 /**
- * The Browser panel: a live window onto the page melo is working in, which the person can take over.
+ * The Browser view: a live window onto the page melo is working in, big, which the person can take over.
  *
- * It sits beside the chat and never opens by itself: the **Open browser** button of the browser card in the
- * conversation (and of the dock above it) opens it on that card's source (`open(card)`), the chat's own browser or a
- * task's, whose page the chat stays beside, and the chat's header chip,
- * which names the state of the chat's browser, shows or hides it. Hiding it only stops watching: the page, melo's
- * run and the card stay as they are, and the panel is never Done or Stop. Whether the chat can be watched
- * (`available`: its browser is Chrome and the live view is on) is asked when the chat is followed, on `recheck()`
- * (this page saved Settings), and again when a chat marked unwatchable has a new browser card or is asked to open one
- * (another page may have saved Settings since). The pictures come from the page's one stream of the card's source
- * (browser-stream.mjs): a panel that is hidden holds no watcher, and the card, the dock and the panel of one source
- * share one socket and one decoder.
+ * One click on a browser card (its picture or its **Open browser** button, or the dock's) shows it at once, and the
+ * view covers the work area, the chat and Melo's panel, so the picture is as large as the window allows. It never opens
+ * by itself, and melo is not held: the card stays live in the chat underneath, and the view says what melo is doing now
+ * in the card's own words (`browserLook`, browser-card.mjs). The chat's header chip, which names the state of the chat's
+ * browser, shows it too. Closing it (**Back to chat**, Escape: `close()`) only stops watching and puts the keys back on
+ * the card that opened it (`returned(key)`): the page, melo's run and the card stay as they are, and the view is never
+ * Done. **Stop** (`stop(card)`) ends the run it shows, a task's or the chat's own, since the composer is covered. The
+ * view stays on the card the person opened while that run goes on, and a card that is over has its last picture here, big
+ * and with no live control (`kept`): when the run ends under the view, and when the person opens a finished card
+ * (`open(card, picture)` copies the card's own canvas). Whether the chat can be watched (`available`: its browser is
+ * Chrome and the live view is on) is asked when the chat is followed, on `recheck()` (this page saved Settings), and
+ * again when a chat marked unwatchable has a new browser card or is asked to open one (another page may have saved
+ * Settings since). The pictures come from the page's one stream of the card's source (browser-stream.mjs): a view that is
+ * hidden holds no watcher, and the card, the dock and the view of one source share one socket and one decoder.
  *
- * `follow(id)` / `release()` bind the panel to the chat that is open, `card(card)` tells it the state of the chat's
- * newest browser card (the chip's words, and the source the chip opens), and a page that is hidden for a while, or
- * kept by the browser for Back, lets go of its sockets (`suspend`) and asks again when it is back (`resume`).
- * `#/live/<id>` (`liveRoute`, `liveUrl`) is the panel alone, which **Pop out** opens large: in its own window in the
- * macOS app, in a window of the browser elsewhere. A running task's browser pops out too: its address names the
- * source as the card does (`?gen=&run=&owner=`), so the window shows that run alone and never another. The pure helpers (`parseMeta`, `view`, `layout`, `toPage`,
- * `addressParts`, `control` and the input messages) are what the tests check.
+ * `follow(id)` / `release()` bind the view to the chat that is open, `card(newest, cards)` tells it the state of the
+ * chat's cards (the chip's words, the source the chip opens, and the news of the card the view shows), and a page that is
+ * hidden for a while, or kept by the browser for Back, lets go of its sockets (`suspend`) and asks again when it is back
+ * (`resume`). `#/live/<id>` (`liveRoute`, `liveUrl`) is the same view alone, which **Pop out** opens in a window of its
+ * own for a person who works in other apps: in its own window in the macOS app, in a window of the browser elsewhere. A
+ * running task's browser pops out too: its address names the source as the card does (`?gen=&run=&owner=`), so the window
+ * shows that run alone and never another. The pure helpers (`parseMeta`, `view`, `layout`, `toPage`, `addressParts`,
+ * `control` and the input messages) are what the tests check.
  *
  * Take over: **Take over** (or the "melo needs you" card, `takeOver()`) hands the tab to the person (`meta.owner` is
  * then `you`) and melo is paused, with no timer. Where they have it is `meta.place`: `window`, a real Chrome window
- * in front of them, of which this panel is a live copy (**Show Chrome window** brings it back to the front); or
- * `app`, this panel, when the page has a form they began (`form`: **Open in Chrome, clear the form** moves it to a
- * window) or the window could not open (`failed`; `busy`: another chat's window is open). In the panel their clicks, drags and wheel on the picture, and
+ * in front of them, of which this view is a live copy (**Show Chrome window** brings it back to the front); or
+ * `app`, this view, when the page has a form they began (`form`: **Open in Chrome, clear the form** moves it to a
+ * window) or the window could not open (`failed`; `busy`: another chat's window is open). In the view their clicks, drags and wheel on the picture, and
  * their keys, input-method text and pastes in a hidden text box over it, go to the gateway as small JSON messages
  * (`mouseMessage`, `wheelMessage`, `keyMessage`, `composeMessage`, `commitMessage`, `pasteMessage`) and from there to
- * melo's browser as its own input. A point on the picture becomes a point on the page by the frame's own metadata
- * (`toPage`: its size, the space above it and its zoom). The page's boxes are answered in the panel. **Done** gives the
+ * melo's browser as its own input; the Escape they press then is the page's, not the view's. A point on the picture becomes a point on the page by the frame's own metadata
+ * (`toPage`: its size, the space above it and its zoom). The page's boxes are answered in the view. **Done** gives the
  * page back (closing the Chrome window does too). Nothing typed is kept here either: the text box is emptied after
  * every key.
  */
@@ -254,9 +259,11 @@ export function control(meta, {focused = false, link = 'open', touch = false} = 
  * `connecting`, `open` or `retry`) and whether a picture is on the canvas. The states are calm and each says what
  * is going on and whether anything is needed (nothing ever is): `idle` (no page), `loading` (opening, or waiting
  * for the first picture), `live`, `stale` (the picture is kept but not updating, or the link dropped and is being
- * made again) and `closed` (the tab, the browser or the chat is gone).
+ * made again) and `closed` (the tab, the browser or the chat is gone). A run that is over has `kept` (its title,
+ * address and the words of its state): the last picture, with nothing live about it.
  */
-export function view(meta, link, {picture = false, known = false} = {}) {
+export function view(meta, link, {picture = false, known = false, kept = null} = {}) {
+  if (kept) return {state: 'kept', browsing: false, title: kept.title, host: kept.host, rest: kept.rest, note: '', status: kept.status, picture: true};
   let state = meta?.state ?? (known ? 'loading' : 'idle');
   if (!meta && link === 'retry') state = known ? 'stale' : 'idle';
   if (meta && link === 'retry' && (state === 'live' || state === 'loading')) state = picture ? 'stale' : 'loading';
@@ -292,14 +299,16 @@ function on(target, type, fn, options) {
 }
 
 /**
- * The panel's behaviour. *els* are its parts: `root`, `chip` (and `chipText`), `title`, `host`, `rest`, `status`,
- * `viewport` (the box the picture is fitted in), `canvas`, `note`, `hide` and `pop`; for taking over, `take`, `give`,
+ * The view's behaviour. *els* are its parts: `root`, `chip` (and `chipText`), `title`, `host`, `rest`, `status`,
+ * `viewport` (the box the picture is fitted in), `canvas`, `note`, `hide` (Back to chat), `pop` and `stop`; for taking over, `take`, `give`,
  * `viewOnly`, `hint`, `keys` (the hidden text box keys go to) and the box's `dialog`, `dialogTitle`, `dialogText`,
  * `dialogInput`, `dialogOk` and `dialogCancel`. *api* reads paths below /api. *streams* is the page's one transport
  * (`createStreams`: the card and the dock watch the same sources); without it the panel makes its own from
  * *openSocket* (a WebSocket, so a test can give it a fake), *decode* (a picture's bytes to a bitmap the canvas draws),
  * *schedule*, *cancel* and *denied()* (the gateway refused the stream for the token's sake). *popOut* is set only
- * inside the macOS app (called with the source to show: `{session}`, and for a task's browser `gen`, `run` and `owner` too). *changed({shown})* tells the page the panel opened or closed (it makes room for it).
+ * inside the macOS app (called with the source to show: `{session}`, and for a task's browser `gen`, `run` and `owner` too).
+ * *stop(card)* ends the run a card names and answers whether it went; *returned(key)* is called when the person closes
+ * the view that a card (by its key) opened, so the keys go back to it, and answers whether they did.
  * *frame* runs a function before the next paint (pointer moves and wheel steps are sent at most once a frame).
  */
 export function setupBrowser({
@@ -311,9 +320,9 @@ export function setupBrowser({
   location = globalThis.location,
   schedule = (fn, ms) => setTimeout(fn, ms),
   cancel = (id) => clearTimeout(id),
-  wide = () => true,
   popOut = null,
-  changed = () => {},
+  stop = null,
+  returned = () => false,
   denied = () => {},
   observe = null,
   frame = (fn) => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(fn) : setTimeout(fn, 16)),
@@ -330,8 +339,14 @@ export function setupBrowser({
     picture: false,
     unwatch: null, // lets go of the shown source
     source: null, // the source being watched: the chat's, pinned to a card's run and generation when it has one
-    pin: null, // the `{gen, run}` of the chat's newest active browser card: the source the chip and Open browser show
-    card: null, // that card's `{gen, run, state}`, or the newest card's once it ended (the chip's words)
+    pin: null, // the `{gen, run}` of the chat's newest active browser card: the source the chip shows
+    card: null, // the chat's newest card (the chip's words), active or ended
+    chosen: null, // the card the person opened: the view stays on its run, whatever begins after it
+    kept: null, // a run that is over, shown as its last picture: `{card, w, h, title, host, rest}`
+    painted: false, // a picture of the watched source is on the canvas
+    last: null, // the title and address of the page that picture shows
+    from: '', // the key of the card that opened the view: the keys go back to it
+    stopping: null, // the card whose Stop was pressed and has not yet taken effect
     asking: false, // a question to the gateway is on its way
     generation: 0,
     focused: false, // the hidden text box has the keys (take over)
@@ -346,15 +361,22 @@ export function setupBrowser({
   };
 
   const working = () => S.card?.state === 'working';
+  // The card the view is on: the one the person opened, else the chat's newest while it runs; a run that is over, once kept.
+  const shownCard = () => S.kept?.card ?? S.chosen ?? (S.card && ACTIVE.has(S.card.state) ? S.card : null);
+  // What the card says of its run, as the card says it: its state, and the step melo is at.
+  const words = (look) => [look.word, look.now || look.sub].filter(Boolean).join(' · ');
   // A phone or a tablet has no Control key to leave the page with.
   const touchScreen = () => globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
 
   function render() {
-    const v = view(S.meta, S.link, {picture: S.picture, known: S.known});
+    const card = shownCard();
+    const look = card ? browserLook(card, S.kept ? null : {meta: S.meta, link: S.link, picture: S.picture}, {retained: S.kept !== null || S.painted}) : null;
+    const v = view(S.meta, S.link, {picture: S.picture, known: S.known, kept: S.kept && {...S.kept, status: words(look)}});
     const c = control(S.meta, {focused: S.focused, link: S.link, touch: touchScreen()});
-    // The card says melo is at work before the stream does: show it on the panel too.
-    const browsing = v.browsing || (working() && S.shown && v.state !== 'closed' && v.state !== 'idle');
+    // The card says melo is at work before the stream does: show it on the view too.
+    const browsing = v.browsing || (working() && S.shown && !S.kept && v.state !== 'closed' && v.state !== 'idle');
     const {root, chip} = els;
+    if (v.picture && !S.kept) S.last = {title: v.title, host: v.host, rest: v.rest};
     root.hidden = !S.shown;
     root.dataset.state = v.state;
     root.dataset.browsing = String(browsing && !c.you);
@@ -365,14 +387,17 @@ export function setupBrowser({
     setText(els.host, v.host);
     setText(els.rest, v.rest);
     root.dataset.picture = String(v.picture);
-    setText(els.status, c.you ? c.status : browsing && !v.status ? t('browser.browsing') : v.status);
+    // While melo works the card's words say what it is doing; the stream's say the rest (nothing to show, not updating).
+    const watching = look !== null && !S.kept && ['live', 'loading', 'stale'].includes(v.state);
+    setText(els.status, c.you ? c.status : watching ? words(look) : browsing && !v.status ? t('browser.browsing') : v.status);
     renderControl(c);
+    renderStop(card);
     setText(els.note, v.note);
-    els.note.hidden = v.picture && v.state === 'live';
+    els.note.hidden = !v.note || (v.picture && v.state === 'live');
     els.note.dataset.over = String(v.picture);
     els.canvas.hidden = !v.picture;
     els.canvas.setAttribute('aria-label', `${t('browser.picture')}: ${v.title}`);
-    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && v.state !== 'closed');
+    if (els.pop) els.pop.hidden = !(popOut && S.shown && !S.liveOnly && !S.kept && v.state !== 'closed');
     if (els.hide) els.hide.hidden = S.liveOnly;
     if (chip) {
       chip.hidden = S.liveOnly || !(S.available && (S.known || S.shown));
@@ -385,6 +410,13 @@ export function setupBrowser({
     relayout();
   }
 
+  /** Stop: for the run the view shows while it goes on; a press waits for the run to change. */
+  function renderStop(card) {
+    if (!els.stop) return;
+    els.stop.hidden = !(stop && card && !S.kept && ACTIVE.has(card.state));
+    els.stop.disabled = Boolean(S.stopping && card && sameSource(cardSource(S.stopping), cardSource(card)));
+  }
+
   /** The take-over parts: the buttons, the hint under them, the hidden text box and the page's box. */
   function renderControl(c) {
     if (els.take) els.take.hidden = !c.canTake;
@@ -393,7 +425,7 @@ export function setupBrowser({
       els.window.hidden = !c.window;
       setText(els.window, c.window);
     }
-    if (els.viewOnly) els.viewOnly.hidden = c.canTake || c.you;
+    if (els.viewOnly) els.viewOnly.hidden = c.canTake || c.you || S.kept !== null;
     if (els.hint) {
       setText(els.hint, S.tooLong && c.you ? t('browser.pasteTooLong', {n: MAX_PASTE}) : c.hint);
       els.hint.hidden = !c.you;
@@ -431,7 +463,7 @@ export function setupBrowser({
 
   function relayout() {
     const box = {width: els.viewport?.clientWidth ?? 0, height: els.viewport?.clientHeight ?? 0};
-    const fit = layout(S.meta, box);
+    const fit = layout(S.kept ?? S.meta, box);
     if (!fit) return;
     Object.assign(els.canvas.style, {
       left: fit.left + 'px',
@@ -451,17 +483,19 @@ export function setupBrowser({
       S.meta = state.meta;
       S.link = state.link;
       S.picture = state.picture;
+      if (state.picture) S.painted = true;
       if (state.link !== 'open') S.pressed.clear();
       if (state.meta && state.meta.state !== 'idle') S.known = true;
       render();
     },
   };
 
-  /** The source the panel shows: the chat's browser, or the one a card names, pinned to the card's run and generation. */
-  const sourceOf = () => ({session: S.session, ...(S.pin ?? {})});
+  /** The source the view shows: the card the person opened, else the chat's browser pinned to its newest card's run and generation. */
+  const sourceOf = () => (S.chosen ? cardSource(S.chosen) : {session: S.session, ...(S.pin ?? {})});
 
   function watch() {
-    if (S.unwatch || !S.shown || !S.session) return;
+    if (S.unwatch || !S.shown || !S.session || S.kept) return;
+    S.painted = false;
     S.source = sourceOf();
     S.unwatch = hub.watch(S.source, sink);
   }
@@ -652,6 +686,16 @@ export function setupBrowser({
     render();
   });
   on(els.take, 'click', () => takeOver({ask: true}));
+  on(els.stop, 'click', async () => {
+    const card = shownCard();
+    if (!stop || !card || S.kept) return;
+    S.stopping = card;
+    render();
+    if ((await stop(card)) === false) {
+      S.stopping = null;
+      render();
+    }
+  });
   on(els.give, 'click', () => {
     send({type: 'give'});
     els.keys?.blur?.();
@@ -694,26 +738,28 @@ export function setupBrowser({
 
   const sameSource = (a, b) => a?.session === b?.session && (a?.gen ?? '') === (b?.gen ?? '') && (a?.run ?? '') === (b?.run ?? '') && (a?.owner ?? '') === (b?.owner ?? '');
 
-  /** Show the panel (never by itself: the person asked); one that shows another source moves to the one asked for. */
+  /** Show the view (never by itself: the person asked), with the keys inside it; one that shows another source moves to the one asked for. */
   function show() {
     if (S.shown) {
-      if (S.unwatch && !sameSource(S.source, sourceOf())) {
+      if (!S.kept && (!S.unwatch || !sameSource(S.source, sourceOf()))) {
         unwatch();
         watch();
       }
+      render();
       return;
     }
     S.shown = true;
-    changed({shown: true});
     watch();
     render();
+    els.root.focus?.({preventScroll: true});
   }
 
   function hide() {
     if (!S.shown) return;
     S.shown = false;
     unwatch();
-    changed({shown: false});
+    S.chosen = null;
+    S.kept = null;
     render();
   }
 
@@ -724,10 +770,33 @@ export function setupBrowser({
     S.available = null;
     S.pin = null;
     S.card = null;
+    S.chosen = null;
+    S.kept = null;
+    S.last = null;
+    S.from = '';
+    S.stopping = null;
     S.asking = false;
-    const was = S.shown;
     S.shown = false;
-    if (was) changed({shown: false});
+  }
+
+  /**
+   * A run that is over, shown as its last picture: the canvas's own (the run ended under the view) or a copy of the
+   * card's. Nothing is watched and no live control shows. False when there is no picture to show.
+   */
+  function keep(card, {picture = null, title = '', host = '', rest = ''} = {}) {
+    const source = picture ?? els.canvas;
+    if (!(source?.width > 0 && source?.height > 0)) return false;
+    unwatch();
+    if (picture) {
+      els.canvas.width = picture.width;
+      els.canvas.height = picture.height;
+      els.canvas.getContext?.('2d')?.drawImage(picture, 0, 0);
+    }
+    const look = browserLook(card, null, {retained: true});
+    S.chosen = null;
+    S.kept = {card, w: source.width, h: source.height, title: title || look.name, host: host || card.site || '', rest};
+    show();
+    return true;
   }
 
   /** Ask whether the chat can be watched; a pop-out window of a task's browser names its run (*pin*: the routes refuse a task's browser without it). */
@@ -751,7 +820,7 @@ export function setupBrowser({
       show();
       if (!S.available) S.meta = parseMeta('{"type":"meta","state":"closed","reason":"unavailable"}');
       render();
-    } else if (!S.available && S.shown) {
+    } else if (!S.available && S.shown && !S.kept) {
       // The browser now chosen cannot be watched: the panel goes, and it was not the person who hid it.
       hide();
     } else render();
@@ -785,18 +854,27 @@ export function setupBrowser({
     },
 
     /**
-     * The state of the chat's newest browser card (a card as `readBrowser` gives it, or null when it has none): the chip
-     * says it in the card's words, and while the card is active its source is the one the chip (and a panel not asked
-     * for a card) shows. A panel that shows the chat's browser moves to the card's source when a new card begins.
+     * The state of the chat's cards: *newest* is the last (a card as `readBrowser` gives it, or null when it has none)
+     * and *cards* are all of them. The chip says the newest in the card's words, and while it is active its source is the
+     * one the chip shows; a view that follows the chat's browser moves to it when a card begins. A view the person opened
+     * on a card stays on that card's run: when it ends under the view, the view keeps its last picture.
      */
-    card(card) {
+    card(newest, cards = newest ? [newest] : []) {
       if (!S.session || S.liveOnly) return;
-      const live = Boolean(card) && ACTIVE.has(card.state);
-      const pin = live ? cardSource(card) : null;
-      const moved = pin !== null && !sameSource(pin, sourceOf());
-      S.card = card ? {gen: card.gen, run: card.run, state: card.state} : null;
+      const was = shownCard();
+      const live = Boolean(newest) && ACTIVE.has(newest.state);
+      const pin = live ? cardSource(newest) : null;
+      const find = (card) => cards.find((found) => sameSource(cardSource(found), cardSource(card))) ?? null;
+      if (S.chosen) S.chosen = find(S.chosen) ?? S.chosen;
+      const moved = S.chosen === null && pin !== null && !sameSource(pin, sourceOf());
+      S.card = newest ?? null;
       S.known = S.known || S.card !== null;
       S.pin = pin;
+      const now = was && find(was);
+      if (S.shown && !S.kept && now && !ACTIVE.has(now.state) && S.painted) {
+        keep(now, S.last ?? {});
+        return;
+      }
       if (moved && S.shown) show();
       render();
       // A chat last found unwatchable may browse in another browser now (Settings saved elsewhere): ask once for the run.
@@ -813,42 +891,57 @@ export function setupBrowser({
       await probe();
     },
 
-    /** Open browser, on a card or the dock: the panel shows that card's source. */
-    async open(card) {
+    /**
+     * Open browser, on a card or the dock: the view shows that card's source, big. *picture* is the card's own canvas,
+     * which is all a finished card has to show: its last picture opens the same view, with nothing live in it.
+     */
+    async open(card, picture = null) {
       if (!S.session || S.liveOnly) return false;
       const id = S.session;
+      S.from = card.key ?? '';
+      if (!ACTIVE.has(card.state)) {
+        // Only the card's own picture: the view's canvas may hold another run's.
+        return picture?.width > 0 && picture?.height > 0 && keep(card, {picture});
+      }
       if (S.available === false) await probe(); // the browser may have changed since this page last asked
       if (S.session !== id || S.available === false) return false;
-      S.pin = cardSource(card);
+      S.kept = null;
+      S.chosen = card;
       S.available = S.available ?? true;
       show();
       return true;
     },
 
-    /** The header chip: show the panel, or hide it. Hiding only stops watching. */
+    /** The header chip: show the view, or hide it. Hiding only stops watching. */
     toggle() {
       if (S.shown) hide();
       else if (S.session) {
+        S.from = S.card?.key ?? '';
         S.available = S.available ?? true;
         show();
       }
     },
 
+    /** The page lets the view go (a task or the schedule takes the room): the keys stay where they are. */
     hide() {
       if (!S.shown || S.liveOnly) return;
       hide();
     },
 
-    /** Escape on a phone: the sheet closes. True when it did. */
-    closeSheet() {
-      if (!S.shown || S.liveOnly || wide()) return false;
-      this.hide();
+    /** Back to chat, or Escape: the view closes, and the card that opened it has the keys again. True when it closed. */
+    close() {
+      if (!S.shown || S.liveOnly) return false;
+      const from = S.from;
+      hide();
+      if (!from || returned(from) === false) els.chip?.focus?.();
       return true;
     },
 
-    /** The pop-out button: the app (or a window of the browser) shows this panel's source alone, a task's by its exact run. */
+    /** The pop-out button: the app (or a window of the browser) shows this view's source alone, a task's by its exact run. */
     popOut() {
-      if (popOut && S.session && S.shown && !S.liveOnly) popOut(S.pin?.owner ? sourceOf() : {session: S.session});
+      if (!popOut || !S.session || !S.shown || S.liveOnly || S.kept) return;
+      const source = sourceOf();
+      popOut(source.owner ? source : {session: S.session});
     },
 
     /**

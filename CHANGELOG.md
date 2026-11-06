@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- One click on a browser card shows the page big. The card's picture or **Open browser** (or the **Browser** button in
+  the header) now opens the Browser panel over the chat at once, live, where it used to open a narrow panel beside
+  it that needed a second click; on a phone it fills the screen. melo keeps working while you watch, the view says
+  what it is doing as the card does, and **Stop**, **Take over** and **Done** are in it and work as before. **Back to
+  chat** or Esc closes it and puts the keys back on the card, which stays live in the chat. A card whose run is over
+  opens its last picture big, with no live controls. The side column, its sheet and the composer's squeezed layout are
+  gone: it is one view at a new size over the same picture stream, and **Pop out** is unchanged (#569).
 - melo reads PDFs. `file_read` and `web_fetch` open a PDF by its first bytes (`%PDF-`), whatever its name or type says,
   and give its pages in order as text, each under a `--- page N of M ---` line, with each row kept whole (a place and a
   date stay on the line of their school or employer). A page with no text (a scan) is a picture in the result when the

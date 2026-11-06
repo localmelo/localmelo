@@ -47,7 +47,7 @@ The pinned Python and uv archives and the wheels are checked against their hashe
 
 ## The Browser window
 
-- When a task you asked for browses in Chrome in the background, the console's **Browser** panel has a **Pop out** button. It opens the panel alone in its own window, so you can watch melo's page while you work in another window. A task's page pops out the same way.
+- When a task you asked for browses in Chrome in the background, a click on its card shows the page big in the app's window. The **Browser** panel has a **Pop out** button. It opens the panel alone in its own window, so you can watch melo's page while you work in another window. A task's page pops out the same way.
 - The window shows the same live picture ([Watching melo's browser](browsing.md#watching-melos-browser)), and **Take over** works there too: clicks, keys, the Mac's input methods and Command-V paste go to the page, and Command-A, Command-X and Command-Z act on the page ([Taking over melo's browser](browsing.md#taking-over-melos-browser)). Closing it ends its picture stream; a page you have stays yours until you press **Done**. It also closes when the gateway stops or the app quits.
 - It can only show the gateway's own page. A link in it is never opened, and it never goes to another site.
 
