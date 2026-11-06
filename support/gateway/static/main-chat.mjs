@@ -78,6 +78,7 @@ export function readCard(row) {
       preview: String(data.preview ?? ""),
       review: data.review && typeof data.review === "object" ? data.review : {},
       canAllow: data.can_allow === true,
+      finished: data.finished === true,
     } : {}),
   };
 }
@@ -91,7 +92,7 @@ export function cardBlock(card) {
     preview: card.preview,
   });
   if (!facts || !facts.category) return null;
-  return card.canAllow ? facts : {...facts, allow: false};
+  return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
 }
 
 /**

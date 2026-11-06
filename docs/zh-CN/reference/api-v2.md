@@ -430,7 +430,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 
 任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。被拦下步骤的 `review` 在调用有 `gist` 时带着它（见 `GET /api/sessions/{id}` 的 `pending_approvals`）。任务在没有被拦下步骤的情况下继续。`POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
-"message": "queued"}`（它在下一步读到消息），工作没做完就停下的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`，工作已完成时返回 409 `invalid_transition`（此时 `can_allow` 为 `false`）。任务结束时，它的允许随之失效。
+"message": "queued"}`（它在下一步读到消息），工作没做完就停下的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`，工作已完成时返回 409 `invalid_transition`（此时 `can_allow` 为 `false`，这个步骤和它的卡片带 `finished: true`：这一步是对话里的新工作）。任务结束时，它的允许随之失效。
 
 明确指定的用户工作区必须是主目录之内的现有目录（严格位于主目录内部），且位于隐藏文件夹和 `~/Library` 之外；默认工作区的选择方式见[调度器](scheduler.md#tasks-workers-and-the-scheduler-store-s3a)。无效的工作区请求返回 400 `invalid_workspace`；在运行或恢复之前变为无效的工作区会使任务以 `wait_reason="invalid_workspace"` 失败，而不是运行它。
 

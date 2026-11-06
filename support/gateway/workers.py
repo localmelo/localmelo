@@ -2935,7 +2935,9 @@ class TaskWorkers:
         )
         if job_finished(record):
             # A worker is one-time: its finished job has no step left to allow.
-            body["blocked"] = [{**b, "can_allow": False} for b in body["blocked"]]
+            body["blocked"] = [
+                {**b, "can_allow": False, "finished": True} for b in body["blocked"]
+            ]
         policy = self._auto.get(record.task_id)
         body["allowances"] = dict(policy.given) if policy is not None else {}
         # Its steps that ran on the person's earlier approval, each with Revoke (#369).

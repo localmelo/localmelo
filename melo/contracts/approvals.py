@@ -719,7 +719,7 @@ class AutoPolicy:
         asking: ApprovalPolicy | None = None,
         watch: AskWatch | None = None,
     ) -> None:
-        # A saved task's policy: a blocked step is offered on the task's page.
+        # A saved task's policy: a blocked step is offered while its job is unfinished.
         self.task = task
         self._clock = clock
         # The policy that asks a person about a stopped step (#465); None
@@ -1083,8 +1083,11 @@ NOBODY_TO_ASK: Final = (
     "fault, a limit) and do not guess one.\n"
     "Do not try to reach the same result another way."
 )
+# A worker is one-time: once its job finished, the step is new work, not an allowance.
 ALLOW_IN_TASK: Final = (
-    "that they can allow it once from the task's page; the task goes on " "without it."
+    "that the task goes on without it, and that once it has finished this step is "
+    "new work they ask the chat for. A task that cannot finish without the step "
+    "ends with Ending: blocked instead, and then they can allow it once."
 )
 ALLOW_NEVER: Final = (
     "that this step cannot be allowed: melo never changes its own runtime, "
@@ -1190,7 +1193,7 @@ def block_note(
 ) -> str:
     """The text the model reads for a step auto mode blocked.
 
-    *task*: the run is a saved task, whose page offers the allowance;
+    *task*: the run is a saved task, offered the allowance while its job is unfinished;
     *folder*: the workspace, for a step that can never be allowed; *second*:
     a second block of the same kind in this turn, which stops the run;
     *changed*: the user allowed a step and this retry differs from it.

@@ -464,6 +464,7 @@ class MainChatCards:
             **{k: block[k] for k in ("request_id", "step_key", "name", "preview")},
             "review": review,
             "can_allow": block["can_allow"] and not job_finished(record),
+            "finished": job_finished(record),
         }
 
     async def _reminder_words(self, task_id: str) -> str | None:

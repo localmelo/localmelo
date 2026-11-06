@@ -226,7 +226,7 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 - **"Allow for this chat" covers its tasks.** A tool you allowed for a chat runs its routine steps in that chat's tasks too, as in the chat, after melo reads the files changed since the chat began. What you allowed in the main chat counts there too; another side chat's grants never do, and **Allow for this task** holds in that task only.
 - **What always asks.** A high-impact step (installs, downloads, deletes, sends data out, changes outside the folder, uses your keys, changes melo itself) asks every time, however often you allowed it before. So does a step melo could not see all of (a file too big to read, a command built while it runs), and every call of a tool melo's rules do not read (a web or MCP tool, such as one that pays an invoice). Chores, and tasks another program or melo itself started, never use or record your approvals. Auto's **Allow once** is one step, once, and is never recorded. A task you create with your gateway token (`melo task new`) is yours, and uses the main chat's approvals.
 - **Revoke.** **Revoke** on the chat's row, on the task's page, or under **Steps you approved here** in a chat's **Details** (developer mode) takes an approval back: that step asks again; what ran stays done. These recorded steps live in memory only: restarting the gateway or deleting the chat forgets them. Your "allow for this chat" grants are not among them; they are kept (see [Permissions](#permissions)).
-- **In Auto.** A step Auto stops in a task you started asks in its chat, on the same card, and the task waits. A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once** while the job is unfinished. A job that finished offers none: new work is a new task. An earlier approval never lifts Auto's stop: Auto stops only steps that are not routine, and those are never kept.
+- **In Auto.** A step Auto stops in a task you started asks in its chat, on the same card, and the task waits. A step Auto blocked in a task shows in its chat too, with what was blocked, why, and **Allow once** while the job is unfinished. A job that finished offers none: the step is new work you ask the chat for. An earlier approval never lifts Auto's stop: Auto stops only steps that are not routine, and those are never kept.
 
 ## When a task it started stops, the chat follows up
 
@@ -1026,7 +1026,8 @@ commands and file changes.
   with nobody watching, it blocks the step instead: its page shows **Mode**
   and lists **Blocked steps**, each opening the same card; the task goes on
   without them, and **Allow once** there sends the message to the task
-  while its job is unfinished.
+  while its job is unfinished. Once it finished, the step is new work you
+  ask the chat for.
 - An **Allow once** on a blocked step lives in memory: restarting
   localmelo forgets it, and an allowance the retried turn did not use goes
   when that turn ends. Sites allowed for a chat are grants, which are kept

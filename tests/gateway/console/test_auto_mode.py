@@ -633,9 +633,9 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
         [blocked] = body["blocked"]
         assert blocked["can_allow"] is True and blocked["name"] == "python_exec"
         assert blocked["preview"] and blocked["used_at"] is None
-        # The note the task read offers its page, not the chat.
+        # The note the task read promises no allowance after it ended.
         assert any(
-            "from the task's page" in m.content for m in llm.requests[-1]
+            "new work they ask the chat for" in m.content for m in llm.requests[-1]
         ), "the task's note"
         steps = await blocked_steps(console.store, task_id)
         assert steps[0]["review"]["categories"] == ["credentials"]
@@ -700,6 +700,7 @@ async def test_a_job_that_finished_without_a_blocked_step_is_not_reopened_for_it
             await asyncio.sleep(0.02)
         [blocked] = (await console.workers.get(task_id))["blocked"]
         assert blocked["can_allow"] is False, "a finished job offers no Allow once"
+        assert blocked["finished"] is True
         turns = await console.store.list_turns(task_id)
         response = await client.post(
             f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"

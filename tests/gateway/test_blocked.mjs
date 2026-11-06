@@ -51,6 +51,14 @@ const OPAQUE = {...INSTALL, request_id: 'r3', review: {verdict: 'high', categori
 const VENV = "import subprocess\nsubprocess.run(['.venv/bin/pip', 'install', 'matplotlib'])";
 const item = (approval) => ({kind: 'tool', status: 'blocked', name: 'python_exec', arguments: {code: VENV}, preview: 'import subprocess (+1 more line)', approval, durationS: null, errorCategory: 'approval_denied', error: 'Auto mode blocked this step'});
 
+test('a finished job\'s blocked step has no Allow once and says it is new work for the chat', () => {
+  const card = blockCard(fakeDoc(), {...blockFacts(item(INSTALL)), allow: false, finished: true});
+  const words = text(card);
+  assert.match(words, /finished without this step/);
+  assert.match(words, /ask for it in the chat/);
+  assert.doesNotMatch(words, /allow it here|Allow once/);
+});
+
 test('a blocked row says what the step does; an allowed retry and a step you asked for say so too', () => {
   assert.equal(toolState(item(INSTALL)).text, 'blocked: installs software');
   assert.equal(approvalTag('blocked', 'approval_denied', {...INSTALL, review: null, reason: 'the turn stopped'}).short, 'blocked: the turn stopped');

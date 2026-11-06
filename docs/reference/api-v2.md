@@ -839,7 +839,8 @@ next step), `"continued"` for one that stopped before its job was done (it
 runs again); 404 `not_found` for no such block, 409 `not_allowable` for one
 that cannot be allowed, 409 `already_allowed` once the step ran on an
 allowance or while one waits, 409 `invalid_transition` for a job that finished
-(`can_allow` is `false` then). A task's allowances go when it finishes.
+(`can_allow` is `false` then, and the block and its card carry `finished: true`:
+the step is new work for the chat). A task's allowances go when it finishes.
 
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
