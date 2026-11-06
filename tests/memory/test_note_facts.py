@@ -62,16 +62,9 @@ def test_a_meta_claim_is_ignored_with_a_reason() -> None:
         "are memorized.",
     ]
     for text in claims:
-        for source in ("reasoning_note", "digest"):
-            decision = decide(
-                text,
-                kind="episodic",
-                source=source,
-                provenance={},
-                active=[],
-            )
-            assert decision.action == "IGNORE", (source, text)
-            assert "meta claim" in decision.reason
+        decision = decide(text, kind="episodic", provenance={}, active=[])
+        assert decision.action == "IGNORE", text
+        assert "meta claim" in decision.reason
 
 
 def test_a_meta_claim_that_carries_a_fact_is_not_dropped() -> None:
@@ -79,9 +72,7 @@ def test_a_meta_claim_that_carries_a_fact_is_not_dropped() -> None:
         "all 10 records read and summarized — plumber 4/10 1-3PM Adler Plumbing "
         "$180 Ben Okoro 14 Orchard Ln Apt 3"
     )
-    decision = decide(
-        text, kind="episodic", source="reasoning_note", provenance={}, active=[]
-    )
+    decision = decide(text, kind="episodic", provenance={}, active=[])
     assert decision.action == "NEW"
 
 
@@ -110,7 +101,7 @@ def test_a_digest_with_a_task_line_is_content() -> None:
     # sentence reads like a completion claim (no dates or amounts at all).
     text = "task: transpose() … outcome: completed"
     assert not is_meta_claim(text)
-    decision = decide(text, kind="episodic", source="digest", provenance={}, active=[])
+    decision = decide(text, kind="episodic", provenance={}, active=[])
     assert decision.action == "NEW", decision.reason
 
 
@@ -121,27 +112,17 @@ def test_a_claim_that_names_a_file_or_function_is_content() -> None:
         "I've read `transpose_matrix` and remembered all of Jamie's records.",
     ):
         assert not is_meta_claim(text)
-        decision = decide(
-            text, kind="episodic", source="reasoning_note", provenance={}, active=[]
-        )
+        decision = decide(text, kind="episodic", provenance={}, active=[])
         assert decision.action == "NEW", (text, decision.reason)
 
 
-def test_an_aider_final_digest_is_admitted_as_a_user_request_digest() -> None:
+def test_an_aider_final_digest_is_a_new_fact() -> None:
     text = (
         "task: Implement transpose in transpose.py so the tests in "
         "transpose_test.py pass\noutcome: completed"
     )
-    for admitted_by in ("", "user_request"):
-        decision = decide(
-            text,
-            kind="episodic",
-            source="digest",
-            provenance={},
-            active=[],
-            admitted_by=admitted_by,
-        )
-        assert decision.action == "NEW", (admitted_by, decision.reason)
+    decision = decide(text, kind="episodic", provenance={}, active=[])
+    assert decision.action == "NEW", decision.reason
 
 
 def test_a_fenced_code_block_is_not_a_fact() -> None:

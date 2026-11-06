@@ -50,6 +50,7 @@ from localmelo.support.memory.service import (
     search_memory_listing,
 )
 from localmelo.support.sessions.store import SessionStore
+from localmelo.tests.memory.hippo_helpers import relate
 from localmelo.tests.memory.test_recall_bars import (
     FAR_QUESTION,
     MODEL,
@@ -612,7 +613,7 @@ async def test_a_replaced_item_reads_as_older_and_its_replacement_leads(
             at=now - 2 * DAY,
         )
         _, index = memory.stores()
-        await index.mark_replaced(old, new)
+        await relate(index, replace=(old, new))
         found = await ask(memory, store, "when is the weekly sync?")
         assert [i.key for i in found.used] == [f"m:{new}"]
         assert OLDER_ITEM not in found.block
@@ -662,7 +663,7 @@ async def test_a_conflicting_item_names_its_partners_in_the_line_and_the_heading
             at=now - 3 * DAY,
         )
         _, index = memory.stores()
-        await index.link_items(never, like, conflict=True)
+        await relate(index, link=(never, like), conflict=True)
         reply = await MemoryTools(memory).search(query="spicy food")
         listed = lines_of(reply)
         assert len(listed) == 2
@@ -698,7 +699,7 @@ async def test_the_corpus_reads_an_item_again_when_its_status_changes(
         await ask(memory, store, "weekly sync")
         assert not memory._corpus.items[f"m:{first}"].replaced_by
         _, index = memory.stores()
-        await index.mark_replaced(first, second)
+        await relate(index, replace=(first, second))
         await ask(memory, store, "weekly sync")
         assert memory._corpus.items[f"m:{first}"].replaced_by == f"m:{second}"
         await index.delete(session_id)
@@ -1174,7 +1175,7 @@ async def test_deleting_the_item_that_replaced_another_does_not_bring_the_older_
             "The weekly sync is now on Friday.",
             at=now - 2 * DAY,
         )
-        await memory.stores()[1].mark_replaced(old, new)
+        await relate(memory.stores()[1], replace=(old, new))
         assert await memory.delete_item(new)
         # The Wednesday fact is still the older one: it is not the current answer ...
         found = await ask(memory, store, "when is the weekly sync?")

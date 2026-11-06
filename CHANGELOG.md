@@ -1710,6 +1710,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.
 - melo no longer refuses a note because it quotes a form line you typed, reads the messages you add while it works, and stops after two refused attempts instead of retrying again and again. Part of #442.
 - Developer only: when the chat model fails on a window while memory items are written from a chat, the chat's progress mark no longer passes it, so those turns stay recalled as turns. Part of #428.

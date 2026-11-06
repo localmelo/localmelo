@@ -17,6 +17,7 @@ import httpx
 from localmelo.support.gateway.console import Console
 from localmelo.support.memory import service
 from localmelo.support.memory.index import MemoryItem
+from localmelo.tests.memory.hippo_helpers import relate
 
 from .test_memory_routes import ScriptedLLM, say, setup  # noqa: F401  (fixture)
 
@@ -89,7 +90,7 @@ async def test_a_replaced_item_names_what_replaced_it_until_that_is_deleted(
     session_id = await say(client, tmp_path, "Where is the weekly sync?")
     old = await store(console, session_id, "Sync", "On Wednesday.", 1.0)
     new = await store(console, session_id, "Sync", "Now on Friday.", 2.0)
-    await console.memory.stores()[1].mark_replaced(old, new)
+    await relate(console.memory.stores()[1], replace=(old, new))
     rows = {row["id"]: row for row in await listed(client)}
     assert [r["id"] for r in await listed(client)] == [new, old], "newest first"
     assert (rows[old]["status"], rows[old]["replaced_by"]) == ("replaced", new)
