@@ -305,9 +305,14 @@ class LiveState:
 
 
 def _beside(preview: str, words: str) -> str:
-    """The preview a row shows beside a step's *words*: none when they say it already."""
+    """The preview a row shows beside a step's *words*: none when they say it
+    already, or when it is a call's raw arguments, which are for a developer.
+    """
+    if not words:
+        return preview
     named = preview.split(" ", 1)[0].rstrip("/").rsplit("/", 1)[-1]
-    return "" if preview in words or named in words.split() else preview
+    said = preview in words or named in words.split()
+    return "" if said or preview.startswith(("{", "[")) else preview
 
 
 @dataclass(frozen=True)

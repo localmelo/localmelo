@@ -581,6 +581,9 @@ def test_a_row_says_what_the_step_did_and_a_developer_keeps_the_call() -> None:
     ):
         assert words in Turn().tool(tool, "", output=output).text()
         assert tool in Turn(developer=True).tool(tool, "", output=output).text()
+    raw = '{"run_now":true,"title":"Buy it"}'
+    assert raw not in Turn().tool("task_schedule", raw, output="Saved").text()
+    assert raw in Turn(developer=True).tool("task_schedule", raw, output="x").text()
 
 
 def test_output_cannot_act_on_the_terminal() -> None:
@@ -1295,7 +1298,7 @@ def test_a_tool_name_from_the_model_is_cleaned() -> None:
     turn.finish("cancelled")
     text = turn.text()
     assert "\x1b" not in text and "PWNED" not in text
-    assert "✗ ± Use evil  {}" in text and "◌ ± Use never" in text
+    assert "✗ ± Use evil ·" in text and "◌ ± Use never" in text
 
 
 def test_model_ids_in_the_banner_are_cleaned() -> None:

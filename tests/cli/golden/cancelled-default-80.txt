@@ -3,7 +3,7 @@
   No approvals for this turn (--yolo).
 ✓ $ Ran a command  true · 0.1s
   └ (no output)
-◌ ± Use hold  {} · stopped after 0.1s
+◌ ± Use hold · stopped after 0.1s
 ◌ $ Run a command  false · not run
 ■ Stopped · /retry runs it again
 
