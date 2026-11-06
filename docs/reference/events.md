@@ -533,9 +533,11 @@ is in `memory_stats.recall_log` and, with its item text, in
   was dropped), `control_char` (raw newline, carriage return and tab
   characters inside strings were escaped), `invalid_escape` (the backslash of
   an escape that JSON does not have, such as `\;`, was doubled, so that it
-  reads as a backslash and the character after it) or `unclosed_array` (an
+  reads as a backslash and the character after it), `unclosed_array` (an
   array that the next key broke off was closed: a `]` was inserted before the
-  comma that precedes that key); `null` when the reply read as it was and when no
+  comma that precedes that key), `single_quotes` (a value in single quotes became
+  a JSON string) or `key_quote` (a key's missing opening quote was inserted);
+  `null` when the reply read as it was and when no
   reflection was read. A repair is tried only when the
   reply holds no reflection as it stands, only on a `{...}` that the decoder
   rejects (the first eight of a reply), and counts only when the result is an
