@@ -67,7 +67,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 - 轮次请求的审批仍是熟悉的选项列表，答复经网关送达；在控制台答复的审批，这里的列表会关闭。
 - 卡片是一行彩色文字：一个侧边对话或任务已完成、未完成或在等你，以及如何打开它。`/task …` 会在当前对话里开始一个任务，与控制台相同；关于别的对话的任务的回执，行尾会写上 `from` 和那个对话的名字。
 - 任务向对话求助时，会有一行灰色文字 `Task “Fix tests” asks: <problem>`（中文目录里是「任务「Fix tests」在问：…」），随后是 melo 的回答，上面没有你的消息。接着是 `→ melo answered “Fix tests” · <answer>`，或者 `! “Fix tests” needs your answer: <question>`：只有这一个任务在等时，在这里发一条消息回答（`→ Sent to “Fix tests” as your answer`；10 秒内可在 `melo console` 里撤销）；有几个在等时，这一行会写 `several wait: /answer Fix tests …`。
-- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用；`/approvals ask`、`/approvals auto` 和 `/grants` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
+- `/model`、`/backend`、`/undo`、`/copy`、`/sessions`、`/resume`、`/title`、`/usage`、`/attach`、`/browser` 和 `/mcp` 只在终端自己的对话里可用（使用 melo_serve 时，`/model` 在主聊天里也可用）；`/approvals ask`、`/approvals auto` 和 `/grants` 在每个对话里都可用。`melo -X cli.chat=local`（或 `[cli] chat = "local"`）打开它，`-u URL`、`-c`、`-r` 和 `--yolo` 也是如此。
 
 <a id="which-model-server"></a>
 
@@ -154,7 +154,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 | 命令 | 作用 |
 |---|---|
 | `/help [command]` | 三组常用命令；`/help all`（开发者模式下直接 `/help`）列出所有命令和按键；`/help NAME` 给出某个命令的详情。 |
-| `/model [name\|number]` | 单独使用：列出服务器的对话模型，当前模型标 `✓`，已加载的标 `(loaded)`；Enter 切换并把该模型保存为默认值，Esc 保留当前模型。带列出的 ID 或编号：从下一条消息起切换。服务器没有列出的名称会被拒绝。 |
+| `/model [name\|number]` | 单独使用：列出服务器的对话模型，当前模型标 `✓`，已加载的标 `(loaded)`；Enter 切换并把该模型保存为默认值，Esc 保留当前模型。带列出的 ID 或编号：从下一条消息起切换。服务器没有列出的名称会被拒绝。使用 melo_serve 时：列出它的对话模型、每个需要的内存和是否放得下，切换后本机每个聊天都会跟上（[切换模型](model-servers.md#switch-the-model)）。 |
 | `/backend [url]` | 切换到另一个模型服务器：询问它的 URL 和列表中的一个模型，用 `GET /models` 检查，切换并把两者保存为默认值。 |
 | `/new` | 开始新对话：模型忘记之前的对话；在终端自己的对话里，新对话不带上一个对话的授权（你在主对话里允许的仍然有效）。一条 `── New chat ──` 分隔线标出开始位置。 |
 | `/clear` | 在空屏上执行 `/new`：屏幕及其滚动缓冲区被清空，欢迎信息重新绘制。 |

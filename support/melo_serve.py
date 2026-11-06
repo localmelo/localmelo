@@ -15,12 +15,20 @@ Both paths are resolved at call time, and every surface (a banner, a provider
 build, a status line) takes one snapshot and reads everything from it. The
 state file is data from another process: a field that is not what it should be
 counts as absent, and :func:`snapshot` never raises.
+
+The control socket is also the one way to change what is served: :func:`picks`
+reads the chat models melo_serve offers and :func:`switch` loads one. Every
+surface goes through them (the gateway for the console and the app, the
+terminal when no gateway runs), and every surface words a pick with
+:func:`pick_words`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import grp
 import json
+import math
 import os
 import shutil
 import socket
@@ -33,6 +41,8 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
+
 HOME_ENV: Final = "MELO_SERVE_HOME"
 SOCKET_ENV: Final = "MELO_SERVE_SOCKET"
 SCHEMA_PREFIX: Final = "melo_serve.state/"
@@ -40,6 +50,14 @@ COMMAND: Final = "melo-serve"
 DEFAULT_URL: Final = "http://127.0.0.1:8321/v1"
 USE_HINT: Final = f"{COMMAND} use <pick>"
 INSTALL_HINT: Final = "uv tool install git+https://github.com/localmelo/melo_serve"
+# The longest a load may take. Without a ``before_load`` hook melo_serve's own worst
+# case is about 42 minutes (a drain, a start and a rollback), so this is for one that
+# never answers: past it a switch ends failed, and a request that waited for the load
+# gives its error. A hook may add its 30 minutes; a setup that slow is deliberate, and
+# then the switch can end failed, its turns going on, while melo_serve still works.
+LOAD_BOUND_S: Final = 45 * 60.0
+# The kind of the MeloServeError for that.
+NO_ANSWER: Final = "no_answer"
 # The melo_serve that first-run setup installs: one commit (a tag can move), v0.4.0,
 # and the oldest version it accepts.
 MELO_SERVE_REF: Final = "a1535a95d5eb1c3c3709be73f465cbaa95258db1"
@@ -56,6 +74,17 @@ MAX_STATE_BYTES: Final = 256 * 1024
 CONNECT_TIMEOUT_S: Final = 0.2
 LOOPBACK_HOSTS: Final = ("127.0.0.1", "localhost", "::1")
 ROLES: Final = ("chat", "embedding")
+# A reply of the control socket is a few kilobytes; a larger one is not read.
+MAX_REPLY_BYTES: Final = 256 * 1024
+MAX_PICKS: Final = 64
+# ``GET /picks`` measures free memory first; ``POST /switch`` answers once the
+# model is ready, which can take minutes, so only its connection is bounded.
+PICKS_TIMEOUT_S: Final = 30.0
+CONTROL_CONNECT_S: Final = 2.0
+# The fit verdicts melo_serve gives; only ``too_big`` is refused.
+TOO_BIG: Final = "too_big"
+# The fit word a verdict shows (none for ``unknown``), and whether it is tight.
+_FIT_WORDS: Final = {"fits": "fits", "estimate": "fits", "alone": "tight"}
 
 
 def _path(value: str) -> Path:
@@ -88,13 +117,49 @@ class Role:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """What melo_serve says now. Not running is the empty one: no URL, no roles."""
+    """What melo_serve says now. Not running is the empty one: no URL, no roles.
+
+    *generation* goes up each time a switch loads a model; a switch names the
+    one it was chosen at, so a switch made meanwhile is not undone.
+    """
 
     running: bool = False
     url: str = ""
     status: str = ""
     login: bool = False
     roles: dict[str, Role] = field(default_factory=dict)
+    generation: int = 0
+
+
+@dataclass(frozen=True)
+class Pick:
+    """A chat model melo_serve offers (one row of ``GET /picks``).
+
+    *need_gb* is the memory it needs here and *free_gb* the memory there is for
+    it (free now, plus what the model it replaces gives back): the two figures
+    that decide whether it fits. *verdict* is melo_serve's fit word and
+    *problem* why it cannot load at all (not downloaded, ...), else ``""``.
+    A figure melo_serve leaves out is 0; only *free_gb* has None for that, as
+    0 there would say that nothing is free.
+    """
+
+    id: str
+    short: str = ""
+    name: str = ""
+    backend_name: str = ""
+    model: str = ""
+    current: bool = False
+    problem: str = ""
+    verdict: str = ""
+    need_gb: float = 0.0
+    free_gb: float | None = None
+    disk_gb: float = 0.0
+    load_s: float = 0.0
+
+    @property
+    def loadable(self) -> bool:
+        """Whether a switch may load it: nothing stops it and it fits in memory."""
+        return not self.problem and self.verdict != TOO_BIG
 
 
 def as_text(value: object) -> str:
@@ -108,12 +173,21 @@ def as_count(value: object) -> int:
     return 0
 
 
+def _finite(value: object) -> float | None:
+    """*value* as a finite number of either sign, not a bool; else None."""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:  # an int beyond a float's range
+        return None
+    return number if math.isfinite(number) else None
+
+
 def as_number(value: object) -> float:
     """*value* when it is a finite number (not a bool) of at least 0, else 0.0."""
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        number = float(value)
-        return number if 0.0 <= number < float("inf") else 0.0
-    return 0.0
+    number = _finite(value)
+    return number if number is not None and number >= 0.0 else 0.0
 
 
 def _own(info: os.stat_result) -> bool:
@@ -244,11 +318,24 @@ def snapshot() -> Snapshot:
         status=status,
         login=isinstance(service, dict) and service.get("login") is True,
         roles={name: role for name, role in roles.items() if role is not None},
+        generation=as_count(state.get("generation")),
     )
 
 
 class MeloServeError(Exception):
-    """melo_serve cannot answer for a model; the message says what to run."""
+    """melo_serve cannot answer for a model; the message says what to run.
+
+    A refusal of the control socket keeps its ``error.type`` as *kind*
+    (``stale_generation``, ``busy``, ...) and, for ``stale_generation``, the
+    *generation* melo_serve is at now.
+    """
+
+    def __init__(
+        self, message: str, kind: str = "", generation: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.generation = generation
 
 
 def _admin_gid() -> int | None:
@@ -402,6 +489,203 @@ def clean(text: str) -> str:
     from localmelo.support.sessions.display import clean_output, home_labelled
 
     return home_labelled(clean_output(text))
+
+
+def _words(key: str, language: str, **params: Any) -> str:
+    """The catalog's words of *key* in *language* (the console's catalogs, read without the gateway)."""
+    from localmelo.support.words import t_in
+
+    return t_in(language, key, **params)
+
+
+# ── The control socket ──
+
+
+def one_line(text: str) -> str:
+    """*text* as one line of a list: :func:`clean`, with any newline folded."""
+    return " ".join(clean(text).split())
+
+
+def _refusal(status: int, reply: object) -> MeloServeError:
+    """The error a refusal of the control socket carries, in melo_serve's words."""
+    error = reply.get("error") if isinstance(reply, dict) else None
+    error = error if isinstance(error, dict) else {}
+    message = as_text(error.get("message")) or f"it answered {status}"
+    generation = error.get("generation")
+    return MeloServeError(
+        clean(f"melo_serve: {message}"),
+        as_text(error.get("type")),
+        as_count(generation) if isinstance(generation, int) else None,
+    )
+
+
+async def _call(
+    method: str, path: str, *, body: dict[str, Any] | None = None, timeout: float | None
+) -> Any:
+    """One request to the control socket: its JSON reply, or MeloServeError.
+
+    Nothing connects to a socket that :func:`_private` refuses; the error then
+    says how to start melo_serve. A reply is read up to :data:`MAX_REPLY_BYTES`
+    and must be JSON; a refusal raises with melo_serve's words and its kind.
+    """
+    where = socket_path()
+    if not _private(where):
+        raise unavailable(Snapshot(), "chat")
+    raw = bytearray()
+    try:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.AsyncHTTPTransport(uds=str(where)),
+                base_url="http://melo_serve",
+                timeout=httpx.Timeout(timeout, connect=CONTROL_CONNECT_S),
+                trust_env=False,
+            ) as client,
+            client.stream(
+                method, path, json=body, headers={"Accept-Encoding": "identity"}
+            ) as response,
+        ):
+            # As sent: the cap counts what came, and a compressed reply is no JSON.
+            async for chunk in response.aiter_raw():
+                raw += chunk
+                if len(raw) > MAX_REPLY_BYTES:
+                    raise MeloServeError(f"melo_serve's answer to {path} is too large")
+            status = response.status_code
+    except httpx.HTTPError as exc:
+        said = str(exc) or type(exc).__name__
+        raise MeloServeError(clean(f"melo_serve did not answer: {said}")) from None
+    try:
+        reply = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise MeloServeError(f"melo_serve's answer to {path} is not JSON") from None
+    if status >= 400:
+        raise _refusal(status, reply)
+    return reply
+
+
+def _pick(entry: object, total_gb: float, free_pct: float) -> Pick | None:
+    """A chat row of ``GET /picks``; None for any other row, or one with no usable id."""
+    if not isinstance(entry, dict) or entry.get("role") != "chat":
+        return None
+    pick_id = as_text(entry.get("id"))
+    if not pick_id or not pick_id.isprintable():
+        return None
+    fit = entry.get("fit")
+    fit = fit if isinstance(fit, dict) else {}
+    need = as_number(fit.get("need_gb"))
+    after = _finite(fit.get("after_pct"))  # below 0 for a model that does not fit
+    free = None
+    if total_gb and need and after is not None:
+        free = max(0.0, need + after * total_gb / 100)  # the memory there is for it
+    elif total_gb and free_pct:
+        free = free_pct * total_gb / 100
+    return Pick(
+        id=pick_id,
+        short=one_line(as_text(entry.get("short"))),
+        name=one_line(as_text(entry.get("name")) or pick_id),
+        backend_name=one_line(
+            as_text(entry.get("backend_name")) or as_text(entry.get("backend"))
+        ),
+        model=one_line(as_text(entry.get("model"))),
+        current=entry.get("current") is True,
+        problem=one_line(as_text(entry.get("problem"))),
+        verdict=as_text(fit.get("verdict")),
+        need_gb=need,
+        free_gb=free,
+        disk_gb=as_number(entry.get("disk_gb")),
+        load_s=as_number(entry.get("load_s")),
+    )
+
+
+async def picks() -> list[Pick]:
+    """The chat models melo_serve offers, in its order; MeloServeError when it cannot say.
+
+    A reply that is not an object with a list of picks is refused. A row that
+    is not what it should be is left out, and a field of one counts as absent,
+    as in the state file.
+    """
+    reply = await _call("GET", "/picks", timeout=PICKS_TIMEOUT_S)
+    rows = reply.get("picks") if isinstance(reply, dict) else None
+    if not isinstance(rows, list):
+        raise MeloServeError("melo_serve's answer to /picks lists no picks")
+    memory = reply.get("memory")
+    memory = memory if isinstance(memory, dict) else {}
+    total, free_pct = as_number(memory.get("total_gb")), as_number(
+        memory.get("free_pct")
+    )
+    found = (_pick(entry, total, free_pct) for entry in rows[:MAX_PICKS])
+    return [pick for pick in found if pick is not None]
+
+
+async def switch(pick: str, *, expected_generation: int) -> dict[str, Any]:
+    """Load *pick* for its role, unless melo_serve has left *expected_generation* meanwhile.
+
+    It answers once the model is ready, which can take minutes, so only
+    :data:`LOAD_BOUND_S` bounds it: past that, kind :data:`NO_ANSWER`. A refusal
+    raises MeloServeError whose kind is melo_serve's ``error.type``:
+    ``stale_generation`` (with the generation it is at now), ``busy``,
+    ``does_not_fit``, ``unknown_pick``, ...
+    """
+    try:
+        async with asyncio.timeout(LOAD_BOUND_S):
+            reply = await _call(
+                "POST",
+                "/switch",
+                body={
+                    "pick": pick,
+                    "expected_generation": expected_generation,
+                    "initiator": "localmelo",
+                },
+                timeout=None,
+            )
+    except TimeoutError:
+        minutes = round(LOAD_BOUND_S / 60)
+        words = _words("serve.noAnswer", "en", minutes=minutes)
+        raise MeloServeError(words, NO_ANSWER) from None
+    if not isinstance(reply, dict):
+        raise MeloServeError("melo_serve's answer to /switch is not an object")
+    return reply
+
+
+def _gb(value: float, digits: int = 1) -> str:
+    """A size as the rows write it: ``21`` for 21.0, ``2.5``."""
+    return f"{round(value, digits):g}"
+
+
+def pick_words(
+    pick: Pick, language: str = "en", *, developer: bool = False
+) -> tuple[str, str]:
+    """The line under a pick's name, the same on every surface, and its fit word.
+
+    ``Splash · needs 21 GB · fits``. A pick that cannot load has its reason
+    where the fit word would be: ``Splash · needs 48 GB, 31 GB free``, or what
+    melo_serve says is wrong (``not downloaded yet ...``). It names one memory
+    figure, the one that decides the fit; the size on disk only for a
+    developer. The fit word (``""`` when none shows) ends the line, so a
+    surface can colour it.
+    """
+    parts = [pick.backend_name] if pick.backend_name else []
+    fit = ""
+    if pick.problem:
+        parts.append(pick.problem)
+    elif pick.verdict == TOO_BIG and pick.need_gb:
+        need = _gb(pick.need_gb)
+        parts.append(
+            _words("serve.pick.noRoom", language, need=need)
+            if pick.free_gb is None
+            else _words(
+                "serve.pick.short", language, need=need, free=_gb(pick.free_gb, 0)
+            )
+        )
+    else:
+        if pick.need_gb:
+            parts.append(_words("serve.pick.needs", language, need=_gb(pick.need_gb)))
+        if developer and pick.disk_gb:
+            parts.append(_words("serve.pick.disk", language, disk=_gb(pick.disk_gb)))
+        word = _FIT_WORDS.get(pick.verdict)
+        if word:
+            fit = _words(f"serve.fit.{word}", language)
+            parts.append(fit)
+    return " · ".join(parts), fit
 
 
 def role_text(role: Role | None) -> str:

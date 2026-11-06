@@ -85,7 +85,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
-exclude = ["^__main__\\.py$"]
+exclude = ["^__main__\\.py$", "^build/"]
 cache_dir = ".cache/mypy"
 
 [[tool.mypy.overrides]]

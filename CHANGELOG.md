@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
+  chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
+  needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at
+  most, cancellable), holds new ones and runs them on the new model, and a task mid-step waits out the load (Stop ends
+  it at once) and goes on with the model served. A load is bounded at 45 minutes, for a melo_serve that never answers.
+  `GET /api/serve`, `POST /api/serve/switch` and `POST /api/serve/switch/cancel` are new, `GET /api/health` gains
+  `switch`, and the macOS app needs macOS 15 (#532).
 - `melo serve` just works after the first run. With the gateway's login service installed, a bare `melo serve` (no
   `--port`, `--host`, `--force`, `--reconfigure` or `-X` setting) no longer starts a second gateway that fights for the
   port: it starts melo_serve when the config uses it, starts the gateway service when no gateway is live (up to 20 s),

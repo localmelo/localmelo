@@ -29,6 +29,7 @@ import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
+import { activeSwitch, setupServe } from "./serve.mjs";
 import { allowState, blockCard, blockFacts } from "./blocked.mjs";
 import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
 import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
@@ -424,7 +425,7 @@ function setupShown() {
 function connectionState({ turn, held, pending, session }) {
   if (!S.online) return { text: t("header.offline"), offline: true };
   if (developerMode) {
-    const text = turn ? (held ? holdText(held) : t(pending > 0 ? "header.approvalNeeded" : "header.working")) : session ? t("header.ready") : t("chat.new");
+    const text = turn ? (held ? holdText(held, S.health?.switch?.name) : t(pending > 0 ? "header.approvalNeeded" : "header.working")) : session ? t("header.ready") : t("chat.new");
     return { text, offline: false };
   }
   const model = S.health?.model;
@@ -513,19 +514,37 @@ function syncUI() {
       ? `${model.name} · ${model.backend_label}`
       : t("header.connectModel");
   const connection = connectionState({ turn, held, pending, session });
-  $("connection-label").textContent = connection.text;
+  const modelChip = $("connection-btn");
+  // With melo_serve, the chip that names the model opens its chat models: the model, its backend and a caret.
+  const lists = serve.serves() && !developerMode && !connection.offline;
+  const named = lists ? serve.chip() : null;
+  const label = $("connection-label");
+  const shown = named?.name ? `${named.name}\n${named.backend}` : "";
+  if (label.dataset.shown !== shown || !shown) {
+    label.dataset.shown = shown;
+    if (shown) label.replaceChildren(el("span", "", named.name), ...(named.backend ? [el("span", "chip-backend", ` · ${named.backend}`)] : []));
+    else label.textContent = connection.text;
+  }
+  $("connection-caret").hidden = !lists;
+  if (lists && activeSwitch(S.health)) modelChip.setAttribute("data-switching", "");
+  else modelChip.removeAttribute("data-switching");
+  if (lists) modelChip.setAttribute("aria-haspopup", "menu");
+  else modelChip.removeAttribute("aria-haspopup");
   $("connection-dot").classList.toggle("offline", connection.offline);
   // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
-  $("connection-btn").classList.toggle("names-model", !developerMode && !connection.offline);
-  if (developerMode) $("connection-btn").removeAttribute("aria-label");
-  else $("connection-btn").setAttribute("aria-label", t("header.modelLabel", { model: connection.text }));
+  modelChip.classList.toggle("names-model", !developerMode && !connection.offline);
+  if (developerMode) modelChip.removeAttribute("aria-label");
+  else modelChip.setAttribute("aria-label", t(lists ? "serve.chipLabel" : "header.modelLabel", { model: named?.name || connection.text }));
   // Unhide before the text write, so a screen reader announces the wait.
   const lockBanner = $("lock-banner");
   const lockNote = !developerMode && held === LOCK_HOLD ? t("header.gpuWait") : "";
   if (lockNote) lockBanner.hidden = false;
   setTextIfChanged(lockBanner, lockNote);
   if (!lockNote) lockBanner.hidden = true;
-  $("model-btn").textContent = `${model?.name || t("header.chooseModel")}  ⌄`;
+  // melo_serve's pick has a name of its own (Qwen3.8 27B), shorter than the model it serves.
+  $("model-btn").textContent = `${(serve.serves() && serve.current()?.name) || model?.name || t("header.chooseModel")}  ⌄`;
+  if (serve.serves()) $("model-btn").setAttribute("aria-haspopup", "menu");
+  else $("model-btn").removeAttribute("aria-haspopup");
   $("send-btn").hidden = false;
   $("send-btn").title = busy ? t("composer.addTitle") : "";
   $("stop-btn").hidden = !busy;
@@ -545,7 +564,7 @@ function syncUI() {
   // Run as a task: a chat starts the message as a task, without asking the model.
   $("task-btn").hidden = !S.activeId || !!busy || media.hasPictures();
   $("task-btn").disabled = $("send-btn").disabled;
-  $("run-status").textContent = turn ? (held ? holdText(held) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
+  $("run-status").textContent = turn ? (held ? holdText(held, S.health?.switch?.name) : t(developerMode ? "header.runningOnBackend" : "header.workingDots")) : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
   $("details-trigger").disabled = !session;
@@ -2533,6 +2552,7 @@ function setHealth(body) {
   S.health = body;
   running.update(body?.status);
   panel.update(body);
+  serve.update();
   const { running: now, tasks: queue } = body?.status ?? {};
   sections.workers ||= (now?.runs ?? 0) + (now?.terminal ?? 0) > 0;
   sections.tasks ||= (now?.tasks ?? 0) + (queue?.queued ?? 0) + (queue?.held ?? 0) > 0;
@@ -3095,6 +3115,7 @@ async function settingsSaved(saved) {
 }
 const showSettings = setupSettings({
   api,
+  serve: () => serve,
   developer: () => developerMode,
   health: () => S.health,
   sessions: () => S.sessions,
@@ -3183,6 +3204,29 @@ const modeChip = setupModeChip({
   },
   openSettings: () => openSettings("chats"),
 });
+// melo_serve's chat models (serve.mjs): the header chip and the composer's model button open one list.
+const serve = setupServe({
+  doc: document,
+  api,
+  state: () => ({ health: S.health }),
+  notify: (message) => notify(message, { sticky: true }),
+  changed: (sw) => {
+    if (S.health && sw) S.health.switch = sw;
+    syncUI();
+  },
+  openers: [
+    { button: $("connection-btn"), menu: $("model-menu") },
+    { button: $("model-btn"), menu: $("model-menu-composer") },
+  ],
+});
+// The chip and the composer's button name the pick, so a list that loads redraws them at once.
+serve.onChange(() => syncUI());
+/** Open melo_serve's list from the chip when it shows, else from the composer's model button. */
+function openModels() {
+  const chip = $("connection-btn");
+  const shown = !chip.hidden && chip.classList.contains("names-model") && chip.offsetParent !== null;
+  return serve.click(shown ? 0 : 1);
+}
 // The main chat's one-time offer to bring in what other assistants on this Mac know (import-card.mjs).
 const importCard = setupImportCard({ root: $("import-card"), hero: $("welcome"), api });
 const setupCard = setupModelCard({
@@ -3288,6 +3332,8 @@ const slash = setupSlash({
     return true;
   },
   openSettings: (section) => openSettings(section),
+  // `/model` with melo_serve: its chat models, and a switch every chat follows.
+  models: { serves: () => serve.serves(), open: openModels, load: () => serve.load(), named: serve.named, switchTo: serve.switchTo },
   openMemory: () => {
     panel.select("memory", { focus: true });
     if (!matchMedia("(min-width: 900px)").matches) panel.openSheet();
@@ -3398,6 +3444,7 @@ async function init() {
   S.authenticated = true;
   await refreshMode();
   panel.update(S.health);
+  serve.update();
   $("lock-screen").hidden = true;
   delete document.documentElement.dataset.locked;
   $("app").hidden = false;
@@ -3500,11 +3547,17 @@ input.addEventListener("input", () => {
   resizeInput();
   syncUI();
 });
-for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn"]) {
-  const node = $(id);
-  if (id === "new-btn") node.addEventListener("click", () => newChat());
-  else node.addEventListener("click", openSettings);
+for (const id of ["new-btn", "settings-btn"]) {
+  $(id).addEventListener("click", () => (id === "new-btn" ? newChat() : openSettings()));
 }
+// The chip and the model button open melo_serve's list when it serves the chats (the chip only when it names the
+// model); otherwise Settings.
+$("connection-btn").addEventListener("click", () => {
+  if (!$("connection-btn").classList.contains("names-model") || !serve.click(0)) openSettings();
+});
+$("model-btn").addEventListener("click", () => {
+  if (!serve.click(1)) openSettings();
+});
 $("close-settings").addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
@@ -3555,6 +3608,7 @@ $("level-menu").addEventListener("keydown", (event) => {
 document.addEventListener("click", (event) => {
   if (folderPicker.isOpen() && !event.target.closest?.(".folder-picker")) folderPicker.close();
   if (modeChip.isOpen() && !event.target.closest?.(".mode-picker")) modeChip.close();
+  if (serve.isOpen() && !event.target.closest?.(".model-picker")) serve.close();
   if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
   if (running.isOpen() && !event.target.closest?.(".running-picker")) running.toggle(false);
 });
@@ -3622,6 +3676,10 @@ document.addEventListener("keydown", (event) => {
   if (modeChip.isOpen()) {
     modeChip.close();
     $("mode-btn").focus();
+    return;
+  }
+  if (serve.isOpen()) {
+    serve.close(true);
     return;
   }
   if (S.levelsOpen) {
