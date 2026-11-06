@@ -68,6 +68,25 @@ function fullTurn() {
   return {view, push, turn: view.turns[0]};
 }
 
+test('a page the person has pauses the turn, and how it came back is one line of the record', () => {
+  const {push, turn} = fullTurn();
+  push('run.paused', {what: 'browser', detail: {tab: 't1', place: 'window', site: 'example.com'}});
+  assert.deepEqual(turn.control, {place: 'window', form: false, failed: false, site: 'example.com'});
+  assert.equal(activity(turn), "You're in control");
+  const lines = () => turn.items.filter((item) => item.factKind === 'run.resumed').map((item) => item.message);
+  for (const how of ['closed', 'gone', 'lost', 'stopped', 'ended']) {
+    push('run.resumed', {what: 'browser', how, held_s: 2});
+    assert.equal(turn.control, null);
+  }
+  assert.deepEqual(lines(), [
+    'You closed the Chrome window, so the page went back to melo.',
+    'The page closed its own window, so melo has the tab back.',
+    "melo's Chrome stopped while you had the page.",
+    'melo was stopped while you had the page.',
+    'The turn ended while you had the page, so melo took it back.',
+  ]);
+});
+
 test('a frame at or below the cursor is not applied twice', () => {
   const {view, turn} = started();
   const frame = {id: 7, turn: 1, ts: 110, type: 'turn.finished', data: {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''}};
@@ -3083,6 +3102,24 @@ test('the header pill and the composer follow a session hold', async () => {
   h.run('syncUI(); renderMessages(true)');
   assert.equal(h.element('connection-label').textContent, 'Working');
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
+});
+
+test('a chat whose page the person has says so in the list, as soon as health does', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [session('a', {busy: true})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {busy: true}),
+      pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0,
+    },
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_more: false},
+  }));
+  await h.run('init()');
+  const row = () => h.element('session-list').children[0].children[0].innerHTML;
+  assert.doesNotMatch(row(), /in control/);
+  h.run(`setHealth({...S.health, status: {control: [{kind: 'chat', id: 'a'}]}})`);
+  assert.match(row(), /in control/);
+  h.run(`setHealth({...S.health, status: {control: []}})`);
+  assert.doesNotMatch(row(), /in control/);
 });
 
 test('a running chat says Working by default and keeps "Running on your backend" for a developer', async () => {

@@ -18,17 +18,19 @@ darwin = pytest.mark.skipif(
     sys.platform != "darwin", reason="Swift AppKit host is macOS-only"
 )
 
-# The health reply the fixtures build: items that run, the focus, waits, the newest finished run and the model server.
+# The health reply the fixtures build: items that run, the focus, waits, held pages, the newest finished run and the
+# model server.
 FIXTURES = r"""
 func item(_ kind: String, _ id: String, _ activity: String, _ icon: String, title: String = "") -> String {
     #"{"kind":"\#(kind)","id":"\#(id)","title":"\#(title)","activity":"\#(activity)","icon":"\#(icon)"}"#
 }
-func health(items: [String] = [], focus: String? = nil, waiting: [String] = [], recent: String = "null",
-            server: String = "null") -> Data {
+func health(items: [String] = [], focus: String? = nil, waiting: [String] = [], control: [String] = [],
+            recent: String = "null", server: String = "null") -> Data {
     let list = items.joined(separator: ",")
     let wait = waiting.map { #"{"kind":"chat","id":"\#($0)"}"# }.joined(separator: ",")
+    let held = control.map { #"{"kind":"chat","id":"\#($0)","place":"window"}"# }.joined(separator: ",")
     let first = focus ?? items.first ?? "null"
-    return Data(#"{"api":2,"model_server":\#(server),"status":{"running":{"chats":\#(items.count),"tasks":0,"runs":0,"terminal":0},"items":[\#(list)],"waiting":[\#(wait)],"recent":\#(recent),"focus":\#(first)}}"#.utf8)
+    return Data(#"{"api":2,"model_server":\#(server),"status":{"running":{"chats":\#(items.count),"tasks":0,"runs":0,"terminal":0},"items":[\#(list)],"waiting":[\#(wait)],"control":[\#(held)],"recent":\#(recent),"focus":\#(first)}}"#.utf8)
 }
 func ended(_ outcome: String, _ ago: String, title: String = "Slides", kind: String = "chat", id: String = "c9") -> String {
     #"{"kind":"\#(kind)","id":"\#(id)","title":"\#(title)","outcome":"\#(outcome)","ended_s_ago":\#(ago)}"#
@@ -124,6 +126,32 @@ precondition(down.label == "Melo: model server not reachable. Opens the chat.")
 precondition(pillPictureFile(.workRead) == "face-working.png" && pillPictureFile(.workLaptop) == "face-working.png")
 precondition(pillPictureFile(.workThink) == "face-working.png" && pillPictureFile(.waitAlert) == "face-waiting.png")
 precondition(pillPictureFile(.done) == "face-done.png" && pillPictureFile(.error) == "face-error.png")
+""",
+    )
+
+
+@darwin
+def test_a_page_the_person_holds_is_its_own_state_that_beats_waiting_and_work() -> None:
+    run_swift(
+        r"""
+func snap(_ data: Data) -> PillSnapshot? { pillSnapshot(health: data, age: 0) }
+
+// The person holds the page of c1 while a wait and other work are on: "You're in control" wins, with the paused bar
+// as its mark and a calm face, the chat for Done and no chip; a press opens that chat, not the focus.
+let held = snap(health(items: [tests, reading], focus: tests, waiting: ["t1"], control: ["c1"]))!
+precondition(held.model.state == .control && held.model.text == "You're in control" && held.model.note == "melo is paused")
+precondition(held.model.glyph == "\u{2016}" && held.model.portrait == .waitAlert && held.model.more == 0)
+precondition(held.model.giveBack == "c1" && held.model.click == .route("#/s/c1") && held.ids.contains("c1"))
+precondition(held.model.label == "You're in control. melo is paused. Opens the chat.")
+// It shows even when nothing counts as running. The gateway's own icon for it ("you") reads as the same bar.
+precondition(snap(health(control: ["c1"]))!.model.state == .control)
+precondition(PillIcon(name: "you") == .you && PillIcon.you.glyph == "\u{2016}" && PillPortrait.working(.you) == .workThink)
+// Only a chat the console would open counts: a task, or an id that is no route, is left out.
+let odd = #"{"status":{"control":[{"kind":"task","id":"t1"},{"kind":"chat","id":"a/b"},{"kind":"chat","id":"c2"}]}}"#
+precondition(controlledChats(Data(odd.utf8)) == ["c2"])
+// The Done button's room: the gap, the button and its margin take the place of the chip or the tail.
+precondition(pillWidth(text: 120, more: 0, give: 56) == 74 + 120 + 12 + 56 + 10)
+precondition(pillWidth(text: 120, more: 0) == 74 + 120 + 18 && pillWidth(text: 900, more: 0, give: 56) == 74 + 320 + 78)
 """,
     )
 
@@ -257,6 +285,44 @@ policy = PillPolicy()
 policy.dismiss()
 d = ask(health(items: [reading]), reply: 120, now: 120)
 precondition(d.pill != nil)
+""",
+    )
+
+
+@darwin
+def test_the_pill_stays_while_the_person_holds_a_page() -> None:
+    run_swift(
+        r"""
+var policy = PillPolicy()
+func ask(_ data: Data?, window: Bool = false, mode: DesktopMode = .pill) -> PillDecision {
+    policy.update(health: data, healthAt: 10, stopped: false, windowShown: window, mode: mode, now: 10)
+}
+let working = health(items: [reading])
+let holding = health(items: [reading], control: ["c1"])
+
+// The window in front hides work, but not a held page: Done must stay in reach. "Melo only" shows it too; "Nothing" does not.
+precondition(ask(working, window: true).pill == nil)
+precondition(ask(holding, window: true).pill?.state == .control)
+precondition(ask(holding, mode: .pet).pill?.state == .control)
+precondition(ask(holding, mode: .nothing).pill == nil)
+// Given back, the pill goes by the usual rules: gone with the window in front or "Melo only" (the pet comes back, with no
+// "done"), the work's line otherwise.
+var d = ask(working, window: true)
+precondition(d.pill == nil && !d.petShowsDone)
+d = ask(working, mode: .pet)
+precondition(d.pill == nil && !d.petShowsDone)
+precondition(ask(working).pill?.state == .working)
+// "×" does not hide it (the pill offers none then) and is not remembered: the work shows again after.
+d = ask(holding)
+precondition(d.pill?.state == .control && d.recheckIn == 12)
+policy.dismiss()
+precondition(ask(holding).pill?.state == .control)
+precondition(ask(working).pill?.state == .working)
+// A "×" from before still holds for the same work: the held page shows, and after it the pill stays away.
+policy.dismiss()
+precondition(ask(working).pill == nil)
+precondition(ask(holding).pill?.state == .control)
+precondition(ask(working).pill == nil)
 """,
     )
 

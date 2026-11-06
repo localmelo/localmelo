@@ -2907,3 +2907,52 @@ def test_a_declined_line_takes_its_wait_from_the_record() -> None:
     assert declined_line(Declined("denied", "not now")) == (
         "Not run: you declined it. Your note: not now"
     )
+
+
+def test_a_page_the_person_has_pauses_the_live_row_until_it_comes_back() -> None:
+    turn = Turn(width=200)
+    turn.event(
+        "tool.started",
+        step=1,
+        call_id="c",
+        name="browser_open",
+        arguments={},
+        preview="https://example.com",
+    )
+    detail = {"tab": "t1", "place": "window", "site": "example.com"}
+    turn.event("run.paused", what="browser", detail=detail)
+    live = turn.renderer.live
+    assert live is not None and turn.renderer.in_control == detail
+    rows = live_rows(live, 100.0, 80, UNICODE, frame=0)
+    # No spinner and no tool clock: nothing counts down while melo is paused.
+    assert len(rows) == 1 and _first_row(rows).startswith("◆ You're in control")
+    assert "enter: done" in _first_row(rows)
+    turn.event(
+        "run.paused", what="browser", detail=detail
+    )  # the same place: no new line
+    turn.event("run.resumed", what="browser", how="closed", held_s=75.0)
+    assert turn.renderer.in_control is None and not live.control
+    assert turn.text().splitlines()[-2:] == [
+        "◆ You're in control: melo is paused. example.com is in a browser window. "
+        "Press Enter on an empty line here, or close the window, to give it back.",
+        "✓ You closed the window, so the page went back to melo · 1m15s",
+    ]
+
+
+def test_every_way_a_page_comes_back_but_a_stop_has_its_line_and_the_panel_says_enter_too() -> (
+    None
+):
+    turn = Turn(width=200)
+    panel = {"tab": "t1", "place": "app", "site": "example.com", "form": True}
+    turn.event("run.paused", what="browser", detail=panel)
+    assert "Press Enter on an empty line here, or Done there" in turn.text()
+    for how, words in (
+        ("gone", "The page closed its own window"),
+        ("lost", "melo's Chrome stopped"),
+        ("ended", "The turn ended while you had the page"),
+    ):
+        turn.event("run.resumed", what="browser", how=how, held_s=2.0)
+        assert words in turn.text().splitlines()[-1]
+    before = turn.text()
+    turn.event("run.resumed", what="browser", how="stopped", held_s=2.0)
+    assert turn.text() == before, "the stop's own line says it"

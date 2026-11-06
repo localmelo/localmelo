@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
@@ -23,7 +24,7 @@ from localmelo.support.browser.live import Frame
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.config import Config
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.tests.browser.test_takeover import Takeable, browser, grace_left
+from localmelo.tests.browser.test_takeover import Takeable, browser
 from localmelo.tests.gateway.console import test_browser_live as routes
 from localmelo.tests.gateway.console.conftest import (
     FakeAgent,
@@ -152,7 +153,9 @@ async def test_the_person_takes_types_and_gives_back_over_the_socket(
         )
         await ws.send(json.dumps({"type": "take"}))
         meta = await meta_until(ws, lambda m: m.get("owner") == "you")
-        assert meta["grace"] == 120
+        assert (
+            meta["place"] == "app"
+        ), "this browser has no window: the panel is the place"
         await ws.send(
             json.dumps(
                 {
@@ -214,26 +217,11 @@ async def test_a_message_over_the_size_cap_ends_the_stream(
     assert agent.driver.inputs == []
 
 
-async def test_a_panel_that_leaves_keeps_the_page_for_the_grace_period(
+async def test_the_page_stays_the_persons_until_done_from_anywhere(
     console: Console, builder: Builder, workspace: Path, served: Served
 ) -> None:
-    session_id, agent = await opened(console, builder, workspace)
-    async with connect(served.url(session_id), additional_headers=served.bearer) as ws:
-        await messages(ws, 1)
-        await ws.send(json.dumps({"type": "take"}))
-        await meta_until(ws, lambda m: m.get("owner") == "you")
-    owners = agent.provider.owners
-    await until(lambda: grace_left(owners, "t1") is not None)
-    assert owners.owner("t1") == "you"
-    async with connect(served.url(session_id), additional_headers=served.bearer) as ws:
-        meta = await meta_until(ws, lambda m: m.get("type") == "meta")
-        assert meta["owner"] == "you", "the person came back within the grace period"
-        await until(lambda: grace_left(owners, "t1") is None)
-
-
-async def test_rotating_the_token_starts_the_grace_period(
-    console: Console, builder: Builder, workspace: Path, served: Served
-) -> None:
+    # The panel goes (here the token rotates): no clock gives the page back. Done
+    # comes over HTTP, as the app's pill and the terminal send it.
     session_id, agent = await opened(console, builder, workspace)
     async with connect(served.url(session_id), additional_headers=served.bearer) as ws:
         await messages(ws, 1)
@@ -245,8 +233,15 @@ async def test_rotating_the_token_starts_the_grace_period(
                 while True:
                     await ws.recv()
     owners = agent.provider.owners
-    await until(lambda: grace_left(owners, "t1") is not None)
+    await asyncio.sleep(0.2)
     assert owners.owner("t1") == "you"
+    base = f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/browser"
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        state = (await client.get(base)).json()
+        assert (state["yours"], state["place"]) == (True, "app")
+        assert (await client.post(f"{base}/done")).json() == {"ok": True}
+        assert owners.owner("t1") == "melo"
+        assert (await client.post(f"{base}/done")).json() == {"ok": False}
 
 
 async def test_nothing_typed_is_in_the_store_the_logs_or_on_disk(

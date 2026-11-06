@@ -1,8 +1,9 @@
-"""The live view of a chat's browser: ``GET /api/sessions/{id}/browser`` and the stream ``/browser/live``.
+"""The live view of a chat's browser: ``GET /api/sessions/{id}/browser``, the stream ``/browser/live``, and the person's Done.
 
 ``GET`` says whether the chat has a page open in melo's browser (the current tab, its
 address and title), whether melo is in the middle of a browser step
-(``browsing``), whether the person has one of its pages (``yours``), and whether
+(``browsing``), whether the person has one of its pages (``yours``, and
+``place``: ``window`` or ``app``), and whether
 the live view is available, so the console can open its Browser panel when melo
 starts browsing. It starts nothing. ``available`` is about the browser the chat
 browses in now: an open chat's own (a chat whose turn ran when Settings changed
@@ -21,8 +22,16 @@ browser open, the one the settings name; ``driver`` is the setting.
   loses the pictures in between.
 
 The meta also says ``owner``: ``melo``, or ``you`` once the person took the tab
-over (with ``grace``, the seconds the tab stays theirs once no panel shows it, and
+over (with ``place``: ``window``, a real Chrome window this stream is a live copy
+of, or ``app``, this panel; ``form`` and ``failed`` say why it is in the app; and
 ``dialog`` for a box the page shows them); ``takeover`` says a viewer may take it.
+
+``POST /browser/done`` is the person's Done from anywhere (the app's pill, the
+terminal, the console): every page they have comes back to melo, and the run
+goes on. ``POST /browser/window`` moves their page to a real Chrome window, or
+brings that window to the front; sent while a take-over card waits, its "Take
+over" opens the window. Both answer ``{"ok": bool}``: false when the chat has no
+page the person has (or no card waits).
 
 The client sends JSON text messages of at most :data:`MAX_CLIENT_MESSAGE` bytes
 (more ends the stream, 1009): ``take`` and ``give`` hand the tab to the person
@@ -77,16 +86,22 @@ SEND_TIMEOUT_S = 15.0
 _TAB = re.compile(r"t[0-9]{1,6}")
 
 
-def live_of(console: Console, session_id: str) -> LiveView | None:
-    """The live view of chat *session_id*'s browser, or None when the chat is not open or has no streaming browser."""
+def browser_of(console: Console, session_id: str) -> BrowserToolProvider | None:
+    """The browser tools of open chat *session_id*, or None when it is not open or has no browser."""
     entry = console.sessions.get(session_id)
     agent = entry.agent if entry is not None else None
     if agent is None:
         return None
     for provider in agent.tool_providers:
         if isinstance(provider, BrowserToolProvider):
-            return provider.live
+            return provider
     return None
+
+
+def live_of(console: Console, session_id: str) -> LiveView | None:
+    """The live view of chat *session_id*'s browser, or None when the chat is not open or has no streaming browser."""
+    browser = browser_of(console, session_id)
+    return browser.live if browser is not None else None
 
 
 def available(console: Console, session_id: str) -> bool:
@@ -125,12 +140,27 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "title": "",
                 "browsing": False,
                 "yours": False,
+                "place": None,
                 "viewers": 0,
             }
         )
         state["available"] = available(console, session_id)
         state["driver"] = console.cfg.browser.driver
         return JSONResponse(content=state, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/sessions/{session_id}/browser/done")
+    async def browser_done(session_id: str) -> JSONResponse:
+        console.require_store()
+        await console.require_session(session_id)
+        browser = browser_of(console, session_id)
+        return JSONResponse({"ok": browser is not None and browser.hand_back()})
+
+    @app.post("/api/sessions/{session_id}/browser/window")
+    async def browser_window(session_id: str) -> JSONResponse:
+        console.require_store()
+        await console.require_session(session_id)
+        browser = browser_of(console, session_id)
+        return JSONResponse({"ok": browser is not None and browser.show_to_person()})
 
     @app.websocket("/api/sessions/{session_id}/browser/live")
     async def browser_live(

@@ -26,6 +26,7 @@ from localmelo.melo.contracts.folders import (
     never_text,
     outside_access,
 )
+from localmelo.melo.contracts.pause import TOOL_DEADLINE
 from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED, TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
@@ -495,9 +496,12 @@ class Executor:
                         raise asyncio.CancelledError()
                     marked = True
                 token = _ENTRY_MARKED.set(marked)
+                # A tool that waits for the person stops this limit meanwhile (pause).
+                limit = TOOL_DEADLINE.set(deadline)
                 try:
                     output = await fn(**request.arguments)
                 finally:
+                    TOOL_DEADLINE.reset(limit)
                     _ENTRY_MARKED.reset(token)
         except (PathChangedError, HardLinkError) as exc:
             # The file opened is not the one checked (a part of the path

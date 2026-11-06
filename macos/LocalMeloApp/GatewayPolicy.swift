@@ -65,17 +65,24 @@ func consoleRoute(kind: String, id: String) -> String? {
     return WaitingItem(kind: kind, id: id).route
 }
 
-/// The list is empty when it is missing or damaged. An entry whose kind or id the console would not
-/// open is left out.
-func waitingItems(_ data: Data) -> [WaitingItem] {
+/// The entries of `status.<key>` of `GET /api/health` (a list of `{kind, id}`): empty when it is missing or damaged.
+/// An entry whose kind or id the console would not open is left out.
+private func statusEntries(_ data: Data, _ key: String) -> [WaitingItem] {
     guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let status = body["status"] as? [String: Any],
-          let list = status["waiting"] as? [[String: Any]] else { return [] }
+          let list = status[key] as? [[String: Any]] else { return [] }
     return list.compactMap { entry in
         guard let kind = entry["kind"] as? String, let id = entry["id"] as? String,
               consoleRoute(kind: kind, id: id) != nil else { return nil }
         return WaitingItem(kind: kind, id: id)
     }
+}
+
+func waitingItems(_ data: Data) -> [WaitingItem] { statusEntries(data, "waiting") }
+
+/// The chats whose page the person holds in melo's browser (`status.control`); their runs are paused until Done.
+func controlledChats(_ data: Data) -> [String] {
+    statusEntries(data, "control").filter { $0.kind == "chat" }.map { $0.id }
 }
 
 /// `model_server.reachable` of `GET /api/health`: false when the settings' local model server did not answer, nil

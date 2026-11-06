@@ -295,6 +295,8 @@ class LiveState:
     retry_until: float = 0.0
     finished: bool = False
     waiting: bool = False
+    # The person has a page of the run's (run.paused): melo is paused, nothing counts.
+    control: bool = False
     # Released provisional text of the planning reply being streamed.
     stream_text: str = ""
 
@@ -572,6 +574,51 @@ def stopped_line(cause: str, symbols: Symbols) -> Text:
     return Text(f"{symbols.stopped} {text}", style="warn")
 
 
+def paused_line(detail: Mapping[str, Any], symbols: Symbols) -> Text:
+    """``run.paused``: the person has a page; where it is and how melo gets it back."""
+    site = clean_output(str(detail.get("site") or "the page"))
+    if detail.get("place") == "app":
+        why = (
+            "Another chat has melo's Chrome window open, so "
+            if detail.get("busy")
+            else (
+                "Chrome could not open a window, so "
+                if detail.get("failed")
+                else "Your form stays there, so " if detail.get("form") else ""
+            )
+        )
+        where = f"{why}{site} is in the web console's Browser panel (melo console)"
+        back = "or Done there"
+    else:
+        where = f"{site} is in a browser window"
+        back = "or close the window"
+    text = (
+        f"You're in control: melo is paused. {where}. Press Enter on an empty "
+        f"line here, {back}, to give it back."
+    )
+    return Text(f"{symbols.session} {text}", style="accent")
+
+
+# How a hold ended (run.resumed's ``how``), for the line that says so.
+RESUMED_WORDS: Final = {
+    "done": "You gave the page back to melo",
+    "closed": "You closed the window, so the page went back to melo",
+    "gone": "The page closed its own window, so melo has the tab back",
+    "lost": "melo's Chrome stopped while you had the page",
+    "ended": "The turn ended while you had the page, so melo took it back",
+}
+
+
+def resumed_line(how: str, held_s: float, symbols: Symbols) -> Text | None:
+    """``run.resumed``: how the page came back; None when the run's stop says it."""
+    words = RESUMED_WORDS.get(how)
+    if words is None:
+        return None
+    return Text(
+        f"{symbols.ok} {words} {symbols.dot} {run_elapsed(held_s)}", style="muted"
+    )
+
+
 def _same_display_text(left: str, right: str) -> bool:
     """Whether two texts would read the same after cleaning and whitespace."""
     return " ".join(clean_output(left).split()) == " ".join(clean_output(right).split())
@@ -685,6 +732,8 @@ class TurnRenderer:
         # An assistant message without tool calls, until the next step or
         # the end of the run decides whether it prints (section 3).
         self._held = ""
+        # While the person has a page of the turn's run (run.paused), what it said.
+        self.in_control: Mapping[str, Any] | None = None
         # The finished calls of this session, for /expand: turn number and
         # call number by turn.
         self.tool_outputs: list[ToolOutput] = []
@@ -733,6 +782,7 @@ class TurnRenderer:
         self._max_steps = 0
         self._retry_noted = False
         self._held = ""
+        self.in_control = None
         self._stream_texts = {}
         self._stream_step = 0
         self._stream_open = False
@@ -1258,6 +1308,27 @@ class TurnRenderer:
             self.live.waiting = False
             self.live.activity = "Thinking"
 
+    def _on_run_paused(self, data: Mapping[str, Any]) -> None:
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        before, self.in_control = self.in_control, detail
+        if self.live is not None:
+            self.live.control = True
+        # A second pause says the page moved (to the console's panel): it prints when the place changes.
+        if before is None or before.get("place") != detail.get("place"):
+            self.out.print(paused_line(detail, self.symbols))
+
+    def _on_run_resumed(self, data: Mapping[str, Any]) -> None:
+        self.in_control = None
+        if self.live is not None:
+            self.live.control = False
+            self.live.activity = "Thinking"
+        line = resumed_line(
+            str(data.get("how") or ""), _float(data.get("held_s")), self.symbols
+        )
+        if line is not None:
+            self.out.print(line)
+
     def _on_run_finished(self, data: Mapping[str, Any]) -> None:
         raw = data.get("result")
         if not isinstance(raw, Mapping):
@@ -1297,9 +1368,11 @@ class TurnRenderer:
             self._cancelled_pending = True
         else:
             self._print_result(result, footer=True)
+        self.in_control = None
         if self.live is not None:
             self.live.finished = True
             self.live.waiting = False
+            self.live.control = False
             self.live.tool = ""
             self.live.activity = "Wrapping up"
             self.live.retry_until = 0.0
@@ -2025,6 +2098,9 @@ def live_rows(
     if live.waiting:
         # The panel below names its keys.
         head, hint = f"{symbols.warn} Waiting for your approval", ""
+    elif live.control:
+        # No spinner: melo is paused, and nothing counts down.
+        head, hint = f"{symbols.session} You're in control", "enter: done"
     else:
         index = (
             frame if frame is not None else int((now - live.started) / SPINNER_FRAME_S)
@@ -2093,7 +2169,7 @@ def live_rows(
     rows[0] = [fragment for fragment in rows[0] if fragment[1]]
     if live.stream_text:
         rows.extend(_stream_rows(live.stream_text, width, symbols, stream_lines))
-    if live.tool and not live.waiting:
+    if live.tool and not live.waiting and not live.control:
         clock = tool_elapsed(now - live.tool_started)
         if live.tool_limit_s:
             clock += f" of {tool_elapsed(live.tool_limit_s)}"
