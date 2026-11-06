@@ -133,31 +133,6 @@ async def test_the_chinese_request_starts_its_task_at_once(
 # ── 2. A refused start, and a turn that only says what it will do ──
 
 
-async def test_a_status_question_refuses_a_task_and_answers_from_the_tasks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    main: list[Reply] = [
-        tool_call("task_create", {"title": "Check", "objective": "Check"}, "c-1"),
-        lists(1),
-        gets(2),
-        gets(3),
-        answer("No task is running."),
-    ]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        models,
-        _,
-    ):
-        await say(client, console, "is it done?")
-        refused = tool_results(models["main"], 1)[-1]
-        assert refused.startswith("Not done: this is a question or small talk")
-        assert "task_get" in refused, "a status question is answered from the task"
-        turn = await turn_of(console)
-        assert (turn.status, turn.answer) == ("completed", "No task is running.")
-        assert await console.workers.tasks.list_tasks() == []
-
-
 def _promised() -> list[Reply]:
     return [lists(1), gets(2), answer("Let me look at the task list.")]
 

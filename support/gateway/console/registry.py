@@ -1001,6 +1001,7 @@ class ConsoleSessions:
         mode: ChatMode | None = None,
         admit: Callable[[], Awaitable[None]] | None = None,
         extras: TurnExtras | None = None,
+        session_id: str | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         """Create a session, usually with its first turn (``POST /api/sessions``).
 
@@ -1011,7 +1012,8 @@ class ConsoleSessions:
         settings' mode for new chats. With *client_request_id*, a repeat of
         an accepted key raises :class:`SubmissionRepeated` with its turn and
         makes no Agent; a raised error after the Agent was built closes it
-        and registers nothing.
+        and registers nothing. *session_id* names the new chat instead of a
+        random id, when the id is itself a receipt.
         """
         lock = self._create_lock(client_request_id)
         try:
@@ -1023,6 +1025,7 @@ class ConsoleSessions:
                     mode or self.new_chat_mode(),
                     admit,
                     extras,
+                    session_id,
                 )
         finally:
             # Outside the block: the lock this task took is free again, so
@@ -1037,6 +1040,7 @@ class ConsoleSessions:
         mode: ChatMode = "ask",
         admit: Callable[[], Awaitable[None]] | None = None,
         extras: TurnExtras | None = None,
+        session_id: str | None = None,
     ) -> tuple[OpenSession, TurnInfo | None]:
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
@@ -1063,7 +1067,10 @@ class ConsoleSessions:
         # The row comes before the Agent: the scheduler gate tags every call
         # with the session id, so the id must exist before the first one.
         info = await self._store.create_session(
-            model=model, workspace=path, meta={"approvals": mode}
+            model=model,
+            workspace=path,
+            meta={"approvals": mode},
+            session_id=session_id,
         )
         # Under the session's lock, so a turn started on the new row by
         # another client waits until this create has registered it.

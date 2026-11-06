@@ -211,6 +211,18 @@ test('a task the chat started offers Change and Stop until it ends', () => {
   assert.deepEqual(echoActions(echo, true), []);
 });
 
+test('a card whose message started its work has no Just once, and still saves', () => {
+  const card = {echo: 'chore', line: 'Run this every day at 9:00?', title: 'x'};
+  assert.deepEqual(echoActions(row(1, card), false).map(([, does]) => does), ['save', 'once', 'cancel']);
+  assert.deepEqual(echoActions(row(2, {...card, ran: 'a1'}), false).map(([, does]) => does), ['save', 'cancel']);
+});
+
+test('a notice is a plain line that a chat keeps', () => {
+  const echo = row(3, {echo: 'notice', line: 'Browsing is off.'});
+  assert.equal(echo.kind, 'notice');
+  assert.deepEqual(echoActions(echo, false), []);
+});
+
 test('a follow-up melo began stands in for the person\'s bubble and says melo started it', async () => {
   assert.equal(askTurn({origin: 'followup', userText: 'x'}), true);
   const echo = row(2, {echo: 'followup', line: 'melo follows up on “Fix tests”: it ran out of steps', lead: FOLLOW_LEAD,

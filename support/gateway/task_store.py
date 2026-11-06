@@ -190,6 +190,10 @@ class TaskNotFoundError(TaskStoreError):
     """No task has this id."""
 
 
+class JobFinishedError(TaskStoreError):
+    """The task finished its one job: new work is a new task (#567)."""
+
+
 class TaskNotPausedError(TaskStoreError):
     """A resume was requested for a task that is not paused."""
 

@@ -603,7 +603,7 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
     monkeypatch.setenv("HOME", str(tmp_path))
     plans = [
         step(KEYS),
-        _answer("The task went on without it."),
+        _answer("It needs that step.\nEnding: blocked: may it read the key?"),
         step(KEYS, "call_2"),
         _answer("Deleted."),
     ]
@@ -645,7 +645,7 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
         )
         assert (await console.workers.get(task_id))["approvals"] == "auto"
 
-        # Allow once from the task's page: the finished task goes ahead with it.
+        # Allow once from the task's page: the job it stopped on goes ahead with it.
         response = await client.post(
             f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"
         )
@@ -670,6 +670,47 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
             409,
             "already_allowed",
         )
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_finished_without_a_blocked_step_is_not_reopened_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plans = [step(KEYS), _answer("The task went on without it.")]
+    async with auto_console(tmp_path, plans, monkeypatch=monkeypatch) as (
+        console,
+        client,
+        ran,
+        _,
+    ):
+        folder = tmp_path / "ws"
+        folder.mkdir()
+        assert console.main_id is not None
+        await console.store.update_session(
+            console.main_id, meta_update={"approvals": "auto"}
+        )
+        task, _ = await console.workers.create(
+            {"prompt": "tidy the notes", "workspace": str(folder)}
+        )
+        task_id = task["task_id"]
+        deadline = time.monotonic() + TIMEOUT_S
+        while (await console.workers.get(task_id))["state"] != "done":
+            assert time.monotonic() < deadline, "the task did not finish"
+            await asyncio.sleep(0.02)
+        [blocked] = (await console.workers.get(task_id))["blocked"]
+        assert blocked["can_allow"] is False, "a finished job offers no Allow once"
+        turns = await console.store.list_turns(task_id)
+        response = await client.post(
+            f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"
+        )
+        assert (response.status_code, response.json()["error"]["code"]) == (
+            409,
+            "invalid_transition",
+        )
+        assert (await console.workers.get(task_id))["state"] == "done"
+        assert await console.store.list_turns(task_id) == turns
+        assert ran.codes == []
 
 
 @pytest.mark.asyncio

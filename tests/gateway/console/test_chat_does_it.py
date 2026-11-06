@@ -39,7 +39,7 @@ from .test_chat_owns_tasks import (
 from .test_chores import Summary, chore_console
 from .test_front_followup import _finished
 from .test_side_equals import chats_console
-from .test_turn_writes import _post_turn
+from .test_turn_writes import _post_turn, _wait_turn
 
 OK = answer("It is on its way.")
 
@@ -84,26 +84,47 @@ async def test_the_models_call_on_a_persons_turn_starts_the_task(
 
 
 @pytest.mark.parametrize(
-    ("typed", "rule"),
+    "typed",
     [
-        # Nothing typed, and words that say not to act: offered.
-        ("", "offer"),
-        ("只解释一下这个错误", "offer"),
-        ("don't change anything, only tell me what is wrong", "offer"),
-        ("不用开任务，看一下我的简历然后告诉我适合什么工作", "offer"),
-        # How a task stands, text given to explain, a greeting, a brief question:
-        # there is no work in them, and the chat answers.
-        ("is it done?", "answer"),
-        ("跑完了吗", "answer"),
-        ("翻译成英文：今天天气不错", "answer"),
-        ("hi", "answer"),
-        ("简单说一下什么是 monad？", "answer"),
-        # Words that ask for the work and say what to leave alone: work.
-        ("fix the login bug without changing anything else", "start"),
+        "",
+        "只解释一下这个错误",
+        "don't change anything, only tell me what is wrong",
+        "不用开任务，看一下我的简历然后告诉我适合什么工作",
+        "don't do anything yet",
+        "先别动手",
+        # A word that looks like a verb in what it is about changes nothing.
+        "the fix report: just explain it",
+        "the deploy notes, only tell me what they say",
     ],
 )
-def test_only_words_that_hold_no_work_stop_a_models_call(typed: str, rule: str) -> None:
-    assert create_rule(typed) == rule
+def test_words_that_plainly_say_not_to_act_are_offered(typed: str) -> None:
+    assert create_rule(typed) == "offer"
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        # A limit on the work is no word against the work.
+        "fix the login bug without changing anything else",
+        "修复登录的 bug，别改其他文件",
+        "帮我订机票，别改其他东西",
+        "book the hotel, don't touch anything else",
+        "don't do it before noon, book it at one",
+        # A question and work in one message: the model read them both.
+        "到底好了没，好了就去订票",
+        "is it done, and book the table for tonight",
+        "briefly, what is in my inbox and can you clear it?",
+        # Words after a colon are not always text to explain.
+        "总结一下：我这周的邮件",
+        "translate my site: all pages to French",
+        # No list stands in the way of the model's own reading.
+        "is it done?",
+        "is the fix report done?",
+        "hi",
+    ],
+)
+def test_no_other_words_stand_between_the_model_and_the_work(typed: str) -> None:
+    assert create_rule(typed) == "start"
 
 
 def test_nothing_sends_the_person_to_rephrase() -> None:
@@ -152,7 +173,7 @@ async def test_new_work_for_a_finished_worker_starts_a_new_one_with_its_record(
         [new] = await others(console, old)
         # The new worker has the person's words as its request, and the old one's
         # record as data; the old worker's session is as it ended.
-        assert new.spec["objective"] == typed
+        assert new.spec["objective"] == typed and new.spec["user_words"] == typed
         assert "Wrote vendors.md" in new.spec["chat_picked"]
         assert "write the vendors list" in new.spec["chat_picked"]
         assert await state(console, old) == "done"
@@ -538,6 +559,47 @@ async def test_a_new_chats_first_message_reads_codes_rules_like_any_other(
         assert plain["turn"]["status"] == "running"
 
 
+REPEATS = {
+    "a reminder": "remind me to call Sam on Friday at 9",
+    "a change to a task": "pause tidy the notes",
+    "a choice between tasks": "pause tidy",
+    "new work on a finished task": "redo the vendors list",
+}
+
+
+@pytest.mark.parametrize("what", list(REPEATS))
+async def test_a_repeated_first_message_is_one_chat_and_one_effect(
+    tmp_path: Path, what: str
+) -> None:
+    folder = Path.home() / "side-folder"
+    folder.mkdir(exist_ok=True)
+    async with chats_console(tmp_path) as (console, client, _):
+        made: list[str] = []
+        for work in ("tidy the notes", "tidy the desk", "write the vendors list"):
+            made.append(await task_of(client, console, work))
+        await _finished(console, made[2], REPORT)
+        turn = {"text": REPEATS[what], "client_request_id": "repeat-1"}
+        body = {"turn": turn, "workspace": str(folder)}
+        first = await client.post("/api/sessions", json=body)
+        assert first.status_code == 201, first.text
+        chat = first.json()["session"]["id"]
+        lines = await rows(console, chat)
+        tasks = await console.workers.tasks.list_tasks()
+        # The answer was lost, and the words may read otherwise by now.
+        await console.workers.update(made[0], state="stop")
+        again = await client.post("/api/sessions", json=body)
+        assert again.status_code == 200, again.text
+        assert again.json()["session"]["id"] == chat
+        assert again.json()["echo"]["id"] == first.json()["echo"]["id"]
+        assert again.json()["repeated"] is True
+        assert await rows(console, chat) == lines
+        assert len(await console.workers.tasks.list_tasks()) == len(tasks)
+        # The key is this message's: another one under it is a conflict.
+        turn["text"] = "pause tidy the desk"
+        other = await client.post("/api/sessions", json=body)
+        assert other.status_code == 409, other.text
+
+
 # ── 6. A waiting task shows in the check-in ──
 
 
@@ -619,6 +681,164 @@ async def test_a_task_whose_question_waits_for_the_person_shows_in_the_check_in(
         assert summary.facts == [["Slides: waiting for the user"]]
 
 
+# ── One message, one receipt ──
+
+PROMISE = answer("I'll take care of that now.")
+SAVED = answer("It is saved for every day at 9.")
+
+
+async def retry(client: httpx.AsyncClient, console: Console) -> None:
+    """The person's Retry of the chat's newest turn."""
+    chat = str(console.main_id)
+    turn = await _wait_turn(client, chat)
+    done = await client.post(
+        f"/api/sessions/{chat}/retry", json={"turn_id": turn["id"]}
+    )
+    assert done.status_code == 202, done.text
+    await _wait_turn(client, chat)
+
+
+async def card_of(console: Console) -> dict[str, Any]:
+    [card] = [r for r in await rows(console, console.main_id) if r["echo"] == "chore"]
+    return card
+
+
+async def test_just_once_after_the_message_started_its_work_starts_nothing_more(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owner_console(
+        tmp_path, monkeypatch, main=[creates("Invoice"), OK], run=False
+    ) as (console, client, _, _):
+        await say(client, console, BOTH)
+        [task] = await console.workers.tasks.list_tasks()
+        card = await card_of(console)
+        tapped = await client.post(
+            f"/api/front/echoes/{card['id']}", json={"do": "once"}
+        )
+        assert len(await console.workers.tasks.list_tasks()) == 1
+        assert tapped.status_code == 400 and card["ran"] == task.task_id
+        # What is left of the message saves, and that task is its first run.
+        saved = await client.post(
+            f"/api/front/echoes/{card['id']}", json={"do": "save"}
+        )
+        assert saved.status_code == 200, saved.text
+        [chore] = await chores(console)
+        assert chore.last_task_id == task.task_id
+
+
+async def test_just_once_and_a_retry_start_the_same_work_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [answer("That is a good habit."), PROMISE]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        await say(client, console, BOTH)
+        card = await card_of(console)
+        tapped = await client.post(
+            f"/api/front/echoes/{card['id']}", json={"do": "once"}
+        )
+        assert tapped.status_code == 200, tapped.text
+        await retry(client, console)
+        assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+@pytest.mark.parametrize(
+    "again", [[PROMISE], [schedules(True), PROMISE]], ids=["promise", "schedule"]
+)
+async def test_a_retry_of_a_message_that_only_saved_a_schedule_runs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, again: list[Reply]
+) -> None:
+    main: list[Reply] = [schedules(False), SAVED, *again, SAVED]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        await say(client, console, ONLY)
+        await retry(client, console)
+        assert len(await chores(console)) == 1
+        assert await console.workers.tasks.list_tasks() == []
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [creates("Invoice"), schedules(True)],
+        [creates("Invoice"), schedules(False)],
+        [schedules(True)],
+        [schedules(False), creates("Invoice")],
+    ],
+    ids=["create, now", "create, later", "schedule, now", "schedule, then create"],
+)
+async def test_the_run_a_message_started_is_its_chores_run_in_either_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calls: list[Reply]
+) -> None:
+    async with owner_console(tmp_path, monkeypatch, main=[*calls, OK], run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        await say(client, console, BOTH)
+        [task] = await console.workers.tasks.list_tasks()
+        [chore] = await chores(console)
+        assert chore.last_task_id == task.task_id
+        assert chore.reported_task_id == task.task_id
+        # The next slot comes while that run is held: none starts beside it.
+        runner = console.chore_runner
+        await runner.store.advance(chore, next_run=runner.clock() - 1)
+        assert await runner.tick() == []
+        assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+# ── The worker's lock decides ──
+
+
+async def test_a_worker_that_finishes_before_the_message_arrives_is_not_reopened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owner_console(tmp_path, monkeypatch, follow_up=False, run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        old = await task_of(client, console, "write the vendors list")
+        read = await console.workers.tasks.get_task(old)
+        await _finished(console, old, REPORT)
+        turns = await console.store.list_turns(old)
+        typed = "add the prices"
+        echo = await console.front.follow(read, typed, typed=typed, show=typed)
+        assert echo["echo"] == "started" and echo["task_id"] != old
+        assert await state(console, old) == "done"
+        assert await console.store.list_turns(old) == turns
+        [new] = await others(console, old)
+        assert "Wrote vendors.md" in new.spec["chat_picked"]
+
+
+async def test_a_turn_melo_began_saves_no_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [creates("Long report"), OK, schedules(True), SAVED]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        await say(client, console, "write the long report from my notes")
+        await stop_run(console, await started_task(console))
+        await until(lambda: len(models["main"].requests) >= 4)
+        refused = tool_results(models["main"], 3)[-1]
+        assert refused.startswith("Not done: only the user's own message")
+        assert await chores(console) == []
+
+
 # ── 7. A website request with browsing off ──
 
 
@@ -648,6 +868,12 @@ async def test_browsing_off_is_said_once_with_how_to_turn_it_on(
         await say(client, console, "buy it on example.com")
         [line] = await off_lines(console)
         assert "/browser chrome" in line["line"] and "Settings" in line["line"]
+        # The task started as it should: this is a word about it, not a failure.
+        assert line["echo"] == "notice"
+        assert [r["echo"] for r in await rows(console, console.main_id)][:2] == [
+            "started",
+            "notice",
+        ]
         # The model hears it: it is told the state, and promises no browser.
         assert (
             "browsing is off" in str(models["main"].requests[0][-1].content).casefold()

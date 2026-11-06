@@ -835,10 +835,11 @@ on without a blocked step. `POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` allows it once (as for a
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
 "message": "queued"}` for a task that has not finished (it reads it at its
-next step), `"continued"` for one that has (it runs again); 404 `not_found`
-for no such block, 409 `not_allowable` for one that cannot be allowed, 409
-`already_allowed` once the step ran on an allowance or while one waits. A
-task's allowances go when it finishes.
+next step), `"continued"` for one that stopped before its job was done (it
+runs again); 404 `not_found` for no such block, 409 `not_allowable` for one
+that cannot be allowed, 409 `already_allowed` once the step ran on an
+allowance or while one waits, 409 `invalid_transition` for a job that finished
+(`can_allow` is `false` then). A task's allowances go when it finishes.
 
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
@@ -1287,7 +1288,9 @@ with the echo.
   `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
   `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
-  (the whole message), `schedule`, `when` and `level`; a reminder cue with a time gives
+  (the whole message), `schedule`, `when` and `level`, `receipt` (the message's key:
+  what it starts or saves, it does once) and, when the message started its work
+  already, `ran` (that task: `once` is then 400); a reminder cue with a time gives
   `Remind you on Fri Oct 30 at 9:00?` with `reminder: true`, `text`
   `Reminder: <words>`, `work` (the words), a `once` `schedule` and no
   `level`), `chore_saved` (with `chore_id`; `of` when it answers a `chore` echo, none when the chat saved it),
@@ -1295,7 +1298,8 @@ with the echo.
   person was away: `run_id`, `count`, `variant`, `items` of at most five
   `{change, text}` with `change` one of `merged`, `updated`, `added`, `reworded`,
   `retired`, `changed`, `more` for the changes not listed, `line` `While you were away, melo tidied 3 notes`),
-  `undone`, `failed`, `earlier`
+  `undone`, `failed`, `notice` (a plain word about what was done, such as that
+  browsing is off), `earlier`
   (a task's step ran on the person's earlier approval: `task_id`, `title`,
   `entry_id`, `approved_at`, `preview`, `line` `Used your approval from 14:02`)
   or `revoked` (that approval was taken back; `of` is the `earlier` echo). A reminder
@@ -1321,7 +1325,9 @@ with the echo.
   cannot start is 400 and leaves no chat, one that is admitted keeps its chat), and a side chat's code rules (`/task`, control phrases,
   follow-ups and reminders) apply from its first message, the task
   belonging to that side chat: `POST /api/sessions` with a message code acts on
-  answers 201 with the `session` and the `echo`, no turn, as `turn.as_task` does. A repeated `client_request_id` of a delegation
+  answers 201 with the `session` and the `echo`, no turn, as `turn.as_task` does,
+  and a repeat of its `client_request_id` answers 200 with that chat, its first
+  echo and `repeated: true`, however the words read by then. A repeated `client_request_id` of a delegation
   answers the same echo.
 - A chat keeps a note of the news it has told as an `attention.news` event (turn
   `null`; `floor`, `tasks`, `sides`); a client ignores it.

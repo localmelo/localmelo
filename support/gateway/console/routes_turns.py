@@ -48,11 +48,14 @@ from localmelo.support.sessions.submissions import (
     SubmissionWithdrawn,
     check_client_request_id,
     check_submission,
+    text_sha256,
 )
 
 from .asks import MAX_NOTE_CHARS
 from .bodies import Body
+from .cards import card_json
 from .errors import ApiError
+from .front import ECHO_EVENT
 from .registry import STOP_REASON, TurnExtras
 from .shapes import submission_json, turn_json
 from .task_submissions import (
@@ -340,7 +343,9 @@ async def _create_for_code(
     like any other: a cancelled key is 409 ``submission_withdrawn``, one accepted
     for another message 409 ``submission_conflict``, and a repeat answers 200
     with the chat and echo the first made (``repeated``), the echo written again
-    if the gateway stopped between the task and it. Creates of a key go one at a
+    if the gateway stopped between the task and it. A message that started no
+    task leaves no row to find it by: its chat is named by the key
+    (:func:`_chat_of`), and that chat is the receipt. Creates of a key go one at a
     time, with its cancel.
     """
     assert body.turn is not None
@@ -368,8 +373,14 @@ async def _create_for_code(
                         "repeated": True,
                     }
                 )
+            again = None if as_task else await _repeated(console, key, text)
+            if again is not None:
+                return again
         entry, _ = await console.sessions.create(
-            body.workspace, None, mode=body.approvals
+            body.workspace,
+            None,
+            mode=body.approvals,
+            session_id=None if key is None or as_task else _chat_of(key),
         )
         chat = entry.session_id
         try:
@@ -395,6 +406,38 @@ async def _create_for_code(
             status_code=201,
             content={"session": console.session_body(info), "echo": echo},
         )
+
+
+def _chat_of(key: str) -> str:
+    """The id of the chat a first message code acted on made under *key*: the key's receipt."""
+    return text_sha256(f"chat\0{key}")[:12]
+
+
+async def _repeated(console: Console, key: str, text: str) -> JSONResponse | None:
+    """The answer to a repeat of *key*'s first message: the chat it made and its first echo.
+
+    A message that holds another text under the key is 409 ``submission_conflict``.
+    ``None`` for a key that made no such chat.
+    """
+    info = await console.store.get_session(_chat_of(key))
+    if info is None:
+        return None
+    found = await console.store.events_of_type(info.id, ECHO_EVENT, limit=200)
+    if not found:
+        # The gateway stopped before the message was read: nothing came of it.
+        await console.sessions.delete(info.id)
+        return None
+    first = min(found, key=lambda event: event.id or 0)
+    echo = card_json(first)
+    if echo.get("typed", text) != text:
+        raise conflict()
+    return JSONResponse(
+        content={
+            "session": console.session_body(info),
+            "echo": echo,
+            "repeated": True,
+        }
+    )
 
 
 async def _refuse_task_key(console: Console, key: str | None) -> None:
@@ -442,7 +485,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if (
             sent is not None
             and not sent.extras.images
-            and await console.front.claims(sent.typed)
+            and (
+                # A repeat is answered from its receipt, however the words read now.
+                (key is not None and await console.store.get_session(_chat_of(key)))
+                or await console.front.claims(sent.typed)
+            )
         ):
             # A new chat's first message reads code's rules like any later one; what
             # they leave to the model is the first turn below.
