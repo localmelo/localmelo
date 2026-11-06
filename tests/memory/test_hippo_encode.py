@@ -534,20 +534,56 @@ async def test_kind_title_and_text_are_checked_and_cut() -> None:
     assert hippo.TITLE_CHARS == 80 and hippo.TEXT_CHARS == 800
 
 
-async def test_a_secret_the_model_wrote_is_left_out_of_the_item() -> None:
+async def test_an_item_that_holds_a_secret_is_refused_whole_and_counted() -> None:
+    # A password in the text, a card number in the title only, words with no value,
+    # and a card number across the cut at TEXT_CHARS: each is refused, none is kept
+    # as a remnant. 4242 4242 4242 4242 is a documented test card number.
+    straddling = "word " * 158 + "4242 4242 4242 4242 and more"
+    assert straddling.index("4242") < hippo.TEXT_CHARS < straddling.index("and more")
     reply = says(
         [
             item(
-                "Login",
-                "The user likes tea. The user said the password is hunter2.",
-                "profile",
-                [0],
-            )
+                "Login", "The user likes tea. The password is hunter2.", "profile", [0]
+            ),
+            item("Card 4242 4242 4242 4242", "The user has a card.", "profile", [1]),
+            item("Secret", "The user said their password is private.", "profile", [2]),
+            item("Long", straddling, "profile", [3]),
+            item("Tea", "The user said they like green tea.", "profile", [4]),
         ]
     )
-    result = await hippo.encode(StubEncoder(reply), "T", chat(1), window_chars=12000)
+    result = await hippo.encode(StubEncoder(reply), "T", chat(5), window_chars=12000)
     (piece,) = result.pieces
-    assert "hunter2" not in piece.text and "likes tea" in piece.text
+    assert piece.title == "Tea" and piece.sources == (4,)
+    assert result.refused == 4 and result.windows[0].dropped == 0
+    assert result.kept == [4] and result.unmentioned == [0, 1, 2, 3]
+
+
+async def test_a_refused_item_leaves_its_exchange_to_the_rules_not_to_the_secret() -> (
+    None
+):
+    turns = [turn(0, "I live in Utrecht. My password is hunter2.", "Noted.")]
+    reply = says(
+        [item("Home", "The user lives in Utrecht, password hunter2.", "profile", [0])]
+    )
+    result = await hippo.encode(StubEncoder(reply), "T", turns, window_chars=12000)
+    # The model's item is refused; the statement the rules read from the clean
+    # sentence is made into an item instead.
+    (forced,) = result.pieces
+    assert (forced.text, forced.encoder, forced.forced) == (
+        "You live in Utrecht.",
+        hippo.RULES_ENCODER,
+        True,
+    )
+    assert result.refused == 1 and result.forced == [0] and result.kept == [0]
+
+
+async def test_a_chat_title_that_holds_a_secret_reaches_the_model_cleaned() -> None:
+    title = "Card 4242 4242 4242 4242"
+    stub = StubEncoder()
+    await hippo.encode(stub, title, chat(1), window_chars=12000)
+    (prompt,) = stub.prompts
+    assert prompt.startswith(f"Chat title: {cleaned(title)}\n\n[0] ")
+    assert "4242" not in prompt
 
 
 async def test_items_come_in_time_order_stamped_with_their_newest_sources_time() -> (
@@ -620,6 +656,39 @@ async def test_a_statement_in_a_window_that_failed_is_forced_too() -> None:
     result = await hippo.encode(StubEncoder("garbage"), "T", turns, window_chars=12000)
     assert result.windows[0].failed and result.forced == [0]
     assert [p.text for p in result.pieces] == ["You live in Pittsburgh."]
+
+
+async def test_the_first_window_that_failed_is_where_the_mark_must_stop() -> None:
+    turns = padded(4, 500)
+
+    def broken(*bad: int) -> StubEncoder:
+        def reply(prompt: str) -> str:
+            return "RAISE" if set(labels(prompt)) & set(bad) else by_label(prompt)
+
+        return StubEncoder(reply)
+
+    # One exchange to a window, so each window is one exchange.
+    assert window_sizes(turns, 700) == [1, 1, 1, 1]
+    for bad, first in (((2,), 2), ((3, 2), 2), ((0,), 0)):
+        result = await hippo.encode(broken(*bad), "T", turns, window_chars=700)
+        assert result.failed_from == first
+    whole = await hippo.encode(broken(), "T", turns, window_chars=700)
+    assert whole.failed_from is None and whole.refused == 0
+    # A half of a window that ran out of room counts as well: only that half failed.
+    half = StubEncoder(
+        lambda prompt: (
+            CUT_OFF
+            if len(labels(prompt)) == 4
+            else "RAISE" if labels(prompt)[0] == 2 else by_label(prompt)
+        ),
+        usage=lambda prompt: (
+            len(prompt) // 4,
+            CAP if len(labels(prompt)) == 4 else 10,
+        ),
+    )
+    split = await hippo.encode(half, "T", padded(4, 2000), window_chars=12000)
+    assert split.windows[0].split == 2 and split.windows[0].failed_parts == 1
+    assert split.failed_from == 2
 
 
 async def test_no_statement_means_no_forced_item() -> None:

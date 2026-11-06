@@ -326,10 +326,11 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
     ``windows`` (``exchanges``, ``chars``, ``cached``, ``failed``, ``cut``,
     ``dropped``, ``split``, ``failed_parts``, ``part``: ``[k, m]`` for part *k* of
     *m* of one long exchange, else ``null``), ``gate`` (``kept``, ``ignored``, ``unmentioned``, ``forced``:
-    exchange indexes), ``items`` (each stored: ``id``, ``title``, ``text``,
-    ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes`` (each routed item:
-    ``item`` (its id, ``null`` when ignored), ``action``, ``target``, ``reason``,
-    ``title``).
+    exchange indexes, read from the items that were kept), ``refused`` (how many items
+    held a secret and were not kept), ``items`` (each stored: ``id``, ``title``,
+    ``text``, ``kind``, ``sources`` as ``[file id, exchange index]``) and ``routes``
+    (each routed item: ``item`` (its id, ``null`` when ignored), ``action``,
+    ``target``, ``reason``, ``title``).
     """
     encoding = encoded.encoding
     return {
@@ -340,6 +341,7 @@ def _chat_report(label: str, encoded: Compressed) -> dict[str, Any]:
             "unmentioned": encoding.unmentioned,
             "forced": encoding.forced,
         },
+        "refused": encoded.refused,
         "items": [
             {
                 "id": route.item,
