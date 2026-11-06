@@ -1188,6 +1188,7 @@ dialog.picture-box {
 .starters button { padding: 6px var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink-2); font-size: var(--text-small); }
 .starters button:hover { background: var(--soft); }
 .send-button {
+  flex: none;
   width: 32px;
   height: 32px;
   background: var(--primary);
@@ -1198,11 +1199,13 @@ dialog.picture-box {
   line-height: 1;
 }
 .stop-button {
+  flex: none;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--soft);
   padding: 6px 10px;
   font-size: var(--text-caption);
+  white-space: nowrap;
 }
 .stop-button span {
   margin-left: 4px;
@@ -1217,6 +1220,10 @@ dialog.picture-box {
   gap: 12px;
 }
 #run-status {
+  /* Gives way first in a narrow composer, whole: the state is on the chip and the row too. */
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--text-caption);
   color: var(--muted);
   white-space: nowrap;

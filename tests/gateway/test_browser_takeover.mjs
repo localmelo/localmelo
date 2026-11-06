@@ -203,6 +203,8 @@ test('Take over asks the gateway, and the keys go to the page once it is the per
   assert.equal(els.status.textContent, "You're in control");
   assert.equal(els.take.hidden, true);
   assert.equal(els.give.hidden, false);
+  assert.equal(els.chipText.textContent, "You're in control", 'the chip says what the panel says');
+  assert.equal(els.chip.dataset.browsing, 'false');
   assert.equal(els.keys.focused, true, 'the keys went to the page');
   assert.equal(els.root.dataset.keys, 'true');
   assert.match(els.hint.textContent, /Control-Esc/);

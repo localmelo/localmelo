@@ -3104,6 +3104,24 @@ test('the header pill and the composer follow a session hold', async () => {
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
 });
 
+test('a chat whose page the person has says so in the list, as soon as health does', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [session('a', {busy: true})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {busy: true}),
+      pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0,
+    },
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({status: 'running', answer: null, finished_at: 0, running_here: true})], has_more: false},
+  }));
+  await h.run('init()');
+  const row = () => h.element('session-list').children[0].children[0].innerHTML;
+  assert.doesNotMatch(row(), /in control/);
+  h.run(`setHealth({...S.health, status: {control: [{kind: 'chat', id: 'a'}]}})`);
+  assert.match(row(), /in control/);
+  h.run(`setHealth({...S.health, status: {control: []}})`);
+  assert.doesNotMatch(row(), /in control/);
+});
+
 test('a running chat says Working by default and keeps "Running on your backend" for a developer', async () => {
   const working = (routes) => routes({
     'GET /sessions': {sessions: [session('a', {busy: true})], machine: null, has_more: false},

@@ -421,10 +421,11 @@ export function setupBrowser({
     if (els.hide) els.hide.hidden = S.liveOnly;
     if (chip) {
       chip.hidden = S.liveOnly || !(S.available && (S.known || S.shown));
-      chip.dataset.browsing = String(browsing || (hint() && !S.shown));
+      const working = !c.you && (browsing || (hint() && !S.shown));
+      chip.dataset.browsing = String(working);
       chip.setAttribute('aria-expanded', String(S.shown));
       chip.setAttribute('aria-label', S.shown ? t('browser.hide') : t('browser.show'));
-      setText(els.chipText, browsing || (hint() && !S.shown) ? t('browser.browsing') : t('browser.title'));
+      setText(els.chipText, c.you ? c.status : working ? t('browser.browsing') : t('browser.title'));
     }
     relayout();
   }

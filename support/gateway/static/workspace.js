@@ -625,6 +625,7 @@ function renderSessions() {
     unread?.id ?? 0,
     main && [main.id, main.busy, main.held || "", main.pending_approvals || 0, main.waiting_in_side || 0, main.updated_at, main.last_card?.id],
     new Date().toDateString(),
+    S.health?.status?.control ?? [],
     S.sessions.map((session) => [
       session.id,
       session.title,
@@ -685,6 +686,12 @@ function renderSessions() {
   }
 }
 
+/** What a busy chat's row says it does: while the person has its page, the panel's own word (health's `status.control`). */
+function busyWord(session) {
+  const control = (S.health?.status?.control ?? []).some((chat) => chat.id === session.id);
+  return control ? "browser.inControl" : session.held ? "chat.waiting" : "header.working";
+}
+
 /** The main chat's row, pinned above its side chats: Melo's face, the time and a dot for an unread card. */
 function mainRow(main, unread) {
   const row = el("div", "session-item main-chat");
@@ -703,7 +710,7 @@ function mainRow(main, unread) {
   const meta = asking
     ? t("chat.needsApproval")
     : main.busy
-      ? t(main.held ? "chat.waiting" : "header.working")
+      ? t(busyWord(main))
       : unread
         ? unread.state === "waiting" ? t("chat.needsYou", { title: unread.title || t("chat.aSideChat") }) : t("chat.newResult", { title: unread.title || t("chat.aResult") })
         : sideWords;
@@ -733,7 +740,7 @@ function sessionRow(session, active) {
   // A task this chat started waits for the person: the row says so, as an approval of its own does.
   const tasksWait = session.waiting_tasks > 0 ? t("chat.tasksWait", { n: session.waiting_tasks }) : "";
   const asking = session.pending_approvals > 0 || !!tasksWait;
-  const marker = tasksWait ? `${tasksWait} · ` : asking || !session.busy ? "" : `${t(session.held ? "chat.waiting" : "header.working")} · `;
+  const marker = tasksWait ? `${tasksWait} · ` : asking || !session.busy ? "" : `${t(busyWord(session))} · `;
   const needed = esc(session.pending_approvals > 0 ? t("header.approvalNeeded") : tasksWait);
   const dot = asking ? `<span class="attention-dot" role="img" aria-label="${needed}" title="${needed}"></span>` : "";
   info.innerHTML = `<div class="session-title">${dot}${esc(title(session))}</div><div class="session-meta">${esc(marker)}${esc(chatMeta(session))}</div>`;
@@ -2624,6 +2631,7 @@ const sections = { workers: false, tasks: false };
 
 function setHealth(body) {
   S.health = body;
+  renderSessions();
   running.update(body?.status);
   panel.update(body);
   serve.update();
