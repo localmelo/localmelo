@@ -12,7 +12,7 @@
  * modules, served as they are.
  */
 
-import { approvalCard as drawApprovalCard, approvalNow, GUARD_MS } from "./approval-card.mjs";
+import { approvalCard as drawApprovalCard, guardLeft } from "./approval-card.mjs";
 import { maker } from "./dom.mjs";
 import { formatTime, t } from "./i18n.mjs";
 import { renderMarkdown } from "./markdown.mjs";
@@ -23,6 +23,7 @@ import { setupTasks } from "./tasks.mjs";
 import { plainSegments, setupStatusRow } from "./status-row.mjs";
 import { setupRunning } from "./running.mjs";
 import { setupPanel } from "./panel.mjs";
+import { stepWords } from "./step-words.mjs";
 import { liveRoute, liveUrl, setupBrowser } from "./browser-live.mjs";
 import { levelCode, levelLabel } from "./levels.mjs";
 import { setupModelCard } from "./setup-card.mjs";
@@ -55,6 +56,7 @@ import {
   formatPast,
   formatTokens,
   holdText,
+  httpFailure,
   liveFacts,
   LOCK_HOLD,
   newTurn,
@@ -416,9 +418,21 @@ function needsModel(health) {
   return health.configured === false || health.model_server?.reachable === false;
 }
 
-/** Whether the welcome shows the setup card: a model is needed (or being connected), and no chat is open. */
+/** Whether the chat has nothing in it yet and shows the welcome: a chat not sent, or the main chat before its first word. */
+function chatIsEmpty() {
+  if (!S.activeId) return true;
+  const view = S.view;
+  return mainActive() && !!view?.session && view.turns.length === 0 && !view.cards?.length && !view.echoes?.length;
+}
+
+/** Whether the welcome shows the setup card: a model is needed (or being connected), and the chat is empty. */
 function setupShown() {
-  return S.ready && (needsModel(S.health) || setupCard.holding()) && !S.activeId && !pendingOutbox() && !workerMode;
+  return S.ready && (needsModel(S.health) || setupCard.holding()) && chatIsEmpty() && !pendingOutbox() && !workerMode;
+}
+
+/** Whether nothing can be sent yet: the setup card is up, or no model is configured in any chat. */
+function composerBlocked() {
+  return setupShown() || S.health?.configured === false;
 }
 
 /** The header chip: what the page is doing in developer mode; in default mode which model answers, and whether it can. */
@@ -495,8 +509,10 @@ function syncUI() {
   setupCard.show(setup);
   importCard.show(S.ready && !!S.health && !needsModel(S.health) && !setup && mainActive() && !workerMode);
   $("welcome").classList.toggle("needs-model", setup);
-  input.disabled = setup;
-  input.placeholder = setup ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
+  // With no model nothing is sent: the words stay in the box, and the card (or the banner) shows the way.
+  const blocked = composerBlocked();
+  input.disabled = blocked;
+  input.placeholder = blocked ? t("header.connectToStart") : busy ? t("composer.whileWorking") : COMPOSER_PLACEHOLDER;
   // While melo works, Enter adds the words to the work; Stop is still its own button.
   setTextIfChanged($("composer-hint-text"), t(busy ? "composer.hintWorking" : "html.enterToSend"));
   // A new chat shows the folder melo will work in and a few ways to start; a chat shows its folder in the header.
@@ -504,9 +520,7 @@ function syncUI() {
   folderPicker.update(fresh);
   modeChip.update();
   $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
-  const modelBanner = $("model-banner");
-  setTextIfChanged(modelBanner, S.health?.configured === false && !setup ? t("header.noModelBanner") : "");
-  modelBanner.hidden = !modelBanner.textContent;
+  $("model-banner").hidden = !(S.health?.configured === false && !setup);
   refreshStreamNotice();
   $("header-model").textContent = session
     ? chatSubtitle(session.model || t("header.yourConfiguredModel"), session.workspace_label)
@@ -531,6 +545,8 @@ function syncUI() {
   if (lists) modelChip.setAttribute("aria-haspopup", "menu");
   else modelChip.removeAttribute("aria-haspopup");
   $("connection-dot").classList.toggle("offline", connection.offline);
+  // A Stop was pressed (or answered) but the turn has not ended: the panel says Stopping, not Working.
+  panel.stopping(stopSettling || (turn && (turn.stopping === true || S.cancelling.has(turn.id))) ? 1 : 0);
   // On a phone the composer names the model, so the chip stays only to warn (see the narrow block in workspace.css).
   modelChip.classList.toggle("names-model", !developerMode && !connection.offline);
   if (developerMode) modelChip.removeAttribute("aria-label");
@@ -554,9 +570,9 @@ function syncUI() {
   // Words, or pictures and files that have arrived at the gateway, can be sent.
   const hasMedia = media.has();
   $("attach-btn").hidden = workerMode;
-  $("attach-btn").disabled = setup || !S.online;
+  $("attach-btn").disabled = blocked || !S.online;
   $("send-btn").disabled =
-    setup ||
+    blocked ||
     !S.online ||
     (sending !== null && sending.state !== "failed") ||
     media.busy() ||
@@ -917,6 +933,10 @@ function startStream(id) {
       if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
       if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
       noteFrame(frame);
+      if (frame.type === "turn.finished") {
+        stopSettling = frame.data?.cause === "user_stop";
+        refreshHealthSoon();
+      }
       browser.note(frame);
       chatStatus.bump();
       renderMessages(false);
@@ -1326,7 +1346,7 @@ async function readTaskApproval(id, tries = 0) {
 /** An answer to a task's approval from its chat: the same route and the same choices as the task's page. */
 async function answerTaskApproval(request, state, choice) {
   const id = String(request.request_id);
-  if (workerMode || state.submitting || approvalNow() - state.mountedAt < GUARD_MS) return;
+  if (workerMode || state.submitting || guardLeft(state) > 0) return;
   if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
   state.submitting = true;
   messageSnapshot = "";
@@ -1598,11 +1618,14 @@ function answerNode(answer) {
 function actionsNode(turn) {
   const actions = el("div", "message-actions");
   const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
-  const parts = [
-    formatDuration(turnDuration(turn)),
-    t("turns.steps", { n: steps }),
-    turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
-  ].filter(Boolean);
+  // A person reads how long it took; the steps and the tokens are for the developer mode.
+  const parts = developerMode
+    ? [
+        formatDuration(turnDuration(turn)),
+        t("turns.steps", { n: steps }),
+        turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
+      ].filter(Boolean)
+    : [formatDuration(turnDuration(turn))];
   actions.append(el("span", "", parts.join(" · ")));
   actions.append(
     button("copy-button", t("chat.copyResponse"), async () => {
@@ -1639,6 +1662,9 @@ function failureHint(turn, can, error) {
     case "provider_error": {
       // The title says all there is to say, and the actions offer the settings.
       if (error === PICTURES_REFUSED) return "";
+      // A person reads what went wrong as a sentence; the server's own text is under Details.
+      const kind = developerMode ? "" : httpFailure(turn.status, error);
+      if (kind) return t(`failure.http.${kind}`);
       if (serverUnreachable(turn.status, error)) {
         if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");
@@ -1705,7 +1731,9 @@ function statusNode(turn) {
   node.append(heading);
   // An unreachable server's title and hint say all there is to say; its raw error stays under Details.
   // So does the title of a tool call written as text.
-  if (!stopped && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
+  // In the default mode a model server's own text is under Details too, with the sentence above it.
+  const raw = developerMode || turn.status !== "provider_error";
+  if (!stopped && raw && error && !serverUnreachable(turn.status, error) && error !== info.title && error !== TOOL_CALL_TEXT && error !== PICTURES_REFUSED) {
     node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
   }
   const hint = stopped ? "" : failureHint(turn, can, error);
@@ -1761,7 +1789,7 @@ function workGroup(turn) {
     turn.userToggledGroup ||
     prefs.verbose ||
     turn.status !== "completed";
-  const summary = workSummary(turn, { held: heldOf(turn) });
+  const summary = workSummary(turn, { held: heldOf(turn), plain: !developerMode });
   const group = workBox(summary, open);
   // A finished turn without tool calls is one line over its reasoning: the reasoning is the
   // group's body, not a second "Thought" disclosure inside it.
@@ -1868,7 +1896,7 @@ const approvalCard = (request, view = chatApproval, asked = "") => drawApprovalC
 async function answerApproval(request, state, choice) {
   if (workerMode) return;
   const id = String(request.request_id);
-  if (state.submitting || approvalNow() - state.mountedAt < GUARD_MS || !S.view?.pending.has(id)) return;
+  if (state.submitting || guardLeft(state) > 0 || !S.view?.pending.has(id)) return;
   if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
   state.submitting = true;
   messageSnapshot = "";
@@ -1915,7 +1943,7 @@ function goToApproval() {
     const state = approvalStates.get(String(request.request_id));
     setTimeout(() => {
       if (document.activeElement === $("approval-go") && !once.disabled) once.focus();
-    }, Math.max(0, GUARD_MS - (approvalNow() - state.mountedAt)));
+    }, guardLeft(state));
   }
 }
 
@@ -1928,8 +1956,16 @@ function toolCard(item, turn, context = {}) {
   callCards.set(item, card);
   const summary = el("summary", "tool-summary");
   summary.append(el("span", "tool-mark", state.mark));
-  summary.append(el("span", "tool-name", item.name));
-  if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
+  if (developerMode) {
+    summary.append(el("span", "tool-name", item.name));
+    if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
+  } else {
+    // What the step is, not the tool's name or its arguments (they stay in the opened card). A step that
+    // did not finish reads as what it was to do, beside its mark and its word.
+    const tense = state.state === "running" ? false : state.state === "success" ? true : "ask";
+    summary.classList.add("plain");
+    summary.append(el("span", "tool-words", stepWords(item.name, item.arguments, tense)));
+  }
   const meta = state.text ? el("span", "tool-meta", state.text) : null;
   if (meta) summary.append(meta);
   if (meta && state.state === "running" && !context.readOnly) {
@@ -2030,19 +2066,20 @@ function liveRow(turn) {
 
 function activityOptions(turn, now) {
   return {
+    plain: !developerMode,
     held: heldOf(turn),
     pending: S.view?.pending.size ?? 0,
-    cancelling: S.cancelling.has(turn.id),
+    cancelling: S.cancelling.has(turn.id) || turn.stopping === true,
     now,
   };
 }
 
-/** The live row's first line: `● Running bash · 12s · step 2 · 412 tokens`. */
+/** The live row's first line: `● Reading notes.md · 12s`, and in the developer mode `● Running bash · 12s · step 2 · 412 tokens`. */
 function liveText(turn, now) {
   const parts = [activity(turn, activityOptions(turn, now))];
   parts.push(formatDuration(Math.max(0, now - turn.startedAt)));
-  parts.push(...liveFacts(turn));
-  if (turn.outputTokens > 0) parts.push(t("chat.tokens", { n: formatTokens(turn.outputTokens) }));
+  parts.push(...liveFacts(turn, { plain: !developerMode }));
+  if (developerMode && turn.outputTokens > 0) parts.push(t("chat.tokens", { n: formatTokens(turn.outputTokens) }));
   parts.push(t("chat.escToStop"));
   return parts.join(" · ");
 }
@@ -2112,6 +2149,12 @@ async function send({ asTask = false } = {}) {
 
 async function queueMessage(text, {clearInput = false, asTask = false, carry = null} = {}) {
   if (workerMode) return;
+  // No model is configured: nothing is sent and the words stay in the box. The guide shows where the person is.
+  if (S.health?.configured === false) {
+    if (setupShown()) $("setup-card").focus();
+    else openSettings("model");
+    return;
+  }
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
   if (composerTurn() !== null) {
@@ -2402,6 +2445,8 @@ async function stop() {
   syncUI();
   try {
     const stopped = await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    // The run stops at its next step, not on the instant: the panel says so until the turn ends.
+    turn.stopping = true;
     // Words the run never read do not start another turn after a Stop: they are in the box again.
     const unread = stopped.unread_notes ?? [];
     if (unread.length > 0) {
@@ -2420,6 +2465,27 @@ async function stop() {
     S.cancelling.delete(turn.id);
     syncUI();
   }
+}
+
+// The panel reads the gateway's health, which the poll refreshes every few seconds. A turn this page watches
+// ending is known here first: the health is read again at once, so the panel does not keep saying a chat works
+// after its answer or its Stop. The short wait lets the gateway finish the turn it just announced.
+const HEALTH_SETTLE_MS = 300;
+let healthSoon = null;
+// A stopped turn has ended but the health still counts it: the panel says Stopping until the health is read again.
+let stopSettling = false;
+function refreshHealthSoon() {
+  if (healthSoon !== null) return;
+  healthSoon = setTimeout(async () => {
+    healthSoon = null;
+    try {
+      setHealth(await api("/health"));
+    } catch {
+      /* the poll reads it again */
+    }
+    stopSettling = false;
+    syncUI();
+  }, HEALTH_SETTLE_MS);
 }
 
 async function deleteSession(id) {
@@ -2715,7 +2781,7 @@ function leaveWorkers() {
 // is the line for a turn without events, or "" to draw its work group.
 function turnSteps(turn, sessionId, render, empty) {
   if (empty) return [el("p", "muted", empty)];
-  const summary = workSummary(turn, {});
+  const summary = workSummary(turn, { plain: !developerMode });
   const group = workBox(summary, true);
   const inline = Boolean(turn.finishedAt) && summary === t("turns.summary.thought");
   for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId, render, inline}));
@@ -3550,6 +3616,7 @@ input.addEventListener("input", () => {
 for (const id of ["new-btn", "settings-btn"]) {
   $(id).addEventListener("click", () => (id === "new-btn" ? newChat() : openSettings()));
 }
+$("model-banner-open").addEventListener("click", () => openSettings("model"));
 // The chip and the model button open melo_serve's list when it serves the chats (the chip only when it names the
 // model); otherwise Settings.
 $("connection-btn").addEventListener("click", () => {

@@ -8,7 +8,14 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import EMPTY_REPLY_NUDGE, SHORT_TERM_MAX, Message, ToolCall
+from localmelo.melo.schema import (
+    EMPTY_REPLY_NUDGE,
+    INTERRUPT_LABEL,
+    NO_ANSWER_LABEL,
+    SHORT_TERM_MAX,
+    Message,
+    ToolCall,
+)
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.session_views import memory_view, usage_view
 from localmelo.support.cli.theme import ASCII, UNICODE
@@ -136,6 +143,30 @@ def test_memory_resume_explanation_comes_from_resume_info(
         assert note in text
     else:
         assert "not reloaded" not in text
+
+
+def test_memory_view_words_a_run_without_an_answer() -> None:
+    messages = [
+        Message("user", "first"),
+        Message("assistant", INTERRUPT_LABEL),
+        Message("user", "second"),
+        Message("assistant", NO_ANSWER_LABEL.format(status="failed")),
+    ]
+    text = render(
+        memory_view(
+            messages,
+            BackendInfo("vllm", "vLLM", "stub", "http://127.0.0.1:9/v1"),
+            window_max=SHORT_TERM_MAX,
+            memory=False,
+            loaded=None,
+            width=100,
+            symbols=UNICODE,
+        )
+    )
+    assert "(stopped before answering)" in text and "(ended without an answer)" in text
+    assert "[interrupt" not in text and "[no answer" not in text
+    # The kept label itself, which the model's request replaces, is untouched.
+    assert messages[1].content == INTERRUPT_LABEL
 
 
 def test_memory_sanitizes_rows_and_does_not_mutate_the_copied_window() -> None:

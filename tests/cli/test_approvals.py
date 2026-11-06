@@ -78,7 +78,7 @@ def _request(
         (
             "ask",
             ["shell_exec", "file_write", "mcp__files__read"],
-            "asks before running commands or changing files · allowed this session: "
+            "asks before running commands or changing files · allowed in this chat: "
             "file writes, mcp__files__read, shell commands",
         ),
         (
@@ -182,13 +182,36 @@ def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> 
         width=80,
     )
     assert acting.title == "Click on a website?"
-    assert (
-        acting.header.startswith("example.com") and "acts on the page" in acting.header
+    assert acting.header.startswith("example.com") and "a click or a choice" in (
+        acting.header
     )
     words = " ".join(line for _, line in acting.body)
-    assert "click and choose on example.com" in words
+    assert "melo does this on example.com" in words
     assert "click, type" not in words, "typing is a question of its own"
-    assert "asked about apart, every time" in words
+    assert "Typing is decided separately, each time." in words
+    # A control the engine named is in the title: the action and its target.
+    for on, how, title in [
+        ('a button "Sign in"', "click", "Click “Sign in” on example.com?"),
+        ("a link", "click", "Click a link on example.com?"),
+        (
+            'a select "Country"',
+            "choose an option",
+            "Choose an option in “Country” on example.com?",
+        ),
+        (
+            'a button "Go" inside a box from login.example.org',
+            "click",
+            "Click “Go” on example.com?",
+        ),
+    ]:
+        named = _request(
+            "browser-act:https://example.com",
+            site="example.com",
+            access="act",
+            how=how,
+            on=on,
+        )
+        assert panel_text(named, width=80).title == title
     address = "https://other.org/post"
     sending = panel_text(
         _request(
@@ -200,7 +223,7 @@ def test_acting_on_a_page_and_sending_a_form_ask_apart_from_opening_a_site() -> 
         ),
         width=80,
     )
-    assert sending.title == "Send a form?" and "sends a form" in sending.header
+    assert sending.title == "Send a form?" and "sending a form" in sending.header
     assert ("", address) in sending.body
 
 
@@ -434,7 +457,18 @@ def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> No
         ),
         width=80,
     )
-    assert typing.title == "Type on a website?" and "types text" in typing.header
+    assert typing.title == "Type on a website?" and "typing on a web page" in (
+        typing.header
+    )
+    into = _request(
+        "browser-type:https://example.com",
+        site="example.com",
+        access="type",
+        how="type",
+        text="hi",
+        on='a textbox "Comment"',
+    )
+    assert panel_text(into, width=80).title == "Type into “Comment” on example.com?"
     words = " ".join(line for _, line in typing.body)
     assert "hello there" in [line for _, line in typing.body]
     assert "".join(text.split()) in "".join(words.split()), "none of the text is cut"
@@ -551,7 +585,7 @@ def test_control_characters_show_escaped_and_nothing_is_dropped(
 
 def test_the_session_warning_is_for_shell_and_python_only() -> None:
     assert session_warning("shell_exec", "~/demo") == [
-        '"Allow every" lets routine shell commands run without asking for the rest of this session.',
+        '"Allow every" lets routine shell commands run without asking for the rest of this chat.',
         "Installs, downloads and changes outside ~/demo still ask.",
     ]
     assert session_warning("python_exec", "~/demo")[0].startswith(
@@ -696,7 +730,10 @@ async def test_the_panel_replaces_the_input_box_and_keeps_the_draft(
         assert f"│ shell_exec · in {WORKSPACE}" in text
         assert "│   ls -1" in text
         assert "❯ 1. Yes" in text
-        assert "  2. Yes, and allow every shell_exec call in this session" in text
+        assert (
+            "  2. Yes, and allow every shell_exec call for the rest of this chat"
+            in text
+        )
         assert "  3. No, and tell melo why" in text
         assert '"Allow every" lets routine shell commands run without asking' in text
         assert (
@@ -939,7 +976,7 @@ async def test_the_warning_under_option_two_wraps_rather_than_hides_the_folder(
         assert (
             f"Installs, downloads and changes outside {WORKSPACE} still ask." in joined
         )
-        assert "allow every shell_exec call in this session" in joined
+        assert "allow every shell_exec call for the rest of this chat" in joined
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
@@ -1698,7 +1735,7 @@ async def test_the_terminal_lists_a_site_by_its_site_and_forgets_it_by_name() ->
     assert grant_listed("shell_exec") == "shell_exec"
     # Auto names the sites it may use, the only grants it reads.
     assert approval_words("auto", approvals.allowed_tools).endswith(
-        "· allowed this session: clicking and choosing on news.example"
+        "· allowed in this chat: clicking and choosing on news.example"
     )
     approvals.forget("www.news.example")
     assert approvals.allowed_tools == {"shell_exec"}

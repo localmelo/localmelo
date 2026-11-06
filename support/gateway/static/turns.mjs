@@ -15,6 +15,7 @@
 import { blockWords } from "./blocked.mjs";
 import { t } from "./i18n.mjs";
 import { readMemory } from "./memory.mjs";
+import { stepWords } from "./step-words.mjs";
 
 const SEPARATOR = " · ";
 // `support/cli/render.py`: these two calls end after SESSION_TOOL_TIMEOUT_S.
@@ -314,6 +315,21 @@ const UNREACHABLE_PREFIX = "cannot reach the model server at ";
 /** Whether a run ended because the model server could not be reached, not because it answered with an error. */
 export function serverUnreachable(status, error) {
   return status === "provider_error" && String(error ?? "").startsWith(UNREACHABLE_PREFIX);
+}
+
+/**
+ * What kind of answer a model server gave a provider error (`POST /chat/completions failed with HTTP 500: …`): `auth`
+ * (401, 403), `missing` (404), `busy` (408, 429), `server` (5xx), `refused` (another 4xx), or "" for an error that
+ * names no status. The page words each kind in a sentence of its own; the raw text stays in the details.
+ */
+export function httpFailure(status, error) {
+  if (status !== "provider_error") return "";
+  const code = Number(/failed with HTTP (\d{3})/.exec(String(error ?? ""))?.[1]);
+  if (code === 401 || code === 403) return "auth";
+  if (code === 404) return "missing";
+  if (code === 408 || code === 429) return "busy";
+  if (code >= 500) return "server";
+  return code >= 400 ? "refused" : "";
 }
 
 /** The address that error names, as the provider wrote it, or "". */
@@ -1349,20 +1365,24 @@ export function holdText(held, switching = "") {
  * footer under its answer already gives the turn's time: it reads `Thought`
  * when it has reasoning to open (the events carry the step's time, not the
  * reasoning's own, so no time is shown) and is empty when it has none.
+ *
+ * *plain* is the default mode's line: the same, without the count of tool
+ * calls (`Working`, `Worked for 14s · 1 failed`).
  */
-export function workSummary(turn, {held = ""} = {}) {
-  const calls = toolCount(turn);
+export function workSummary(turn, {held = "", plain = false} = {}) {
+  const calls = plain ? 0 : toolCount(turn);
   const callWord = t("turns.summary.calls", {n: calls});
   if (!turn.finishedAt) {
     const activity = held ? holdText(held) : t("turns.summary.working");
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
-  if (turn.status === "completed" && calls === 0) {
+  if (turn.status === "completed" && toolCount(turn) === 0) {
     return turn.items.some((item) => item.kind === "thinking") ? t("turns.summary.thought") : "";
   }
   const duration = formatDuration(turnDuration(turn));
   if (turn.status === "completed") {
-    const parts = [t("turns.summary.workedFor", {duration}), callWord];
+    const parts = [t("turns.summary.workedFor", {duration})];
+    if (calls > 0) parts.push(callWord);
     const failed = failedCount(turn);
     const denied = deniedCount(turn);
     if (failed) parts.push(t("turns.summary.failed", {n: failed}));
@@ -1379,9 +1399,10 @@ export function workSummary(turn, {held = ""} = {}) {
  * The live row's activity, in the order that matters to a person.
  *
  * A held call comes before an approval, an approval before a stop, a stop
- * before a retry, and the model's own work last.
+ * before a retry, and the model's own work last. *plain* says a running call
+ * in a person's words (`Reading notes.md`), not by its tool's name.
  */
-export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0} = {}) {
+export function activity(turn, {held = "", pending = 0, cancelling = false, now = 0, plain = false} = {}) {
   if (held) return holdText(held);
   if (pending > 0) return t("turns.activity.approval");
   if (cancelling) return t("turns.activity.stopping");
@@ -1395,9 +1416,19 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
   const tool = [...turn.items]
     .reverse()
     .find((item) => item.kind === "tool" && item.status === "running");
-  if (tool !== undefined) return t("turns.activity.running", {tool: tool.name});
+  if (tool !== undefined) return plain ? stepWords(tool.name, tool.arguments) : t("turns.activity.running", {tool: tool.name});
   if (turn.step > 0) return t("turns.activity.thinking");
   return t("turns.activity.starting");
+}
+
+// The phases a run's progress names (`EXPLORE`, `WRITING`, `VERIFY` and `FINISHING` in `melo/memory/procedures/classify.py`).
+const PHASES = new Set(["explore", "write", "verify", "finishing"]);
+
+/** A run's phase in the page's language; a phase the page does not know stays as the run wrote it. */
+export function phaseWords(phase) {
+  const name = String(phase);
+  const key = name.toLowerCase();
+  return PHASES.has(key) ? t(`turns.phase.${key}`) : name;
 }
 
 /**
@@ -1407,9 +1438,17 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
  * `run.progress` has arrived (the cap is the most the run may take, never an
  * estimate of its length); before the first one, the step of the turn's own
  * events (`step 2 of 100`).
+ *
+ * *plain* leaves the numbers out and keeps what a person can use: the phase
+ * (`Looking around`), in the page's language; the terminal's `Explore` stays
+ * in the developer mode.
  */
-export function liveFacts(turn) {
+export function liveFacts(turn, {plain = false} = {}) {
   const parts = [];
+  if (plain) {
+    const phase = isObject(turn.progress) ? turn.progress.phase : "";
+    return phase ? [phaseWords(phase)] : parts;
+  }
   const progress = isObject(turn.progress) ? turn.progress : null;
   if (progress === null) {
     if (turn.step > 0) parts.push(t("turns.facts.stepOf", {step: turn.step, max: turn.maxSteps || 100}));

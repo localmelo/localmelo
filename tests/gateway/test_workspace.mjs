@@ -29,6 +29,7 @@ import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as serve from '../../support/gateway/static/serve.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
+import {stepWords} from '../../support/gateway/static/step-words.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
 
@@ -690,6 +691,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/status-row\.mjs";\n/m, '')
   .replace(/^import \{ setupRunning \} from "\.\/running\.mjs";\n/m, '')
   .replace(/^import \{ setupPanel \} from "\.\/panel\.mjs";\n/m, '')
+  .replace(/^import \{ stepWords \} from "\.\/step-words\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/browser-live\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/levels\.mjs";\n/m, '')
   .replace(/^import \{ setupModelCard \} from "\.\/setup-card\.mjs";\n/m, '')
@@ -905,8 +907,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
   const context = vm.createContext({
     ...turns,
     drawApprovalCard: approvals.approvalCard,
-    approvalNow: approvals.approvalNow,
-    GUARD_MS: approvals.GUARD_MS,
+    guardLeft: approvals.guardLeft,
+    stepWords,
     maker,
     t,
     formatTime,
@@ -958,7 +960,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // `/memory import` opens its tab and presses "Look for notes": a test sets `notesOn` and reads `notesLooked`.
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
     setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
-      lost: [], offline(value) { this.lost.push(value); },
+      lost: [], offline(value) { this.lost.push(value); }, stopped: [], stopping(count) { this.stopped.push(count); },
       closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
@@ -1614,7 +1616,7 @@ test('title and independent banners follow active state without replacing notice
   h.run('notify("Other error", {sticky: true}); syncUI()');
   assert.match(h.context.document.title, /localmelo · New chat · 1/);
   assert.match(h.element('store-banner').textContent, /database offline/);
-  assert.match(h.element('model-banner').textContent, /No model/);
+  assert.equal(h.element('model-banner').hidden, false, 'With no model the banner shows');
   assert.equal(h.element('stream-banner').hidden, false);
   assert.equal(h.element('notice').textContent, 'Other error');
   await h.element('reconnect-btn').click();
@@ -1630,18 +1632,17 @@ test('status banners do not rewrite unchanged live text', async () => {
   h.stream().fail();
   h.run('syncUI()');
   const writes = {};
-  for (const id of ['store-banner', 'model-banner', 'stream-banner-text']) {
+  for (const id of ['store-banner', 'stream-banner-text']) {
     const node = h.element(id);
     let value = node.textContent;
     writes[id] = 0;
     Object.defineProperty(node, 'textContent', {get: () => value, set: (text) => { writes[id]++; value = text; }});
   }
   h.run('syncUI(); refreshStreamNotice()');
-  assert.deepEqual(writes, {'store-banner': 0, 'model-banner': 0, 'stream-banner-text': 0});
+  assert.deepEqual(writes, {'store-banner': 0, 'stream-banner-text': 0});
   h.state().health.sessions.store_error = 'new error';
   h.run('syncUI()');
   assert.equal(writes['store-banner'], 1);
-  assert.equal(writes['model-banner'], 0);
 });
 
 // ── The setup card on the welcome ──
@@ -1690,6 +1691,34 @@ test('the setup card shows, and asks what is on this Mac, only while no model ca
   await chat.run('init()');
   assert.equal(chat.element('setup-card').hidden, true, 'An open chat has no setup card');
   assert.equal(chat.net.callsTo('/setup/detect').length, 0);
+});
+
+test('with no model the main chat shows the card with both ways, nothing is sent, and the banner is a button', async () => {
+  const route = {'GET /health': {...health, configured: false}, 'GET /setup/detect': nothing};
+  // The main chat before its first word: the card is in it, and it names a model on this Mac and an account or a key.
+  const empty = harness(mainRoutes(route));
+  await empty.run('init()');
+  await tick();
+  assert.equal(empty.state().activeId, 'm');
+  assert.equal(empty.element('setup-card').hidden, false);
+  assert.match(empty.text('setup-card'), /No model server is running on this Mac.*brew install.*Or use an account or a key.*Choose a service/);
+  assert.equal(empty.element('input').disabled, true);
+  await press(empty.element('setup-card'), 'Choose a service…');
+  assert.equal(empty.context.settingsSection, 'model', 'the account way opens the model settings');
+  // The main chat with history has no card, but still sends nothing: the banner says why and opens the settings.
+  const history = harness(mainRoutes(route, {turns: [turnRow()]}));
+  await history.run('init()');
+  assert.equal(history.element('setup-card').hidden, true);
+  assert.equal(history.element('model-banner').hidden, false);
+  assert.equal(history.element('input').disabled, true);
+  history.element('input').value = 'my words';
+  await history.run('queueMessage("my words", {clearInput: true})');
+  assert.equal(history.net.calls.filter((call) => call.method === 'POST' && /messages|turns|run/.test(call.path)).length, 0, 'nothing was sent');
+  assert.equal(history.element('input').value, 'my words', 'the words stay in the box');
+  assert.equal(history.context.settingsSection, 'model', 'and the model settings open in place of an "Outcome unknown"');
+  history.context.settingsOpened = 0;
+  await history.element('model-banner-open').click();
+  assert.deepEqual([history.context.settingsOpened, history.context.settingsSection], [1, 'model']);
 });
 
 test('Use this model saves the server that was found, tests it, and the welcome is ready without opening settings', async () => {
@@ -2722,6 +2751,27 @@ test('stop posts the running turn\'s id', async () => {
   await h.run('stop()');
   assert.deepEqual(h.net.callsTo('/turns/turn-2/cancel').map((call) => call.method), ['POST']);
   assert.equal(h.state().cancelling.size, 0);
+});
+
+test('after a Stop the panel says Stopping at once, and reads the health again when the turn ends', async () => {
+  const h = harness(baseRoutes({
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
+  }));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task', client_request_id: 'k2'}});
+  const stopping = h.run('stop()');
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel says Stopping on the press, before the gateway answers');
+  await stopping;
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'and still after the answer, until the turn ends');
+  assert.equal(h.run('activity(S.view.turns.at(-1), {now: 100, cancelling: S.view.turns.at(-1).stopping})'), 'Stopping');
+  const reads = () => h.net.callsTo('/health').length;
+  const before = reads();
+  h.stream().emit({id: 21, turn: 2, ts: 52, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', cause: 'user_stop', error: ''}});
+  assert.equal(reads(), before, 'the gateway gets a moment to finish the turn it announced');
+  assert.equal(h.run('panel.stopped.at(-1)'), 1, 'the panel does not go back to Working while the health is old');
+  await h.timers.findLast((timer) => !timer.interval && timer.ms === 300).handler();
+  assert.equal(reads(), before + 1, 'then the health is read, not left to the poll');
+  assert.equal(h.run('panel.stopped.at(-1)'), 0, 'no Stopping once the health is read again');
 });
 
 // ── Words added while melo works ──
@@ -4311,6 +4361,79 @@ test('leaving the task card, or opening another task, closes the live stream and
   first.emit(liveTool(9));
   second.emit(liveTool(9));
   assert.equal(h.timers.filter((timer) => !timer.interval && timer.ms === 150 && !timer.cleared).length, 0, 'frames of a closed stream draw nothing');
+});
+
+
+// ── Default mode: plain words ──
+
+test('default mode words the run with no tool name, count or step number, and the developer mode keeps them', () => {
+  const {turn, push} = fullTurn();
+  push('run.progress', {level: 1, state: 'running', step: 4, attempt: 2, phase: 'Verify', cycle: 1, tests: {passed: 3, failed: 1, total: 4}, items: null, past: null, basis: {match: 'new'}});
+  push('tool.started', {step: 4, call_id: 'call-1', name: 'file_read', arguments: {path: '/tmp/notes.md'}, preview: '/tmp/notes.md'});
+  assert.equal(activity(turn, {now: 200, plain: true}), 'Reading notes.md');
+  assert.equal(activity(turn, {now: 200}), 'Running file_read');
+  assert.deepEqual(liveFacts(turn, {plain: true}), ['Checking the result'], 'the phase in words, no step, attempt or test count');
+  assert.deepEqual(liveFacts(turn), ['step 4 of 30', 'attempt 2', 'Verify (cycle 1)', 'tests 3/4']);
+  assert.equal(workSummary(turn, {plain: true}), 'Working');
+  assert.equal(workSummary(turn), 'Working · 1 tool call');
+  assert.equal(turns.phaseWords('Explore'), 'Looking around');
+  assert.equal(turns.phaseWords('Rebuild'), 'Rebuild', 'a phase the page does not know stays as the run wrote it');
+  push('tool.finished', {step: 4, call_id: 'call-1', name: 'file_read', status: 'error', error_category: 'runtime_error', output: '', output_chars: 0, error: 'bad', duration_s: 1, images: [], approval: null, exit_code: null});
+  push('run.finished', {result: {status: 'completed', result: 'done', duration_s: 14, n_tool: 1, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  assert.equal(workSummary(turn, {plain: true}), 'Worked for 14s · 1 failed');
+  const stopped = newTurn({turn: 1, status: 'cancelled', cause: 'user_stop', started_at: 10, finished_at: 16, result: {duration_s: 6, n_tool: 2}});
+  stopped.items = [{kind: 'tool', status: 'success'}, {kind: 'tool', status: 'success'}];
+  assert.equal(workSummary(stopped, {plain: true}), 'Stopped after 6.0s');
+});
+
+test('a model server error in default mode is one sentence with a next step, and its raw text is under Details', async () => {
+  const sentences = {401: 'auth', 403: 'auth', 404: 'missing', 429: 'busy', 500: 'server', 503: 'server', 400: 'refused'};
+  for (const [code, kind] of Object.entries(sentences)) {
+    assert.equal(turns.httpFailure('provider_error', `POST /chat/completions failed with HTTP ${code}: {}`), kind, code);
+  }
+  assert.equal(turns.httpFailure('provider_error', 'cannot reach the model server at http://127.0.0.1:1/v1.'), '');
+  assert.equal(turns.httpFailure('failed', 'POST /chat/completions failed with HTTP 500'), '', 'only a provider error');
+  const raw = "POST /chat/completions failed with HTTP 500: {'error': {'message': 'CUDA out of memory'}}";
+  const card = async (routes) => {
+    const h = harness(routes);
+    await h.run('init()');
+    const turn = turns.newTurn(turnRow({status: 'provider_error', result: {error: raw, n_tool: 0}}));
+    h.state().view.turns = [turn];
+    h.context.turn = turn;
+    return h.run('statusNode(turn)');
+  };
+  const part = (node, name) => findNode(node, (child) => child.className === name);
+  const plain = await card(defaultMode());
+  assert.equal(part(plain, 'failure-error'), null, 'the server\'s text is not on the card');
+  assert.equal(part(plain, 'failure-hint').textContent, 'The model server ran into a problem and could not answer. Try again; if it keeps happening, restart the server.');
+  assert.match(part(plain, 'failure-details').children[1].textContent, /Error: POST \/chat\/completions failed with HTTP 500: .*CUDA out of memory/);
+  const developer = await card(baseRoutes());
+  assert.match(part(developer, 'failure-error').textContent, /failed with HTTP 500/, 'the developer mode keeps the raw line');
+});
+
+test('a person sees what melo is doing and how long, never a tool name, a step number or a token count', async () => {
+  const h = harness(defaultMode());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('assistant.message', {step: 1, content: '', tool_calls: [{id: 'call-1', name: 'file_write', arguments: {path: '/tmp/notes.md', content: 'x'}, preview: 'notes.md'}], usage: {completion_tokens: 24}, duration_s: 1});
+  push('tool.started', {step: 1, call_id: 'call-1', name: 'file_write', arguments: {path: '/tmp/notes.md', content: 'x'}, preview: 'notes.md'});
+  h.context.turn = turn;
+  const live = flatten(h.run('assistantNode(turn)'));
+  assert.match(live, /Writing notes\.md/);
+  assert.doesNotMatch(live, /file_write|tool call|step \d|tokens/);
+  assert.match(live, /Esc to stop/);
+  push('tool.finished', {step: 1, call_id: 'call-1', name: 'file_write', status: 'success', error_category: 'none', output: 'ok', output_chars: 2, error: '', duration_s: 0.1, images: [], approval: null, exit_code: null});
+  push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 14, n_tool: 1, steps: 2}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  turn.outputTokens = 24;
+  const done = h.run('assistantNode(turn)');
+  const summary = findNode(done, (node) => node.className === 'work-summary');
+  assert.equal(summary.textContent, 'Worked for 14s');
+  const card = findNode(done, (node) => node.classList?.contains('tool-card'));
+  assert.equal(findNode(card, (node) => node.className === 'tool-words').textContent, 'Wrote notes.md');
+  assert.equal(findNode(card, (node) => node.className === 'tool-name'), null);
+  assert.equal(findNode(done, (node) => node.className === 'message-actions').children[0].textContent, '14s', 'the footer gives the time alone');
 });
 
 // ── Default mode: fewer choices, the same page ──
