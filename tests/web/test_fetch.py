@@ -305,6 +305,42 @@ async def test_a_pdf_reads_like_a_page_of_text_with_a_picture_for_a_page_without
     assert "Page 2 has no text; its picture is attached" in result.text
 
 
+@pytest.mark.parametrize("path", ["/pdf-as-text", "/pdf-as-html"])
+async def test_a_pdf_is_known_by_its_first_bytes_whatever_readable_type_the_server_gives(
+    server: dict[str, Any], path: str
+) -> None:
+    result = await _call(_provider(server), f"{URL}{path}")
+    assert isinstance(result, ToolOutput) and not result.is_error, result
+    head, body = _block(result.text)
+    assert "type=pdf" in head and "Experience: Acme Corp" in body
+    assert len(result.images) == 1
+
+
+async def test_a_pdf_of_many_pages_without_text_comes_in_parts_that_each_carry_their_pictures(
+    server: dict[str, Any],
+) -> None:
+    provider = _provider(server)
+    attached: list[int] = []
+    part, total = 1, 1
+    while part <= total:
+        result = await _call(provider, f"{URL}/pdf-scans", part=part)
+        assert isinstance(result, ToolOutput) and not result.is_error, result
+        head, body = _block(result.text)
+        found = re.search(r"part=\d+/(\d+)", head)
+        total = int(found.group(1)) if found else 1
+        pages = [
+            int(n)
+            for n in re.findall(r"\[page (\d+): no text, picture attached\]", body)
+        ]
+        # No part promises a page its own picture does not bring.
+        assert len(result.images) == len(pages) <= 3
+        assert "no picture came" not in result.text
+        attached += pages
+        part += 1
+        assert part <= 6
+    assert attached == [2, 3, 4, 5, 6, 7, 8]
+
+
 async def test_a_fetched_pdf_is_material_for_the_note_gate_as_a_page_is(
     server: dict[str, Any],
 ) -> None:

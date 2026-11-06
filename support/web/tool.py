@@ -200,9 +200,7 @@ def _decode(body: bytes, charset: str, html: bool) -> str:
 
 
 def _sniff(body: bytes) -> str:
-    """The media type of a page that named none: PDF, HTML, text, or binary."""
-    if pdf.is_pdf(body):
-        return "application/pdf"
+    """The media type of a page that named none: HTML, text, or binary."""
     head = body[:1024].lstrip().lower()
     if head.startswith((b"<!doctype html", b"<html")) or b"<body" in head:
         return "text/html"
@@ -491,7 +489,9 @@ class WebFetchProvider(BaseToolProvider):
             # The status code only: the reason phrase is the server's own words.
             raise FetchError(f"{host} answered HTTP {page.status}.")
         media = page.content_type or _sniff(page.body)
-        if media in _GENERIC and pdf.is_pdf(page.body):
+        if pdf.is_pdf(page.body):
+            # By its first bytes, whatever type the server gave it. Only a body
+            # the fetcher already took (see _wanted) can be one.
             media = "application/pdf"
         if not (readable(media) or media in _PDF):
             raise FetchError(_not_read(media))
@@ -544,7 +544,7 @@ class WebFetchProvider(BaseToolProvider):
             doc = await pdf.read_text(page.body)
         except pdf.PdfError as exc:
             raise FetchError(str(exc)) from None
-        reading.parts = _plain_parts(doc.text)
+        reading.parts = [part for piece in doc.pieces() for part in _plain_parts(piece)]
         reading.document = (page.body, doc)
 
     @staticmethod

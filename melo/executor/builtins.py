@@ -8,6 +8,7 @@ import contextlib
 import contextvars
 import errno
 import functools
+import io
 import itertools
 import os
 import re
@@ -358,13 +359,13 @@ class _PdfFile(bytes):
 
 
 def _read_as_given(path: str) -> str | _PdfFile:
-    """The text of *path* as given, or its bytes when it is a PDF."""
-    with open(path, "rb") as probe:
-        if pdf.is_pdf(probe.read(len(pdf.MAGIC))):
-            probe.seek(0)
-            return _PdfFile(pdf.read_file(probe))
-    with open(path) as source:
-        return source.read()
+    """The text of *path* as given, or its bytes when it is a PDF; opened once."""
+    with open(path, "rb") as source:
+        head = source.read(len(pdf.MAGIC))
+        if pdf.is_pdf(head):
+            return _PdfFile(pdf.read_file(source, head))
+        # Decoded as open(path).read() does: the locale's encoding, universal newlines.
+        return io.TextIOWrapper(io.BytesIO(head + source.read())).read()
 
 
 async def _read_pdf(data: bytes, start: int, end: int | None) -> str | ToolOutput:

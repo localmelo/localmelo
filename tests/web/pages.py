@@ -57,6 +57,9 @@ PDF_PAGES = [
     None,
 ]
 
+# A first page with words and seven pages that are only a drawing.
+SCAN_PAGES = ["The first page has some words on it, as a cover does.", *[None] * 7]
+
 JS_PAGE = """<!doctype html><html><head><title>App</title>
 <script src="/app.js"></script><script>render()</script></head>
 <body><div id="root"></div><noscript>Turn on JavaScript.</noscript></body></html>"""
@@ -104,6 +107,12 @@ def _handler(state: dict[str, object]) -> type[BaseHTTPRequestHandler]:
                 self._send(200, make_pdf(PDF_PAGES), "application/pdf")
             elif path == "/pdf-untyped":
                 self._send(200, make_pdf(PDF_PAGES), "application/octet-stream")
+            elif path == "/pdf-as-text":
+                self._send(200, make_pdf(PDF_PAGES), "text/plain")
+            elif path == "/pdf-as-html":
+                self._send(200, make_pdf(PDF_PAGES), "text/html")
+            elif path == "/pdf-scans":
+                self._send(200, make_pdf(SCAN_PAGES), "application/pdf")
             elif path == "/pdf-bad":
                 self._send(200, b"%PDF-1.7 ...", "application/pdf")
             elif path == "/image":

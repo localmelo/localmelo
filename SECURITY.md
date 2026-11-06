@@ -37,14 +37,25 @@ those tools can do.
   (`python -I`, a script run by path, so melo's own modules are not loaded)
   on its standard input and nothing else goes with them: no path, no
   descriptor, no secret in the environment (only the variables `child_env`
-  names). The child has a process group of its own that a cancellation or its
-  20-second time limit kills, ends by itself after 25 seconds of CPU, and its
-  answer is read up to 24 MB. A file over 50 MB is never sent (`web_fetch`
-  keeps its 2 MB download limit), and only the first 300 pages and 1,000,000
-  characters are read. A file that breaks the reader ends the child, not the
-  gateway, and the model gets one plain line. The child is not sandboxed: it
-  can read what you can, and the library is not memory-safe, so a PDF that
-  exploits it runs with your permissions. The path checks of `file_read` and
+  names). The child has a process group of its own that a cancellation, its
+  20-second time limit or a memory limit kills, and it ends itself after 25
+  seconds of CPU or of wall clock (an alarm in the child, so also when the
+  process that started it is gone). Melo reads the child's resident memory
+  every 0.25 seconds and kills it over 1 GB; a burst of allocation between two
+  looks can pass the limit before it is seen, memory not yet touched does not
+  count, only the child's own process is counted (not the other PDF reads
+  running at the same time), and when `ps` cannot be run the limit is not
+  checked. There is no address-space limit on macOS. The child's answer is not
+  trusted: it is read up to about 4 MB for text and 12 MB for pictures and
+  checked (types, counts, sizes, the PNG header, the text cleaned again) before
+  any of it is used. A file over 50 MB is never sent (`web_fetch` keeps its
+  2 MB download limit), and only the first 300 pages and 1,000,000 characters
+  are read. A file that breaks the reader ends the child, not the gateway, and
+  the model gets one plain line. The child is not sandboxed: it can read what
+  you can, and the library is not memory-safe, so a PDF that exploits it runs
+  with your permissions. `uv` never builds the library from source
+  (`no-build-package`) and the app installs it from hashed wheels; a plain
+  `pip install` of the source tree is not covered by that setting. The path checks of `file_read` and
   the site gate of `web_fetch` run before any byte is parsed. A PDF's words and
   pictures are untrusted like any file's or page's: `web_fetch` frames and
   cleans the text as it does a page's, and the note gate treats it as a page.

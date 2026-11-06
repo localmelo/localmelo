@@ -9,13 +9,18 @@ and nothing else goes with them: the library that parses them is not
 thread-safe, and a broken file must not take the gateway down. The child is a
 fresh interpreter started by path (``python -I``), so melo's own modules are
 not loaded into it and pypdfium2 is imported only there. It runs in a group of
-its own that the wall clock (:data:`TIMEOUT_S`) or a cancellation kills whole,
-and it ends by itself after :data:`TIMEOUT_S` plus a few seconds of CPU. What
-it answers is read up to :data:`MAX_ANSWER_BYTES`. A file over :data:`MAX_BYTES`
-is never sent. Of the pages, :data:`MAX_PAGES` are read, and of the text,
-:data:`MAX_CHARS` characters. Nothing leaves the child but one JSON object, and
-what goes wrong reaches the model as one plain line (:class:`PdfError`),
-never a traceback.
+its own, and ends by itself: after :data:`TIMEOUT_S` plus a few seconds of CPU
+or of wall clock, whichever comes first, so it is bounded even if this process
+is gone. While it runs this process watches it: the wall clock
+(:data:`TIMEOUT_S`), a cancellation, an answer over its limit, or a resident
+memory over :data:`MAX_RSS_BYTES` (looked at every :data:`WATCH_S`, so a burst
+between two looks can pass the limit before it is seen) kill the group whole.
+A file over :data:`MAX_BYTES` is never sent. Of the pages, :data:`MAX_PAGES` are
+read, and of the text, :data:`MAX_CHARS` characters. Nothing leaves the child
+but one JSON object, and the child is not trusted: its answer is read up to a
+limit that depends on what was asked, and checked (types, counts, sizes, the
+picture's own header) before any of it is used. What goes wrong reaches the
+model as one plain line (:class:`PdfError`), never a traceback.
 
 The text of a page under :data:`NO_TEXT_CHARS` characters is a page with no
 text (a scan, a drawing): its text stays empty, a line says so, and
@@ -29,17 +34,21 @@ reaches the model.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import functools
 import json
 import re
+import struct
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, TypeGuard
 
+from localmelo.melo.executor import _pdf_child
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.process_gate import kill_process_group
 from localmelo.melo.schema import ImagePart
@@ -47,15 +56,25 @@ from localmelo.melo.schema import ImagePart
 # A PDF starts with this, and nothing else does.
 MAGIC = b"%PDF-"
 
-MAX_BYTES = 50 * 1024 * 1024
+_MB = 1024 * 1024
+
+MAX_BYTES = 50 * _MB
 MAX_PAGES = 300
 MAX_CHARS = 1_000_000
 TIMEOUT_S = 20.0
-# Bytes the child may answer: the text at three bytes a character at most, and
-# the pictures of one result as base64.
-MAX_ANSWER_BYTES = 24 * 1024 * 1024
+# The child ends itself this many seconds after TIMEOUT_S (CPU and wall clock).
+_GRACE_S = 5
+# Resident memory the child may use, and how often it is looked at. Resident
+# memory is what the kernel gives it at the moment: native allocations that
+# are not touched do not count, and a burst between two looks is not seen.
+MAX_RSS_BYTES = 1024 * _MB
+WATCH_S = 0.25
+
 # A page with fewer characters than this, spaces left out, has no text.
 NO_TEXT_CHARS = 20
+
+# Characters of base64 one picture may take; the child draws a page smaller to fit.
+PICTURE_BYTES = 4 * _MB
 
 # Pictures one result carries: the default of ``AgentOptions.tool_images_keep``,
 # so none of them loses its pixels when the next arrives.
@@ -75,12 +94,12 @@ _MARKER = re.compile(
     r"^\[page (\d+): no text, picture (?:not sent|attached|failed)\]$", re.M
 )
 
-_MB = 1024 * 1024
 _BROKEN = "melo could not read this PDF: the file is damaged or is not a PDF."
 _PROBLEMS = {
     "password": "This PDF is password-protected, so melo cannot read it.",
     "unavailable": "melo cannot read PDFs here: its PDF reader is not installed.",
 }
+_PNG = b"\x89PNG\r\n\x1a\n"
 
 
 class PdfError(ValueError):
@@ -92,9 +111,12 @@ def is_pdf(head: bytes) -> bool:
     return head.startswith(MAGIC)
 
 
-def read_file(source: BinaryIO) -> bytes:
-    """All of the PDF file *source*, from its start; :class:`PdfError` when it is over :data:`MAX_BYTES`."""
-    data = source.read(MAX_BYTES + 1)
+def read_file(source: BinaryIO, head: bytes = b"") -> bytes:
+    """The PDF file *source*: *head* (bytes already read from its start) and the rest of it.
+
+    :class:`PdfError` when it is over :data:`MAX_BYTES`.
+    """
+    data = head + source.read(MAX_BYTES + 1 - len(head))
     if len(data) > MAX_BYTES:
         raise PdfError(
             f"This PDF is larger than {MAX_BYTES // _MB} MB; melo reads PDFs up to that size."
@@ -135,29 +157,57 @@ class PdfText:
             if len("".join(text.split())) < NO_TEXT_CHARS
         )
 
-    @functools.cached_property
-    def text(self) -> str:
-        """The pages in order, each under its page line; a page with no text says so."""
-        lines: list[str] = []
+    def _blocks(self) -> list[str]:
+        """Each page as one block: its page line, its text, and the line that says it has none."""
+        blocks: list[str] = []
         for n, page in enumerate(self.texts, 1):
-            lines.append(f"--- page {n} of {self.pages} ---")
+            lines = [f"--- page {n} of {self.pages} ---"]
             if page:
                 lines.append(page)
             if n in self.blank:
                 lines.append(marker(n, "not sent"))
-        if len(self.texts) < self.pages or self.cut:
-            unread = len(self.texts) < self.pages
-            lines.append(
-                f"[the text is cut: melo reads at most {MAX_PAGES} pages and {MAX_CHARS:,} "
-                "characters of a PDF"
-                + (
-                    f"; pages {len(self.texts) + 1}-{self.pages} are not read"
-                    if unread
-                    else ""
-                )
-                + "]"
+            blocks.append("\n".join(lines))
+        return blocks
+
+    def _cut_note(self) -> list[str]:
+        """The line that says the text stops short of the document, when it does."""
+        unread = len(self.texts) < self.pages
+        if not unread and not self.cut:
+            return []
+        return [
+            f"[the text is cut: melo reads at most {MAX_PAGES} pages and {MAX_CHARS:,} "
+            "characters of a PDF"
+            + (
+                f"; pages {len(self.texts) + 1}-{self.pages} are not read"
+                if unread
+                else ""
             )
-        return "\n".join(lines) + "\n"
+            + "]"
+        ]
+
+    @functools.cached_property
+    def text(self) -> str:
+        """The pages in order, each under its page line; a page with no text says so."""
+        return "\n".join([*self._blocks(), *self._cut_note()]) + "\n"
+
+    def pieces(self, per: int = MAX_PICTURES) -> list[str]:
+        """The text in pieces that each hold at most *per* pages with no text.
+
+        A reader that shows one piece at a time (``web_fetch``'s parts) thus
+        has every picture the piece needs to give, and the next piece starts
+        at the first page left out.
+        """
+        pieces: list[list[str]] = [[]]
+        blanks = 0
+        for n, block in enumerate(self._blocks(), 1):
+            if n in self.blank:
+                if blanks == per:
+                    pieces.append([])
+                    blanks = 0
+                blanks += 1
+            pieces[-1].append(block)
+        pieces[-1].extend(self._cut_note())
+        return ["\n".join(piece) + "\n" for piece in pieces]
 
     def line_of(self, page: int) -> int:
         """The line (from 1) of the line that says page *page* has no text."""
@@ -165,11 +215,11 @@ class PdfText:
 
 
 class _AnswerTooLargeError(Exception):
-    """The child answered more than :data:`MAX_ANSWER_BYTES`."""
+    """The child answered more than it was allowed to."""
 
 
-async def _exchange(proc: asyncio.subprocess.Process, data: bytes) -> bytes:
-    """Send *data* to the child and collect its answer, never more than the limit."""
+async def _exchange(proc: asyncio.subprocess.Process, data: bytes, limit: int) -> bytes:
+    """Send *data* to the child and collect its answer, never more than *limit* bytes."""
     assert proc.stdin is not None and proc.stdout is not None
     stdin, stdout = proc.stdin, proc.stdout
 
@@ -187,7 +237,7 @@ async def _exchange(proc: asyncio.subprocess.Process, data: bytes) -> bytes:
         size = 0
         while chunk := await stdout.read(1 << 16):
             size += len(chunk)
-            if size > MAX_ANSWER_BYTES:
+            if size > limit:
                 raise _AnswerTooLargeError
             chunks.append(chunk)
         return b"".join(chunks)
@@ -197,11 +247,43 @@ async def _exchange(proc: asyncio.subprocess.Process, data: bytes) -> bytes:
     return answer
 
 
-async def _ask(mode: str, limits: dict[str, Any], data: bytes) -> dict[str, Any]:
-    """The child's answer for *mode*; :class:`PdfError` for every way it can fail."""
+async def _resident(pid: int) -> int:
+    """Resident memory of process *pid*, in bytes; 0 when it cannot be told (it is gone, or no ``ps``)."""
+    try:
+        ps = await asyncio.create_subprocess_exec(
+            "ps",
+            "-o",
+            "rss=",
+            "-p",
+            str(pid),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        out, _ = await ps.communicate()
+        return int(out.split()[0]) * 1024  # ps gives kilobytes
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+async def _watch(proc: asyncio.subprocess.Process, over: asyncio.Event) -> None:
+    """Kill the group *proc* leads when its resident memory passes :data:`MAX_RSS_BYTES`, after setting *over*."""
+    while proc.returncode is None:
+        await asyncio.sleep(WATCH_S)
+        if await _resident(proc.pid) > MAX_RSS_BYTES:
+            over.set()
+            await kill_process_group(proc)
+            return
+
+
+async def _ask(
+    mode: str, limits: dict[str, Any], data: bytes, answer_limit: int
+) -> dict[str, Any]:
+    """The child's answer for *mode*, at most *answer_limit* bytes; :class:`PdfError` for every way it can fail."""
     if not sys.executable:
         raise PdfError(_PROBLEMS["unavailable"])
-    limits = {**limits, "cpu": int(TIMEOUT_S) + 5}
+    ends = int(TIMEOUT_S) + _GRACE_S
+    limits = {**limits, "cpu": ends, "wall": ends}
     try:
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -217,9 +299,11 @@ async def _ask(mode: str, limits: dict[str, Any], data: bytes) -> dict[str, Any]
         )
     except OSError:
         raise PdfError(_PROBLEMS["unavailable"]) from None
+    over = asyncio.Event()
+    watcher = asyncio.create_task(_watch(proc, over))
     try:
         async with asyncio.timeout(TIMEOUT_S):
-            answer = await _exchange(proc, data)
+            answer = await _exchange(proc, data, answer_limit)
     except TimeoutError:
         await kill_process_group(proc)
         raise PdfError(
@@ -231,9 +315,20 @@ async def _ask(mode: str, limits: dict[str, Any], data: bytes) -> dict[str, Any]
     except BaseException:
         await kill_process_group(proc)
         raise
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+    if over.is_set():
+        raise PdfError(
+            f"Reading this PDF needed more than {MAX_RSS_BYTES // _MB} MB of memory; "
+            "melo stopped."
+        )
     try:
         found = json.loads(answer) if proc.returncode == 0 else None
-    except ValueError:
+    except (
+        ValueError,
+        RecursionError,
+    ):  # not JSON, or nested past what the decoder takes
         found = None
     if not isinstance(found, dict):
         raise PdfError("melo could not read this PDF: the PDF reader stopped on it.")
@@ -245,31 +340,63 @@ async def _ask(mode: str, limits: dict[str, Any], data: bytes) -> dict[str, Any]
 
 async def read_text(data: bytes) -> PdfText:
     """The text of the PDF in *data*; :class:`PdfError` when it cannot be read."""
-    answer = await _ask("text", {"pages": MAX_PAGES, "chars": MAX_CHARS}, data)
+    # Four bytes a character at most, and room for the quotes and page list.
+    answer = await _ask(
+        "text", {"pages": MAX_PAGES, "chars": MAX_CHARS}, data, MAX_CHARS * 4 + 65_536
+    )
     pages, texts = answer.get("pages"), answer.get("texts")
     if (
-        not isinstance(pages, int)
+        type(pages) is not int
         or not isinstance(texts, list)
-        or not all(isinstance(text, str) for text in texts)
-        or not 0 < len(texts) <= pages
+        or not 0 < len(texts) <= min(pages, MAX_PAGES)
+        or not all(type(text) is str for text in texts)
+        or sum(map(len, texts)) > MAX_CHARS
     ):
         raise PdfError(_BROKEN)
-    return PdfText(pages, tuple(texts), answer.get("cut") is True)
+    # What the child says is cleaned again here: it is not taken on its word.
+    return PdfText(
+        pages, tuple(map(_pdf_child.clean, texts)), answer.get("cut") is True
+    )
+
+
+def _is_picture(png: object) -> TypeGuard[str]:
+    """Whether *png* is base64 of a PNG within :data:`PICTURE_BYTES` and the size of a screenshot."""
+    if type(png) is not str or len(png) > PICTURE_BYTES:
+        return False
+    try:
+        raw = base64.b64decode(png, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    if len(raw) < 24 or raw[:8] != _PNG or raw[12:16] != b"IHDR":
+        return False
+    width, height = struct.unpack(">II", raw[16:24])
+    return bool(0 < width <= PICTURE_WIDTH and 0 < height <= PICTURE_HEIGHT)
 
 
 async def render_pages(data: bytes, pages: Sequence[int]) -> dict[int, ImagePart]:
-    """A picture of each of *pages* (from 1) that could be drawn, by page."""
+    """A picture of each of *pages* (from 1) that could be drawn, by page.
+
+    Only a page asked for, once, and a picture that passes :func:`_is_picture`.
+    """
     limits = {
         "pages": list(pages),
         "dpi": PICTURE_DPI,
         "width": PICTURE_WIDTH,
         "height": PICTURE_HEIGHT,
+        "bytes": PICTURE_BYTES,
     }
-    answer = await _ask("render", limits, data)
+    answer = await _ask("render", limits, data, MAX_PICTURES * PICTURE_BYTES + 65_536)
+    pictures = answer.get("pictures")
     made: dict[int, ImagePart] = {}
-    for item in answer.get("pictures") or []:
-        page, png = item.get("page"), item.get("png")
-        if page in pages and isinstance(png, str) and page not in made:
+    for item in pictures[: len(pages)] if isinstance(pictures, list) else []:
+        page = item.get("page") if isinstance(item, dict) else None
+        png = item.get("png") if isinstance(item, dict) else None
+        if (
+            type(page) is int
+            and page in pages
+            and page not in made
+            and _is_picture(png)
+        ):
             made[page] = ImagePart(mime_type="image/png", data=png)
     return made
 

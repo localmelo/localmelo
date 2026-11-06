@@ -49,6 +49,10 @@ melo-retrieve = "localmelo.support.retrieve:main"
 melo-procedures = "localmelo.support.procedures:main"
 melo-task = "localmelo.support.task_cli:main"
 
+[tool.uv]
+# The PDF reader is a native library: install its wheel or fail, never build it from source.
+no-build-package = ["pypdfium2"]
+
 # ── black ──
 [tool.black]
 line-length = 88

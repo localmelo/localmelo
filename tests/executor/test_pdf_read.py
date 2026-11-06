@@ -7,10 +7,16 @@ scripted model that cannot see pictures.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import signal
 import struct
+import subprocess
+import sys
 import textwrap
+import tomllib
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +35,7 @@ from localmelo.melo.executor import (
     pdf,
     register_builtins,
 )
+from localmelo.melo.executor import builtins as builtins_module
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import Message, ToolCall, decode_base64
 from localmelo.tests.agent.test_tool_images import ScriptedLLM
@@ -235,3 +242,200 @@ async def test_a_child_that_hangs_is_killed_and_one_that_crashes_is_named(
     monkeypatch.setattr(pdf, "_CHILD", crash)
     outcome = await _read(root, "cv.pdf")
     assert "the PDF reader stopped on it" in outcome.error
+
+
+# ── What the child may cost, and what the parent believes of it ──
+
+
+async def test_a_child_that_grows_past_the_memory_cap_is_killed(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (root / "cv.pdf").write_bytes(make_pdf([CV]))
+    pid_file = tmp_path / "pid"
+    grow = _child(
+        tmp_path,
+        f"""
+        import os, sys, time
+        open({str(pid_file)!r}, "w").write(str(os.getpid()))
+        blocks = []
+        for _ in range(60):  # 600 MB, touched, a block every 50 ms
+            blocks.append(bytearray(b"x" * (10 * 1024 * 1024)))
+            time.sleep(0.05)
+        time.sleep(3)
+        sys.stdout.write('{{"status": "broken"}}')
+        """,
+    )
+    monkeypatch.setattr(pdf, "_CHILD", grow)
+    monkeypatch.setattr(pdf, "MAX_RSS_BYTES", 150 * 1024 * 1024)
+    monkeypatch.setattr(pdf, "WATCH_S", 0.05)
+    outcome = await _read(root, "cv.pdf")
+    assert outcome.status == ExecutionStatus.ERROR
+    assert "more than 150 MB of memory" in outcome.error and "\n" not in outcome.error
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_file.read_text()), 0)
+
+
+def test_the_child_ends_itself_by_its_own_clock_when_nobody_answers() -> None:
+    # No bytes and no end of input: the parent is gone or stuck. The child's
+    # alarm (a wall clock, whatever the child does) ends it, so its life is bounded.
+    limits = {"pages": 1, "chars": 1, "cpu": 30, "wall": 1}
+    proc = subprocess.Popen(
+        [sys.executable, "-I", str(pdf._CHILD), "text", json.dumps(limits)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert proc.wait(timeout=8) == -signal.SIGALRM
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def _answering(body: str) -> str:
+    return f"import sys\nsys.stdout.write({body})"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        _answering("'[' * 200_000"),  # a decoder that runs out of depth
+        _answering(
+            '\'{"status": "ok", "pages": 1, "texts": ["\' + \'a\' * 5_000_000 + \'"]}\''
+        ),
+    ],
+    ids=["too-deep", "too-much-text"],
+)
+async def test_an_answer_the_parent_cannot_use_gives_one_plain_line(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str
+) -> None:
+    (root / "cv.pdf").write_bytes(make_pdf([CV]))
+    monkeypatch.setattr(pdf, "_CHILD", _child(tmp_path, script))
+    outcome = await _read(root, "cv.pdf")
+    assert outcome.status == ExecutionStatus.ERROR
+    assert outcome.error.startswith("melo could not read this PDF")
+    assert "\n" not in outcome.error and "Traceback" not in outcome.error
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"pages": True, "texts": ["abc"]},
+        {"pages": "1", "texts": ["abc"]},
+        {"pages": 3, "texts": ["a", "b", "c"]},  # more pages than MAX_PAGES (2 here)
+        {"pages": 1, "texts": ["x" * 11]},  # more text than MAX_CHARS (10 here)
+        {"pages": 1, "texts": ["a", "b"]},  # more texts than pages
+        {"pages": 1, "texts": []},
+    ],
+)
+async def test_the_parent_holds_the_child_to_the_text_it_may_answer(
+    monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any]
+) -> None:
+    async def fake(
+        mode: str, limits: dict[str, Any], data: bytes, limit: int
+    ) -> dict[str, Any]:
+        return {"status": "ok", **answer}
+
+    monkeypatch.setattr(pdf, "_ask", fake)
+    monkeypatch.setattr(pdf, "MAX_PAGES", 2)
+    monkeypatch.setattr(pdf, "MAX_CHARS", 10)
+    with pytest.raises(pdf.PdfError, match="damaged or is not a PDF"):
+        await pdf.read_text(b"%PDF-")
+
+
+async def test_the_parent_cleans_the_text_the_child_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake(
+        mode: str, limits: dict[str, Any], data: bytes, limit: int
+    ) -> dict[str, Any]:
+        return {"status": "ok", "pages": 1, "texts": ["a\x1b[31mb\x00 c  \r\nd\n\n"]}
+
+    monkeypatch.setattr(pdf, "_ask", fake)
+    assert (await pdf.read_text(b"%PDF-")).texts == ("a[31mb c\nd",)
+
+
+def _png_of(width: int, height: int, *, signature: bytes = b"\x89PNG\r\n\x1a\n") -> str:
+    head = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    chunk = (
+        struct.pack(">I", len(head))
+        + b"IHDR"
+        + head
+        + struct.pack(">I", zlib.crc32(b"IHDR" + head))
+    )
+    return base64.b64encode(signature + chunk).decode()
+
+
+async def test_the_parent_admits_only_the_pictures_it_asked_for_within_the_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    good = _png_of(600, 800)
+    monkeypatch.setattr(pdf, "PICTURE_BYTES", len(good))
+    answers: list[Any] = [
+        5,  # not a list
+        [1, "x", None],  # not mappings
+        [{"page": True, "png": good}],  # a flag is not a page
+        [{"page": 9, "png": good}],  # a page it did not ask for
+        [{"page": 2, "png": base64.b64encode(b"not a picture").decode()}],
+        [{"page": 2, "png": _png_of(5000, 10)}],  # wider than a screenshot
+        [{"page": 2, "png": _png_of(10, 9000)}],  # taller
+        [{"page": 2, "png": good + "AAAA"}],  # over the bytes one picture may take
+    ]
+
+    async def fake(
+        mode: str, limits: dict[str, Any], data: bytes, limit: int
+    ) -> dict[str, Any]:
+        return {"status": "ok", "pictures": answers.pop(0)}
+
+    monkeypatch.setattr(pdf, "_ask", fake)
+    while answers:
+        assert await pdf.render_pages(b"%PDF-", [2, 3]) == {}
+    answers.append([{"page": 2, "png": good}, {"page": 2, "png": good}])
+    assert list(await pdf.render_pages(b"%PDF-", [2, 3])) == [2]
+
+
+async def test_a_picture_is_made_smaller_to_fit_the_bytes_it_may_take(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (root / "scan.pdf").write_bytes(
+        make_pdf(["Cover page with some words in it", None])
+    )
+    # Drawn at full size this page is 16,400 characters of base64.
+    monkeypatch.setattr(pdf, "PICTURE_BYTES", 8_000)
+    outcome = await _read(root, "scan.pdf")
+    [image] = outcome.images
+    assert len(image.data) <= 8_000 and _width(image) < 1_200
+    assert "[page 2: no text, picture attached]" in outcome.output
+    # A page that cannot be made small enough is a failed page, not an error of the read.
+    monkeypatch.setattr(pdf, "PICTURE_BYTES", 100)
+    outcome = await _read(root, "scan.pdf")
+    assert outcome.status == ExecutionStatus.SUCCESS and outcome.images == []
+    assert "[page 2: no text, picture failed]" in outcome.output
+
+
+def test_a_file_given_by_its_path_is_opened_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[Any] = []
+    real_open = open
+
+    def counting(file: Any, *args: Any, **kwargs: Any) -> Any:
+        opened.append(file)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins_module, "open", counting, raising=False)
+    (tmp_path / "a.txt").write_text("h\u00e9llo\r\nworld\n", encoding="utf-8")
+    (tmp_path / "cv.pdf").write_bytes(make_pdf([CV]))
+    assert (
+        builtins_module._read_as_given(str(tmp_path / "a.txt")) == "h\u00e9llo\nworld\n"
+    )
+    assert isinstance(builtins_module._read_as_given(str(tmp_path / "cv.pdf")), bytes)
+    assert len(opened) == 2
+
+
+def test_pypdfium2_is_never_built_from_source_by_uv() -> None:
+    project = tomllib.loads(
+        (Path(pdf.__file__).parents[2] / "pyproject.toml").read_text()
+    )
+    assert "pypdfium2" in project["tool"]["uv"]["no-build-package"]
