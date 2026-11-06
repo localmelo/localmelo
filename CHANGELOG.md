@@ -58,7 +58,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   model answers, melo saves melo_serve and opens the chat. A pipe is shown the list and told to run melo in a terminal,
   and never starts it; other systems and a failed check print the reason and how to start a server by hand. The
   read-only preview, `Show how to set one up` and its six numbered steps are gone. melo_serve is now pinned at v0.4.0
-  and 0.4.0 is the oldest accepted (#NNN).
+  and 0.4.0 is the oldest accepted (#537).
 - melo_serve as a local model server. localmelo can use melo_serve (github.com/localmelo/melo_serve), the per-user
   daemon that serves Splash or oMLX models behind one OpenAI-compatible address and switches them with `melo-serve
   use <pick>`. `chat_backend = "melo_serve"` with a `[melo_serve]` table (`chat_url`, `chat_model`, `embedding_url`,
