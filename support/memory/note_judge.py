@@ -122,9 +122,9 @@ def cjk_only_refusal(note: str, said: Sequence[str]) -> bool:
     """Whether a typed-rule refusal can be sent to the wording judge.
 
     Only Chinese or Japanese terms may be missing. A note that is or may be an
-    order to the assistant (:func:`gives_order`), a quoted span, a number (including number characters,
-    weekdays and relative dates), Korean and a Latin value stay hard refusals, even
-    beside CJK wording. The value check with the note itself as evidence removes
+    order to the assistant (:func:`gives_order`), a quoted span, a number (including
+    number characters, weekdays and date words), Korean and a Latin value stay hard
+    refusals, even beside CJK wording. The value check with the note itself as evidence removes
     only the rule's untyped-character classification, retaining its quote check.
     """
     if not any(text.strip() for text in said) or gives_order(note):
