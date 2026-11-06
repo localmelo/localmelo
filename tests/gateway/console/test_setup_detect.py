@@ -94,6 +94,7 @@ def test_detect(
     body, _ = detect(client, console, monkeypatch, answers)
     keys = ("state", "name", "backend", "url", "models", "loaded", "suggested")
     assert tuple(body[key] for key in keys) == expected
+    assert body["job"] is None  # no first-run setup was started
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux"])

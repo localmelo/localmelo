@@ -15,7 +15,8 @@ import pytest
 from localmelo.support import progress_line
 from localmelo.support.cli.theme import ASCII
 from localmelo.support.server_setup import run
-from localmelo.support.server_setup.terminal import Progress, consent_lines, size_left
+from localmelo.support.server_setup.listing import size_left
+from localmelo.support.server_setup.terminal import Progress, consent_lines
 
 CHAT, EMBEDDING = "model:qwen3-8b-omlx", "model:qwen3-embedding-0.6b-omlx"
 
