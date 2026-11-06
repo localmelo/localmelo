@@ -2831,11 +2831,14 @@ def _uninstall_services(parser: argparse.ArgumentParser) -> None:
             f"{parser.prog}: error: melo serve uninstall asks before it removes "
             "these; run it in a terminal\n",
         )
+    from localmelo.support.cli.picker import choose_inline
+
+    remove, keep = "Remove them", "Keep them"
     try:
-        answer = input("Remove them? [y/N]: ")
-    except EOFError:
-        answer = ""
-    if answer.strip().lower() not in ("y", "yes"):
+        chosen = choose_inline("Remove them?", [remove, keep], default=1, escape=1)
+    except (EOFError, KeyboardInterrupt):
+        chosen = 1
+    if chosen == 1:
         print("Nothing was removed.")
         return
     if daemon.is_installed():

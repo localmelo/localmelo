@@ -57,6 +57,9 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
     return fake
 
 
+CHOOSE = "localmelo.support.cli.picker.choose_inline"
+
+
 def _config(chat_backend: str = "vllm") -> Config:
     return Config(
         chat_backend=chat_backend,
@@ -166,9 +169,11 @@ def test_uninstall_names_both_services_asks_once_and_removes_both(
 ) -> None:
     marker = _melo_serve_command(tmp_path, monkeypatch)
     monkeypatch.setattr("localmelo.__main__._on_a_terminal", lambda: True)
-    with mock.patch("builtins.input", return_value="y") as asked:
+    with mock.patch(CHOOSE, return_value=0) as asked:
         assert _run("serve", "uninstall") == 0
-    assert asked.call_count == 1
+    asked.assert_called_once_with(
+        "Remove them?", ["Remove them", "Keep them"], default=1, escape=1
+    )
     assert capsys.readouterr().out == (
         "This removes the login services and stops them:\n"
         "  ai.localmelo.gateway   the gateway\n"
@@ -179,12 +184,18 @@ def test_uninstall_names_both_services_asks_once_and_removes_both(
     assert world.removed == ["gateway"] and marker.read_text() == "uninstall\n"
 
 
-def test_uninstall_removes_nothing_when_the_answer_is_no(
-    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "answer", [{"return_value": 1}, {"side_effect": EOFError}], ids=["keep", "ctrl-d"]
+)
+def test_uninstall_removes_nothing_when_the_answer_is_to_keep_them(
+    world: World,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: dict[str, Any],
 ) -> None:
     marker = _melo_serve_command(tmp_path, monkeypatch)
     monkeypatch.setattr("localmelo.__main__._on_a_terminal", lambda: True)
-    with mock.patch("builtins.input", return_value=""):
+    with mock.patch(CHOOSE, **answer):
         assert _run("serve", "uninstall") == 0
     assert world.removed == [] and not marker.exists()
 
