@@ -49,10 +49,10 @@ func face(_ portrait: PillPortrait) -> CGImage? {
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
 }
 func model(_ state: PillState, _ text: String, _ icon: PillIcon, more: Int = 0, _ portrait: PillPortrait,
-           _ click: PillClick = .window, giveBack: String? = nil) -> PillModel {
+           _ click: PillClick = .window, giveBack: BrowserSource? = nil) -> PillModel {
     PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click, giveBack: giveBack)
 }
-let control = model(.control, "You're in control", .you, .waitAlert, giveBack: "c1")
+let control = model(.control, "You're in control", .you, .waitAlert, giveBack: BrowserSource(session: "c1"))
 let long = "Writing a very long file name that does not fit in the pill and keeps going and going.md"
 let rows: [(String, PillModel, Bool)] = [
     ("Working: the newest running item", model(.working, "Reading example.com", .web, .workRead), false),
@@ -331,7 +331,7 @@ func crossing(_ type: NSEvent.EventType) -> NSEvent {
                            eventNumber: 0, trackingNumber: 0, userData: nil)!
 }
 let held = PillModel(state: .control, text: "You're in control", icon: .you, more: 0, portrait: .waitAlert,
-                     click: .route("#/s/c1"), giveBack: "c1")
+                     click: .route("#/s/c1"), giveBack: BrowserSource(session: "c1"))
 let view = PillView()
 view.show(held, picture: nil, fade: false)
 view.frame = NSRect(origin: .zero, size: pillPanelSize(width: view.capsuleWidth))
@@ -394,8 +394,13 @@ def test_the_app_wires_the_pill_beside_the_pet_and_never_launches_it_here() -> N
         "{ self.pill?.windowShown($0) }"
     )
     assert "pill.openRoute" in main and "open(route: pendingRoute)" in main
-    # Done on the pill posts to the chat's own route and reads the health again.
-    assert "pill.giveBack" in main and "/browser/done" in main
+    # Done on the pill posts to the held source's own route (a task's run, not its chat's newest) and reads the health again.
+    gateway = (APP / "GatewayPolicy.swift").read_text()
+    assert (
+        "pill.giveBack" in main
+        and "source.donePath" in main
+        and "/browser/done" in gateway
+    )
     assert "menuBar.offerDesktop(pet.desktop.makeItem())" in main
     # The pill is a panel that is never key and does not hide with the app, as the pet's is.
     panel = (APP / "PillPanel.swift").read_text()

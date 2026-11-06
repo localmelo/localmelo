@@ -29,7 +29,7 @@ import * as levels from '../../support/gateway/static/levels.mjs';
 import * as modeChip from '../../support/gateway/static/mode.mjs';
 import * as serve from '../../support/gateway/static/serve.mjs';
 import * as blocked from '../../support/gateway/static/blocked.mjs';
-import {mergeBrowsers, setupBrowserCards} from '../../support/gateway/static/browser-card.mjs';
+import {ACTIVE as BROWSING, mergeBrowsers, setupBrowserCards, sourceOf as browserSource} from '../../support/gateway/static/browser-card.mjs';
 import {stepWords} from '../../support/gateway/static/step-words.mjs';
 import {reportText} from '../../support/gateway/static/endings.mjs';
 import {parseCommand, setupSlash} from '../../support/gateway/static/slash.mjs';
@@ -977,6 +977,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     }),
     setupBrowserCards,
     mergeBrowsers,
+    BROWSING,
+    browserSource,
     setupBrowser: () => {
       let said = null;
       return {
@@ -986,7 +988,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
       card: (card) => {
         if ((card?.state ?? null) !== said) browserLog.push(['card', said = card?.state ?? null]);
       },
-      open: (card) => { browserLog.push(['open', card.run]); },
+      open: (card) => { browserLog.push(['open', card.run]); return true; },
+      takeOver() { browserLog.push(['takeOver']); },
       toggle() { browserLog.push(['toggle']); },
       hide() { browserLog.push(['hide']); },
       closeSheet() { return false; },
@@ -4516,11 +4519,9 @@ test('a note melo kept reads as kept, and one the gate refused as not kept, neve
 
 // ── Default mode: fewer choices, the same page ──
 
-/** The page in default mode: no run, terminal chat or task exists unless a test says so. */
+/** The page in default mode: no task exists unless a test says so. */
 const defaultMode = (extra = {}) => baseRoutes({
   'GET /settings': {mode: 'default'},
-  'GET /sessions?kind=worker&limit=1': {sessions: []},
-  'GET /sessions?kind=terminal&limit=1': {sessions: []},
   'GET /tasks': {tasks: []},
   ...extra,
 });
@@ -4547,12 +4548,9 @@ test('the panel offers all tasks once a task exists; the Workers switch is a dev
   await none.run('init()');
   assert.deepEqual(nav(none), [true, true]);
   assert.equal(none.run('sections.tasks'), false);
-  assert.deepEqual(none.net.calls.slice(-3).map((call) => call.path), ['/sessions?kind=worker&limit=1', '/sessions?kind=terminal&limit=1', '/tasks']);
-  // A run or a terminal chat no longer brings back the sidebar's Workers switch (the main chat links them).
-  const terminal = harness(defaultMode({'GET /sessions?kind=terminal&limit=1': {sessions: [session('k', {kind: 'chat'})]}}));
-  await terminal.run('init()');
-  assert.deepEqual(nav(terminal), [true, true]);
-  // A task brings no sidebar link either: the panel's Workers tab lists all of them.
+  assert.equal(none.net.calls.at(-1).path, '/tasks');
+  assert.equal(none.net.calls.some((call) => call.path.startsWith('/sessions?kind=')), false, 'Nobody asks whether worker runs exist: default mode links none');
+  // A task brings no sidebar link either: the panel's Activity lists all of them.
   const task = harness(defaultMode({'GET /tasks': {tasks: [taskRow('t1')]}}));
   await task.run('init()');
   assert.deepEqual(nav(task), [true, true]);
@@ -4665,6 +4663,17 @@ test('the task list and card name the priority in developer mode only', async ()
   const [devList, devCard] = await text(baseRoutes);
   assert.match(devList, /paused · P3 · updated/);
   assert.match(devCard, /Priority P3 · when there is time/);
+  // A running task still pauses from its page in both modes; only a developer gets the menu of priorities.
+  const running = {'GET /tasks': {tasks: [taskRow('t1', {state: 'running'})]}, 'GET /tasks/t1': {task: taskRow('t1', {state: 'running'})}};
+  const menus = async (make) => {
+    const h = harness(make(running));
+    await h.run('init()');
+    h.context.location.hash = '#/tasks/t1';
+    await h.windowListeners.hashchange[0](); await settle();
+    return [labelled(h, 'Pause') !== null, findNode(h.element('task-panel'), (node) => node.tag === 'select') !== null];
+  };
+  assert.deepEqual(await menus(defaultMode), [true, false]);
+  assert.deepEqual(await menus(baseRoutes), [true, true]);
 });
 
 test('Escape closes what is open in Tasks and Workers too, and stops no chat there', async () => {
@@ -5122,13 +5131,13 @@ test('at phone width the list is a drawer: a side chat closes it and its header 
   assert.equal(h.state().activeId, 'm');
 });
 
-test('in default mode worker history is linked from the empty main chat once a run exists', async () => {
-  const plain = harness(defaultMode({...mainRoutes(), 'GET /settings': {mode: 'default'}}));
+test('worker history is linked from the empty main chat in developer mode only, even once a run exists', async () => {
+  const plain = harness(defaultMode({...mainRoutes(), 'GET /settings': {mode: 'default'}, 'GET /sessions?kind=worker&limit=1': {sessions: [session('w', {kind: 'worker'})]}}));
   await plain.run('init()');
   assert.deepEqual([plain.element('workers-link').hidden, plain.element('welcome-workers').hidden], [true, true]);
-  const runs = harness(defaultMode({...mainRoutes(), 'GET /settings': {mode: 'default'}, 'GET /sessions?kind=worker&limit=1': {sessions: [session('w', {kind: 'worker'})]}}));
-  await runs.run('init()');
-  assert.deepEqual([runs.element('workers-link').hidden, runs.element('welcome-workers').hidden], [true, false]);
+  const developer = harness(mainRoutes());
+  await developer.run('init()');
+  assert.deepEqual([developer.element('workers-link').hidden, developer.element('welcome-workers').hidden], [false, false]);
 });
 
 test('a card from the open side chat is seen there, unless an earlier one is still unread', async () => {
@@ -5155,14 +5164,14 @@ const echoRow = (id, data) => ({id, ts: NOW - 100 + id, ...data});
 
 test('a message the main chat started as a task shows as the person\'s words and an echo line with its level', async () => {
   const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: '/task make slides'});
-  const h = harness(defaultMode({...mainRoutes({
+  const h = harness(mainRoutes({
     'POST /sessions/m/turns': {status: 200, body: {echo: started}},
     // /task is a slash command, so the page asks which commands there are before it sends the line.
     'GET /commands': {commands: [{name: 'task', aliases: [], args: 'TEXT', help: {en: 'Start a task', 'zh-Hans': '开始任务'}, during_turn: false, keys: '', action: 'send'}], everyday: ['task']},
     'POST /front/echoes/40': {status: 200, body: {echo: echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → P1', undo: {level: 'auto'}})}},
-  }), 'GET /settings': {mode: 'default'}}));
+  }));
   await h.run('init()');
-  assert.equal(h.element('task-btn').hidden, false, 'Run as a task is offered in the main chat');
+  assert.equal(h.element('task-btn').hidden, false, 'Run as a task is a developer\'s button in the main chat');
   h.element('input').value = '/task make slides';
   await h.run('send()');
   assert.equal(Object.keys(h.state().outbox).length, 0, 'No turn: the echo answers the send');
@@ -5184,6 +5193,35 @@ test('a message the main chat started as a task shows as the person\'s words and
   await settle();
   assert.deepEqual(h.net.callsTo('/front/echoes/40')[0].body, {do: 'level', level: 'P1'});
   assert.match(h.text('messages'), /make slides →.*P1.*Undo/);
+});
+
+test('default mode names no Worker and no P-code: no Run as a task, no Workers link, a level in words, no list of levels', async () => {
+  const started = echoRow(40, {echo: 'started', task_id: 't1', title: 'make slides', level: 2, line: 'Started: make slides · P2', typed: '/task make slides'});
+  const changed = echoRow(41, {echo: 'level', task_id: 't1', title: 'make slides', level: 1, line: 'make slides → P1', said: {key: 'front.echo.level', params: {title: 'make slides'}}, undo: {level: 'auto'}});
+  const suggested = echoRow(42, {echo: 'suggest', action: 'level', level: 0, task_id: 't1', title: 'make slides', line: 'Suggested: make slides → P0',
+    said: {key: 'front.echo.suggestLevel', params: {title: 'make slides', level: 'P0'}}});
+  const routes = (mode) => ({
+    'GET /settings': {mode},
+    'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards: [], echoes: [started, changed, suggested]},
+  });
+  const plain = harness(defaultMode(mainRoutes(routes('default'))));
+  await plain.run('init()');
+  assert.equal(plain.element('task-btn').hidden, true);
+  assert.equal(plain.element('welcome-workers').hidden, true);
+  const text = plain.text('messages');
+  assert.match(text, /Started: make slides/);
+  assert.match(text, /make slides →.*today.*Undo/, 'a level the person changed is said in words');
+  assert.match(text, /Suggested: make slides → runs first; others wait/);
+  assert.doesNotMatch(text, /\bP[0-5]\b|Change|Worker/);
+  const buttons = (echo) => findNodes(findNode(plain.element('messages'), (node) => node.dataset?.echoId === echo), (node) => node.tagName === 'BUTTON').map((node) => node.textContent);
+  assert.deepEqual(buttons('40'), ['Stop'], 'a started task keeps Stop and loses the priority list');
+  assert.deepEqual(buttons('42'), ['Set to runs first; others wait']);
+  const developer = harness(defaultMode(mainRoutes(routes('developer'))));
+  await developer.run('init()');
+  assert.equal(developer.element('task-btn').hidden, false);
+  assert.equal(developer.element('welcome-workers').hidden, false);
+  assert.match(developer.text('messages'), /Started: make slides.*P2.*Change/);
+  assert.match(developer.text('messages'), /Suggested: make slides → P0/);
 });
 
 test('Run as a task sends the message as a task; a control echo\'s Undo goes once', async () => {
@@ -6590,6 +6628,44 @@ for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
     assert.equal(card.dataset.own, 'done');
     assert.equal(h.watched[0].open, false);
     assert.equal(h.element('input').value, 'half a thought');
+  });
+}
+
+for (const [kind, id] of [['main', 'm'], ['side', 'a']]) {
+  test(`a task's card shows under its Started line in the ${kind} chat, and Stop and Done name that task's run`, async () => {
+    const task = {source_kind: 'task', source_session_id: 't9', card_key: 't9:run-1', source_turn: 1, goal: 'Find ML jobs', owner_chat_id: id};
+    const started = {id: 5, ts: 30, echo: 'started', task_id: 't9', title: 'Find ML jobs', line: 'Started: Find ML jobs · P2', level: 2};
+    const page = {turns: [turnRow()], has_earlier: false, replay_from: 7, echoes: [started], cards: [], browser: [{id: 6, ts: 40, ...browserData(id, task)}]};
+    const sent = [];
+    const acts = {
+      'PATCH /tasks/t9': (body) => { sent.push(['stop', body]); return {task: taskRow('t9')}; },
+      [`POST /sessions/t9/browser/done?gen=a1b2c3d4&run=run-1&owner=${id}`]: () => { sent.push(['done']); return {ok: true}; },
+    };
+    const h = harness(id === 'm'
+      ? mainRoutes({'GET /sessions/m/turns?limit=10': page, ...acts})
+      : baseRoutes({'GET /sessions/a/turns?limit=10': page, ...acts}));
+    await h.run('init()');
+    const [card] = findNodes(h.element('messages'), (node) => node.className === 'bcard');
+    assert.ok(card, 'the card is in the chat that asked');
+    const reply = findNode(h.element('messages'), (node) => node.className === 'msg assistant');
+    assert.equal(findNode(reply, (node) => node === card), null, 'it is no reply of this chat: its turn numbers are the task\'s');
+    const shown = h.element('messages').children;
+    const line = shown.findIndex((node) => flatten(node).includes('Started: Find ML jobs'));
+    assert.ok(line >= 0 && shown[line + 1] === card, 'right under the line that started it');
+    assert.deepEqual(h.watched.map((found) => found.source), [{session: 't9', gen: 'a1b2c3d4', run: 'run-1', owner: id}]);
+    assert.equal(findNode(card, (node) => node.className === 'bcard-name').textContent, 'Working for this chat');
+    assert.equal(findNode(card, (node) => node.className === 'bcard-goal').textContent, 'Find ML jobs');
+    const button = (word) => findNode(card, (node) => node.tag === 'button' && node.textContent === word && !node.hidden);
+    await button('Stop').click();
+    assert.deepEqual(sent, [['stop', {state: 'stop', source: {gen: 'a1b2c3d4', run: 'run-1', owner: id}}]]);
+    h.stream().emit(browserFrame(id, 21, {...task, state: 'you', action: ''}));
+    await button('Done').click();
+    assert.deepEqual(sent.at(-1), ['done']);
+    assert.equal(await h.run("takeTaskPage('t9')"), true);
+    assert.deepEqual(h.browserLog.slice(-2), [['open', 'run-1'], ['takeOver']]);
+    const before = h.browserLog.length;
+    assert.equal(await h.run("takeTaskPage('another-task')"), false, 'no card of that task: no page is taken');
+    assert.equal(h.browserLog.length, before);
   });
 }
 

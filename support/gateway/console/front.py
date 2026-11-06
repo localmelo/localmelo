@@ -1,25 +1,28 @@
-"""The front of a chat: it answers, or hands bigger work to a task by priority.
+"""The front of a chat: it answers, or hands the work to a task from the start.
 
 The main chat has one :class:`Front`; every side chat has one too, bound to
-that chat (:meth:`~localmelo.support.gateway.console.Console.front_for`). A
-side chat gets the same task tools and code's rules, and the tasks it starts
-are its own: their echoes, cards, news and results come back to it, while the
-main chat's Activity lists them all and its next turn reads one line of news
-when a side chat finishes work (``side.summary``).
+that chat (:meth:`~localmelo.support.gateway.console.Console.front_for`). Every
+chat works the same: the same rules, tools, options and Agent class. The tasks a
+chat starts are its own: their echoes, cards, news, live browser and results come
+back to it, while the main chat's Activity lists them all and its next turn reads
+one line of news when a side chat finishes work (``side.summary``).
 
 Code decides first (:mod:`~localmelo.support.gateway.front_rules`): ``/task …``,
 Run as a task and an imperative change to named files start a task; a
 control phrase that names a task changes it, with an echo line and Undo; a
 follow-up word with a task's name sends the message to that task; none of
 them calls the model. Every other message is one turn of :class:`FrontAgent`,
-which has its own options (thinking off, at most :data:`FRONT_STEPS` steps, no
-reflection; steps whose calls were all refused do not count, up to
-:data:`FRONT_REFUSED_STEPS`), the task tools of :class:`FrontTools` and
-``search_files``. A turn that has not settled in those steps, or whose reply
-only says what it will do, ends ``completed``: a request starts the work as a
-task; anything else is answered from what the turn found, and a question code
-offers also shows "Start this as a task?" (#440); the sentences are in the
-message's language.
+which reads and answers: thinking off, no reflection, the ordinary steps, the
+task tools of :class:`TaskTools` and ``search_files``, and nothing that acts. Work
+that acts (the browser, a command, a changed file) or that takes long goes
+through ``task_create`` before its first effect, so a task owns the run from its
+start: there is nothing to move and nothing to send again, and the chat takes the
+next message while the task works. The task is admitted once for the person's
+turn (:meth:`Front.delegate`), whichever words a model gives it. A reply that only
+says what it will do did nothing, so code settles it: a request starts as a task
+under the same key; anything else is answered from what the turn found, and a
+question code offers also shows "Start this as a task?" (#440); the sentences are
+in the message's language.
 
 A message to a task (``task_message``, or code's follow-up route) is read at
 the task's next step while it runs, and continues a done, failed or stopped
@@ -76,7 +79,6 @@ from localmelo.melo.schema import (
     ToolResult,
     split_thinking,
 )
-from localmelo.support.browser import configured_driver
 from localmelo.support.config import LocalBackendConfig
 from localmelo.support.gateway.chat_gate import GatedEmbedding, GatedLLM
 from localmelo.support.gateway.chore_schedule import (
@@ -122,7 +124,7 @@ from localmelo.support.gateway.handover import (
     snapshot,
     turn_lines,
 )
-from localmelo.support.gateway.i18n import said, said_text, t, t_in
+from localmelo.support.gateway.i18n import said, said_in, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
 from localmelo.support.gateway.task_endings import report_text, shown
 from localmelo.support.gateway.task_files import files_line, written_files
@@ -139,7 +141,6 @@ from localmelo.support.sessions.agents import (
     configured_session_options,
 )
 from localmelo.support.sessions.display import TITLE_WIDTH, short_title, title_width
-from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import (
     SessionBusyError,
     SessionStoreError,
@@ -167,61 +168,56 @@ logger = logging.getLogger(__name__)
 ECHO_EVENT: Final = "attention.echo"
 # What the memory lane hears when a side chat finishes work (not a stored event).
 SIDE_SUMMARY_EVENT: Final = "side.summary"
-# The front's step cap (design 2.4); a turn not settled in it is handed off.
-FRONT_STEPS: Final = 4
-# Steps a turn may take beyond the cap because a policy check refused every
-# call in them (a note that is not the user's words, a task not asked for, a
-# refused site): they did nothing, so they do not use up the cap (#440).
-FRONT_REFUSED_STEPS: Final = 2
 # A brief question's step cap: BRIEF_NOTE asks for one or two steps.
 BRIEF_STEPS: Final = 2
 # A follow-up turn's step cap (#411): look, continue once or ask, then report.
 FOLLOWUP_STEPS: Final = 4
-HANDOFF_STATUSES: Final = frozenset({"budget_exhausted", "stuck"})
-# What the main chat is told about itself, after melo's identity. The language
+# How many turns a retry's walk back to its accepted turn reads at a time.
+RETRIES_READ: Final = 32
+# What every chat is told about itself, after melo's identity. The language
 # of the reply is set once, in that identity (sessions/identity.py LANGUAGE_RULE).
 FRONT_TEXT: Final = (
-    "You are the main chat. Do what you can with your own tools: search_files "
-    "finds where something is in the user's folder, and you can read files "
-    "and public web pages. When you have the browser tools, you also act on a "
-    "site with them (open, click, type, submit). A request to do something for "
-    "the user online (find openings and apply, sign in, fill in and submit a "
-    "form, book, send) is work, not advice: do it with the browser tools, and "
-    "start the many-step part (research, running commands, changing files) with "
-    "task_create right away; do not ask whether to, and do not answer with a "
-    "list of links for the user to follow themselves. Answer a question you "
-    "can answer, and ask one short question when a request is too unclear to "
-    "act on. A follow-up on a task goes to it with task_message; a question "
-    "about a task (is it done, what did it find) is answered from task_get, "
-    "which gives its whole answer and the files it wrote. When the user asks "
-    "for something online and authorizes it, your next step is a tool call "
-    "(open the page, start the task), not an explanation. Never reply with only "
-    "what you are about to do: do it, or start the task."
+    "You are a chat with the user. Answer what you can yourself: search_files finds "
+    "where something is in this chat's folder, and you can read files and public web "
+    "pages. You have no browser and you change nothing yourself. A request to act for "
+    "the user (find openings and apply, sign in, fill in and submit a form, book, "
+    "send, run a command, change a file) or that takes many steps of research is "
+    "work, not advice: start it with task_create right away. A task has the browser, "
+    "commands and files, works beside this chat, asks through it, and shows its live "
+    "page here; the chat stays free. Do not ask whether to start it, and do not answer "
+    "with a list of links for the user to follow themselves. Answer a question you "
+    "can answer, and ask one short question when a request is too unclear to act on. "
+    "A follow-up on a task goes to it with task_message; a question about a task (is "
+    "it done, what did it find) is answered from task_get, which gives its whole "
+    "answer and the files it wrote. Never reply with only what you are about to do: "
+    "answer, or start the task."
 )
-# What a side chat is told about itself, after melo's identity.
-SIDE_TEXT: Final = (
-    "You are a side chat. Answer and work in this chat yourself. When you have "
-    "the browser tools, you act on a site with them, and a request to do "
-    "something for the user online is work, not advice. Work that takes "
-    "many steps or runs long can go to a task with task_create, started right "
-    "away; a follow-up on a task goes to it with task_message. A task you start "
-    "reports back to this chat."
+# The reminder every message of a chat ends with: its own tool to act is task_create.
+CHAT_NOTE: Final = (
+    "[localmelo · reminder · you act for the user, in their name. When this message "
+    "asks you to act for them or authorizes it, start it now with task_create: the "
+    "task does it, the last click included. Do not say that you will not submit, sign "
+    "or send it: the approval cards cover the risk, and the outcome is the user's to "
+    "own. An earlier refusal of yours in this chat was a mistake, not a precedent.]"
 )
-# What a turn that did not settle is asked for at its end (#440): its answer.
+# What a turn that only said what it would do is asked for at its end (#440): its answer.
 CLOSING_NOTE: Final = (
-    "No step is left in this turn. Answer the user's message now, in the user's "
+    "This turn ends here. Answer the user's message now, in the user's "
     "language, from what you found above and what you know: the answer first, "
     "in a few sentences, and say plainly what you could not find or check. Do "
     "not call any tool, and do not say what you would do next."
 )
 # What such a turn says when no answer comes either.
 NO_ANSWER_TEXT: Final = (
-    "I could not finish this in the few steps a chat turn has. Ask me again with "
-    "more detail, or ask me to start it as a task."
+    "I could not answer this. Ask me again with more detail, or ask me to start it "
+    "as a task."
 )
 NO_ANSWER_TEXT_ZH: Final = (
-    "这一轮的几步里我没能答完。可以说得更具体些再问我，或者让我把它作为任务开始。"
+    "我没能答上来。可以说得更具体些再问我，或者让我把它作为任务开始。"
 )
+# What a retried turn says of the work its message started before.
+ALREADY_TEXT: Final = "That started as a task already: {title}."
+ALREADY_TEXT_ZH: Final = "这件事已经作为任务开始了：{title}。"
 # What the main chat is told when the person asks to be answered briefly.
 BRIEF_NOTE: Final = (
     "[localmelo · the user asked for a short answer: look in one or two steps at "
@@ -384,22 +380,17 @@ def whole_answer(answer: str, chars: int = RESULT_CHARS) -> tuple[str, int]:
 
 
 def front_options(settings: Config | None) -> AgentOptions:
-    """The main chat's options: at most 4 steps, no reflection, read-only file tools.
+    """Every chat's options: no reflection, the ordinary steps, read-only file tools.
 
-    Steps whose every call a policy check refused do not count, up to
-    :data:`FRONT_REFUSED_STEPS` a turn. A request that runs out of steps is
-    handed off to a task, so the chat does not spend a request asking for an
-    answer first (``answer_on_stop``); :class:`FrontAgent` asks for one for a
-    turn it does not hand off.
+    A chat reads and answers. There is no cap of its own: a run that uses its
+    steps stops as any run does, with an answer from what it found, and the work
+    that acts or goes on is a task from its start, never this run sent again.
     """
     options = configured_session_options(settings, AgentOptions(mode="gateway"))
     return dataclasses.replace(
         options,
-        max_steps=FRONT_STEPS,
         attempt_policy="none",
         builtins=frozenset({"file_read", "list_files"}),
-        answer_on_stop=False,
-        refused_steps=FRONT_REFUSED_STEPS,
     )
 
 
@@ -441,29 +432,28 @@ def _plain_answer(routed: Routed, typed: str, composed: str) -> bool:
 
 
 class FrontAgent(Agent):
-    """The main chat's Agent: a run that does not settle starts a task, or answers.
+    """A chat's Agent, main or side: it reads and answers, and a task does the work.
 
-    A run that runs out of steps, gets stuck, or whose answer only says what
-    it will do (:func:`~localmelo.support.gateway.front_rules.intention_only`)
-    ends ``completed``, in the ``run.finished`` the session stores and in the
-    conversation the next turn reads: for a request (``start_rule`` ``start``)
-    with :func:`handoff_text`, and ``front`` starts the task; otherwise with an
-    answer from what the run found (:meth:`_closing_answer`), and ``front``
-    offers the task only when ``start_rule`` says ``offer``. Each run also
-    reads the tasks that ended since the last one. Without ``front`` it is a
-    plain Agent.
+    A run whose answer only says what it will do
+    (:func:`~localmelo.support.gateway.front_rules.intention_only`) did nothing
+    and started nothing. Its ``run.finished`` waits, so the chat says only what
+    is so: for a request (``start_rule`` ``start``) the work starts as a task
+    first, and the run ends ``completed`` with :func:`handoff_text`, or with why
+    it could not start; otherwise it ends with an answer from what the run found
+    (:meth:`_closing_answer`), and ``front`` offers the task only when
+    ``start_rule`` says ``offer``. Each run also reads the tasks that ended since
+    the last one. Without ``front`` it is a plain Agent.
     """
 
     front: Front | None = None
-    # What the chat is told about itself, after melo's identity.
-    identity_text: str = FRONT_TEXT
 
     def __init__(
         self, *args: Any, options: AgentOptions | None = None, **kwargs: Any
     ) -> None:
         if options is not None:
-            text = self.identity_text
-            identity = f"{options.identity}\n{text}" if options.identity else text
+            identity = (
+                f"{options.identity}\n{FRONT_TEXT}" if options.identity else FRONT_TEXT
+            )
             options = dataclasses.replace(options, identity=identity)
         super().__init__(*args, options=options, **kwargs)
 
@@ -480,119 +470,120 @@ class FrontAgent(Agent):
         if kwargs.get("user_words") is None:
             kwargs["user_words"] = query
         if front is None or turn is None or on_event is None:
-            query = f"{query}\n\n{ACTING_NOTE}"
+            query = f"{query}\n\n{CHAT_NOTE}"
             return await super().run_task(query, on_event=on_event, **kwargs)
         words = turn.typed_text or turn.user_text
-        # A turn that could not settle (out of steps, stuck, or a reply that only
-        # says what it will do) goes as start_rule reads the person's words: a
-        # request starts as a task; anything else is answered here from what
-        # the turn found (one more request, without tools), and a question is
-        # also offered as a task. Never the offer for what the chat answers,
-        # nor for a task's status (#440). Words that are not typed (an
-        # attachment alone) are handed off as they are.
+        # A reply that only says what it will do goes as start_rule reads the
+        # person's words: a request starts as a task; anything else is answered
+        # here from what the turn found (one more request, without tools), and a
+        # question is also offered as a task. Never the offer for what the chat
+        # answers, nor for a task's status (#440). Words that are not typed (an
+        # attachment alone) start as they are.
         rule = start_rule(turn.typed_text) if turn.typed_text.strip() else "start"
-        # A question that asks for a short answer is answered here, never handed off.
+        # A question that asks for a short answer is answered here, never started.
         quick = brief_question(turn.typed_text)
         offers = rule == "offer" and not quick
-        handed: list[tuple[str, str, bool]] = []
         held: list[AgentEvent] = []
+        stopped: list[str] = []
         try:
             news = await front.news()
         except Exception:
             # Best effort: the tools still read the tasks.
-            logger.exception("The main chat could not read its tasks")
+            logger.exception("A chat could not read its tasks")
             news = ""
         if news:
             query = f"{query}\n\n{news}"
         if quick:
             query = f"{query}\n\n{BRIEF_NOTE}"
-        query = f"{query}\n\n{ACTING_NOTE}"
+        query = f"{query}\n\n{CHAT_NOTE}"
 
         def sink(event: AgentEvent) -> None:
             result = event.data.get("result")
             if event.type == "run.finished" and isinstance(result, dict):
                 status = str(result.get("status"))
                 reply = split_thinking(str(result.get("result") or ""))[1]
-                made = bool(front.made.get(turn.id))
-                unsettled = status in HANDOFF_STATUSES or (
-                    status == "completed" and not made and intention_only(reply)
-                )
-                if unsettled:
-                    stays = (
-                        status in HANDOFF_STATUSES
-                        and bool(reply.strip())
-                        and not intention_only(reply)
-                    )
-                    if stays:
-                        # A brief question's stop answer is its answer.
-                        handed.append((status, reply.strip(), True))
-                    elif rule == "start" and not made:
-                        # A request: the work is handed off as a task.
-                        handed.append((status, handoff_text(words, asks=False), False))
-                    else:
-                        # Answered here, from what the turn found: after the run.
-                        handed.append((status, "", False))
-                        held.append(event)
-                        return
-                    text = handed[-1][1]
+                promised = intention_only(reply)
+                brief_end = quick and status == "budget_exhausted"
+                if (
+                    status == "completed" and promised and not front.made.get(turn.id)
+                ) or (brief_end and (promised or not reply.strip())):
+                    # Said what it will do, and did nothing: settled after the run.
+                    held.append(event)
+                    return
+                if brief_end:
+                    # A brief question's stop answer is its answer.
+                    stopped.append(reply.strip())
                     done = {
                         **result,
                         "status": "completed",
-                        "result": text,
+                        "result": stopped[0],
                         "error": "",
                     }
-                    data = {**event.data, "result": done}
-                    event = dataclasses.replace(event, data=data)
+                    event = dataclasses.replace(
+                        event, data={**event.data, "result": done}
+                    )
             on_event(event)
 
         saved = self.options
         if quick:
-            # The stop answer is asked for once, so a brief question still gets one,
-            # and it has BRIEF_STEPS steps.
-            self.options = dataclasses.replace(
-                saved, answer_on_stop=True, max_steps=BRIEF_STEPS
-            )
+            # A brief question has BRIEF_STEPS steps.
+            self.options = dataclasses.replace(saved, max_steps=BRIEF_STEPS)
         try:
             outcome = await super().run_task(query, on_event=sink, **kwargs)
         except BaseException:
             if held:
-                on_event(held[0])  # cut short before its answer was asked for
+                on_event(held[0])  # cut short before it was settled
             raise
         finally:
             self.options = saved
-        if not handed:
-            return outcome
-        status, text, stays = handed[0]
-        if held:
+        if stopped:
+            text = stopped[0]
+            label = NO_ANSWER_LABEL.format(status=outcome.status)
+        elif held:
             try:
-                # A brief question was asked for its stop answer already.
-                text = "" if quick else await self._closing_answer(query)
+                text = await self._settled(query, turn, rule, offers, quick, words)
             except BaseException:
-                on_event(held[0])  # stopped while it asked: the run as it ended
+                on_event(held[0])  # stopped while it settled: the run as it ended
                 raise
-            text = text or self._no_answer(
-                words, offers=offers, made=bool(front.made.get(turn.id))
-            )
             result = held[0].data.get("result") or {}
             done = {**result, "status": "completed", "result": text, "error": ""}
             on_event(
                 dataclasses.replace(held[0], data={**held[0].data, "result": done})
             )
-            handed[0] = (status, text, stays)
-            held.clear()
+            label = outcome.result
+        else:
+            return outcome
         window = self.hippo.working.get_window()
-        said = (NO_ANSWER_LABEL.format(status=status), outcome.result)
+        said = (label, outcome.result)
         if window and window[-1].role == "assistant" and window[-1].content in said:
             window[-1].content = text
-        if not stays and (rule == "start" or offers):
-            try:
-                await front.handed_off(turn, asks=rule != "start")
-            except Exception:
-                logger.exception("The main chat could not hand its turn off")
         return dataclasses.replace(outcome, status="completed", result=text, error="")
 
+    async def _settled(
+        self,
+        query: str,
+        turn: TurnInfo,
+        rule: str,
+        offers: bool,
+        quick: bool,
+        words: str,
+    ) -> str:
+        """What a turn says that only said what it would do: a task is committed before the words claim one."""
+        front = self.front
+        assert front is not None
+        if rule == "start":
+            return await front.start_for(turn, words)
+        # A brief question was told to answer already.
+        text = "" if quick else await self._closing_answer(query)
+        text = text or self._no_answer(
+            words, offers=offers, made=bool(front.made.get(turn.id))
+        )
+        if offers:
+            await front.offer_for(turn)
+        return text
+
     async def _closing_answer(self, query: str) -> str:
-        """The answer of a turn that did not settle, from what it found: one request, no tools.
+        """The answer of a turn that only said what it would do, from what it found: one request, no tools.
 
         ``""`` when the request fails or its reply is blank, only says what it
         will do, or is a tool call written as text.
@@ -600,7 +591,7 @@ class FrontAgent(Agent):
         try:
             text = await self.closing_answer(query, note=CLOSING_NOTE)
         except Exception as exc:
-            logger.warning("The main chat could not ask for its answer: %s", exc)
+            logger.warning("A chat could not ask for its answer: %s", exc)
             return ""
         return "" if intention_only(text) else text
 
@@ -651,38 +642,6 @@ class FrontAgent(Agent):
             self.options = saved
 
 
-class SideAgent(FrontAgent):
-    """A side chat's Agent: the full agent loop with the task tools, and its tasks' news.
-
-    It is not handed off to a task when it runs out of steps; each run reads
-    the tasks of this chat that ended since the last one.
-    """
-
-    identity_text = SIDE_TEXT
-
-    async def run_task(
-        self, query: str, *, on_event: Any = None, **kwargs: Any
-    ) -> RunResult:
-        turn = self.front.current_turn() if self.front is not None else None
-        if turn is not None and turn.origin == ASK_ORIGIN:
-            return await self.answer_ask(query, on_event=on_event, **kwargs)
-        if turn is not None and turn.origin == FOLLOWUP_ORIGIN:
-            return await self.follow_up(query, on_event=on_event, **kwargs)
-        # The reviews read the person's words: never the notes appended below.
-        if kwargs.get("user_words") is None:
-            kwargs["user_words"] = query
-        news = ""
-        if self.front is not None:
-            try:
-                news = await self.front.news()
-            except Exception:
-                logger.exception("A side chat could not read its tasks")
-        if news:
-            query = f"{query}\n\n{news}"
-        query = f"{query}\n\n{ACTING_NOTE}"
-        return await Agent.run_task(self, query, on_event=on_event, **kwargs)
-
-
 async def build_front_agent(
     settings: Config,
     workspace: str,
@@ -692,11 +651,10 @@ async def build_front_agent(
     gate: ChatGate | None = None,
     memory: ChatMemory | None = None,
 ) -> Agent:
-    """The main chat's started Agent, gated like every console chat.
+    """A chat's started Agent, main or side, gated like every console chat.
 
-    It has the browser tools when ``[browser] driver`` names a driver, and
-    ``web_fetch`` unless ``[tools] web_fetch`` is off, and ``web_search`` when
-    ``[web] search`` is on, as the other chats do.
+    It has ``web_fetch`` unless ``[tools] web_fetch`` is off and ``web_search``
+    when ``[web] search`` is on, and no browser: the browser is its tasks'.
     """
     llm = None if gate is None else gate.client(session_id)
     return await build_session_agent(
@@ -705,7 +663,6 @@ async def build_front_agent(
         model=None,
         workspace=workspace,
         options=front_options(settings),
-        browser_driver=configured_driver(settings),
         web_fetch=settings.tools.web_fetch is True,
         web_search=settings.web.search is True,
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
@@ -716,6 +673,7 @@ async def build_front_agent(
         memory=memory,
         tools=[tools],
         agent_class=FrontAgent,
+        chat_id=session_id,
     )
 
 
@@ -743,10 +701,11 @@ TASK_TOOLS: Final = (
     _tool(
         "task_create",
         "Start a task right away for a request you cannot do with your own tools: "
-        "running commands, changing files, or many steps of research or writing. It "
-        "runs in the background, its steps ask or are blocked as this chat's Ask or "
-        "Auto says, and its result comes back to this chat. The user's own message "
-        "is its request; code sets its priority from their words.",
+        "using the browser, running commands, changing files, or many steps of "
+        "research or writing. It runs beside this chat, its steps ask or are blocked "
+        "as this chat's Ask or Auto says, its browser shows live here, and its result "
+        "comes back to this chat. The user's own message is its request; code sets "
+        "its priority from their words.",
         {
             "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
@@ -824,10 +783,11 @@ TASK_TOOLS: Final = (
 
 
 class TaskTools(BaseToolProvider):
-    """The task tools of one chat; their results are data, not instructions.
+    """The tools of one chat: the task tools, and a read-only search of its folder.
 
-    A tool acts on this chat's tasks first and on the other chats' after
-    them; a result says when a task is another chat's.
+    What they return is data, not instructions. A tool acts on this chat's
+    tasks first and on the other chats' after them; a result says when a task is
+    another chat's.
     """
 
     def __init__(self, front: Front) -> None:
@@ -846,8 +806,15 @@ class TaskTools(BaseToolProvider):
             "task_continue": self.continue_task,
         }
         return [
-            ProvidedTool(definition=d, function=_marked(functions[d.name]))
-            for d in TASK_TOOLS
+            *(
+                ProvidedTool(definition=d, function=_marked(functions[d.name]))
+                for d in TASK_TOOLS
+            ),
+            # The chat's folder at each call: the main chat's follows the default folder.
+            ProvidedTool(
+                definition=SEARCH_FILES_TOOL,
+                function=rooted_search_files(self._front.folder),
+            ),
         ]
 
     async def close(self) -> None:
@@ -870,6 +837,13 @@ class TaskTools(BaseToolProvider):
         if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
             return (
                 "Not done: one task per message. Tell the user what else could start."
+            )
+        started = await front.admitted(turn)
+        if started is not None:
+            # A retry of the turn that started it: nothing starts twice.
+            return (
+                f"Not done: this message started task {started.task_id} already: "
+                f"{_row(started)}. {_tell(turn.user_text)}"
             )
         # Only the person's own words start a task (#410). A request starts it at
         # once: the person's message is the objective and the model's title only
@@ -1047,7 +1021,10 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     asked = owner.waiting(task_id) if owner is not None else None
     lines = []
     if live.get("step"):
-        lines.append(f"step {live['step']} of {live.get('budget') or '?'}")
+        # A run that goes on past its first steps has no end to count to.
+        budget = live.get("budget") or 0
+        ending = f" of {budget}" if budget >= live["step"] else ""
+        lines.append(f"step {live['step']}{ending}")
     if live.get("action"):
         name, args = live["action"]
         lines.append(f"last action: {name} {redact_secrets(str(args))[0][:160]}")
@@ -1057,18 +1034,6 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     if live.get("left"):
         lines.append(f"its last note: {answer_head(live['left'], ANSWER_CHARS)}")
     return lines
-
-
-class FrontTools(TaskTools):
-    """The main chat's tools: the task tools and a read-only search of its folder."""
-
-    async def start(self) -> list[ProvidedTool]:
-        # The main chat's folder at each call: it follows the default folder.
-        search = rooted_search_files(self._front.folder)
-        return [
-            *await super().start(),
-            ProvidedTool(definition=SEARCH_FILES_TOOL, function=search),
-        ]
 
 
 def _ref(record: TaskRecord) -> TaskRef:
@@ -1112,7 +1077,7 @@ class Front:
     def __init__(self, console: Console, chat_id: str | None = None) -> None:
         self.console = console
         self._chat_id = chat_id
-        self.tools: TaskTools = FrontTools(self) if chat_id is None else TaskTools(self)
+        self.tools = TaskTools(self)
         # Tasks each turn of this chat started or sent a message to, by turn id.
         self.made: dict[str, int] = {}
         # One tap on an echo at a time, so an Undo or a Start runs once.
@@ -1764,7 +1729,13 @@ class Front:
         the chat's turns before that, not with what was said since, and with what
         that turn picked as the card kept it (*kept*, :func:`~.handover.snapshot`),
         checked again when the task is made.
+
+        Work a running *turn* starts is admitted once, under this chat and the
+        turn the person's words were accepted in (:meth:`_turn_key`): never under
+        anything a model wrote, so a retry finds the task the turn started.
         """
+        if turn is not None and key is None and create_key is None:
+            create_key = await self._turn_key(turn)
         level, reason = triage(typed)
         try:
             spec = TaskSpec.from_payload(
@@ -1805,6 +1776,45 @@ class Front:
         if not title and echo.get("echo") == "started" and wants_title(work):
             self._name_later(str(echo["task_id"]), spec.title, work)
         return echo
+
+    async def admitted(self, turn: TurnInfo) -> TaskRecord | None:
+        """The task *turn*'s accepted message started already, or ``None``.
+
+        It counts as this turn's: a retry that finds it starts and offers nothing.
+        """
+        found = await self.console.workers.tasks.by_create_key(
+            await self._turn_key(turn)
+        )
+        if found is not None:
+            self._count(turn)
+        return found
+
+    async def _turn_key(self, turn: TurnInfo) -> str:
+        """The key *turn*'s work is admitted under: its chat and its accepted turn.
+
+        A retry runs as a new turn right after the undone one with the same
+        words and nothing typed; the accepted turn is the one those retries go
+        back to, however many there were, so every retry has its key. The same
+        words typed again, after an Undo too, are a new message.
+        """
+        return f"turn:{turn.session_id}:{(await self._accepted(turn)).id}"
+
+    async def _accepted(self, turn: TurnInfo) -> TurnInfo:
+        """The turn *turn*'s words were accepted in: itself, or the one its retries go back to."""
+        accepted = turn
+        while not accepted.typed_text.strip():
+            earlier = await self.console.store.list_turns(
+                turn.session_id, before=accepted.turn, limit=RETRIES_READ
+            )
+            for row in reversed(earlier):
+                if not row.undone or row.user_text != turn.user_text:
+                    return accepted
+                accepted = row
+                if row.typed_text.strip():
+                    return accepted
+            if len(earlier) < RETRIES_READ:
+                return accepted
+        return accepted
 
     async def _start(
         self,
@@ -2080,16 +2090,27 @@ class Front:
                 await inner.close()
         return reply.content
 
-    async def handed_off(self, turn: TurnInfo, *, asks: bool) -> None:
-        """After a turn that did not settle: start its work, or ask whether to.
+    async def start_for(self, turn: TurnInfo, words: str) -> str:
+        """Start *turn*'s whole message as a task, and what the reply says: that it started, or why not.
 
-        A turn that already started a task or sent a message to one does
-        neither.
+        Its level comes from the typed words only. The turn acted on nothing
+        (a chat has nothing to act with), so nothing is done twice; a retry of a
+        turn that started it says so.
         """
+        started = await self.admitted(turn)
+        if started is not None:
+            words_for = ALREADY_TEXT_ZH if is_chinese(words) else ALREADY_TEXT
+            return words_for.format(title=started.title)
+        echo = await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
+        if echo.get("echo") == "started":
+            return handoff_text(words, asks=False)
+        return said_in("zh-Hans" if is_chinese(words) else "en", echo["said"])
+
+    async def offer_for(self, turn: TurnInfo) -> None:
+        """Ask whether to start *turn*'s message as a task, unless the turn did or sent one."""
         if self.made.get(turn.id):
             return
-        # The work is the whole message; its level, only the typed words.
-        if asks:
+        try:
             data = {"echo": "ask", "text": turn.user_text, "words": turn.typed_text}
             handed = await self._offered(turn)
             await self.echo(
@@ -2097,8 +2118,8 @@ class Front:
                  "line": "Start this as a task?", "said": said("front.echo.ask"),
                  **({"handed": handed} if handed else {})}
             )  # fmt: skip
-        else:
-            await self.delegate(turn.user_text, typed=turn.typed_text, turn=turn)
+        except Exception:
+            logger.exception("A chat could not offer its turn as a task")
 
     async def _change(self, record: TaskRecord, **change: Any) -> str:
         """Change *record* as the person asked; what stopped it, or ``""``."""
@@ -2437,15 +2458,13 @@ __all__ = [
     "ASK_TEXT_ZH",
     "BRIEF_STEPS",
     "ECHO_EVENT",
+    "CHAT_NOTE",
     "FOLLOWUP_STEPS",
-    "FRONT_STEPS",
     "FRONT_TEXT",
     "STARTED_TEXT",
     "STARTED_TEXT_ZH",
     "Front",
     "FrontAgent",
-    "FrontTools",
-    "SideAgent",
     "TaskTools",
     "add_routes",
     "answer_head",

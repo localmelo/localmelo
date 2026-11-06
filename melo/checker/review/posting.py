@@ -24,6 +24,9 @@ into saying "the user asked" still does not post:
   what was approved once, so a repeating post asks each time.
 - :func:`asks_to_share`: the words speak of sharing or making something public,
   the one thing that lets a pre-ticked "public" box stay ticked.
+- :func:`asks_to_attach`: the words ask to send a file or an application (the
+  verbs of a send, and "attach" or "apply"), the one thing that lets melo attach
+  a file to a page's upload field without a card.
 - :func:`asks_to_search`: the words ask to search or look something up, the one
   thing that lets a search box take a query of any length: a search is no post,
   whatever it holds, but only a box the person asked to search in is one.
@@ -45,6 +48,7 @@ __all__ = [
     "POST",
     "account_names",
     "asks_for_review",
+    "asks_to_attach",
     "asks_to_search",
     "asks_to_send",
     "asks_to_share",
@@ -173,6 +177,14 @@ _WRITE = re.compile(
     r"|draft|drafting|leave|leaving|put|putting|add|adding)\b|(?P<plain>填写|输入|写下|写个|写一)",
     re.IGNORECASE,
 )
+# Verbs of attaching a file or applying (an application is sent with its files).
+# "apply" as a noun never stands alone; "an attachment" and "the attached file"
+# are not requests: a determiner before the verb makes it a noun, as for :data:`_SEND`.
+_ATTACH = re.compile(
+    r"\b(?P<strong>attach|attaching|apply|applying)\b"
+    r"|(?P<plain>附上|附加|附件|上传|投递|申请|报名)",
+    re.IGNORECASE,
+)
 _REVIEW = re.compile(
     r"\breview(?:s)?\b|\brat(?:e|ing|ings)\b|\bfeedback\b|\btestimonial|\b\d[- ]?stars?\b"
     r"|评价|评分|点评|好评|差评|打分",
@@ -295,6 +307,12 @@ def _asks(pattern: re.Pattern[str], texts: Iterable[str]) -> bool:
 def asks_to_send(texts: Iterable[str]) -> bool:
     """Whether the person's words ask to post, send, reply or open an issue or a pull request."""
     return _asks(_SEND, texts)
+
+
+def asks_to_attach(texts: Iterable[str]) -> bool:
+    """Whether the person's words ask to send a file to a site: to attach, upload or send it, or to apply."""
+    texts = list(texts)
+    return _asks(_ATTACH, texts) or asks_to_send(texts)
 
 
 def asks_to_search(texts: Iterable[str]) -> bool:

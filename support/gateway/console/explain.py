@@ -4,7 +4,8 @@ When a task asks the person (Ask mode), the chat that owns it explains the
 step in a few sentences under the card: what the task is doing, why it
 needs this step, the risk, the choices. It is one model call, not a turn.
 Its inputs are data: the task's title and objective, the call as code shows
-it, the review's reasons; never a tool's output. It has
+it, the review's reasons; never a tool's output, so a browser's question,
+whose call holds typed words and a page's own, has no explanation. It has
 :data:`EXPLAIN_TIMEOUT_S` at most; without an answer the card shows
 without it. The text only explains: the command, the buttons and which step
 an answer approves come from code, and nothing reads the text back.
@@ -23,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.schema import Message
+from localmelo.support.browser.sites import is_browser_question
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.sessions.approvals import reusable
 
@@ -124,7 +126,7 @@ class Explanations:
     def start(self, task_id: str, request: ApprovalRequest) -> None:
         """Ask the model for *request*'s explanation, without holding the card back."""
         key = request.request_id
-        if key in self._texts:
+        if key in self._texts or is_browser_question(request.tool_name):
             return
         self._texts[key] = None
         while len(self._texts) > KEPT:

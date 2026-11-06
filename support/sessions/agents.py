@@ -17,9 +17,11 @@ import dataclasses
 import logging
 import os
 from collections.abc import Callable, Collection, Mapping, Sequence
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import EXTEND_STEPS
@@ -83,9 +85,10 @@ def configured_cache_options(
 CONTEXT_SETTINGS: Final = ("context_window", "output_reserve", "safety_margin")
 # The settings of the pictures that tools return (AgentOptions.tool_images).
 IMAGE_SETTINGS: Final = ("tool_images", "tool_images_keep", "tool_images_retire")
-# The setting of a turn that ends with only thinking
-# (AgentOptions.empty_reply_fallback).
-FALLBACK_SETTINGS: Final = ("empty_reply_fallback",)
+# The settings of the model's thinking: what a turn that ends with only thinking
+# becomes (AgentOptions.empty_reply_fallback), and on which steps it thinks
+# (AgentOptions.thinking_steps).
+FALLBACK_SETTINGS: Final = ("empty_reply_fallback", "thinking_steps")
 
 
 def _configured_keys(
@@ -107,7 +110,7 @@ def configured_image_options(cfg: Config, options: AgentOptions) -> AgentOptions
 
 
 def configured_fallback_options(cfg: Config, options: AgentOptions) -> AgentOptions:
-    """*options* with ``[agent] empty_reply_fallback``; ValueError for a bad value."""
+    """*options* with ``[agent] empty_reply_fallback`` and ``thinking_steps``; ValueError for a bad value."""
     return _configured_keys(cfg, options, FALLBACK_SETTINGS)
 
 
@@ -305,6 +308,22 @@ def with_review_body(llm: BaseLLMProvider, backend: str | None) -> None:
         llm.extra_body_by_kind = {**llm.extra_body_by_kind, "review": body}
 
 
+def with_quiet_steps(
+    llm: BaseLLMProvider, backend: str | None, options: AgentOptions
+) -> None:
+    """For ``thinking_steps = "first_and_failed"``: give *llm* the fields that turn thinking off on *backend* (#551).
+
+    The agent sends them with the planning steps that need no thinking. A
+    service whose provider already has a switch (the hosted ones) keeps it; a
+    local server gets :func:`~localmelo.support.providers.llm.thinking.thinking_off_fields`.
+    Under ``"all"`` nothing is touched, so the requests are as they were.
+    """
+    if options.thinking_steps == "all" or llm.thinking_off or llm.thinking_off_body:
+        return
+    if body := thinking_off_fields(llm, backend):
+        llm.thinking_off_body = MappingProxyType(body)
+
+
 async def build_session_agent(
     *,
     cfg: Config | None,
@@ -319,7 +338,9 @@ async def build_session_agent(
     retrieval_extra_body: Mapping[str, Any] | None = None,
     mcp_config: str | None = None,
     browser_driver: str = "off",
+    desktop: bool = True,
     web_fetch: bool = False,
+    web_task: bool = False,
     web_search: bool = False,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
@@ -327,6 +348,7 @@ async def build_session_agent(
     memory: ChatMemory | None = None,
     tools: Sequence[BaseToolProvider] = (),
     agent_class: type[Agent] | None = None,
+    chat_id: str | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -344,9 +366,12 @@ async def build_session_agent(
     extra body applies only to retrieve requests and is never saved.
     *browser_driver* names the browser the Agent may read web pages in (see
     :mod:`localmelo.support.browser`); ``off`` gives it no browser tools. Only
-    the surfaces that ask a person (the terminal chat and the console) pass it.
-    *web_fetch* gives it the ``web_fetch`` tool (see
-    :mod:`localmelo.support.web`): the chats and the console's tasks pass
+    the surfaces that ask a person (the terminal chat and a console task a
+    person's chat owns) pass it. *desktop* false keeps it out of other apps'
+    windows whatever ``[browser] app_windows`` says (work that runs in the
+    background). *web_fetch* gives it the ``web_fetch`` tool (see
+    :mod:`localmelo.support.web`), and *web_task* says it is a task's, which
+    reads no site with nobody to ask: the chats and the console's tasks pass
     ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
     *web_search* gives it ``web_search`` (see :mod:`localmelo.support.web.search_tool`):
     the same surfaces pass ``[web] search``, and the tool may use the browser
@@ -372,6 +397,11 @@ async def build_session_agent(
     tools), and *agent_class* the class it is made of (the main chat's
     :class:`~localmelo.support.gateway.console.front.FrontAgent`); every other
     caller passes neither.
+
+    *chat_id* is the chat this Agent is for: its browser keeps the files its
+    pages hand over in the chat's work folder, which the Agent may read (see
+    :mod:`localmelo.melo.contracts.work_folder`). Without one the folder is
+    this run's own and goes when the run ends.
     """
     agent_options = session_options(
         configured_session_options(cfg) if options is None else options, workspace
@@ -399,12 +429,21 @@ async def build_session_agent(
         browser = provider_for(
             browser_driver,
             keep_tabs=cfg is not None and cfg.browser.keep_tabs is True,
-            app_windows=cfg is None or cfg.browser.app_windows is True,
+            app_windows=desktop and (cfg is None or cfg.browser.app_windows is True),
+            opens_apps=desktop,
             live=cfg is None or cfg.browser.live is True,
             live_fps=cfg.browser.live_fps if cfg is not None else 15,
+            chat_id=chat_id,
         )
         if browser is not None:
             providers.append(browser)
+            agent_options = dataclasses.replace(
+                agent_options,
+                read_folders=(
+                    *agent_options.read_folders,
+                    work_folder.path_for(browser.work_id),
+                ),
+            )
     if web_fetch:
         from localmelo.support import web_local
         from localmelo.support.web import WebFetchProvider
@@ -416,6 +455,7 @@ async def build_session_agent(
         providers.append(
             WebFetchProvider(
                 browser=browser_driver != "off",
+                task=web_task,
                 cfg=cfg,
                 protect=(
                     base_url,
@@ -497,6 +537,10 @@ async def build_session_agent(
                 )
             }
         with_review_body(llm, None if cfg is None else cfg.chat_backend)
+        # A server given by URL has no backend of its own to name (as in a direct run).
+        with_quiet_steps(
+            llm, None if base_url or cfg is None else cfg.chat_backend, agent_options
+        )
         if wrap_llm is not None:
             llm = wrap_llm(llm)
         if wrap_embedding is not None and embedding is not None:

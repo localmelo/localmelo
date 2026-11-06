@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- melo finishes web forms itself. `browser_find` searches the whole page and says how many elements match when it cannot
+  show them all. Each chat gets a private work folder (`$TMPDIR/localmelo/<chat id>/`, removed with the chat) where a
+  page's downloads land, named in the step, and new `browser_attach` gives a page's upload field a file with no file
+  dialog (Chrome only): a file you named, one in the chat's folder or one in the work folder, never a key or a secret.
+  A card names the file and the site unless your own words ask for the send; a file you did not name always gets
+  one, and the file is checked again right before the browser gets it. In a task you started, with a model
+  that reads pictures, melo works through a picture check itself, in the open and with no outside service, for 3 tries
+  and then offers you the page; some sites' terms forbid automated answers to their checks. The developer setting
+  `[agent] thinking_steps = "first_and_failed"` (`-X agent.thinking_steps=first_and_failed`, default `"all"`) compares
+  thinking on every step with thinking on the first plan and after a failed step only. PDFs on the web are still not
+  read (#551).
 - The browser shows in the chat. When melo browses (also for a web search), the reply holds a **Browser** card with
   the live page, what melo is doing, one state word and **Open browser**, in the main chat and in side chats alike; it
   shrinks to a bar at the top of the chat when it scrolls out of view, and a picture that stops says "Not updating"
@@ -27,6 +38,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the panel. New events `run.paused` and `run.resumed`, `POST /api/sessions/{id}/browser/done` and `/browser/window`,
   and health `status.control`. melo's Chrome now restores its last session on every start, so session cookies stay in
   its 0700 profile too (#529).
+- Work that acts is a task in every chat. The main chat and side chats share one intake, read and answer, and start
+  work before its first step: the main chat's four-step stop and the resend behind it are gone, **Retry** finds the
+  task instead of starting a second, and the chat takes your next message while the task runs. A task you asked for in
+  a chat can browse, and its card shows in that chat as **Working for this chat** with the goal, **Stop** and **Done**;
+  a task with no person and no chat behind it gets no browser, and no task opens another app. Such a task goes on while it makes real progress, to about 500 steps, and stops honestly
+  with **Continue** when it stalls or gets there; `--max-steps` and direct runs are unchanged. Side chats now answer with thinking off and leave file
+  changes and code to a task (#536).
+- Nothing to learn in default mode, and every task's browser can be controlled from the app and the terminal. The panel's
+  **Workers** tab, the welcome link to worker runs, **Run as a task** and the P0 to P5 chips and lists show only in
+  developer mode (a task shows as what melo is doing, and a changed priority reads in words); every route stays open.
+  The app's pill and its **Done**, **Pop out** and an empty Enter in the terminal name a task's exact run, so Done frees
+  that task's run and never a newer one; the terminal prints one status line for a task's browser each time its state
+  changes, with no picture. `status.control` now lists tasks, each with `owner`, `gen` and `run` (#536).
 - Set up a model from the welcome card. With no server on a supported Apple-silicon Mac, the console's and the app's
   welcome card shows the terminal's list (what this Mac can run, each item with its size and where it goes, the total
   to download), lets each optional item be turned off, and sets it up after one button: a row per step with its own

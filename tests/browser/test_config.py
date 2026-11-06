@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ import pytest
 
 import localmelo.__main__ as cli
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support import config, settings
 from localmelo.support.cli.agents import AgentFactory, url_backend
@@ -82,7 +84,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             ]
         finally:
             await agent.close()
-    assert names["off"] == [] and len(names["safari-automation"]) == 12
+    assert names["off"] == [] and len(names["safari-automation"]) == 13
     assert names["chrome"] == names["safari-automation"]
     with pytest.raises(ValueError, match="unknown browser driver"):
         await session_agents.build_session_agent(
@@ -95,13 +97,40 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
         )
 
 
-async def test_the_terminal_and_the_console_pass_the_configured_driver(
+async def test_a_session_with_a_browser_reads_its_chats_work_folder_and_no_other() -> (
+    None
+):
+    cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+    cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
+    roots = {}
+    for driver, chat_id in (("off", "abc123"), ("chrome", "abc123"), ("chrome", None)):
+        agent = await session_agents.build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=None,
+            workspace=str(Path.cwd()),
+            options=AgentOptions(mode="interactive"),
+            browser_driver=driver,
+            chat_id=chat_id,
+        )
+        try:
+            roots[driver, chat_id] = agent.executor._read_roots
+        finally:
+            await agent.close()
+    assert roots["off", "abc123"] == ()
+    assert roots["chrome", "abc123"] == (work_folder.path_for("abc123"),)
+    [own] = roots["chrome", None]
+    assert os.path.basename(own).startswith("run-"), "a run with no chat has its own"
+    assert not os.path.exists(own), "and leaves nothing when it ends"
+
+
+async def test_the_terminal_passes_the_configured_driver_and_no_console_chat_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[Any] = []
 
     async def fake_build(**kwargs: Any) -> Any:
-        seen.append(kwargs["browser_driver"])
+        seen.append(kwargs.get("browser_driver", "off"))
         return object()
 
     monkeypatch.setattr("localmelo.support.cli.agents.build_session_agent", fake_build)
@@ -124,7 +153,7 @@ async def test_the_terminal_and_the_console_pass_the_configured_driver(
     from localmelo.support.gateway.console import front
 
     await front.build_front_agent(cfg, "/w", "main", tools=_NoTools())
-    assert seen == ["safari-automation"] * 3
+    assert seen == ["safari-automation", "safari-automation", "off"]
 
 
 class _NoTools(BaseToolProvider):
@@ -137,54 +166,73 @@ class _NoTools(BaseToolProvider):
 
 @pytest.mark.parametrize(
     ("driver", "count"),
-    [("safari-automation", 12), ("chrome", 12), ("off", 0), ("firefox", 0)],
+    [("safari-automation", 13), ("chrome", 13), ("off", 0), ("firefox", 0)],
 )
-async def test_every_console_chat_has_the_browser_tools_the_setting_names(
-    driver: str, count: int
+async def test_a_chats_work_has_the_browser_tools_the_setting_names_and_its_chat_none(
+    driver: str, count: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The main chat (the app's), and a side chat; a driver that is not one is off."""
+    """What a chat's task is built with, and a chat; a driver that is not one is off."""
+    from localmelo.support import browser
+    from localmelo.support.browser import configured_driver
     from localmelo.support.gateway.console import front
 
+    asked_for: dict[str, Any] = {}
+    real = browser.provider_for
+
+    def provider_for(name: str, **options: Any) -> Any:
+        asked_for.update(options)
+        return real(name, **options)
+
+    monkeypatch.setattr(browser, "provider_for", provider_for)
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
     cfg.browser.driver = driver
-    main = await front.build_front_agent(cfg, str(Path.cwd()), "main", tools=_NoTools())
-    side = await registry.default_builder(cfg, str(Path.cwd()), None, "side")
+    chat = await front.build_front_agent(cfg, str(Path.cwd()), "main", tools=_NoTools())
+    work = await session_agents.build_session_agent(
+        cfg=cfg,
+        base_url=None,
+        model=None,
+        workspace=str(Path.cwd()),
+        options=AgentOptions(),
+        browser_driver=configured_driver(cfg),
+        desktop=False,
+    )
     try:
-        for agent in (main, side):
-            names = [
-                t.name for t in agent.list_tools() if t.name.startswith("browser_")
-            ]
-            assert len(names) == count
-            tiers = {t.name: t.tier for t in agent.list_tools() if t.name in names}
-            acting = {
-                "browser_click",
-                "browser_type",
-                "browser_select",
-                "browser_click_point",
-            }
-            # Reading is read tier; what acts is not, so a surface that trusts the
-            # read tier does not get it.
-            assert all(
-                tier == ("write" if name in acting else "read")
-                for name, tier in tiers.items()
-            )
+        assert not [t for t in chat.list_tools() if t.name.startswith("browser_")]
+        names = [t.name for t in work.list_tools() if t.name.startswith("browser_")]
+        assert len(names) == count
+        # Other apps stay out of work nobody sits beside.
+        assert not [t for t in work.list_tools() if t.name.startswith("window_")]
+        if count:
+            assert asked_for["app_windows"] is False
+            assert asked_for["opens_apps"] is False
+        tiers = {t.name: t.tier for t in work.list_tools() if t.name in names}
+        acting = {
+            "browser_click",
+            "browser_type",
+            "browser_select",
+            "browser_click_point",
+            "browser_attach",
+        }
+        # Reading is read tier; what acts is not, so a surface that trusts the
+        # read tier does not get it.
+        assert all(
+            tier == ("write" if name in acting else "read")
+            for name, tier in tiers.items()
+        )
     finally:
-        await main.close()
-        await side.close()
+        await chat.close()
+        await work.close()
 
 
-def test_direct_runs_and_workers_never_name_a_driver() -> None:
+def test_direct_runs_never_name_a_driver() -> None:
     import argparse
     import inspect
-
-    from localmelo.support.gateway import workers
 
     default = inspect.signature(session_agents.build_session_agent).parameters[
         "browser_driver"
     ]
     assert default.default == "off"
-    assert "browser_driver" not in inspect.getsource(workers)
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.browser.driver = "safari-automation"
     config.save(cfg)

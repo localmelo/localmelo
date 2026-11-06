@@ -167,6 +167,11 @@ def hide_passwords(text: str) -> str:
     return VAULT.hide(text)
 
 
+def spent(text: str) -> str:
+    """*text* with its handles gone: it reads the same, and nothing in it can be typed."""
+    return HANDLE.sub("[…]", text)
+
+
 def handles_in(text: str) -> frozenset[str]:
     """The handles of passwords that *text* holds and the vault still keeps."""
     return frozenset(h for h in HANDLE.findall(text) if VAULT.value(h) is not None)

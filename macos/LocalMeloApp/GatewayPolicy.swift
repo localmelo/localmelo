@@ -80,9 +80,62 @@ private func statusEntries(_ data: Data, _ key: String) -> [WaitingItem] {
 
 func waitingItems(_ data: Data) -> [WaitingItem] { statusEntries(data, "waiting") }
 
-/// The chats whose page the person holds in melo's browser (`status.control`); their runs are paused until Done.
-func controlledChats(_ data: Data) -> [String] {
-    statusEntries(data, "control").filter { $0.kind == "chat" }.map { $0.id }
+/// One run's browser, named exactly: a chat's (`session`), or a running task's (`session` is the task, `owner` the chat its
+/// card shows in, with the run and browser generation). The gateway's browser routes take those three as `gen`, `run`
+/// and `owner`, and refuse a source that is not the run's now, so Done and a pop-out reach that run and no other. Nil
+/// unless every part is one a route takes: a task has all three, a chat has none or `gen` with `run`.
+struct BrowserSource: Equatable {
+    let session: String
+    let owner: String?
+    let gen: String?
+    let run: String?
+
+    init?(session: String, owner: String? = nil, gen: String? = nil, run: String? = nil) {
+        guard consoleRoute(kind: "chat", id: session) != nil,
+              owner.map({ consoleRoute(kind: "chat", id: $0) != nil }) ?? true,
+              gen.map(BrowserSource.isGeneration) ?? true,
+              run.map(BrowserSource.isRunID) ?? true,
+              (gen == nil) == (run == nil), owner == nil || gen != nil else { return nil }
+        self.session = session
+        self.owner = owner
+        self.gen = gen
+        self.run = run
+    }
+
+    /// `gen=…&run=…&owner=…` for what is named, in the order the routes read it; empty for a chat's own browser.
+    var query: String {
+        [("gen", gen), ("run", run), ("owner", owner)].compactMap { name, value in value.map { "\(name)=\($0)" } }
+            .joined(separator: "&")
+    }
+
+    /// The console route that shows the page's card: the chat that asked, for a task, else the chat itself.
+    var route: String? { consoleRoute(kind: "chat", id: owner ?? session) }
+
+    /// The request path of Done for this source.
+    var donePath: String { "/api/sessions/\(session)/browser/done" + (query.isEmpty ? "" : "?" + query) }
+
+    private static func isRunID(_ text: String) -> Bool {
+        (1...80).contains(text.count) && text.unicodeScalars.allSatisfy(routeCharacters.contains)
+    }
+
+    private static func isGeneration(_ text: String) -> Bool {
+        text.count == 8 && text.unicodeScalars.allSatisfy { "0123456789abcdef".unicodeScalars.contains($0) }
+    }
+}
+
+/// The pages the person holds in melo's browser (`status.control`), each with its exact source; their runs are paused until
+/// Done. An entry the gateway's Done route would refuse is left out, as is a task without its chat, run and generation.
+func controlSources(_ data: Data) -> [BrowserSource] {
+    guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let status = body["status"] as? [String: Any],
+          let list = status["control"] as? [[String: Any]] else { return [] }
+    return list.compactMap { entry in
+        guard let kind = entry["kind"] as? String, kind == "chat" || kind == "task", let id = entry["id"] as? String,
+              let source = BrowserSource(session: id, owner: entry["owner"] as? String, gen: entry["gen"] as? String,
+                                         run: entry["run"] as? String),
+              kind == "chat" || source.owner != nil else { return nil }
+        return source
+    }
 }
 
 /// `model_server.reachable` of `GET /api/health`: false when the settings' local model server did not answer, nil

@@ -177,7 +177,10 @@ class Gist:
     and ``warn_params["said"]`` holds the words. ``note`` holds the model's
     words when the rules found the step risky: they stand below the sentence,
     labelled as the model's. ``apps`` names the apps a script operates,
-    whoever wrote the sentence, so a reason line can name them.
+    whoever wrote the sentence, so a reason line can name them. ``attach``
+    has the file, its folder, the site and whether the person named the file
+    for a question about attaching a file to a page (#551), so the reason
+    line says them in the page's own language.
     """
 
     id: str
@@ -187,6 +190,7 @@ class Gist:
     warn_params: dict[str, str] = field(default_factory=dict)
     note: str = ""
     apps: tuple[str, ...] = ()
+    attach: dict[str, Any] = field(default_factory=dict)
 
     @property
     def plain(self) -> bool:
@@ -204,6 +208,8 @@ class Gist:
             out["note"] = self.note
         if self.apps:
             out["apps"] = list(self.apps)
+        if self.attach:
+            out["attach"] = dict(self.attach)
         return out
 
 
@@ -235,6 +241,8 @@ def step_gist(
     """
     if tool_name.startswith("browser:"):
         return None
+    if tool_name.startswith("browser-attach:"):
+        return _attach(tool_name, arguments)
     words = _words(tool_name, arguments)
     # A text over the limit is not read by the rules either (see MAX_TEXT).
     items = (
@@ -272,6 +280,22 @@ def step_gist(
     if _risky(review):
         return replace(built, note=words)
     return replace(Gist("model", {"text": words}, by="model"), apps=apps)
+
+
+def _attach(tool_name: str, arguments: Mapping[str, Any]) -> Gist:
+    """The question about attaching a file to a page (#551): the card's own words stay, and the facts ride along.
+
+    The file, its folder and the site are the ones the question names, each as
+    one clean line; ``named`` is false for a file nobody vouched for (the
+    person did not name it).
+    """
+    facts = {
+        "file": _line(str(arguments.get("name") or "a file"), 80),
+        "folder": _line(str(arguments.get("folder") or ""), 120),
+        "site": _line(str(arguments.get("site") or "this site"), 80),
+        "named": arguments.get("source") != "other",
+    }
+    return Gist("tool", {"tool": tool_name}, attach=facts)
 
 
 def _risky(review: ActionReview | None) -> bool:

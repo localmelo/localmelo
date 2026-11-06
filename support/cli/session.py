@@ -599,8 +599,12 @@ class CliSession:
         """Enter on an empty line: Done while the person has a page of the turn's run.
 
         None when they have none (an empty Enter does nothing); a hint when the
-        page is melo's already.
+        page is melo's already. A page of a task the open chat owns is Done at any
+        time: the chat's own turn is idle while the task browses.
         """
+        if self.remote is not None and self.remote.holds_page():
+            self.remote.give_back()
+            return None
         if self._state != "running" or self.renderer.in_control is None:
             return None
         if self.remote is not None:

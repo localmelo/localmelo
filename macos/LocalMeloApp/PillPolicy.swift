@@ -76,8 +76,9 @@ struct PillModel: Equatable {
     var more: Int
     var portrait: PillPortrait
     var click: PillClick
-    /// The chat whose page the person holds: the "Done" button in the capsule gives it back to melo.
-    var giveBack: String? = nil
+    /// The source whose page the person holds, a chat's or a task's: the "Done" button in the capsule gives that run's
+    /// page back to melo.
+    var giveBack: BrowserSource? = nil
 
     /// The small line under the line while the person holds a page.
     var note: String? { state == .control ? L10n.t("app.pill.controlNote", "melo is paused") : nil }
@@ -149,18 +150,19 @@ func pillSnapshot(health data: Data, age: TimeInterval) -> PillSnapshot? {
     let waits = waitingItems(data)
     let focus = pillFocus(data)
     let ids = runningIDs(data).union(waits.map { $0.id }).union(focus.map { [$0.id] } ?? [])
+    let held = controlSources(data).first
     let route = focus.flatMap { consoleRoute(kind: $0.kind, id: $0.id) }.map(PillClick.route) ?? .window
     func active(_ state: PillState, _ text: String, _ icon: PillIcon, _ portrait: PillPortrait, _ click: PillClick)
         -> PillSnapshot {
         PillSnapshot(model: PillModel(state: state, text: text, icon: icon, more: more, portrait: portrait, click: click),
                      ids: ids.isEmpty ? ["running"] : ids)
     }
-    if let chat = controlledChats(data).first {
+    if let held = held {
         // The person holds a page: the run waits for them, so this beats a wait and work; the chip is left out for the button.
+        // A press opens the chat that shows the page's card, and Done names that source alone.
         let model = PillModel(state: .control, text: L10n.t("app.pill.control", "You're in control"), icon: .you, more: 0,
-                              portrait: .waitAlert, click: consoleRoute(kind: "chat", id: chat).map(PillClick.route) ?? .window,
-                              giveBack: chat)
-        return PillSnapshot(model: model, ids: ids.union([chat]))
+                              portrait: .waitAlert, click: held.route.map(PillClick.route) ?? .window, giveBack: held)
+        return PillSnapshot(model: model, ids: ids.union([held.session]))
     }
     if !waits.isEmpty {
         return active(.waiting, L10n.t("app.menu.waiting", "Waiting for your approval"), .wait, .waitAlert, .waiting)

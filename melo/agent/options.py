@@ -24,6 +24,7 @@ from localmelo.melo.schema import (
     LOCAL_WINDOW_MESSAGES,
     MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
+    MAX_EXTENSIONS,
     STEPS_PER_ATTEMPT,
     WINDOW_MESSAGES_MAX,
     WINDOW_MESSAGES_MIN,
@@ -36,6 +37,7 @@ NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["chunk", "boundary"]
 ToolImages = Literal["auto", "on", "off"]
 EmptyReplyFallback = Literal["on", "off"]
+ThinkingSteps = Literal["all", "first_and_failed"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -307,11 +309,16 @@ class AgentOptions:
     - ``extend_steps``: how many steps a run still making progress is given
       by itself when it is :data:`~localmelo.melo.schema.EXTEND_WHEN` steps
       from the end of its last attempt (so the steps left finish the work and
-      report), at most :data:`~localmelo.melo.schema.MAX_EXTENSIONS` times
-      (#547). Progress is two different steps with no error among the last
-      five. Default 0: a run ends at ``max_steps`` as before; the sessions
-      of the gateway, the console and the CLI chats turn it on
+      report), at most ``max_extensions`` times (#547). Progress is three
+      different steps with no error among the last five, each with a call the
+      run had not made before. Default 0: a run ends at ``max_steps`` as
+      before; the sessions of the gateway, the console and the CLI chats turn
+      it on
       (:func:`~localmelo.support.sessions.agents.configured_attempt_options`).
+    - ``max_extensions``: how many times ``extend_steps`` may extend a run;
+      work a person's chat owns has
+      :data:`~localmelo.melo.schema.TASK_EXTENSIONS` (#536). The steps stay one
+      count: nothing restarts, and a run that stalls ends at the steps it has.
     - ``refused_steps``: how many steps of a run may go uncounted toward
       ``max_steps`` because a policy check refused every call in them: the
       tool's own check (it returned ``refuse_call(...)``, see
@@ -329,6 +336,19 @@ class AgentOptions:
       of the two happened, and each comes with a ``notice`` event
       (``thinking_off_retry``, ``answer_from_thinking``). ``"off"``: neither;
       the run ends ``failed`` as it did before the fallback existed.
+    - ``thinking_steps``: on which planning steps the model thinks (#551), for
+      comparing the two. ``"all"``, the default: every step, as the provider's
+      requests say. ``"first_and_failed"``: the first plan of an attempt and
+      the plan after a step that failed think; the plan after a tool step that
+      worked goes out with thinking off, where the provider has a switch for
+      that (``thinking_off_body``; the sessions, the console and ``melo`` set
+      it for a local server when this is on). A provider with no switch thinks
+      on every step either way.
+    - ``read_folders``: folders outside the workspace that the read tools
+      (``file_read``, ``list_files``) may read without a question: the agent's
+      own, such as a chat's work folder (:mod:`~localmelo.melo.contracts.work_folder`).
+      A place never offered stays refused, and what ``file_read`` returns from
+      there is marked as a web page's text. Default empty.
     """
 
     context_window: int | None = None
@@ -384,7 +404,10 @@ class AgentOptions:
     task_aids: bool = False
     refused_steps: int = 0
     extend_steps: int = 0
+    max_extensions: int = MAX_EXTENSIONS
     empty_reply_fallback: EmptyReplyFallback = "on"
+    thinking_steps: ThinkingSteps = "all"
+    read_folders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -430,6 +453,14 @@ class AgentOptions:
                 f"extend_steps must be an int >= 0, got {self.extend_steps!r}"
             )
         if (
+            isinstance(self.max_extensions, bool)
+            or not isinstance(self.max_extensions, int)
+            or self.max_extensions < 0
+        ):
+            raise ValueError(
+                f"max_extensions must be an int >= 0, got {self.max_extensions!r}"
+            )
+        if (
             isinstance(self.refused_steps, bool)
             or not isinstance(self.refused_steps, int)
             or self.refused_steps < 0
@@ -458,6 +489,7 @@ class AgentOptions:
             ("window_eviction", get_args(WindowEviction)),
             ("tool_images", get_args(ToolImages)),
             ("empty_reply_fallback", get_args(EmptyReplyFallback)),
+            ("thinking_steps", get_args(ThinkingSteps)),
             ("retriever", RETRIEVER_MODES),
             ("recall_placement", RECALL_PLACEMENTS),
         ):

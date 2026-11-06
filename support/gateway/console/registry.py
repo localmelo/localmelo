@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
@@ -175,6 +176,7 @@ async def default_builder(
         memory=memory,
         tools=tools,
         agent_class=agent_class,
+        chat_id=session_id,
     )
 
 
@@ -1540,6 +1542,8 @@ class ConsoleSessions:
                     with contextlib.suppress(Exception):
                         await agent.close()
                 self._sessions.pop(session_id, None)
+            # Its work folder (the files its pages handed over) goes with it (#551).
+            await asyncio.to_thread(work_folder.remove, session_id)
         # The lock stays: a turn that queued on it before the delete holds
         # this object, and ``open`` checks that the lock it is under is the
         # session's. The dict keeps one small lock per session this process

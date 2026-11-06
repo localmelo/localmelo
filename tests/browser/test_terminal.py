@@ -143,7 +143,7 @@ async def test_browser_says_it_is_off_and_a_list_turns_it_on(chat: Any) -> None:
         "Sites allowed in this chat: none yet; melo asks before it opens a site" in text
     )
     assert "(no saved settings)" in text
-    assert len(_tools(session)) == 12
+    assert len(_tools(session)) == 13
     assert factory.live_agents() == [session.agent]  # the old Agent was closed
 
 

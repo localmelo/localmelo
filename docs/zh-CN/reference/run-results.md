@@ -99,6 +99,7 @@
 | `tools` | 所有已注册的工具，内置的和 MCP 的，按名称排序。 |
 | `answer_on_stop` | 运行开启了它（默认）时为 `true`；使用 `-X agent.answer_on_stop=off` 时不出现。 |
 | `empty_reply_fallback` | 运行关闭了它时为 `"off"`；默认的 `"on"` 时不出现。 |
+| `thinking_steps` | 运行用了它时为 `"first_and_failed"`；默认的 `"all"` 时不出现。 |
 | `max_calls` | 运行设置了调用预算时为该值；否则不出现。 |
 | `window_eviction` | `chunk`（默认值）或 `boundary`。 |
 | `window_messages` | 窗口的消息数上限不是 20 时为该值（本地服务器或 URL 上默认为 64）；为 20 时不出现。 |

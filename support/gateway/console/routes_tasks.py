@@ -26,6 +26,7 @@ from .activity import left_line
 from .bodies import Body
 from .errors import ApiError
 from .explain import remembered
+from .routes_browser import StaleSourceError, resolve, stale_source
 from .shapes import approval_json
 
 if TYPE_CHECKING:
@@ -46,9 +47,19 @@ class CreateTask(Body):
     front_id: StrictStr | None = None
 
 
+class CardSource(Body):
+    """The browser a card shows: the browser tools' generation, the run and the owner chat."""
+
+    gen: StrictStr
+    run: StrictStr
+    owner: StrictStr
+
+
 class UpdateTask(Body):
     level: StrictInt | StrictStr | None = None
     state: StrictStr | None = None
+    # A browser card's Stop names what it shows: a card of an earlier run stops nothing.
+    source: CardSource | None = None
 
 
 class ResumeTask(Body):
@@ -158,9 +169,22 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         if body.level is None and body.state is None:
             raise ApiError(400, "invalid_request", "Choose a level or state.")
-        task = await _call(
-            console.workers.update(task_id, level=body.level, state=body.state)
-        )
+        named = body.source
+
+        def still_shown() -> None:
+            if named is not None:
+                resolve(
+                    console, task_id, gen=named.gen, run=named.run, owner=named.owner
+                )
+
+        try:
+            task = await _call(
+                console.workers.update(
+                    task_id, level=body.level, state=body.state, check=still_shown
+                )
+            )
+        except StaleSourceError as exc:
+            raise stale_source() from exc
         return JSONResponse(content={"task": _approvals(console, task)})
 
     @app.post("/api/tasks/{task_id}/continue")

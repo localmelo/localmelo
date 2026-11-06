@@ -361,8 +361,14 @@ export function echoDone(echo, done, ended) {
   return done.has(echo.id) || (echo.kind !== "earlier" && ended.has(echo.task_id));
 }
 
-/** An echo's buttons: `[label, do]`; a level change opens the level list. */
-export function echoActions(echo, done) {
+/** A level as a line names it: its P-code for a developer, what it means in words (`today`) in default mode. */
+const levelName = (level, plain) => (plain ? levelMeaning(level) : levelCode(level));
+
+/**
+ * An echo's buttons: `[label, do]`; a level change opens the level list. *plain* (default mode) leaves out the level
+ * list, which names P-codes: a task's priority is a developer's to change, and Stop stays.
+ */
+export function echoActions(echo, done, plain = false) {
   if (done || !echo.task_id && !["ask", "chore", "chore_saved", "sleep"].includes(echo.kind)) return [];
   const undo = [t("mainChat.echo.undo"), "undo"];
   // A step ran on the person's earlier approval (#369): Revoke takes the approval back.
@@ -373,14 +379,14 @@ export function echoActions(echo, done) {
   if (echo.kind === "chore_saved" || echo.kind === "sleep") return [undo];
   if (echo.kind === "started" || echo.kind === "level") {
     // A task the chat started (#410): its priority, and Stop until it ends.
-    return echo.kind === "started" ? [[t("mainChat.echo.change"), "level"], [t("common.stop"), "stop"]] : [undo];
+    return echo.kind === "started" ? [...(plain ? [] : [[t("mainChat.echo.change"), "level"]]), [t("common.stop"), "stop"]] : [undo];
   }
   // A Stop that found nothing left to stop has no Undo: Undo would start the task again.
   if (echo.kind === "control") return echo.undo === null ? [] : [undo];
   // A message sent as a task's answer can be taken back until it is delivered.
   if (echo.kind === "answer_sent") return [undo];
   if (echo.kind === "suggest") {
-    if (echo.action === "level") return [[t("mainChat.echo.setTo", {level: levelCode(echo.level)}), "apply"]];
+    if (echo.action === "level") return [[t("mainChat.echo.setTo", {level: levelName(echo.level, plain)}), "apply"]];
     const word = ["stop", "pause", "resume", "first"].includes(echo.action) ? t(`mainChat.echo.${echo.action}`) : String(echo.action);
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
@@ -391,9 +397,10 @@ export function echoActions(echo, done) {
 
 /**
  * One echo's nodes: the person's own message when it answers one, then the line with its buttons.
- * `{doc, echo, done, act}`: `act(echo, do, level)` runs a button; `done` hides them.
+ * `{doc, echo, done, act, plain}`: `act(echo, do, level)` runs a button; `done` hides them; `plain` (default mode) says a
+ * changed level in words, never as a P-code, shows none on a task's start and offers no list of them.
  */
-export function echoNodes({doc, echo, done = false, act}) {
+export function echoNodes({doc, echo, done = false, act, plain = false}) {
   const {node: el} = maker(doc);
   const nodes = [];
   // A queued message that ran is its turn's bubble now; the mark that it ran shows nothing. What a follow-up did
@@ -413,18 +420,22 @@ export function echoNodes({doc, echo, done = false, act}) {
   // An echo the gateway worded keeps its words for the page's language; the level is the chip.
   // A step that ran on an earlier approval says its time as the page writes a time.
   const approvedAt = echo.kind === "earlier" ? Number(echo.approved_at) : 0;
-  const own = approvedAt ? t("approvals.used", {time: clock(approvedAt)}) : saidText(echo.said);
+  const said = plain && echo.said?.params?.level ? {...echo.said, params: {...echo.said.params, level: levelName(echo.level, plain)}} : echo.said;
+  const own = approvedAt ? t("approvals.used", {time: clock(approvedAt)}) : saidText(said);
   const words = level === null || own !== null ? own ?? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
   // The words, the level and the buttons wrap together, under the words.
   const body = el("div", "echo-body");
   body.append(el("p", "echo-text", words));
   line.append(mark, body);
-  if (level !== null) {
-    // The chip is the code; its meaning is the tooltip and, hidden, part of its accessible name.
-    const chip = el("span", "echo-level", levelCode(level));
+  // A task starts at its own level, which default mode never mentions; a level the person changed is said in words.
+  if (level !== null && !(plain && echo.kind === "started")) {
+    // The chip is the code, its meaning the tooltip and, hidden, part of its accessible name; in default mode it is the meaning.
+    const chip = el("span", "echo-level", levelName(level, plain));
     chip.dataset.level = String(level);
-    chip.title = levelMeaning(level);
-    chip.append(el("span", "sr-only", `, ${levelMeaning(level)}`));
+    if (!plain) {
+      chip.title = levelMeaning(level);
+      chip.append(el("span", "sr-only", `, ${levelMeaning(level)}`));
+    }
     body.append(chip);
   }
   // A chore's proposal names the work it would repeat (a reminder, its words), under the question.
@@ -438,7 +449,7 @@ export function echoNodes({doc, echo, done = false, act}) {
   if (owner) body.append(el("p", "echo-sub", t("chat.fromChat", {title: owner})));
   body.append(...askNodes({el, echo, done, act}));
   const buttons = el("span", "echo-actions");
-  for (const [label, does] of echoActions(echo, done)) {
+  for (const [label, does] of echoActions(echo, done, plain)) {
     const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);
     button.type = "button";
     button.addEventListener("click", () => {

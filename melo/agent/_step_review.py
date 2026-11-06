@@ -66,6 +66,7 @@ from localmelo.melo.checker.review.model import (
     user_message,
 )
 from localmelo.melo.checker.review.named import (
+    file_named,
     folder_named,
     key_named,
     local_sites,
@@ -74,6 +75,7 @@ from localmelo.melo.checker.review.named import (
 )
 from localmelo.melo.checker.review.posting import (
     account_names,
+    asks_to_attach,
     asks_to_search,
     asks_to_share,
     is_message,
@@ -362,6 +364,36 @@ def _title(review: ActionReview) -> str:
     return TITLES.get(first, "Run this?").rstrip("?").format(folder="the folder")
 
 
+def attach_review(arguments: Mapping[str, Any], *, asked: bool) -> ActionReview:
+    """The review of attaching a file to a page's upload field, decided by code alone (#551).
+
+    Attaching sends a file to a site. It is routine only when *asked*: Auto
+    mode, and the person's own messages ask for the send
+    (:meth:`StepReviewer.asks_to_attach`), and the file is one the run vouches
+    for. A file nobody vouched for (``source`` ``other``: the person did not
+    name it, and it is not in the chat's folders) is never routine, whatever
+    the words ask: the card names exactly that file. Every other case, and
+    every case in Ask, is stopped for a card that names the file and the site.
+    The user's model never sees this question, so a page cannot talk it into a
+    send: a page's text is in no message of the person's.
+    """
+    site = " ".join(str(arguments.get("site") or "this site").split())[:80]
+    name = " ".join(str(arguments.get("name") or "a file").split())[:80]
+    folder = " ".join(str(arguments.get("folder") or "").split())[:120]
+    file = f"{name} from {folder}" if folder else name
+    if arguments.get("source") == "other":
+        return ActionReview(
+            "high",
+            ("send_out",),
+            (f"Sends the file {file} to {site}; you did not name it.",),
+        )
+    if asked:
+        return ActionReview(
+            "routine", (), (f"Attaches {file} to {site}, which you asked for.",)
+        )
+    return ActionReview("high", ("send_out",), (f"Sends the file {file} to {site}.",))
+
+
 class StepReviewer:
     """Asks the user's model about steps the rules left open; keeps the chat's blocks."""
 
@@ -584,6 +616,18 @@ class StepReviewer:
         melo never opens does not reach here at all.
         """
         return folder_named(path, self.requests, os.path.expanduser("~"))
+
+    def names_file(self, path: str) -> bool:
+        """Whether the person's own words name the file *path* (canonical) itself, by its path or its specific name; a folder above it names nothing (#551).
+
+        See :func:`~localmelo.melo.checker.review.named.file_named`; a place
+        melo never opens is refused before anything asks this.
+        """
+        return file_named(path, self.requests, os.path.expanduser("~"))
+
+    def asks_to_attach(self) -> bool:
+        """Whether the person's own words ask to send a file: to attach, upload or send it, or to apply (#551)."""
+        return asks_to_attach(self.requests)
 
     def written_sites(self) -> frozenset[tuple[str, int]]:
         """The servers on this computer the person's own words write, as ``(address, port)``.

@@ -1,14 +1,19 @@
-"""The browser card: what a chat's browser says in the conversation.
+"""The browser card: what a browser says in the chat it works for.
 
-When melo browses in a chat, the chat shows one card for the run, like a reply: the live page, what melo is doing
-and who has the page. The card is an ``attention.browser`` event that belongs to no turn, stored in the chat that
-owns it and delivered and replayed like its other cards (:mod:`.cards`): no second event store, no second stream.
-Its data is the card's identity, ``card_key`` (the chat and the run) with ``owner_chat_id``, ``source_session_id``,
-``source_turn``, ``run_id`` and ``browser_session_id`` (the browser tools' :attr:`generation
+When melo browses, the chat that asked shows one card for the run, like a reply: the live page, what melo is doing
+and who has the page. The browser is a task's, which the chat owns (:meth:`~BrowserCards.attach_task`); a chat's own
+Agent has none unless a test's builder gave it one. The card is an ``attention.browser`` event that belongs to no
+turn, stored in the chat that owns it and delivered and replayed like its other cards (:mod:`.cards`): no second
+event store, no second stream. Its data is the card's identity, ``card_key`` (the source and the run) with
+``owner_chat_id``, ``source_session_id``, ``source_turn`` (the turn of the source), ``run_id`` and
+``browser_session_id`` (the browser tools' :attr:`generation
 <localmelo.support.browser.provider.BrowserToolProvider.generation>`: a tab id means something only with it), and
 what it says: ``state`` (``working``, ``waiting`` for the person's answer, ``you`` while they have the page,
 ``done``, ``stopped``, with ``by`` set to ``you`` for a Stop), ``action`` (the kind of step melo is on, which the
-page words in the reader's language) and ``site`` (a bare host).
+page words in the reader's language) and ``site`` (a bare host). A task's card also has ``source_kind`` ``task``
+and ``goal``, the task's title, the words of its Started line. The chat it shows in comes from the task's record,
+never from a model's words about it, and a person's Stop and Done act on the source the card names, that task and that
+run alone.
 
 Nothing page content reaches it: no picture, typed value, full address or query string is stored, only the words
 the program wrote (:meth:`BrowserToolProvider.card
@@ -31,6 +36,8 @@ from typing import TYPE_CHECKING, Any, Final
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.sessions.store import StoredEvent
 
+from .cards import card_title
+
 if TYPE_CHECKING:
     from . import Console
 
@@ -52,11 +59,13 @@ def _retire(source: _Source) -> None:
 
 @dataclass(eq=False)
 class _Source:
-    """One open chat's browser tools and the run they work in."""
+    """One browser's tools and the run they work in: an open chat's, or a running task's (*owner* is its chat)."""
 
     session_id: str
     provider: weakref.ReferenceType[BrowserToolProvider]
     generation: str
+    owner: str | None = None
+    goal: str = ""
     run: str = ""
     turn: int = 0
     # The card last written for the run (None before its first), and how the run ended once it did.
@@ -70,8 +79,19 @@ class _Source:
     )
 
 
+def _browser_of(agent: object) -> BrowserToolProvider | None:
+    return next(
+        (
+            p
+            for p in getattr(agent, "tool_providers", ())
+            if isinstance(p, BrowserToolProvider)
+        ),
+        None,
+    )
+
+
 class BrowserCards:
-    """Projects each open chat's browser into its ``attention.browser`` card. See the module docstring."""
+    """Projects each browser into its ``attention.browser`` card. See the module docstring."""
 
     def __init__(self, console: Console) -> None:
         self._console = console
@@ -86,22 +106,73 @@ class BrowserCards:
 
     def attach(self, session_id: str, agent: object) -> None:
         """Follow the browser tools of *session_id*'s new Agent (a rebuilt Agent replaces the old ones)."""
-        provider = next(
-            (
-                p
-                for p in getattr(agent, "tool_providers", ())
-                if isinstance(p, BrowserToolProvider)
-            ),
-            None,
-        )
+        self._follow(session_id, agent, None)
+
+    def attach_task(self, task_id: str, agent: object, owner: str) -> None:
+        """Follow the browser tools of task *task_id*'s Agent, which works for chat *owner*."""
+        self._follow(task_id, agent, owner)
+
+    def _follow(self, session_id: str, agent: object, owner: str | None) -> None:
+        provider = _browser_of(agent)
         old = self._sources.pop(session_id, None)
         if old is not None:
             _retire(old)
         if provider is None:
             return
-        source = _Source(session_id, weakref.ref(provider), provider.generation)
+        source = _Source(session_id, weakref.ref(provider), provider.generation, owner)
         self._sources[session_id] = source
         provider.watch(lambda: self._poke(source))
+
+    def detach_task(self, task_id: str) -> None:
+        """Task *task_id*'s Agent goes: its browser is no source now, and a card still active says it stopped."""
+        source = self._sources.pop(task_id, None)
+        if source is None:
+            return
+        if source.card is not None and source.ended is None:
+            source.ended = ("stopped", "")
+            self._schedule(source)
+        else:
+            _retire(source)
+
+    def task_browser(self, task_id: str) -> BrowserToolProvider | None:
+        """The browser tools of running task *task_id*, or None: no fallback to anything else."""
+        source = self._sources.get(task_id)
+        if source is None or source.owner is None:
+            return None
+        return source.provider()
+
+    def owner_of(self, task_id: str) -> str | None:
+        """The chat running task *task_id*'s browser works for, or None when *task_id* is no such source."""
+        source = self._sources.get(task_id)
+        return source.owner if source is not None else None
+
+    def source_of(self, session_id: str) -> dict[str, str] | None:
+        """The exact source of *session_id*'s browser in its run now: ``gen`` and ``run``, and ``owner`` for a task.
+
+        The three parts a client names to reach that run alone (``/browser/done?gen=&run=&owner=``). None when the
+        session has no browser source, or none in a run now.
+        """
+        source = self._sources.get(session_id)
+        if source is None or not source.run or source.ended is not None:
+            return None
+        found = {"gen": source.generation, "run": source.run}
+        if source.owner is not None:
+            found["owner"] = source.owner
+        return found
+
+    def holds_page(self, task_id: str) -> bool:
+        """Whether the person has a page of running task *task_id*'s browser now."""
+        browser = self.task_browser(task_id)
+        return browser is not None and bool(browser.owners.held)
+
+    def rehome(self, chat_id: str, main: str | None) -> None:
+        """Chat *chat_id* is gone: the cards of the tasks it owned go to *main*, and nothing it held still reaches them."""
+        for source in self._sources.values():
+            if source.owner == chat_id:
+                source.owner = main
+                _retire(source)
+                if source.card is not None and source.run:
+                    self._schedule(source)
 
     def is_current(self, session_id: str, run: str) -> bool:
         """Whether *run* is the run that session *session_id*'s browser works for now."""
@@ -135,7 +206,10 @@ class BrowserCards:
             if (
                 isinstance(data, dict)
                 and data.get("state") in ACTIVE
-                and not self._running(row.session_id, str(data.get("run_id", "")))
+                and not self._running(
+                    str(data.get("source_session_id") or row.session_id),
+                    str(data.get("run_id", "")),
+                )
             ):
                 row = await self._console.store.append_session_event(
                     row.session_id,
@@ -191,13 +265,15 @@ class BrowserCards:
         """Write the card as it is now, once for every change noted since (a burst is one write)."""
         while source.dirty:
             source.dirty = False
-            card = self._card(source)
-            if card is None or card == source.card:
-                continue
-            source.card = card
             try:
+                if source.owner is not None:
+                    await self._read_task(source)
+                card = self._card(source)
+                if card is None or card == source.card:
+                    continue
+                source.card = card
                 await self._console.store.append_session_event(
-                    source.session_id, BROWSER_EVENT, card
+                    str(card["owner_chat_id"]), BROWSER_EVENT, card
                 )
             except Exception as exc:  # a card is best effort, as the others are
                 logger.debug("No browser card: %s", exc)
@@ -207,14 +283,37 @@ class BrowserCards:
                 source
             )  # after the card says the run is over: the card and the stream's end arrive in that order
 
+    async def _read_task(self, source: _Source) -> None:
+        """A task's title and the chat that owns it, from its record: the owner is never a model's word."""
+        console = self._console
+        record = await console.workers.tasks.get_task(source.session_id)
+        source.goal = card_title(record.title)
+        owner = await console.effective_owner(record.front_id)
+        if owner is not None and owner != source.owner:
+            source.owner = owner
+            _retire(source)
+
     def _card(self, source: _Source) -> dict[str, Any] | None:
         """The card for the run now, or None when there is nothing to say yet."""
         found = source.card
+        where: dict[str, Any] = {}
+        if source.owner is not None:
+            where = {
+                "owner_chat_id": source.owner,
+                "source_kind": "task",
+                "goal": source.goal,
+            }
         if source.ended is not None:
             if found is None:
                 return None
             state, by = source.ended
-            return {**found, "state": state, "action": "", **({"by": by} if by else {})}
+            return {
+                **found,
+                **where,
+                "state": state,
+                "action": "",
+                **({"by": by} if by else {}),
+            }
         provider = source.provider()
         facts = provider.card() if provider is not None else None
         if facts is None:
@@ -224,6 +323,7 @@ class BrowserCards:
         return {
             "card_key": f"{source.session_id}:{source.run}",
             "owner_chat_id": source.session_id,
+            **where,
             "source_session_id": source.session_id,
             "source_turn": source.turn,
             "run_id": source.run,

@@ -2376,6 +2376,7 @@ def _build_direct_mode_agent(
         configured_context_options,
         configured_fallback_options,
         configured_image_options,
+        with_quiet_steps,
     )
 
     def config_value_error(message: str) -> NoReturn:
@@ -2473,6 +2474,7 @@ def _build_direct_mode_agent(
         # Asked last, so a usage error never costs a request.
         model = args.chat_model or _direct_model(args)
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
+        with_quiet_steps(llm, None, options)
         if options is not None and options.memory_dir is not None:
             _make_memory_dir(options.memory_dir)
         return Agent(
@@ -2636,6 +2638,7 @@ def _build_direct_mode_agent(
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     llm_provider, embedding_provider = providers_for(cfg, options.reasoning)
+    with_quiet_steps(llm_provider, cfg.chat_backend, options)
     if (
         options.reasoning != "legacy"
         and options.retriever == "embedding"

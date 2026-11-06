@@ -142,9 +142,13 @@ def test_the_browser_tools_take_no_hook() -> None:
         "settle_s",
         "desktop",
         "opener",
+        # It only takes away: a task opens no other app.
+        "opens_apps",
         # The live view only watches; it opens and reads nothing.
         "live",
         "live_fps",
+        # A name for the chat's work folder; it carries no permission.
+        "chat_id",
     }
     assert not [name for name in parameters if "allow" in name or "local" in name]
     for function in (require_public, addresses.console_sites):

@@ -9,7 +9,9 @@ file. :class:`MainChat` then talks to it only over API v2: a message is a
 turn of the open chat, the chat's stream brings its events back and they
 draw as the terminal's own turns do, an approval opens the terminal's
 approval list and is answered through the gateway, and a card is one
-coloured line.
+coloured line. So is a task's browser (``attention.browser``): one line each
+time its state changes, with ``melo console`` as the way to open it, and an empty
+Enter is Done for the page the person holds, by the source its card names.
 """
 
 from __future__ import annotations
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
 # The main chat's events that belong to no turn (the gateway's cards.py and front.py).
 CARD_EVENT: Final = "attention.card"
 ECHO_EVENT: Final = "attention.echo"
+BROWSER_EVENT: Final = "attention.browser"
 # Where a gateway started from the terminal writes what it prints.
 GATEWAY_LOG: Final = "~/.cache/localmelo/logs/gateway.log"
 # How long a gateway started here may take to answer, in seconds.
@@ -491,9 +494,15 @@ class GatewayClient:
             "POST", "/".join(["/api/turns", quote(turn_id, safe=""), "cancel"])
         )
 
-    async def give_back(self, session_id: str) -> bool:
-        """Done: every page the person has in chat *session_id* goes back to melo."""
-        body = await self.call("POST", _path(session_id, "browser", "done"))
+    async def give_back(
+        self, session_id: str, source: Mapping[str, str] | None = None
+    ) -> bool:
+        """Done: every page the person has in *session_id* goes back to melo.
+
+        *source* (``gen``, ``run`` and, for a task, ``owner``) names one run's page alone.
+        """
+        path = _path(session_id, "browser", "done")
+        body = await self.call("POST", path, params=dict(source or {}))
         return body.get("ok") is True
 
     async def note(self, turn_id: str, text: str) -> None:
@@ -572,6 +581,53 @@ def card_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
     line = Text(cut_cells(head + body, room, symbols.ellipsis), style=style)
     line.append(f"  {how}", style="muted")
     return line
+
+
+# A browser card's state: its symbol, its style and the catalog key of its word (the console's card says the same).
+_BROWSER_WORDS: Final = {
+    "working": ("session", "accent", "browser.forThisChat"),
+    "waiting": ("warn", "warn", "browser.state.waiting"),
+    "you": ("session", "accent", "browser.inControl"),
+    "done": ("ok", "ok", "browser.state.done"),
+    "stopped": ("stopped", "warn", "browser.state.stopped"),
+}
+_BROWSER_ACTIVE: Final = frozenset({"working", "waiting", "you"})
+
+
+def browser_line(card: Mapping[str, Any], symbols: Any, width: int) -> Text:
+    """A task's browser card as one line: its state, the task, the site, and how to open it or give it back."""
+    symbol, style, key = _BROWSER_WORDS[str(card.get("state"))]
+    word = t_in("en", key)
+    if card.get("state") == "stopped" and card.get("by") == "you":
+        word = f"{word} {t_in('en', 'browser.state.byYou')}"
+    goal = clean_output(" ".join(str(card.get("goal") or "").split()))
+    site = clean_output(str(card.get("site") or ""))
+    active = card.get("state") in _BROWSER_ACTIVE
+    how = ""
+    if card.get("state") == "you":
+        how = "Enter on an empty line gives it back"
+    elif active:
+        how = "melo console opens it"
+    head = f"{getattr(symbols, symbol)} {word}"
+    body = f": {goal}" if goal else ""
+    body += f" {symbols.dot} {site}" if site and active else ""
+    room = max(8, width - len(how) - 3)
+    line = Text(cut_cells(head + body, room, symbols.ellipsis), style=style)
+    if how:
+        line.append(f"  {how}", style="muted")
+    return line
+
+
+def browser_source(card: Mapping[str, Any]) -> tuple[str, dict[str, str]]:
+    """The session and the exact source (``gen``, ``run``, ``owner`` for a task) a browser card names."""
+    session = str(card.get("source_session_id") or card.get("owner_chat_id") or "")
+    source = {
+        "gen": str(card.get("browser_session_id") or ""),
+        "run": str(card.get("run_id") or ""),
+    }
+    if card.get("source_kind") == "task":
+        source["owner"] = str(card.get("owner_chat_id") or "")
+    return session, source
 
 
 def task_question(user_text: str) -> tuple[str, str] | None:
@@ -805,6 +861,8 @@ class MainChat:
         self._asks: dict[str, asyncio.Task[None]] = {}
         # The card and echo events already drawn, by id.
         self._seen: set[int] = set()
+        # The browser cards of each open chat that are in use, by chat and card key: what Done gives back.
+        self._browsers: dict[str, dict[str, Mapping[str, Any]]] = {}
         self._lost = False
         # Set once the main chat is open (or could not open).
         self._ready = asyncio.Event()
@@ -881,6 +939,9 @@ class MainChat:
             running = await self.client.turns(chat_id, 1)
             after = int(running.get("replay_from") or 0)
             turns = turns[:-1]
+        for card in page.get("browser") or []:
+            if isinstance(card, Mapping) and card.get("state") in _BROWSER_ACTIVE:
+                self._on_browser(chat_id, card, card.get("id"))
         self._recap(turns, page.get("cards") or [], page.get("echoes") or [])
         return after
 
@@ -985,6 +1046,9 @@ class MainChat:
         if not isinstance(data, Mapping):
             return
         event_id = event.get("id")
+        if kind == BROWSER_EVENT:
+            self._on_browser(chat_id, data, event_id)
+            return
         if kind in (CARD_EVENT, ECHO_EVENT):
             if isinstance(event_id, int):
                 if event_id in self._seen:
@@ -1042,6 +1106,27 @@ class MainChat:
                 asked.cancel()  # answered in another window: the list goes away
         elif kind == "turn.finished" and not turn.done.done():
             turn.done.set_result(str(data.get("status") or ""))
+
+    def _on_browser(
+        self, chat_id: str, card: Mapping[str, Any], event_id: object = None
+    ) -> None:
+        """A task's browser card changed: one line when its state does (a burst of steps is one), and what Done holds."""
+        if isinstance(event_id, int):
+            if event_id in self._seen:
+                return
+            self._seen.add(event_id)
+        key, state = str(card.get("card_key") or ""), str(card.get("state") or "")
+        if not key or state not in _BROWSER_WORDS:
+            return
+        mine = self._browsers.setdefault(chat_id, {})
+        before = mine.get(key)
+        if state in _BROWSER_ACTIVE:
+            mine[key] = card
+        else:
+            mine.pop(key, None)
+        if before is None or before.get("state") != state:
+            line = browser_line(card, self.host.renderer.symbols, self.host.out.width)
+            self.host.out.print(line)
 
     def _fail_turn(self, why: str) -> None:
         turn = self._turn
@@ -1102,17 +1187,39 @@ class MainChat:
 
     # ── The person's page ──
 
+    def _held(self) -> list[Mapping[str, Any]]:
+        """The browser cards of the open chat whose page the person has."""
+        cards = self._browsers.get(self.chat.id or "", {})
+        return [card for card in cards.values() if card.get("state") == "you"]
+
+    def holds_page(self) -> bool:
+        """Whether the person has a page of a task this chat owns."""
+        return bool(self._held())
+
     def give_back(self) -> None:
-        """Enter on an empty line while the person has a page: Done, through the gateway."""
-        if self.chat.id is not None:
+        """Enter on an empty line while the person has a page: Done, through the gateway.
+
+        A task's page goes back to its run alone, by the exact source its card names; a chat's own page
+        (a turn paused for the person) by the chat.
+        """
+        held = self._held()
+        if held:
+            for card in held:
+                self.host.spawn(self._give_back(*browser_source(card)))
+        elif self.chat.id is not None:
             self.host.spawn(self._give_back(self.chat.id))
 
-    async def _give_back(self, chat_id: str) -> None:
+    async def _give_back(
+        self, session_id: str, source: Mapping[str, str] | None = None
+    ) -> None:
         try:
-            if not await self.client.give_back(chat_id):
+            if not await self.client.give_back(session_id, source):
                 self._say("melo has the page already.", "muted")
         except GatewayError as exc:
-            self._say(f"Could not give the page back: {exc}", "error")
+            if exc.code == "stale_source":  # its run ended, or the page went back first
+                self._say("melo has the page already.", "muted")
+            else:
+                self._say(f"Could not give the page back: {exc}", "error")
 
     def note(self, text: str) -> bool:
         """Send *text* to the running turn as a note; False when its id is not known yet."""

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import errno
 import os
+import re
 import stat
 import sys
 import unicodedata
@@ -462,6 +463,38 @@ def home_label(path: str, *, home: str | None = None) -> str:
 def never_text(path: str, reason: NeverReason) -> str:
     """What the model reads for *path* (as it gave it), never offered for *reason*."""
     return NEVER_TEXT[reason].format(path=path)
+
+
+# File names that say the file holds a key or a password, wherever it lies: an
+# environment file, a key or certificate store, an SSH key, a file of credentials
+# or secrets. Such a file is never attached to a page (#551).
+_SECRET_NAME: Final = re.compile(
+    r"\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk)"
+    r"|id_(?:rsa|dsa|ecdsa|ed25519)|(?:.*[._-])?(?:credentials?|secrets?)(?:[._-].*)?",
+    re.IGNORECASE,
+)
+
+
+def attach_refusal(path: str) -> str | None:
+    """Why the file *path* is never attached to a page, or ``None`` when it may be (#551).
+
+    A place that is never offered (:func:`never_offered`: keys and passwords,
+    melo's own data, system folders, the home folder itself), or a file whose
+    name says it holds a key or a password. *path* is made canonical first, so
+    a link or ``..`` into such a place is that place.
+    """
+    real = canonical_path(path)
+    reason = never_offered(real, canonical=True)
+    if reason is not None:
+        return {
+            "credentials": "is in a place that holds keys or passwords",
+            "melo": "is in melo's own data folder",
+            "system": "is in a system folder",
+            "home": "is the whole home folder or a folder above it",
+        }[reason]
+    if _SECRET_NAME.fullmatch(os.path.basename(real)):
+        return "looks like a key, a password or a secret"
+    return None
 
 
 def asked_text(outside: OutsideAccess) -> str:

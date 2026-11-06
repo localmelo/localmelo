@@ -47,7 +47,7 @@ The pinned Python and uv archives and the wheels are checked against their hashe
 
 ## The Browser window
 
-- In a chat that browses in Chrome in the background, the console's **Browser** panel has a **Pop out** button. It opens the panel alone in its own window, so you can watch melo's page while you work in another window.
+- When a task you asked for browses in Chrome in the background, the console's **Browser** panel has a **Pop out** button. It opens the panel alone in its own window, so you can watch melo's page while you work in another window. A task's page pops out the same way.
 - The window shows the same live picture ([Watching melo's browser](browsing.md#watching-melos-browser)), and **Take over** works there too: clicks, keys, the Mac's input methods and Command-V paste go to the page, and Command-A, Command-X and Command-Z act on the page ([Taking over melo's browser](browsing.md#taking-over-melos-browser)). Closing it ends its picture stream; a page you have stays yours until you press **Done**. It also closes when the gateway stops or the app quits.
 - It can only show the gateway's own page. A link in it is never opened, and it never goes to another site.
 
@@ -103,7 +103,7 @@ Close the window, minimize it or hide the app (Command-H) and a small Melo appea
 While the window is put away and something runs or waits, a small pill takes Melo's place and says in one line what Melo is doing.
 
 - It says what runs in plain words ("Reading example.com", "Running the tests"); **+1** counts the others that run. While an approval waits it turns amber and says "Waiting for your approval".
-- While you have a page of melo's, it says "You're in control" and "melo is paused" and has a **Done** button that gives the page back. It floats above other windows, the real Chrome window too, and shows even with the window open or **Melo only** chosen; only **Nothing** hides it.
+- While you have a page of melo's, it says "You're in control" and "melo is paused" and has a **Done** button that gives the page back. Done names the task whose page you hold, so it releases that task's run and no newer one; a press on the pill opens the chat that shows its card. It floats above other windows, the real Chrome window too, and shows even with the window open or **Melo only** chosen; only **Nothing** hides it.
 - It shows "Done: …" and "Stopped: …" for 8 seconds each, and "Model server not reachable" while the model server is down. Then Melo comes back, eyes closed and happy for a moment after a "Done".
 - Click it to open the chat or task it names (the one that waits, for an approval). Drag it like Melo: it takes Melo's place and saves it. Point at it and press **×** to hide it until the next task starts.
 - **On the desktop** in the menu-bar menu and in Melo's menu chooses **Melo and the activity pill** (the default), **Melo only** or **Nothing**. **Hide Melo** is the same as **Nothing**, and **Show Melo** brings back what you had.
