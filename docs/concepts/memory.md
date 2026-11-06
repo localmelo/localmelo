@@ -328,6 +328,7 @@ The **Memory** tab:
 - **Edit** rewords a note; **Delete** asks `Forget this note?` first.
 - **Forget everything…** names what goes (the notes and melo's search index of your chat turns; your chats stay) with `Keep everything` as the first answer.
 - With no notes, the tab says how memory starts.
+- With memory items turned on (a developer setting), the same list shows the items melo wrote from your chats, marked as written by melo, each with its date and a link to the chat it came from; **Delete** removes one at once and **Undo** puts it back for a few minutes.
 
 The other places:
 

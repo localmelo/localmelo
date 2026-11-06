@@ -752,6 +752,8 @@
   "errors.forgetAllFlag": "Forgetting everything needs ?all=true.",
   "errors.importGone": "That import has no notes left.",
   "errors.importScanGone": "That scan is gone: scan again.",
+  "errors.itemGone": "That item is not in melo's memory.",
+  "errors.itemUndoGone": "That item can no longer be put back.",
   "errors.listFailed": "Could not list models at {url}: {reason}",
   "errors.listLocalOnly": "Listing models works for local backends only; type the model name.",
   "errors.mainDelete": "The main chat is always there: it cannot be deleted.",
@@ -1239,6 +1241,20 @@
     "one": "melo's search index of {n} chat turn",
     "other": "melo's search index of {n} chat turns"
   },
+  "memoryTab.item.by": "Written by melo",
+  "memoryTab.item.conflict": "Disagrees with another item",
+  "memoryTab.item.deleteFailed": "Could not delete the item. Try again.",
+  "memoryTab.item.deleted": "Deleted “{item}”.",
+  "memoryTab.item.kind.episodic": "Event",
+  "memoryTab.item.kind.profile": "About you",
+  "memoryTab.item.kind.semantic": "Fact",
+  "memoryTab.item.replaced": "Replaced by a newer item",
+  "memoryTab.item.replacedGone": "Replaced; the newer item was deleted",
+  "memoryTab.item.undoFailed": "Could not put the item back. Try again.",
+  "memoryTab.items": {
+    "one": "{n} memory item",
+    "other": "{n} memory items"
+  },
   "memoryTab.keepAll": "Keep everything",
   "memoryTab.keepIt": "Keep it",
   "memoryTab.never": "Never kept: passwords, keys, codes and page contents.",
@@ -1247,6 +1263,7 @@
     "one": "{n} note",
     "other": "{n} notes"
   },
+  "memoryTab.notesAndItems": "{notes}, {items}",
   "memoryTab.readFailed": "Could not read what melo remembers.",
   "memoryTab.reading": "Reading what melo remembers…",
   "memoryTab.rebuilt": {

@@ -19,12 +19,13 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import numpy as np
 import pytest
 
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
-from localmelo.support.memory import ChatMemory
+from localmelo.support.memory import ChatMemory, service
 from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
@@ -1121,6 +1122,109 @@ async def test_forgetting_a_chat_or_everything_takes_the_items_and_a_reindex_kee
         assert await index.encoded_turn(first) is None
         assert not memory._corpus.keys("m:")
         assert (await ask(memory, store, "tomatoes in bed one")).block == ""
+    finally:
+        await memory.aclose()
+
+
+async def test_a_deleted_item_leaves_recall_at_once_its_turn_returns_and_an_undo_reverses_both(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    fill = await held(tmp_path, store, cfg)
+    memory = fill.memory
+    try:
+        before = await ask(memory, store)
+        assert [i.key for i in before.used] == [f"m:{fill.item}"]
+        assert await memory.delete_item(fill.item)
+        # The next search reads the turn the item stood for, as a turn, and not the item.
+        after = await ask(memory, store)
+        assert [i.key for i in after.used] == [f"d:{fill.doc}"]
+        assert TITLE not in after.block and "Bed one faces south" in after.block
+        assert not await memory.delete_item(fill.item), "a second delete finds nothing"
+        assert await memory.restore_item(fill.item)
+        again = await ask(memory, store)
+        assert again.block == before.block
+        assert [i.key for i in again.used] == [f"m:{fill.item}"]
+        assert not await memory.restore_item(fill.item), "an undo is used once"
+    finally:
+        await memory.aclose()
+
+
+async def test_deleting_the_item_that_replaced_another_does_not_bring_the_older_fact_back(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        now = time.time()
+        session_id, _ = await add_turn(
+            memory, store, "Where?", "Here.", at=now - 5 * DAY, title="Sync"
+        )
+        old = await put(
+            memory,
+            session_id,
+            "Sync day",
+            "The weekly sync is on Wednesday.",
+            at=now - 4 * DAY,
+        )
+        new = await put(
+            memory,
+            session_id,
+            "Sync day",
+            "The weekly sync is now on Friday.",
+            at=now - 2 * DAY,
+        )
+        await memory.stores()[1].mark_replaced(old, new)
+        assert await memory.delete_item(new)
+        # The Wednesday fact is still the older one: it is not the current answer ...
+        found = await ask(memory, store, "when is the weekly sync?")
+        assert not found.used and "Friday" not in found.block
+        # ... and only a question about the past finds it, marked older.
+        past = await ask(memory, store, "when was the weekly sync before?")
+        assert [i.key for i in past.used] == [f"m:{old}"]
+        assert f"({OLDER_ITEM})" in past.block
+        # An undo makes the newer fact the answer again.
+        assert await memory.restore_item(new)
+        back = await ask(memory, store, "when is the weekly sync?")
+        assert [i.key for i in back.used] == [f"m:{new}"]
+    finally:
+        await memory.aclose()
+
+
+async def test_an_undo_runs_out_and_forgetting_the_chat_or_everything_ends_it(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        when = time.time() - 3 * DAY
+        first, _ = await add_turn(
+            memory, store, "Which bed?", "Bed one.", at=when, title="One"
+        )
+        second, _ = await add_turn(
+            memory, store, "Which pot?", "Pot two.", at=when, title="Two"
+        )
+        bed = await put(memory, first, "Bed", "The user plants tomatoes in bed one.")
+        pot = await put(memory, second, "Pot", "The user keeps basil in pot two.")
+        # Time runs out.
+        assert await memory.delete_item(bed)
+        with mock.patch.object(service, "ITEM_UNDO_S", 0):
+            assert not await memory.restore_item(bed)
+        assert not await memory.delete_item(bed), "an expired item is gone for good"
+        # Forgetting another chat leaves an undo; forgetting a turn the item cites ends it.
+        assert await memory.delete_item(pot)
+        await memory.forget_session(first)
+        assert await memory.restore_item(pot)
+        assert await memory.delete_item(pot)
+        await memory.forget_session(second, 1)
+        assert not await memory.restore_item(pot)
+        # Forgetting everything ends every undo.
+        assert await memory.delete_item(
+            await put(memory, first, "Bed", "Tomatoes again.")
+        )
+        await memory.forget_all()
+        assert not memory._trash
+        assert await memory.stores()[1].count_items() == 0
     finally:
         await memory.aclose()
 

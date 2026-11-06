@@ -348,6 +348,7 @@ A line that starts with an id such as [t123] is cut; open it with open_memory wh
 - **Edit** 改写一条笔记，**Delete** 会先问 `Forget this note?`。
 - **Forget everything…** 会先写明将删除什么（笔记和 melo 对你的对话轮次建的搜索索引；对话本身保留），第一个答案是 `Keep everything`。
 - 没有笔记时，标签页会说明记忆怎样开始。
+- 打开记忆条目（开发者设置）后，同一个列表里还会显示 melo 根据你的对话写下的条目，标明由 melo 写下，并带日期和指向来源对话的链接；**Delete** 立即删除一条，**Undo** 在几分钟内把它放回来。
 
 其他位置：
 
