@@ -441,6 +441,14 @@ class BrowserDriver(Protocol):
     async def blank(self, tab: str | None) -> None:
         """Leave the page: load an empty one (a redirect the person refused)."""
 
+    async def attach(self, tab: str | None, act: Act, path: str) -> ActResult:
+        """Do the click *act*, and give the file chooser it opens the file *path*, with no dialog on screen (#551).
+
+        Only a driver with ``attaches`` true can; it raises :class:`BrowserError`
+        when the click opens no chooser. *path* is a real file the caller has
+        checked: the driver gives it to the browser as it is.
+        """
+
     async def act(self, tab: str | None, act: Act) -> ActResult:
         """Do *act* on the page of *tab*, then let the page settle.
 

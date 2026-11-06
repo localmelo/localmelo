@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent._step_review import (
     StepReviewer,
+    attach_review,
     holds_secret,
     plain_page_key,
 )
@@ -53,7 +54,14 @@ from localmelo.melo.contracts.approvals import (
     review_mode,
     site_key,
 )
-from localmelo.melo.contracts.folders import NAMED_FOLDER, OutsideAccess, home_label
+from localmelo.melo.contracts.folders import (
+    NAMED_FOLDER,
+    OutsideAccess,
+    attach_refusal,
+    canonical_path,
+    covers,
+    home_label,
+)
 from localmelo.melo.contracts.review import (
     CATEGORY_WORDS,
     RULED_TOOLS,
@@ -736,6 +744,27 @@ class _ToolAsk:
         reviewer = self._reviewer
         return None if reviewer is None else reviewer.sign_in_value(handle, site)
 
+    def attachable(self, path: str) -> str | None:
+        """Why the file *path* may be attached to a page: ``folder`` or ``named``; None when it may not (#551).
+
+        ``folder``: it lies in the chat's folder (the workspace). ``named``:
+        the person's own words name it, or a folder above it (see
+        :meth:`StepReviewer.names_file`). A place never offered, or a file that
+        looks like a key, is neither, however the person worded it. The chat's
+        work folder is the browser's own to vouch for; a page's text, a tool's
+        result and the model's own words name nothing.
+        """
+        real = canonical_path(path)
+        if attach_refusal(real) is not None:
+            return None
+        root = self._workspace_root
+        if root and covers(canonical_path(root), real):
+            return "folder"
+        reviewer = self._reviewer
+        if reviewer is not None and reviewer.names_file(real):
+            return "named"
+        return None
+
     def asks_to_share(self) -> bool | None:
         """Whether the person's own words speak of sharing or making something public; None when nothing reads them (#547)."""
         return None if self._reviewer is None else self._reviewer.asks_to_share()
@@ -897,6 +926,19 @@ class _ToolAsk:
             # The review is asked in the same guard as the policy, as the
             # gate does: a failure of either refuses the question alike.
             nonlocal request
+            if arguments.get("access") == "attach":
+                # A file sent to a site (#551): decided by code alone, a card in
+                # Ask and unless the person's words ask for the send.
+                request = dataclasses.replace(
+                    asked,
+                    review=attach_review(
+                        arguments,
+                        asked=auto
+                        and reviewer is not None
+                        and reviewer.asks_to_attach(),
+                    ),
+                )
+                return await self._policy.decide(request)
             if auto and reviewer is not None:
                 site = str(arguments.get("site") or "")
                 access = str(arguments.get("access") or "")

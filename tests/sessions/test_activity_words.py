@@ -91,6 +91,13 @@ def test_a_leading_done_gives_way_to_what_followed_it(
             "Choosing from a list",
             "web",
         ),
+        (
+            "browser_attach",
+            {"ref": "e4", "file": "/Users/me/Documents/resume.pdf"},
+            "Attaching resume.pdf",
+            "web",
+        ),
+        ("browser_attach", {"ref": "e4"}, "Attaching a file", "web"),
         ("browser_screenshot", {}, "Looking at the page", "web"),
         ("browser_click_point", {"x": 500, "y": 300}, "Clicking on the page", "web"),
         ("recall", {"query": "x"}, "Remembering", "memory"),

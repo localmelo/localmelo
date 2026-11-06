@@ -36,6 +36,7 @@ export function stepWords(name, args, done = false) {
   if (tool === 'browser_click' || tool === 'browser_click_point') return say('click', t('steps.thePage'));
   if (tool === 'browser_type') return say('type', t('steps.aField'));
   if (tool === 'browser_select') return say('choose', t('steps.aList'));
+  if (tool === 'browser_attach') return say('attach', base(a.file) || t('steps.aFile'));
   if (tool === 'browser_screenshot') return say('lookAt', t('steps.thePage'));
   if (tool.startsWith('browser_')) return say('read', t('steps.thePage'));
   return say('use', t('steps.aTool'));

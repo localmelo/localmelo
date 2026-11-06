@@ -147,6 +147,8 @@ test('a step reads as the server words it, in the present while it runs and the 
     ['browser_click_point', {x: 500, y: 300}, 'Clicking on the page'],
     ['browser_type', {ref: 'e2', text: 'my secret'}, 'Typing into a field'],
     ['browser_select', {ref: 'e3', option: 'Spain'}, 'Choosing from a list'],
+    ['browser_attach', {ref: 'e4', file: '/Users/me/Documents/resume.pdf'}, 'Attaching resume.pdf'],
+    ['browser_attach', {ref: 'e4'}, 'Attaching a file'],
     ['recall', {}, 'Remembering'],
     ['remember', {text: 'You prefer tea.', topic: 'preferences'}, 'Remembering'],
     ['mcp__files__file_read', {path: 'a/b.txt'}, 'Reading b.txt'],

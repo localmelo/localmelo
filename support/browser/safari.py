@@ -166,6 +166,8 @@ class SafariAutomationDriver(PageScriptActs):
     """:class:`BrowserDriver` over ``safaridriver --mcp``. See the module docstring."""
 
     name = "safari-automation"
+    # Safari's automation gives no way to answer a file chooser.
+    attaches = False
 
     def __init__(
         self,
@@ -519,6 +521,9 @@ class SafariAutomationDriver(PageScriptActs):
         except BrowserError:
             pass
         await self._call("open", url="about:blank")
+
+    async def attach(self, tab: str | None, act: Act, path: str) -> ActResult:
+        raise BrowserError("Safari's automation cannot attach a file to a page.")
 
     async def act(self, tab: str | None, act: Act) -> ActResult:
         """Do *act*: by the browser's own input first, else by the page script.

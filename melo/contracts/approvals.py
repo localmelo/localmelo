@@ -370,10 +370,13 @@ DESKTOP_ACT: Final = "desktop-act:"
 # field, a consent or terms control, or inside a box from another site
 # (``browser-point:<site>``) is one too, and so is a press in another app's window
 # that appeared after melo's own act (``desktop-act:<app>``), and OK to a
-# ``confirm`` box a page put up while melo acted (``browser-dialog:<site>``).
+# ``confirm`` box a page put up while melo acted (``browser-dialog:<site>``), and
+# so is attaching a file to a page's upload field (``browser-attach:<site>``): a
+# grant would cover every later file, whatever it holds.
 NEVER_GRANTED: Final = (
     "browser-submit:",
     "browser-type:",
+    "browser-attach:",
     "browser-point:",
     DESKTOP_ACT,
     "browser-dialog:",
@@ -393,6 +396,7 @@ SELF_ASKING_TOOLS: Final = frozenset(
         "browser_type",
         "browser_select",
         "browser_click_point",
+        "browser_attach",
         "window_press",
     }
 )

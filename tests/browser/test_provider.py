@@ -79,11 +79,12 @@ def world() -> FakeDriver:
     )
 
 
-async def test_the_tools_are_a_group_of_twelve_and_only_the_readers_are_read_only() -> (
+async def test_the_tools_are_a_group_of_thirteen_and_only_the_readers_are_read_only() -> (
     None
 ):
     tools = await tools_of(world())
     assert sorted(tools) == [
+        "browser_attach",
         "browser_back",
         "browser_click",
         "browser_click_point",
@@ -97,7 +98,13 @@ async def test_the_tools_are_a_group_of_twelve_and_only_the_readers_are_read_onl
         "browser_type",
         "browser_wait",
     ]
-    acting = {"browser_click", "browser_type", "browser_select", "browser_click_point"}
+    acting = {
+        "browser_click",
+        "browser_type",
+        "browser_select",
+        "browser_click_point",
+        "browser_attach",
+    }
     for name, tool in tools.items():
         assert tool.group == "browser"
         if name in acting:
@@ -296,11 +303,13 @@ async def test_find_searches_the_whole_page_and_says_how_many_it_cannot_show() -
 def test_the_script_of_a_search_lists_far_more_than_the_script_of_a_reading() -> None:
     from localmelo.support.browser import pagescript as ps
 
-    assert ps.PAGE_JS == ps.page_script()
+    assert ps.page_script() == ps.PAGE_JS
     assert f"i < {ps.READ_NODES};" in ps.PAGE_JS
     assert f"length >= {ps.READ_ELEMENTS})" in ps.PAGE_JS
     whole = ps.page_script(whole=True)
-    assert f"i < {ps.FIND_NODES};" in whole and f"length >= {ps.FIND_ELEMENTS})" in whole
+    assert (
+        f"i < {ps.FIND_NODES};" in whole and f"length >= {ps.FIND_ELEMENTS})" in whole
+    )
     assert "__" not in whole.replace("__proto__", "")
 
 

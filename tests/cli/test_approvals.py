@@ -274,6 +274,25 @@ def test_a_form_panel_shows_what_it_holds_and_when_the_page_decides() -> None:
     assert "typed: cats" in words
 
 
+def test_an_attach_panel_names_the_file_its_folder_and_the_site() -> None:
+    attaching = panel_text(
+        _request(
+            "browser-attach:https://jobs.example",
+            site="jobs.example",
+            access="attach",
+            name="resume.pdf",
+            folder="~/Documents",
+            size=2048,
+            source="named",
+        ),
+        width=100,
+    )
+    assert attaching.title == "Attach a file to a website?"
+    words = " ".join(line for _, line in attaching.body)
+    assert "attach resume.pdf (from ~/Documents) to a field on jobs.example" in words
+    assert "Asked every time" in words
+
+
 def test_a_click_at_a_point_says_what_it_lands_on_and_that_it_asks_every_time() -> None:
     pointing = panel_text(
         _request(

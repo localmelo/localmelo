@@ -338,6 +338,8 @@ def launch_args(
 # at most this many are followed at once (#547).
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 MAX_DOWNLOADS = 50
+# How long a click that is to open a file chooser waits for it, in seconds.
+CHOOSER_S = 5.0
 
 
 def downloads_folder(profile: str) -> str:
@@ -460,6 +462,9 @@ class _Chrome:
         self._n = 0
         self.dialogs: dict[str, dict[str, Any]] = {}
         self.woken: dict[str, asyncio.Event] = {}
+        # A file chooser a page opened while melo intercepted them (#551), by session.
+        self.choosers: dict[str, dict[str, Any]] = {}
+        self.chooser_woken: dict[str, asyncio.Event] = {}
         self.handoffs: dict[str, list[str]] = {}
         self.navs: dict[str, int] = {}
         self.main: dict[str, str] = {}  # session -> its main frame
@@ -631,6 +636,9 @@ class _Chrome:
         elif method == "Page.javascriptDialogClosed":
             self.dialogs.pop(session, None)
             self._dialog_changed(session)
+        elif method == "Page.fileChooserOpened":
+            self.choosers[session] = params
+            self.chooser_woken.setdefault(session, asyncio.Event()).set()
         elif method == "Page.screencastFrame":
             self._frame(session, params)
         elif method == "Page.frameRequestedNavigation":
@@ -1263,6 +1271,8 @@ class ChromeBackgroundDriver(PageScriptActs):
 
     name = "chrome"
     label = "Chrome"
+    # A click that opens a file chooser can be answered with a file (:meth:`attach`).
+    attaches = True
 
     def __init__(
         self,
@@ -1348,7 +1358,13 @@ class ChromeBackgroundDriver(PageScriptActs):
             browser.claimed -= self._mine
             for session in self._sessions.values():
                 browser.end_cast(session)
-                for kept in (browser.dialogs, browser.handoffs, browser.navs):
+                for kept in (
+                    browser.dialogs,
+                    browser.handoffs,
+                    browser.navs,
+                    browser.choosers,
+                    browser.chooser_woken,
+                ):
                     kept.pop(session, None)
             for target in self._mine:
                 browser.attempts.pop(target, None)
@@ -2251,6 +2267,57 @@ class ChromeBackgroundDriver(PageScriptActs):
             late=tuple(late),
             dialogs=tuple(self._said.pop(target, [])),
         )
+
+    async def attach(self, tab: str | None, act: Act, path: str) -> ActResult:
+        """Do the click *act* with Chrome's own input and answer the file chooser it opens with *path* (#551).
+
+        Chrome is told to hand the chooser to melo instead of putting up a
+        window (``Page.setInterceptFileChooserDialog``), for this call only.
+        The click is a real one (a script's click has no user gesture and opens
+        no chooser), on a file field or on the button a page opens one with, a
+        hidden field included: the chooser says which field it is for, and the
+        file goes to that field (``DOM.setFileInputFiles``), which fires the
+        page's own ``input`` and ``change`` events. A click that opens no
+        chooser attaches nothing.
+        """
+        if act.kind != "click" or act.point is not None:
+            raise BrowserError("A file is attached by a click on a field or a button.")
+        session = await self._focus(tab)
+        browser = await self._live()
+        browser.choosers.pop(session, None)
+        browser.chooser_woken.setdefault(session, asyncio.Event()).clear()
+        await self._cmd(
+            "Page.setInterceptFileChooserDialog", {"enabled": True}, session
+        )
+        try:
+            result = await self.act(tab, dataclasses.replace(act, native=True))
+            opened = await self._chooser(browser, session)
+            node = opened.get("backendNodeId") if opened else None
+            if not isinstance(node, int):
+                raise BrowserError(
+                    "That click opened no file chooser, so nothing was attached. "
+                    "Click the page's file field or its Upload button."
+                )
+            await self._cmd(
+                "DOM.setFileInputFiles",
+                {"files": [path], "backendNodeId": node},
+                session,
+            )
+        finally:
+            browser.choosers.pop(session, None)
+            with contextlib.suppress(BrowserError):
+                await self._cmd(
+                    "Page.setInterceptFileChooserDialog", {"enabled": False}, session
+                )
+        return result
+
+    async def _chooser(self, browser: _Chrome, session: str) -> dict[str, Any] | None:
+        """The file chooser the page opened on *session* (it may be here already), or None after :data:`CHOOSER_S` seconds."""
+        if session not in browser.choosers:
+            event = browser.chooser_woken.setdefault(session, asyncio.Event())
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(), CHOOSER_S)
+        return browser.choosers.get(session)
 
     async def _native(
         self, session: str, spec: dict[str, Any], act: Act

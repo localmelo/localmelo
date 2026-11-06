@@ -84,7 +84,7 @@ async def test_a_session_gets_the_browser_tools_only_when_a_driver_is_named() ->
             ]
         finally:
             await agent.close()
-    assert names["off"] == [] and len(names["safari-automation"]) == 12
+    assert names["off"] == [] and len(names["safari-automation"]) == 13
     assert names["chrome"] == names["safari-automation"]
     with pytest.raises(ValueError, match="unknown browser driver"):
         await session_agents.build_session_agent(
@@ -166,7 +166,7 @@ class _NoTools(BaseToolProvider):
 
 @pytest.mark.parametrize(
     ("driver", "count"),
-    [("safari-automation", 12), ("chrome", 12), ("off", 0), ("firefox", 0)],
+    [("safari-automation", 13), ("chrome", 13), ("off", 0), ("firefox", 0)],
 )
 async def test_every_console_chat_has_the_browser_tools_the_setting_names(
     driver: str, count: int
@@ -191,6 +191,7 @@ async def test_every_console_chat_has_the_browser_tools_the_setting_names(
                 "browser_type",
                 "browser_select",
                 "browser_click_point",
+                "browser_attach",
             }
             # Reading is read tier; what acts is not, so a surface that trusts the
             # read tier does not get it.

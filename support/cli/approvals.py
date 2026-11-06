@@ -425,6 +425,28 @@ def _tool_panel(
             body,
             escaped_any,
         )
+    if tool.startswith("browser-attach:"):
+        # A file from this computer for a page's upload field (#551): asked every time.
+        site = shown(str(arguments.get("site") or tool.split(":", 1)[1]))
+        name = shown(str(arguments.get("name") or "a file"))
+        folder = shown(str(arguments.get("folder") or ""))
+        said = (
+            f"melo wants to attach {name}"
+            + (f" (from {folder})" if folder else "")
+            + f" to a field on {site} {window}."
+        )
+        note = (
+            "The page gets the file, and may upload it as soon as it is attached. "
+            "Asked every time."
+        )
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Attach a file to a website?",
+            f"{site}{mark} · a file from this computer",
+            body,
+            escaped_any,
+        )
     if tool.startswith("desktop-act:"):
         # A button in another app's window that appeared after melo's own step
         # in the browser: asked every time.

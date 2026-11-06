@@ -250,9 +250,14 @@ async def test_a_high_impact_answer_never_grants_the_tool() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["browser-submit:https://example.com", "browser-type:https://example.com"]
+    "name",
+    [
+        "browser-submit:https://example.com",
+        "browser-type:https://example.com",
+        "browser-attach:https://example.com",
+    ],
 )
-async def test_sending_a_form_and_typing_are_never_granted_for_the_session(
+async def test_sending_a_form_typing_and_attaching_are_never_granted_for_the_session(
     name: str,
 ) -> None:
     asked: list[str] = []
