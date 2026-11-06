@@ -331,7 +331,7 @@ async def test_a_turn_that_starts_between_two_windows_stops_the_run(
 # ── Which chat, which turns ──
 
 
-async def test_the_oldest_chat_goes_first_and_a_failed_turn_stops_its_chat(
+async def test_the_oldest_chat_goes_first_and_a_cancelled_turn_is_skipped(
     tmp_path: Path,
 ) -> None:
     async with world(tmp_path, sleep="off") as w:
@@ -339,13 +339,14 @@ async def test_the_oldest_chat_goes_first_and_a_failed_turn_stops_its_chat(
         # Written first, but its turns are the newest; the older chat is made last.
         newer = await chat(w, padded(1), at=now + 5 * HOUR, title="Newer")
         broken = await chat(
-            w, [("turn 1", "Fine."), ("turn 2", ""), ("turn 3", "Lost.")], at=now + HOUR
+            w, [("turn 1", "Fine."), ("turn 2", ""), ("turn 3", "Kept.")], at=now + HOUR
         )
         older = await chat(w, padded(1), at=now, title="Older")
-        # The middle turn of the second chat failed: nothing after it is encoded yet.
+        # The middle turn of the second chat was cancelled: it is not read, and nor
+        # does it hold up the turn after it.
         async with w.console.store.component_transaction("test_state") as conn:
             await conn.execute(
-                "UPDATE turns SET status = 'failed' WHERE session_id = ? AND turn = 2",
+                "UPDATE turns SET status = 'cancelled' WHERE session_id = ? AND turn = 2",
                 (broken,),
             )
         arm(w)
@@ -353,8 +354,8 @@ async def test_the_oldest_chat_goes_first_and_a_failed_turn_stops_its_chat(
         run = await w.console.idle_encode.tick()
         assert run is not None and run.stopped == "empty"
         assert [sid for sid, _ in seen.calls] == [older, broken, newer]
-        assert seen.calls[1] == (broken, [1])
-        assert await mark(w, broken) == 1
+        assert seen.calls[1] == (broken, [1, 3])
+        assert await mark(w, broken) == 3
         assert await w.console.memory.waiting_turns(w.console.store, broken) == []
 
 
@@ -365,6 +366,74 @@ async def test_a_turn_that_runs_is_not_read_and_nor_is_anything_after_it(
         sid = await chat(w, [("turn 1", "Fine."), ("turn 2", "")], last="running")
         waiting = await w.console.memory.waiting_turns(w.console.store, sid)
         assert [t.turn for t in waiting] == [1]
+
+
+# ── A forget while a window is with the model ──
+
+
+async def forget_during_a_window(
+    w: World, forget: Callable[[], Awaitable[Any]]
+) -> tuple[Any, StubEncoder]:
+    """Run the encoder, and do *forget* once its window is with the model; the run."""
+    stub = arm(w)
+    original = w.console.memory.encode_chat
+    reading, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        found = await original(*args, **kwargs)
+        reading.set()
+        await release.wait()
+        return found
+
+    w.console.memory.encode_chat = slow  # type: ignore[method-assign]
+    encoding = asyncio.create_task(w.console.idle_encode.tick())
+    await asyncio.wait_for(reading.wait(), 5)
+    await forget()
+    release.set()
+    return await asyncio.wait_for(encoding, 5), stub
+
+
+async def test_forgetting_everything_during_a_window_keeps_it_out(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    async with world(tmp_path, sleep="off") as w:
+        sid = await chat(w, padded(1))
+        with caplog.at_level(logging.INFO, logger=LOGGER):
+            run, stub = await forget_during_a_window(w, w.console.memory.forget_all)
+        assert run is not None and run.stopped == "forgotten"
+        assert (run.windows, run.failures, run.items) == (0, 0, 0)
+        assert w.console.idle_encode.failures == {}
+        assert await w.console.memory.stores()[1].count_items() == 0
+        assert await mark(w, sid) is None
+        assert any("stopped: forgotten" in r.getMessage() for r in caplog.records)
+        # The turns the user forgot are not read again, and later ones are.
+        asked = len(stub.prompts)
+        again = await w.console.idle_encode.tick()
+        assert again is not None and (again.windows, again.stopped) == (0, "empty")
+        assert len(stub.prompts) == asked
+
+
+async def test_deleting_the_chat_during_a_window_keeps_it_out(tmp_path: Path) -> None:
+    async with world(tmp_path, sleep="off") as w:
+        sid = await chat(w, padded(2))
+        other = await chat(
+            w, padded(1), at=time.time() - LONG_AGO + HOUR, title="Other"
+        )
+
+        async def delete() -> None:
+            gone = await w.client.delete(f"/api/sessions/{sid}")
+            assert gone.status_code == 204, gone.text
+
+        run, _ = await forget_during_a_window(w, delete)
+        assert run is not None and run.stopped == "forgotten"
+        assert (run.windows, run.failures) == (0, 0)
+        assert w.console.idle_encode.failures == {}
+        index = w.console.memory.stores()[1]
+        assert await index.count_items() == 0 and await mark(w, sid) is None
+        # The chat after it is encoded at the next look.
+        again = await w.console.idle_encode.tick()
+        assert again is not None and again.windows == 1
+        assert await mark(w, other) == 1 and await index.count_items() == 1
 
 
 # ── Failures ──

@@ -17,7 +17,9 @@ this holds, and reads nothing otherwise:
 There is no spacing: a run goes on while a backlog exists, one window at a time, and
 asks the gates again before each window, so it stops when the person comes back (the
 window in flight ends first). The oldest chat goes first, by its first waiting turn, so
-a newer statement can replace an older one. A window that fails stops the run: it is
+a newer statement can replace an older one. A forget (everything, or this chat) that
+comes while a window is with the model keeps that window out: nothing is stored, no mark is
+set, and the run stops without counting a failure. A window that fails stops the run: it is
 tried again at the next look, never in a tight loop; after :data:`MAX_FAILURES`
 failures in a row a chat is skipped until the gateway restarts, and its turns stay
 recalled as turns. The run shares :attr:`~.idle_gates.IdleStep.busy` with the sleep, so
@@ -52,8 +54,10 @@ CHATS_SEEN: Final = 100_000
 @dataclass
 class EncodeRun:
     """What one run did. *stopped* says why it ended: ``empty`` (nothing waits),
-    ``failed`` (a window failed) or the gate that said no (``off``, ``hosted``,
-    ``store``, ``lock``, ``active``, ``tasks``, ``battery``, ``model``)."""
+    ``failed`` (a window failed), ``forgotten`` (the user forgot, or deleted the
+    chat, while a window was with the model: nothing from it was kept) or the gate
+    that said no (``off``, ``hosted``, ``store``, ``lock``, ``active``, ``tasks``,
+    ``battery``, ``model``)."""
 
     chats: set[str] = field(default_factory=set)
     windows: int = 0
@@ -110,7 +114,7 @@ class IdleEncode(IdleStep):
         run = EncodeRun()
         while not run.stopped:
             run.stopped = await self._window(run) or await self._reason()
-        if run.windows or run.failures:
+        if run.windows or run.failures or run.stopped == "forgotten":
             logger.info(
                 "Idle encode: %d chats, %d windows, %d items stored, %d refused, "
                 "%d failures, stopped: %s",
@@ -125,7 +129,8 @@ class IdleEncode(IdleStep):
 
     async def _window(self, run: EncodeRun) -> str:
         """Encode one window of the oldest chat that has one. ``""`` when it was
-        encoded, ``failed`` when it was not, and ``empty`` when no chat waits."""
+        encoded, ``failed`` when it was not, ``forgotten`` when a forget kept it out
+        (neither a failure nor a success), and ``empty`` when no chat waits."""
         memory = self.console.memory
         for session, waiting in await self._backlog():
             try:
@@ -141,6 +146,8 @@ class IdleEncode(IdleStep):
                 return self._failed(run, session.id)
             if out is None:  # nothing in this chat is worth reading: the next one
                 continue
+            if out.forgotten:  # nothing was stored; the next look starts afresh
+                return "forgotten"
             if out.encoding.failed_from == 0:  # the first window failed: no mark
                 return self._failed(run, session.id)
             self.failures.pop(session.id, None)

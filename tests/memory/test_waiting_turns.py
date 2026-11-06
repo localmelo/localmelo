@@ -120,18 +120,27 @@ async def test_what_the_index_would_not_hold_does_not_wait(
     assert await numbers(memory, store, sid) == [1, 5]
 
 
-async def test_the_list_stops_before_a_turn_that_runs_or_did_not_complete(
+async def test_a_turn_that_ended_without_completing_is_skipped_not_waited_for(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    first = await turn(store, None, "one")
+    sid = first.session_id
+    await turn(store, sid, "this one failed", status="failed")
+    await turn(store, sid, "this one was cancelled", status="cancelled")
+    await turn(store, sid, "out of steps", status="budget_exhausted")
+    await turn(store, sid, "five")
+    assert await numbers(memory, store, sid) == [1, 5]
+
+
+async def test_the_list_stops_before_a_turn_that_still_runs(
     memory: ChatMemory, store: SessionStore
 ) -> None:
     first = await turn(store, None, "one")
     sid = first.session_id
     await turn(store, sid, "two")
-    await turn(store, sid, "this one failed", status="failed")
-    await turn(store, sid, "four")
+    await turn(store, sid, "this one was cancelled", status="cancelled")
+    await turn(store, sid, "this one runs", status="running")
     assert await numbers(memory, store, sid) == [1, 2]
-    other = await turn(store, None, "five")
-    await turn(store, other.session_id, "this one runs", status="running")
-    assert await numbers(memory, store, other.session_id) == [1]
 
 
 async def test_a_turn_from_before_the_user_forgot_everything_does_not_wait(
@@ -268,3 +277,58 @@ async def test_the_turns_a_window_holds_are_the_ones_the_index_holds(
     (prompt,) = stub.prompts
     assert "User: I live in Utrecht. / melo: Utrecht is a canal city." in prompt
     assert time.strftime("%Y-%m-%d", time.localtime(started)) in prompt
+
+
+async def test_turns_from_before_a_forget_are_not_read_at_all(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    """A forget between :meth:`waiting_turns` and :meth:`encode_window` keeps the old turns out."""
+    sid = await padded_chat(store, 2)
+    stub = StubEncoder(reply)
+    memory.chat_provider = lambda: stub  # type: ignore[method-assign]
+    waiting = await memory.waiting_turns(store, sid)
+    await memory.forget_all()
+    assert await memory.encode_window(store, sid, "Chat", waiting) is None
+    assert stub.prompts == []
+    assert await memory.stores()[1].encoded_turn(sid) is None
+
+
+async def test_a_chat_that_is_gone_is_not_read(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    sid = await padded_chat(store, 2)
+    stub = StubEncoder(reply)
+    memory.chat_provider = lambda: stub  # type: ignore[method-assign]
+    waiting = await memory.waiting_turns(store, sid)
+    assert await store.delete_session(sid)
+    assert await memory.encode_window(store, sid, "Chat", waiting) is None
+    assert stub.prompts == []
+
+
+async def test_a_guard_that_says_no_keeps_the_window_out(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    sid = await padded_chat(store, 2)
+    stub = StubEncoder(reply)
+    memory.chat_provider = lambda: stub  # type: ignore[method-assign]
+    _, index = memory.stores()
+    seen: list[bool] = []
+
+    async def no() -> bool:
+        seen.append(memory._lock.locked())  # a forget takes this lock: so is it held
+        return False
+
+    turns = [
+        hippo_encode.Turn(n, 1000.0 * n, 1000.0 * n + 5, f"turn {n}", "Noted.")
+        for n in (1, 2)
+    ]
+    out = await memory.compress_chat(sid, "Chat", turns, guard=no)
+    assert out.forgotten and out.routed == [] and seen == [True]
+    assert await index.count_items() == 0 and await index.encoded_turn(sid) is None
+
+    # With a guard that agrees, or none, the same call stores and marks as ever.
+    async def yes() -> bool:
+        return True
+
+    out = await memory.compress_chat(sid, "Chat", turns, guard=yes)
+    assert not out.forgotten and await index.encoded_turn(sid) == 2
