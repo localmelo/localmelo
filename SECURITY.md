@@ -31,6 +31,40 @@ those tools can do.
   the Python API unless an agent sets the options below. The interactive UI
   (bare `melo`) keeps the file tools inside its workspace, the current
   folder or `--workspace DIR`.
+- **A PDF is parsed in a child process; its limits are not a sandbox.**
+  `file_read` and `web_fetch` read a PDF (a file or a download that starts with
+  `%PDF-`) with pypdfium2, a native library that parses untrusted bytes. The
+  bytes go to a child Python (`python -I`, a script run by path, so melo's own
+  modules are not loaded) on its standard input and nothing else goes with
+  them: no path, no descriptor, no secret in the environment (only the
+  variables `child_env` names). A PDF that makes the library fail or exit costs
+  the child, not the gateway, and the model gets one plain line. The child has
+  a process group of its own that a cancellation, its 20-second time limit or
+  its memory limit kills, and it ends itself after 25 seconds of CPU or of wall
+  clock (an alarm in the child, so also when the process that started it is
+  gone). The memory limit is a sampled one: melo reads the child's resident
+  memory every 0.25 seconds and stops it over 1 GB. That stops ordinary runaway
+  memory and promises no more: a burst of allocation between two looks can pass
+  the limit before it is seen, memory not yet touched does not count, only the
+  child's own process is counted, a page's text is whole in the child before
+  the character limit cuts it, and there is no address-space limit on macOS. If
+  the memory cannot be read three looks in a row while the child runs (no
+  `ps`, no answer in time), melo stops the child rather than leave it
+  unwatched. One PDF is read at a time in a process, so the limit holds for all
+  PDF reads together. The child's answer is not trusted: it is read up to about
+  4 MB for text and 12 MB for pictures and checked before any of it is used
+  (types, counts, sizes, the text cleaned again, and for each picture the
+  whole PNG structure with its checksums, never decoded in melo). A file over
+  50 MB is never sent (`web_fetch` keeps its 2 MB download limit), and only the
+  first 300 pages and 1,000,000 characters are read. The child is not
+  sandboxed: it can read what you can, and the library is not memory-safe, so a
+  PDF that exploits it runs with your permissions. `uv` never builds the
+  library from source (`no-build-package`) and the app installs it from hashed
+  wheels; a plain `pip install` of the source tree is not covered by that
+  setting. The path checks of `file_read` and the site gate of `web_fetch` run
+  before any byte is parsed. A PDF's words and pictures are untrusted like any
+  file's or page's: `web_fetch` frames and cleans the text as it does a page's,
+  and the note gate treats it as a page.
 - **Approvals apply only with a policy.** In the Python API, an approval
   policy passed to `Agent.run_task` decides whether each call of
   `shell_exec`, `python_exec`, `file_write` and other tools marked as

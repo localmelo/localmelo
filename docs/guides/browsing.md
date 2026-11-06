@@ -15,7 +15,7 @@ Let melo read web pages, and click, type and choose on them, on a Mac, from the 
 Every chat can read a public page without Safari, with the `web_fetch` tool. It is **on by default** and needs no setup.
 
 - Ask about a website or paste its address: melo reads the page as text (title, headings, main text and links). Plain text and JSON come back as they are.
-- It only reads: one request, no cookies, no sign-ins, no forms. PDFs and other files are refused for now.
+- It only reads: one request, no cookies, no sign-ins, no forms. A PDF is read as text, page by page, and a page with no text (a scan) comes as a picture when your model reads pictures; other files are refused.
 - It never reaches this Mac or your local network, except a server on this Mac that you wrote as `localhost:3000`, `127.0.0.1:3000` or `[::1]:3000` in your own message (never melo's own servers). `localhost`, private and link-local addresses, `.local` names, this Mac's own addresses (also a public IPv6 one) and the network around them, and a redirect or DNS answer that points to one of them are refused.
 - A site your own recent messages name reads at once: that exact site, with or without `www.`. A site under it (`docs.example.com` when you named `example.com`) and any other site ask once per chat ("Let melo read example.com?", with the full address), and one "allow for this chat" covers the browser too. A file name such as `README.md` does not name a site.
 - A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in Safari instead.

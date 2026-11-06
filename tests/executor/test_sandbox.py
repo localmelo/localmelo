@@ -26,7 +26,7 @@ import pytest
 from localmelo.melo.contracts import own_gateway
 from localmelo.melo.contracts.own_gateway import OwnGateway
 from localmelo.melo.executor import sandbox
-from localmelo.melo.executor.builtins import ToolFunction, builtin_callables
+from localmelo.melo.executor.builtins import builtin_callables
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.executor.sandbox import (
@@ -42,6 +42,7 @@ from localmelo.melo.executor.sandbox import (
     quote,
     user_temp_dir,
 )
+from localmelo.tests.executor.text_tool import TextTool, text_tool
 
 HOME = "/Users/someone"
 
@@ -325,12 +326,16 @@ def _real(root: Path, env: dict[str, str]) -> WriteConfinement:
 
 def _tools(
     root: Path, env: dict[str, str], **kwargs: float
-) -> tuple[WriteConfinement, ToolFunction, ToolFunction]:
+) -> tuple[WriteConfinement, TextTool, TextTool]:
     confinement = _real(root, env)
     tools = builtin_callables(
         str(root), tool_env=env, confinement=confinement, **kwargs
     )
-    return confinement, tools["shell_exec"][0], tools["python_exec"][0]
+    return (
+        confinement,
+        text_tool(tools["shell_exec"][0]),
+        text_tool(tools["python_exec"][0]),
+    )
 
 
 class TestRealUserTemp:
@@ -648,7 +653,8 @@ class TestRealGuard:
             tools = builtin_callables(
                 str(ws), tool_env={"HOME": str(home)}, confinement=c
             )
-            shell, python = tools["shell_exec"][0], tools["python_exec"][0]
+            shell = text_tool(tools["shell_exec"][0])
+            python = text_tool(tools["python_exec"][0])
             found = await shell(
                 "find ~/.cache -name token -exec cat {} \\; ; cat ~/.cache/other.txt"
             )
@@ -708,9 +714,9 @@ async def test_an_auto_call_cannot_ask_macos_to_open_anything(
         pytest.skip(str(exc))
     assert guarded is not None and plain is not None
     for c, status in ((plain, "-10814"), (guarded, "-54")):
-        python = builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][
-            0
-        ]
+        python = text_tool(
+            builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        )
         assert (await python(_LS_PROBE)).strip() == status
 
 
@@ -735,9 +741,9 @@ async def test_an_auto_call_cannot_reach_a_container_engine_s_socket(
         except ConfinementError as exc:
             pytest.skip(str(exc))
         assert c is not None
-        python = builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][
-            0
-        ]
+        python = text_tool(
+            builtin_callables(str(ws), tool_env=env, confinement=c)["python_exec"][0]
+        )
         code = (
             "import socket\n"
             "for name in ('docker-test.sock', 'other.sock'):\n"

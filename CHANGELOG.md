@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- melo reads PDFs. `file_read` and `web_fetch` open a PDF by its first bytes (`%PDF-`), whatever its name or type says,
+  and give its pages in order as text, each under a `--- page N of M ---` line, with each row kept whole (a place and a
+  date stay on the line of their school or employer). A page with no text (a scan) is a picture in the result when the
+  model reads pictures, at most 3 pictures a result, and a note names the pages it left out and where to read on
+  (`start_line` for a file, `part` for a web page); a model that is not sent pictures is told which pages it could not
+  read. The PDF is parsed in a child process with limits (50 MB a file, 300 pages, 1,000,000 characters, 20 seconds, 1 GB of memory),
+  so a crash of the PDF library ends the child and not the gateway (the memory limit is a sample, not a sandbox), and a password-protected, damaged or too large file gives one plain
+  line. A PDF on the web goes through the same fetcher and its 2 MB download limit, whatever readable type the server gives it. New core dependency: pypdfium2
+  (#566).
 - melo finishes web forms itself. `browser_find` searches the whole page and says how many elements match when it cannot
   show them all. Each chat gets a private work folder (`$TMPDIR/localmelo/<chat id>/`, removed with the chat) where a
   page's downloads land, named in the step, and new `browser_attach` gives a page's upload field a file with no file

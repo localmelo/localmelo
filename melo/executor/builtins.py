@@ -8,10 +8,10 @@ import contextlib
 import contextvars
 import errno
 import functools
+import io
 import itertools
 import os
 import re
-import signal
 import stat
 import subprocess
 import sys
@@ -28,19 +28,25 @@ from localmelo.melo.contracts.folders import (
     open_checked,
 )
 from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED
+from localmelo.melo.executor import pdf
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.git_status import GIT_STATUS_DEF, run_git_status
+from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.executor.process_gate import (
     PROCESS_RECORD,
     UnsupportedProcessGateError,
     gate_supported,
     gated_exec,
 )
+from localmelo.melo.executor.process_gate import (
+    kill_process_group as _kill_process_group,
+)
 from localmelo.melo.executor.sandbox import Confinement
 from localmelo.melo.schema import ToolDef
 
-# A built-in tool's callable.
-ToolFunction = Callable[..., Coroutine[Any, Any, str]]
+# A built-in tool's callable: plain text, or text with pictures (file_read of a
+# PDF with pages that have no text).
+ToolFunction = Callable[..., Coroutine[Any, Any, str | ToolOutput]]
 
 # Every built-in: its definition and its function. The function takes the
 # workspace root (None without a workspace) before the tool's own parameters,
@@ -72,7 +78,8 @@ SHELL_TIMEOUT_S = 30.0
 
 # Seconds the executor's limit of the rooted shell_exec lies above the
 # shell's own, more than killing and reaping its process group can take
-# (_REAP_TIMEOUT_S), so the shell's own limit fires first and names itself.
+# (REAP_TIMEOUT_S in process_gate), so the shell's own limit fires first and
+# names itself.
 _SHELL_TIMEOUT_MARGIN_S = 30.0
 
 # Characters of output that the error of a failed python_exec keeps.
@@ -90,9 +97,6 @@ _PYTHON_ERROR_TAIL = 4_000
 # the code runs.
 PYTHON_CPU_LIMIT_S = 3_600
 PYTHON_NOFILE_LIMIT = 1_024
-
-# Seconds to wait for a killed shell_exec command to be reaped.
-_REAP_TIMEOUT_S = 5.0
 
 # Bytes the file_read of a workspace reads at most. As UTF-8 they always
 # hold the MAX_OUTPUT_LEN characters that the executor's result check keeps.
@@ -288,18 +292,6 @@ def _output_text(stdout: bytes, stderr: bytes) -> str:
     return f"{out}\n{err}".strip() if err else out.strip()
 
 
-async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
-    """SIGKILL the process group *proc* leads, then reap *proc*."""
-    # ProcessLookupError: the group is gone already. PermissionError: a
-    # member switched users. Neither may replace the error being handled.
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(proc.pid, signal.SIGKILL)
-    # Bounded: before Python 3.13, wait() also waits for the output pipes
-    # to close, and a process that left the group could hold them open.
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(proc.wait(), timeout=_REAP_TIMEOUT_S)
-
-
 @_builtin(
     ToolDef(
         name="file_read",
@@ -325,7 +317,7 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
             },
             "required": ["path"],
         },
-        semantic_tags=["file", "read", "open", "content", "text"],
+        semantic_tags=["file", "read", "open", "content", "text", "pdf"],
     )
 )
 async def _file_read(
@@ -333,27 +325,72 @@ async def _file_read(
     path: str,
     start_line: int | None = None,
     end_line: int | None = None,
-) -> str:
+) -> str | ToolOutput:
     target = _in_root(root, path)
     start = _line_range(start_line, end_line)
     loop = asyncio.get_running_loop()
     checked = checked_for(target)
     if checked is None and root is None:
         # No workspace and no check by the executor: the path as given.
-        text = await loop.run_in_executor(None, lambda: open(path).read())
-        if start == 1 and end_line is None and len(text) <= MAX_OUTPUT_LEN:
-            return text
-        lines = _split_lines(text)
+        found = await loop.run_in_executor(None, _read_as_given, path)
+        if isinstance(found, _PdfFile):
+            return await _read_pdf(found, start, end_line)
+        if start == 1 and end_line is None and len(found) <= MAX_OUTPUT_LEN:
+            return found
+        lines = _split_lines(found)
         return _view_lines(
             _select(lines, start, end_line),
             start,
             len(lines),
-            size=len(text.encode()),
+            size=len(found.encode()),
         )
     expect = None if checked is None else checked.path
     outside = checked is not None and checked.outside
-    return await loop.run_in_executor(
+    read = await loop.run_in_executor(
         None, _read_regular_file, target, start, end_line, expect, outside
+    )
+    if isinstance(read, _PdfFile):
+        return await _read_pdf(read, start, end_line)
+    return read
+
+
+class _PdfFile(bytes):
+    """The bytes of a file that starts like a PDF, read whole (see :func:`_read_pdf`)."""
+
+
+def _read_as_given(path: str) -> str | _PdfFile:
+    """The text of *path* as given, or its bytes when it is a PDF; opened once."""
+    with open(path, "rb") as source:
+        head = source.read(len(pdf.MAGIC))
+        if pdf.is_pdf(head):
+            return _PdfFile(pdf.read_file(source, head))
+        # Decoded as open(path).read() does: the locale's encoding, universal newlines.
+        return io.TextIOWrapper(io.BytesIO(head + source.read())).read()
+
+
+async def _read_pdf(data: bytes, start: int, end: int | None) -> str | ToolOutput:
+    """What file_read shows of the PDF *data*: its text by line, and the pictures of pages with none.
+
+    The text is every page under a page line (:attr:`pdf.PdfText.text`), cut and
+    numbered by line as any file's. A page with no text that the lines shown
+    hold has its picture in the result, as many as one result carries.
+    """
+    doc = await pdf.read_text(data)
+    lines = _split_lines(doc.text)
+    view = _view_lines(
+        _select(lines, start, end),
+        start,
+        len(lines),
+        size=len(doc.text.encode()),
+        reserve=pdf.NOTE_ROOM,
+    )
+    shown, note, images = await pdf.with_pictures(
+        data, doc, view, lambda page: f"start_line={doc.line_of(page)}"
+    )
+    if not note:
+        return shown
+    return ToolOutput(
+        text=shown + ("" if shown.endswith("\n") else "\n") + note, images=images
     )
 
 
@@ -877,7 +914,7 @@ def _read_regular_file(
     end: int | None = None,
     expect: str | None = None,
     outside: bool = False,
-) -> str:
+) -> str | _PdfFile:
     """The text of the regular file *path*, cut as :func:`builtin_callables` says.
 
     *start* and *end* are the first and last line wanted (see
@@ -885,7 +922,9 @@ def _read_regular_file(
     checked path (:func:`~localmelo.melo.contracts.folders.open_checked`).
     With *outside* (a path outside the workspace a person allowed), a file
     with another name (a hard link) is refused: that name may be a place
-    melo never opens.
+    melo never opens. A file that starts like a PDF comes back as its bytes
+    (a :class:`_PdfFile`), after the same checks, and is read by
+    :func:`_read_pdf`.
     """
     limit = MAX_FILE_READ_BYTES
     fd = open_checked(path, os.O_RDONLY | os.O_NONBLOCK, expect)
@@ -893,6 +932,9 @@ def _read_regular_file(
         _require_regular_file(fd, path)
         if outside:
             _require_one_name(fd, path)
+        if pdf.is_pdf(os.pread(fd, len(pdf.MAGIC), 0)):
+            with os.fdopen(fd, "rb", closefd=False) as whole:
+                return _PdfFile(pdf.read_file(whole))
         # The file is read line by line: the lines wanted are kept, up to
         # the byte cap, and the others are only counted (up to a scan cap).
         picked: list[bytes] = []
@@ -962,6 +1004,7 @@ def _view_lines(
     exact: bool = True,
     size: int = 0,
     byte_cut: bool = False,
+    reserve: int = 0,
 ) -> str:
     """What file_read shows of *lines*, the lines wanted from number *first*.
 
@@ -971,18 +1014,20 @@ def _view_lines(
     file has, which lines this shows and where to go on (``start_line``).
     Only whole lines are kept, so the line to go on from is exact; a first
     line that alone is too long is cut. *byte_cut* says the byte cap ended
-    the last line early.
+    the last line early. The caller adds up to *reserve* characters of its own
+    after what this returns, so the whole stays within MAX_OUTPUT_LEN.
     """
     text = "".join(lines)
     last = first + len(lines) - 1
     whole_file = first == 1 and exact and not byte_cut and last == total
-    if whole_file and len(text) <= MAX_OUTPUT_LEN:
+    room = MAX_OUTPUT_LEN - reserve
+    if whole_file and len(text) <= room:
         return text
     whole = lines[:-1] if byte_cut and not text.endswith("\n") else lines
     kept: list[str] = []
     used = 0
     for line in whole:
-        if used + len(line) > MAX_OUTPUT_LEN - _NOTE_ROOM:
+        if used + len(line) > room - _NOTE_ROOM:
             break
         kept.append(line)
         used += len(line)
@@ -997,7 +1042,7 @@ def _view_lines(
                 f"\n... [truncated: the file has {count} lines; line {first} is "
                 f"too long, showing its start; read more with start_line={first + 1}]"
             )
-        return lines[0][: MAX_OUTPUT_LEN - len(note)] + note
+        return lines[0][: room - len(note)] + note
     shown = first + len(kept) - 1
     cut = byte_cut or len(kept) < len(lines)
     note = (
