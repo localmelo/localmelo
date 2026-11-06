@@ -608,12 +608,14 @@ ALLOW_ONCE_S: Final = 30 * 60
 ALLOWED_ONCE: Final = "allowed once"
 
 # Auto mode (#465): the categories of a stopped step a person may allow from a
-# card: those the user's words can allow, a step melo could not check, and the
-# kinds only a person allows (paying, an account's settings). A step with any
-# other category (credentials, system settings, an app driven by a script,
-# something that runs later, code from the internet, a failed review, localmelo
-# itself) stays blocked, as before.
-ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque"} | CARD_ONLY
+# card: those the user's words can allow, a step melo could not check, a step
+# whose review failed (it timed out, could not be read or ran out of room: the
+# person decides it instead of the step stopping without a word), and the kinds
+# only a person allows (paying, an account's settings). A step with any other
+# category (credentials, system settings, an app driven by a script, something
+# that runs later, code from the internet, localmelo itself) stays blocked, as
+# before.
+ASKS_IN_AUTO: Final = WORDS_CAN_ALLOW | {"opaque", "unreviewed"} | CARD_ONLY
 
 
 def asks_in_auto(review: ActionReview | None) -> bool:

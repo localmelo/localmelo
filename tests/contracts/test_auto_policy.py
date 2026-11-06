@@ -292,6 +292,8 @@ BEYOND = ActionReview(
         ActionReview("high", ("opaque",), ("Runs code built at run time (eval).",)),
         ActionReview("high", ("delete",), ("Deletes ~/notes.",)),
         ActionReview("high", ("send_out",), ("Sends data to a server.",)),
+        # A review that failed: the person decides, the step does not stop silently.
+        ActionReview("high", ("unreviewed",), ("melo could not review this call.",)),
     ],
 )
 async def test_a_stop_a_person_may_allow_asks_instead_of_blocking(
@@ -315,7 +317,6 @@ async def test_a_stop_a_person_may_allow_asks_instead_of_blocking(
         ("app_control",),
         ("persistence",),
         ("remote_code",),
-        ("unreviewed",),
         ("self",),
         ("install", "system"),
     ],

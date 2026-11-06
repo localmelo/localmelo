@@ -17,9 +17,14 @@ When the model is asked:
   of the same kind or names something the call acts on.
 
 It is never asked about a routine call or a ``self`` one, nor when a person
-will be asked anyway. A review that times out, fails or cannot be read, one
-past the turn's :data:`~localmelo.melo.checker.review.model.REVIEWS_PER_TURN`,
-and a call too long to review all leave the call high (fail closed).
+will be asked anyway. A request that times out, fails or cannot be read is
+sent once more; a review that still has no answer, one past the turn's
+:data:`~localmelo.melo.checker.review.model.REVIEWS_PER_TURN` (counted for the
+steps the rules could not judge only; a high-impact step the model only
+checks against the user's words has a count of its own), and a call too long
+to review all leave the call high with the category ``unreviewed``. Auto mode
+shows a person that step on a card instead of blocking it without a word
+(``ASKS_IN_AUTO``); with nobody to ask it stays blocked (fail closed).
 
 The goal decides (#465): an undecided call the model finds on the goal of the
 chat, with no high-impact category, runs; the user's words only ever add to
@@ -48,6 +53,7 @@ from localmelo.melo.checker.review.model import (
     MAX_ACTION_CHARS,
     MAX_REQUEST_CHARS,
     REVIEW_TIMEOUT_S,
+    REVIEW_TRIES,
     REVIEWS_PER_TURN,
     SYSTEM_PROMPT,
     ReviewInputs,
@@ -203,7 +209,10 @@ class _Block:
 class RunReviews:
     """One run's reviews: what ``run.finished`` reports, and the stop rule's state."""
 
+    # Reviews of steps the rules could not judge, of high-impact steps the
+    # rules judged (the model reads only the user's words), and of runners.
     used: int = 0
+    consent_used: int = 0
     runner_used: int = 0
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     blocks: list[tuple[str, str]] = field(default_factory=list)
@@ -551,7 +560,8 @@ class StepReviewer:
             self._shared_used[shared] = self._shared_used.get(shared, 0) + 1
             return kept[0]
         runner = bool(review.changed)
-        used = run.runner_used if runner else run.used
+        goal = purpose == "undecided"
+        used = run.runner_used if runner else run.used if goal else run.consent_used
         if len(action) > MAX_ACTION_CHARS:
             answer = ModelAnswer(error="the call is too long to review")
         elif used >= (RUNNER_REVIEWS_PER_TURN if runner else REVIEWS_PER_TURN):
@@ -559,10 +569,11 @@ class StepReviewer:
         else:
             if runner:
                 run.runner_used += 1
-            else:
+            elif goal:
                 run.used += 1
+            else:
+                run.consent_used += 1
             run.counts["model"] += 1
-            goal = purpose == "undecided"
             inputs = ReviewInputs(
                 workspace=workspace or "",
                 requests=self.requests,
@@ -599,13 +610,27 @@ class StepReviewer:
             self._cache.popitem(last=False)
 
     async def _ask(self, inputs: ReviewInputs) -> ModelAnswer:
-        """One review request; any failure is an answer with an ``error``."""
+        """One review: up to :data:`REVIEW_TRIES` requests; any failure is an answer with an ``error``.
+
+        A request that timed out, failed or came back unreadable is sent
+        once more (a busy local model often answers the second time); the
+        answer of the last one stands. ``ms`` spans all of them.
+        """
         messages = [
             Message(role="system", content=SYSTEM_PROMPT),
             Message(role="user", content=user_message(inputs)),
         ]
         started = self._clock()
+        answer = ModelAnswer(error="the review did not run")
+        for _ in range(REVIEW_TRIES):
+            answer = await self._request_once(messages, started)
+            if not answer.error:
+                break
+        return answer
 
+    async def _request_once(
+        self, messages: list[Message], started: float
+    ) -> ModelAnswer:
         def ms() -> int:
             return int((self._clock() - started) * 1000)
 

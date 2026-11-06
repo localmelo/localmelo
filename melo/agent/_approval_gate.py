@@ -17,7 +17,11 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.melo.agent._step_review import StepReviewer, plain_page_key
+from localmelo.melo.agent._step_review import (
+    StepReviewer,
+    holds_secret,
+    plain_page_key,
+)
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
@@ -851,6 +855,18 @@ class _ToolAsk:
                 elif reading and reviewer.names_host(site):
                     review = ActionReview(
                         "routine", (), (f"Opens {site}, which you named.",)
+                    )
+                elif (
+                    typing
+                    and reviewer.names_host(site)
+                    and not holds_secret(arguments, preview)
+                ):
+                    # The rules judge it: text with no secret in it, typed on a
+                    # site the person wrote themselves. Nothing leaves the page
+                    # until a form is sent, and that is reviewed on its own, so
+                    # a long form does not use up the turn's reviews (#547).
+                    review = ActionReview(
+                        "routine", (), (f"Types on {site}, which you named.",)
                     )
                 else:
                     doubt = _site_doubt(access, site, preview)
