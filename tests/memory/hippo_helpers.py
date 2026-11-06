@@ -13,6 +13,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.memory import hippo_encode
 from localmelo.support.memory.hippo_encode import Turn
+from localmelo.support.memory.index import ConversationIndex
 
 Reply = Callable[[str], str]
 
@@ -98,6 +99,32 @@ def turn(
     minutes unless *when* says."""
     start = when if when is not None else at("2023-05-20", "14:02") + 60 * n
     return Turn(n + 1, start, start + 5, typed, answer)
+
+
+async def relate(
+    index: ConversationIndex,
+    *,
+    replace: tuple[int, int] | None = None,
+    link: tuple[int, int] | None = None,
+    conflict: bool = False,
+) -> None:
+    """Change how items already in *index* relate, in one transaction (it rolls back
+    and raises when a step fails), as ``add_item`` does for a new item's.
+
+    *replace* is ``(old, new)``: *old* is marked replaced by *new*, and any conflict
+    it was in ends. *link* is ``(first, second)``: the two are linked both ways as
+    related, or, with *conflict*, in conflict.
+    """
+    conn = await index._ready()
+    try:
+        if replace is not None:
+            await index._replace(conn, *replace)
+        if link is not None:
+            await index._link(conn, *link, conflict=conflict)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
 
 
 def numbers_in(prompt: str) -> list[int]:

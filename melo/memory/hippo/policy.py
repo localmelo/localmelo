@@ -1,7 +1,7 @@
 """R6-lite's admission policy: classify a fact, compare it, pick one action.
 
-The policy is pure: it takes one item's text, its source and the active
-entries of its kind, and returns one decision. It makes no model call and
+The policy is pure: it takes one item's text, its kind and the active
+entries of that kind, and returns one decision. It makes no model call and
 touches no store. The five actions are NEW, UPDATE, RELATED, CONFLICT and
 IGNORE; the thresholds are v1 and are set on synthetic fixtures.
 """
@@ -493,11 +493,9 @@ def decide(
     text: str,
     *,
     kind: str,
-    source: str,
     provenance: Mapping[str, Any],
     active: Sequence[Any],
     embedding: Sequence[float] | None = None,
-    admitted_by: str = "",
 ) -> PolicyDecision:
     """Compare one item with the active entries of *kind* and pick an action."""
     folded = normalise(text)
@@ -649,20 +647,16 @@ class HippoPolicy:
         text: str,
         *,
         kind: str,
-        source: str,
         provenance: Mapping[str, Any],
         active: Sequence[Any],
         embedding: Sequence[float] | None = None,
-        admitted_by: str = "",
     ) -> PolicyDecision:
         return decide(
             text,
             kind=kind,
-            source=source,
             provenance=provenance,
             active=active,
             embedding=embedding,
-            admitted_by=admitted_by,
         )
 
 

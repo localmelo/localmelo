@@ -28,6 +28,7 @@ from localmelo.support.memory.index import (
     MemoryItem,
     document_chunks,
 )
+from localmelo.tests.memory.hippo_helpers import relate
 
 MODEL = "fixed-embed"
 
@@ -158,8 +159,8 @@ async def test_active_items_are_listed_by_kind_and_leave_the_replaced_and_confli
     d = await index.add_item(make("Semantic item.", kind="semantic"))
     assert [i.id for i in await index.active_items()] == [a, b, c, d]
     assert [i.id for i in await index.active_items("profile")] == [a, b]
-    await index.mark_replaced(a, b)
-    await index.link_items(c, d, conflict=True)
+    await relate(index, replace=(a, b))
+    await relate(index, link=(c, d), conflict=True)
     assert [i.id for i in await index.active_items()] == [b]
     assert (await index.active_items("episodic")) == []
 
@@ -170,14 +171,14 @@ async def test_links_are_both_ways_and_a_replaced_item_keeps_its_replacer(
     a = await index.add_item(make("First item text."))
     b = await index.add_item(make("Second item text."))
     c = await index.add_item(make("Third item text."))
-    await index.link_items(a, b, conflict=False)
-    await index.link_items(a, b, conflict=False)  # twice is once
-    await index.mark_replaced(c, a)
+    await relate(index, link=(a, b))
+    await relate(index, link=(a, b))  # twice is once
+    await relate(index, replace=(c, a))
     first, second, third = await index.fetch_items([a, b, c])
     assert (first.related, second.related, third.related) == ((b,), (a,), ())
     assert (first.status, second.status) == ("active", "active")
     assert (third.status, third.replaced_by) == ("replaced", a)
-    await index.link_items(a, c, conflict=True)  # a conflict with a replaced one
+    await relate(index, link=(a, c), conflict=True)  # a conflict with a replaced one
     first, _, third = await index.fetch_items([a, b, c])
     assert first.conflicts == (c,) and first.status == "conflict"
     assert third.status == "replaced"
@@ -188,11 +189,11 @@ async def test_a_conflict_marks_both_and_replacing_one_ends_it(
 ) -> None:
     a = await index.add_item(make("The user said they like spicy food."))
     b = await index.add_item(make("The user said they never like spicy food."))
-    await index.link_items(b, a, conflict=True)
+    await relate(index, link=(b, a), conflict=True)
     first, second = await index.fetch_items([a, b])
     assert (first.status, first.conflicts) == ("conflict", (b,))
     assert (second.status, second.conflicts) == ("conflict", (a,))
-    await index.mark_replaced(a, b)
+    await relate(index, replace=(a, b))
     first, second = await index.fetch_items([a, b])
     assert (first.status, first.conflicts, first.replaced_by) == ("replaced", (), b)
     assert (second.status, second.conflicts) == ("active", ())
@@ -262,16 +263,16 @@ async def test_deleting_an_item_makes_what_it_replaced_current_and_ends_a_confli
     new = await index.add_item(
         make("The user said they now live in Utrecht.", session="s2")
     )
-    await index.mark_replaced(old, new)
+    await relate(index, replace=(old, new))
     liked = await index.add_item(
         make("The user said they like spicy food.", session="s1")
     )
     never = await index.add_item(
         make("The user said they never like spicy food.", session="s2")
     )
-    await index.link_items(liked, never, conflict=True)
+    await relate(index, link=(liked, never), conflict=True)
     related = await index.add_item(make("A related item text here.", session="s2"))
-    await index.link_items(liked, related, conflict=False)
+    await relate(index, link=(liked, related))
     await index.delete("s2")
     survivors = {i.id: i for i in await index.fetch_items([old, new, liked, never])}
     assert set(survivors) == {old, liked}
@@ -288,8 +289,8 @@ async def test_deleting_the_middle_of_a_replacement_chain_leaves_the_end_replaci
     a = await index.add_item(make("The user lived in Pittsburgh.", turns=(1,), at=1.0))
     b = await index.add_item(make("The user lived in Utrecht.", turns=(2, 3), at=2.0))
     c = await index.add_item(make("The user lives in Lisbon.", turns=(4,), at=3.0))
-    await index.mark_replaced(a, b)
-    await index.mark_replaced(b, c)
+    await relate(index, replace=(a, b))
+    await relate(index, replace=(b, c))
     await index.delete("s1", 3)  # one of the two turns B rests on: B goes whole
     first, last = await index.fetch_items([a, c])
     assert [i.id for i in await index.fetch_items([a, b, c])] == [a, c]
@@ -350,12 +351,12 @@ async def test_deleting_a_replaced_or_conflicting_item_undoes_its_links_and_an_u
 ) -> None:
     old = await index.add_item(make("The user said they live in Pittsburgh."))
     new = await index.add_item(make("The user said they now live in Utrecht."))
-    await index.mark_replaced(old, new)
+    await relate(index, replace=(old, new))
     liked = await index.add_item(make("The user said they like spicy food."))
     never = await index.add_item(make("The user said they never like spicy food."))
-    await index.link_items(liked, never, conflict=True)
+    await relate(index, link=(liked, never), conflict=True)
     near = await index.add_item(make("The user said they cook at home."))
-    await index.link_items(old, near, conflict=False)
+    await relate(index, link=(old, near))
 
     async def read(
         *ids: int,
@@ -397,7 +398,7 @@ async def test_deleting_the_item_that_replaced_another_leaves_the_older_one_repl
     one true again, so it stays history (never current, never listed as active)."""
     old = await index.add_item(make("The user said they live in Pittsburgh."))
     new = await index.add_item(make("The user said they now live in Utrecht."))
-    await index.mark_replaced(old, new)
+    await relate(index, replace=(old, new))
     gone = await index.delete_item(new)
     (older,) = await index.fetch_items([old])
     assert (older.status, older.replaced_by) == ("replaced", new)
@@ -418,8 +419,8 @@ async def test_deleting_the_middle_of_a_chain_by_hand_keeps_the_order_and_an_und
     a = await index.add_item(make("The user lived in Pittsburgh.", at=1.0))
     b = await index.add_item(make("The user lived in Utrecht.", at=2.0))
     c = await index.add_item(make("The user lives in Lisbon.", at=3.0))
-    await index.mark_replaced(a, b)
-    await index.mark_replaced(b, c)
+    await relate(index, replace=(a, b))
+    await relate(index, replace=(b, c))
     gone = await index.delete_item(b)
     first, last = await index.fetch_items([a, c])
     assert (first.status, first.replaced_by) == ("replaced", c), "still older than C"
@@ -438,7 +439,7 @@ async def test_the_list_holds_every_status_newest_first_without_vectors(
     a = await index.add_item(make("Oldest item.", at=10.0, vector=(0.5, 0.5)))
     b = await index.add_item(make("Newest item.", at=30.0))
     c = await index.add_item(make("Middle item.", at=20.0))
-    await index.mark_replaced(a, b)
+    await relate(index, replace=(a, b))
     listed = await index.all_items()
     assert [i.id for i in listed] == [b, c, a]
     assert [i.status for i in listed] == ["active", "active", "replaced"]
@@ -475,7 +476,7 @@ async def test_a_turn_is_hidden_from_recall_only_while_an_item_cites_it(
     # as a turn.
     old = await index.add_item(make("Old fact.", turns=(2,)))
     new = await index.add_item(make("New fact.", turns=(3,)))
-    await index.mark_replaced(old, new)
+    await relate(index, replace=(old, new))
     assert await uncited(index) == {("s1", -1), ("s2", 1), ("s2", 2)}
     # A mark says a turn was read, not that an item stands for it.
     await index.mark_encoded("s2", 2)
@@ -818,7 +819,6 @@ async def test_the_pool_gives_the_decision_the_policy_gives_for_all_of_them(
     expected = decide(
         new.text,
         kind="semantic",
-        source="ingest",
         provenance={"candidate_id": "new", "item_index": 99},
         active=[_Entry(i.id, i.text, i.created_at) for i in everything],
     )

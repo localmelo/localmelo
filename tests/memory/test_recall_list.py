@@ -31,6 +31,7 @@ from localmelo.support.memory.recall import (
     OPEN_CHARS,
     Item,
     day,
+    gate_terms,
     listed_title,
     meaning_of,
     pick,
@@ -494,6 +495,33 @@ def test_titles_follow_chinese_and_japanese_queries() -> None:
     title = listed_title(run, "量子力学")
     assert "量子力学" in title and title.startswith("…") and len(title) <= 80
     assert title.endswith("量子力学。")
+
+
+def test_a_japanese_particle_is_no_term_but_a_word_that_holds_one_is() -> None:
+    for particle in "のはがをにへでともかねよ":
+        assert gate_terms(particle) == set()
+    for particle in ("から", "まで", "より"):
+        assert particle not in gate_terms(particle)
+    # A word that holds a particle's character keeps its terms: the pairs, and the
+    # characters that are not particles.
+    assert gate_terms("はな") == {"はな", "な"}
+    assert {"かば", "ばん"} <= gate_terms("かばん")
+    assert gate_terms("もの") == {"もの"}  # a word made of two particle characters
+    assert gate_terms("私の本を") == {"私", "本", "私の", "の本", "本を"}
+    # English and Chinese are as they were.
+    assert gate_terms("What is my sister's name?") == {"name", "s", "sister"}
+    assert gate_terms("我的组会是哪天") == {"组", "会", "天", "组会"}
+
+
+def test_a_title_ignores_the_japanese_particles_the_question_shares() -> None:
+    turn = doc("User: 朝は静かでした。夕方に姉の本の話をしました。\nmelo: そうですか。")
+    first = "朝は静かでした。"
+    assert listed_title(turn) == first
+    # のとに are all the question shares with the second sentence: no term, so the
+    # title stays the first sentence.
+    assert listed_title(turn, "彼の机の上に") == first
+    # A word they share moves it.
+    assert listed_title(turn, "姉の本") == "夕方に姉の本の話をしました。"
 
 
 def test_without_a_query_or_a_match_a_title_reads_as_it_always_did() -> None:
