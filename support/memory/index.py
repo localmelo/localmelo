@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import re
 import time
@@ -120,6 +121,8 @@ _ITEM_COLUMNS: Final = (
     "id, session_id, title, text, kind, created_at, sources, status, replaced_by, "
     "related, conflicts, vector, embed_model, encoder"
 )
+# The same without the vector blob, for a list that does not rank (``NULL`` in its place).
+_LISTED_COLUMNS: Final = _ITEM_COLUMNS.replace("conflicts, vector,", "conflicts, NULL,")
 # What an item's ``kind`` and ``status`` may be.
 ITEM_KINDS: Final = ("profile", "semantic", "episodic")
 ITEM_STATUSES: Final = ("active", "replaced", "conflict")
@@ -207,6 +210,22 @@ def _sources(raw: object) -> tuple[tuple[str, int], ...]:
         for pair in value
         if isinstance(pair, list) and len(pair) == 2 and isinstance(pair[1], int)
     )
+
+
+def loses_source(
+    owner: str,
+    sources: Sequence[tuple[str, int]],
+    session_id: str,
+    turn: int | None,
+) -> bool:
+    """Whether forgetting chat *session_id* (one *turn* of it, else all) takes an
+    item of chat *owner* with these *sources* along: it names a forgotten turn, or
+    it has no sources and belongs to the chat that is forgotten whole."""
+    if any(
+        src[0] == session_id and (turn is None or src[1] == turn) for src in sources
+    ):
+        return True
+    return not sources and owner == session_id and turn is None
 
 
 def _item(row: Sequence[Any]) -> MemoryItem:
@@ -700,26 +719,24 @@ class ConversationIndex:
             rows = await cur.fetchall()
         gone: set[int] = set()
         for item_id, owner, raw in rows:
-            sources = _sources(raw)
-            lost = any(
-                src[0] == session_id and (turn is None or src[1] == turn)
-                for src in sources
-            )
-            if lost or (not sources and owner == session_id and turn is None):
+            if loses_source(str(owner), _sources(raw), session_id, turn):
                 gone.add(int(item_id))
         if gone:
             await self._unlink(conn, gone)  # reads the replacement links, then
             marks = ", ".join("?" * len(gone))
             await conn.execute(f"DELETE FROM items WHERE id IN ({marks})", sorted(gone))
 
-    async def _unlink(self, conn: aiosqlite.Connection, gone: set[int]) -> None:
+    async def _unlink(
+        self, conn: aiosqlite.Connection, gone: set[int], *, keep_replaced: bool = False
+    ) -> None:
         """Undo what the items in *gone* (still stored) did to the others, and keep
         the order in which the rest replace one another. An item whose replacer goes
         is replaced by the replacer's own replacer, and so on to the first one that
         stays (A, B, C in turn: without B, C replaces A). When none stays, the newest
-        of the items they replaced is current again and replaces the others. An item
-        that disagreed only with them is no longer in conflict, and links to them are
-        dropped."""
+        of the items they replaced is current again and replaces the others, unless
+        *keep_replaced* (a person deleted the replacer: the older ones stay replaced,
+        with nothing to name). An item that disagreed only with them is no longer in
+        conflict, and links to them are dropped."""
         async with conn.execute(
             "SELECT id, status, replaced_by, related, conflicts, created_at FROM items "
             "WHERE replaced_by IS NOT NULL OR related != '[]' OR conflicts != '[]'"
@@ -740,7 +757,7 @@ class ConversationIndex:
                 orphans.setdefault(heir, []).append(item_id)
             else:
                 now[item_id] = heir
-        for members in orphans.values():
+        for members in () if keep_replaced else orphans.values():
             newest = max(members, key=lambda i: (made[i], i))
             now.update({i: newest for i in members if i != newest})
             now[newest] = None
@@ -917,30 +934,8 @@ class ConversationIndex:
         to the other are one transaction: either both are stored or neither is.
         """
         conn = await self._ready()
-        vector = None if item.vector is None else np.asarray(item.vector, np.float32)
         try:
-            cur = await conn.execute(
-                "INSERT INTO items (session_id, title, text, kind, created_at, "
-                "sources, status, replaced_by, related, conflicts, vector, "
-                "embed_model, encoder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    item.session_id,
-                    item.title,
-                    item.text,
-                    item.kind,
-                    item.created_at or time.time(),
-                    json.dumps([list(src) for src in item.sources]),
-                    item.status,
-                    item.replaced_by,
-                    json.dumps(list(item.related)),
-                    json.dumps(list(item.conflicts)),
-                    None if vector is None else vector.tobytes(),
-                    item.embed_model if vector is not None else "",
-                    item.encoder,
-                ),
-            )
-            assert cur.lastrowid is not None
-            new_id = int(cur.lastrowid)
+            new_id = await self._insert(conn, item)
             if replace is not None:
                 await self._replace(conn, replace, new_id)
             if link is not None:
@@ -950,6 +945,44 @@ class ConversationIndex:
             await conn.rollback()
             raise
         return new_id
+
+    async def _insert(
+        self, conn: aiosqlite.Connection, item: MemoryItem, item_id: int | None = None
+    ) -> int:
+        """Insert *item* as a new row, with the id *item_id* when given (its own
+        ``id`` is ignored); the id of the row."""
+        vector = None if item.vector is None else np.asarray(item.vector, np.float32)
+        fields: tuple[object, ...] = (
+            item.session_id,
+            item.title,
+            item.text,
+            item.kind,
+            item.created_at or time.time(),
+            json.dumps([list(src) for src in item.sources]),
+            item.status,
+            item.replaced_by,
+            json.dumps(list(item.related)),
+            json.dumps(list(item.conflicts)),
+            None if vector is None else vector.tobytes(),
+            item.embed_model if vector is not None else "",
+            item.encoder,
+        )
+        columns = (
+            "session_id, title, text, kind, created_at, sources, status, "
+            "replaced_by, related, conflicts, vector, embed_model, encoder"
+        )
+        marks = ", ".join("?" * len(fields))
+        if item_id is None:
+            cur = await conn.execute(
+                f"INSERT INTO items ({columns}) VALUES ({marks})", fields
+            )
+            assert cur.lastrowid is not None
+            return int(cur.lastrowid)
+        await conn.execute(
+            f"INSERT INTO items (id, {columns}) VALUES (?, {marks})",
+            (item_id, *fields),
+        )
+        return item_id
 
     async def fetch_items(self, ids: Iterable[int]) -> list[MemoryItem]:
         """The items with these ids, in id order (in batches, as :meth:`fetch`)."""
@@ -1066,6 +1099,14 @@ class ConversationIndex:
         ) as cur:
             return [_item(row) for row in await cur.fetchall()]
 
+    async def all_items(self) -> list[MemoryItem]:
+        """Every item of any status, newest first, without its vector (for a list)."""
+        conn = await self._ready()
+        async with conn.execute(
+            f"SELECT {_LISTED_COLUMNS} FROM items ORDER BY created_at DESC, id DESC"
+        ) as cur:
+            return [_item(row) for row in await cur.fetchall()]
+
     async def _links(
         self, conn: aiosqlite.Connection, item_id: int
     ) -> tuple[str, tuple[int, ...], tuple[int, ...]]:
@@ -1130,6 +1171,60 @@ class ConversationIndex:
                 "WHERE id = ?",
                 (status, json.dumps(related), json.dumps(conflicts), item_id),
             )
+
+    async def delete_item(self, item_id: int) -> MemoryItem | None:
+        """Delete one item and give it back (so a caller can offer an undo); ``None``
+        when there is none.
+
+        Its turns are recalled as turns again unless another item cites them. Links to
+        it are undone as for an item whose chat went (:meth:`_unlink`), except that an
+        item it replaced stays replaced (by the deleted item's own replacer when it has
+        one, else with nothing to name): the person said the newer fact is wrong or
+        unwanted, which does not make the older one true again. The row is overwritten
+        on disk and the write-ahead log folded in, as a deleted note is.
+        """
+        conn = await self._ready()
+        async with secure_deletes(conn):
+            try:
+                found = await self.fetch_items([item_id])
+                if not found:
+                    return None
+                await self._unlink(conn, {item_id}, keep_replaced=True)  # reads the row
+                await conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+        await checkpoint_wal(conn)
+        return found[0]
+
+    async def restore_item(self, item: MemoryItem) -> bool:
+        """Put a deleted *item* back under its own id, with the links it had to the
+        items that are still there; ``False`` when that id is in use again."""
+        conn = await self._ready()
+        try:
+            async with conn.execute("SELECT id FROM items") as cur:
+                have = {int(row[0]) for row in await cur.fetchall()}
+            if item.id in have:
+                return False
+            bare = dataclasses.replace(
+                item,
+                status="replaced" if item.status == "replaced" else "active",
+                related=(),
+                conflicts=(),
+            )
+            await self._insert(conn, bare, item.id)
+            for other in item.related:
+                if other in have:
+                    await self._link(conn, item.id, other, conflict=False)
+            for other in item.conflicts:
+                if other in have:
+                    await self._link(conn, item.id, other, conflict=True)
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        return True
 
     async def aclose(self) -> None:
         if self._conn is not None:

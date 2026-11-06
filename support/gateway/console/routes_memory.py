@@ -15,6 +15,11 @@ takes the batch back (``kept`` counts the notes the person had reworded, which s
 present when above 0); ``GET /api/memory/import/offer`` says whether the offer to do it
 was never made (the first run's card) and ``DELETE`` on it records "Not now" and answers
 whether the offer is still open (it is when the record could not be written).
+``GET /api/memory/items`` lists the memory items melo wrote from the chats (the
+developer setting ``recall_source = "items"``) newest first, each with the chat it
+came from and a link to it; ``DELETE /api/memory/items/{id}`` deletes one at once (the
+turns it cited are recalled as turns again) and says how long ``POST
+/api/memory/items/{id}/restore`` can put it back; nothing of it stays on disk meanwhile.
 ``PUT /api/memory`` switches
 ``[memory] across_chats`` and ``POST /api/memory/reindex`` rebuilds the index
 from the chats. In developer mode (``[ui] mode = "developer"``; anywhere else
@@ -27,6 +32,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
@@ -36,7 +42,9 @@ from localmelo.melo.memory.long import StoredEntry
 from localmelo.support import config
 from localmelo.support.gateway.i18n import current, t
 from localmelo.support.memory import note_gate
+from localmelo.support.memory.index import MemoryItem
 from localmelo.support.memory.recall import chat_label, chat_title, day
+from localmelo.support.memory.service import ITEM_UNDO_S
 
 from .errors import ApiError
 
@@ -193,6 +201,35 @@ def _row(
     }
 
 
+def _item_row(
+    item: MemoryItem, console: Console, chats: dict[str, Any] | None, known: set[int]
+) -> dict[str, Any]:
+    """A memory item as the page reads it. ``replaced_by`` names the item that replaced
+    it, ``None`` when that one was deleted since (it stays replaced); ``link`` opens the
+    chat it came from, ``""`` for a chat that is gone or opens elsewhere."""
+    surface = console.memory.surface
+    info = chats.get(item.session_id) if chats else None
+    gone = chats is not None and item.session_id not in chats
+    label = chat_label(
+        info.kind if info else "chat", info.title if info else "", surface
+    )
+    openable = info is not None and info.kind in ("chat", "front")
+    return {
+        "id": item.id,
+        "title": item.title,
+        "text": item.text,
+        "kind": item.kind,
+        "status": item.status,
+        "replaced_by": item.replaced_by if item.replaced_by in known else None,
+        "conflicts": [other for other in item.conflicts if other in known],
+        "from": _from_words(info, label, gone, item.created_at, surface),
+        "chat_gone": gone,
+        "link": f"#/s/{quote(item.session_id, safe='')}" if openable else "",
+        "session_id": item.session_id,
+        "created_at": item.created_at,
+    }
+
+
 async def identity_changed(console: Console, pinned: str) -> None:
     """Rebuild idle chats' Agents when the notes their instructions pin changed.
 
@@ -256,6 +293,26 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if not await console.memory.delete_record(record_id, undo=undo):
             raise ApiError(404, "not_found", t("errors.noteGone"))
         await identity_changed(console, pinned)
+        return Response(status_code=204)
+
+    @app.get("/api/memory/items")
+    async def memory_items() -> dict[str, Any]:
+        items = await console.memory.items()
+        chats = await _chats(console, {i.session_id for i in items}) if items else {}
+        known = {i.id for i in items}
+        chats_known = chats if console.store_state() == "ok" else None
+        return {"items": [_item_row(i, console, chats_known, known) for i in items]}
+
+    @app.delete("/api/memory/items/{item_id}")
+    async def memory_item_delete(item_id: int) -> dict[str, int]:
+        if not await console.memory.delete_item(item_id):
+            raise ApiError(404, "not_found", t("errors.itemGone"))
+        return {"undo_seconds": ITEM_UNDO_S}
+
+    @app.post("/api/memory/items/{item_id}/restore")
+    async def memory_item_restore(item_id: int) -> Response:
+        if not await console.memory.restore_item(item_id):
+            raise ApiError(404, "not_found", t("errors.itemUndoGone"))
         return Response(status_code=204)
 
     @app.delete("/api/memory/records")

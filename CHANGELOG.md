@@ -25,6 +25,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (0.13.4) next to its Python, so none is needed on the Mac. `GET /api/setup/plan`, `POST /api/setup/start` and
   `POST /api/setup/cancel` are new, and `GET /api/setup/detect` gains `job` (#545).
 - Developer only: with memory items as the recall source and a local chat model, melo writes items from your chats while the computer is idle, and stops when you come back. Part of #428.
+- Developer only: the Memory page lists memory items beside your notes, with the chat each came from, and you can delete one. Part of #428.
 - Switch melo_serve's model from every surface. `/model` in a melo_serve chat (the main chat too), the console's model
   chip and composer button, Settings → Model server and the app's new **Model** menu list its chat models with what each
   needs and whether it fits, and one pick switches every chat on this Mac: it waits for running turns (10 minutes at

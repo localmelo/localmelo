@@ -323,6 +323,128 @@ async def test_deleting_the_one_two_older_items_were_replaced_by_keeps_the_newer
     assert [i.id for i in await index.active_items("profile")] == [2]
 
 
+async def test_deleting_one_item_frees_its_turns_and_an_undo_puts_it_back_as_it_was(
+    index: ConversationIndex,
+) -> None:
+    for turn in (1, 2, 3):
+        await add_turn(index, "s1", turn)
+    held = await index.add_item(
+        make("Said in two turns.", turns=(1, 2), vector=(0.25, 0.5))
+    )
+    other = await index.add_item(make("Said in the third.", turns=(3,)))
+    assert await uncited(index) == set()
+    gone = await index.delete_item(held)
+    assert gone is not None and (gone.id, gone.text) == (held, "Said in two turns.")
+    assert [i.id for i in await index.fetch_items([held, other])] == [other]
+    assert await uncited(index) == {("s1", 1), ("s1", 2)}
+    assert await index.delete_item(held) is None, "there is nothing left to delete"
+    assert await index.restore_item(gone)
+    assert await index.fetch_items([held]) == [gone], "back whole, under its own id"
+    assert await uncited(index) == set()
+    assert not await index.restore_item(gone), "its id is in use again"
+    assert await index.add_item(make("Written after the undo.")) > other
+
+
+async def test_deleting_a_replaced_or_conflicting_item_undoes_its_links_and_an_undo_restores_them(
+    index: ConversationIndex,
+) -> None:
+    old = await index.add_item(make("The user said they live in Pittsburgh."))
+    new = await index.add_item(make("The user said they now live in Utrecht."))
+    await index.mark_replaced(old, new)
+    liked = await index.add_item(make("The user said they like spicy food."))
+    never = await index.add_item(make("The user said they never like spicy food."))
+    await index.link_items(liked, never, conflict=True)
+    near = await index.add_item(make("The user said they cook at home."))
+    await index.link_items(old, near, conflict=False)
+
+    async def read(
+        *ids: int,
+    ) -> list[tuple[str, int | None, tuple[int, ...], tuple[int, ...]]]:
+        return [
+            (i.status, i.replaced_by, i.related, i.conflicts)
+            for i in await index.fetch_items(ids)
+        ]
+
+    # A replaced item goes: the newer one that replaced it stays, links to it are dropped.
+    gone_old = await index.delete_item(old)
+    assert await read(new, near) == [
+        ("active", None, (), ()),
+        ("active", None, (), ()),
+    ]
+    # A conflicting item goes: its partner is no longer in conflict.
+    gone_never = await index.delete_item(never)
+    assert await read(liked) == [("active", None, (), ())]
+    # An undo puts the links back, both ways.
+    assert gone_old is not None and await index.restore_item(gone_old)
+    assert gone_never is not None and await index.restore_item(gone_never)
+    assert await read(old, liked, never, near) == [  # in id order
+        ("replaced", new, (near,), ()),
+        ("conflict", None, (), (never,)),
+        ("conflict", None, (), (liked,)),
+        ("active", None, (old,), ()),
+    ]
+    # A partner deleted in between is not linked to: the item comes back on its own.
+    gone_never = await index.delete_item(never)
+    await index.delete_item(liked)
+    assert gone_never is not None and await index.restore_item(gone_never)
+    assert await read(never) == [("active", None, (), ())]
+
+
+async def test_deleting_the_item_that_replaced_another_leaves_the_older_one_replaced(
+    index: ConversationIndex,
+) -> None:
+    """The person called the newer fact wrong or unwanted; that does not make the older
+    one true again, so it stays history (never current, never listed as active)."""
+    old = await index.add_item(make("The user said they live in Pittsburgh."))
+    new = await index.add_item(make("The user said they now live in Utrecht."))
+    await index.mark_replaced(old, new)
+    gone = await index.delete_item(new)
+    (older,) = await index.fetch_items([old])
+    assert (older.status, older.replaced_by) == ("replaced", new)
+    assert await index.active_items() == []
+    # A chat that goes later does not bring it back either: its replacer is not in that set.
+    await add_turn(index, "s2", 1)
+    other = await index.add_item(make("An item of another chat.", session="s2"))
+    await index.delete("s2")
+    assert (await index.fetch_items([old]))[0].status == "replaced" and other
+    # An undo makes the pointer good again.
+    assert gone is not None and await index.restore_item(gone)
+    assert (await index.fetch_items([old, new]))[0].replaced_by == new
+
+
+async def test_deleting_the_middle_of_a_chain_by_hand_keeps_the_order_and_an_undo_keeps_it_older(
+    index: ConversationIndex,
+) -> None:
+    a = await index.add_item(make("The user lived in Pittsburgh.", at=1.0))
+    b = await index.add_item(make("The user lived in Utrecht.", at=2.0))
+    c = await index.add_item(make("The user lives in Lisbon.", at=3.0))
+    await index.mark_replaced(a, b)
+    await index.mark_replaced(b, c)
+    gone = await index.delete_item(b)
+    first, last = await index.fetch_items([a, c])
+    assert (first.status, first.replaced_by) == ("replaced", c), "still older than C"
+    assert (last.status, last.replaced_by) == ("active", None)
+    assert gone is not None and await index.restore_item(gone)
+    assert [(i.status, i.replaced_by) for i in await index.fetch_items([a, b, c])] == [
+        ("replaced", c),
+        ("replaced", c),
+        ("active", None),
+    ]
+
+
+async def test_the_list_holds_every_status_newest_first_without_vectors(
+    index: ConversationIndex,
+) -> None:
+    a = await index.add_item(make("Oldest item.", at=10.0, vector=(0.5, 0.5)))
+    b = await index.add_item(make("Newest item.", at=30.0))
+    c = await index.add_item(make("Middle item.", at=20.0))
+    await index.mark_replaced(a, b)
+    listed = await index.all_items()
+    assert [i.id for i in listed] == [b, c, a]
+    assert [i.status for i in listed] == ["active", "active", "replaced"]
+    assert listed[2].vector is None and listed[2].text == "Oldest item."
+
+
 async def test_forgetting_everything_clears_the_items_and_a_rebuild_keeps_them(
     index: ConversationIndex,
 ) -> None:
@@ -437,7 +559,8 @@ async def test_an_item_that_holds_a_secret_is_refused_and_stores_nothing(
 def test_the_router_is_the_only_way_into_the_items_table() -> None:
     """``add_item`` is the one statement that writes an item's title and text, and
     the router, which refuses an item that holds a secret first, is its only caller
-    outside the tests; no statement changes a stored item's title, text or kind."""
+    outside the tests; no statement changes a stored item's title, text or kind (an
+    undo of a delete puts back the row the router stored)."""
     root = Path(hippo_route.__file__).parents[2]
     writers: set[str] = set()
     callers: set[str] = set()

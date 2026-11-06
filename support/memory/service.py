@@ -115,6 +115,7 @@ from localmelo.support.memory.index import (
     ItemState,
     MemoryItem,
     document_chunks,
+    loses_source,
     plain_text,
     typed_of,
 )
@@ -179,6 +180,10 @@ _SELECT_FAILURES: Final = {
     "parse": "unreadable",
 }
 PINNED_CHARS: Final = 600
+# How long a deleted memory item can be put back, and how many at most. The deleted
+# item is held in this process only: nothing of it stays on disk, as for a note.
+ITEM_UNDO_S: Final = 600
+ITEM_UNDO_MAX: Final = 20
 # The one line a block carries when nothing was recalled and ``[memory]
 # search_when_empty`` is ``hint``; the model decides whether to search.
 SEARCH_HINT: Final = (
@@ -961,6 +966,8 @@ class ChatMemory:
         self._llm_key: tuple[str, ...] | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._plans: dict[str, ImportPlan] = {}
+        # Deleted memory items an undo can bring back: id to (when, item), oldest first.
+        self._trash: dict[int, tuple[float, MemoryItem]] = {}
         self.last_error = ""
         self._warned = False
 
@@ -2509,6 +2516,7 @@ class ChatMemory:
             for note in await store.session_entries(session_id, undone_only=True):
                 if turn is None or note.provenance.get("turn") == turn:
                     await store.delete_entry(note.id, versions=False)
+            self._forget_trash(session_id, turn)
             return await index.delete(session_id, turn)
 
     async def forget_all(self) -> tuple[int, int]:
@@ -2524,6 +2532,7 @@ class ChatMemory:
             await records_store.forget_all()
             turns = await index.forget_all()
             self._corpus = Corpus()
+            self._forget_trash()
         return notes, turns
 
     async def forget_chat_notes(self, session_id: str) -> int:
@@ -2871,6 +2880,55 @@ class ChatMemory:
     async def delete_record(self, record_id: int, *, undo: bool = False) -> bool:
         async with self._lock:
             return await self.stores()[0].delete_entry(record_id, restore=undo)
+
+    async def items(self) -> list[MemoryItem]:
+        """Every memory item of any status, newest first, without vectors."""
+        async with self._lock:
+            return await self.stores()[1].all_items()
+
+    async def delete_item(self, item_id: int) -> bool:
+        """Delete a memory item; ``False`` when there is none.
+
+        Recall stops showing it at the next search and the turns it cited, if no other
+        item cites them, are recalled as turns again. The item is held in memory for
+        :data:`ITEM_UNDO_S` seconds for :meth:`restore_item`; a forget of its chat or
+        of everything, or a restart, drops it.
+        """
+        async with self._lock:
+            gone = await self.stores()[1].delete_item(item_id)
+            if gone is None:
+                return False
+            self._prune_trash()
+            self._trash[item_id] = (time.monotonic(), gone)
+            return True
+
+    async def restore_item(self, item_id: int) -> bool:
+        """Put back an item deleted less than :data:`ITEM_UNDO_S` seconds ago; ``False``
+        when there is none to put back."""
+        async with self._lock:
+            self._prune_trash()
+            held = self._trash.pop(item_id, None)
+            return held is not None and await self.stores()[1].restore_item(held[1])
+
+    def _prune_trash(self) -> None:
+        """Drop the deleted items whose undo has run out, and the oldest beyond the cap."""
+        now = time.monotonic()
+        for number, (at, _) in list(self._trash.items()):
+            if now - at >= ITEM_UNDO_S:
+                del self._trash[number]
+        while len(self._trash) > ITEM_UNDO_MAX:
+            del self._trash[next(iter(self._trash))]
+
+    def _forget_trash(
+        self, session_id: str | None = None, turn: int | None = None
+    ) -> None:
+        """Drop the deleted items an undo could bring back: every one, or only those a
+        forgotten chat (or one turn of it) takes along, as a stored item would go."""
+        for number, (_, item) in list(self._trash.items()):
+            if session_id is None or loses_source(
+                item.session_id, item.sources, session_id, turn
+            ):
+                del self._trash[number]
 
     async def edit_record(self, record_id: int, text: str) -> StoredEntry | None:
         """Reword a note; ``None`` when it is gone. Raises ``ValueError`` (a plain
@@ -3233,6 +3291,7 @@ class ChatMemory:
                     await closer.aclose()
         self._records = self._index = None
         self._corpus = Corpus()
+        self._forget_trash()
 
     def tools(self) -> MemoryTools:
         return MemoryTools(self)
