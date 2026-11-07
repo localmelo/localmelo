@@ -2601,13 +2601,10 @@ class TaskWorkers:
                 grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
-            auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
-            # A step Auto stops that the person may allow is asked through the
-            # chat (#465), while someone sees the task or its chat; a task
-            # nobody can be asked for (a chore, one melo or another agent
-            # started) has the step blocked and nothing holds it (#339).
-            auto.asking = None
             if _remembers(record.origin):
+                # A step Auto stops that the person may allow is asked through
+                # the chat (#465), while someone sees the task or its chat.
+                auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
                 auto.asking = asking
                 auto.watch = self._card_watch(task_id)
                 # The person's task follows its chat's mode at every step
@@ -2628,6 +2625,10 @@ class TaskWorkers:
                 )
                 owned.append(policy)
             elif task_mode == "auto":
+                # A task nobody can be asked for (a chore, one melo or another
+                # agent started) has the step blocked and nothing holds it (#339).
+                auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
+                auto.asking = None
                 policy = auto
             # A run its chat continued on its own never repeats a blocked step (#411).
             policy = await self._guard(
