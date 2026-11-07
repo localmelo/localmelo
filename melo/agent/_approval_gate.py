@@ -43,7 +43,6 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
     ReviewMode,
-    Withdrawal,
     ask,
     block_note,
     call_key,
@@ -51,6 +50,7 @@ from localmelo.melo.contracts.approvals import (
     find_earlier,
     find_folder_asker,
     holds_grant,
+    is_refusal,
     question_key,
     question_site_key,
     review_mode,
@@ -325,9 +325,7 @@ class _ApprovalGate:
             remember=decided.remember,
             # A person's Deny, an auto block, a policy's refusal of the step
             # itself; never a question withdrawn or one that could not be asked.
-            denial=not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal),
+            denial=is_refusal(decided),
         )
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the
@@ -1072,13 +1070,8 @@ class _ToolAsk:
                 revoke_site(self._policy, site, "auto")
                 return refusal
         self._ended_by_words(request, decided, preview)
-        if (
-            not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal)
-        ):
-            # A person's Deny, an auto block, a policy's refusal of the step:
-            # a task its chat continues on its own never asks it again.
+        if is_refusal(decided):
+            # A task its chat continues on its own never asks it again.
             self._keep(request, decided)
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the

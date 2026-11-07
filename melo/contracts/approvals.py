@@ -1065,6 +1065,19 @@ class DenyAllPolicy:
         return ApprovalDecision(False, self.reason, origin="policy")
 
 
+def is_refusal(decision: ApprovalDecision) -> bool:
+    """Whether *decision* refuses the step: a person's Deny, an auto block, a policy's refusal.
+
+    Not a question nobody answered, a person's message that ended the wait, or
+    a withdrawn one: nobody said no to the step.
+    """
+    return (
+        not decision.allow
+        and decision.origin in ("user", "auto", "policy")
+        and not isinstance(decision, Withdrawal)
+    )
+
+
 def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) -> str:
     """The text the model reads for a call that *decision* denied.
 

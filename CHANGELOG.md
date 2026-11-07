@@ -16,7 +16,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   hosting domain stay separate; addresses by number, local names, unlisted suffixes and other ports stay exact. Allow
   once, typing, forms, attached files, take-over, passwords and high-impact steps are asked as before, and what Auto let
   a chat read stays that host. A refusal covers the whole site too: it takes back what the chat or task keeps for the
-  site, so a later turn asks again, and only your newer answer stands over it. `/approvals forget` takes a site's answer
+  site, the main chat's answer for it included, and the approval of tabs open on it, so a later turn asks again, and
+  only your newer answer stands over it. `/approvals forget` takes a site's answer
   back by any of its hosts. New core dependency: publicsuffixlist (#577).
 - A chat does what you ask. Say it in your own words and melo starts the work: no list of verbs stands in the way, and
   nothing sends you to rephrase or press a card. A worker is one-time: new work after a finished task starts a new task

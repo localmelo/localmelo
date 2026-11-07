@@ -76,6 +76,7 @@ from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
     ApprovalDecision,
     ToolAsk,
+    site_key,
 )
 from localmelo.melo.contracts.folders import (
     attach_refusal,
@@ -1268,7 +1269,7 @@ class BrowserToolProvider(BaseToolProvider):
             try:
                 await addresses.require_public(url)
                 if self._origins.get(tab) != origin:
-                    await sites.require_site(origin)
+                    await self._ask_site(origin)
                 else:
                     sites.require_not_refused(origin)
             except BrowserError:
@@ -1278,6 +1279,21 @@ class BrowserToolProvider(BaseToolProvider):
         if self._origins.get(tab) != origin:
             self._origins[tab] = origin
             self._poke_live()  # the card names the site
+
+    async def _ask_site(self, origin: str) -> None:
+        """Ask about *origin*. A refusal covers its whole site: no tab stays approved on it (#577).
+
+        Their pages stay, and nothing read from them: the next read asks, in a
+        later turn too, with no refusal to remember.
+        """
+        try:
+            await sites.require_site(origin)
+        except sites.SiteRefusedError:
+            site = site_key({"origin": origin})
+            for tab, approved in list(self._origins.items()):
+                if site_key({"origin": approved}) == site:
+                    self._drop_reading(tab)
+            raise
 
     async def _recheck(self, tab: str) -> None:
         """Check where *tab* is now, read in the tab: a page can move itself after it was read.
@@ -1398,7 +1414,7 @@ class BrowserToolProvider(BaseToolProvider):
         origin = sites.require_origin(url)
         await addresses.require_public(url)  # before the site question and the load
         if origin != same_site:
-            await sites.require_site(origin)
+            await self._ask_site(origin)
         else:
             sites.require_not_refused(origin)
         target = self._open_target(tab)

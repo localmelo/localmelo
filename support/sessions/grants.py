@@ -787,21 +787,27 @@ class GrantBook:
         return found
 
     def take_back_site(
-        self, session_id: str | None, key: str, by: str | None = None
+        self,
+        session_id: str | None,
+        key: str,
+        by: str | None = None,
+        *,
+        inherit: bool = True,
     ) -> None:
-        """Take back what a session itself kept about the site *key*, ``ask:site:<site>`` (#577).
+        """Take back what covers the site *key*, ``ask:site:<site>``, in a session (#577).
 
         A refusal of the site: both schemes, opening and clicking, the person's
-        and Auto's (with *by*, that decider's only). A ``global`` grant from
-        the main chat stays when another session refuses: it holds there
-        through the run's refusal only.
+        and Auto's (with *by*, that decider's only), the session's own rows and,
+        with *inherit*, the ``global`` ones that hold there: the person's newest
+        word wins, and the main chat asks once more. :attr:`outside`'s rows are
+        another file's and stay.
         """
         sid = session_id or ""
         self._drop(
             [
                 g
                 for g in self._rows.values()
-                if g.session_id == sid
+                if (g.session_id == sid or (inherit and g.scope == "global"))
                 and g.kind == "site"
                 and question_site_key(g.key) == key
                 and by in (None, g.decided_by)
@@ -1056,8 +1062,8 @@ class SessionGrants:
         return self.book.forget_now(self.session_id, key)
 
     def take_back_site(self, key: str, by: str | None = None) -> None:
-        """Take back what this session itself kept about the site *key* (:meth:`GrantBook.take_back_site`)."""
-        self.book.take_back_site(self.session_id, key, by)
+        """Take back what covers the site *key* here (:meth:`GrantBook.take_back_site`)."""
+        self.book.take_back_site(self.session_id, key, by, inherit=self.inherit)
 
     def forget_folder_now(self, folder: str) -> bool:
         """Take back a folder's grant; whether one held here."""

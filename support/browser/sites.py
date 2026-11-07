@@ -16,8 +16,9 @@ cannot be read that way (an address by number, a local name, a public suffix,
 an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
 Every other answer stays on the exact origin it was asked about: an Allow once,
 typing, a form, a file, a click at a point, a page's box and a take-over. A page
-approved earlier is read again unasked until its site is refused: only the
-person's newer answer stands over that (:func:`require_not_refused`).
+approved earlier is read again unasked until its site is refused: the refusal
+takes the tabs' approval back (:class:`SiteRefusedError`), and only the person's
+newer answer stands over it (:func:`require_not_refused`).
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
     ApprovalDecision,
     denial_text,
+    is_refusal,
 )
 from localmelo.support.browser.apps import scheme_of
 from localmelo.support.browser.driver import BrowserError
@@ -75,6 +77,10 @@ URL_SHOWN = 300
 # The most form fields a send question lists.
 FORM_SHOWN = 12
 _PORTS = {"http": 80, "https": 443}
+
+
+class SiteRefusedError(BrowserError):
+    """A question about a site was refused: nobody's silence or a withdrawn card, a no (#577)."""
 
 
 def origin_of(url: str) -> str | None:
@@ -210,7 +216,8 @@ async def require_site(
 ) -> None:
     """Ask about *origin*; :class:`BrowserError` with the sentence for the model if refused.
 
-    A "no" is final for the call: the person's answer is not asked twice.
+    A "no" is final for the call: the person's answer is not asked twice. It
+    raises :class:`SiteRefusedError`, an answer nobody gave the plain error.
     *via* ``"web_fetch"`` asks the same question (the same grant name, so one
     "allow for this chat" covers both tools) worded "read <url>", with
     ``via`` and the address it requests (*url*, cut to :data:`URL_SHOWN`
@@ -222,7 +229,8 @@ async def require_site(
         return
     decision = await ask(*_question(origin, via, url))
     if not decision.allow:
-        raise BrowserError(_refusal(origin, via, decision))
+        error = SiteRefusedError if is_refusal(decision) else BrowserError
+        raise error(_refusal(origin, via, decision))
 
 
 async def require_act(origin: str, what: str, on: str = "") -> None:

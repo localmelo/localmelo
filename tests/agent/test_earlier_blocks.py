@@ -41,7 +41,7 @@ from localmelo.support.sessions.approvals import (
     OwnedTaskPolicy,
     RememberingPolicy,
 )
-from localmelo.support.sessions.grants import GrantBook
+from localmelo.support.sessions.grants import Grant, GrantBook
 
 from .test_approvals import (
     Policy,
@@ -588,6 +588,7 @@ async def test_a_click_refused_is_no_refusal_of_the_site() -> None:
 async def test_a_task_s_refusal_takes_back_its_own_and_its_chat_s_answers() -> None:
     book = GrantBook()
     assert book.view("chat", "side").grant_now(KEPT) is not None
+    assert book.view("main", "main").grant_now("browser:https://a.collect.com")
     assert book.view("task", "task", inherit=False).grant_now(
         "browser:https://cdn.collect.com"
     )
@@ -617,13 +618,36 @@ async def test_a_task_s_refusal_takes_back_its_own_and_its_chat_s_answers() -> N
     assert book.live() == []
 
 
-async def test_a_side_chat_s_refusal_holds_for_its_run_over_the_main_chat_s_answer() -> (
+async def test_a_side_chat_s_refusal_takes_back_the_main_chat_s_answer_for_the_site() -> (
     None
 ):
     book = GrantBook()
-    assert book.view("main", "main").grant_now(KEPT) is not None
-    person = Answers(NO)
+    other = "browser:https://www.other.com"
+    for name in (KEPT, other):
+        assert book.view("main", "main").grant_now(name) is not None
+    person = Answers(NO, NO)
     policy = RememberingPolicy(person, grants=book.view("side", "side"))
+    llm = ScriptedLLM(
+        [
+            _reads("http://login.collect.com/x", "https://www.collect.com/y"),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert reader.read == []
+    assert person.asked[-1] == KEPT, "the person's newest word: it asks again"
+    assert [g.key for g in book.live()] == [other], "another site's answer stays"
+
+
+async def test_a_global_answer_that_cannot_be_taken_back_still_yields_for_the_run() -> (
+    None
+):
+    # The terminal's own chat reads the main chat's rows from a file it does not write.
+    held = Grant("g1", "main", "main", "global", "site", KEPT, "", "", "person", 1.0)
+    book = GrantBook(outside=lambda: (held,))
+    person = Answers(NO)
+    policy = RememberingPolicy(person, grants=book.view("own", "terminal"))
     llm = ScriptedLLM(
         [
             _reads("http://login.collect.com/x", "https://www.collect.com/y"),
@@ -634,7 +658,19 @@ async def test_a_side_chat_s_refusal_holds_for_its_run_over_the_main_chat_s_answ
     await agent.run_task("summarise my notes", approval=policy)
     assert reader.read == [] and len(person.asked) == 1
     assert "refused earlier in this task" in llm.tool_messages(1)[1]
-    assert [g.key for g in book.live()] == [KEPT], "the main chat's word stays"
+    assert policy.grants.covers(KEPT), "it still holds in a later turn"
+
+
+async def test_a_run_a_global_answer_does_not_reach_takes_nothing_from_it() -> None:
+    # A chore's run has only its own rows: the main chat's answer is not what it asked.
+    book = GrantBook()
+    assert book.view("main", "main").grant_now(KEPT) is not None
+    person = Answers(NO)
+    policy = RememberingPolicy(person, grants=book.view("chore", "task", inherit=False))
+    llm = ScriptedLLM([_reads("https://login.collect.com/x"), _answer("No.")])
+    agent, _ = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert [g.key for g in book.live()] == [KEPT]
 
 
 async def test_the_person_s_fresh_allow_lifts_a_refusal_for_what_they_kept() -> None:

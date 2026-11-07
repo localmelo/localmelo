@@ -200,17 +200,24 @@ those tools can do.
   site adds nothing to that: another host of the site gets no password. Every
   host still passes the check for a public address.
 - **A refusal covers the whole site.** The person's refusal of a site takes
-  back what that chat or task keeps for it, on either scheme, and what a task
-  holds from its chat, so a later turn asks again. A refusal of any kind then
-  stands for the rest of the run, and in a task continued later, over all that
-  would run with no answer from the person: a kept answer, a site the request
-  names, Auto, and a page approved before it, which is left for an empty one.
+  back what that chat or task keeps for it, on either scheme, what a task holds
+  from its chat, and a main chat's answer that would cover the site where they
+  refused, so a later turn asks again, in the main chat too. A browser question
+  refused takes the approval of every tab on the site, so a tab asks again in a
+  later turn as well. A refusal of any kind then stands for the rest of the
+  run, and in a task continued later, over all that would run with no answer
+  from the person: a kept answer, a site the request names, Auto, and a page
+  approved before it, which is left for an empty one.
   Only the person's newer answer stands over it, for what they allowed: that
   question, or the whole site on that scheme when they keep the answer. Three
-  limits remain. A kept answer from the main chat stays when a side chat
-  refuses: it holds there again from the next turn. An automatic block leaves
-  kept answers alone, since it can come from nobody being there to ask. A tab
-  left open and not touched in that run can be read in a later turn.
+  limits remain. An automatic block leaves kept answers alone, since it can come
+  from nobody being there to ask. The terminal's own chat reads the main chat's
+  answers from a file it does not write: a refusal there stands for the run, and
+  the answer holds again from the next turn. A refusal outside the browser does
+  not reach every tab: after `web_fetch`'s question is refused, a tab of the
+  site not touched in that run can be read in a later turn, and a refused shell
+  or Python step is one refused step, not a refused site, so it takes nothing
+  back and stops no tab.
 - **melo's Chrome keeps its sign-ins on disk.** Its profile
   (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
   each time Chrome starts, so that a page can move to a window for the person
