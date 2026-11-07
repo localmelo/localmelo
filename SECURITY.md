@@ -118,9 +118,11 @@ those tools can do.
   above, and in a folder a task may not use (outside your home, hidden, under
   `~/Library`) it reads and answers and has no tool that changes a file. A turn
   melo began itself, to answer a task's question or to follow one up, gets
-  only tools that read, and no network or browser tool. That is a check on the
-  run, made by code: the other tools are not offered and a call of one is
-  refused, whatever the prompt or a page says.
+  only tools that read, public web reads included, and no browser, also not
+  through a search. That is a check on the run, made by code: the other tools
+  are not offered and a call of one is refused, whatever the prompt or a page
+  says. A note a run may have read is never run again after a restart, and
+  words on their way when you press Stop start nothing.
 - **A chat's answer to a task never approves.** When a task asks its chat
   for help, the chat answers in a turn of its own (`origin` `ask_owner`).
   That turn has no tool that grants an approval, and the question and the

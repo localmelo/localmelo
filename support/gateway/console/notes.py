@@ -65,5 +65,9 @@ class ChatNotes:
             return []
         return self._asks.note_images(self._chat_id, offset)
 
+    async def claim(self, offsets: Sequence[int]) -> bool:
+        """Store that the run reads *offsets*, before a request carries them."""
+        return await self._asks.notes_reading(self._chat_id, offsets)
+
     def accept(self, offset: int) -> None:
         self._asks.note_read(self._chat_id, offset)

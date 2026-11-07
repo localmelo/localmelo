@@ -1315,6 +1315,19 @@ test('a high-impact card: Allow once and Deny answer, there is no session answer
   assert.deepEqual(h.net.callsTo('/approvals/high')[0].body, {choice: 'once'});
 });
 
+test("Stop in the Browser view ends the run its card names, never a later turn of the chat", async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A later job'}});
+  const stop = h.browserView.options.stop;
+  // A card of the turn before, still shown as working because its last update is late.
+  const stale = {task: false, session: 'main', turn: 1, run: 'run-1', gen: 'g', state: 'working'};
+  assert.equal(await stop(stale), false);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  assert.equal(await stop({...stale, turn: 2, run: 'run-2'}), true);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1);
+});
+
 test('Escape leaves the deny box first, and stops a running turn only while focus is in the composer', async () => {
   const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
   await h.run('init()');
@@ -2898,6 +2911,24 @@ test('a note refused because the turn just ended is sent as a message', async ()
   await h.run('send()');
   assert.deepEqual(h.net.callsTo('/sessions/a/turns').map((call) => call.body.text), ['late words']);
   assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 0, 'a finished turn takes no notes');
+});
+
+test('a note refused after Stop gives the words back and starts no turn', async () => {
+  let refuse;
+  const refused = new Promise((done) => { refuse = () => done({status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}}); });
+  const h = await runningChat({
+    'POST /turns/turn-2/notes': () => refused,
+    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
+    'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'wait, not that'})}},
+  });
+  h.element('input').value = 'wait, not that';
+  const sending = h.run('send()');
+  await h.run('stop()');
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', error: null, cause: 'user_stop'}});
+  refuse();
+  await sending;
+  assert.equal(h.net.callsTo('/sessions/a/turns').length, 0);
+  assert.equal(h.element('input').value, 'wait, not that');
 });
 
 test('a refused note gives the words back to the box and says why', async () => {
@@ -6605,7 +6636,7 @@ test('Stop in the Browser view stops a task by its run and a chat by its own tur
   const task = {session: 't1', task: true, gen: 'a1b2c3d4', run: 'run-1', owner: 'a', key: 't1:run-1', state: 'working'};
   assert.equal(await stop(task), true);
   assert.deepEqual(h.net.callsTo('/tasks/t1').map((call) => call.body), [{state: 'stop', source: {gen: 'a1b2c3d4', run: 'run-1', owner: 'a'}}], 'the card\'s own stop, naming the run');
-  const chat = {session: 'a', task: false, gen: 'a1b2c3d4', run: 'run-2', key: 'a:run-2', state: 'working'};
+  const chat = {session: 'a', task: false, gen: 'a1b2c3d4', run: 'run-2', turn: 2, key: 'a:run-2', state: 'working'};
   assert.equal(await stop(chat), false, 'the chat has no run going');
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
   h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Look at the page'}});

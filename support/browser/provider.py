@@ -72,6 +72,7 @@ from typing import Any, Final, Literal, NamedTuple, NoReturn, cast
 
 from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
+    RUN_ACTS,
     SELF_ASKING_TOOLS,
     TOOL_ASK,
     ApprovalDecision,
@@ -486,9 +487,7 @@ def _guarded(fn: ToolFunction) -> ToolFunction:
                 tab, arguments = self._step_target(fn.__name__, arguments)
                 await self._wait_for_person(tab)
                 await self._switched()
-                self._set_action(ACTIONS.get(fn.__name__, "read"))
-                self._set_busy(True)
-                await self._driver.start()
+                await self._begin(ACTIONS.get(fn.__name__, "read"))
                 self._allow_local()
                 self._looked, self._handoff, self._stuck = False, False, None
                 back, returned = self._back_lines()
@@ -553,6 +552,9 @@ def _back_line(back: Returned) -> str:
 
 # What the model reads when the person's message ended a take-over card: it is no "not now",
 # nothing is remembered, and the next page that needs them offers the card again.
+# A run nobody asked to act reads what it has; a search goes on without the browser.
+NOT_ASKED: Final = "This turn was not asked to use the browser."
+
 CARD_ENDED = (
     "The user sent a message while melo waited for their answer to the card in "
     "the Browser panel, so nothing was handed over and no answer was kept. Read "
@@ -1131,6 +1133,14 @@ class BrowserToolProvider(BaseToolProvider):
         async with self._lock:
             await self._close_tabs(keep_one=True)
 
+    async def _begin(self, action: str) -> None:
+        """The one place a run's browser work starts, and shows; a run with no authority to act does neither."""
+        if not RUN_ACTS.get():
+            raise BrowserError(NOT_ASKED)
+        self._set_action(action)
+        self._set_busy(True)
+        await self._driver.start()
+
     async def check(self) -> None:
         """Start the driver now (``/browser``); raises what a first call would."""
         async with self._lock:
@@ -1445,11 +1455,9 @@ class BrowserToolProvider(BaseToolProvider):
             before, current = set(self._raw), self._tab
             token = TOOL_ASK.set(_no_other_site)
             named = sites.BROWSER.set(self.browser_name)
-            # A search is browsing: the chat's Browser card says so, and shows the results' tab while it is read.
-            self._set_action("search")
-            self._set_busy(True)
             try:
-                await self._driver.start()
+                # A search is browsing: the chat's Browser card says so, and shows the results' tab while it is read.
+                await self._begin("search")
                 self._allow_local()  # the search asks no policy: no local address
                 await addresses.require_public(url)
                 info = await self._driver.open(url, new_tab=True)

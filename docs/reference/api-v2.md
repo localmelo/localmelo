@@ -1690,6 +1690,8 @@ These codes answer on the write routes besides the shared ones above:
 | 409 | `model_text_only` | a turn, or the retry of one, has pictures and the chat's model is known not to read them |
 | 409 | `chat_answering` | a message with pictures arrived while the chat answers a task's question |
 | 409 | `session_busy` | a turn is already running in the session |
+| 409 | `chat_queue_full` | too many messages wait behind the chat's turn |
+| 409 | `turn_stopped` | the person stopped the turn while these words were being stored |
 | 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
@@ -1793,9 +1795,11 @@ is no `workspace` here — the session's own folder is the Agent's.
 - One turn runs per session. On a chat, words sent while a person's turn runs
   answer 202 `{"note": {...}}`, the same note as `POST /api/turns/{turn_id}/notes`,
   read at the run's next step. A message that cannot be a note yet keeps its
-  place (200, a `queued` echo); pictures with nowhere to wait are 409
-  `chat_answering`. On any other session the answer is 409 `session_busy`,
-  before anything is queued.
+  place (200, a `queued` echo), at most 20 messages and 2,000,000 characters
+  together, then 409 `chat_queue_full`; pictures with nowhere to wait are 409
+  `chat_answering`; words still on their way when Stop came are 409
+  `turn_stopped`, and stay the sender's. On any other session the answer is 409
+  `session_busy`, before anything is queued.
 - A repeated `client_request_id` answers 200 with that key's stored turn
   and `"repeated": true`, whether the turn still runs or not.
 - The session's folder must still exist: a deleted folder is 400

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from localmelo.support.gateway.console.asks import MAX_NOTES
 from localmelo.support.gateway.console.notes import NOTE_MARK
 from localmelo.support.sessions.picture_input import MAX_PICTURES, MAX_UPLOAD_BYTES
 
@@ -443,3 +445,80 @@ async def test_a_note_in_a_side_chat_keeps_its_picture_in_that_chat_only(
         await _wait_turn(client, main_id)
         assert _request_pictures(models[side_id].requests[1]) == [sent]
         assert all(_request_pictures(r) == [] for r in models["main"].requests)
+
+
+def _held_blobs(
+    console: Any, monkeypatch: pytest.MonkeyPatch
+) -> tuple[asyncio.Event, asyncio.Event, list[int]]:
+    """The store keeps a picture only once the test lets it: (one is waiting, let them go, how many came)."""
+    put, entered, go, came = (
+        console.store.put_blobs,
+        asyncio.Event(),
+        asyncio.Event(),
+        [],
+    )
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        came.append(1)
+        entered.set()
+        await go.wait()
+        return await put(*args, **kwargs)
+
+    monkeypatch.setattr(console.store, "put_blobs", slow)
+    return entered, go, came
+
+
+async def test_a_picture_note_stop_caught_on_its_way_starts_nothing_and_stays_the_persons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path, monkeypatch, main=[held(never, answer("x"))], vision=FakeVision(True),
+        run=False,
+    ) as (console, client, models):  # fmt: skip
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        picture = await _stage(client, png(4, 4))
+        entered, go, _ = _held_blobs(console, monkeypatch)
+        sending = asyncio.create_task(
+            _note(client, turn_id, "and this", images=[picture])
+        )
+        await entered.wait()
+        assert (await client.post(f"/api/turns/{turn_id}/cancel")).status_code == 202
+        await _wait_turn(client, main_id)
+        go.set()
+        answered = await sending
+        assert answered.status_code == 409, answered.text
+        assert answered.json()["error"]["code"] == "turn_stopped"
+        await console.asks.settle()
+        await asyncio.sleep(0.1)
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
+        # The picture is still staged: the composer sends it again with a message.
+        assert console.pictures.resolve([picture])
+
+
+async def test_pictured_notes_at_once_cannot_pass_the_limit_of_a_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path, monkeypatch, main=[held(never, answer("x"))], vision=FakeVision(True),
+        run=False,
+    ) as (console, client, models):  # fmt: skip
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        for n in range(MAX_NOTES - 1):
+            assert (await _note(client, turn_id, f"note {n}")).status_code == 202
+        pictures = [await _stage(client, png(4, 4)) for _ in range(2)]
+        entered, go, _ = _held_blobs(console, monkeypatch)
+        sending = [
+            asyncio.create_task(_note(client, turn_id, "seen", images=[picture]))
+            for picture in pictures
+        ]
+        await entered.wait()
+        await asyncio.sleep(0.05)
+        go.set()
+        codes = sorted([(await send).status_code for send in sending])
+        assert codes == [202, 400]

@@ -1405,11 +1405,17 @@ async function stopBrowsingTask(card) {
 
 /**
  * Stop in the Browser view, which covers the composer: a task's browser ends that task, as its card's Stop does; a chat's
- * is the chat's own run, as the composer's Stop does. False when there is no run to stop.
+ * is the chat's own run, as the composer's Stop does, only while the composer holds the turn the card names: its run may
+ * be over and the composer's turn a later one. False when there is no run to stop.
  */
 async function stopBrowsingRun(card) {
   if (card.task) return stopBrowsingTask(card);
-  if (composerTurn() === null) return false;
+  const turn = composerTurn();
+  if (turn === null) return false;
+  if (turn.turn !== card.turn) {
+    notify(t("errors.staleBrowser"));
+    return false;
+  }
   await stop();
   return true;
 }
@@ -2352,10 +2358,11 @@ async function addNote(text, { clearInput = false } = {}) {
   } catch (error) {
     dropNote(turn, item);
     if (error.code === "turn_not_running" && S.activeId === sessionId) {
-      // The turn ended first: these words and pictures are a message now.
+      // The turn ended first: these words and pictures are a message now. After a Stop they start nothing.
+      const stopped = turn.stopping || S.cancelling.has(turn.id);
       await reloadSession(sessionId);
       // A message still on its way (the outbox holds one) cannot take them: they go back to the box.
-      if (composerTurn() === null && pendingOutbox() === null) return queueMessage(text, { carry: carried });
+      if (!stopped && composerTurn() === null && pendingOutbox() === null) return queueMessage(text, { carry: carried });
     }
     if (carried.length) returnMedia(sessionId, carried);
     if (text) giveBack(text);

@@ -15,8 +15,12 @@ import httpx
 import pytest
 
 from localmelo.melo.schema import Message
-from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.console.asks import FORGET_TRIES
+from localmelo.support.gateway.console import Console, asks
+from localmelo.support.gateway.console.asks import (
+    FORGET_TRIES,
+    MAX_NOTE_CHARS,
+    MAX_QUEUED,
+)
 from localmelo.support.gateway.console.notes import NOTE_MARK
 from localmelo.support.sessions.store import SessionStoreError
 
@@ -319,6 +323,135 @@ async def test_a_note_unread_before_a_restart_runs_after_it(
         assert info is not None and info.meta.get("queued") is None
 
 
+async def test_a_note_the_run_read_does_not_run_again_after_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row of a read note outlives a crash: the restart says so, and acts on nothing."""
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, STEP), answer("Deleted it.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        assert (await _note(client, turn_id, "delete the copy")).status_code == 202
+        update = console.store.update_session
+
+        async def kept(session_id: str, **kwargs: Any) -> Any:
+            meta = kwargs.get("meta_update") or {}
+            if "queued" in meta and not meta["queued"]:
+                raise SessionStoreError("disk full")
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", kept)
+        release.set()
+        assert (await _wait_turn(client, main_id))["status"] == "completed"
+        await console.asks.settle()
+        assert _seen(models["main"].requests[1]).endswith("delete the copy")
+        assert await _queued(console, main_id) == ["delete the copy"]
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Deleted it again.")], run=False
+    ) as (console, client, models):
+        await console.asks.settle()
+        await asyncio.sleep(0.2)
+        assert models["main"].requests == []
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
+        page = (await client.get(f"/api/sessions/{main_id}/turns")).json()
+        [told] = [e for e in page["echoes"] if e["typed"] == "delete the copy"]
+        assert told["echo"] == "failed" and "may have read" in told["line"]
+
+
+@pytest.mark.parametrize("ending", ["stop", "finish"])
+async def test_a_note_caught_on_its_way_to_the_store_by_the_end_of_its_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    """Words on their way when Stop comes are the person's once, and start nothing; a turn that only ended takes them next."""
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answer("First.")), answer("Second.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        update, entered, go = (
+            console.store.update_session,
+            asyncio.Event(),
+            asyncio.Event(),
+        )
+
+        async def slow(session_id: str, **kwargs: Any) -> Any:
+            if (kwargs.get("meta_update") or {}).get("queued") and not entered.is_set():
+                entered.set()
+                await go.wait()
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", slow)
+        sending = asyncio.create_task(_note(client, turn_id, "on its way"))
+        await entered.wait()
+        given: list[str] = []
+        if ending == "stop":
+            stopped = await client.post(f"/api/turns/{turn_id}/cancel")
+            assert stopped.status_code == 202
+            given = [n["text"] for n in stopped.json().get("unread_notes", [])]
+        else:
+            release.set()
+        await _wait_turn(client, main_id)
+        go.set()
+        answered = await sending
+        await console.asks.settle()
+        await asyncio.sleep(0.1)
+        turns = await console.store.list_turns(main_id)
+        if ending == "stop":
+            refused = answered.status_code == 409
+            assert refused != bool(given), (answered.text, given)
+            assert len(turns) == 1
+            assert await _queued(console, main_id) == []
+        else:
+            assert answered.json()["note"]["state"] == "next"
+            assert [turn.user_text for turn in turns] == ["go", "on its way"]
+
+
+async def test_a_note_that_cannot_be_stored_as_read_stays_unread_and_runs_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answer("First.")), answer("Second.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        assert (await _note(client, turn_id, "kept")).status_code == 202
+        update = console.store.update_session
+
+        async def full(session_id: str, **kwargs: Any) -> Any:
+            rows = (kwargs.get("meta_update") or {}).get("queued") or []
+            if any(row.get("reading") for row in rows):
+                raise SessionStoreError("disk full")
+            return await update(session_id, **kwargs)
+
+        monkeypatch.setattr(console.store, "update_session", full)
+        assert not await console.asks.notes_reading(
+            main_id, [n for n, _ in console.asks.unread_notes(main_id)]
+        )
+        assert [item.reading for item in console.asks._people[main_id]] == [False]
+        release.set()
+        await until(lambda: len(models["main"].requests) == 2)
+        assert NOTE_MARK not in _seen(models["main"].requests[1])
+        assert "kept" in _seen(models["main"].requests[1])
+        assert len(await console.store.list_turns(main_id)) == 2
+
+
 async def test_stop_hands_the_unread_notes_back_and_starts_no_turn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -512,9 +645,7 @@ async def test_a_read_note_is_forgotten_by_the_stored_queue_or_never_runs_twice_
     """The stored queue is what a restart runs, so removing a read note is tried again.
 
     One failed write is made good by the next try. If every try fails the note is
-    still read once and starts no turn of its own; it stays stored, which is the
-    known limit of a queue that is written after the fact (a crash then would run
-    it again).
+    still read once and starts no turn of its own; it stays stored, as read.
     """
     release = asyncio.Event()
     main: list[Reply] = [held(release, STEP), answer("Done, with your note.")]
@@ -532,7 +663,8 @@ async def test_a_read_note_is_forgotten_by_the_stored_queue_or_never_runs_twice_
         failed: list[int] = []
 
         async def flaky(session_id: str, **kwargs: Any) -> Any:
-            if len(failed) < fails and "queued" in (kwargs.get("meta_update") or {}):
+            meta = kwargs.get("meta_update") or {}
+            if len(failed) < fails and "queued" in meta and not meta["queued"]:
                 failed.append(1)
                 raise SessionStoreError("disk full")
             return await update(session_id, **kwargs)
@@ -548,3 +680,56 @@ async def test_a_read_note_is_forgotten_by_the_stored_queue_or_never_runs_twice_
         assert not console.asks._people.get(main_id)
         assert await _queued(console, main_id) == (["read once"] if fails > 1 else [])
         assert len(failed) == min(fails, FORGET_TRIES)
+
+
+async def test_what_waits_behind_a_turn_is_bounded_and_nothing_accepted_is_lost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    main: list[Reply] = [held(never, answer("stalled"))]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        files = [{"name": "a.txt", "text": "the file", "chars": 8}]
+        accepted = [f"file {n}" for n in range(MAX_QUEUED)]
+        for words in accepted:
+            sent = await _post_turn(client, chat, words, attachments=files)
+            assert sent.status_code == 200, sent.text
+        over = await _post_turn(client, chat, "one more", attachments=files)
+        assert over.status_code == 409, over.text
+        assert over.json()["error"]["code"] == "chat_queue_full"
+        # Behind what waits, words alone are refused the same way, not kept.
+        behind = await _post_turn(client, chat, "plain words")
+        assert behind.status_code == 409, behind.text
+        assert await _queued(console, chat) == accepted
+        # A full chat still answers, and a second chat is not held by it.
+        made = await client.post("/api/sessions", json={"turn": {"text": "hello"}})
+        assert made.status_code == 201, made.text
+        stopped = await client.post(f"/api/turns/{turn_id}/cancel")
+        assert stopped.status_code == 202
+
+
+async def test_what_waits_behind_a_turn_is_bounded_in_size_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    main: list[Reply] = [held(never, answer("stalled"))]
+    monkeypatch.setattr(asks, "MAX_QUEUED_CHARS", 20_000)
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        long = "x" * (MAX_NOTE_CHARS + 1)
+        assert (await _post_turn(client, chat, f"a{long}")).status_code == 200
+        assert (await _post_turn(client, chat, f"b{long}")).status_code == 200
+        over = await _post_turn(client, chat, f"c{long}")
+        assert over.status_code == 409 and len(await _queued(console, chat)) == 2

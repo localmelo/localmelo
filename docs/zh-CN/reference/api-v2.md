@@ -839,6 +839,8 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 409 | `model_text_only` | 轮次（或对它的重试）带有图片，而对话模型已知读不了图片 |
 | 409 | `chat_answering` | 对话正在回答任务的提问时，收到了带图片的消息 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
+| 409 | `chat_queue_full` | 对话的轮次后面等待的消息太多 |
+| 409 | `turn_stopped` | 这些话写入时本人停止了这一轮 |
 | 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
 | 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
@@ -898,7 +900,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 返回 202，附带轮次和恢复键。当本次调用必须从会话文件重建智能体时，恢复键会被填充：即本网关的任何路由都未打开过的会话上的第一个轮次，例如重启之后的第一个轮次。本网关关闭并保存在内存中的会话，会从该对话重新打开，并报告 `null`。
 - 任务会话返回 409 `task_session_read_only`；请使用任务路由，而不是开始一个对话轮次。
-- 每个会话同时只运行一个轮次。在对话上，本人的轮次运行期间发来的话返回 202 `{"note": {...}}`，与 `POST /api/turns/{turn_id}/notes` 的补充相同，运行在下一步读到。暂时不能成为补充的消息保持顺序（200，`queued` 回执）；图片无处等待时返回 409 `chat_answering`。在其他会话上返回 409 `session_busy`，在任何东西进入队列之前。
+- 每个会话同时只运行一个轮次。在对话上，本人的轮次运行期间发来的话返回 202 `{"note": {...}}`，与 `POST /api/turns/{turn_id}/notes` 的补充相同，运行在下一步读到。暂时不能成为补充的消息保持顺序（200，`queued` 回执），合计最多 20 条、2,000,000 个字符，超过时返回 409 `chat_queue_full`；图片无处等待时返回 409 `chat_answering`；Stop 时还在写入的话返回 409 `turn_stopped`，由发送方保留。在其他会话上返回 409 `session_busy`，在任何东西进入队列之前。
 - 重复的 `client_request_id` 会以 200 返回该键已保存的轮次和 `"repeated": true`，无论该轮次是否仍在运行。
 - 会话的文件夹必须仍然存在：文件夹被删除则返回 400 `invalid_workspace`，且轮次不会开始。
 - `attachments` 和 `images` 与创建时相同。要向正在运行的轮次补充话语，请使用 [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes)，而不是等待。

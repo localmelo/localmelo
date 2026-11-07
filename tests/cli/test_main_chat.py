@@ -61,6 +61,11 @@ class FakeGateway:
         self.lose_stream = False
         self.refuse_mode = False
         self.note_refused = False  # a note's turn ended on the way
+        self.notes_in: list[str] = []  # the words that reached a turn, in order
+        self.note_hold: asyncio.Event | None = None  # the next note waits for it
+        self.note_waiting = False
+        self.note_error: tuple[int, str] | None = None
+        self.note_down = False  # a note gets no answer
         self.unread: list[dict[str, Any]] = []  # what a Stop gives back
         # The task runs Done named: session id and the query that says which run.
         self.done_sources: list[tuple[str, dict[str, str]]] = []
@@ -259,9 +264,22 @@ class FakeGateway:
             self.finish(parts[2], number, "completed", "Signed in.")
             return httpx.Response(200, json={"ok": True})
         if parts[:2] == ["api", "turns"] and parts[3:] == ["notes"]:
-            if self.note_refused:
+            hold, self.note_hold = self.note_hold, None
+            if hold is not None:
+                self.note_waiting = True
+                await hold.wait()
+            if self.note_down:
+                raise httpx.ConnectError("the gateway went away")
+            if self.note_error is not None:
+                return _error(*self.note_error, "That note is too long.")
+            if self.note_refused or parts[2] not in self._running:
                 return _error(409, "turn_not_running", "The turn is not running.")
-            return httpx.Response(202, json={"note": {"text": body["text"]}})
+            session_id, number = self._running[parts[2]]
+            self.notes_in.append(body["text"])
+            note = {"note": len(self.notes_in), "text": body["text"]}
+            self.emit(session_id, "turn.note", {"turn": number, "turn_id": parts[2],
+                      **note}, number)  # fmt: skip
+            return httpx.Response(202, json={"note": note})
         if parts[:2] == ["api", "turns"] and parts[3:] == ["cancel"]:
             found = self._running.pop(parts[2], None)
             if found is None:
@@ -560,7 +578,7 @@ async def test_words_typed_before_the_turns_id_is_known_keep_their_order(
     # The send has not come back: no turn to add a note to yet.
     assert session.state == "running"
     assert session.enter("then this") is None
-    assert session.queued == "then this"
+    gateway.note_refused = True  # the turn ended before it could take them
     await _until(lambda: session.remote is not None and session.remote._turn is not None
                  and bool(session.remote._turn.turn_id))  # fmt: skip
     gateway._running.clear()
@@ -598,9 +616,129 @@ async def test_a_note_the_stopped_turn_never_read_comes_back_to_the_input_box(
     await _until(lambda: session.remote is not None and session.remote._turn is not None
                  and bool(session.remote._turn.turn_id))  # fmt: skip
     assert session.enter("not that way") is None
+    await _until(lambda: gateway.notes_in == ["not that way"])
     assert session.stop() is True
     await setup.idle()
     assert back == ["not that way"]
+
+
+async def _running(session: Any) -> None:
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+
+
+async def test_words_before_and_after_the_turns_id_reach_that_turn_in_order(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long job") is None
+    assert session.enter("first") is None  # the send has not come back
+    await _running(session)
+    assert session.enter("second") is None
+    await _until(lambda: len(gateway.notes_in) == 2)
+    assert gateway.notes_in == ["first", "second"]
+    assert session.queued is None
+    gateway._running.clear()
+    gateway.finish(MAIN, 1, "completed", "Done.")
+    await setup.idle()
+    assert len(gateway.turns[MAIN]) == 1
+
+
+async def test_a_slow_note_keeps_the_next_one_behind_it(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long job") is None
+    await _running(session)
+    hold = gateway.note_hold = asyncio.Event()
+    assert session.enter("one") is None
+    await _until(lambda: gateway.note_waiting)
+    assert session.enter("two") is None
+    await asyncio.sleep(0.05)
+    hold.set()
+    await _until(lambda: len(gateway.notes_in) == 2)
+    assert gateway.notes_in == ["one", "two"]
+
+
+def _sends(gateway: FakeGateway, words: str) -> list[str]:
+    """The requests that made *words* a message of any chat."""
+    return [path for method, path, body in gateway.requests
+            if method == "POST" and not path.endswith("/notes")
+            and words in json.dumps(body or {})]  # fmt: skip
+
+
+@pytest.mark.parametrize("how", ["stop", "switch"])
+async def test_a_note_refused_late_goes_back_to_the_person_and_starts_nothing(
+    chat: tuple[Setup, FakeGateway], how: str
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    back: list[str] = []
+    session.words_back = back.append  # type: ignore[method-assign,assignment]
+    assert session.enter("long job") is None
+    await _running(session)
+    hold = gateway.note_hold = asyncio.Event()
+    assert session.enter("not that way") is None
+    await _until(lambda: gateway.note_waiting)
+    if how == "stop":
+        assert session.stop() is True
+    else:
+        gateway._running.clear()
+        gateway.finish(MAIN, 1, "completed", "Done.")
+    await _until(lambda: session.state == "idle")
+    if how == "switch":
+        assert session.enter("/side Trip plans") is None
+        await _until(
+            lambda: session.remote is not None and not session.remote.chat.main
+        )
+    hold.set()
+    await _until(lambda: bool(back))
+    await setup.idle()
+    assert back == ["not that way"]
+    assert _sends(gateway, "not that way") == []
+
+
+@pytest.mark.parametrize("down", [False, True])
+async def test_a_note_the_gateway_did_not_take_is_the_persons_again_and_not_sent_again(
+    chat: tuple[Setup, FakeGateway], down: bool
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    back: list[str] = []
+    session.words_back = back.append  # type: ignore[method-assign,assignment]
+    assert session.enter("long job") is None
+    await _running(session)
+    gateway.note_down = down
+    gateway.note_error = None if down else (400, "invalid_request")
+    assert session.enter("a very long note") is None
+    await _until(lambda: bool(back))
+    assert back == ["a very long note"]
+    text = setup.out.text()
+    assert "Could not send the note" in text
+    assert "Note for melo: a very long note" not in text
+    assert len([r for r in gateway.requests if r[1].endswith("/notes")]) == 1
+
+
+async def test_words_added_in_another_window_show_here_once_and_ones_typed_here_too(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    gateway.start_turn(MAIN, "long from the console", "other")
+    await _until(lambda: session.state == "running")
+    await _running(session)
+    note = {"turn": 1, "turn_id": f"{MAIN}-t1", "note": 7, "text": "use the blue one"}
+    gateway.emit(MAIN, "turn.note", note, 1)
+    gateway.emit(MAIN, "inbox.accepted", {"offset": 7}, 1)
+    await _until(lambda: "Note for melo: use the blue one" in setup.out.text())
+    assert session.enter("and the red one") is None
+    await _until(lambda: "Note for melo: and the red one" in setup.out.text())
+    await asyncio.sleep(0.05)
+    text = setup.out.text()
+    assert text.count("Note for melo: use the blue one") == 1
+    assert text.count("Note for melo: and the red one") == 1
 
 
 async def test_a_tasks_browser_is_one_status_line_and_done_gives_back_that_run(

@@ -43,7 +43,8 @@ import itertools
 import logging
 import time
 import uuid
-from collections.abc import Callable, Coroutine, Sequence
+from collections import Counter
+from collections.abc import Callable, Coroutine, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
@@ -87,6 +88,10 @@ MAX_ANSWER_CHARS: Final = 2000
 # Words the person can add to one running turn, and the longest of them.
 MAX_NOTES: Final = 20
 MAX_NOTE_CHARS: Final = 8_000
+# The messages that may wait behind a chat's turn, and their size together.
+# One message always fits; a note counts under MAX_NOTES instead.
+MAX_QUEUED: Final = 20
+MAX_QUEUED_CHARS: Final = 2_000_000
 # The notes of a chat that are remembered by key, so a repeated send gets its note back.
 NOTE_KEYS_KEPT: Final = 64
 # How long the person can take back a message sent as a task's answer.
@@ -152,6 +157,9 @@ class _Queued:
     note: int = 0
     # False while a note is being stored: its run does not read it yet.
     note_ready: bool = True
+    # Stored as true before a request carries the note: a restart that finds it
+    # cannot tell whether the run read it, so it does not run it.
+    reading: bool = False
     # The pictures that came with a note, as references into the chat's blobs
     # (stored with the queue, so a restart finds them), and in memory while the
     # gateway runs, with the names they were added under.
@@ -183,6 +191,9 @@ class OwnerAsks:
         # The numbers of notes, and the newest notes of each chat by key, so a
         # repeated send answers with the note it made, also once it was read.
         self._note_numbers = itertools.count(1)
+        # Places taken under a limit (a chat's queue, a turn's notes) from before
+        # the first wait until they are in the queue.
+        self._places: Counter[str] = Counter()
         self._note_keys: dict[str, dict[str, dict[str, Any]]] = {}
 
     # ── What the rest reads ──
@@ -501,6 +512,22 @@ class OwnerAsks:
         key: str | None,
         people: list[_Queued],
     ) -> dict[str, Any]:
+        waiting = [item.composed for item in people if not item.note_of]
+        if len(waiting) + self._places[chat_id] >= MAX_QUEUED or (
+            waiting and sum(map(len, waiting)) + len(composed) > MAX_QUEUED_CHARS
+        ):
+            raise ApiError(409, "chat_queue_full", t("errors.queueFull"))
+        with self._holding(chat_id):
+            return await self._keep_message(chat_id, typed, composed, key, people)
+
+    async def _keep_message(
+        self,
+        chat_id: str,
+        typed: str,
+        composed: str,
+        key: str | None,
+        people: list[_Queued],
+    ) -> dict[str, Any]:
         busy = self._busy.get(chat_id)
         title = (
             busy.title if busy else (people[-1].echo.get("title", "") if people else "")
@@ -537,11 +564,23 @@ class OwnerAsks:
     async def _keep_queue(self, chat_id: str) -> None:
         """Store *chat_id*'s queued messages, so a restart runs them; raises on failure."""
         kept = [{"typed": q.typed, "composed": q.composed, "key": q.key,
-                 "echo": q.echo, **({"images": q.images} if q.images else {})}
+                 "echo": q.echo, **({"images": q.images} if q.images else {}),
+                 **({"reading": True} if q.reading else {})}
                 for q in self._people.get(chat_id, [])]  # fmt: skip
         await self.console.store.update_session(
             chat_id, meta_update={"queued": kept or None}
         )
+
+    @contextlib.contextmanager
+    def _holding(self, key: str) -> Iterator[None]:
+        """A place under the limit of *key*, held across the waits before it is in the queue."""
+        self._places[key] += 1
+        try:
+            yield
+        finally:
+            self._places[key] -= 1
+            if not self._places[key]:
+                del self._places[key]
 
     # ── Words the person adds to a running turn ──
 
@@ -574,7 +613,9 @@ class OwnerAsks:
         note it has not read when the turn ends runs as the chat's next turn,
         in order, with the queued messages (the same store, so a restart keeps
         it). 409 ``turn_not_running`` when the turn is not that turn, is being
-        stopped, or has ended its run. The answer says whether the note was
+        stopped, or has ended its run; ``turn_stopped`` when Stop came while it
+        was being stored, so the sender keeps it and nothing runs after the
+        Stop. The answer says whether the note was
         sent to the running turn (``sent``) or the turn ended while it was
         stored (``next``), and lists the pictures (``images``) when it has any.
         A repeat of a *key* answers with the note it made.
@@ -620,27 +661,29 @@ class OwnerAsks:
         if entry is None or not entry.runner.takes_notes(turn_id):
             raise ApiError(409, "turn_not_running", t("errors.turnNotRunning"))
         people = self._people.setdefault(chat_id, [])
-        if sum(1 for item in people if item.note_of == turn_id) >= MAX_NOTES:
+        taken = sum(1 for item in people if item.note_of == turn_id)
+        if taken + self._places[turn_id] >= MAX_NOTES:
             raise ApiError(
                 400, "invalid_request", t("errors.tooManyNotes", n=MAX_NOTES)
             )
         images = [staged.picture.image for staged in pictures]
-        if images:
-            # Kept before the note is accepted: the page shows them from the chat's
-            # blobs, and a note that becomes the next turn (or outlives a restart) has them.
-            await self.console.store.put_blobs(chat_id, images)
-        number = next(self._note_numbers)
-        item = _Queued(
-            text,
-            composed,
-            key or f"note-{uuid.uuid4().hex}",
-            note_of=turn_id,
-            note=number,
-            note_ready=False,
-            images=[_reference(image) for image in images],
-            pictures=tuple(pictures),
-        )
-        people.append(item)
+        with self._holding(turn_id):
+            if images:
+                # Kept before the note is accepted: the page shows them from the chat's
+                # blobs, and a note that becomes the next turn (or outlives a restart) has them.
+                await self.console.store.put_blobs(chat_id, images)
+            number = next(self._note_numbers)
+            item = _Queued(
+                text,
+                composed,
+                key or f"note-{uuid.uuid4().hex}",
+                note_of=turn_id,
+                note=number,
+                note_ready=False,
+                images=[_reference(image) for image in images],
+                pictures=tuple(pictures),
+            )
+            people.append(item)
         try:
             await self._keep_queue(chat_id)
         except Exception as exc:
@@ -649,6 +692,11 @@ class OwnerAsks:
             if isinstance(exc, SessionStoreError):
                 raise
             raise SessionStoreError("Could not keep the note") from exc
+        if entry.runner.stopped(turn_id):
+            # Stop came while it was stored: not a next turn after a Stop.
+            people.remove(item)
+            await self._forget_started(chat_id)
+            raise ApiError(409, "turn_stopped", t("errors.turnStopped"))
         # Stored: now its run may read it, after the event that shows it.
         sent = entry.runner.publish_note(turn_id, number, text, images)
         if sent:
@@ -707,6 +755,21 @@ class OwnerAsks:
                 return [staged.picture.image for staged in item.pictures]
         return []
 
+    async def notes_reading(self, chat_id: str, numbers: Sequence[int]) -> bool:
+        """Store that the run reads notes *numbers*; False, and they stay unread, if that fails."""
+        reading = [item for item in self._people.get(chat_id, ())
+                   if item.note in numbers and item.note_of]  # fmt: skip
+        for item in reading:
+            item.reading = True
+        try:
+            await self._keep_queue(chat_id)
+        except Exception:
+            logger.warning("Could not store that a note is read", exc_info=True)
+            for item in reading:
+                item.reading = False
+            return False
+        return True
+
     def note_read(self, chat_id: str, number: int) -> None:
         """The run read note *number*: it is no longer a message to send next."""
         people = self._people.get(chat_id, [])
@@ -723,7 +786,8 @@ class OwnerAsks:
         gets their words back and sends them again, or not.
         """
         people = self._people.get(chat_id, [])
-        gone = [item for item in people if item.note_of == turn_id]
+        # One still being stored is not here yet: its send is refused instead.
+        gone = [item for item in people if item.note_of == turn_id and item.note_ready]
         if not gone:
             return []
         people[:] = [item for item in people if item not in gone]
@@ -753,16 +817,33 @@ class OwnerAsks:
             kept = info.meta.get("queued")
             if info.kind not in ("chat", "front") or not isinstance(kept, list):
                 continue
+            rows = [q for q in kept if isinstance(q, dict)]
             self._people[info.id] = [
                 _Queued(str(q.get("typed", "")), str(q.get("composed", "")),
                         str(q.get("key") or f"queued-{uuid.uuid4().hex}"),
                         dict(q.get("echo") or {}),
                         images=[dict(i) for i in q.get("images") or []
                                 if isinstance(i, dict)])  # fmt: skip
-                for q in kept
-                if isinstance(q, dict)
+                for q in rows
+                if not q.get("reading")
             ]
+            maybe_read = [q for q in rows if q.get("reading")]
+            for q in maybe_read:
+                await self._maybe_read(info.id, str(q.get("typed", "")))
+            if maybe_read:
+                await self._forget_started(info.id)
             self._kick(info.id)
+
+    async def _maybe_read(self, chat_id: str, typed: str) -> None:
+        """A note the gateway stopped reading: it may have acted on it, so it runs no turn, and its row says so."""
+        try:
+            await self.console.front_for(chat_id).echo(
+                {"echo": "failed", "typed": typed,
+                 "line": t_in("en", "ask.noteMaybeRead"),
+                 "said": said("ask.noteMaybeRead")}
+            )  # fmt: skip
+        except Exception:
+            logger.warning("Could not say a note may have been read", exc_info=True)
 
     # ── Each chat's turns, one at a time ──
 
@@ -828,6 +909,9 @@ class OwnerAsks:
 
     async def _send_queued(self, chat_id: str) -> None:
         item = self._people[chat_id][0]
+        if not item.note_ready:
+            await asyncio.sleep(self.idle_s)  # its send says soon what it is
+            return
         front = self.console.front_for(chat_id)
         try:
             images = await self._queued_images(chat_id, item)
@@ -878,7 +962,8 @@ class OwnerAsks:
         A failed write is tried again a few times, a little later each time: the
         stored queue is what a restart would run, so an entry left in it after it
         was handled would run twice. If every try fails the entry stays stored; a
-        message's key then finds its turn after a restart, a read note has none.
+        message's key then finds its turn after a restart, and a read note is
+        stored as read (:meth:`notes_reading`).
         """
         for attempt in range(FORGET_TRIES):
             try:

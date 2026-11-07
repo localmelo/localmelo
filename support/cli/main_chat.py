@@ -508,13 +508,15 @@ class GatewayClient:
         body = await self.call("POST", path, params=dict(source or {}))
         return body.get("ok") is True
 
-    async def note(self, turn_id: str, text: str) -> None:
-        """Words for a running turn: its run reads them at its next step."""
-        await self.call(
+    async def note(self, turn_id: str, text: str) -> dict[str, Any]:
+        """Words for a running turn: its run reads them at its next step; the note it made."""
+        body = await self.call(
             "POST",
             "/".join(["/api/turns", quote(turn_id, safe=""), "notes"]),
             json={"text": text, "client_request_id": uuid.uuid4().hex},
         )
+        note = body.get("note")
+        return note if isinstance(note, dict) else {}
 
     async def answer(self, request_id: str, choice: str, reason: str = "") -> None:
         body = {"choice": choice, "reason": reason}
@@ -848,6 +850,14 @@ class _Turn:
     retry: bool = False
 
 
+@dataclass
+class _Note:
+    """Words typed for the running turn, and the chat they were typed in."""
+
+    text: str
+    chat: Chat
+
+
 class MainChat:
     """The terminal's side of the main chat (see the module docstring)."""
 
@@ -867,6 +877,12 @@ class MainChat:
         self._cursors: dict[str, int] = {}
         self._follow: asyncio.Task[None] | None = None
         self._turn: _Turn | None = None
+        # Words for the running turn, oldest first, not sent yet: one sender
+        # takes them in order, so they reach the run in the order they were typed.
+        self._notes: list[_Note] = []
+        self._note_sender: asyncio.Task[None] | None = None
+        # The notes of this turn already shown: the answer and the stream both say so.
+        self._notes_shown: set[int] = set()
         self._asks: dict[str, asyncio.Task[None]] = {}
         # The card and echo events already drawn, by id.
         self._seen: set[int] = set()
@@ -1082,7 +1098,7 @@ class MainChat:
                     data.get("turn") if isinstance(data.get("turn"), int) else None
                 )
                 turn.turn_id = str(data.get("turn_id") or "")
-                self._stop_if_wanted(turn)
+                self._turn_known(turn)
             elif turn is None and self.host.state == "idle":
                 # A message sent in another window (the console, the app).
                 loop = asyncio.get_running_loop()
@@ -1105,7 +1121,9 @@ class MainChat:
                 event_id if isinstance(event_id, int) else None, chat_id, number, stored
             )
         )
-        if kind == "approval.requested":
+        if kind == "turn.note":
+            self._show_note(data.get("note"), str(data.get("text") or ""))
+        elif kind == "approval.requested":
             request_id = str(data.get("request_id") or "")
             if request_id and request_id not in self._asks:
                 self._asks[request_id] = self.host.spawn(self._ask(chat_id, request_id))
@@ -1230,22 +1248,59 @@ class MainChat:
             else:
                 self._say(f"Could not give the page back: {exc}", "error")
 
-    def note(self, text: str) -> bool:
-        """Send *text* to the running turn as a note; False when its id is not known yet."""
-        turn = self._turn
-        if turn is None or not turn.turn_id:
-            return False
-        self.host.spawn(self._note(turn.turn_id, text))
-        return True
+    def note(self, text: str) -> None:
+        """Words for the running turn: they go in the order they were typed, once its id is known."""
+        self._notes.append(_Note(text, self.chat))
+        self._send_notes()
 
-    async def _note(self, turn_id: str, text: str) -> None:
-        try:
-            await self.client.note(turn_id, text)
-        except GatewayError as exc:
-            if exc.code == "turn_not_running":
-                self.host.next_message(text)  # the turn ended as they were sent
+    def _send_notes(self) -> None:
+        turn = self._turn
+        sending = self._note_sender is not None and not self._note_sender.done()
+        if self._notes and turn is not None and turn.turn_id and not sending:
+            self._note_sender = self.host.spawn(self._deliver(turn))
+
+    async def _deliver(self, turn: _Turn) -> None:
+        """Send the waiting notes to *turn*, one at a time: the next waits for the gateway's answer."""
+        while self._notes and turn.turn_id:
+            note = self._notes.pop(0)
+            try:
+                body = await self.client.note(turn.turn_id, note.text)
+            except GatewayError as exc:
+                self._not_taken(note, turn, exc)
             else:
-                self._say(f"Could not send the note: {exc}", "error")
+                self._show_note(body.get("note"), note.text)
+
+    def _not_taken(self, note: _Note, turn: _Turn, exc: GatewayError | None) -> None:
+        """A note that did not reach *turn*: the next message only if the turn just ended, here and with no Stop.
+
+        Anything else is the person's to send again: nothing is sent twice on a
+        guess, into another chat, or after a Stop.
+        """
+        ended = exc is None or exc.code == "turn_not_running"
+        if ended and not turn.stop and note.chat is self.chat:
+            self.host.next_message(note.text)
+            return
+        self.host.words_back(note.text)
+        if exc is not None and exc.code not in ("turn_not_running", "turn_stopped"):
+            self._say(f"Could not send the note: {exc}", "error")
+
+    def _show_note(self, number: Any, text: str) -> None:
+        """The line for words that reached the running turn, once, from this window or another."""
+        if isinstance(number, int):
+            if number in self._notes_shown:
+                return
+            self._notes_shown.add(number)
+        self.host.say_note(text)
+
+    def _turn_over(self, turn: _Turn) -> None:
+        """*turn* ended: what no sender is taking did not reach it."""
+        if self._turn is turn:
+            self._turn = None
+        self._notes_shown.clear()
+        if self._note_sender is None or self._note_sender.done():
+            waiting, self._notes = self._notes, []
+            for note in waiting:
+                self._not_taken(note, turn, None)
 
     # ── Turns ──
 
@@ -1308,20 +1363,20 @@ class MainChat:
                     symbols, width = self.host.renderer.symbols, self.host.out.width
                     self.host.out.print(echo_line(echo, symbols, width))
                 return "echo"
-            if isinstance(body.get("note"), dict):
+            note = body.get("note")
+            if isinstance(note, dict):
                 # A turn of another window runs: the words joined it.
-                self.host.say_note(text)
+                self._show_note(note.get("note"), text)
                 return "echo"
             started = body.get("turn")
             number = started.get("turn") if isinstance(started, dict) else None
             if turn.number is None and isinstance(number, int):
                 turn.number = number
             turn.turn_id = turn.turn_id or str(body.get("turn_id") or "")
-            self._stop_if_wanted(turn)
+            self._turn_known(turn)
             return await turn.done
         finally:
-            if self._turn is turn:
-                self._turn = None
+            self._turn_over(turn)
 
     async def wait(self) -> str:
         """Wait for the turn another window started (see :meth:`_dispatch`)."""
@@ -1331,8 +1386,7 @@ class MainChat:
         try:
             return await turn.done
         finally:
-            if self._turn is turn:
-                self._turn = None
+            self._turn_over(turn)
 
     def stop(self) -> None:
         """Esc: ask the gateway to stop the running turn, once its id is known."""
@@ -1340,18 +1394,22 @@ class MainChat:
         if turn is None or turn.stop:
             return
         turn.stop = True
-        self._stop_if_wanted(turn)
+        self._turn_known(turn)
 
-    def _stop_if_wanted(self, turn: _Turn) -> None:
+    def _turn_known(self, turn: _Turn) -> None:
+        """The turn's id may be known now: a Stop that waited for it goes, or else the notes that did."""
         if turn.stop and turn.turn_id:
             turn_id, turn.turn_id = turn.turn_id, ""
             self.host.spawn(self._cancel(turn_id))
+        self._send_notes()
 
     async def _cancel(self, turn_id: str) -> None:
+        waiting, self._notes = [note.text for note in self._notes], []
+        unread: list[str] = []
         with contextlib.suppress(GatewayError):
             unread = await self.client.cancel(turn_id)
-            if unread:
-                self.host.words_back("\n".join(unread))
+        if unread or waiting:
+            self.host.words_back("\n".join([*unread, *waiting]))
 
     # ── Commands ──
 

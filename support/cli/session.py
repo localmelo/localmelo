@@ -574,9 +574,10 @@ class CliSession:
             return None
         if self._state == "running":
             # Words go to the chat's running turn as a note: its run reads them at
-            # its next step. Until its id is known, they wait in order.
-            if self.remote is not None and self.remote.note(text):
-                self.say_note(text)
+            # its next step. They show once the gateway has them.
+            if self.remote is not None:
+                self.remote.note(text)
+                self._hint("Your note goes to melo at its next step")
                 return None
             if self.queued is not None:
                 return "One message is already queued (↑ edits it)."

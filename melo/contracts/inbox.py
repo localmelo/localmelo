@@ -28,6 +28,17 @@ class InboxSource(Protocol):
     def accept(self, offset: int) -> None: ...
 
 
+class ClaimingInbox(InboxSource, Protocol):
+    """An inbox that stores what is being read before a request carries it.
+
+    ``claim(offsets)`` answers once that is stored, ``False`` when it could not
+    be: the run then leaves those messages unread this step. So what was read
+    is never taken for unread after a restart, whatever happens after it.
+    """
+
+    async def claim(self, offsets: Sequence[int]) -> bool: ...
+
+
 class PictureInbox(InboxSource, Protocol):
     """An inbox whose messages can carry pictures (a chat's added words).
 

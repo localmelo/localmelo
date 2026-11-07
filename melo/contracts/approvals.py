@@ -533,6 +533,9 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # holds a grant of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
+# Whether the run of the running tool may act (``Agent.run_task(acts=)``): what a
+# tool reaches through another tool, a search through the browser, reads it.
+RUN_ACTS: ContextVar[bool] = ContextVar("localmelo_run_acts", default=True)
 
 
 def review_mode(policy: object, request: ApprovalRequest) -> ReviewMode:

@@ -42,6 +42,7 @@ from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import StoredEvent
+from localmelo.tests.browser.fakes import FakeDriver
 from localmelo.tests.browser.test_live import HOME, site
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
@@ -873,6 +874,7 @@ async def built_chats(
     monkeypatch: pytest.MonkeyPatch,
     *scripts: list[Message],
     driver: str = "off",
+    search_order: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Path, list[Script]]]:
     """A console built as the gateway builds it: only the model is a script.
 
@@ -893,6 +895,8 @@ async def built_chats(
     cfg = make_cfg()
     cfg.gateway.workspace = str(folder)
     cfg.browser.driver = driver
+    cfg.web.search_order = list(search_order)
+    cfg.web.search = bool(search_order)
     console = Console(
         cfg,
         port=PORT,
@@ -1075,6 +1079,61 @@ async def test_a_turn_melo_began_cannot_change_anything_whatever_the_model_calls
         offered = set(models[0].offered[-1])
         assert not offered & {"file_write", "file_edit", "python_exec"}
         assert await console.workers.tasks.list_tasks() == []
+
+
+async def _search_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeDriver:
+    """The stand-in behind every browser this test's chats build, with no address looked up."""
+    driver = site()
+
+    async def public(_: str) -> None:
+        return None
+
+    monkeypatch.setattr("localmelo.support.browser.addresses.require_public", public)
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(driver),  # type: ignore[arg-type]
+    )
+    return driver
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_turn_melo_began_starts_no_browser_work_through_a_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    calls = [tool_call("web_search", {"query": "tomatoes"}, "s-1"), answer("Nothing.")]
+    script = [*([answer("Hello.")] if where == "side" else []), *calls]
+    driver = await _search_browser(monkeypatch)
+    async with built_chats(
+        tmp_path, monkeypatch, script, driver="chrome", search_order=("browser",)
+    ) as (console, client, folder, models):
+        chat = str(console.main_id)
+        if where == "side":
+            made = await client.post(
+                "/api/sessions",
+                json={"turn": {"text": "hello"}, "workspace": str(folder)},
+            )
+            chat = str(made.json()["session"]["id"])
+            await _wait_turn(client, chat)
+        await console.sessions.start_internal(chat, "a task's question", ASK_ORIGIN)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert "web_search" in models[0].offered[-1]
+        assert (driver.started, driver.calls) == (0, [])
+        assert await console.store.events_of_type(chat, BROWSER_EVENT, limit=50) == []
+
+
+async def test_a_turn_the_person_began_still_searches_with_the_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = [tool_call("web_search", {"query": "tomatoes"}, "s-1"), answer("Found.")]
+    driver = await _search_browser(monkeypatch)
+    async with built_chats(
+        tmp_path, monkeypatch, script, driver="chrome", search_order=("browser",)
+    ) as (console, client, folder, _):
+        chat = await _chat(client, console, "main", "search for tomatoes", folder)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert driver.started >= 1
 
 
 async def test_a_reply_that_only_says_what_it_will_do_is_the_reply_and_starts_nothing(
