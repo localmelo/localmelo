@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
+    WEB_PORTS,
     ApprovalDecision,
     denial_text,
     is_refusal,
@@ -76,7 +77,6 @@ BROWSER: ContextVar[str] = ContextVar("localmelo_browser_name", default="Safari"
 URL_SHOWN = 300
 # The most form fields a send question lists.
 FORM_SHOWN = 12
-_PORTS = {"http": 80, "https": 443}
 
 
 class SiteRefusedError(BrowserError):
@@ -100,11 +100,11 @@ def origin_of(url: str) -> str | None:
     host = host[:-1] if host.endswith(".") else host
     # No % in a host, as web_fetch's check: a browser decodes `coll%65ct.example`
     # to `collect.example`, so an encoded host would dodge a site refused earlier.
-    if scheme not in _PORTS or not host or not re.fullmatch(r"[\w.\-\[\]:]+", host):
+    if scheme not in WEB_PORTS or not host or not re.fullmatch(r"[\w.\-\[\]:]+", host):
         return None
     shown = f"[{host}]" if ":" in host else host
     return f"{scheme}://{shown}" + (
-        f":{port}" if port not in (None, _PORTS[scheme]) else ""
+        f":{port}" if port not in (None, WEB_PORTS[scheme]) else ""
     )
 
 

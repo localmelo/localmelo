@@ -463,6 +463,7 @@ class _ApprovalGate:
             tier=self._tier,
             review=review,
             outside=outside,
+            person_cjk=None if self._reviewer is None else self._reviewer.person_cjk(),
         )
 
     async def _ask(
@@ -556,7 +557,9 @@ class _ApprovalGate:
         ):
             shown = review.to_json()
             # The sentence the approval card starts with (#454).
-            gist = step_gist(asking.tool_name, asking.arguments, review)
+            gist = step_gist(
+                asking.tool_name, asking.arguments, review, cjk=asking.person_cjk
+            )
             if gist is not None:
                 shown["gist"] = gist.to_json()
             self.asked["review"] = shown

@@ -31,7 +31,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.gist import request_gist
 from localmelo.melo.contracts.approvals import (
     DESKTOP_ACT,
     WINDOW_READ,
@@ -257,7 +257,7 @@ def _says(request: ApprovalRequest, text: PanelText) -> PanelText:
     A tool whose question says as much itself (a file write, a tool's name, a
     site) has none.
     """
-    gist = step_gist(request.tool_name, request.arguments, request.review)
+    gist = request_gist(request)
     if gist is None:
         return text
     shown = gist.to_json()

@@ -145,7 +145,7 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 - `since`（自纪元起的秒数）是这一天的开始；默认是网关所在电脑的本地午夜，不能是将来的时间（`400 invalid_request`），最多往回一周。
 - `session_id`（最多 128 个字符）是面板当前打开的对话。对于侧边对话，`scope` 为 `chat`，行是该对话自己的一行和它启动的任务（任务的 `front_id`）；未知的 id 视为没有任何内容的侧边对话。对于主对话（类型为 `front` 的会话，或 `meta` 里有 `main: true` 的会话），以及不带 `session_id` 时，`scope` 为 `all`，行是一整天的内容，包括 worker 运行和终端对话。
 - 一行是会话在 `since` 或之后仍在运行或已结束的最新轮次（仍在运行的轮次一定在内，无论它多早开始），或在那之后有变化或尚未结束的任务。运行中 `state` 为 `running`、`waiting`（有审批在等待）、`held`（调度器暂缓了它的模型调用）、`queued` 或 `paused`，否则为 `done`、`failed` 或 `stopped`；用完步数的任务是 `stopped` 并带 `can_continue: true`（它存储的状态是 `failed`），其 `result` 是它的最终回答里说明还剩什么的那一句。运行中的行说明它在做什么（`activity` 和 `icon`，与 [`status.items`](#get-apihealth) 中的相同）；已结束的行在 `result` 中说明结果，一行，最多 140 个字符（该轮的摘要，否则是去掉 Markdown 的回答第一句，失败时是原因；控制台对话的行先说这个对话自最新一轮开始以来做了什么：`Started a task: <title>`、`Offered a task: <title>`、`Kept a note`，再接它回答的那一行，用 ` · ` 连接；主对话的 `title` 用请求的语言），其 `icon` 是它最后一次工具调用的类别（没有工具调用时为 `done`，或为 `failed`、`stopped`）。`at` 是它结束的时间（运行中的行：开始的时间；任务：最后一次变化的时间），`turns` 是对话当天开始的轮次数，`level` 是任务的优先级（0 到 5）。结果始终是平实的话：运行自己的标记写作 `Stopped before answering` 或 `Ended without an answer`，路径写作 `Made a picture` 或文件名，代码让位给它周围的第一句话（没有时写 `Wrote some code`）。在一整天的列表里，旁支对话开始的任务还带 `from`，即那个对话的标题。
-- `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`，从不显示命令行、代码或文本），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
+- `approvals` 按从旧到新列出该行的会话今天请求做的事，最多 20 条：`{id, what, answer, at}`。`what` 是用平实的话描述的调用（`Write slides.md`、`Run the tests`、`Run a command`、`Open example.com`、`Click or choose on example.com`，从不显示命令行、代码、文本或 `browser-act:` 这样的问题名称），`at` 是请求的时间，`answer` 为 `waiting`、`allowed once`、`allowed for this chat`、`allowed automatically`、`denied`、`no answer`（超时）或 `withdrawn`（轮次先结束了）。对话或任务中 `waiting` 的请求用 `POST /api/approvals/{id}` 回答，与对话的卡片相同。运行和终端对话的行与其余内容一样经过脱敏。
 - 运行中的行在前，其余从新到旧，最多 100 行；有行被省略时 `more` 为 `true`。无法读取的来源不添加任何行，并在 `unavailable` 中写出（`chats`、`tasks`、`runs`、`approvals`）。
 
 ## GET /api/settings
@@ -428,7 +428,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 任务对象包含任务 id、规范化的 `spec`、`state`、优先级和来源、`wait_reason`、`pending_approvals`（任务正在等待的批准，形状与会话的相同；没有时为空；与对话一样，用 `POST
 /api/approvals/{request_id}` 回答其中一个；每个还带 `explanation`，见[任务的批准](#a-tasks-approvals-go-through-its-chat)）、`earlier`（它凭之前的批准运行的步骤）、时间戳、工作区和 `priority_events`，以及保留的计量字段。服务、等待和工具计量尚未实现。
 
-任务保留创建时其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）；之后切换对话不会改变它。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。被拦下步骤的 `review` 在调用有 `gist` 时带着它（见 `GET /api/sessions/{id}` 的 `pending_approvals`）。任务在没有被拦下步骤的情况下继续。`POST
+你发起的任务在结束之前跟随其对话的[模式](#ask-and-auto)（`approvals`，`ask` 或 `auto`）：它以对话当时的模式开始，之后对话的切换会传到它那里，Auto 切到 Ask 时在它的下一次决定就生效，Ask 切到 Auto 时在正在等待的那张卡片之后的下一次决定生效（那张卡片仍留给你）。定时任务（chore），以及其他程序或 melo 自己创建的任务，保留创建时的模式；已经结束的任务保留结束时的模式。Auto 下的任务不问任何人，所以没有东西会让它停下等待，它的调用在写入沙箱中运行。它的对象另有 `blocked`，即 Auto 拦下的步骤（从旧到新：`request_id`、`call_id`、`name`、`step_key`、`reason`、`review`、`preview`、`ts`、`turn`、`can_allow`，以及 `used_at`，即被允许的步骤运行的时间，否则为 `null`），还有与对话相同的 `allowances`。被拦下步骤的 `review` 在调用有 `gist` 时带着它（见 `GET /api/sessions/{id}` 的 `pending_approvals`）。任务在没有被拦下步骤的情况下继续。`POST
 /api/tasks/{task_id}/blocks/{request_id}/allow` 允许一次（与对话相同），并把继续的消息发给任务：尚未结束的任务返回 202 `{"task": ...,
 "message": "queued"}`（它在下一步读到消息），工作没做完就停下的任务返回 `"continued"`（它再次运行）；没有这个被拦下的步骤返回 404 `not_found`，不能被允许的返回 409 `not_allowable`，这一步已经凭允许运行过或仍有一个允许在等待时返回 409 `already_allowed`，工作已完成时返回 409 `invalid_transition`（此时 `can_allow` 为 `false`，这个步骤和它的卡片带 `finished: true`：这一步是对话里的新工作）。任务结束时，它的允许随之失效。
 
@@ -1089,7 +1089,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 每个控制台对话都有一个模式（#339）：`ask`（melo 在运行命令和更改文件前先问你）或 `auto`（不问任何人；常规步骤直接运行，有风险或超出请求的步骤会被拦下并说明原因）。每个会话对象都带有：
 
-- `approvals`：对话的模式；任务的模式是创建任务时其对话的模式。主对话在被设定之前取 `[approvals] mode`。
+- `approvals`：对话的模式；你发起的任务在运行期间取其对话的模式（对话的切换会传到它那里，见[调度任务](#scheduler-tasks-s3a2)），定时任务取创建时的模式。主对话在被设定之前取 `[approvals] mode`。
 - `allowances`：自网关启动以来在这个对话中被允许一次的步骤，`step_key` -> 允许的到期时间（Unix 秒）；用过或过期后仍保留，便于页面说明。
 
 被拦下的步骤是其调用的 `tool.finished` 记录，带有来源为 `auto` 且 `allowed` 为 false 的 `approval`（见[事件](events.md)）。在 Auto 下，对话的调用在 `[agent] confine_writes` 的写入沙箱中运行：写入文件夹和临时文件夹之外会失败，其输出以一行说明开头。

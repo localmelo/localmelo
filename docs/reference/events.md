@@ -365,7 +365,7 @@ The number of `tool.started` events is `RunResult.n_tool`.
   rules saw, in a script whose code shows nothing), or `then` and `more`,
   whose params hold other sentences (`first` and `next`; `list` and `count`) and
   name every effect of a compound step in order. `note` holds the model's words
-  when the rules found something: they stand below the sentence, and a client
+  when the rules found something: they stand below the sentence, only when they are in the script of the person's recent words (`ApprovalRequest.person_cjk`; otherwise `note` is absent and the sentence stays melo's own), and a client
   labels them with `gist.say.model` ("melo says: …"). `warn` is set only when the
   model's words disagree with what the code does and quotes them (`params.said`):
   `delete` and `send_out` when the words name no such effect, `delete_target` and

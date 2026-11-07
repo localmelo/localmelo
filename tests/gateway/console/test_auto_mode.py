@@ -639,11 +639,15 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
         ), "the task's note"
         steps = await blocked_steps(console.store, task_id)
         assert steps[0]["review"]["categories"] == ["credentials"]
-        # A later switch of the chat leaves the task as it was made.
+        # A later switch of the chat leaves a task that ended as it was; the run
+        # the Allow continues decides by its chat's mode (#576), so it is put back.
         await console.store.update_session(
             console.main_id, meta_update={"approvals": "ask"}
         )
         assert (await console.workers.get(task_id))["approvals"] == "auto"
+        await console.store.update_session(
+            console.main_id, meta_update={"approvals": "auto"}
+        )
 
         # Allow once from the task's page: the job it stopped on goes ahead with it.
         response = await client.post(

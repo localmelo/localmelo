@@ -708,6 +708,7 @@ class TestRequest:
             workspace_root=None,
             tier="write",
             review=ActionReview("routine"),
+            person_cjk=False,
         )
         assert deploy_request == ApprovalRequest(
             request_id=deploy_request.request_id,
@@ -719,6 +720,7 @@ class TestRequest:
             workspace_root=None,
             tier="write",
             review=ActionReview("routine"),
+            person_cjk=False,
         )
         assert (again.run_id, again.call_id) == (second.task_id, "call_d")
         ids = [request.request_id for request in policy.requests]
@@ -760,6 +762,7 @@ class TestRequest:
             workspace_root=agent.workspace_root,
             tier="write",
             review=ActionReview("routine"),
+            person_cjk=False,
         )
         assert agent.workspace_root == os.path.realpath(root)
         [started] = recorder.of("run.started")

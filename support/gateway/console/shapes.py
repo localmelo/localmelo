@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
-from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.gist import request_gist
 from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     grant_offered,
@@ -191,7 +191,7 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     root = request.workspace_root
     arguments = dict(request.arguments)
     safe_arguments = json_safe_payload(arguments)
-    gist = step_gist(request.tool_name, arguments, request.review)
+    gist = request_gist(request)
     return {
         "request_id": request.request_id,
         "call_id": request.call_id,

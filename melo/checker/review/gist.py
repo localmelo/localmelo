@@ -43,6 +43,7 @@ from localmelo.melo.checker.review import apps as app_names
 from localmelo.melo.checker.review import destroys, targets
 from localmelo.melo.checker.review.paths import loopback
 from localmelo.melo.contracts import shell_lexer
+from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.review import MAX_TEXT, ActionReview, command_steps
 
 # The argument that carries the model's own words about a call. Another
@@ -233,17 +234,24 @@ class _Item:
 
 
 def step_gist(
-    tool_name: str, arguments: Mapping[str, Any], review: ActionReview | None = None
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    review: ActionReview | None = None,
+    *,
+    cjk: bool | None = None,
 ) -> Gist | None:
     """The sentence for a call of *tool_name*, or ``None`` for a tool whose card has its own.
 
     The browser tools (``browser:<site>``) ask with a sentence of their own.
+    *cjk* says whether the person's own words have Chinese, Japanese or Korean
+    characters (``None``: not known); the model's words in the other script are
+    not shown as melo's words, and the sentence is the code's own (#576).
     """
     if tool_name.startswith("browser:"):
         return None
     if tool_name.startswith("browser-attach:"):
         return _attach(tool_name, arguments)
-    words = _words(tool_name, arguments)
+    words = _words(tool_name, arguments, cjk)
     # A text over the limit is not read by the rules either (see MAX_TEXT).
     items = (
         _items(tool_name, arguments)
@@ -280,6 +288,13 @@ def step_gist(
     if _risky(review):
         return replace(built, note=words)
     return replace(Gist("model", {"text": words}, by="model"), apps=apps)
+
+
+def request_gist(request: ApprovalRequest) -> Gist | None:
+    """:func:`step_gist` for an approval request, in the script its person writes in."""
+    return step_gist(
+        request.tool_name, request.arguments, request.review, cjk=request.person_cjk
+    )
 
 
 def _attach(tool_name: str, arguments: Mapping[str, Any]) -> Gist:
@@ -335,15 +350,25 @@ def _sentence(text: str) -> bool:
     return len(text) >= 4 or (len(text) >= 2 and _CJK.search(text) is not None)
 
 
-def _words(tool_name: str, arguments: Mapping[str, Any]) -> str:
-    """The model's own words for the call, or ``""``."""
+def has_cjk(text: str) -> bool:
+    """Whether *text* has Chinese, Japanese or Korean characters: the script check for the person's language."""
+    return _CJK.search(text) is not None
+
+
+def _words(
+    tool_name: str, arguments: Mapping[str, Any], cjk: bool | None = None
+) -> str:
+    """The model's own words for the call, in the person's script (*cjk*), or ``""``."""
     for name in WORD_FIELDS:
         value = arguments.get(name)
         if isinstance(value, str):
             line = _line(value, WORDS_CHARS)
-            if _sentence(line):
+            if _sentence(line) and cjk in (None, has_cjk(line)):
                 return line
-    return _comment(tool_name, arguments) if tool_name in _RUNNERS else ""
+    if tool_name not in _RUNNERS:
+        return ""
+    comment = _comment(tool_name, arguments)
+    return comment if cjk in (None, has_cjk(comment)) else ""
 
 
 def _source(tool_name: str, arguments: Mapping[str, Any]) -> str:

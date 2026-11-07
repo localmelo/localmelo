@@ -297,8 +297,7 @@ Without `session_id` (or with the main chat's) the same call lists the whole day
   side chat started also has `from`, that chat's title.
 - `approvals` lists what the row's session asked to do today, oldest first, at
   most 20: `{id, what, answer, at}`. `what` is the call in plain words (`Write
-  slides.md`, `Run the tests`, `Run a command`; never a command line, code or
-  text), `at` when it was asked, and `answer` is `waiting`, `allowed once`,
+  slides.md`, `Run the tests`, `Run a command`, `Open example.com`, `Click or choose on example.com`; never a command line, code, text or the name of a question such as `browser-act:`), `at` when it was asked, and `answer` is `waiting`, `allowed once`,
   `allowed for this chat`, `allowed automatically`, `denied`, `no answer` (it
   timed out) or `withdrawn` (the turn ended first). A `waiting` request of a
   chat or task is answered with `POST /api/approvals/{id}`, as the chat's card
@@ -822,9 +821,13 @@ an earlier approval), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
 
-A task keeps the [mode](#ask-and-auto) its chat had when it was made
-(`approvals`, `ask` or `auto`); a later switch of the chat does not change
-it. A task in Auto asks nobody, so nothing holds it, and its calls run
+A task you started follows the [mode](#ask-and-auto) of its chat
+(`approvals`, `ask` or `auto`) while it has not ended: it starts with the
+chat's mode, and a later switch of the chat reaches it, Auto to Ask at its
+next decision at once and Ask to Auto at the next decision after the card
+that waits (that card stays for you). A chore, and a task another program
+or melo made, keep the mode they were made with; a task that ended keeps
+the mode it ended with. A task in Auto asks nobody, so nothing holds it, and its calls run
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
 `review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
@@ -2116,8 +2119,9 @@ Each console chat has a mode (#339): `ask` (melo asks before commands and
 file changes) or `auto` (nobody is asked; routine steps run, a risky or
 off-request step is blocked and explained). Every session object carries:
 
-- `approvals`: the chat's mode; a task's is the mode its chat had when the
-  task was made. The main chat has `[approvals] mode` until it is set.
+- `approvals`: the chat's mode; a task you started has its chat's mode while
+  it runs (a switch of the chat reaches it, see
+  [Scheduler tasks](#scheduler-tasks-s3a2)), a chore the mode it was made with. The main chat has `[approvals] mode` until it is set.
 - `allowances`: the steps allowed once in this chat since the gateway
   started, `step_key` -> when the allowance runs out (Unix seconds); kept
   after it was used or ran out, so a page can say so.

@@ -2846,9 +2846,12 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bcard[data-size="line"] .bcard-head { margin: 0; }
 .bcard[data-size="line"] .own-mark { width: 28px; height: 28px; font-size: var(--text-small); }
 /* A run that scrolled out of view: the card docks at the top of the chat, watching the same page, until the run ends.
-   The anchor takes no room, so the dock appearing never moves the conversation. */
+   The anchor takes no room, so the dock appearing never moves the conversation. Its backdrop is the chat's own colour
+   from the top edge to a line below the card, fading out there, so no line shows cut off in the gap above the card,
+   through its rounded corners or at its bottom edge (#576). */
 .bdock-anchor { position: sticky; top: 0; z-index: 3; height: 0; max-width: 800px; margin: 0 auto; }
 .bdock { position: absolute; inset: var(--space-2) 0 auto; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-float); }
+.bdock::before { content: ""; position: absolute; z-index: -1; top: calc(-1 * var(--space-2) - 1px); right: -1px; bottom: calc(-1 * var(--space-4) - 1px); left: -1px; background: linear-gradient(to bottom, var(--canvas) calc(100% - var(--space-4)), transparent); }
 .bdock-jump { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
 .bdock-canvas { flex: none; width: 56px; aspect-ratio: 16 / 9; object-fit: cover; object-position: top; }
 .bdock .own-mark { width: 28px; height: 28px; font-size: var(--text-small); }
