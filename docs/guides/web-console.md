@@ -418,8 +418,8 @@ I can't open websites myself.`; what it did is `Started a task: …`, `Offered a
 chat's row is named in the page's language.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, `2 approvals, 1
-waiting`, or `1 approval waiting` when every request still waits. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
-the command itself), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
+waiting`, or `1 approval waiting` when every request still waits. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`, `Open example.com`, `Click or choose on example.com`; never
+the command itself or an internal name), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
 when it was asked. A request that waits for you has **Allow once** and **Deny** right there, the same answers as the
 approval card in the chat, and **Review**, which opens the chat or task with the card and the exact content. There is
 no separate Approvals tab.
@@ -838,7 +838,7 @@ or a Python script starts with one plain sentence about what the step will do,
 which melo builds from the call and which names every effect it finds, in order
 ("Operate Safari, then delete files"; a command too long to show ends "and 2
 more"). The model's own words (a `why` argument, or a comment at the top of the
-code) always carry a label, "melo says: …". When the rules find nothing to ask
+code) always carry a label, "melo says: …". They show only in the language of your own recent messages: words the model wrote in another script (English under a Chinese chat, say) are left out and the card keeps melo's own sentence. When the rules find nothing to ask
 about, the words are the sentence and the code sits under it in a fold, **Show
 the code**. When the rules find something, the sentence stays melo's own, the
 words go in a line below it, and the code is open, so the words can never make a
@@ -955,7 +955,10 @@ commands and file changes.
 - **melo acts in your name; the cards ask.** What you ask for is done as you: applying with your resume, signing in, filling in and submitting a form, sending a message as you, booking. The model does not refuse it because it speaks in your name or cannot be undone, and it does not ask you to type a permission; which steps you confirm is decided by the cards in Ask and by Auto's review in Auto. Only what would harm other people is declined.
 - **Switch.** The chip beside the model under the message box reads **Ask**
   or **Auto**; its menu, "How melo works in this chat", switches the chat
-  from melo's next step (a card already waiting stays). A new chat starts in
+  from melo's next step (a card already waiting stays), and it reaches the
+  tasks the chat started that are still running: Auto to Ask at their next
+  decision, Ask to Auto at the one after the card that waits. A chore keeps
+  the mode it was saved with. A new chat starts in
   the mode of Settings → Chats and folders → **New chats start in**
   (`[approvals] mode`); the main chat follows that setting until you pick
   its mode.

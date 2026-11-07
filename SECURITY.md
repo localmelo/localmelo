@@ -111,6 +111,19 @@ those tools can do.
   confined. Auto is a reviewer, not a wall: a step that hands work to another
   app or program is judged by the review (blocked, or checked by your model),
   not walled off by the sandbox.
+- **A chat's mode decides for the tasks it started.** A task you started
+  follows the Ask or Auto of its chat while it runs, so a switch you make in
+  the chat is not ignored by work that began earlier. Auto to Ask applies at
+  the task's next decision. Ask to Auto applies at the next decision after a card
+  that waits: that card stays for you, and nothing answers it. The mode only
+  chooses between the two policies the task already had; it adds no
+  permission, and Auto's own limits (the write sandbox, the review, the
+  steps it never allows) are the same as in a chat. A chore, and a task
+  another program or melo made, keep the mode they were made with: a switch
+  of the chat never makes one of them ask less or ask nobody. A task that
+  ended keeps the mode it ended with. Fixing the mode when a task started was
+  a choice for its page to show one value, not a rule an approval relied on;
+  the page now shows the mode the task has now.
 - **A chat's answer to a task never approves.** When a task asks its chat
   for help, the chat answers in a turn of its own (`origin` `ask_owner`).
   That turn has no tool that grants an approval, and the question and the
