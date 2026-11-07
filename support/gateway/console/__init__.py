@@ -230,6 +230,7 @@ class Console:
         # approvals first, then the person, with melo's explanation.
         self.explanations = Explanations(self)
         self.workers.chat_of = self.effective_owner
+        self.workers.chat_modes = self.sessions
         self.workers.on_earlier = self._used_earlier
         self.workers.on_ask = self.explanations.start
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)

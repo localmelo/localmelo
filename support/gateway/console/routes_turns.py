@@ -811,9 +811,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if body.workspace is not None:
             await console.sessions.change_workspace(session_id, body.workspace)
         if body.approvals is not None:
+            # The tasks this chat started read it at their next step (#576).
             await console.sessions.set_mode(session_id, body.approvals)
-            # The tasks this chat started follow it while they run (#576).
-            await console.workers.follow_chat_mode(session_id, body.approvals)
         if title is not None:
             # 2.10 lists PATCH among the lock holders; the workspace change
             # takes the lock itself, so a title alone takes it here.

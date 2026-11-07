@@ -389,15 +389,28 @@ class ModePolicy:
     next step; a call already waiting for a person keeps waiting. Both
     policies keep their own state (Ask's grants, Auto's allowances) across
     switches. ``inner`` is the policy of the mode now, for
-    :func:`~localmelo.melo.contracts.approvals.find_auto`.
+    :func:`~localmelo.melo.contracts.approvals.find_auto`. *mode* is a mode,
+    or a function that gives it: a task's policy reads its chat's mode that
+    way, so the task has no mode of its own to leave behind (#576).
     """
 
     def __init__(
-        self, ask: ApprovalPolicy, auto: AutoPolicy, mode: ChatMode = "ask"
+        self,
+        ask: ApprovalPolicy,
+        auto: AutoPolicy,
+        mode: ChatMode | Callable[[], ChatMode] = "ask",
     ) -> None:
-        self.mode: ChatMode = mode
+        self._mode = mode
         self.ask = ask
         self.auto = auto
+
+    @property
+    def mode(self) -> ChatMode:
+        return self._mode() if callable(self._mode) else self._mode
+
+    @mode.setter
+    def mode(self, value: ChatMode) -> None:
+        self._mode = value
 
     @property
     def inner(self) -> ApprovalPolicy:

@@ -10,7 +10,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, replace
 from typing import Any, Final, Protocol, cast
@@ -258,6 +258,16 @@ ASK_TOOL: Final = ToolDef(
     # It changes nothing: like the task tools, it asks no approval.
     annotations={"readOnlyHint": True},
 )
+
+
+class ChatModes(Protocol):
+    """Each chat's mode (``console.registry.SessionRegistry``): what a person's task decides by (#576)."""
+
+    async def current_mode(self, session_id: str) -> ChatMode:
+        """A chat's mode as the store has it now, and from then on :meth:`mode_now`."""
+
+    def mode_now(self, session_id: str | None) -> ChatMode:
+        """A chat's mode as last committed or read; Ask for one never read."""
 
 
 class OwnerChannel(Protocol):
@@ -626,9 +636,6 @@ class TaskWorkers:
         # Auto mode's policy of each task in Auto, kept across its runs for
         # the steps allowed once (#339).
         self._auto: dict[str, AutoPolicy] = {}
-        # The policy of each person's task that is running, which follows its
-        # chat's mode (#576); gone when the run ends.
-        self._modes: dict[str, ModePolicy] = {}
         # The chat a task asks when it is stuck (#369); the console sets it.
         self.owner: OwnerChannel | None = None
         # Who shows a task's browser in the chat that owns it; the console sets it.
@@ -643,6 +650,9 @@ class TaskWorkers:
         # main chat's reach it through its chat (#369).
         self.grants = GrantBook()
         self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
+        # Each chat's mode, the one a person's task decides by (#576); the
+        # console sets it. Without it a task has the mode it was made with.
+        self.chat_modes: ChatModes | None = None
         self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
         # What each running task did last, for task_get (see live()).
@@ -890,30 +900,51 @@ class TaskWorkers:
         approvals = getattr(self.settings(), "approvals", None)
         return chat_mode({"approvals": getattr(approvals, "mode", "ask")})
 
-    async def follow_chat_mode(self, chat_id: str, mode: ChatMode) -> None:
-        """Hand chat *chat_id*'s new *mode* to the tasks it started that have not ended (#576).
+    async def _following(
+        self, record: TaskRecord, fixed: ChatMode
+    ) -> tuple[Callable[[], Awaitable[str | None]], Callable[[], ChatMode]]:
+        """How a task finds the chat that owns it and the mode it decides by (#576).
 
-        A running task reads it at its next decision: Auto to Ask applies at
-        once, Ask to Auto after the step that is waiting for the person (that
-        card stays for them). A task that has not started yet starts with it.
-        Only the person's own tasks follow their chat; a chore keeps the mode
-        it was saved with, and so does a task another agent started. A task
-        that ended keeps the mode it ended with.
+        A person's own task decides by that chat's mode, read at every step: a
+        switch needs nothing handed on to it, and a task that starts later or
+        again after a restart reads the same chat. The owner is read anew at
+        each step (a task whose chat was deleted follows the main chat). Any
+        other task, or any task where no console says the chats' modes, has the
+        mode it was made with.
         """
-        ids = await self.tasks.unfinished(chat_id)
-        self._follow(ids, mode)  # at once, before anything is written
-        for task_id in ids:
-            if _remembers((await self.tasks.get_task(task_id)).origin):
-                await self.store.update_session(
-                    task_id, meta_update={"approvals": mode}
-                )
-        self._follow(ids, mode)  # a run that began while the mode was written
+        task_id = record.task_id
+        modes = self.chat_modes
+        if modes is None or not _remembers(record.origin):
+            return (lambda: self._owner_chat(task_id)), (lambda: fixed)
+        chat: list[str | None] = [None]
 
-    def _follow(self, task_ids: Iterable[str], mode: ChatMode) -> None:
-        for task_id in task_ids:
-            running = self._modes.get(task_id)
-            if running is not None:
-                running.mode = mode
+        async def owner() -> str | None:
+            chat[0] = found = await self._owner_chat(task_id)
+            if found:
+                await modes.current_mode(found)
+            return found
+
+        await owner()
+        return owner, lambda: modes.mode_now(chat[0])
+
+    async def _chat_mode_of(self, record: TaskRecord) -> ChatMode | None:
+        """The mode of the chat that owns *record* now, for a person's task that has not ended (#576)."""
+        modes = self.chat_modes
+        if (
+            modes is None
+            or not _remembers(record.origin)
+            or record.state in TERMINAL_PHASES
+        ):
+            return None
+        chat = await self._owner_chat(record.task_id)
+        return await modes.current_mode(chat) if chat else None
+
+    async def _keep_mode(self, task_id: str, mode: ChatMode) -> None:
+        """A task whose run ended keeps the mode it decided by last (#576)."""
+        try:
+            await self.store.update_session(task_id, meta_update={"approvals": mode})
+        except Exception:
+            log.warning("Could not keep the mode of task %s", task_id, exc_info=True)
 
     async def _chat_folder(self, front_id: str | None) -> str | None:
         """The folder a task of *front_id* inherits: a side chat's own, else None.
@@ -2333,6 +2364,8 @@ class TaskWorkers:
         ending: dict[str, Any] | None = None
         ending_phase = ""
         base = Baseline(None, git=True, error=True)  # until read: never ready
+        # The policy that follows the chat's mode, once a person's task has one (#576).
+        followed: ModePolicy | None = None
         deferred = False
         launch_uncertain = False
         execution_id: str | None = self._pending_execution.get(task_id)
@@ -2543,9 +2576,9 @@ class TaskWorkers:
             if chat is not None and self.browsers is not None:
                 self.browsers.attach_task(task_id, agent, chat)
             base = await self._baseline(workspace, record)
-            # The mode its chat has now (#576), read last, with nothing awaited
-            # before the policy below is registered, so a switch is never missed.
-            latest = await self.store.get_session(task_id)
+            # A person's task decides by the mode of the chat that owns it, read at
+            # each step (#576); known before the first one.
+            owner, mode_now = await self._following(record, task_mode)
             # Set below when the task uses its chat's approvals and grants.
             owned: list[OwnedTaskPolicy] = []
 
@@ -2607,18 +2640,14 @@ class TaskWorkers:
                 auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
                 auto.asking = asking
                 auto.watch = self._card_watch(task_id)
-                # The person's task follows its chat's mode at every step
-                # (#576): the chat's switch reaches this run (follow_chat_mode).
-                mode = ModePolicy(
-                    asking, auto, chat_mode(latest.meta if latest else None)
-                )
-                self._modes[task_id] = mode
+                # The mode of its chat at every step (#576), Ask or Auto.
+                followed = ModePolicy(asking, auto, mode_now)
                 # Its chat's grants and the person's earlier Allows first (#369).
                 policy = OwnedTaskPolicy(
-                    mode,
+                    followed,
                     self.ledger,
                     task_id,
-                    lambda: self._owner_chat(task_id),
+                    owner,
                     self._earlier,
                     started=self._chat_started,
                     folders=asking,
@@ -2868,7 +2897,8 @@ class TaskWorkers:
                         and task_id not in self._stopping
                     ):
                         unread = inbox.drain()
-                    self._modes.pop(task_id, None)
+                    if followed is not None and followed.mode != task_mode:
+                        await self._keep_mode(task_id, followed.mode)
                     if not unread:
                         # Finished: its allowances go, used or not (#339).
                         self._auto.pop(task_id, None)
@@ -2990,8 +3020,11 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
-        # Ask or Auto, fixed when the task was made, and what Auto blocked (#339).
-        body["approvals"] = chat_mode(session.meta if session else None)
+        # Ask or Auto, and what Auto blocked (#339): the chat's mode now for a
+        # person's task that has not ended (#576), else the mode it ended with.
+        body["approvals"] = await self._chat_mode_of(record) or chat_mode(
+            session.meta if session else None
+        )
         body["blocked"] = (
             await blocked_steps(self.store, record.task_id)
             if body["approvals"] == "auto"

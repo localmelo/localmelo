@@ -120,10 +120,14 @@ those tools can do.
   permission, and Auto's own limits (the write sandbox, the review, the
   steps it never allows) are the same as in a chat. A chore, and a task
   another program or melo made, keep the mode they were made with: a switch
-  of the chat never makes one of them ask less or ask nobody. A task that
-  ended keeps the mode it ended with. Fixing the mode when a task started was
-  a choice for its page to show one value, not a rule an approval relied on;
-  the page now shows the mode the task has now.
+  of the chat never makes one of them ask less or ask nobody. A task reads
+  its chat's mode each time it decides and keeps no copy to go stale: an
+  overlapping switch, one cut short, a restart, or a chat deleted while the task
+  runs (the main chat then owns it, and its mode decides) cannot leave the task
+  in another mode than its chat's. A task that ended keeps the mode it ended
+  with. Fixing the mode when a task started was a choice for its page to show
+  one value, not a rule an approval relied on; the page now shows the mode the
+  task has now.
 - **A chat's answer to a task never approves.** When a task asks its chat
   for help, the chat answers in a turn of its own (`origin` `ask_owner`).
   That turn has no tool that grants an approval, and the question and the
