@@ -10,7 +10,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from dataclasses import asdict, replace
 from typing import Any, Final, Protocol, cast
@@ -152,13 +152,18 @@ from localmelo.support.sessions.approvals import (
     ApprovalUse,
     CardWatch,
     ChatMode,
+    ModePolicy,
     OwnedTaskPolicy,
     RememberingPolicy,
     chat_mode,
 )
 from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
-from localmelo.support.sessions.identity import ACTING_NOTE, ACTING_RULE
+from localmelo.support.sessions.identity import (
+    ACTING_NOTE,
+    ACTING_RULE,
+    LANGUAGE_RULE,
+)
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
@@ -192,7 +197,10 @@ WORKER_GUIDE = (
     "just to ask the person in your report. End your report with one line, "
     "Ending: ready (done as asked), Ending: blocked: <what only the person can "
     "give> (say blocked only then), Ending: failed or Ending: dropped (made "
-    "moot); code checks it against your own test runs and commits. " + ACTING_RULE
+    "moot); code checks it against your own test runs and commits. "
+    + LANGUAGE_RULE
+    + " "
+    + ACTING_RULE
 )
 # What a worker with no browser is told after its guide (#567).
 NO_BROWSER_NOTE: Final = (
@@ -618,6 +626,9 @@ class TaskWorkers:
         # Auto mode's policy of each task in Auto, kept across its runs for
         # the steps allowed once (#339).
         self._auto: dict[str, AutoPolicy] = {}
+        # The policy of each person's task that is running, which follows its
+        # chat's mode (#576); gone when the run ends.
+        self._modes: dict[str, ModePolicy] = {}
         # The chat a task asks when it is stuck (#369); the console sets it.
         self.owner: OwnerChannel | None = None
         # Who shows a task's browser in the chat that owns it; the console sets it.
@@ -878,6 +889,29 @@ class TaskWorkers:
         """``[approvals] mode``: the main chat's mode until the person picks one."""
         approvals = getattr(self.settings(), "approvals", None)
         return chat_mode({"approvals": getattr(approvals, "mode", "ask")})
+
+    async def follow_chat_mode(self, chat_id: str, mode: ChatMode) -> None:
+        """Hand chat *chat_id*'s new *mode* to the tasks it started that have not ended (#576).
+
+        A running task reads it at its next decision: Auto to Ask applies at
+        once, Ask to Auto after the step that is waiting for the person (that
+        card stays for them). A task that has not started yet starts with it.
+        Only the person's own tasks follow their chat; a chore keeps the mode
+        it was saved with, and so does a task another agent started. A task
+        that ended keeps the mode it ended with.
+        """
+        ids = await self.tasks.unfinished(chat_id)
+        self._follow(ids, mode)  # at once, before anything is written
+        for task_id in ids:
+            if _remembers((await self.tasks.get_task(task_id)).origin):
+                await self.store.update_session(task_id, meta_update={"approvals": mode})
+        self._follow(ids, mode)  # a run that began while the mode was written
+
+    def _follow(self, task_ids: Iterable[str], mode: ChatMode) -> None:
+        for task_id in task_ids:
+            running = self._modes.get(task_id)
+            if running is not None:
+                running.mode = mode
 
     async def _chat_folder(self, front_id: str | None) -> str | None:
         """The folder a task of *front_id* inherits: a side chat's own, else None.
@@ -2507,6 +2541,9 @@ class TaskWorkers:
             if chat is not None and self.browsers is not None:
                 self.browsers.attach_task(task_id, agent, chat)
             base = await self._baseline(workspace, record)
+            # The mode its chat has now (#576), read last, with nothing awaited
+            # before the policy below is registered, so a switch is never missed.
+            latest = await self.store.get_session(task_id)
             # Set below when the task uses its chat's approvals and grants.
             owned: list[OwnedTaskPolicy] = []
 
@@ -2562,22 +2599,24 @@ class TaskWorkers:
                 grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
-            if task_mode == "auto":
-                auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
-                # A task the person started asks through its chat about a step
-                # Auto stops that they may allow (#465), while someone sees the
-                # task or its chat; any other (a chore, one melo or another
-                # agent started) has nobody to ask, so the step is blocked and
-                # nothing holds the task (#339).
-                auto.asking = None
-                if _remembers(record.origin):
-                    auto.asking = asking
-                    auto.watch = self._card_watch(task_id)
-                policy = auto
+            auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
+            # A step Auto stops that the person may allow is asked through the
+            # chat (#465), while someone sees the task or its chat; a task
+            # nobody can be asked for (a chore, one melo or another agent
+            # started) has the step blocked and nothing holds it (#339).
+            auto.asking = None
             if _remembers(record.origin):
+                auto.asking = asking
+                auto.watch = self._card_watch(task_id)
+                # The person's task follows its chat's mode at every step
+                # (#576): the chat's switch reaches this run (follow_chat_mode).
+                mode = ModePolicy(
+                    asking, auto, chat_mode(latest.meta if latest else None)
+                )
+                self._modes[task_id] = mode
                 # Its chat's grants and the person's earlier Allows first (#369).
                 policy = OwnedTaskPolicy(
-                    policy,
+                    mode,
                     self.ledger,
                     task_id,
                     lambda: self._owner_chat(task_id),
@@ -2586,6 +2625,8 @@ class TaskWorkers:
                     folders=asking,
                 )
                 owned.append(policy)
+            elif task_mode == "auto":
+                policy = auto
             # A run its chat continued on its own never repeats a blocked step (#411).
             policy = await self._guard(
                 task_id, task_session.meta if task_session else None, policy
@@ -2824,6 +2865,7 @@ class TaskWorkers:
                         and task_id not in self._stopping
                     ):
                         unread = inbox.drain()
+                    self._modes.pop(task_id, None)
                     if not unread:
                         # Finished: its allowances go, used or not (#339).
                         self._auto.pop(task_id, None)

@@ -673,10 +673,67 @@ def step_said(
     return words
 
 
+# A question the approval card asks about a site or an app, not a tool
+# (``browser-act:https://example.com``, ``takeover:https://example.com``): the
+# verb it reads as (``steps.ask.<verb>``), and whether it is about the site in
+# its name or about an app (named in the call's ``app``).
+_QUESTIONS: Final[Mapping[str, tuple[str, str]]] = {
+    "browser": ("open", "site"),
+    "browser-act": ("act", "site"),
+    "browser-point": ("act", "site"),
+    "browser-type": ("type", "site"),
+    "browser-submit": ("submit", "site"),
+    "browser-attach": ("attachTo", "site"),
+    "browser-dialog": ("confirm", "site"),
+    "takeover": ("takeover", "site"),
+    "handoff": ("open", "app"),
+    "desktop-act": ("act", "app"),
+    "window-read": ("lookAt", "window"),
+}
+
+
+def _site(address: str) -> str:
+    """A site as a question's name holds it: the host without ``www.``, and a port that is not the default."""
+    host = _host(address)
+    try:
+        port = urlsplit(address).port
+    except ValueError:
+        port = None
+    return f"{host}:{port}" if host and port not in (None, 80, 443) else host
+
+
+def _question(tool: str, arguments: object) -> dict[str, Any] | None:
+    """The words for *tool* when it is a question about a site or an app, else ``None``."""
+    prefix, _, rest = tool.partition(":")
+    found = _QUESTIONS.get(prefix)
+    if found is None:
+        return None
+    verb, about = found
+    args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}
+    if about == "site":
+        what: object = _site(rest) or said("steps.aPage")
+        if prefix == "browser" and args.get("via") == "web_fetch":
+            verb = "read"
+    else:
+        app = " ".join(str(args.get("app") or "").split())[:_NAME_SHOWN]
+        if about == "window":
+            what = said("steps.windowOf", app=app) if app else said("steps.aWindow")
+        else:
+            what = app or said("steps.anApp")
+    return said(f"steps.ask.{verb}", what=what)
+
+
 def request_said(
     tool: str, arguments: object = None, *, root: str | None = None
 ) -> dict[str, Any]:
-    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``."""
+    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``.
+
+    A question about a site or an app (``browser-act:<site>``) says what melo
+    wants to do there, never its internal name: ``Click or choose on example.com``.
+    """
+    asked = _question(tool, arguments)
+    if asked is not None:
+        return asked
     return step_said(tool, arguments, tense="ask", root=root)
 
 

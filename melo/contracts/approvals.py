@@ -134,7 +134,9 @@ class ApprovalRequest:
     session grant covers only a call whose review is routine (or ``None``).
     ``outside`` is set for a file tool's call on a path outside the
     workspace (#405): the person is asked about the folder, and a tool
-    grant never covers it.
+    grant never covers it. ``person_cjk`` says whether the person's own recent
+    words have Chinese, Japanese or Korean characters (``None``: no words are
+    known): a card shows the model's reason only in that script (#576).
     """
 
     request_id: str
@@ -147,6 +149,7 @@ class ApprovalRequest:
     tier: ToolTier | None = None
     review: ActionReview | None = None
     outside: OutsideAccess | None = None
+    person_cjk: bool | None = None
 
 
 @dataclass(frozen=True)

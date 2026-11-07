@@ -369,3 +369,86 @@ def test_a_request_is_the_same_words_put_as_a_request_in_any_language() -> None:
         == "运行 一条命令"
     )
     assert said_in("zh-Hans", request_said("", None)) == "正在思考"
+
+
+_SITE = "https://www.example.com"
+
+
+@pytest.mark.parametrize(
+    "tool, arguments, words, chinese",
+    [
+        (f"browser:{_SITE}", {}, "Open example.com", "打开 example.com"),
+        (
+            f"browser:{_SITE}",
+            {"via": "web_fetch"},
+            "Read example.com",
+            "读取 example.com",
+        ),
+        (
+            f"browser-act:{_SITE}",
+            {},
+            "Click or choose on example.com",
+            "在 example.com 上点击或选择",
+        ),
+        (
+            f"browser-point:{_SITE}",
+            {},
+            "Click or choose on example.com",
+            "在 example.com 上点击或选择",
+        ),
+        (f"browser-type:{_SITE}", {}, "Type into example.com", "在 example.com 中输入"),
+        (
+            f"browser-submit:{_SITE}",
+            {},
+            "Send a form from example.com",
+            "从 example.com 发送表单",
+        ),
+        (
+            f"browser-attach:{_SITE}",
+            {},
+            "Attach a file to example.com",
+            "把一个文件附加到 example.com",
+        ),
+        (
+            f"browser-dialog:{_SITE}",
+            {},
+            "Answer OK on example.com",
+            "在 example.com 上回答“确定”",
+        ),
+        (f"takeover:{_SITE}", {}, "Take over example.com", "接管 example.com"),
+        # A site with a port keeps it: another server on the same host is another site.
+        (
+            "browser:http://localhost:3000",
+            {},
+            "Open localhost:3000",
+            "打开 localhost:3000",
+        ),
+        # A question about an app says the app's name, not its identifier.
+        ("handoff:chat", {"app": "Slack"}, "Open Slack", "打开 Slack"),
+        (
+            "window-read:com.apple.Safari",
+            {"app": "Safari"},
+            "Look at a window of Safari",
+            "查看 Safari 的一个窗口",
+        ),
+        (
+            "window-read:com.apple.Safari",
+            {},
+            "Look at a window",
+            "查看 一个窗口",
+        ),
+        (
+            "desktop-act:Safari",
+            {"app": "Safari"},
+            "Click or choose on Safari",
+            "在 Safari 上点击或选择",
+        ),
+    ],
+)
+def test_a_question_about_a_site_or_an_app_says_what_melo_wants_to_do(
+    tool: str, arguments: Any, words: str, chinese: str
+) -> None:
+    """The card's heading and the activity line never show ``browser-act:`` or ``takeover:`` (#576)."""
+    said = request_said(tool, arguments)
+    assert said_in("en", said) == words == request_words(tool, arguments)
+    assert said_in("zh-Hans", said) == chinese
