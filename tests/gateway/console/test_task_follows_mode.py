@@ -96,6 +96,9 @@ async def test_a_switch_to_auto_reaches_a_task_that_is_running(
             ("auto", False),
         ]
         assert console.broker.pending(task_id) == []
+        # What the task ended in stays on its page, with what Auto blocked.
+        ended = await console.workers.get(task_id)
+        assert ended["approvals"] == "auto" and len(ended["blocked"]) == 1
 
 
 async def test_a_switch_to_ask_reaches_a_task_that_is_running_at_once(
