@@ -769,6 +769,29 @@ async def test_a_note_the_gateway_gave_back_is_in_the_input_again(
     await _until(lambda: back == ["not read"])
 
 
+async def test_a_note_given_back_before_the_chat_opened_is_a_row_with_its_words(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    """Never into the input from history: a later open would put it there twice."""
+    setup, gateway = chat
+    session = setup.session
+    back: list[str] = []
+    session.words_back = back.append  # type: ignore[method-assign,assignment]
+    gateway.emit(MAIN, "attention.echo", {"echo": "failed", "note_back": True,
+                 "typed": "use the blue one", "line": "Nothing runs from it."}, None)  # fmt: skip
+    remote = session.remote
+    assert isinstance(remote, MainChat)
+    remote._cursors.clear()
+    remote._seen.clear()
+    sent = len(gateway.requests)
+    await remote.open(remote.chat)
+    await asyncio.sleep(0.05)
+    assert setup.out.text().count("Not sent to Main chat: use the blue one") == 1
+    assert setup.out.text().count("Nothing runs from it.") == 1
+    assert back == []
+    assert [r for r in gateway.requests[sent:] if r[0] == "POST"] == []
+
+
 @pytest.mark.parametrize("down", [False, True])
 async def test_a_note_the_gateway_did_not_take_is_the_persons_again_and_not_sent_again(
     chat: tuple[Setup, FakeGateway], down: bool

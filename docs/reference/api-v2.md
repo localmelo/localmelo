@@ -1897,6 +1897,9 @@ With a picture ([staged first](#post-apiuploads); its id goes in `images`):
   never starts work by itself: once the chat is idle, however the turn ended, a Stop or a restart included, a
   `failed` echo says so with `note_back: true`, `typed` and `images` (its pictures staged again, each as
   [`POST /api/uploads`](#post-apiuploads) answers), and a client on the stream puts them back in its input.
+  After a restart there is no `images`, and the line says a picture did not come back. Only a row stored as a
+  message runs after a restart: any other row returns this way, one stored before the mark included, with `of`
+  when it has a `queued` echo.
 - A card that a step of the turn is waiting on (an approval, a take-over, a question about another app's
   window) ends when a note is sent: `approval.resolved` with `outcome` `denied` and `origin` `words`, and the
   call returns at once, so the run reads the note at its next step. Words never allow anything, whatever they

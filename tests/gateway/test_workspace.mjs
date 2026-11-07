@@ -2897,7 +2897,7 @@ test('a note that the turn did not read before it ended says it is back in the b
   h.element('input').value = 'one more thing';
   await h.run('send()');
   h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
-  assert.match(h.text('messages'), /Not read: the turn ended first\. It is back in the message box\./);
+  assert.match(h.text('messages'), /Not read: the turn ended first\. Nothing runs from it until you send it again\./);
 });
 
 test('a note refused because the turn just ended is sent as a message', async () => {
@@ -2948,7 +2948,7 @@ test('a note its turn ended without is back in the box, and a reload does not pu
   h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', error: null, cause: 'user_stop'}});
   h.stream().emit({id: 24, turn: null, ts: 54, type: 'attention.echo', data: {id: 24, echo: 'failed', note_back: true, typed: 'not that way', line: 'It is back.'}});
   assert.equal(h.element('input').value, 'not that way');
-  assert.match(h.text('messages'), /Not read: the turn ended first\. It is back in the message box\./);
+  assert.match(h.text('messages'), /Not read: the turn ended first\. Nothing runs from it until you send it again\./);
   assert.equal(h.net.callsTo('/sessions/a/turns').filter((call) => call.method === 'POST').length, 0);
 });
 

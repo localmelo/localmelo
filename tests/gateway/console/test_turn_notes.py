@@ -1,4 +1,4 @@
-"""Words the person adds to a turn that runs: read at its next step, or sent as the next turn.
+"""Words the person adds to a turn that runs: read at its next step, or given back to the person.
 
 Each test runs the console with its main chat on a scripted model. A model reply
 that waits for an event keeps a turn running while the test posts notes; nothing
@@ -394,6 +394,58 @@ async def test_a_note_its_turn_ended_without_on_the_way_to_the_store_is_refused(
         await asyncio.sleep(0.1)
         assert len(await console.store.list_turns(main_id)) == 1
         assert await _queued(console, main_id) == []
+
+
+def _old_row(words: str, **more: Any) -> dict[str, Any]:
+    """A queue row as a writer before the mark stored it: nothing says what it is."""
+    return {"typed": words, "composed": words, "key": "old-row", "echo": {}, **more}
+
+
+@pytest.mark.parametrize(
+    "more",
+    [{}, {"reading": True}, {"images": [{"blob": "b1", "media_type": "image/png"}]}],
+    ids=["unread", "read", "with a picture"],
+)
+async def test_a_row_from_before_the_mark_starts_nothing_after_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, more: dict[str, Any]
+) -> None:
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, _, _models):
+        main_id = str(console.main_id)
+        row = _old_row("delete the copy", **more)
+        await console.store.update_session(main_id, meta_update={"queued": [row]})
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Deleted it.")], run=False
+    ) as (console, client, models):
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert models["main"].requests == []
+        assert await console.store.list_turns(main_id) == []
+        assert await _queued(console, main_id) == []
+        [told] = await _given_back(client, main_id)
+        assert told["typed"] == "delete the copy" and told["echo"] == "failed"
+        assert "restarted" in told["line"]
+        assert ("picture" in told["line"]) is ("images" in more)
+
+
+async def test_a_queued_message_from_before_the_mark_goes_back_and_its_row_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It may be a real message: the price is one more Send, once, at the upgrade."""
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, _, _models):
+        main_id = str(console.main_id)
+        waiting = await console.front_for(main_id).echo(
+            {"echo": "queued", "typed": "hello there", "line": "Queued"}
+        )
+        row = {**_old_row("hello there"), "echo": waiting}
+        await console.store.update_session(main_id, meta_update={"queued": [row]})
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Hi.")], run=False
+    ) as (console, client, models):  # fmt: skip
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert models["main"].requests == []
+        [told] = await _given_back(client, main_id)
+        assert told["typed"] == "hello there" and told["of"] == waiting["id"]
 
 
 async def test_a_row_stop_could_not_remove_starts_nothing_after_a_restart(

@@ -15,7 +15,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   not hold the chat. The main chat and side chats are one agent that differ only in identity, folder, grants and how
   they show. Send while melo works is a note it reads at its next step, in the console, the app, the terminal's main
   chat and the API, never a second turn. A note that misses its turn never starts work by itself, after a Stop or a
-  restart included: it goes back to your message box with its pictures, and you press Send. What waits behind a turn
+  restart included: it goes back to your message box, and you press Send. After a restart its picture does not come
+  back, and the line says so. Anything waiting from an older version comes back once the same way, a real queued
+  message included, which needs one more Send. What waits behind a turn
   is bounded. A turn melo began itself, to answer a task's
   question or to follow one up, reads and answers and changes nothing, by a check on the run and not by its wording.
   The rules that read action words, the short-answer mode and the fallback that turned a promise into a task are gone. (#571)

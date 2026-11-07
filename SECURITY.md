@@ -122,7 +122,9 @@ those tools can do.
   through a search. That is a check on the run, made by code: the other tools
   are not offered and a call of one is refused, whatever the prompt or a page
   says. A note that misses its turn never starts work by itself, after a Stop
-  or a restart included: it goes back to you, and you press Send.
+  or a restart included: it goes back to you, and you press Send. After a
+  restart only a row stored as a message runs. Any other row, one stored by
+  an older version included, goes back the same way, without its picture.
 - **A chat's answer to a task never approves.** When a task asks its chat
   for help, the chat answers in a turn of its own (`origin` `ask_owner`).
   That turn has no tool that grants an approval, and the question and the

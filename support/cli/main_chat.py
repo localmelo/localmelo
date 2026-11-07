@@ -746,6 +746,15 @@ def _sleeps(echoes: Sequence[Any]) -> list[dict[str, Any]]:
     return [e for e in rows if e.get("echo") == "sleep" and e["id"] not in undone]
 
 
+def _notes_back(echoes: Sequence[Any]) -> list[dict[str, Any]]:
+    """The lines among *echoes* of notes that went back to the person, oldest first."""
+    return [
+        e
+        for e in echoes
+        if isinstance(e, dict) and e.get("note_back") and isinstance(e.get("id"), int)
+    ]
+
+
 def _outside(found: object) -> OutsideAccess | None:
     """A path outside the workspace as the gateway lists it (#405), or ``None``."""
     if not isinstance(found, dict) or found.get("access") not in ("read", "write"):
@@ -967,9 +976,13 @@ class MainChat:
         )
         finished = [t for t in turns if not t.get("undone")]
         since = float(finished[-1].get("started_at") or 0) if finished else 0.0
-        # What melo tidied since the last turn (or ever, with no turn) and nobody put back.
-        sleeps = [e for e in _sleeps(echoes) if float(e.get("ts") or 0) > since]
-        if not finished and not sleeps:
+        # What was left for the person since the last turn (or ever, with no turn).
+        left = [
+            e
+            for e in [*_sleeps(echoes), *_notes_back(echoes)]
+            if float(e.get("ts") or 0) > since
+        ]
+        if not finished and not left:
             return
         # Under a command's echo the connector and the hang indent already
         # set the rows in; at the start they are indented by two.
@@ -1017,8 +1030,11 @@ class MainChat:
             if isinstance(card.get("id"), int):
                 self._seen.add(card["id"])
             out.print(card_line(card, symbols, width))
-        for echo in sleeps:
+        for echo in left:
             self._seen.add(int(echo["id"]))
+            # A row, not the input: history is read again at every start.
+            if echo.get("note_back") and echo.get("typed"):
+                self._not_sent(self.chat.title, str(echo["typed"]))
             out.print(echo_line(echo, symbols, width))
         out.print(Text(""))
 
@@ -1279,8 +1295,10 @@ class MainChat:
         if turn.chat is self.chat:
             self.host.words_back(text)
         else:
-            title = turn.chat.title if turn.chat is not None else ""
-            self._say(f"Not sent to {title}: {text}", "muted")
+            self._not_sent(turn.chat.title if turn.chat is not None else "", text)
+
+    def _not_sent(self, title: str, text: str) -> None:
+        self._say(clean_output(f"Not sent to {title}: {text}"), "muted")
 
     def _turn_over(self, turn: _Turn) -> None:
         """*turn* ended: what its sender is not taking did not reach it."""

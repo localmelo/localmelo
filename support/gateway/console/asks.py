@@ -19,10 +19,10 @@ then), and runs as the chat's next turn, before any other internal turn. Words
 the person sends while their own turn runs are a note of it (:meth:`add_note`,
 also from a plain Send, see ``routes_turns``) and wait in the same queue,
 flagged with that turn: the turn's run reads them at its next step
-(:class:`~.notes.ChatNotes`), and any it never read run as the next turn, in
-order, once the turn ends. A note may carry pictures: they are kept in the
-chat's blobs when the note is accepted, go to the model with the note's words,
-and start the next turn with it when the run never read them. A
+(:class:`~.notes.ChatNotes`), and any it never read go back to the person once
+the turn ends, and start nothing. A note may carry pictures: they are kept in
+the chat's blobs when the note is accepted, go to the model with the note's
+words, and go back with it, except after a restart. A
 chat that neither answers nor asks the person within :data:`OWNER_TIMEOUT_S`
 of its internal turn's start, or whose internal turn ends without doing
 either, gives the worker "No answer from <chat>"; a stopped task ends its
@@ -90,6 +90,8 @@ MAX_ANSWER_CHARS: Final = 2000
 # One message always fits; a note counts under MAX_NOTES instead.
 MAX_QUEUED: Final = 20
 MAX_QUEUED_CHARS: Final = 2_000_000
+# The note_of of a stored row marked neither a note nor a message: no turn has it.
+UNMARKED: Final = "unmarked"
 # The notes of a chat that are remembered by key, so a repeated send gets its note back.
 NOTE_KEYS_KEPT: Final = 64
 # How long the person can take back a message sent as a task's answer.
@@ -151,6 +153,7 @@ class _Queued:
     # Words added to a running turn: that turn's id, stored with the row, and the
     # number its run's inbox reads them by. A queued message has "" and 0. A note
     # never runs as a message: what its turn did not read goes back to the person.
+    # A row restored from the store keeps note_of, or UNMARKED, and has no number.
     note_of: str = ""
     note: int = 0
     # False while a note is being stored: its run does not read it yet.
@@ -159,6 +162,32 @@ class _Queued:
     # and in memory while the gateway runs, with the names they were added under.
     images: list[dict[str, Any]] = field(default_factory=list)
     pictures: tuple[Staged, ...] = ()
+
+
+def _restored(row: dict[str, Any]) -> _Queued:
+    """A stored queue row. It fails closed: a row not marked as a message never starts work.
+
+    A writer before the mark stored notes and messages alike, so its row may be a
+    note, one its run read included, and it goes back to the person.
+    """
+    note_of = str(row.get("note_of") or "")
+    if not note_of and row.get("message") is not True:
+        note_of = UNMARKED
+    return _Queued(
+        str(row.get("typed", "")),
+        str(row.get("composed", "")),
+        str(row.get("key") or f"queued-{uuid.uuid4().hex}"),
+        dict(row.get("echo") or {}),
+        note_of=note_of,
+        images=[dict(i) for i in row.get("images") or [] if isinstance(i, dict)],
+    )
+
+
+def _back_words(item: _Queued) -> str:
+    """What a row going back says: only a live note has a number, and pictures in memory."""
+    if item.note:
+        return "ask.noteBack"
+    return "ask.noteBackNoPicture" if item.images else "ask.noteBackRestart"
 
 
 class OwnerAsks:
@@ -557,9 +586,10 @@ class OwnerAsks:
         return item.echo
 
     async def _keep_queue(self, chat_id: str) -> None:
-        """Store *chat_id*'s queued messages, so a restart runs them; raises on failure."""
-        kept = [{"typed": q.typed, "composed": q.composed, "key": q.key,
-                 "echo": q.echo, **({"note_of": q.note_of} if q.note_of else {})}
+        """Store *chat_id*'s queued rows; raises on failure. Only a row marked ``message`` runs after a restart."""
+        kept = [{"typed": q.typed, "composed": q.composed, "key": q.key, "echo": q.echo,
+                 **({"note_of": q.note_of} if q.note_of else {"message": True}),
+                 **({"images": q.images} if q.images else {})}
                 for q in self._people.get(chat_id, [])]  # fmt: skip
         await self.console.store.update_session(
             chat_id, meta_update={"queued": kept or None}
@@ -661,8 +691,7 @@ class OwnerAsks:
         images = [staged.picture.image for staged in pictures]
         with self._holding(turn_id):
             if images:
-                # Kept before the note is accepted: the page shows them from the chat's
-                # blobs, and a note that becomes the next turn (or outlives a restart) has them.
+                # Kept before the note is accepted: the page shows them from the chat's blobs.
                 await self.console.store.put_blobs(chat_id, images)
             number = next(self._note_numbers)
             item = _Queued(
@@ -742,7 +771,7 @@ class OwnerAsks:
         return []
 
     def note_read(self, chat_id: str, number: int) -> None:
-        """The run read note *number*: it is no longer a message to send next."""
+        """The run read note *number*: it no longer goes back to the person."""
         people = self._people.get(chat_id, [])
         kept = [item for item in people if item.note != number or not item.note_of]
         if len(kept) == len(people):
@@ -751,21 +780,23 @@ class OwnerAsks:
         self._spawn(self._forget_started(chat_id))
 
     async def _give_back(self, chat_id: str, missed: Sequence[_Queued]) -> None:
-        """Notes that missed their turn start nothing: each goes back to the person's input, with its pictures.
+        """Rows that missed their turn start nothing: each goes back to the person's input, with its pictures.
 
         However the turn ended, a Stop or a restart included. The row stays in the
         chat with the words, for a person with no input open. After a restart a
         note may have been read before the gateway stopped, and nothing can tell:
-        it is treated the same.
+        it is treated the same, and its row says its pictures did not come back.
         """
         front = self.console.front_for(chat_id)
         reads = self.console.vision.known()
         for item in missed:
             images = [self.console.pictures.put(staged.picture, staged.name).json(reads)
                       for staged in item.pictures]  # fmt: skip
+            words = _back_words(item)
             await front.echo(
                 {"echo": "failed", "note_back": True, "typed": item.typed,
-                 "line": t_in("en", "ask.noteBack"), "said": said("ask.noteBack"),
+                 "line": t_in("en", words), "said": said(words),
+                 **({"of": item.echo["id"]} if "id" in item.echo else {}),
                  **({"images": images} if images else {})}
             )  # fmt: skip
             self._people[chat_id].remove(item)
@@ -778,18 +809,12 @@ class OwnerAsks:
         )  # fmt: skip
 
     async def restore_queued(self) -> None:
-        """At start: the messages the last run queued and never started run now, in order; its notes go back."""
+        """At start: the messages the last run queued run now, in order; every other row goes back."""
         for info in await self.console.store.sessions_with_meta("queued"):
             kept = info.meta.get("queued")
             if info.kind not in ("chat", "front") or not isinstance(kept, list):
                 continue
-            self._people[info.id] = [
-                _Queued(str(q.get("typed", "")), str(q.get("composed", "")),
-                        str(q.get("key") or f"queued-{uuid.uuid4().hex}"),
-                        dict(q.get("echo") or {}), note_of=str(q.get("note_of") or ""))  # fmt: skip
-                for q in kept
-                if isinstance(q, dict)
-            ]
+            self._people[info.id] = [_restored(q) for q in kept if isinstance(q, dict)]
             self._kick(info.id)
 
     # ── Each chat's turns, one at a time ──

@@ -265,8 +265,9 @@ async def test_a_note_of_a_picture_alone_goes_back_with_it(
         assert back["typed"] == "" and len(back["images"]) == 1
 
 
+@pytest.mark.parametrize("words", ["after the restart", ""])
 async def test_a_picture_note_a_restart_finds_starts_nothing_and_says_so(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, words: str
 ) -> None:
     never = asyncio.Event()
     async with ask_console(
@@ -278,7 +279,7 @@ async def test_a_picture_note_a_restart_finds_starts_nothing_and_says_so(
         await until(lambda: len(models["main"].requests) == 1)
         picture = await _stage(client, png(40, 20))
         assert (
-            await _note(client, turn_id, "after the restart", images=[picture])
+            await _note(client, turn_id, words, images=[picture])
         ).status_code == 202
     async with ask_console(
         tmp_path, monkeypatch, main=[answer("Hi again.")], vision=FakeVision(True),
@@ -289,6 +290,10 @@ async def test_a_picture_note_a_restart_finds_starts_nothing_and_says_so(
         assert models["main"].requests == []
         assert len(await console.store.list_turns(main_id)) == 1
         assert await _queued(console, main_id) == []
+        # Its picture is not recovered, and the row does not pretend it is.
+        [told] = await _given_back(client, main_id)
+        assert told["typed"] == words and "images" not in told
+        assert "picture did not come back" in told["line"]
 
 
 async def test_a_repeated_send_of_a_picture_note_is_one_note(
