@@ -1,9 +1,6 @@
 """A task from the chat runs smoothly, end to end (#440).
 
-- A request for work starts at once, in Chinese as in English.
-- A call a policy check refused does not use up the chat's steps, and a turn
-  that still runs out of steps answers with what it has: never "Start this as
-  a task?" for a question the chat answers, nor for a task's status.
+- The model's task_create starts at once, in Chinese as in English.
 - When a task the chat started ends Ready, the chat tells the answer unasked,
   and "is it done?" is answered from the task's state and result.
 
@@ -27,7 +24,6 @@ from localmelo.support.gateway.console.front import (
     TASK_TOOLS,
     whole_answer,
 )
-from localmelo.support.gateway.front_rules import ASK_TEXT, ASK_TEXT_ZH
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import HOLDER, core_event, run_result
@@ -130,97 +126,7 @@ async def test_the_chinese_request_starts_its_task_at_once(
         assert turn.answer == "已经作为任务开始了，结果会回到这里。"
 
 
-# ── 2. A refused start, and a turn that only says what it will do ──
-
-
-def _promised() -> list[Reply]:
-    return [lists(1), gets(2), answer("Let me look at the task list.")]
-
-
-@pytest.mark.parametrize(
-    "typed",
-    [
-        IS_IT_DONE,
-        DIDNT_IT,
-        JUST_TELL_ME,
-        "is it done?",
-        "what did it find?",
-        "what did the task find?",
-        "check the slides task and tell me its progress",
-    ],
-)
-async def test_a_turn_that_only_promises_answers_with_what_it_has(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
-) -> None:
-    best = "任务已经完成：它的回答在这里。"
-    main: list[Reply] = [*_promised(), answer(best)]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        models,
-        _,
-    ):
-        await say(client, console, typed)
-        turn = await turn_of(console)
-        assert (turn.status, turn.answer) == ("completed", best)
-        # The last request asked for the answer, with no tools.
-        assert models["main"].offered[-1] == []
-        assert await echo_kinds(console) == [], "no Start this as a task?"
-        assert await console.workers.tasks.list_tasks() == []
-
-
-async def test_a_preamble_to_a_status_question_gets_an_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    main: list[Reply] = [answer("我先看一下任务列表。"), answer("任务已经完成了。")]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        _,
-        _ran,
-    ):
-        await say(client, console, IS_IT_DONE)
-        turn = await turn_of(console)
-        assert turn.answer == "任务已经完成了。"
-        assert turn.answer not in (ASK_TEXT, ASK_TEXT_ZH)
-        assert await echo_kinds(console) == []
-
-
-async def test_with_no_answer_at_all_the_turn_says_so_and_offers_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    main: list[Reply] = [*_promised(), answer("")]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        _,
-        _ran,
-    ):
-        await say(client, console, IS_IT_DONE)
-        turn = await turn_of(console)
-        assert turn.status == "completed" and turn.answer
-        assert turn.answer not in (ASK_TEXT, ASK_TEXT_ZH)
-        assert await echo_kinds(console) == []
-
-
-async def test_a_question_it_only_promised_answers_and_still_offers_a_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    best = "From the files I read, the fixture is missing; a run would tell for sure."
-    main: list[Reply] = [*_promised(), answer(best)]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        _,
-        _ran,
-    ):
-        await say(client, console, "Why does pytest fail in tests/cli?")
-        turn = await turn_of(console)
-        assert turn.answer == best
-        assert await echo_kinds(console) == ["ask"]
-
-
-# ── 3. The answer comes back to the chat ──
+# ── 2. The answer comes back to the chat ──
 
 # A long answer: its key points first, then many lines of detail.
 LONG = "\n".join(
@@ -490,37 +396,6 @@ def test_a_long_chinese_answer_is_cut_at_its_length() -> None:
     text, cut = whole_answer(answer_text)
     assert RESULT_CHARS // 2 < len(text) <= RESULT_CHARS
     assert cut == len(answer_text) - len(text)
-
-
-@pytest.mark.parametrize(
-    "typed",
-    [
-        "不用开任务，看一下我的简历然后告诉我适合什么工作",
-        "no need for a task, look at my website and tell me what is wrong",
-    ],
-)
-async def test_words_against_a_task_never_start_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, typed: str
-) -> None:
-    best = "From what I could read here: research and ML systems roles fit best."
-    main: list[Reply] = [
-        tool_call("task_create", {"title": "Jobs", "objective": "x"}, "c-1"),
-        lists(1),
-        gets(2),
-        answer(best),
-    ]
-    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
-        console,
-        client,
-        models,
-        _,
-    ):
-        await say(client, console, typed)
-        assert tool_results(models["main"], 1)[-1].startswith("Not done:")
-        turn = await turn_of(console)
-        assert turn.answer == best
-        assert await console.workers.tasks.list_tasks() == [], "nothing started"
-        assert "started" not in await echo_kinds(console)
 
 
 async def test_task_get_names_the_files_on_one_clean_line(

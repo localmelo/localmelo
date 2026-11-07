@@ -6,7 +6,8 @@ kind ``task_ask``), or in the main chat when that chat was deleted; a
 ``task.ask`` event goes to the listeners, and the call waits, holding no model
 call. The chat runs one internal turn per ask, oldest first, once it is idle:
 a turn whose ``origin`` is ``ask_owner``, whose typed text is empty and whose
-user text is the request framed as data. It has the chat's mode and tools, at
+user text is the request framed as data. It has the chat's mode, only the tools
+that change nothing (the runner says so for the run, ``acts=False``), at
 most :data:`ASK_STEPS` steps, and two more tools: ``task_answer`` sends the
 chat's answer back, ``ask_person`` shows the person the question with a reply
 box ("Task X needs your answer"), which waits as long as the person takes.
@@ -15,7 +16,8 @@ Nothing here grants an approval.
 A message the person sends while an internal turn runs is queued, shown as
 queued, kept in the chat's ``meta.queued`` until it starts (a restart runs it
 then), and runs as the chat's next turn, before any other internal turn. Words
-the person adds to a turn that runs (:meth:`add_note`) wait in the same queue,
+the person sends while their own turn runs are a note of it (:meth:`add_note`,
+also from a plain Send, see ``routes_turns``) and wait in the same queue,
 flagged with that turn: the turn's run reads them at its next step
 (:class:`~.notes.ChatNotes`), and any it never read run as the next turn, in
 order, once the turn ends. A note may carry pictures: they are kept in the
@@ -205,8 +207,18 @@ class OwnerAsks:
         return ActivityText(said_in("en", words), "held", words)
 
     def holds(self, chat_id: str) -> bool:
-        """Whether a message the person sends *chat_id* now waits for an internal turn."""
-        return chat_id in self._busy or bool(self._people.get(chat_id))
+        """Whether a message the person sends *chat_id* now waits: for an internal turn, or behind what is kept for the next turn.
+
+        A note of the running turn is that turn's, and holds nothing back.
+        """
+        if chat_id in self._busy:
+            return True
+        entry = self.console.sessions.get(chat_id)
+        runner = None if entry is None else entry.runner
+        return any(
+            runner is None or not runner.takes_notes(item.note_of)
+            for item in self._people.get(chat_id, ())
+        )
 
     def add_listener(self, listener: Callable[[StoredEvent], None]) -> None:
         """Call *listener* with each ``task.ask`` and ``task.answer`` (the memory lane's)."""
@@ -496,7 +508,11 @@ class OwnerAsks:
         following = busy is not None and not isinstance(busy, Ask)
         if busy is None and people:
             following = bool(people[-1].echo.get("following"))
-        words = "ask.queuedFollowUp" if following else "ask.queued"
+        words = (
+            "ask.queuedFollowUp"
+            if following
+            else "ask.queued" if title else "ask.queuedTurn"
+        )
         front = self.console.front_for(chat_id)
         item = _Queued(typed, composed, key or f"queued-{uuid.uuid4().hex}")
         item.echo = await front.echo(
@@ -538,6 +554,10 @@ class OwnerAsks:
             if body is not None and body["turn_id"] == turn_id:
                 return body
         return None
+
+    def note_of(self, chat_id: str, key: str | None) -> dict[str, Any] | None:
+        """The note a send of *key* made in *chat_id*, also once its turn ended: a repeat gets it back."""
+        return None if key is None else self._note_keys.get(chat_id, {}).get(key)
 
     async def add_note(
         self,

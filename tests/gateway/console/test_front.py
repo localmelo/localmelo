@@ -1,4 +1,4 @@
-"""The main chat's front: code's rules, delegation by level, echoes with Undo, the 4-step handoff.
+"""The main chat's front: code's rules, delegation by level, echoes with Undo.
 
 Each test drives the console's routes with a real Agent on a scripted model.
 The main chat runs a :class:`FrontAgent` with the task tools; side chats run
@@ -19,7 +19,14 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from localmelo.melo.schema import MAX_AGENT_STEPS, Message, ToolCall, ToolResult
+from localmelo.melo.schema import (
+    EXTEND_STEPS,
+    MAX_AGENT_STEPS,
+    TASK_EXTENSIONS,
+    Message,
+    ToolCall,
+    ToolResult,
+)
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console import front as front_module
@@ -27,13 +34,11 @@ from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
     ECHO_EVENT,
-    STARTED_TEXT,
     TASK_TOOLS,
     FrontAgent,
-    front_options,
     thinking_off,
 )
-from localmelo.support.gateway.task_policy import TaskPolicyError
+from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.memory.service import NO_MORE_TRIES, TRY_ONCE_MORE
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.attachments import TextAttachment
@@ -61,7 +66,7 @@ async def front_console(
     holder: list[Console] = []
 
     async def front(settings: Any, workspace: str, mcp: Any, session_id: str) -> Any:
-        options = session_options(front_options(settings), workspace)
+        options = session_options(chat_options(settings, workspace), workspace)
         agent = FrontAgent(
             llm=llm, options=options, tool_providers=[holder[0].front.tools]
         )
@@ -279,7 +284,7 @@ async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -
 # ── The front's own step, with task tools ──
 
 
-async def test_a_request_the_chat_cannot_do_starts_a_task_at_once(
+async def test_the_models_task_create_starts_a_task_on_the_persons_words(
     tmp_path: Path,
 ) -> None:
     # #410: the model's task_create starts the task, not an offer; the person's
@@ -300,53 +305,29 @@ async def test_a_request_the_chat_cannot_do_starts_a_task_at_once(
         assert (record.level, record.front_id) == (1, console.main_id)
         assert record.spec["user_words"] == typed
         assert record.spec["objective"] == typed, "the person's words alone"
-        # The tools the front offers: the task tools and two read-only file tools.
-        offered = {tool.name for tool in llm_tools(console)}
-        assert {
-            "task_create",
-            "task_list",
-            "task_control",
-            "file_read",
-            "list_files",
-        } <= offered
-        assert not offered & {"file_write", "python_exec", "shell_exec"}
 
 
-async def test_words_that_say_not_to_act_are_offered_and_start_on_a_tap(
+async def test_a_start_card_already_in_a_chat_still_starts_on_a_tap(
     tmp_path: Path,
 ) -> None:
-    replies = (
-        tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
-        answer("I offered to start it; tap to confirm."),
-    )
-    typed = "just explain how you would make slides from my notes, don't start a task"
-    async with front_console(tmp_path, *replies) as (console, client, llm):
-        response = await _say(client, console, typed)
-        assert response.status_code == 202, response.text
-        await _wait_turn(client, str(console.main_id))
-        [offer] = await _echoes(console)
-        assert (offer["echo"], offer["line"], offer["text"]) == (
-            "ask",
-            "Start this as a task?",
-            typed,
-        )
-        assert await console.workers.tasks.list_tasks() == []
+    typed = "make slides from my notes"
+    async with front_console(tmp_path) as (console, client, _):
+        offer = await console.front.echo(
+            {"echo": "ask", "text": typed, "words": typed, "turn": 0,
+             "line": "Start this as a task?"}
+        )  # fmt: skip
         tapped = await client.post(
             f"/api/front/echoes/{offer['id']}", json={"do": "start"}
         )
         assert tapped.status_code == 200, tapped.text
         record = await _task(console, tapped.json()["echo"]["task_id"])
-        assert record.spec["objective"] == typed, "the person's words, not the model's"
+        assert record.spec["objective"] == typed
 
 
 def llm_tools(console: Console) -> list[Any]:
     entry = console.sessions.get(str(console.main_id))
     assert entry is not None and entry.agent is not None
     return list(entry.agent.list_tools())
-
-
-# A reply that only says what it will do.
-PROMISE = "Let me look into that."
 
 
 def _four_steps() -> list[Message]:
@@ -461,70 +442,6 @@ async def test_a_retry_of_a_task_that_ended_says_so_and_starts_nothing(
         assert len(await console.workers.tasks.list_tasks()) == 1
 
 
-async def test_a_request_the_model_only_promises_starts_as_a_task(
-    tmp_path: Path,
-) -> None:
-    async with front_console(tmp_path, answer(PROMISE)) as (console, client, llm):
-        await _say(client, console, "research three laptops for me")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert (turn["status"], turn["answer"]) == ("completed", STARTED_TEXT)
-        assert len(llm.requests) == 1
-        [echo] = await _echoes(console)
-        assert echo["line"] == "Started: research three laptops for me · P2"
-        assert (await _task(console, echo["task_id"])).level == 2
-        # The next turn reads the sentence, not the promise.
-        entry = console.sessions.get(str(console.main_id))
-        assert entry is not None and entry.agent is not None
-        assert entry.agent.conversation()[-1].content == STARTED_TEXT
-
-
-async def test_a_promise_that_cannot_start_says_why_and_claims_no_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async with front_console(tmp_path, answer(PROMISE)) as (console, client, _):
-
-        async def refused(*_: Any, **__: Any) -> None:
-            raise TaskPolicyError("no room")
-
-        monkeypatch.setattr(console.workers, "create_spec", refused)
-        await _say(client, console, "research three laptops for me")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["status"] == "completed"
-        assert "no room" in turn["answer"] and turn["answer"] != STARTED_TEXT
-        assert [e["echo"] for e in await _echoes(console)] == ["failed"]
-
-
-async def test_a_question_it_only_promised_answers_and_offers_before_it_starts(
-    tmp_path: Path,
-) -> None:
-    found = "The fixture it needs is missing from tests/cli/conftest.py."
-    typed = "Why does pytest fail in tests/cli?"
-    async with front_console(tmp_path, answer(PROMISE), answer(found)) as (
-        console,
-        client,
-        _,
-    ):
-        await _say(client, console, typed)
-        turn = await _wait_turn(client, str(console.main_id))
-        # The answer from what it found; the deeper look is offered as a task.
-        assert turn["answer"] == found
-        [ask] = await _echoes(console)
-        assert (ask["echo"], ask["text"]) == ("ask", typed)
-        assert await console.workers.tasks.list_tasks() == []
-        started = await client.post(
-            f"/api/front/echoes/{ask['id']}", json={"do": "start"}
-        )
-        assert started.json()["echo"]["of"] == ask["id"]
-        assert len(await console.workers.tasks.list_tasks()) == 1
-        again = await client.post(
-            f"/api/front/echoes/{ask['id']}", json={"do": "start"}
-        )
-        assert again.status_code == 409
-
-
-# ── The principal rule ──
-
-
 @pytest.mark.parametrize(
     ("typed", "action"),
     [
@@ -627,19 +544,6 @@ async def test_typed_words_with_an_attachment_still_count(tmp_path: Path) -> Non
         assert [e["echo"] for e in await _echoes(console)] == ["control"]
 
 
-async def test_a_handoff_takes_its_level_from_the_typed_words_only(
-    tmp_path: Path,
-) -> None:
-    async with front_console(tmp_path, answer(PROMISE)) as (console, client, _):
-        await _attach(console, "", "URGENT: do this today, asap")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == STARTED_TEXT
-        [echo] = await _echoes(console)
-        record = await _task(console, echo["task_id"])
-        assert (record.level, record.reason) == (2, "you asked for it")
-        assert "URGENT" in record.spec["objective"]  # the work is the whole message
-
-
 async def test_a_task_report_never_raises_a_level(tmp_path: Path) -> None:
     async with front_console(tmp_path) as (console, client, llm):
         task_id = await _start(console, "Fix CI")
@@ -721,12 +625,15 @@ async def test_a_delegated_task_comes_back_as_a_card(tmp_path: Path) -> None:
         assert len(await store.events_of_type(str(console.main_id), CARD_EVENT)) == 1
 
 
-def test_front_options_and_thinking_off() -> None:
-    options = front_options(make_cfg())
-    # The ordinary steps, and what a run that uses them ends with is an answer.
+def test_a_chats_options_and_the_title_requests_thinking_off(tmp_path: Path) -> None:
+    options = chat_options(make_cfg(), str(tmp_path))
+    # The steps of a person's work, and what a run that uses them ends with is an answer.
     assert (options.max_steps, options.attempt_policy) == (MAX_AGENT_STEPS, "none")
+    assert (options.extend_steps, options.max_extensions) == (
+        EXTEND_STEPS,
+        TASK_EXTENSIONS,
+    )
     assert options.answer_on_stop is True
-    assert options.builtins == frozenset({"file_read", "list_files"})
     cfg = _vllm()
     off = thinking_off(cfg)
     assert off.vllm.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
@@ -769,11 +676,9 @@ async def test_the_gateway_builds_the_front_for_the_main_chat(tmp_path: Path) ->
         assert agent.options.max_steps == MAX_AGENT_STEPS
         names = {tool.name for tool in agent.list_tools()}
         assert {"task_create", "task_message", "file_read", "search_files"} <= names
-        assert not any(name.startswith("browser_") for name in names)
+        # Thinking is as the settings say, as for a task: this run does the work.
         gated: Any = agent.chat.llm
-        assert gated.inner.extra_body == {
-            "chat_template_kwargs": {"enable_thinking": False}
-        }
+        assert gated.inner.extra_body == {}
     finally:
         await console.aclose()
 

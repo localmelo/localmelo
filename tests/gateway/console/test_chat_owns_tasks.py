@@ -29,13 +29,11 @@ from localmelo.support.gateway.console.followups import (
     asked_question,
 )
 from localmelo.support.gateway.console.front import (
-    FRONT_TEXT,
     TASK_TOOLS,
     FrontAgent,
-    front_options,
 )
+from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.front_rules import hands_off, start_rule
 from localmelo.support.gateway.workers import NOTE_START, _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
@@ -111,7 +109,7 @@ async def owner_console(
     holder: list[Console] = []
 
     async def front(settings: Any, workspace: str, mcp: Any, session_id: str) -> Any:
-        options = session_options(front_options(settings), workspace)
+        options = session_options(chat_options(settings, workspace), workspace)
         llm = GatedLLM(models["main"], holder[0].gate.client(session_id))
         agent = FrontAgent(
             llm=llm,
@@ -260,145 +258,7 @@ async def settled(console: Console) -> None:
 # ── #410: the chat starts the task itself ──
 
 
-def test_the_start_rule_starts_requests_and_answers_questions() -> None:
-    for typed in (
-        "open https://example.com/news and tell me the top story",
-        "run the test suite in my project and tell me what fails",
-        "can you make slides from my notes today?",
-        "帮我装一下 numpy 然后跑一下",
-        "fix tests/cli/test_e2e.py",
-    ):
-        assert start_rule(typed) == "start", typed
-    for typed in ("hi", "what is a monad?", "简单说一下什么是 monad？"):
-        assert start_rule(typed) == "answer", typed
-    for typed in (
-        "",
-        "Why does pytest fail in tests/cli?",
-        "just explain how pip works",
-        "don't change anything, only tell me what is wrong",
-        "只解释一下这个错误",
-        "every day at 9 brief me on the news",
-    ):
-        assert start_rule(typed) == "offer", typed
-    assert hands_off("please don't start a task for this")
-    assert not hands_off("start the build and tell me when it is done")
-    assert "task_create right away" in FRONT_TEXT and "one short question" in FRONT_TEXT
-
-
-@pytest.mark.parametrize(
-    ("typed", "rule"),
-    [
-        # A polite opening acts only with a verb that acts.
-        ("please explain what a monad is", "answer"),
-        ("帮我看看 x.py 是做什么的", "answer"),
-        ("please install numpy and run the tests", "start"),
-        ("请帮我把 notes.md 翻译成英文", "start"),
-        # Words that steer a task are offered, named or not.
-        ("cancel it", "offer"),
-        ("pause everything", "offer"),
-        ("continue the report task", "offer"),
-        ("stop the build task", "offer"),
-        ("取消它", "offer"),
-        ("暂停所有任务", "offer"),
-        ("继续那个报告任务", "offer"),
-        # A short message with no verb that acts is talk.
-        ("ok", "answer"),
-        ("thanks, that was helpful", "answer"),
-        ("Tell me about report.md", "answer"),
-        ("谢谢你", "answer"),
-        ("今天天气不错", "answer"),
-        # Words that say not to act, unless the message asks for something else too.
-        ("do not modify any files", "offer"),
-        ("don't touch the code", "offer"),
-        ("don't edit anything", "offer"),
-        ("no changes", "offer"),
-        ("不要改任何文件", "offer"),
-        ("Do not delete report.md; just explain what it contains.", "offer"),
-        ("fix the login bug without changing anything else", "start"),
-        ("修复登录的 bug，别改其他文件", "start"),
-        # A short polite request for work starts, though code would answer it.
-        ("can you commit this?", "start"),
-        ("could you push the branch?", "start"),
-        ("can you test the login page?", "start"),
-        ("can you check if the tests pass?", "start"),
-        ("can you see if numpy is installed?", "start"),
-        # A request in steps starts at once, in Chinese as in English: look somewhere
-        # first, then tell or do something with it. Its question is the person's ask.
-        (
-            "你去我的网站看一下我的简历 然后告诉我什么工作适合我 特别是大公司的什么岗位",
-            "start",
-        ),
-        ("Look at my website and tell me which jobs fit me", "start"),
-        (
-            "Go to my website, read my CV, then tell me which jobs fit me, "
-            "especially at large companies",
-            "start",
-        ),
-        ("can you look at my website and tell me which jobs fit me?", "start"),
-        ("去这个网站看一下然后告诉我最新的价格", "start"),
-        ("帮我查一下明天北京的天气", "start"),
-        ("看看我的项目然后告诉我哪里需要改", "start"),
-        ("分析一下我的简历，告诉我适合什么工作", "start"),
-        ("你能看一下我的网站然后告诉我适合什么工作吗？", "start"),
-        # A plain question is answered, a status question too, and "看看再说" is talk.
-        ("什么工作适合我？", "answer"),
-        ("看看再说", "answer"),
-        ("看看我的简历写得怎么样", "answer"),
-        ("跑完了吗", "answer"),
-        ("之前worker不是已经跑完了吗", "answer"),
-        ("直接和我说就行了", "answer"),
-        ("is it done?", "answer"),
-        ("didn't it finish?", "answer"),
-        ("is the report task done yet?", "answer"),
-        ("which of my tasks will finish first?", "answer"),
-        ("任务跑完了吗？", "answer"),
-        ("你看了我的网站然后告诉我了吗", "answer"),
-        # Words that say not to act still get an offer.
-        ("看看我的项目然后告诉我哪里需要改，先别动手", "offer"),
-        ("look at my site and tell me what is wrong, don't change anything", "offer"),
-        # Words against a task never start one, however the rest reads.
-        ("不用开任务，看一下我的简历然后告诉我适合什么工作", "offer"),
-        ("别开任务，看看这段代码然后告诉我哪里有问题", "offer"),
-        ("不需要建任务，去我的网站看一下然后告诉我哪里要改", "offer"),
-        ("no need for a task, look at my website and tell me what is wrong", "offer"),
-        ("don't make a task: look at my repo and tell me how it is laid out", "offer"),
-        # A look then tell starts only for something outside the chat (a site, a
-        # link, a file, a repo or folder, or the person's own things), and words
-        # that ask to be told, translated or explained, or name a task, win.
-        ("看看天气然后告诉我", "answer"),
-        ("look at this and tell me what you think", "answer"),
-        ("我最近在研究Rust，你推荐什么书？", "answer"),
-        ("研究表明喝咖啡有好处，解释一下为什么", "answer"),
-        ("解释一下：去网站看一下然后告诉我，这句话什么意思", "answer"),
-        ("翻译成英文：去这个网站看一下然后告诉我最新的价格", "answer"),
-        ("嗯，停一下，看看日志然后告诉我", "answer"),
-        ("看一下那个任务然后告诉我结果", "answer"),
-        ("look at the slides task and tell me its progress", "answer"),
-        ("check the slides task and tell me its progress", "answer"),
-        ("open the report task and tell me what it found", "answer"),
-        # What a task found or said is its result: the chat answers it.
-        ("what did it find?", "answer"),
-        ("what did the task find?", "answer"),
-        ("what did the worker say?", "answer"),
-        ("what does the task say?", "answer"),
-        ("has the task found anything?", "answer"),
-        # What a file says is a question about the file, not a task.
-        ("What does report.md say?", "offer"),
-        ("它找到了什么？", "answer"),
-        ("任务发现了什么？", "answer"),
-        ("那个任务说了什么？", "answer"),
-        ("did it find the bug? if not, fix it", "offer"),
-        ("find the bug in app.py and tell me what you found", "start"),
-        # A status word does not swallow a request for work.
-        ("Is the report ready? If not, write it to report.md and commit it", "offer"),
-        ("做完了吗？没做完的话帮我把测试修好并提交", "offer"),
-    ],
-)
-def test_the_start_rule_reads_what_the_words_ask(typed: str, rule: str) -> None:
-    assert start_rule(typed) == rule
-
-
-async def test_a_web_or_command_request_starts_a_task_with_one_line_and_stop(
+async def test_the_models_task_create_starts_a_task_with_one_line_and_stop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     main: list[Reply] = [

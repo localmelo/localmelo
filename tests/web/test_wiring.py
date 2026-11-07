@@ -12,7 +12,7 @@ from localmelo.melo.agent import AgentOptions
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.preview import call_preview
 from localmelo.support import config, settings
-from localmelo.support.gateway.console import front, registry
+from localmelo.support.gateway.console import registry
 from localmelo.support.sessions import agents as session_agents
 from localmelo.support.sessions.display import activity_text, request_words
 from localmelo.support.web import NOTE
@@ -114,7 +114,9 @@ async def test_with_the_browser_on_the_line_points_to_it() -> None:
 async def test_the_console_chats_follow_the_setting(on: bool) -> None:
     cfg = _cfg(web_fetch=on)
     side = await registry.default_builder(cfg, str(Path.cwd()), None, "s1")
-    main = await front.build_front_agent(cfg, str(Path.cwd()), "s2", tools=_NoTools())
+    main = await registry.default_builder(
+        cfg, str(Path.cwd()), None, "s2", tools=[_NoTools()]
+    )
     try:
         for agent in (side, main):
             assert ("web_fetch" in _tools(agent)) is on

@@ -106,10 +106,10 @@ Three limits apply at different levels:
 
 ![The main chat starts tasks and shows their levels](../assets/img/main-chat-tasks.webp)
 
-- Every chat reads and answers: no reflection, thinking off, and tools to start, list and change tasks, read files and search memory. It acts on nothing itself.
-- Code reads your message first. `/task` and control phrases ("pause the slides") need no model call; a greeting or a short question is answered at once, never started as a task.
-- Work that acts is a task from its start: a worker runs it beside the conversation at a level from your words, with the browser and while it makes progress, to about 500 steps, and its result comes back as a card.
-- A reply that only says what it will do starts the task ("This needs more than a quick answer, so I started it as a task"), or asks first when you asked a question.
+- Every chat does the work itself: no reflection, tools for files, Python, the web and the browser, tools to start, list and change tasks, and memory. Every step passes the same checks and approvals.
+- Code reads your message first, for explicit commands only: `/task` and control phrases ("pause the slides") need no model call. Everything else is the model's to read.
+- A task is work beside the chat: ask for one, or the chat starts one for long work. A worker runs it at a level from your words, with the browser and while it makes progress, to about 500 steps, and its result comes back as a card.
+- A turn melo began itself (a task's question, a follow-up) reads and answers, and changes nothing.
 - Direct runs and workers run the full loop above, as before.
 
 ## Code layout

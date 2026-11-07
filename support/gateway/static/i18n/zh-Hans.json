@@ -323,6 +323,7 @@
   "ask.part.whatHappened": "发生了什么",
   "ask.queued": "已排队：melo 回答完「{title}」后就发送",
   "ask.queuedFollowUp": "已排队：melo 跟进完「{title}」后就发送",
+  "ask.queuedTurn": "已排队：当前这一轮结束后发送",
   "ask.replied": "你回答了「{title}」",
   "ask.replyHint": "你的回答",
   "ask.replyLabel": "你对「{title}」的回答",

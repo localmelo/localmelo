@@ -2840,6 +2840,16 @@ async function runningChat(routes = {}) {
 
 const noteReply = (number, text, extra = {}) => ({status: 202, body: {note: {note: number, turn_id: 'turn-2', text, state: 'sent', ...extra}}});
 
+test('A send the gateway made a note of a turn this page had not seen leaves nothing waiting', async () => {
+  const h = harness(baseRoutes({'POST /sessions/a/turns': {status: 202, body: {note: {note: 3, turn_id: 'turn-9', text: 'and the blue one', state: 'sent'}}}}));
+  await h.run('init()');
+  h.element('input').value = 'and the blue one';
+  await h.run('send()');
+  assert.equal(h.net.callsTo('/sessions/a/turns').length, 1);
+  assert.equal(h.element('input').value, '');
+  assert.equal(h.state().outbox.a, undefined, 'the words are not waiting to be sent');
+});
+
 test('Enter during a running turn posts the words to that turn, shows them as sent, and empties the box', async () => {
   const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'use the blue one')});
   assert.equal(h.element('input').placeholder, 'Add to what melo is doing…');

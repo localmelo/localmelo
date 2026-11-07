@@ -110,6 +110,79 @@ async def test_a_note_is_read_at_the_next_step_and_marked_as_added_while_it_work
         assert info is not None and info.meta.get("queued") is None
 
 
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_send_while_a_turn_runs_is_a_note_of_that_turn_never_a_second_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    release = asyncio.Event()
+    work: list[Reply] = [held(release, STEP), answer("Done, with your note.")]
+    async with ask_console(
+        tmp_path,
+        monkeypatch,
+        main=work if where == "main" else None,
+        sides=[work],
+        run=False,
+    ) as (console, client, models):
+        if where == "main":
+            chat = str(console.main_id)
+            turn_id = await _start(client, console, "start the job")
+        else:
+            made = await client.post(
+                "/api/sessions",
+                json={"turn": {"text": "start the job"}, "workspace": str(tmp_path)},
+            )
+            assert made.status_code == 201, made.text
+            chat, turn_id = made.json()["session"]["id"], made.json()["turn_id"]
+        await until(lambda: chat in models or where == "main")
+        model = models["main" if where == "main" else chat]
+        await until(lambda: len(model.requests) == 1)
+        sent = await _post_turn(
+            client, chat, "use the blue one", client_request_id="s1"
+        )
+        assert sent.status_code == 202, sent.text
+        note = sent.json()["note"]
+        assert (note["state"], note["turn_id"]) == ("sent", turn_id)
+        # A repeat of the send gets the same note back, and adds none.
+        again = await _post_turn(
+            client, chat, "use the blue one", client_request_id="s1"
+        )
+        assert again.status_code == 202, again.text
+        assert again.json()["note"]["note"] == note["note"]
+        release.set()
+        finished = await _wait_turn(client, chat)
+        assert finished["status"] == "completed"
+        await console.asks.settle()
+        assert _seen(model.requests[1]).endswith(f"{NOTE_MARK}\nuse the blue one")
+        assert len(await console.store.list_turns(chat)) == 1
+
+
+async def test_send_with_a_file_while_a_turn_runs_waits_for_the_next_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file cannot join a running turn: it keeps its order, as the next message."""
+    release = asyncio.Event()
+    main: list[Reply] = [held(release, answer("First.")), answer("Second.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        await _start(client, console, "start the job")
+        await until(lambda: len(models["main"].requests) == 1)
+        files = [{"name": "a.txt", "text": "the file", "chars": 8}]
+        sent = await _post_turn(client, chat, "read this", attachments=files)
+        assert sent.status_code == 200, sent.text
+        echo = sent.json()["echo"]
+        assert echo["echo"] == "queued"
+        assert echo["line"] == "Queued: this runs when the current turn ends"
+        release.set()
+        await until(lambda: len(models["main"].requests) == 2)
+        assert "the file" in _seen(models["main"].requests[1])
+        await console.asks.settle()
+        assert len(await console.store.list_turns(chat)) == 2
+
+
 async def test_a_note_after_the_last_step_becomes_the_next_turn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2432,6 +2432,13 @@ async function submit(slot, key, text) {
       syncUI();
       return;
     }
+    if (body.note) {
+      // A turn was running after all: the words joined it, and its stream shows them.
+      delete S.outbox[slot];
+      renderMessages(true);
+      syncUI();
+      return;
+    }
     if (body.repeated === true) {
       // The key was accepted already: this is the turn it started, not a
       // second one, and no new event will say so.

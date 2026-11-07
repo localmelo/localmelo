@@ -573,16 +573,10 @@ class CliSession:
             self.submit(text)
             return None
         if self._state == "running":
-            # While the person has a page, words go to the paused run as a note (main chat).
-            if (
-                self.renderer.in_control is not None
-                and self.remote is not None
-                and self.remote.note(text)
-            ):
-                symbols = self.renderer.symbols
-                self.out.print(
-                    self._text(f"{symbols.queued} Note for melo: {text}", "muted")
-                )
+            # Words go to the chat's running turn as a note: its run reads them at
+            # its next step. Until its id is known, they wait in order.
+            if self.remote is not None and self.remote.note(text):
+                self.say_note(text)
                 return None
             if self.queued is not None:
                 return "One message is already queued (↑ edits it)."
@@ -676,6 +670,24 @@ class CliSession:
         self._state = "shell"
         self._work = self.spawn(self._run_shell(shell.text))
         return None
+
+    def say_note(self, text: str) -> None:
+        """The line that shows words added to the running turn."""
+        symbols = self.renderer.symbols
+        self.out.print(self._text(f"{symbols.queued} Note for melo: {text}", "muted"))
+
+    def next_message(self, text: str) -> None:
+        """A note the turn ended without: *text* is the next message, after any queued one."""
+        if self._state == "idle":
+            self.submit(text)
+            return
+        self.queued = text if self.queued is None else f"{self.queued}\n{text}"
+
+    def words_back(self, text: str) -> None:
+        """Notes a stopped turn never read: they are the person's again, in the input box."""
+        if self.app is not None:
+            self._give_back(text)
+            self.out.print(self._text("Your note is back in the input box.", "muted"))
 
     def take_queued(self) -> str | None:
         text, self.queued = self.queued, None

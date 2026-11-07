@@ -60,6 +60,8 @@ class FakeGateway:
         self.closed = False
         self.lose_stream = False
         self.refuse_mode = False
+        self.note_refused = False  # a note's turn ended on the way
+        self.unread: list[dict[str, Any]] = []  # what a Stop gives back
         # The task runs Done named: session id and the query that says which run.
         self.done_sources: list[tuple[str, dict[str, str]]] = []
         self._running: dict[str, tuple[str, int]] = {}  # turn id -> session, number
@@ -257,13 +259,17 @@ class FakeGateway:
             self.finish(parts[2], number, "completed", "Signed in.")
             return httpx.Response(200, json={"ok": True})
         if parts[:2] == ["api", "turns"] and parts[3:] == ["notes"]:
+            if self.note_refused:
+                return _error(409, "turn_not_running", "The turn is not running.")
             return httpx.Response(202, json={"note": {"text": body["text"]}})
         if parts[:2] == ["api", "turns"] and parts[3:] == ["cancel"]:
             found = self._running.pop(parts[2], None)
             if found is None:
                 return _error(409, "turn_not_running", "This turn is not running.")
             self.finish(found[0], found[1], "cancelled", cause="user_stop")
-            return httpx.Response(202, json={"cancelling": True})
+            return httpx.Response(
+                202, json={"cancelling": True, "unread_notes": self.unread}
+            )
         return _error(404, "not_found", "Not found.")
 
     async def _stream(self, session_id: str, after: int) -> AsyncIterator[bytes]:
@@ -523,6 +529,80 @@ async def test_while_the_person_has_a_page_an_empty_enter_is_done_and_words_are_
     assert "✓ You gave the page back to melo · 3s" in text
 
 
+async def test_words_typed_while_a_turn_runs_are_a_note_of_that_turn(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long job") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+    assert session.enter("use the blue one") is None
+    await _until(lambda: any(r[1].endswith("/notes") for r in gateway.requests))
+    assert session.queued is None
+    note = next(r for r in gateway.requests if r[1].endswith("/notes"))
+    assert (note[1], note[2]["text"]) == (
+        f"/api/turns/{MAIN}-t1/notes",
+        "use the blue one",
+    )
+    assert "↳ Note for melo: use the blue one" in setup.out.text()
+    gateway._running.clear()
+    gateway.finish(MAIN, 1, "completed", "Done.")
+    await setup.idle()
+
+
+async def test_words_typed_before_the_turns_id_is_known_keep_their_order(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long job") is None
+    # The send has not come back: no turn to add a note to yet.
+    assert session.state == "running"
+    assert session.enter("then this") is None
+    assert session.queued == "then this"
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+    gateway._running.clear()
+    gateway.finish(MAIN, 1, "completed", "Done.")
+    await _until(lambda: "Answer to then this." in setup.out.text())
+    await setup.idle()
+
+
+async def test_a_note_for_a_turn_that_ended_is_the_next_message_not_lost(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("long job") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+    gateway.note_refused = True  # the turn ended while the words were on their way
+    assert session.enter("one more thing") is None
+    gateway._running.clear()
+    gateway.finish(MAIN, 1, "completed", "Done.")
+    await _until(lambda: "Answer to one more thing." in setup.out.text())
+    await setup.idle()
+    assert "Could not send the note" not in setup.out.text()
+
+
+async def test_a_note_the_stopped_turn_never_read_comes_back_to_the_input_box(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    back: list[str] = []
+    session.words_back = back.append  # type: ignore[method-assign,assignment]
+    gateway.unread = [{"note": 1, "text": "not that way"}]
+    assert session.enter("long job") is None
+    await _until(lambda: session.remote is not None and session.remote._turn is not None
+                 and bool(session.remote._turn.turn_id))  # fmt: skip
+    assert session.enter("not that way") is None
+    assert session.stop() is True
+    await setup.idle()
+    assert back == ["not that way"]
+
+
 async def test_a_tasks_browser_is_one_status_line_and_done_gives_back_that_run(
     chat: tuple[Setup, FakeGateway],
 ) -> None:
@@ -559,16 +639,16 @@ async def test_a_turn_sent_in_another_window_draws_here(
     session = setup.session
     gateway.start_turn(MAIN, "long from the console", "other")
     await _until(lambda: session.state == "running")  # drawn as it runs
-    # A message typed meanwhile waits for it, as during a turn of this terminal.
+    # A message typed meanwhile joins that turn, as during a turn of this terminal.
     assert session.enter("next") is None
-    assert session.queued == "next"
+    await _until(lambda: any(r[1].endswith("/notes") for r in gateway.requests))
+    assert session.queued is None
     gateway._running.clear()
     gateway.finish(MAIN, 1, "completed", "Console answer.")
-    await _until(lambda: "Answer to next." in setup.out.text())
+    await _until(lambda: "Console answer." in setup.out.text())
     await setup.idle()
     text = setup.out.text()
     assert text.index("long from the console") < text.index("Console answer.")
-    assert text.index("Console answer.") < text.index("Answer to next.")
     sent = [r[2]["text"] for r in gateway.requests if r[0] == "POST"]
     assert sent == ["next"]
 

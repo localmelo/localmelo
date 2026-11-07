@@ -13,10 +13,7 @@ from localmelo.support.gateway.front_rules import (
     allows,
     allows_level,
     allows_message,
-    authorizes,
-    brief_question,
     continue_name,
-    intention_only,
     is_chinese,
     is_question,
     level_code,
@@ -26,12 +23,10 @@ from localmelo.support.gateway.front_rules import (
     level_word,
     reply_language,
     route,
-    start_rule,
     title_matches,
     triage,
     work_request,
 )
-from localmelo.support.sessions.display import short_title
 from localmelo.tests.linear import assert_linear
 
 SLIDES = TaskRef("a1b2c3d4e5f6", "Slides for the 15:00 meeting", "running")
@@ -44,12 +39,12 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
 @pytest.mark.parametrize(
     ("typed", "expected"),
     [
-        ("hello", "answer"),
-        ("Hi there!", "answer"),
-        ("你好", "answer"),
-        ("谢谢", "answer"),
-        ("what time is my meeting?", "answer"),
-        ("我的组会是哪天？", "answer"),
+        ("hello", "plan"),
+        ("Hi there!", "plan"),
+        ("你好", "plan"),
+        ("谢谢", "plan"),
+        ("what time is my meeting?", "plan"),
+        ("我的组会是哪天？", "plan"),
         ("summarize notes.md", "plan"),
         ("write a report on battery chemistry", "plan"),
         (
@@ -75,7 +70,7 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
         ("每周一提醒我交周报", "chore"),
         # Not reminders: questions, a cue with no work, a weak cue with no time.
         ("remind me what the report said", "plan"),
-        ("what reminders do I have?", "answer"),
+        ("what reminders do I have?", "plan"),
         ("我记得明天有会", "plan"),
         ("记得保存文件", "plan"),
         ("remind me tomorrow at 9", "plan"),
@@ -89,8 +84,8 @@ TASKS = [SLIDES, CI, PHOTOS, DONE]
             "你去我的网站看一下我的简历 然后告诉我什么工作适合我 特别是大公司的什么岗位",
             "plan",
         ),
-        ("什么工作适合我？", "answer"),
-        ("跑完了吗", "answer"),
+        ("什么工作适合我？", "plan"),
+        ("跑完了吗", "plan"),
     ],
 )
 def test_routes(typed: str, expected: str) -> None:
@@ -258,41 +253,6 @@ def test_a_question_mark_anywhere_or_quick_question_is_a_question() -> None:
 
 
 @pytest.mark.parametrize(
-    "reply",
-    [
-        "I'll start by looking at the test file and finding the relevant code.",
-        "Sure! Let me check.",
-        "Let me look at the tests first. Then I'll fix the check and commit.",
-        "I'll start by:\n1. Reading the test\n2. Fixing it",
-        "OK, I'm going to search the repository for it…",
-        "我先看一下测试文件。",
-        "好的，我来检查一下这个文件，然后修改它。",
-    ],
-)
-def test_a_reply_that_only_announces_what_it_will_do(reply: str) -> None:
-    assert intention_only(reply)
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        "Let me know if you need more.",
-        "I'll need the folder name to continue.",
-        "Let me check. The file is support/gateway/task_policy.py.",
-        "Which folder should I look in?",
-        "I'll look at it — which branch?",
-        "Started the slides; I'll tell you when they're done.",
-        "DEFAULT_WORKSPACE is defined in support/gateway/task_policy.py:24.",
-        "已交给后台任务处理：放宽优先级判定。",
-        "我先说结论：在 task_policy.py 里。是否还要别的？",
-        "",
-    ],
-)
-def test_an_answer_is_not_a_preamble(reply: str) -> None:
-    assert not intention_only(reply)
-
-
-@pytest.mark.parametrize(
     "typed",
     [
         "Please fix this today: in tests/cli/test_e2e_pty.py the list_files "
@@ -303,13 +263,11 @@ def test_an_answer_is_not_a_preamble(reply: str) -> None:
         "commit support/gateway/console/registry.py",
     ],
 )
-def test_an_imperative_change_to_named_files_is_work(typed: str) -> None:
-    routed = route(typed, TASKS)
-    assert (routed.route, routed.title, routed.text) == (
-        "work",
-        short_title(typed),
-        typed,
-    )
+def test_an_imperative_change_to_named_files_is_work_and_the_chats_to_do(
+    typed: str,
+) -> None:
+    assert work_request(typed)
+    assert route(typed, TASKS).route == "plan"
 
 
 @pytest.mark.parametrize(
@@ -321,12 +279,10 @@ def test_an_imperative_change_to_named_files_is_work(typed: str) -> None:
         "make slides from notes.md",  # makes something new: the front's step
         "fix and/or improve the docs",  # no file
         "write a report on battery chemistry",
-        "The report task stopped before its commit. Please finish it: commit docs/a.md",
-        "finish the old report: commit docs/report.md",  # names a task: may follow it
     ],
 )
 def test_other_messages_are_not_work(typed: str) -> None:
-    assert route(typed, TASKS).route != "work"
+    assert not work_request(typed)
 
 
 @pytest.mark.parametrize(
@@ -341,7 +297,7 @@ def test_other_messages_are_not_work(typed: str) -> None:
     ],
 )
 def test_a_change_test_commit_pipeline_is_work_without_a_named_file(typed: str) -> None:
-    assert route(typed, ()).route == "work"
+    assert work_request(typed)
 
 
 @pytest.mark.parametrize(
@@ -355,7 +311,7 @@ def test_a_change_test_commit_pipeline_is_work_without_a_named_file(typed: str) 
     ],
 )
 def test_a_pipeline_ask_that_is_not_work(typed: str) -> None:
-    assert route(typed, ()).route != "work"
+    assert not work_request(typed)
 
 
 @pytest.mark.parametrize(
@@ -473,35 +429,6 @@ def test_continue_the_task_leaves_what_it_cannot_name_to_the_front() -> None:
 
 
 @pytest.mark.parametrize(
-    "typed",
-    [
-        "主对话里卡片上的「Done.」现在是怎么处理的？简单说一下就行。",
-        "Quick question: which file defines DEFAULT_WORKSPACE? Answer in one line.",
-        "briefly, what does support/gateway/front.py do?",
-        "In short: why does the card say Done?",
-        "这个函数是做什么的？简单讲讲",
-        "能不能一句话说明为什么卡片只写 Done？",
-    ],
-)
-def test_a_question_that_asks_for_a_brief_answer_is_answered_here(typed: str) -> None:
-    assert brief_question(typed)
-    assert route(typed, TASKS).route == "answer"
-
-
-@pytest.mark.parametrize(
-    "typed",
-    [
-        "why does the card say Done?",  # a question, but not a brief one
-        "summarize notes.md briefly",  # not a question
-        "don't answer briefly, why does it fail?",
-        "写一句话的测试",  # not a question
-    ],
-)
-def test_other_messages_are_not_brief_questions(typed: str) -> None:
-    assert not brief_question(typed)
-
-
-@pytest.mark.parametrize(
     ("text", "work"),
     [
         # A prohibition before the verb, in Chinese and in English, is no request.
@@ -544,52 +471,6 @@ def test_work_is_asked_for_only_when_no_prohibition_or_quote_holds_the_verb(
     text: str, work: bool
 ) -> None:
     assert work_request(text) is work
-    assert (route(text).route == "work") is work
-
-
-@pytest.mark.parametrize(
-    ("typed", "goes_ahead"),
-    [
-        ("I authorize you to apply to them", True),
-        ("I authorize you", True),
-        ("You are authorized to submit them", True),
-        ("Yes, you have my permission", True),
-        ("我授权你去投简历", True),
-        ("我授权你去提交 然后有问题再问我", True),
-        ("我允许你去试一下", True),
-        # Authorization as a topic, a past fact or a refusal is no go-ahead.
-        ("What does authorization mean in OAuth?", False),
-        ("how do I authorize an app on GitHub?", False),
-        ("I authorized the app yesterday", False),
-        ("请解释一下 OAuth 授权", False),
-        ("授权码是什么", False),
-        ("我没授权你删除", False),
-        ("I don't authorize you to touch my files", False),
-    ],
-)
-def test_words_that_authorize_work_are_a_go_ahead(typed: str, goes_ahead: bool) -> None:
-    assert authorizes(typed) is goes_ahead
-
-
-@pytest.mark.parametrize(
-    ("typed", "rule"),
-    [
-        # A go-ahead for work the chat talked about is a request, with no verb of its own.
-        ("我授权你去投简历", "start"),
-        ("I authorize you to apply", "start"),
-        ("You have my permission, go on", "start"),
-        # Small talk, a question about the word, and a go-ahead that says not to act are not.
-        ("谢谢", "answer"),
-        ("explain what authorization means", "answer"),
-        ("What does authorization mean in OAuth?", "answer"),
-        ("我授权你，但只解释一下", "offer"),
-        ("just explain it, I authorize nothing", "offer"),
-    ],
-)
-def test_a_go_ahead_starts_the_work_it_gives_the_go_ahead_for(
-    typed: str, rule: str
-) -> None:
-    assert start_rule(typed) == rule
 
 
 # ── A long paste is read by its opening ──
@@ -606,16 +487,13 @@ LONG_PASTES: Final = {
 @pytest.mark.parametrize("shape", sorted(LONG_PASTES))
 def test_the_rules_read_a_long_paste_in_time_linear_in_its_length(shape: str) -> None:
     assert_linear(
-        LONG_PASTES[shape], lambda text: (start_rule(text), route(text).route)
+        LONG_PASTES[shape], lambda text: (work_request(text), route(text).route)
     )
 
 
-def test_a_request_in_the_opening_of_a_long_text_is_a_task_with_all_of_the_text() -> (
-    None
-):
-    pasted = "Please fix src/app.py, the log is below.\n" + "x" * 100_000
+def test_a_slash_task_carries_all_of_a_long_text() -> None:
+    pasted = "/task Please fix src/app.py, the log is below.\n" + "x" * 100_000
     found = route(pasted)
 
-    assert found.route == "work"
-    assert found.text == pasted
-    assert start_rule(pasted) == "start"
+    assert found.route == "delegate"
+    assert found.text == pasted.removeprefix("/task ")

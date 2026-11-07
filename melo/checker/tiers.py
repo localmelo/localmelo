@@ -73,9 +73,20 @@ def tier_requires_approval(tier: ToolTier) -> bool:
     return tier != "read"
 
 
+def changes_nothing(tool_def: ToolDef) -> bool:
+    """Whether *tool_def* is for a run nobody asked to act: it reads, here, and only that.
+
+    The read tier, without the browser's reading tools, which are read tier so
+    that the site gate asks per site, yet open pages and move a page the person
+    may be watching.
+    """
+    return tier_of(tool_def) == "read" and "browser" not in tool_def.semantic_tags
+
+
 __all__ = [
     "BUILTIN_TIERS",
     "tier_from_annotations",
+    "changes_nothing",
     "tier_of",
     "tier_requires_approval",
 ]

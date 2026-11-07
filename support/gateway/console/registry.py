@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import dataclasses
 import logging
 import os
 import time
@@ -33,13 +34,17 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.melo.schema import ImagePart, Message
+from localmelo.melo.schema import TASK_EXTENSIONS, ImagePart, Message
 from localmelo.support.browser import configured_driver
 from localmelo.support.config import SavedFolders, gateway_workspace_problem
 from localmelo.support.gateway.auto_blocks import BlockError
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.gateway.i18n import t
-from localmelo.support.gateway.task_policy import DEFAULT_WORKSPACE
+from localmelo.support.gateway.task_policy import (
+    DEFAULT_WORKSPACE,
+    folder_problem,
+    worker_tool_allowlist,
+)
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
     build_session_agent,
@@ -102,6 +107,9 @@ EXIT_SAVE_RESERVE_S: Final = 1.0
 # Seconds between idle sweeps.
 SWEEP_INTERVAL_S: Final = 60.0
 
+# What a chat has in a folder no task may work in: it reads, and changes nothing.
+READING_BUILTINS: Final = frozenset({"file_read", "git_status", "list_files"})
+
 SettingsSource = Callable[[], "Config"]
 # A builder gets the settings, the workspace, the MCP config and the
 # session id the Agent is made for: the scheduler gate tags its calls with
@@ -137,6 +145,32 @@ class SessionLock(asyncio.Lock):
         super().release()
 
 
+def chat_options(settings: Config, workspace: str) -> AgentOptions:
+    """A chat's options, main or side: the person's work runs in the chat (#571).
+
+    It has the file tools and Python of a person's task, written under the same
+    confinement, and that work's step bound: the steps of a chat's turn are the
+    steps of the work. There is no reflection: a chat's turn goes on or ends, and
+    the person is there to say what comes next. A folder no task may work in
+    (:func:`~localmelo.support.gateway.task_policy.folder_problem`) stays readable
+    and nothing in it is written or run: the chat opens, and says why.
+    """
+    options = configured_session_options(
+        settings,
+        AgentOptions(
+            mode="gateway",
+            builtins=(
+                READING_BUILTINS
+                if folder_problem(workspace, settings)
+                else worker_tool_allowlist("user").builtins
+            ),
+            confine_writes=settings.agent.confine_writes,
+            max_extensions=TASK_EXTENSIONS,
+        ),
+    )
+    return dataclasses.replace(options, attempt_policy="none")
+
+
 async def default_builder(
     settings: Config,
     workspace: str,
@@ -147,7 +181,7 @@ async def default_builder(
     tools: Sequence[BaseToolProvider] = (),
     agent_class: type[Agent] | None = None,
 ) -> Agent:
-    """A started Agent for *workspace*, from the shared session builder.
+    """A chat's started Agent, from the shared session builder: the one composition of every chat.
 
     MCP is deferred to U4, so *mcp_config* is not read yet; a caller that
     needs it passes its own builder in :class:`ConsoleOptions`. With *gate*,
@@ -155,7 +189,9 @@ async def default_builder(
     :class:`GatedEmbedding` for *session_id*, so every call this Agent makes
     waits for its slot like a workspace chat's. *memory* gives the chat
     memory across chats (see :func:`build_session_agent`); *tools* and
-    *agent_class* give a side chat its task tools and its Agent class.
+    *agent_class* give a chat its task tools and its Agent class. It has
+    ``web_fetch`` unless ``[tools] web_fetch`` is off, ``web_search`` when
+    ``[web] search`` is on, and the browser the settings name.
     """
 
     llm = None if gate is None else gate.client(session_id)
@@ -164,8 +200,11 @@ async def default_builder(
         base_url=None,
         model=None,
         workspace=workspace,
-        options=configured_session_options(settings, AgentOptions(mode="gateway")),
+        options=chat_options(settings, workspace),
         browser_driver=configured_driver(settings),
+        # Its pages stay in melo's browser, as a task's do: another app's window
+        # is the person's to see, and they may not be at the screen.
+        desktop=False,
         web_fetch=settings.tools.web_fetch is True,
         web_search=settings.web.search is True,
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),

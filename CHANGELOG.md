@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
+  Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
+  approvals in the chat. It becomes a task only when you ask for one or for background work, or when long work should
+  not hold the chat. The main chat and side chats are one agent that differ only in identity, folder, grants and how
+  they show. Send while melo works is a note it reads at its next step, in the console, the app, the terminal's main
+  chat and the API, never a second turn, and Stop gives unread notes back. A turn melo began itself, to answer a task's
+  question or to follow one up, reads and answers and changes nothing, by a check on the run and not by its wording.
+  The rules that read action words, the short-answer mode and the fallback that turned a promise into a task are gone. (#571)
 - A chat does what you ask. Say it in your own words and melo starts the work: no list of verbs stands in the way, and
   nothing sends you to rephrase or press a card. A worker is one-time: new work after a finished task starts a new task
   in the same folder, with the old task's answer and files as background; a task that stopped before finishing goes on

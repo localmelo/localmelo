@@ -1,8 +1,8 @@
 """The browser card: what a browser says in the chat it works for.
 
 When melo browses, the chat that asked shows one card for the run, like a reply: the live page, what melo is doing
-and who has the page. The browser is a task's, which the chat owns (:meth:`~BrowserCards.attach_task`); a chat's own
-Agent has none unless a test's builder gave it one. The card is an ``attention.browser`` event that belongs to no
+and who has the page. The browser is the chat's own Agent's (:meth:`~BrowserCards.attach`), or a task's, which the
+chat owns (:meth:`~BrowserCards.attach_task`). The card is an ``attention.browser`` event that belongs to no
 turn, stored in the chat that owns it and delivered and replayed like its other cards (:mod:`.cards`): no second
 event store, no second stream. Its data is the card's identity, ``card_key`` (the source and the run) with
 ``owner_chat_id``, ``source_session_id``, ``source_turn`` (the turn of the source), ``run_id`` and

@@ -368,6 +368,44 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
     await s.aclose()
 
 
+@pytest.mark.parametrize(
+    "began", [{"origin": "ask_owner"}, {"origin": "followup"}, {"from_person": False}]
+)
+async def test_a_chats_turn_the_person_did_not_begin_runs_no_effect(
+    tmp_path: Path, began: dict[str, Any]
+) -> None:
+    """The check is the run's, whatever the model calls: no wording stops it (#571)."""
+    call = tool_call("file_write", {"path": "made.txt", "content": "x"})
+    s = await setup(tmp_path, [call, answer("Refused.")], progress=True)
+    await s.runner.start_turn("a task's words", **began)
+    await s.runner.wait()
+    assert not (tmp_path / "ws" / "made.txt").exists()
+    finished = next(e for e in s.events if e.event["type"] == "tool.finished")
+    assert "not offered" in finished.event["data"]["error"].casefold()
+    await s.aclose()
+
+
+@pytest.mark.parametrize(
+    ("kind", "began"),
+    [("chat", {}), ("task", {"from_person": False})],
+    ids=["a person's turn", "a task with no person's words"],
+)
+async def test_a_turn_with_authority_still_acts(
+    tmp_path: Path, kind: str, began: dict[str, Any]
+) -> None:
+    """A task another agent made has no person's words and is still admitted work."""
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway", clock=Clock())  # type: ignore[arg-type]
+    call = tool_call("file_write", {"path": "made.txt", "content": "x"})
+    agent = await started_agent(tmp_path / "ws", ScriptedLLM([call, answer("Done.")]))
+    runner = SessionRunner(agent, store, None, new_session=NewSession(kind=kind))
+    await runner.start_turn("write it", **began)
+    await runner.wait()
+    assert (tmp_path / "ws" / "made.txt").read_text() == "x"
+    await runner.close()
+    await agent.close()
+    await store.aclose()
+
+
 async def test_a_turns_review_window_starts_at_the_earlier_start_it_is_given(
     tmp_path: Path,
 ) -> None:

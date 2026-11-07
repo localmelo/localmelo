@@ -335,6 +335,7 @@
   "ask.part.whatHappened": "What happened",
   "ask.queued": "Queued: this runs once melo has answered “{title}”",
   "ask.queuedFollowUp": "Queued: this runs once melo has followed up on “{title}”",
+  "ask.queuedTurn": "Queued: this runs when the current turn ends",
   "ask.replied": "You answered “{title}”",
   "ask.replyHint": "Your answer",
   "ask.replyLabel": "Your answer to “{title}”",

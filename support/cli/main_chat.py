@@ -489,10 +489,13 @@ class GatewayClient:
         echo = body.get("echo")
         return echo if isinstance(echo, dict) else {}
 
-    async def cancel(self, turn_id: str) -> None:
-        await self.call(
+    async def cancel(self, turn_id: str) -> list[str]:
+        """Stop *turn_id*; the words added to it that its run never read."""
+        body = await self.call(
             "POST", "/".join(["/api/turns", quote(turn_id, safe=""), "cancel"])
         )
+        rows = body.get("unread_notes")
+        return [str(row.get("text") or "") for row in rows or ()]
 
     async def give_back(
         self, session_id: str, source: Mapping[str, str] | None = None
@@ -808,6 +811,12 @@ class Host(Protocol):
     def spawn(self, coroutine: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]: ...
 
     def follow_turn(self, text: str, *, echo: bool = True) -> bool: ...
+
+    def say_note(self, text: str) -> None: ...
+
+    def next_message(self, text: str) -> None: ...
+
+    def words_back(self, text: str) -> None: ...
 
     async def choose_from(
         self, title: str, options: Sequence[str], *, default: int = 0
@@ -1233,7 +1242,10 @@ class MainChat:
         try:
             await self.client.note(turn_id, text)
         except GatewayError as exc:
-            self._say(f"Could not send the note: {exc}", "error")
+            if exc.code == "turn_not_running":
+                self.host.next_message(text)  # the turn ended as they were sent
+            else:
+                self._say(f"Could not send the note: {exc}", "error")
 
     # ── Turns ──
 
@@ -1296,6 +1308,10 @@ class MainChat:
                     symbols, width = self.host.renderer.symbols, self.host.out.width
                     self.host.out.print(echo_line(echo, symbols, width))
                 return "echo"
+            if isinstance(body.get("note"), dict):
+                # A turn of another window runs: the words joined it.
+                self.host.say_note(text)
+                return "echo"
             started = body.get("turn")
             number = started.get("turn") if isinstance(started, dict) else None
             if turn.number is None and isinstance(number, int):
@@ -1333,7 +1349,9 @@ class MainChat:
 
     async def _cancel(self, turn_id: str) -> None:
         with contextlib.suppress(GatewayError):
-            await self.client.cancel(turn_id)
+            unread = await self.client.cancel(turn_id)
+            if unread:
+                self.host.words_back("\n".join(unread))
 
     # ── Commands ──
 

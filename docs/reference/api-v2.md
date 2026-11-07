@@ -1284,8 +1284,8 @@ with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`; `action` `send` carries the message as `text`),
-  `ask` (`Start this as a task?`, with `text`, the whole message, `words`, what
-  was typed, and `turn_id`), `sent` (a message given to a task, `how`
+  `ask` (`Start this as a task?`, only on a card already stored: nothing writes
+  new ones; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
   `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
   `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
@@ -1388,7 +1388,7 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 - `ask_end` (`how`: `person` with `text`, `timeout`, `stopped` or `expired`;
   `of` the question or the escalation).
 - `queued` (`typed`) and `dequeued` (`of`): a message sent while the chat
-  answers a task is kept, `POST /api/sessions/{id}/turns` answering 200 with the
+  answers a task, or that cannot be a note of its running turn yet, is kept, `POST /api/sessions/{id}/turns` answering 200 with the
   `queued` echo instead of 409, and runs as the chat's next turn, after a
   restart too, and once: a turn its `client_request_id` (or melo's own key)
   already started is not run again. It is accepted only once it is stored;
@@ -1790,8 +1790,12 @@ is no `workspace` here — the session's own folder is the Agent's.
   reopens from that conversation and reports `null`.
 - A task session returns 409 `task_session_read_only`; use the task routes
   instead of starting a chat turn.
-- 409 `session_busy` while a turn runs. One turn runs per session; a second
-  is refused before anything is queued.
+- One turn runs per session. On a chat, words sent while a person's turn runs
+  answer 202 `{"note": {...}}`, the same note as `POST /api/turns/{turn_id}/notes`,
+  read at the run's next step. A message that cannot be a note yet keeps its
+  place (200, a `queued` echo); pictures with nowhere to wait are 409
+  `chat_answering`. On any other session the answer is 409 `session_busy`,
+  before anything is queued.
 - A repeated `client_request_id` answers 200 with that key's stored turn
   and `"repeated": true`, whether the turn still runs or not.
 - The session's folder must still exist: a deleted folder is 400

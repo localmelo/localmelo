@@ -112,7 +112,11 @@ from localmelo.melo.checker.payloads import (
 from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.review.model import recalled_part
-from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
+from localmelo.melo.checker.tiers import (
+    changes_nothing,
+    tier_of,
+    tier_requires_approval,
+)
 from localmelo.melo.checker.validators import (
     MAX_IMAGES_PER_RESULT,
     MAX_MEMORY_TEXT_LEN,
@@ -841,6 +845,9 @@ class _RunState:
     extensions: int = 0
     calls_made: set[str] = dataclasses.field(default_factory=set)
     refused_calls: set[str] = dataclasses.field(default_factory=set)
+    # Whether this run may change anything (run_task's acts): False offers, and
+    # so runs, only what changes nothing, whatever the model calls.
+    acts: bool = True
     # Whether the person sent the run's query (run_task's from_person): only
     # then may a path outside the workspace be asked about (#405).
     from_person: bool = True
@@ -1904,6 +1911,9 @@ class Agent(_RecallLoop, _NotesLoop):
             )
         if run is not None and run.hidden:
             tools = [t for t in tools if t.name not in run.hidden]
+        if run is not None and not run.acts:
+            # What the step offers is what the executor runs (TOOL_NOT_OFFERED).
+            tools = [t for t in tools if changes_nothing(t)]
 
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(
@@ -3451,6 +3461,7 @@ class Agent(_RecallLoop, _NotesLoop):
         user_words: str | None = None,
         chat_started: float | None = None,
         from_person: bool = True,
+        acts: bool = True,
         hide_tools: Collection[str] = (),
         earlier_turns: Sequence[tuple[str, str]] | None = None,
         images: Sequence[ImagePart] = (),
@@ -3647,7 +3658,13 @@ class Agent(_RecallLoop, _NotesLoop):
         chat): a step review counts no new message of theirs, so a block or
         consent of their last message holds and the query's words allow
         nothing, and long-term memory takes no statement or remember request
-        of the user's from it. *hide_tools* are not offered in this run.
+        of the user's from it. With *acts* false nobody asked this run to act
+        (a turn melo began in a chat): only tools that change nothing are
+        offered (:func:`~localmelo.melo.checker.tiers.changes_nothing`), and the
+        executor refuses any other call. *from_person* says whose words the
+        query is, *acts* what the run may do: a task another agent made has no
+        person's words and still does its job. *hide_tools* are not offered in
+        this run.
         *earlier_turns* are the chat's newest turns before this one, each
         ``(what the user said, the answer)``, oldest first, from a caller that
         keeps the chat (a session's runner): the working window drops its
@@ -3726,6 +3743,7 @@ class Agent(_RecallLoop, _NotesLoop):
             ),
             approval=approval,
             from_person=from_person,
+            acts=acts,
             routine=routine,
             inbox=inbox,
             brief=self.options.brief_probe is not None,

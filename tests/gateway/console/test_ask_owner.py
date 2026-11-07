@@ -28,8 +28,8 @@ from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.front import (
     ECHO_EVENT,
     FrontAgent,
-    front_options,
 )
+from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.console.running import item_activity
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.workers import ASK_FIELDS, MAX_ASKS, AskOwner
@@ -147,7 +147,7 @@ async def ask_console(
         return GatedLLM(llm, holder[0].gate.client(session_id))
 
     async def front(settings: Any, workspace: str, mcp: Any, session_id: str) -> Any:
-        options = session_options(front_options(settings), workspace)
+        options = session_options(chat_options(settings, workspace), workspace)
         agent = FrontAgent(
             llm=gated(models["main"], session_id),
             options=options,

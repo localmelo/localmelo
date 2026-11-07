@@ -13,7 +13,7 @@ from localmelo.melo.agent import AgentOptions
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.preview import call_preview
 from localmelo.support import config, settings
-from localmelo.support.gateway.console import front, registry
+from localmelo.support.gateway.console import registry
 from localmelo.support.sessions import agents as session_agents
 from localmelo.support.sessions.display import activity_text, request_words
 from localmelo.support.web.search_tool import NOTE
@@ -149,7 +149,9 @@ async def test_the_search_does_not_need_web_fetch_and_does_not_turn_it_on() -> N
 async def test_the_console_chats_follow_the_setting(on: bool) -> None:
     cfg = _cfg(search=on)
     side = await registry.default_builder(cfg, str(Path.cwd()), None, "s1")
-    main = await front.build_front_agent(cfg, str(Path.cwd()), "s2", tools=_NoTools())
+    main = await registry.default_builder(
+        cfg, str(Path.cwd()), None, "s2", tools=[_NoTools()]
+    )
     try:
         for agent in (side, main):
             assert ("web_search" in _tools(agent)) is on
@@ -202,7 +204,9 @@ async def test_with_the_switch_off_nothing_is_built_and_no_request_goes_out(
     cfg = _cfg()
     agent = await _session_agent()
     side = await registry.default_builder(cfg, str(Path.cwd()), None, "s1")
-    main = await front.build_front_agent(cfg, str(Path.cwd()), "s2", tools=_NoTools())
+    main = await registry.default_builder(
+        cfg, str(Path.cwd()), None, "s2", tools=[_NoTools()]
+    )
     try:
         for built in (agent, side, main):
             assert "web_search" not in _tools(built)
