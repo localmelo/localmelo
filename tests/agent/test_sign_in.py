@@ -15,6 +15,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
+from localmelo.melo.contracts import review
 from localmelo.melo.contracts.approvals import TOOL_ASK, AutoPolicy
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.block import BLOCK_HEADER
@@ -220,3 +221,29 @@ def test_a_note_the_person_sends_mid_run_is_hidden_and_recalled_notes_are_not_re
     assert not reviewer.signs_in("forum.example")
     reviewer.user_message("thanks")
     assert reviewer.sign_in_value("[password-1]", "forum.example") is None
+
+
+@pytest.mark.parametrize(
+    ("site", "typed"),
+    [
+        ("www.forum.com", True),  # the host the person named
+        ("forum.com", True),  # `www.` aside, on purpose
+        ("login.forum.com", False),  # another host of the site
+        ("forum.com.evil.org", False),
+    ],
+)
+def test_one_site_adds_nothing_to_where_a_password_goes(
+    monkeypatch: pytest.MonkeyPatch, site: str, typed: bool
+) -> None:
+    def no_site_reading() -> None:
+        raise AssertionError("a password never reads the suffix list")
+
+    monkeypatch.setattr(review, "_suffix_list", no_site_reading)
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.reset()
+    reviewer.user_message(
+        reviewer.hide_passwords("sign in to www.forum.com, password: mine-12345")
+    )
+    found = reviewer.sign_in_value("[password-1]", site)
+    assert found == ("mine-12345" if typed else None)
+    assert reviewer.signs_in(site) is typed

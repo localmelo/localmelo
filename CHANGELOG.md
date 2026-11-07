@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The hosts of one site count as one site. A sign-in that moves from a site's main host to its sign-in host asks once:
+  what you keep for a site, opening it or clicking and choosing on it, now covers its other hosts for that chat or task,
+  and the card names the whole site ("all of example.com"), in the console, the app and the terminal. One site is the same
+  scheme and registrable domain, from a public suffix list bundled with melo and read offline, so accounts on a shared
+  hosting domain stay separate; addresses by number, local names, unlisted suffixes and other ports stay exact. Allow
+  once, typing, forms, attached files, take-over, passwords and high-impact steps are asked as before, and what Auto let
+  a chat read stays that host. A refusal covers the whole site too: it takes back what the chat or task keeps for the
+  site, the main chat's answer for it included, and on a browser question the approval of tabs open on it, so a later
+  turn asks again (SECURITY.md lists the limits), and only your newer answer stands over it. `/approvals forget` takes
+  a site's answer back by any of its hosts. New core dependency: publicsuffixlist (#577).
 - A chat does what you ask. Say it in your own words and melo starts the work: no list of verbs stands in the way, and
   nothing sends you to rephrase or press a card. A worker is one-time: new work after a finished task starts a new task
   in the same folder, with the old task's answer and files as background; a task that stopped before finishing goes on

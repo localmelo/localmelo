@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,6 +21,32 @@ def request(tool_name: str, path: str, root: str | None) -> ApprovalRequest:
         preview=path,
         workspace_root=root,
     )
+
+
+def test_a_site_question_names_the_site_a_kept_answer_covers() -> None:
+    def kept_site(name: str) -> str | None:
+        found = approval_json(request(name, "", None))["kept_site"]
+        assert found is None or isinstance(found, str)
+        return found
+
+    assert kept_site("browser:https://login.example.co.uk") == "example.co.uk"
+    # From the question's name, never from a label that came with it.
+    mismatched = dataclasses.replace(
+        request("browser:https://login.example.com", "", None),
+        arguments={"site": "login.example.org", "kept_site": "example.org"},
+    )
+    assert approval_json(mismatched)["kept_site"] == "example.com"
+    assert kept_site("browser-act:https://a.alice.github.io") == "alice.github.io"
+    for exact in (
+        "browser:https://github.io",
+        "browser:https://10.0.0.1",
+        "browser:https://www.example.com:8443",
+        "browser-type:https://www.example.com",
+        "browser-submit:https://www.example.com",
+        "takeover:https://www.example.com",
+        "shell_exec",
+    ):
+        assert kept_site(exact) is None
 
 
 def test_approval_reports_when_arguments_were_truncated() -> None:
@@ -117,6 +144,7 @@ def test_a_write_over_a_file_carries_what_it_replaces(tmp_path: Path) -> None:
         "gist",
         "outside",
         "offers_chat",
+        "kept_site",
     }
     assert pending["outside"] is None
     # An unreviewed write may be kept for the chat, as Ask's card offers (#465).

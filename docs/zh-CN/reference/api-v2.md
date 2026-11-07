@@ -543,6 +543,7 @@ melo_serve 提供的对话模型，用控制台的语言写好，供模型标签
 - `last_event_id` 是该会话最新一条已存事件的 id（没有事件时为 0）：客户端从这个 id 之后读取 `GET /api/sessions/{id}/events?after=`，只会收到之后的事件。
 - `pending_approvals` 条目的 `arguments_complete` 仅当 JSON 安全的 `arguments` 保留了原始值、未经截断或转换时才为 true。当它为 false 或缺失时，客户端不应允许该请求；拒绝仍然可用。仅审批事件中的参数可能被截断，因此在允许之前请获取会话详情。
 - `pending_approvals` 条目的 `review` 是 melo 的规则在 `shell_exec`、`python_exec` 或 `file_write` 调用中发现的内容，其他工具为 `null`：`verdict` 为 `routine`、`high` 或 `undecided`；`title` 是 `high` 调用的卡片问题（“Install software?”），其他为 `""`；`reasons` 是最多三句说明 melo 为何询问的话（“Installs playwright with pip into .signin_venv (downloads about 42 MB).”），其中的密钥已被遮盖；`categories` 是规则的类别，最强的在前（`install`、`download`、`outside_write`、`system`、`app_control` 等）。`high` 调用每次都会询问，卡片不提供 `session` 回答，只有一种例外：自动模式只因请求没有要求而拦住的网站（`browser:` 或 `browser-act:` 问题，类别为 `["beyond_request"]`），它的 `session` 回答会把这个网站问题授权给整个对话。
+- `pending_approvals` 条目的 `kept_site` 是 `browser:` 或 `browser-act:` 问题里保留的回答所涵盖的网站（`browser:https://login.example.com` 的是 `example.com`）；其他问题，以及保持确切地址的来源（数字地址、本地名称、公共后缀、未列出的后缀、不是该协议默认端口的端口），为 `null`。卡片用它来写保留选项的句子，问题本身仍写确切的主机。
 - `pending_approvals` 条目的 `offers_chat` 表示卡片能否提供 `session`（“本对话允许”）：对于回答可以保留的工具的常规或未审查调用，以及上面那种自动模式下的网站，为 true；对于高影响调用、输入文字、发送表单和工作区之外的路径（它的文件夹回答在 `outside` 里），为 false。在自动模式下，审查拦住、而且每个类别都是人可以允许的步骤（话语能允许的类别，以及 `opaque`），会像其他卡片一样在这里等待；没有人可问的运行（例行任务）则直接拦下它。
 - `pending_approvals` 条目的 `gist` 是卡片开头的那句话，形如 `{say: {id, params}, by, warn?: {id, params}, note?, apps?}`；卡片自带一句话的工具（浏览器网站）为 `null`。对命令或脚本，`by` 为 `code`：`say` 由 melo 根据调用生成，并按顺序写出每个效果（`then` 含两句话，`more` 含一句话和一个数量；参数可以是另一个 `{id, params}` 或一组名称）。只有规则什么都没发现时，`by` 才是 `model`，这句话是模型自己的话（`why` 参数，或脚本开头的注释；`say.params.text`）；规则发现了风险时，这些话放在 `note` 里。客户端用标签 `gist.say.model`（`melo says: …`）显示它们，所以它们总是读作模型的话。客户端用目录项 `gist.say.<id>` 以自己的语言说出一切，并用 `gist.list.*` 连接 `apps`；模型的话与代码不符时设置 `warn` 并引用它们（`params.said`）：效果不同时是 `delete` 或 `send_out`，效果相同但代码操作的文件、文件夹或主机有话里没点名的时是 `delete_target` 或 `send_out_target`（带 `params.target`）。这句话只供阅读：调用是否询问由 `review` 决定，按普通名称操作一个应用的脚本在 `categories` 中是 `app_control`（只能点按钮，和 `system` 一样）；擦除磁盘、停止其他程序和打开自定义协议的链接是 `system`，丢弃未提交的工作是 `delete`。
 - `pending_approvals` 条目的 `target` 仅为 `file_write` 设置：路径 `path_label`（相对于工作区；否则以 `~` 代表主目录）、文件是否 `exists`，以及其 `size_bytes`（在生成响应时读取）。其他工具的 `target` 为 `null`。
@@ -1192,7 +1193,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - `id` 是 12 位十六进制字符。`scope` 为 `global`（在主对话里给出，所以在每个对话、任务和终端里都算）或 `session`（只在 `session_id` 那个对话里算）。`session_kind` 为 `main`、`side`、`task` 或 `terminal`；`chat_title` 是那个对话的标题（主对话为 `Main chat`）。
 - `kind` 为 `tool`、`site`、`folder` 或 `window`。`key` 是检查时匹配的确切名称：`shell_exec`、`browser:https://example.com`、`browser-act:https://example.com`、文件夹路径、`window-read:<app>`。
-- `label` 是页面显示的文字（英文）。`action` 为 `tool`、`open`、`act`（点击和选择）、`read`（Auto 让对话读的网站）、`folder` 或 `window`。`target` 是工具名、网站、写成 `~/…` 的文件夹或应用。
+- `label` 是页面显示的文字（英文）。`action` 为 `tool`、`open`、`act`（点击和选择）、`read`（Auto 让对话读的网站）、`folder` 或 `window`。`target` 是工具名、这项授权涵盖的网站（Auto 保留的读取，以及授权涵盖整个网站之前保留的行，是主机）、写成 `~/…` 的文件夹或应用。
 - `by` 为 `person` 或 `auto`；`granted_at` 是 Unix 秒。Auto 的授权只是读网站，且只在它所属的对话里算，主对话也一样。
 - 顺序与页面和 `/grants` 的编号一致：先是 `global` 授权，从新到旧；然后是各个对话，有最新授权的对话在前。
 - 从不保留，所以从不列出：允许一次、输入、提交表单、点击密码、验证码或银行卡字段、同意控件或来自其他网站的框、在其他应用的窗口里按键、付款、更改账号设置，以及每一个高影响的步骤。

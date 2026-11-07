@@ -15,6 +15,11 @@ The scope rule:
   ``session`` everywhere, the main chat included: only the person's word
   counts everywhere.
 
+The person's grant of a site question (opening, clicking and choosing) covers
+the other hosts of its site where it holds (#577): a row keeps the name it was
+given and :meth:`GrantBook.site_kept` matches hosts at lookup. Auto's read
+stays its exact origin.
+
 Nothing that must ask every time is ever written: the questions of
 :data:`~localmelo.melo.contracts.approvals.NEVER_GRANTED` (typing, sending
 a form, a click at a point, a press in another app), a step reviewed as a
@@ -57,7 +62,10 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     grant_offered,
     never_granted,
+    question_site_key,
+    site_covers,
     stays_for_chat,
+    whole_site,
 )
 from localmelo.melo.contracts.folders import above_home, never_offered
 from localmelo.melo.contracts.review import CARD_ONLY, url_site
@@ -219,7 +227,8 @@ def describe(
         target = home_label(key)
         return f"Read files in {target}", target
     if kind == "site":
-        site = _site(key)
+        # What the person keeps covers the whole site (#577); Auto's read, its host.
+        site = (whole_site(key) if by == "person" else None) or _site(key)
         if key.startswith("browser-act:"):
             return f"Click and choose on {site}", site
         return (f"Read {site}" if by == "auto" else f"Open {site}"), site
@@ -500,6 +509,8 @@ class GrantBook:
         self._open_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._pending: set[asyncio.Task[None]] = set()
+        # Take-backs the file refused, grant id to when: the next write tries.
+        self._owed: dict[str, float] = {}
         # Rows granted before the store opened, written when it does.
         self._unsaved: list[Grant] = []
         self.listeners: list[Callable[[], None]] = []
@@ -612,6 +623,20 @@ class GrantBook:
     def allowed_for(self, session_id: str | None) -> frozenset[str]:
         """The names a session holds a grant of (tools, sites, windows; Auto's site reads too)."""
         return frozenset(g.key for g in self.visible(session_id) if g.kind != "folder")
+
+    def site_kept(
+        self, session_id: str | None, name: str, *, inherit: bool = True
+    ) -> bool:
+        """Whether the person kept an answer that holds here about another host of the site of the question *name* (#577).
+
+        Matched at lookup, so the rows keep the names they were given. Never
+        Auto's: its read is about the host it let the chat read, and nobody
+        vouched for the site's others.
+        """
+        return any(
+            g.decided_by == "person" and site_covers(g.key, name)
+            for g in self.visible(session_id, inherit=inherit)
+        )
 
     def folders_for(self, session_id: str | None) -> tuple[str, ...]:
         """The folders outside the workspace a session may read in, oldest first."""
@@ -763,6 +788,41 @@ class GrantBook:
         self._drop(found)
         return found
 
+    async def take_back_site(
+        self,
+        session_id: str | None,
+        key: str,
+        by: str | None = None,
+        *,
+        inherit: bool = True,
+    ) -> bool:
+        """Take back what covers the site *key*, ``ask:site:<site>``, in a session (#577).
+
+        A refusal of the site: both schemes, opening and clicking, the person's
+        and Auto's (with *by*, that decider's only), the session's own rows and,
+        with *inherit*, the ``global`` ones that hold there: the person's newest
+        word wins, and the main chat asks once more. :attr:`outside`'s rows are
+        another file's and stay.
+
+        Whether the file took it. The checks stop using the rows at once, and
+        what the file refused stays owed to the next write.
+        """
+        sid = session_id or ""
+        write = self._drop(
+            [
+                g
+                for g in self._rows.values()
+                if (g.session_id == sid or (inherit and g.scope == "global"))
+                and g.kind == "site"
+                and question_site_key(g.key) == key
+                and by in (None, g.decided_by)
+            ]
+        )
+        if write is None:
+            return True
+        await asyncio.wait([write])  # a run stopped now does not stop the write
+        return not write.cancelled() and write.exception() is None
+
     async def forget(
         self,
         session_id: str | None,
@@ -829,6 +889,8 @@ class GrantBook:
         async with self._write_lock:
             try:
                 await write
+                if self._owed:
+                    await self._mark_revoked([], 0.0)
             except (sqlite3.Error, OSError) as exc:
                 raise SessionStoreError(
                     f"Could not save a grant change: {exc}"
@@ -847,7 +909,9 @@ class GrantBook:
             raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
-        """Wait for every queued write (a failed one is logged)."""
+        """Wait for every queued write (a failed one is logged), and try what is owed."""
+        if self._owed and not self._pending:
+            self._queue(self._mark_revoked([], 0.0), "grant_revoke")
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
@@ -873,12 +937,15 @@ class GrantBook:
             )
 
     async def _mark_revoked(self, ids: list[str], at: float) -> None:
+        """Mark *ids*, and what the file refused before: owed until it lands (#577)."""
         assert self._store is not None
+        self._owed.update(dict.fromkeys(ids, at))
         async with self._store.component_transaction("grant_revoke") as conn:
             await conn.executemany(
                 "UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-                [(at, grant_id) for grant_id in ids],
+                [(when, grant_id) for grant_id, when in self._owed.items()],
             )
+        self._owed.clear()
 
 
 class SessionGrants:
@@ -919,6 +986,12 @@ class SessionGrants:
             g.key
             for g in self._visible()
             if g.kind != "folder" and g.decided_by == "person"
+        )
+
+    def covers(self, name: str) -> bool:
+        """Whether the person's kept answers here cover the question *name*: that name, or another host of its site."""
+        return name in self.names() or self.book.site_kept(
+            self.session_id or "", name, inherit=self.inherit
         )
 
     def passed(self) -> frozenset[str]:
@@ -1003,6 +1076,12 @@ class SessionGrants:
     def forget_now(self, key: str | None = None) -> list[Grant]:
         """Take back *key* (here and, when global, everywhere), or all this session gave."""
         return self.book.forget_now(self.session_id, key)
+
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
+        """Take back what covers the site *key* here (:meth:`GrantBook.take_back_site`)."""
+        return await self.book.take_back_site(
+            self.session_id, key, by, inherit=self.inherit
+        )
 
     def forget_folder_now(self, folder: str) -> bool:
         """Take back a folder's grant; whether one held here."""

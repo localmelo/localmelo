@@ -283,6 +283,8 @@ class ConsoleSessions:
         # The person's Allows in each chat, which its tasks may use (#369).
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
+        self.ledger.site_kept = self.book.site_kept
+        self.ledger.take_back_site = self.book.take_back_site
         self.ledger.folders_of = self.folder_grants
         # The folders "Always allow this folder" keeps, read from the settings file (#405).
         self.saved_folders = SavedFolders()
@@ -1613,3 +1615,4 @@ class ConsoleSessions:
                 await entry.agent.close()
             entry.agent = None
         self._sessions.clear()
+        await self.book.flush()  # a refused take-back has one more try

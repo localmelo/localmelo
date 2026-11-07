@@ -1,12 +1,24 @@
 """Which sites melo may open: http and https pages, each site asked once per chat.
 
-A site is an origin (scheme, host and a port that is not the scheme's own).
-Before melo loads a page, and again where a redirect lands, the site is put to
-the run's approval policy as a request named ``browser:<origin>``. The policy
-keeps "allow for this chat" as a grant of that name, so a site asks once per
-chat, ``/new`` and ``/approvals forget`` take the grants back, and the console
-shows the question as its approval card. There is no grant that outlives the
-chat. Without a policy (``--yolo``, a library caller) nobody is asked.
+Each question names an origin (scheme, host and a port that is not the
+scheme's own). Before melo loads a page, and again where a redirect lands, the
+origin is put to the run's approval policy as a request named
+``browser:<origin>``. The policy keeps "allow for this chat" as a grant of that
+name, so a site asks once per chat, ``/new`` and ``/approvals forget`` take the
+grants back, and the console shows the question as its approval card. There is
+no grant that outlives the chat. Without a policy (``--yolo``, a library caller)
+nobody is asked.
+
+A site is the hosts of one registrable domain under one scheme (#577,
+:func:`~localmelo.melo.contracts.review.host_site`): what the person keeps for
+``browser:`` and ``browser-act:`` covers them all, and a refusal does too. What
+cannot be read that way (an address by number, a local name, a public suffix,
+an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
+Every other answer stays on the exact origin it was asked about: an Allow once,
+typing, a form, a file, a click at a point, a page's box and a take-over. A page
+approved earlier is read again unasked until its site is refused: the refusal
+takes the tabs' approval back (:class:`SiteRefusedError`), and only the person's
+newer answer stands over it (:func:`require_not_refused`).
 """
 
 from __future__ import annotations
@@ -22,6 +34,7 @@ from localmelo.melo.contracts.approvals import (
     WEB_PORTS,
     ApprovalDecision,
     denial_text,
+    is_refusal,
 )
 from localmelo.support.browser.apps import scheme_of
 from localmelo.support.browser.driver import BrowserError
@@ -64,6 +77,10 @@ BROWSER: ContextVar[str] = ContextVar("localmelo_browser_name", default="Safari"
 URL_SHOWN = 300
 # The most form fields a send question lists.
 FORM_SHOWN = 12
+
+
+class SiteRefusedError(BrowserError):
+    """A question about a site was refused: nobody's silence or a withdrawn card, a no (#577)."""
 
 
 def origin_of(url: str) -> str | None:
@@ -152,7 +169,8 @@ def _question(
 
 def _refusal(origin: str, via: str, decision: ApprovalDecision) -> str:
     verb = "read" if via == "web_fetch" else "open"
-    return f"melo did not {verb} {host_of(origin)}. " + denial_text(decision)
+    said = f"melo did not {verb} {host_of(origin)}. " + denial_text(decision)
+    return f"{said} {decision.notice}" if decision.notice else said
 
 
 def refused_earlier(
@@ -171,12 +189,36 @@ def refused_earlier(
     return None if decision is None else _refusal(origin, via, decision)
 
 
+def refused_unasked(
+    origin: str, *, via: str = "browser", url: str | None = None
+) -> str | None:
+    """As :func:`refused_earlier`, for what passes with no question: a site refused in this run too (#577).
+
+    A refusal covers the whole site and every page approved before it. Where
+    :func:`require_site` asks next, the person decides instead, so that their
+    newest word stands.
+    """
+    check = getattr(TOOL_ASK.get(), "refused_unasked", None)
+    if not callable(check):
+        return None
+    decision = check(*_question(origin, via, url))
+    return None if decision is None else _refusal(origin, via, decision)
+
+
+def require_not_refused(origin: str) -> None:
+    """:class:`BrowserError` when a page on *origin* approved earlier stands refused now (:func:`refused_unasked`)."""
+    refused = refused_unasked(origin)
+    if refused is not None:
+        raise BrowserError(refused)
+
+
 async def require_site(
     origin: str, *, via: str = "browser", url: str | None = None
 ) -> None:
     """Ask about *origin*; :class:`BrowserError` with the sentence for the model if refused.
 
-    A "no" is final for the call: the person's answer is not asked twice.
+    A "no" is final for the call: the person's answer is not asked twice. It
+    raises :class:`SiteRefusedError`, an answer nobody gave the plain error.
     *via* ``"web_fetch"`` asks the same question (the same grant name, so one
     "allow for this chat" covers both tools) worded "read <url>", with
     ``via`` and the address it requests (*url*, cut to :data:`URL_SHOWN`
@@ -188,7 +230,8 @@ async def require_site(
         return
     decision = await ask(*_question(origin, via, url))
     if not decision.allow:
-        raise BrowserError(_refusal(origin, via, decision))
+        error = SiteRefusedError if is_refusal(decision) else BrowserError
+        raise error(_refusal(origin, via, decision))
 
 
 async def require_act(origin: str, what: str, on: str = "") -> None:

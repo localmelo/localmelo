@@ -77,6 +77,7 @@ from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
     ApprovalDecision,
     ToolAsk,
+    site_key,
 )
 from localmelo.melo.contracts.folders import (
     attach_refusal,
@@ -1249,26 +1250,41 @@ class BrowserToolProvider(BaseToolProvider):
     # ── Pages ──
 
     def _snapshot_of(self, tab: str | None) -> render.Snapshot:
-        snap = self._snaps.get(self._current(tab))
+        """The newest reading of *tab*, the one way to a reading kept from before.
+
+        A page read afresh passes :meth:`_admit`; this is the same check for
+        what was kept: a site refused since takes the reading and the tab's
+        approval, so a later turn asks (#577).
+        """
+        tab_id = self._current(tab)
+        snap = self._snaps.get(tab_id)
         if snap is None:
             raise BrowserError(
                 "Nothing has been read in this tab yet. Use browser_open first."
             )
+        try:
+            sites.require_not_refused(snap.origin)
+        except BrowserError:
+            self._drop_reading(tab_id)
+            raise
         return snap
 
     async def _admit(self, url: str, tab: str, done: set[str]) -> None:
         """Let the page at *url* in *tab* be read, or raise why not.
 
         Its address is checked, then its site asked about unless the tab's
-        page was approved for it. *done* holds the origins already checked
-        in this call. A refused page is left for an empty one.
+        page was approved for it and its site was not refused since. *done*
+        holds the origins already checked in this call. A refused page is left
+        for an empty one.
         """
         origin = sites.require_origin(url)
         if origin not in done:
             try:
                 await addresses.require_public(url)
                 if self._origins.get(tab) != origin:
-                    await sites.require_site(origin)
+                    await self._ask_site(origin)
+                else:
+                    sites.require_not_refused(origin)
             except BrowserError:
                 await self._refuse_tab(tab)  # leave the page it led to
                 raise
@@ -1276,6 +1292,31 @@ class BrowserToolProvider(BaseToolProvider):
         if self._origins.get(tab) != origin:
             self._origins[tab] = origin
             self._poke_live()  # the card names the site
+
+    async def _ask_site(self, origin: str) -> None:
+        """Ask about *origin*. A refusal covers its whole site: no tab stays approved on it (#577).
+
+        Their pages stay, and nothing read from them: the next read asks, in a
+        later turn too, with no refusal to remember. Stop while the refusal is
+        being saved ends the question before its answer arrives: the refusal
+        stands all the same. Stop on a question nobody answered takes nothing.
+        """
+        try:
+            await sites.require_site(origin)
+        except sites.SiteRefusedError:
+            self._drop_site(origin)
+            raise
+        except asyncio.CancelledError:
+            if sites.refused_unasked(origin) is not None:
+                self._drop_site(origin)
+            raise
+
+    def _drop_site(self, origin: str) -> None:
+        """Take the approval of every tab on the site of *origin*."""
+        site = site_key({"origin": origin})
+        for tab, approved in list(self._origins.items()):
+            if site_key({"origin": approved}) == site:
+                self._drop_reading(tab)
 
     async def _recheck(self, tab: str) -> None:
         """Check where *tab* is now, read in the tab: a page can move itself after it was read.
@@ -1396,7 +1437,9 @@ class BrowserToolProvider(BaseToolProvider):
         origin = sites.require_origin(url)
         await addresses.require_public(url)  # before the site question and the load
         if origin != same_site:
-            await sites.require_site(origin)
+            await self._ask_site(origin)
+        else:
+            sites.require_not_refused(origin)
         target = self._open_target(tab)
         info: TabInfo
         fresh = target is None
@@ -1922,7 +1965,7 @@ class BrowserToolProvider(BaseToolProvider):
         target = sites.require_origin(url)
         await addresses.require_public(url)
         if target != origin:
-            await sites.require_site(target)
+            await self._ask_site(target)
         done.add(target)
 
     def _no_public_boxes(self, snap: render.Snapshot, item: Element) -> None:

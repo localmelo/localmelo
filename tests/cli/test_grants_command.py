@@ -9,9 +9,12 @@ list and Revoke are the gateway's.
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from localmelo.support.cli import grants
 from localmelo.support.sessions.grants import GrantBook
@@ -52,6 +55,39 @@ async def test_grants_takes_a_number_or_says_how(setup: Setup) -> None:
     await _until(lambda: grants.USAGE in out.text())
     session.enter("/grants revoke 3")
     await _until(lambda: "There is no grant 3" in out.text())
+
+
+async def test_the_terminal_tries_what_the_file_refused_before_it_closes(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    await _first_turn(setup)
+    chat = session.runner.session_id if session.runner else None
+    session.approvals._policy.grants.grant_now("browser:https://www.example.com")
+    await session.grant_book.flush()
+    real = session.store.component_transaction
+
+    def transaction(label: str) -> Any:
+        if label == "grant_revoke":
+            raise sqlite3.OperationalError("disk I/O error")
+        return real(label)
+
+    with monkeypatch.context() as broken:
+        broken.setattr(session.store, "component_transaction", transaction)
+        taken = await session.grant_book.take_back_site(chat, "ask:site:example.com")
+        assert not taken
+
+    file = session.store.path
+    await session.shutdown()
+
+    again = SessionStore(file, writer="cli")
+    await again.open()
+    try:
+        saved = GrantBook(again)
+        await saved.open()
+        assert saved.live() == []
+    finally:
+        await again.aclose()
 
 
 async def test_a_grant_stays_with_its_chat_across_new(setup: Setup) -> None:

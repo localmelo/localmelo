@@ -8,6 +8,12 @@ and never asks the inner policy or reviews the call.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import dataclasses
+import sqlite3
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,6 +22,8 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
     EarlierBlocks,
@@ -24,6 +32,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     find_earlier,
 )
+from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.review import (
     loose_keys,
     reaches_unread_site,
@@ -31,6 +40,14 @@ from localmelo.melo.contracts.review import (
 )
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.browser import sites
+from localmelo.support.sessions.approvals import (
+    ApprovalLedger,
+    ChatPolicy,
+    OwnedTaskPolicy,
+    RememberingPolicy,
+)
+from localmelo.support.sessions.grants import Grant, GrantBook
+from localmelo.support.sessions.store import SessionStore
 
 from .test_approvals import (
     Policy,
@@ -41,6 +58,7 @@ from .test_approvals import (
     _calls,
     _deploy,
 )
+from .test_auto_mode import FakeModel, verdict
 
 
 @pytest.mark.asyncio
@@ -219,6 +237,7 @@ READ_SITE = ToolDef(
     },
     annotations={"readOnlyHint": True},
 )
+CLICK_SITE = dataclasses.replace(READ_SITE, name="click_site")
 
 
 class Reader:
@@ -226,6 +245,7 @@ class Reader:
 
     def __init__(self) -> None:
         self.read: list[str] = []
+        self.clicked: list[str] = []
 
     async def read_site(self, url: str) -> str:
         # The call itself asks nothing (read tier): the site question decides.
@@ -233,12 +253,19 @@ class Reader:
         self.read.append(url)
         return "page text"
 
+    async def click_site(self, url: str) -> str:
+        await sites.require_act(sites.require_origin(url), "click")
+        self.clicked.append(url)
+        return "clicked"
 
-def _reader(llm: ScriptedLLM) -> tuple[Agent, Reader]:
+
+def _reader(llm: BaseLLMProvider) -> tuple[Agent, Reader]:
     agent, _ = _agent(llm)
     reader = Reader()
     agent.hippo.register_tool(READ_SITE)
     agent.executor.register("read_site", reader.read_site)
+    agent.hippo.register_tool(CLICK_SITE)
+    agent.executor.register("click_site", reader.click_site)
     return agent, reader
 
 
@@ -359,11 +386,385 @@ async def test_a_refused_site_is_refused_however_its_address_is_spelt(
 
 
 @pytest.mark.parametrize(
-    "other", ["https://www.collect.example/x", "https://collect.example.org/x"]
+    ("refused", "retry"),
+    [
+        ("https://www.collect.com/x", "https://login.collect.com/y"),  # another host
+        ("https://login.collect.com/x", "https://collect.com/y"),  # the bare domain
+        ("https://www.collect.com/x", "http://cdn.collect.com/y"),  # and another scheme
+        ("https://www.collect.com:8443/x", "https://login.collect.com/y"),  # a port
+        ("https://www.collect.co.uk/x", "https://login.collect.co.uk/y"),
+        ("https://a.alice.github.io/x", "https://alice.github.io/y"),
+    ],
 )
-async def test_another_host_is_asked_as_usual(other: str) -> None:
-    _, reader, inner = await _refused_then_retried(LEAK, other)
+async def test_a_refusal_covers_the_whole_site(refused: str, retry: str) -> None:
+    again, reader, inner = await _refused_then_retried(refused, retry)
+    assert reader.read == [] and inner.requests == []
+    [refusal] = again.tool_messages(1)
+    assert "the user blocked a step like this one earlier in this task" in refusal
+
+
+@pytest.mark.parametrize(
+    ("refused", "other"),
+    [
+        ("https://www.collect.com/x", "https://www.collect.org/x"),
+        ("https://alice.github.io/x", "https://bob.github.io/x"),  # shared hosting
+        ("https://collect.co.uk/x", "https://other.co.uk/x"),  # a country suffix
+        ("https://github.io/x", "https://alice.github.io/x"),  # a suffix is one host
+        ("https://10.0.0.1/x", "https://10.0.0.2/x"),  # addresses by number
+        (LEAK, "https://www.collect.example/x"),  # an unlisted suffix
+    ],
+)
+async def test_another_site_is_asked_as_usual(refused: str, other: str) -> None:
+    _, reader, inner = await _refused_then_retried(refused, other)
     assert reader.read == [other] and len(inner.requests) == 1
+
+
+async def test_a_shell_step_on_another_host_of_a_refused_site_is_refused() -> None:
+    policy, root, _ = await _site_refused("https://www.collect.com/x")
+    for command in ("curl https://login.collect.com/x", "wget collect.com/y"):
+        assert policy.match("shell_exec", {"command": command}, root) == (
+            "the user",
+            False,
+        )
+    assert policy.refused_sites() == ["collect.com"]
+
+
+async def test_a_refusal_kept_before_one_site_covers_the_whole_site() -> None:
+    # A stored block from before keeps the host's key: it refuses the whole site.
+    blocks = EarlierBlocks(
+        Policy(ApprovalDecision(True, origin="user")),
+        {"step": ("the user", "")},
+        {"step": ["ask:site:www.collect.com"]},
+    )
+    command = {"command": "curl https://login.collect.com/x"}
+    assert blocks.match("shell_exec", command, "/w") == ("the user", False)
+    assert blocks.refused_sites() == ["collect.com"]
+
+
+async def _reads_on_a_kept_answer(
+    *urls: str, kept: tuple[str, ...], refused: dict[str, list[str]] | None = None
+) -> tuple[ScriptedLLM, Reader, list[ApprovalRequest]]:
+    """A run on a chat that holds *kept*: the person says no to what it asks."""
+    asked: list[ApprovalRequest] = []
+
+    async def no(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request)
+        return ApprovalDecision(False, "not that", origin="user")
+
+    llm = ScriptedLLM([_reads(*urls), _answer("Done.")])
+    agent, reader = _reader(llm)
+    remembering = RememberingPolicy(no)
+    for name in kept:
+        assert remembering.grants.grant_now(name) is not None
+    policy: ApprovalPolicy = remembering
+    if refused:
+        policy = EarlierBlocks(
+            remembering, {key: ("the user", "") for key in refused}, refused
+        )
+    await agent.run_task("summarise my notes", approval=policy)
+    return llm, reader, asked
+
+
+async def test_a_refusal_earlier_in_the_task_beats_a_kept_answer() -> None:
+    llm, reader, asked = await _reads_on_a_kept_answer(
+        "https://www.collect.com/x",
+        "https://login.collect.com/y",
+        kept=("browser:https://www.collect.com",),
+        refused={"step": ["ask:site:login.collect.com"]},
+    )
+    assert reader.read == [] and asked == []
+    for refusal in llm.tool_messages(1):
+        assert "the user blocked a step like this one" in refusal
+
+
+async def test_a_refusal_in_this_run_beats_a_kept_answer() -> None:
+    # The kept answer covers https only: the http read is asked, and refused, and
+    # the answer is gone: the person is asked again, nothing runs on it.
+    _, reader, asked = await _reads_on_a_kept_answer(
+        "http://login.collect.com/x",
+        "https://login.collect.com/y",
+        "https://www.collect.com/z",
+        kept=("browser:https://www.collect.com",),
+    )
+    assert reader.read == [], "no kept answer ran on the refused site"
+    assert [r.tool_name for r in asked] == [
+        "browser:http://login.collect.com",
+        "browser:https://login.collect.com",
+        "browser:https://www.collect.com",
+    ]
+
+
+class Answers:
+    """The person: each question gets the next answer, and is kept."""
+
+    def __init__(self, *answers: ApprovalDecision) -> None:
+        self.answers = list(answers)
+        self.asked: list[str] = []
+
+    async def __call__(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request.tool_name)
+        return self.answers.pop(0)
+
+
+class NobodyWatches:
+    """Auto's watch with nobody at the chat: a stopped step is blocked, with no card."""
+
+    async def watched(self) -> bool:
+        return False
+
+    async def ask(
+        self, request: ApprovalRequest, asking: ApprovalPolicy
+    ) -> ApprovalDecision:
+        raise AssertionError("nobody is asked")
+
+
+NO = ApprovalDecision(False, "not that", origin="user")
+ONCE = ApprovalDecision(True, origin="user")
+KEEP = ApprovalDecision(True, remember=True, origin="user")
+KEPT = "browser:https://www.collect.com"
+STOPS = verdict(verdict="ask", category="beyond_request", fits_request="no")
+
+
+async def test_auto_cannot_read_a_named_sibling_after_an_automatic_site_refusal() -> (
+    None
+):
+    named = "https://www.collect.com/x"
+    llm = FakeModel(
+        [_reads("https://ads.collect.com/y"), _reads(named), _answer("Done.")],
+        [STOPS],
+    )
+    agent, reader = _reader(llm)
+    policy = ChatPolicy(Answers(), "auto", watch=NobodyWatches())
+    recorder = Recorder()
+
+    await agent.run_task(f"read {named}", on_event=recorder, approval=policy)
+
+    assert reader.read == [], "no automatic decision outranks the refusal"
+    assert "refused earlier in this task" in llm.tool_messages()[-1]
+    assert policy.allowed_tools == frozenset(), "Auto kept nothing of the refused site"
+
+
+async def test_an_automatic_block_leaves_the_person_s_kept_answer() -> None:
+    llm = FakeModel([_reads("https://ads.collect.com/y"), _answer("Done.")], [STOPS])
+    agent, _ = _reader(llm)
+    policy = ChatPolicy(Answers(), "auto", watch=NobodyWatches())
+    policy.ask.grants.grant_now("browser-act:https://www.collect.com")
+    await agent.run_task("read my notes", approval=policy)
+    assert policy.allowed_tools == {"browser-act:https://www.collect.com"}
+
+
+async def test_a_refusal_takes_back_what_the_chat_kept_for_the_site() -> None:
+    other = "browser:https://www.other.com"
+    person = Answers(NO, NO)
+    policy = RememberingPolicy(person)
+    for name in (KEPT, "browser-act:https://cdn.collect.com", other):
+        assert policy.grants.grant_now(name) is not None
+    assert policy.grants.grant_now("browser:https://a.collect.com", by="auto")
+
+    # The kept answer is on https: the person refuses the site on http.
+    first = ScriptedLLM([_reads("http://login.collect.com/x"), _answer("No.")])
+    agent, reader = _reader(first)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert policy.allowed_tools == {other}, "only the refused site's answers went"
+
+    # The next turn has no memory of the refusal: it simply asks again.
+    again = ScriptedLLM([_reads("https://login.collect.com/x"), _answer("No.")])
+    retried, reader = _reader(again)
+    await retried.run_task("try again", approval=policy)
+    assert reader.read == []
+    assert person.asked[-1] == "browser:https://login.collect.com"
+
+
+async def test_a_click_refused_is_no_refusal_of_the_site() -> None:
+    person = Answers(NO)
+    policy = RememberingPolicy(person)
+    assert policy.grants.grant_now(KEPT) is not None
+    llm = ScriptedLLM(
+        [
+            _calls(("click_site", {"url": "https://www.collect.com/x"}, "c1")),
+            _answer("Done."),
+        ]
+    )
+    agent, _ = _reader(llm)
+    await agent.run_task("sign in", approval=policy)
+    assert person.asked == ["browser-act:https://www.collect.com"]
+    assert policy.allowed_tools == {KEPT}
+
+
+async def test_a_task_s_refusal_takes_back_its_own_and_its_chat_s_answers() -> None:
+    book = GrantBook()
+    assert book.view("chat", "side").grant_now(KEPT) is not None
+    assert book.view("main", "main").grant_now("browser:https://a.collect.com")
+    assert book.view("task", "task", inherit=False).grant_now(
+        "browser:https://cdn.collect.com"
+    )
+    ledger = ApprovalLedger()
+    ledger.grants_of = book.allowed_for
+    ledger.site_kept = book.site_kept
+    ledger.take_back_site = book.take_back_site
+
+    async def owner() -> str:
+        return "chat"
+
+    async def started(chat_id: str) -> float:
+        return 1.0
+
+    person = Answers(NO)
+    task = OwnedTaskPolicy(
+        RememberingPolicy(person, grants=book.view("task", "task", inherit=False)),
+        ledger,
+        "task",
+        owner,
+        started=started,
+    )
+    await task.review_window()
+    llm = ScriptedLLM([_reads("http://login.collect.com/x"), _answer("No.")])
+    agent, _ = _reader(llm)
+    await agent.run_task("summarise my notes", approval=task)
+    assert book.live() == []
+
+
+async def test_a_side_chat_s_refusal_takes_back_the_main_chat_s_answer_for_the_site() -> (
+    None
+):
+    book = GrantBook()
+    other = "browser:https://www.other.com"
+    for name in (KEPT, other):
+        assert book.view("main", "main").grant_now(name) is not None
+    person = Answers(NO, NO)
+    policy = RememberingPolicy(person, grants=book.view("side", "side"))
+    llm = ScriptedLLM(
+        [
+            _reads("http://login.collect.com/x", "https://www.collect.com/y"),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert reader.read == []
+    assert person.asked[-1] == KEPT, "the person's newest word: it asks again"
+    assert [g.key for g in book.live()] == [other], "another site's answer stays"
+
+
+async def test_a_global_answer_that_cannot_be_taken_back_still_yields_for_the_run() -> (
+    None
+):
+    # The terminal's own chat reads the main chat's rows from a file it does not write.
+    held = Grant("g1", "main", "main", "global", "site", KEPT, "", "", "person", 1.0)
+    book = GrantBook(outside=lambda: (held,))
+    person = Answers(NO)
+    policy = RememberingPolicy(person, grants=book.view("own", "terminal"))
+    llm = ScriptedLLM(
+        [
+            _reads("http://login.collect.com/x", "https://www.collect.com/y"),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert reader.read == [] and len(person.asked) == 1
+    assert "refused earlier in this task" in llm.tool_messages(1)[1]
+    assert policy.grants.covers(KEPT), "it still holds in a later turn"
+
+
+async def test_a_run_a_global_answer_does_not_reach_takes_nothing_from_it() -> None:
+    # A chore's run has only its own rows: the main chat's answer is not what it asked.
+    book = GrantBook()
+    assert book.view("main", "main").grant_now(KEPT) is not None
+    person = Answers(NO)
+    policy = RememberingPolicy(person, grants=book.view("chore", "task", inherit=False))
+    llm = ScriptedLLM([_reads("https://login.collect.com/x"), _answer("No.")])
+    agent, _ = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert [g.key for g in book.live()] == [KEPT]
+
+
+async def test_the_person_s_fresh_allow_lifts_a_refusal_for_what_they_kept() -> None:
+    person = Answers(NO, KEEP, NO)
+    policy = RememberingPolicy(person)
+    llm = ScriptedLLM(
+        [
+            _reads(
+                "http://login.collect.com/x",  # refused
+                "https://www.collect.com/a",  # asked again: kept for the chat
+                "https://www.collect.com/b",  # on that answer
+                "https://cdn.collect.com/c",  # all of the site, as the card said
+                "http://cdn.collect.com/d",  # the other scheme was not allowed
+            ),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    await agent.run_task("summarise my notes", approval=policy)
+    assert reader.read == [
+        "https://www.collect.com/a",
+        "https://www.collect.com/b",
+        "https://cdn.collect.com/c",
+    ]
+    assert person.asked[-1] == "browser:http://cdn.collect.com"
+
+
+class ArrivesLater:
+    """Auto's watch: nobody at first, then :meth:`arrives` puts the person at the chat."""
+
+    def __init__(self) -> None:
+        self.here = False
+
+    async def arrives(self) -> Message:
+        self.here = True
+        return STOPS
+
+    async def watched(self) -> bool:
+        return self.here
+
+    async def ask(
+        self, request: ApprovalRequest, asking: ApprovalPolicy
+    ) -> ApprovalDecision:
+        return await asking.decide(request)
+
+
+async def test_a_fresh_allow_once_lifts_a_refusal_for_that_address_only() -> None:
+    watch = ArrivesLater()
+    llm = FakeModel(
+        [
+            _reads("https://ads.collect.com/y"),  # blocked: nobody to ask
+            _reads("https://www.collect.com/a"),  # the person's Allow once
+            _reads("https://www.collect.com/b"),  # that address, read by Auto
+            _reads("https://cdn.collect.com/c"),  # the rest of the site is not
+            _answer("Done."),
+        ],
+        [STOPS, watch.arrives, verdict(), verdict()],
+    )
+    agent, reader = _reader(llm)
+    person = Answers(ONCE)
+    await agent.run_task(
+        "read my notes", approval=ChatPolicy(person, "auto", watch=watch)
+    )
+    assert person.asked == ["browser:https://www.collect.com"]
+    assert reader.read == ["https://www.collect.com/a", "https://www.collect.com/b"]
+    assert "refused earlier in this task" in llm.tool_messages()[-1]
+
+
+async def test_a_refused_site_is_not_clicked_on_a_kept_answer() -> None:
+    llm = ScriptedLLM(
+        [
+            _calls(("click_site", {"url": "https://login.collect.com/y"}, "c1")),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    asked = Policy(ApprovalDecision(False, "not that", origin="user"))
+    kept = RememberingPolicy(asked.decide)
+    kept.grants.grant_now("browser-act:https://www.collect.com")
+    policy = EarlierBlocks(
+        kept,
+        {"step": ("the user", "")},
+        {"step": ["ask:site:login.collect.com"]},
+    )
+    await agent.run_task("sign in", approval=policy)
+    assert reader.clicked == [] and asked.requests == []
+    [refusal] = llm.tool_messages(1)
+    assert "refused earlier in this task" in refusal
 
 
 # ── A refused site, fetched by a shell or Python step (#433) ──
@@ -991,3 +1392,201 @@ async def test_naming_curl_without_a_refused_site_is_not_refused(command: str) -
     policy, root, _ = await _site_refused()
     assert policy.match("shell_exec", {"command": command}, root) is None
     assert reaches_unread_site("shell_exec", {"command": command}) is False
+
+
+class SavedChat:
+    """A side chat with a saved answer of its own and the main chat's, on one file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.store = SessionStore(path, writer="gateway")
+        self.book = GrantBook(self.store)
+        self.chat = ""
+
+    async def open(self) -> None:
+        await self.store.open()
+        await self.book.open()
+        main = (await self.store.main_chat()).id
+        self.chat = (await self.store.create_session(workspace="/work")).id
+        await self.book.view(self.chat, "side").grant(KEPT)
+        await self.book.view(main, "main").grant("browser:https://a.collect.com")
+
+    def fail_revokes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = self.store.component_transaction
+
+        def transaction(label: str) -> Any:
+            if label == "grant_revoke":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(label)
+
+        monkeypatch.setattr(self.store, "component_transaction", transaction)
+
+    async def refuse(self, *urls: str) -> tuple[RememberingPolicy, list[str]]:
+        """The person refuses each read of *urls*: the policy, and what each read answered."""
+        self.person = Answers(*(NO for _ in urls))
+        policy = RememberingPolicy(
+            self.person, grants=self.book.view(self.chat, "side")
+        )
+        llm = ScriptedLLM([*(_reads(url) for url in urls), _answer("No.")])
+        agent, self.reader = _reader(llm)
+        await agent.run_task("read my notes", approval=policy)
+        return policy, [m.content for m in llm.requests[-1] if m.role == "tool"]
+
+    async def keys_after_a_restart(self) -> list[str]:
+        await self.store.aclose()
+        store = SessionStore(self.path, writer="gateway")
+        await store.open()
+        try:
+            book = GrantBook(store)
+            await book.open()
+            return sorted(g.key for g in book.live())
+        finally:
+            await store.aclose()
+
+
+NOT_SAVED = "could not be saved"
+REFUSED = "http://login.collect.com/x"  # the kept answers are on https: it asks
+
+
+@pytest.mark.asyncio
+async def test_a_saved_refusal_stays_taken_back_after_a_restart(
+    tmp_path: Path,
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    policy, said = await chat.refuse(REFUSED)
+    assert policy.allowed_tools == set() and NOT_SAVED not in said[0]
+    assert await chat.keys_after_a_restart() == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_the_file_refuses_holds_for_the_run_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    chat.fail_revokes(monkeypatch)
+    policy, said = await chat.refuse(REFUSED, "https://www.collect.com/")
+    assert NOT_SAVED in said[0], "the person hears it may not last"
+    assert policy.allowed_tools == set(), "nothing kept holds in this run"
+    assert chat.reader.read == [] and len(chat.person.asked) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_task_says_so_when_its_chat_s_take_back_is_not_saved() -> None:
+    async def refused(chat_id: str, key: str, by: str | None) -> bool:
+        return False
+
+    async def owner() -> str:
+        return "chat"
+
+    async def started(chat_id: str) -> float:
+        return 1.0
+
+    ledger = ApprovalLedger()
+    ledger.take_back_site = refused
+    task = OwnedTaskPolicy(
+        RememberingPolicy(Answers(NO)), ledger, "task", owner, started=started
+    )
+    await task.review_window()
+    llm = ScriptedLLM([_reads(REFUSED), _answer("No.")])
+    agent, _ = _reader(llm)
+    await agent.run_task("summarise my notes", approval=task)
+    assert NOT_SAVED in [m.content for m in llm.requests[-1] if m.role == "tool"][-1]
+
+
+@pytest.mark.asyncio
+async def test_stop_during_a_task_s_take_back_leaves_neither_scope_holding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    book, store = chat.book, chat.store
+    work = (await store.create_session(workspace="/work")).id
+    view = book.view(work, "task", inherit=False)
+    await view.grant("browser:https://cdn.collect.com")
+
+    held, release = asyncio.Event(), asyncio.Event()
+    real = store.component_transaction
+
+    @contextlib.asynccontextmanager
+    async def transaction(label: str) -> AsyncIterator[Any]:
+        if label == "grant_revoke":
+            held.set()
+            await release.wait()
+        async with real(label) as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "component_transaction", transaction)
+
+    async def owner() -> str:
+        return chat.chat
+
+    async def started(chat_id: str) -> float:
+        return 1.0
+
+    ledger = ApprovalLedger()
+    ledger.grants_of = book.allowed_for
+    ledger.site_kept = book.site_kept
+    ledger.take_back_site = book.take_back_site
+    task = OwnedTaskPolicy(
+        RememberingPolicy(Answers(NO), grants=view),
+        ledger,
+        work,
+        owner,
+        started=started,
+    )
+    await task.review_window()
+    agent, _ = _reader(ScriptedLLM([_reads(REFUSED)]))
+    run = asyncio.create_task(agent.run_task("read my notes", approval=task))
+    await asyncio.wait_for(held.wait(), 5)
+    run.cancel("Stopped")
+    stopped, _ = await asyncio.wait([run], timeout=5)
+    assert stopped, "Stop does not wait for the write"
+    assert book.live() == [], "every scope, with the write still held"
+    release.set()
+    await book.flush()
+    assert await chat.keys_after_a_restart() == []
+
+
+@pytest.mark.asyncio
+async def test_stop_at_the_moment_of_the_refusal_still_takes_the_answers_back(
+    tmp_path: Path,
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    run: asyncio.Task[Any] | None = None
+
+    async def person(request: ApprovalRequest) -> ApprovalDecision:
+        # Stop lands before the take-back's first step can run.
+        assert run is not None
+        asyncio.get_running_loop().call_soon(run.cancel, "Stopped")
+        return NO
+
+    policy = RememberingPolicy(person, grants=chat.book.view(chat.chat, "side"))
+    agent, _ = _reader(ScriptedLLM([_reads(REFUSED)]))
+    run = asyncio.create_task(agent.run_task("read my notes", approval=policy))
+    stopped, _ = await asyncio.wait([run], timeout=5)
+    assert stopped
+    await chat.book.flush()
+    assert await chat.keys_after_a_restart() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("then", ["a later write", "the close"])
+async def test_a_take_back_the_file_refused_lands_once_it_can(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, then: str
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    with monkeypatch.context() as broken:
+        chat.fail_revokes(broken)
+        await chat.refuse(REFUSED)
+        await chat.book.flush()  # the write failed, not one still waiting
+    expected: list[str] = []
+    if then == "a later write":
+        await chat.book.view(chat.chat, "side").grant("python_exec")
+        expected = ["python_exec"]
+    else:
+        await chat.book.flush()
+    assert await chat.keys_after_a_restart() == expected

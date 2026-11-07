@@ -544,6 +544,7 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "prompt-toolkit" },
+    { name = "publicsuffixlist" },
     { name = "pypdfium2" },
     { name = "rich" },
 ]
@@ -578,6 +579,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "prompt-toolkit", specifier = ">=3.0.52,<4" },
+    { name = "publicsuffixlist", specifier = ">=1.0,<2" },
     { name = "pypdfium2", specifier = ">=5,<6" },
     { name = "pyte", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -923,6 +925,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz", hash = "sha256:9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6", size = 435492, upload-time = "2026-07-26T20:56:14.758Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl", hash = "sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2", size = 392288, upload-time = "2026-07-26T20:56:12.512Z" },
+]
+
+[[package]]
+name = "publicsuffixlist"
+version = "1.1.2.20261106"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/93/58/25ba5f0cc8871ba7149211c6bc6ecc6ab6beabcb8079db45e8ca251e4159/publicsuffixlist-1.1.2.20261106.tar.gz", hash = "sha256:6688f0eb52baa4f07d196ef4d0410ea44aa3cc741283116a000f6a89a4d041b7", size = 106709, upload-time = "2026-11-06T10:43:25.408Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/92/4d99101c827c49e27f112e4c59fb55743e44bf6fad713e1e6428f654b542/publicsuffixlist-1.1.2.20261106-py3-none-any.whl", hash = "sha256:cda0b4c588b03f116bad6704fa46556739cb380a292cf3c5b9fdf58104239a95", size = 109471, upload-time = "2026-11-06T10:43:23.252Z" },
 ]
 
 [[package]]

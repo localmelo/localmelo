@@ -196,6 +196,50 @@ those tools can do.
   only resolves to this Mac (DNS rebinding, `/etc/hosts`) is checked by
   neither, and melo only blanks that tab after it lands and reads nothing
   from it. Safari's automation windows have no such check.
+- **The hosts of one site share a kept answer.** What the person keeps for
+  opening a site, or for clicking and choosing on it, covers the site's other
+  hosts where that answer holds, because a sign-in moves between them. One site
+  is the same scheme and the same registrable domain, read offline from a
+  public suffix list bundled with melo, its private section included, so each
+  account of a listed hosting service stays a site of its own. So a kept answer
+  trusts everyone who runs a host under that domain. The list is as new as the
+  installed package: a hosting service added since is read as one site. An
+  address by number, a local or one-word name, a host that is itself a public
+  suffix, an unlisted suffix and a port that is not the scheme's own stay the
+  exact origin, and `https` never covers `http` or the reverse. Nothing else
+  widened: an Allow once, typing, a form sent, a file attached, a click at a
+  point, a page's own question, a take-over, a page's request for another app
+  and high-impact steps stay as they were; a link followed on a page opened by
+  an Allow once asks on another host; what Auto kept for a chat stays the host
+  it read, and Auto keeps no click. A password given in a message goes where it
+  always went, which is not one exact origin: a password box on an `https` page
+  of a host the person's own words name, `www.` aside, whatever the port. One
+  site adds nothing to that: another host of the site gets no password. Every
+  host still passes the check for a public address.
+- **A refusal covers the whole site.** The person's refusal of a site takes
+  back what that chat or task keeps for it, on either scheme, what a task holds
+  from its chat, and a main chat's answer that would cover the site where they
+  refused, so a later turn asks again, in the main chat too. A browser question
+  refused takes the approval of every tab on the site, so a tab asks again in a
+  later turn as well. A refusal of any kind then stands for the rest of the
+  run, and in a task continued later, over all that would run with no answer
+  from the person: a kept answer, a site the request names, Auto, a page
+  approved before it, which is left for an empty one, and the rest of a page
+  read before it.
+  Only the person's newer answer stands over it, for what they allowed: that
+  question, or the whole site on that scheme when they keep the answer. Stop
+  while a refusal is being saved ends only the wait: the answers and the tabs
+  go all the same. Four limits remain. An automatic block leaves kept answers alone, since it can come
+  from nobody being there to ask. The terminal's own chat reads the main chat's
+  answers from a file it does not write: a refusal there stands for the run, and
+  the answer holds again from the next turn. A refusal outside the browser does
+  not reach every tab: after `web_fetch`'s question is refused, a tab of the
+  site not touched in that run can be read in a later turn, and a refused shell
+  or Python step is one refused step, not a refused site, so it takes nothing
+  back and stops no tab. A take-back the sessions file refuses still stands for
+  the run and in that process, the person is told, and it is tried again with
+  the next grant change and at close; if it never lands, the answer holds again
+  after a restart.
 - **melo's Chrome keeps its sign-ins on disk.** Its profile
   (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
   each time Chrome starts, so that a page can move to a window for the person

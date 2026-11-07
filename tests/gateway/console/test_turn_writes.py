@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import shutil
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -31,6 +32,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import (
     ScriptedLLM,
@@ -698,6 +700,31 @@ async def test_rename_and_delete_a_session(tmp_path: Path) -> None:
 
 
 # ── Shutdown ──
+
+
+async def test_shutdown_tries_a_take_back_the_file_refused_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with console_with(tmp_path) as (console, _, _):
+        chat = (await console.store.create_session(workspace=str(tmp_path))).id
+        book = console.sessions.book
+        await book.view(chat, "side").grant("browser:https://www.example.com")
+        real = console.store.component_transaction
+
+        def transaction(label: str) -> Any:
+            if label == "grant_revoke":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(label)
+
+        with monkeypatch.context() as broken:
+            broken.setattr(console.store, "component_transaction", transaction)
+            assert not await book.take_back_site(chat, "ask:site:example.com")
+
+        await console.sessions.close_all()
+
+        saved = GrantBook(console.store)
+        await saved.open()
+        assert saved.live() == []
 
 
 async def test_shutdown_ends_a_running_turn(tmp_path: Path) -> None:
