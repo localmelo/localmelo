@@ -61,6 +61,7 @@ from localmelo.melo.contracts.review import (
     host_site,
     loose_keys,
     offers_grant,
+    site_host,
     site_key_of,
     site_keys,
     step_key,
@@ -449,12 +450,15 @@ def whole_site(name: str) -> str | None:
     ``None`` for a question that is not one of :data:`SITE_GRANTS`, and for an
     origin :func:`~localmelo.melo.contracts.review.host_site` does not read as
     one site (the origin stays exact: a port that is not the scheme's own has
-    one written, which no plain name holds).
+    one written, which no plain name holds). An origin is spelt once, so a host
+    a second reading would change (a dot left at its end) is no origin's.
     """
     if not name.startswith(SITE_GRANTS):
         return None
     scheme, found, host = name.partition(":")[2].partition("://")
-    return host_site(host) if found and scheme in ("http", "https") else None
+    if not found or scheme not in ("http", "https") or site_host(host) != host:
+        return None
+    return host_site(host)
 
 
 def site_covers(kept: str, name: str) -> bool:
@@ -559,8 +563,10 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # The agent's also answers ``names_host(host)``: whether the user's own words
 # name a site, and ``refused_earlier(name, arguments, preview)``: the refusal
 # of a question blocked earlier in the task (#431), which a tool checks before
-# it lets a named site through; and ``granted(name)``: whether the run's chat
-# holds a grant of the question *name* (:func:`holds_grant`).
+# it asks; ``refused_unasked(name, arguments, preview)``: that, or one on a site
+# refused in this run (#577), which a tool checks before it lets something pass
+# with no question; and ``granted(name)``: whether the run's chat holds a grant
+# of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 
@@ -605,28 +611,42 @@ def find_folder_asker(policy: object) -> Any:
     return None
 
 
+def _grants_layer(policy: object, method: str) -> Any:
+    """*method* of the first layer that has it: *policy*, or one behind its ``inner`` wrappers or an Auto policy's ``asking``."""
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        found = getattr(layer, method, None)
+        if callable(found):
+            return found
+        below = getattr(layer, "inner", None)
+        layer, depth = (
+            below if below is not None else getattr(layer, "asking", None)
+        ), depth + 1
+    return None
+
+
 def holds_grant(policy: object, name: str) -> bool:
     """Whether *policy* holds a grant of the question *name* for the chat.
 
-    The first layer with a ``granted(name)`` method answers: *policy*, or a
-    layer behind its ``inner`` wrappers or an Auto policy's ``asking``. A
-    tool that keeps no question of its own asks this before it uses
-    something the person allowed for the chat, such as another app's
-    window (``window-read:<app>``). A question of :data:`NEVER_GRANTED`
-    is never held.
+    The first layer with a ``granted(name)`` method answers. A tool that keeps
+    no question of its own asks this before it uses something the person
+    allowed for the chat, such as another app's window
+    (``window-read:<app>``). A question of :data:`NEVER_GRANTED` is never held.
     """
-    if never_granted(name):
-        return False
-    layer, depth = policy, 0
-    while layer is not None and depth < 8:
-        check = getattr(layer, "granted", None)
-        if callable(check):
-            return check(name) is True
-        found = getattr(layer, "inner", None)
-        layer, depth = (
-            found if found is not None else getattr(layer, "asking", None)
-        ), depth + 1
-    return False
+    check = None if never_granted(name) else _grants_layer(policy, "granted")
+    return check is not None and check(name) is True
+
+
+def revoke_site(policy: object, key: str, by: str | None = None) -> None:
+    """Take back what the chat or task of *policy* keeps about the site *key* (#577).
+
+    *key* is the ``ask:site:<site>`` of a refusal. A person's refusal takes
+    every answer kept there, on either scheme, so a later turn asks again and
+    no refusal has to be remembered. With *by* only that decider's go.
+    """
+    take_back = _grants_layer(policy, "take_back_site")
+    if take_back is not None:
+        take_back(key, by)
 
 
 def find_auto(policy: object) -> AutoPolicy | None:
@@ -855,10 +875,11 @@ class AutoPolicy:
         )
 
 
-# Why a site question is refused that a kept answer would have run (#577).
+# Why a site question is refused that something other than the person would
+# have run: a kept answer, Auto, a page approved before (#577).
 SITE_REFUSED: Final = (
-    "This site was refused earlier in this task, and a refusal stands over an "
-    "answer kept for it, so this does not run; find another way that does not "
+    "This site was refused earlier in this task, and only the user's own answer "
+    "stands over that, so this does not run; find another way that does not "
     "need it"
 )
 # Why a call is refused that was blocked before in the same task (#411);
@@ -907,6 +928,11 @@ def site_key(arguments: Mapping[str, Any]) -> str | None:
     origin = arguments.get("origin")
     host = url_site(origin) if isinstance(origin, str) else None
     return None if host is None else site_key_of(host)
+
+
+def question_site_key(name: str) -> str | None:
+    """The :func:`site_key` of the question *name* (``browser:<origin>``, ``browser-act:<origin>``…), or None for one on no site."""
+    return site_key({"origin": name.partition(":")[2]})
 
 
 class EarlierBlocks:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,6 +30,12 @@ def test_a_site_question_names_the_site_a_kept_answer_covers() -> None:
         return found
 
     assert kept_site("browser:https://login.example.co.uk") == "example.co.uk"
+    # From the question's name, never from a label that came with it.
+    mismatched = dataclasses.replace(
+        request("browser:https://login.example.com", "", None),
+        arguments={"site": "login.example.org", "kept_site": "example.org"},
+    )
+    assert approval_json(mismatched)["kept_site"] == "example.com"
     assert kept_site("browser-act:https://a.alice.github.io") == "alice.github.io"
     for exact in (
         "browser:https://github.io",

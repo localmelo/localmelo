@@ -8,6 +8,9 @@ stays its exact origin, and nothing else gets wider.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import publicsuffixlist
 import pytest
 
 from localmelo.melo.contracts import review
@@ -16,9 +19,14 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     ApprovalRequest,
     AutoPolicy,
+    EarlierBlocks,
+    revoke_site,
+    site_covers,
+    whole_site,
 )
 from localmelo.melo.contracts.review import ActionReview, host_site
 from localmelo.support.browser import sites
+from localmelo.support.cli.approvals import Approvals
 from localmelo.support.sessions.approvals import (
     ApprovalLedger,
     ChatPolicy,
@@ -125,19 +133,33 @@ def test_one_function_says_what_site_a_host_belongs_to(
     assert host_site(host) == site
 
 
-def test_the_list_is_parsed_once_and_a_list_nobody_can_read_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_list_is_parsed_once() -> None:
     review._suffix_list.cache_clear()
     host_site("www.example.com")
     host_site("login.example.org")
     assert review._suffix_list.cache_info().misses == 1
 
-    def unreadable() -> None:
-        raise OSError("no list")
 
-    monkeypatch.setattr(review, "_suffix_list", unreadable)
-    assert host_site("www.example.com") is None
+@pytest.mark.parametrize("error", [OSError("no list"), ImportError("no package")])
+def test_a_list_nobody_can_read_is_tried_once_and_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    tried: list[int] = []
+
+    def unreadable(**_: object) -> None:
+        tried.append(1)
+        raise error
+
+    monkeypatch.setattr(publicsuffixlist, "PublicSuffixList", unreadable)
+    review._suffix_list.cache_clear()
+    try:
+        for _ in range(3):
+            assert host_site("www.example.com") is None
+            assert whole_site(OPEN + KEPT) is None
+            assert not site_covers(OPEN + KEPT, OPEN + OTHER_HOST)
+        assert len(tried) == 1
+    finally:
+        review._suffix_list.cache_clear()
 
 
 ONE_SITE = [
@@ -177,6 +199,37 @@ ANOTHER_SITE = [
     ("https://a.corp.internal", "https://b.corp.internal"),  # an unlisted suffix
     ("https://a.shop.example", "https://b.shop.example"),
 ]
+
+
+@pytest.mark.parametrize(
+    ("kept", "asked"),
+    [
+        ("https://www.example.com..", OTHER_HOST),
+        (KEPT, "https://login.example.com.."),
+        ("https://www.example.com..", "https://login.example.com.."),
+        ("https://www.example.com...", "https://login.example.com..."),
+    ],
+)
+async def test_more_than_one_final_dot_is_read_as_no_site(
+    kept: str, asked: str
+) -> None:
+    name, wanted = OPEN + _origin(kept), OPEN + _origin(asked)
+    assert not site_covers(name, wanted)
+    assert not await _ran_unasked(name, wanted)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        OPEN + "https://www.example.com.",  # one dot: an origin never keeps it
+        OPEN + "https://www.example.com..",
+        OPEN + "https://WWW.EXAMPLE.COM",  # nor capitals
+    ],
+)
+async def test_a_name_no_origin_gives_is_read_as_no_site(key: str) -> None:
+    assert whole_site(key) is None
+    assert not await _ran_unasked(key, OPEN + OTHER_HOST)
+    assert not await _ran_unasked(OPEN + OTHER_HOST, key)
 
 
 @pytest.mark.parametrize(("kept", "asked"), ONE_SITE)
@@ -246,6 +299,41 @@ async def test_a_task_uses_its_chat_s_kept_answer_for_the_site() -> None:
     # Auto's own read of the chat stays its exact origin in the task too.
     await task.decide(_question(OPEN + "https://login.example.org"))
     assert [r.tool_name for r in asker.requests] == [OPEN + "https://login.example.org"]
+
+
+@pytest.mark.parametrize(
+    "layers",
+    [
+        lambda policy: policy,
+        lambda policy: EarlierBlocks(policy, {}),
+        lambda policy: AutoPolicy(asking=policy),
+        lambda policy: EarlierBlocks(AutoPolicy(asking=policy), {}),
+    ],
+)
+def test_a_refusal_reaches_the_kept_answers_through_the_layers_of_a_policy(
+    layers: Callable[[RememberingPolicy], object],
+) -> None:
+    policy = _policy(Asker(), OPEN + KEPT, ACT + "http://cdn.example.com")
+    other = OPEN + "https://www.example.org"
+    assert policy.grants.grant_now(other) is not None
+    assert policy.grants.grant_now(OPEN + OTHER_HOST, by="auto") is not None
+    revoke_site(layers(policy), "ask:site:example.com", "auto")
+    assert OPEN + OTHER_HOST not in policy.allowed_tools, "only Auto's went"
+    assert OPEN + KEPT in policy.allowed_tools
+    revoke_site(layers(policy), "ask:site:example.com")
+    assert policy.allowed_tools == {other}
+
+
+@pytest.mark.parametrize("mode", ["ask", "auto"])
+def test_a_refusal_reaches_a_chat_s_and_the_terminal_s_answers(mode: str) -> None:
+    chat = ChatPolicy(Asker(), mode)  # type: ignore[arg-type]
+    assert chat.grants.grant_now(OPEN + KEPT) is not None
+    revoke_site(chat, "ask:site:example.com")
+    assert chat.allowed_tools == frozenset()
+    terminal = Approvals(Asker(), mode)  # type: ignore[arg-type]
+    assert terminal._policy.grants.grant_now(OPEN + KEPT) is not None
+    revoke_site(terminal.policy(), "ask:site:example.com")
+    assert terminal.allowed_tools == frozenset()
 
 
 async def test_a_kept_answer_stays_in_the_chat_it_holds_in() -> None:

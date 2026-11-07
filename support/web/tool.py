@@ -462,6 +462,10 @@ class WebFetchProvider(BaseToolProvider):
             raise AddressError(refused)
         named = getattr(ask, "names_host", None)
         if not listed and callable(named) and named(host):
+            # Read with no question: a refusal in this run stands over the words.
+            refused = sites.refused_unasked(origin, via="web_fetch", url=target.url)
+            if refused is not None:
+                raise AddressError(refused)
             return
         try:
             await sites.require_site(origin, via="web_fetch", url=target.url)

@@ -104,6 +104,87 @@ async def test_a_site_asks_once_per_chat_and_a_new_chat_asks_again() -> None:
         await agent.close()
 
 
+def _tool(name: str, **arguments: str) -> Message:
+    return Message(
+        role="assistant", tool_call=ToolCall(tool_name=name, arguments=arguments)
+    )
+
+
+SITE, SIBLING = "https://www.collect.com/", "http://login.collect.com/"
+
+
+def _tool_texts(llm: ScriptedLLM) -> list[str]:
+    """What the tools answered, as the model's last request carried it."""
+    return [m.content for m in llm.calls[-1]["messages"] if m.role == "tool"]
+
+
+def _collect() -> FakeDriver:
+    return FakeDriver(
+        page(SITE, "Welcome.", link("News", SITE + "news")),
+        page(SITE + "news", "Today's news."),
+        page(SIBLING, "Sign in."),
+    )
+
+
+class Answers:
+    """The person: each question gets the next answer, and is kept."""
+
+    def __init__(self, *answers: ApprovalDecision) -> None:
+        self.answers = list(answers)
+        self.asked: list[str] = []
+
+    async def __call__(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.asked.append(request.tool_name)
+        return self.answers.pop(0)
+
+
+@pytest.mark.parametrize(
+    "after", [_tool("browser_read"), _tool("browser_follow", ref="e1")]
+)
+async def test_site_refusal_invalidates_a_previously_admitted_sibling_tab(
+    after: Message,
+) -> None:
+    # The kept answer is on https, so the sibling on http is asked, and refused.
+    driver = _collect()
+    policy = RememberingPolicy(Answers(ApprovalDecision(False, "no thanks")))
+    policy.grants.grant_now("browser:https://www.collect.com")
+    llm = ScriptedLLM([_open(SITE), _open(SIBLING), after, _say("ok")])
+    agent = _agent(llm, driver)
+    try:
+        await agent.run_task("read the site", approval=policy)
+        last = _tool_texts(llm)[-1]
+        assert "refused earlier in this task" in last and "Welcome" not in last
+        assert "Today's news" not in last
+        assert ("open", SITE + "news") not in [c[:2] for c in driver.calls]
+    finally:
+        await agent.close()
+
+
+async def test_a_fresh_allow_after_a_refusal_keeps_its_own_tab_readable() -> None:
+    # What the person allowed after the refusal stands; nothing else does.
+    person = Answers(
+        ApprovalDecision(False, "no thanks"),
+        ApprovalDecision(True),
+        ApprovalDecision(False, "no thanks"),
+    )
+    llm = ScriptedLLM(
+        [
+            _open(SIBLING),
+            _open(SITE),
+            _tool("browser_read"),
+            _open("https://cdn.collect.com/"),
+            _say("ok"),
+        ]
+    )
+    agent = _agent(llm, _collect())
+    try:
+        await agent.run_task("read the site", approval=RememberingPolicy(person))
+        assert "Welcome" in _tool_texts(llm)[2]
+        assert person.asked[-1] == "browser:https://cdn.collect.com"
+    finally:
+        await agent.close()
+
+
 async def test_a_refused_site_never_loads_and_the_model_reads_why() -> None:
     panel = Panel(refuse=("example.com",))
     driver = _driver()

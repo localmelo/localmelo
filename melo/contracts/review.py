@@ -676,11 +676,18 @@ def site_host(host: str) -> str | None:
 
 
 @functools.cache
-def _suffix_list() -> PublicSuffixList:
-    """The public suffix list the package bundles, parsed once; a suffix it does not list is none."""
-    from publicsuffixlist import PublicSuffixList
+def _suffix_list() -> PublicSuffixList | None:
+    """The public suffix list the package bundles, read once; a suffix it does not list is none.
 
-    return PublicSuffixList(accept_unknown=False)
+    ``None``, kept like a list, when it cannot be read: every host then stands
+    for itself until melo starts again, and no lookup tries it again.
+    """
+    try:
+        from publicsuffixlist import PublicSuffixList
+
+        return PublicSuffixList(accept_unknown=False)
+    except (ImportError, OSError, ValueError):
+        return None
 
 
 def host_site(host: str) -> str | None:
@@ -697,12 +704,15 @@ def host_site(host: str) -> str | None:
     any host while the list cannot be read.
     """
     name = site_host(host)
-    if name is None or not _HOST_NAME.fullmatch(name) or name.endswith(_NO_SITE):
+    suffixes = _suffix_list()
+    if (
+        suffixes is None
+        or name is None
+        or not _HOST_NAME.fullmatch(name)
+        or name.endswith(_NO_SITE)
+    ):
         return None
-    try:
-        return _suffix_list().privatesuffix(name)
-    except (ImportError, OSError, ValueError):
-        return None
+    return suffixes.privatesuffix(name)
 
 
 def site_key_of(host: str) -> str:

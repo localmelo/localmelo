@@ -15,7 +15,9 @@ A site is the hosts of one registrable domain under one scheme (#577,
 cannot be read that way (an address by number, a local name, a public suffix,
 an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
 Every other answer stays on the exact origin it was asked about: an Allow once,
-typing, a form, a file, a click at a point, a page's box and a take-over.
+typing, a form, a file, a click at a point, a page's box and a take-over. A page
+approved earlier is read again unasked until its site is refused: only the
+person's newer answer stands over that (:func:`require_not_refused`).
 """
 
 from __future__ import annotations
@@ -178,6 +180,29 @@ def refused_earlier(
         return None
     decision = check(*_question(origin, via, url))
     return None if decision is None else _refusal(origin, via, decision)
+
+
+def refused_unasked(
+    origin: str, *, via: str = "browser", url: str | None = None
+) -> str | None:
+    """As :func:`refused_earlier`, for what passes with no question: a site refused in this run too (#577).
+
+    A refusal covers the whole site and every page approved before it. Where
+    :func:`require_site` asks next, the person decides instead, so that their
+    newest word stands.
+    """
+    check = getattr(TOOL_ASK.get(), "refused_unasked", None)
+    if not callable(check):
+        return None
+    decision = check(*_question(origin, via, url))
+    return None if decision is None else _refusal(origin, via, decision)
+
+
+def require_not_refused(origin: str) -> None:
+    """:class:`BrowserError` when a page on *origin* approved earlier stands refused now (:func:`refused_unasked`)."""
+    refused = refused_unasked(origin)
+    if refused is not None:
+        raise BrowserError(refused)
 
 
 async def require_site(

@@ -284,6 +284,7 @@ class ConsoleSessions:
         self.ledger = ledger or ApprovalLedger()
         self.ledger.grants_of = self.grants
         self.ledger.site_kept = self.book.site_kept
+        self.ledger.take_back_site = self.book.take_back_site
         self.ledger.folders_of = self.folder_grants
         # The folders "Always allow this folder" keeps, read from the settings file (#405).
         self.saved_folders = SavedFolders()

@@ -1259,8 +1259,9 @@ class BrowserToolProvider(BaseToolProvider):
         """Let the page at *url* in *tab* be read, or raise why not.
 
         Its address is checked, then its site asked about unless the tab's
-        page was approved for it. *done* holds the origins already checked
-        in this call. A refused page is left for an empty one.
+        page was approved for it and its site was not refused since. *done*
+        holds the origins already checked in this call. A refused page is left
+        for an empty one.
         """
         origin = sites.require_origin(url)
         if origin not in done:
@@ -1268,6 +1269,8 @@ class BrowserToolProvider(BaseToolProvider):
                 await addresses.require_public(url)
                 if self._origins.get(tab) != origin:
                     await sites.require_site(origin)
+                else:
+                    sites.require_not_refused(origin)
             except BrowserError:
                 await self._refuse_tab(tab)  # leave the page it led to
                 raise
@@ -1396,6 +1399,8 @@ class BrowserToolProvider(BaseToolProvider):
         await addresses.require_public(url)  # before the site question and the load
         if origin != same_site:
             await sites.require_site(origin)
+        else:
+            sites.require_not_refused(origin)
         target = self._open_target(tab)
         info: TabInfo
         fresh = target is None

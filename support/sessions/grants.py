@@ -62,6 +62,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     grant_offered,
     never_granted,
+    question_site_key,
     site_covers,
     stays_for_chat,
     whole_site,
@@ -785,6 +786,28 @@ class GrantBook:
         self._drop(found)
         return found
 
+    def take_back_site(
+        self, session_id: str | None, key: str, by: str | None = None
+    ) -> None:
+        """Take back what a session itself kept about the site *key*, ``ask:site:<site>`` (#577).
+
+        A refusal of the site: both schemes, opening and clicking, the person's
+        and Auto's (with *by*, that decider's only). A ``global`` grant from
+        the main chat stays when another session refuses: it holds there
+        through the run's refusal only.
+        """
+        sid = session_id or ""
+        self._drop(
+            [
+                g
+                for g in self._rows.values()
+                if g.session_id == sid
+                and g.kind == "site"
+                and question_site_key(g.key) == key
+                and by in (None, g.decided_by)
+            ]
+        )
+
     async def forget(
         self,
         session_id: str | None,
@@ -1031,6 +1054,10 @@ class SessionGrants:
     def forget_now(self, key: str | None = None) -> list[Grant]:
         """Take back *key* (here and, when global, everywhere), or all this session gave."""
         return self.book.forget_now(self.session_id, key)
+
+    def take_back_site(self, key: str, by: str | None = None) -> None:
+        """Take back what this session itself kept about the site *key* (:meth:`GrantBook.take_back_site`)."""
+        self.book.take_back_site(self.session_id, key, by)
 
     def forget_folder_now(self, folder: str) -> bool:
         """Take back a folder's grant; whether one held here."""

@@ -49,6 +49,7 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
     holds_grant,
     review_mode,
+    revoke_site,
     site_grant,
     stays_for_chat,
     window_grant,
@@ -182,6 +183,10 @@ class RememberingPolicy:
     def forget_folder(self, folder: str) -> bool:
         """Take back the chat's grant of *folder*; whether there was one."""
         return self.grants.forget_folder_now(folder)
+
+    def take_back_site(self, key: str, by: str | None = None) -> None:
+        """A refusal of a site: what this chat kept for it goes (#577)."""
+        self.grants.take_back_site(key, by)
 
     def covered(self, path: str) -> str:
         """What lets the read of *path* run unasked: :data:`FOLDER_FOR_CHAT`, :data:`FOLDER_SAVED` or ``""``."""
@@ -687,6 +692,10 @@ class ApprovalLedger:
         # Whether the person kept an answer in chat *id* about another host of
         # the site of a question (#577); the console sets it.
         self.site_kept: Callable[[str, str], bool] = lambda chat_id, name: False
+        # Takes back what chat *id* itself kept about a refused site (#577).
+        self.take_back_site: Callable[[str, str, str | None], object] = (
+            lambda chat_id, key, by: None
+        )
         # The folders outside the workspace chat *id* allowed for reading (#405).
         self.folders_of: Callable[[str], tuple[str, ...]] = lambda chat_id: ()
 
@@ -908,6 +917,12 @@ class OwnedTaskPolicy:
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
         return self._granted(name) or holds_grant(self.inner, name)
+
+    def take_back_site(self, key: str, by: str | None = None) -> None:
+        """A refusal of a site: what the task kept goes, and what it holds from its chat (#577)."""
+        if self._chat:
+            self._ledger.take_back_site(self._chat, key, by)
+        revoke_site(self.inner, key, by)
 
     async def _earlier(
         self, chat: str, request: ApprovalRequest

@@ -191,14 +191,26 @@ those tools can do.
   suffix, an unlisted suffix and a port that is not the scheme's own stay the
   exact origin, and `https` never covers `http` or the reverse. Nothing else
   widened: an Allow once, typing, a form sent, a file attached, a click at a
-  point, a page's own question, a take-over, a page's request for another app,
-  passwords given in a message and high-impact steps stay as they were; a link
-  followed on a page opened by an Allow once asks on another host; what Auto
-  kept for a chat stays the host it read, and Auto keeps no click. Every host
-  still passes the check for a public address. A refusal covers the whole site
-  and beats a kept answer, in the run that heard it and in a task continued
-  later. In a plain chat a refusal lasts for its turn, as it always has, so a
-  later turn's kept answer applies again.
+  point, a page's own question, a take-over, a page's request for another app
+  and high-impact steps stay as they were; a link followed on a page opened by
+  an Allow once asks on another host; what Auto kept for a chat stays the host
+  it read, and Auto keeps no click. A password given in a message goes where it
+  always went, which is not one exact origin: a password box on an `https` page
+  of a host the person's own words name, `www.` aside, whatever the port. One
+  site adds nothing to that: another host of the site gets no password. Every
+  host still passes the check for a public address.
+- **A refusal covers the whole site.** The person's refusal of a site takes
+  back what that chat or task keeps for it, on either scheme, and what a task
+  holds from its chat, so a later turn asks again. A refusal of any kind then
+  stands for the rest of the run, and in a task continued later, over all that
+  would run with no answer from the person: a kept answer, a site the request
+  names, Auto, and a page approved before it, which is left for an empty one.
+  Only the person's newer answer stands over it, for what they allowed: that
+  question, or the whole site on that scheme when they keep the answer. Three
+  limits remain. A kept answer from the main chat stays when a side chat
+  refuses: it holds there again from the next turn. An automatic block leaves
+  kept answers alone, since it can come from nobody being there to ask. A tab
+  left open and not touched in that run can be read in a later turn.
 - **melo's Chrome keeps its sign-ins on disk.** Its profile
   (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
   each time Chrome starts, so that a page can move to a window for the person
