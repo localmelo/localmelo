@@ -355,7 +355,9 @@ def has_cjk(text: str) -> bool:
     return _CJK.search(text) is not None
 
 
-def _words(tool_name: str, arguments: Mapping[str, Any], cjk: bool | None = None) -> str:
+def _words(
+    tool_name: str, arguments: Mapping[str, Any], cjk: bool | None = None
+) -> str:
     """The model's own words for the call, in the person's script (*cjk*), or ``""``."""
     for name in WORD_FIELDS:
         value = arguments.get(name)

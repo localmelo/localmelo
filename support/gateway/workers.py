@@ -904,7 +904,9 @@ class TaskWorkers:
         self._follow(ids, mode)  # at once, before anything is written
         for task_id in ids:
             if _remembers((await self.tasks.get_task(task_id)).origin):
-                await self.store.update_session(task_id, meta_update={"approvals": mode})
+                await self.store.update_session(
+                    task_id, meta_update={"approvals": mode}
+                )
         self._follow(ids, mode)  # a run that began while the mode was written
 
     def _follow(self, task_ids: Iterable[str], mode: ChatMode) -> None:

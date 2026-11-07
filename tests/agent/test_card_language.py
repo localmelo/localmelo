@@ -15,7 +15,7 @@ import pytest
 from localmelo.melo.checker.review.gist import request_gist, step_gist
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.workers import WORKER_GUIDE
-from localmelo.support.sessions.identity import LANGUAGE_RULE, ACTING_RULE
+from localmelo.support.sessions.identity import ACTING_RULE, LANGUAGE_RULE
 from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import FakeModel, _agent
 
