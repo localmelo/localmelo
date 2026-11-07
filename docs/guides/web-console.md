@@ -1030,9 +1030,10 @@ commands and file changes.
   use your passwords or keys." as your message. While melo works the
   button waits; afterwards the card reads `Allowed once · ran at 14:02` or
   `Allowance expired`.
-- **Tasks.** A task keeps the mode its chat had when it was made. A task you
-  started asks in its chat, as in Ask, and waits for your answer. A
-  scheduled chore takes its chat's mode each time it runs, and in Auto,
+- **Tasks.** A task you started follows its chat's mode at each step: a switch
+  reaches its next decision, and a card that waits stays for you. It asks in
+  its chat, as in Ask, and waits for your answer. A task another program or
+  melo made keeps the mode it was made with. A scheduled chore takes its chat's mode each time it runs, and in Auto,
   with nobody watching, it blocks the step instead: its page shows **Mode**
   and lists **Blocked steps**, each opening the same card; the task goes on
   without them, and **Allow once** there sends the message to the task
