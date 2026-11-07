@@ -49,6 +49,7 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
     holds_grant,
     review_mode,
+    revoke_site,
     site_grant,
     stays_for_chat,
     window_grant,
@@ -111,8 +112,10 @@ class RememberingPolicy:
     In auto mode it is the policy that asks about a step Auto stopped
     (#465): a site Auto stopped only as not asked for may be granted for
     the chat, and a grant of that site question covers it after
-    (:func:`~localmelo.melo.contracts.approvals.site_grant`). A site Auto
-    let the chat read (:meth:`passed_in_auto`) stays allowed for the chat:
+    (:func:`~localmelo.melo.contracts.approvals.site_grant`). A person's grant
+    of a site question covers the site's other hosts too
+    (:meth:`~localmelo.support.sessions.grants.SessionGrants.covers`, #577). A
+    site Auto let the chat read (:meth:`passed_in_auto`) stays allowed for the chat, on its exact origin:
     in Ask its plain reads run unasked, as on a grant, but never a click, an
     address that can carry data, a card-only kind or a step Auto's review
     stops (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`).
@@ -181,6 +184,10 @@ class RememberingPolicy:
         """Take back the chat's grant of *folder*; whether there was one."""
         return self.grants.forget_folder_now(folder)
 
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
+        """A refusal of a site: what this chat kept for it goes (#577). Whether that is saved."""
+        return await self.grants.take_back_site(key, by)
+
     def covered(self, path: str) -> str:
         """What lets the read of *path* run unasked: :data:`FOLDER_FOR_CHAT`, :data:`FOLDER_SAVED` or ``""``."""
         if _covered(self.grants.folders(), path):
@@ -244,7 +251,7 @@ class RememberingPolicy:
     def silent_for(self, request: ApprovalRequest) -> bool:
         """Whether a grant would let *request* run unasked: the gate then lets
         the user's model review an undecided call first (#279 §3.3)."""
-        return request.tool_name in self.grants.names()
+        return self.grants.covers(request.tool_name)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.outside is not None:
@@ -254,7 +261,7 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if request.tool_name in self.grants.names() and (
+        if self.grants.covers(request.tool_name) and (
             covered_by_grant(request.review)
             or site_grant(request)
             or window_grant(request)
@@ -382,18 +389,58 @@ def chat_mode(meta: object, default: ChatMode = "ask") -> ChatMode:
     return "auto" if default == "auto" else "ask"
 
 
-class ChatPolicy:
-    """One chat's policy: Ask (a :class:`RememberingPolicy`) or Auto (#339).
+class ModePolicy:
+    """The Ask policy or the Auto policy, whichever :attr:`mode` names now (#339, #576).
 
     :attr:`mode` is read at every decision, so a switch applies from the
-    chat's next step; a call already waiting for a person keeps waiting.
+    next step; a call already waiting for a person keeps waiting. Both
+    policies keep their own state (Ask's grants, Auto's allowances) across
+    switches. ``inner`` is the policy of the mode now, for
+    :func:`~localmelo.melo.contracts.approvals.find_auto`. *mode* is a mode,
+    or a function that gives it: a task's policy reads its chat's mode that
+    way, so the task has no mode of its own to leave behind (#576).
+    """
+
+    def __init__(
+        self,
+        ask: ApprovalPolicy,
+        auto: AutoPolicy,
+        mode: ChatMode | Callable[[], ChatMode] = "ask",
+    ) -> None:
+        self._mode = mode
+        self.ask = ask
+        self.auto = auto
+
+    @property
+    def mode(self) -> ChatMode:
+        return self._mode() if callable(self._mode) else self._mode
+
+    @mode.setter
+    def mode(self, value: ChatMode) -> None:
+        self._mode = value
+
+    @property
+    def inner(self) -> ApprovalPolicy:
+        return self.auto if self.mode == "auto" else self.ask
+
+    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
+        return review_mode(self.inner, request)
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.inner.decide(request)
+
+
+class ChatPolicy(ModePolicy):
+    """One chat's policy: Ask (a :class:`RememberingPolicy`) or Auto (#339).
+
     The Ask policy keeps its grants and the :class:`AutoPolicy` its
-    allowances across switches. ``inner`` is the policy of the mode now,
-    for :func:`~localmelo.melo.contracts.approvals.find_auto`.
+    allowances across switches (:class:`ModePolicy`).
 
     The person is asked about a folder outside the workspace in either
     mode (:meth:`decide_folder`): auto mode never decides it.
     """
+
+    ask: RememberingPolicy
 
     def __init__(
         self,
@@ -404,17 +451,12 @@ class ChatPolicy:
         watch: AskWatch | None = None,
         grants: SessionGrants | None = None,
     ) -> None:
-        self.mode: ChatMode = mode
-        self.ask = RememberingPolicy(ask, folders=True, saved=saved, grants=grants)
+        asking = RememberingPolicy(ask, folders=True, saved=saved, grants=grants)
         # A step Auto stops that the person may allow asks them on the
         # chat's card while *watch* says someone sees the chat, and an
         # answer for the chat is a grant of the Ask policy (#465).
-        self.auto = AutoPolicy(asking=self.ask, watch=watch)
+        super().__init__(asking, AutoPolicy(asking=asking, watch=watch), mode)
         self.asks_folders = True
-
-    @property
-    def inner(self) -> ApprovalPolicy:
-        return self.auto if self.mode == "auto" else self.ask
 
     @property
     def allowed_tools(self) -> frozenset[str]:
@@ -438,14 +480,8 @@ class ChatPolicy:
     def forget_folder(self, folder: str) -> bool:
         return self.ask.forget_folder(folder)
 
-    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
-        return "auto" if self.mode == "auto" else review_mode(self.ask, request)
-
     async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
         return await self.ask.decide_folder(request)
-
-    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        return await self.inner.decide(request)
 
 
 @dataclass
@@ -666,6 +702,11 @@ class ApprovalUse:
     at: float
 
 
+async def _nothing_kept(chat_id: str, key: str, by: str | None) -> bool:
+    """:attr:`ApprovalLedger.take_back_site` with no book behind it: nothing to save."""
+    return True
+
+
 class ApprovalLedger:
     """The approvals the person gave in each chat: "already approved" by code.
 
@@ -682,6 +723,13 @@ class ApprovalLedger:
         self._uses: deque[ApprovalUse] = deque(maxlen=USES_KEPT)
         # The tools chat *id* holds a grant of now; the console sets it.
         self.grants_of: Callable[[str], frozenset[str]] = lambda chat_id: frozenset()
+        # Whether the person kept an answer in chat *id* about another host of
+        # the site of a question (#577); the console sets it.
+        self.site_kept: Callable[[str, str], bool] = lambda chat_id, name: False
+        # Takes back what chat *id* itself kept about a refused site (#577).
+        self.take_back_site: Callable[[str, str, str | None], Awaitable[bool]] = (
+            _nothing_kept
+        )
         # The folders outside the workspace chat *id* allowed for reading (#405).
         self.folders_of: Callable[[str], tuple[str, ...]] = lambda chat_id: ()
 
@@ -886,11 +934,14 @@ class OwnedTaskPolicy:
         return bool(chat) and self._window is not None and chat == self._window_chat
 
     def _granted(self, tool_name: str) -> bool:
-        chat = self._chat
+        chat = self._chat or ""
         return (
             self._reviewed_since(chat)
             and not self._auto()
-            and tool_name in self._ledger.grants_of(chat or "")
+            and (
+                tool_name in self._ledger.grants_of(chat)
+                or self._ledger.site_kept(chat, tool_name)
+            )
         )
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
@@ -900,6 +951,17 @@ class OwnedTaskPolicy:
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
         return self._granted(name) or holds_grant(self.inner, name)
+
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
+        """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
+
+        Both at once, so a write held up in one does not leave the other
+        holding. Whether all of that is saved.
+        """
+        taken: list[Awaitable[bool]] = [revoke_site(self.inner, key, by)]
+        if self._chat:
+            taken.append(self._ledger.take_back_site(self._chat, key, by))
+        return all(await asyncio.gather(*taken))
 
     async def _earlier(
         self, chat: str, request: ApprovalRequest

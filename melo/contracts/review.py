@@ -7,13 +7,15 @@ call asks every time and is never granted. Under a grant, and in auto
 mode, the user's model reviews an undecided call (``by="model"``). In auto
 mode (#339) nobody is asked: a call that is not routine is blocked, unless
 the user allowed that exact step once (:func:`step_key`) or asked for it in
-their own words. This module imports only the standard library and
-:mod:`~localmelo.melo.contracts.shell_lexer`, which does too.
+their own words. This module imports only the standard library,
+:mod:`~localmelo.melo.contracts.shell_lexer`, which does too, and the bundled
+public suffix list (:func:`host_site`).
 """
 
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import ipaddress
 import json
@@ -21,10 +23,13 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import unquote, urlsplit
 
 from localmelo.melo.contracts import shell_lexer
+
+if TYPE_CHECKING:
+    from publicsuffixlist import PublicSuffixList
 
 Verdict = Literal["routine", "high", "undecided"]
 # The version of the rules a review recorded: 2 added the ``app_control`` kind
@@ -592,7 +597,7 @@ def loose_keys(
 
 # ── The sites a step names (#433): keys that only ever refuse ──
 
-# The loose key of a site: ``ask:site:<host>`` (approvals.site_key).
+# The loose key of a site: ``ask:site:<site>`` (:func:`site_key_of`).
 SITE_KEY: Final = "ask:site:"
 # A step naming an http(s) address whose encoded host melo cannot read as
 # one site (a percent-encoding or an international name that does not
@@ -610,6 +615,9 @@ _HOST_NAME: Final = re.compile(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*")
 # An IPv4 address in any form a client accepts: 1 to 4 parts, each decimal,
 # octal (a leading 0) or hex (0x).
 _NUMERIC: Final = re.compile(r"(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+)){0,3}")
+# Names the suffix list has but no site uses: reverse lookups of addresses by
+# number, and ``home.arpa``, the local name of home networks.
+_NO_SITE: Final = ".arpa"
 # One brace group a shell (or curl) expands into words: ``{a,b}``.
 _BRACES: Final = re.compile(r"^([^{}]*)\{([^{}]*,[^{}]*)\}([^{}]*)$")
 # Characters after a host that end a sentence or a call, not the host.
@@ -665,6 +673,51 @@ def site_host(host: str) -> str | None:
         return str(ipaddress.ip_address(host))
     except ValueError:
         return host or None
+
+
+@functools.cache
+def _suffix_list() -> PublicSuffixList | None:
+    """The public suffix list the package bundles, read once; a suffix it does not list is none.
+
+    ``None``, kept like a list, when it cannot be read: every host then stands
+    for itself until melo starts again, and no lookup tries it again.
+    """
+    try:
+        from publicsuffixlist import PublicSuffixList
+
+        return PublicSuffixList(accept_unknown=False)
+    except (ImportError, OSError, ValueError):
+        return None
+
+
+def host_site(host: str) -> str | None:
+    """The one site *host* belongs to: its registrable domain (#577).
+
+    The one place that says which hosts are one site, read offline from the
+    bundled public suffix list with its private section:
+    ``login.example.co.uk`` gives ``example.co.uk``, and each account of a
+    shared hosting suffix on the list is a site of its own.
+
+    ``None`` fails closed, so the host stands for itself: an address by
+    number, a local or single-label name, a host that is itself a public
+    suffix, an unlisted suffix, anything but a plain name (a port too), and
+    any host while the list cannot be read.
+    """
+    name = site_host(host)
+    suffixes = _suffix_list()
+    if (
+        suffixes is None
+        or name is None
+        or not _HOST_NAME.fullmatch(name)
+        or name.endswith(_NO_SITE)
+    ):
+        return None
+    return suffixes.privatesuffix(name)
+
+
+def site_key_of(host: str) -> str:
+    """The loose key of *host*, spelt as :func:`site_host` does: its site's, else its own."""
+    return SITE_KEY + (host_site(host) or host)
 
 
 def _is_ip(host: str) -> bool:
@@ -728,7 +781,7 @@ def _host_key(raw: str) -> str | None:
         # Not a name a client resolves (a pattern, a stray character):
         # unknown, unless an encoding hid what it is.
         return UNREADABLE_SITE if encoded else None
-    return SITE_KEY + host
+    return site_key_of(host)
 
 
 def _expanded(raw: str) -> list[str]:
@@ -1372,7 +1425,7 @@ def _sites(tool_name: str, arguments: Mapping[str, Any]) -> Sites:
 def site_keys(tool_name: str, arguments: Mapping[str, Any]) -> list[str]:
     """The loose keys of the sites a ``shell_exec`` or ``python_exec`` step names (#433).
 
-    One ``ask:site:<host>`` (:func:`site_host`) per address in it: every
+    One ``ask:site:<site>`` (:func:`site_key_of`) per address in it: every
     ``http://`` or ``https://`` address in a word of a command or a string
     of Python code, nested in another one's path or percent-encoded in its
     query too (an address passed to ``urllib``, ``requests`` or ``httpx``,

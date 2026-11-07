@@ -47,6 +47,16 @@ function controlOf(on) {
   return { kind: found[1], label: found[2] ?? "", frame: found[3] ?? "" };
 }
 
+// The kept choice's sentence about a site: for this chat or task, in the main chat, and the same two when the
+// server read the question as one site (`kept_site`), which is what the answer then covers. The question itself
+// keeps naming the exact host.
+const SITE_RULES = {
+  open: ["approval.rule.open", "approval.rule.openMain", "approval.rule.openWhole", "approval.rule.openWholeMain"],
+  read: ["approval.rule.read", "approval.rule.readMain", "approval.rule.readWhole", "approval.rule.readWholeMain"],
+  act: ["approval.rule.act", "approval.rule.actMain", "approval.rule.actWhole", "approval.rule.actWholeMain"],
+};
+const siteRule = (kind, request, everywhere) => SITE_RULES[kind][(request.kept_site ? 2 : 0) + (everywhere ? 1 : 0)];
+
 // What a click, a choice or typing is on, in a question: “Sign in” when it is named, else the kind of control.
 function actionTitle(key, control, site) {
   return control.label
@@ -145,8 +155,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = everywhere ? t(reading ? "approval.rule.readMain" : "approval.rule.openMain", { site })
-      : t(reading ? "approval.rule.read" : "approval.rule.open", { site, scope });
+    rule = t(siteRule(reading ? "read" : "open", request, everywhere), { site: request.kept_site || site, scope });
     // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front. The
     // sentence is plain text; a read of an address shows the whole address in the box below it.
     why = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
@@ -176,7 +185,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     else if (control) title = actionTitle("actClick", control, site);
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
     rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
-      : everywhere ? t("approval.rule.actMain", { site }) : t("approval.rule.act", { site, scope });
+      : t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
     const chrome = args.browser === "chrome";
     content = t(sending ? "approval.submitContent"
       : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")

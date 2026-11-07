@@ -367,6 +367,30 @@ async def test_a_chat_with_no_approval_policy_reads_as_before(
     assert isinstance(result, str) and "# Tomatoes" in result
 
 
+async def test_a_site_refused_in_this_run_stays_refused_though_the_request_names_it(
+    server: dict[str, Any],
+) -> None:
+    """The named-site shortcut asks nobody, so it never stands over a refusal (#577)."""
+    resolver = _resolver(server)
+    person = Person(refuse=True)
+    llm = ScriptedLLM(
+        [
+            _fetch("http://login.collect.com/x"),
+            _fetch("https://www.collect.com/y"),
+            _say("ok"),
+        ]
+    )
+    agent = _agent(llm, resolver)
+    try:
+        await agent.run_task(
+            "What does www.collect.com say?", approval=RememberingPolicy(person.ask)
+        )
+    finally:
+        await agent.close()
+    assert len(person.asked) == 1 and resolver.calls == []
+    assert "refused earlier in this task" in _results(llm)[1]
+
+
 async def test_a_site_refused_earlier_stays_refused_though_the_request_names_it(
     server: dict[str, Any],
 ) -> None:

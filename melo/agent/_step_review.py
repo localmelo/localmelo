@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.review.gist import has_cjk
 from localmelo.melo.checker.review.model import (
     CHAT_REQUESTS,
     EARLIER_REQUESTS,
@@ -246,6 +247,11 @@ class RunReviews:
     # The hosts of the sites refused in this run, oldest first (#433): the
     # review of a later step is told of them.
     refused_sites: list[str] = field(default_factory=list)
+    # What the person allowed themselves in this run, by the ``ask:site:`` key
+    # of its site (#577): each question, and whether the answer was kept. Their
+    # newest word stands over a refusal of the site, for that much; a refusal
+    # after it clears the site's list.
+    allowed_sites: dict[str, list[tuple[str, bool]]] = field(default_factory=dict)
     # The steps declined on auto mode's card in this run (#465), by each of
     # their keys: the person's Don't allow, or a card nobody answered (no
     # answer, not a no: the model is told to go on and melo asks again in the
@@ -567,6 +573,14 @@ class StepReviewer:
         if self._added > len(self._words):
             return (self._first, *older)
         return older
+
+    def person_cjk(self) -> bool | None:
+        """Whether the person's recent messages have Chinese, Japanese or Korean characters; ``None`` when they have no letters.
+
+        The script a card's reason must be in (:func:`~localmelo.melo.checker.review.gist.step_gist`).
+        """
+        words = " ".join(self.requests)
+        return has_cjk(words) if any(ch.isalpha() for ch in words) else None
 
     def names_host(self, host: str) -> bool:
         """Whether the user's recent messages name *host* itself.

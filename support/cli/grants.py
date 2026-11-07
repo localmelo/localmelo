@@ -18,7 +18,7 @@ import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.support.cli.approvals import grant_listed, grant_site
+from localmelo.support.cli.approvals import grant_listed, grant_of_site
 from localmelo.support.cli.main_chat import GatewayError
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.grants import listed
@@ -53,12 +53,7 @@ STILL_FROM_MAIN: Final = (
 
 def _names(name: str, held: frozenset[str]) -> set[str]:
     """The grants in *held* that ``/approvals forget NAME`` means: the name, or a site's."""
-    site = name.lower().removeprefix("www.")
-    return {
-        grant
-        for grant in held
-        if grant == name or grant_site(grant).removeprefix("www.") == site
-    }
+    return {grant for grant in held if grant == name or grant_of_site(grant, name)}
 
 
 async def forget(session: CliSession, name: str | None) -> None:

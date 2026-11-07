@@ -33,6 +33,8 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     DESKTOP_ACT,
     NOBODY_TO_ASK,
+    REFUSAL_NOT_SAVED,
+    SITE_REFUSED,
     STOPPED_NOTE,
     TAKEOVER,
     WINDOW_READ,
@@ -42,7 +44,6 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     Chosen,
     ReviewMode,
-    Withdrawal,
     ask,
     block_note,
     call_key,
@@ -50,8 +51,12 @@ from localmelo.melo.contracts.approvals import (
     find_earlier,
     find_folder_asker,
     holds_grant,
+    is_refusal,
     question_key,
+    question_site_key,
     review_mode,
+    revoke_site,
+    site_covers,
     site_key,
 )
 from localmelo.melo.contracts.folders import (
@@ -321,9 +326,7 @@ class _ApprovalGate:
             remember=decided.remember,
             # A person's Deny, an auto block, a policy's refusal of the step
             # itself; never a question withdrawn or one that could not be asked.
-            denial=not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal),
+            denial=is_refusal(decided),
         )
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the
@@ -460,6 +463,7 @@ class _ApprovalGate:
             tier=self._tier,
             review=review,
             outside=outside,
+            person_cjk=None if self._reviewer is None else self._reviewer.person_cjk(),
         )
 
     async def _ask(
@@ -553,7 +557,9 @@ class _ApprovalGate:
         ):
             shown = review.to_json()
             # The sentence the approval card starts with (#454).
-            gist = step_gist(asking.tool_name, asking.arguments, review)
+            gist = step_gist(
+                asking.tool_name, asking.arguments, review, cjk=asking.person_cjk
+            )
             if gist is not None:
                 shown["gist"] = gist.to_json()
             self.asked["review"] = shown
@@ -713,6 +719,13 @@ class _ToolAsk:
     among them), and a run its chat continued on its own refuses the same
     question, one under the same name, or one about the same host however
     its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
+    A refusal covers the whole site (:func:`site_key`) and beats everything but
+    the person's own newer answer (#577): the person's refusal takes back what
+    the chat keeps for the site (:func:`revoke_site`), and whatever else would
+    run a question on a site refused in this task (a kept answer that holds
+    from elsewhere, Auto, a page approved before) is refused
+    (:data:`SITE_REFUSED`). The person's fresh Allow lifts it for what they
+    allowed: that question, or all of the site on a kept answer.
     """
 
     def __init__(
@@ -811,6 +824,18 @@ class _ToolAsk:
         as a site the user's words name: a block stands over that (#431).
         """
         return self._earlier(self._request(tool_name, arguments, preview))
+
+    def refused_unasked(
+        self, tool_name: str, arguments: Mapping[str, Any], preview: str
+    ) -> ApprovalDecision | None:
+        """:meth:`refused_earlier`, or a refusal of a site in this run: for what passes with no question (#577).
+
+        Asked before a page approved earlier is read again and before a site
+        the user's words name is read. Where a question comes next, the person
+        decides instead.
+        """
+        request = self._request(tool_name, arguments, preview)
+        return self._earlier(request) or self._site_refusal(request)
 
     def _request(
         self, tool_name: str, arguments: Mapping[str, Any], preview: str
@@ -1037,15 +1062,21 @@ class _ToolAsk:
             return await self._policy.decide(request)
 
         decided = await self._ask(settle, request)
+        site = question_site_key(tool_name)
+        if decided.allow and site is not None:
+            if decided.origin == "user":
+                self._run.reviews.allowed_sites.setdefault(site, []).append(
+                    (tool_name, decided.remember)
+                )
+            elif (refusal := self._site_refusal(request)) is not None:
+                # Only the person's newer word stands over a refusal (#577). What
+                # Auto kept on the way to this answer goes with it.
+                await self._take_back(site, "auto")
+                return refusal
         self._ended_by_words(request, decided, preview)
-        if (
-            not decided.allow
-            and decided.origin in ("user", "auto", "policy")
-            and not isinstance(decided, Withdrawal)
-        ):
-            # A person's Deny, an auto block, a policy's refusal of the step:
-            # a task its chat continues on its own never asks it again.
-            self._keep(request, decided)
+        if is_refusal(decided):
+            # A task its chat continues on its own never asks it again.
+            decided = await self._keep(request, decided)
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the
             # turn (#465).
@@ -1110,18 +1141,45 @@ class _ToolAsk:
         )  # fmt: skip
         return ApprovalDecision(False, reason, origin="policy")
 
-    def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
+    def _site_refusal(self, request: ApprovalRequest) -> ApprovalDecision | None:
+        """The refusal of *request*, on a site refused in this task and not allowed since by the person, or None (#577)."""
+        name = request.tool_name
+        site = question_site_key(name)
+        if site is None or site[len(SITE_KEY) :] not in _refused_sites(
+            self._policy, self._run
+        ):
+            return None
+        allowed = self._run.reviews.allowed_sites.get(site, ())
+        if any(
+            given == name or (kept and site_covers(given, name))
+            for given, kept in allowed
+        ):
+            return None
+        self.refused.append(
+            {"request_id": request.request_id, "tool": name, "allowed": False,
+             "origin": "policy", "reason": SITE_REFUSED,
+             "preview": request.preview}
+        )  # fmt: skip
+        return ApprovalDecision(False, SITE_REFUSED, origin="policy")
+
+    async def _keep(
+        self, request: ApprovalRequest, decided: ApprovalDecision
+    ) -> ApprovalDecision:
         """Keep a refused question as a blocked step: its call key and keys alike.
 
         A refused site joins the run's refused sites, which a later review
-        is told of (#433).
+        is told of (#433), and the person's refusal takes back what the chat
+        keeps for it (#577). All of that stands before the take-back is
+        written; the decision comes back with a notice if the file refused it.
         """
         name, arguments = request.tool_name, request.arguments
         categories = () if request.review is None else request.review.categories
         site = site_key(arguments)
-        refused = self._run.reviews.refused_sites
-        if site is not None and site[len(SITE_KEY) :] not in refused:
-            refused.append(site[len(SITE_KEY) :])
+        reviews = self._run.reviews
+        if site is not None:
+            if site[len(SITE_KEY) :] not in reviews.refused_sites:
+                reviews.refused_sites.append(site[len(SITE_KEY) :])
+            reviews.allowed_sites.pop(site, None)  # the newest word stands
         self.refused.append(
             {"request_id": request.request_id, "tool": name, "allowed": False,
              "origin": decided.origin, "reason": decided.reason,
@@ -1130,6 +1188,24 @@ class _ToolAsk:
              "loose_keys": [*loose_keys(name, arguments, categories),
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
+        # An automatic block leaves the person's word: it can come from nobody
+        # being there to ask.
+        if site is None or decided.origin != "user":
+            return decided
+        if await self._take_back(site):
+            return decided
+        return dataclasses.replace(decided, notice=REFUSAL_NOT_SAVED)
+
+    async def _take_back(self, site: str, by: str | None = None) -> bool:
+        """:func:`revoke_site` to its end, whatever stops the run: Stop ends only the wait (#577)."""
+        task = asyncio.ensure_future(revoke_site(self._policy, site, by))
+        _TAKE_BACKS.add(task)
+        task.add_done_callback(_TAKE_BACKS.discard)
+        return await asyncio.shield(task)
+
+
+# Take-backs under way: a run stopped meanwhile holds them no more (#577).
+_TAKE_BACKS: set[asyncio.Future[bool]] = set()
 
 
 def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:

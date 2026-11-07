@@ -21,6 +21,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is bounded. A turn melo began itself, to answer a task's
   question or to follow one up, reads and answers and changes nothing, by a check on the run and not by its wording.
   The rules that read action words, the short-answer mode and the fallback that turned a promise into a task are gone. (#571)
+- The hosts of one site count as one site. A sign-in that moves from a site's main host to its sign-in host asks once:
+  what you keep for a site, opening it or clicking and choosing on it, now covers its other hosts for that chat or task,
+  and the card names the whole site ("all of example.com"), in the console, the app and the terminal. One site is the same
+  scheme and registrable domain, from a public suffix list bundled with melo and read offline, so accounts on a shared
+  hosting domain stay separate; addresses by number, local names, unlisted suffixes and other ports stay exact. Allow
+  once, typing, forms, attached files, take-over, passwords and high-impact steps are asked as before, and what Auto let
+  a chat read stays that host. A refusal covers the whole site too: it takes back what the chat or task keeps for the
+  site, the main chat's answer for it included, and on a browser question the approval of tabs open on it, so a later
+  turn asks again (SECURITY.md lists the limits), and only your newer answer stands over it. `/approvals forget` takes
+  a site's answer back by any of its hosts. New core dependency: publicsuffixlist (#577).
 - A chat does what you ask. Say it in your own words and melo starts the work: no list of verbs stands in the way, and
   nothing sends you to rephrase or press a card. A worker is one-time: new work after a finished task starts a new task
   in the same folder, with the old task's answer and files as background; a task that stopped before finishing goes on
@@ -1066,6 +1076,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Approval cards read plainly and follow your mode (#576). A question about a site or an app says what melo wants to do and where (`Open example.com`, `Click or choose on example.com`, `Needs you on example.com`), in the words of the console, the app and the terminal, on the card, in the activity line and in the event line, never the internal name of the question. melo's explanation under a step shows only in the language of your own recent messages: words a model wrote in another script (English under a Chinese chat) are left out and the card keeps melo's own sentence, and a task now carries the rule to answer in your language like a chat does. A task you started follows its chat's Ask or Auto while it runs: Auto to Ask at its next decision, Ask to Auto at the one after the card that waits (that card stays for you); a chore keeps the mode it was saved with, and a task that ended keeps its last mode.
 - Auto stops only for what matters. A review that times out or fails is sent once more and then asks on a card; the limit of 12 reviews counts only steps the rules cannot judge; a card nobody answers is not a no (melo goes on and asks again next turn); an Allow lets the step write the paths it was asked about, though never melo's own data, your keychains, launch agents or shell startup files; a password you write in a message is used by melo to sign in (cut out once where your text comes in, a task made through the API included, so no chat title, note, queued message, task or history file keeps it, typed only in the turn you gave it into a password box that belongs to a site you named), never a card number or a code; a key file or an install script you named asks on a card instead of being blocked, a folder you named needs no question for a plain write there, a `localhost:PORT` you wrote needs none while its run lasts, a workspace `.envrc` is an ordinary file and `direnv allow` asks on a card; browser downloads go to a folder of their own and melo says where; a run that is still making progress (not two steps taking turns) gets 30 more steps twice instead of stopping for Continue; and a post in your name (text on a page, a form, `git push`, `gh issue` or `gh pr`, mail) runs only when your own words ask for a send (a search you asked for is no post) and the text, a message file included, holds none of your phone number, address or name, whatever the review model called it, with a ticked "public" box unticked first (#547).
 - One fit for the prompt cap. Without a context window, a planning or reflection request over the 100,000-character cap is now fitted on a copy the way a context window's budget fits it: old tool results become short previews first, then old reasoning and recall go, then whole old turns, down to 70% of the cap, and the next requests repeat that cut byte for byte until one passes the cap, so a server's prompt cache stays valid; a chat's earlier tasks may go whole, and working memory keeps every turn. A request still over the cap ends the run as before (`Plan check failed`); with a context window, its budget is the only limit. The newest tool result is cut only as the last step before a refusal. The reflection request no longer asks for the seven fields nothing read (`progress_made`, `new_information_gained` and five estimates), and a reflection reply with a value in single quotes or a key without its opening quote now reads without a second request (#554).
 - Developer only: recall from memory items also reads the turns of chats that are not encoded yet, so nothing is lost while they wait. Part of #428.
@@ -1505,6 +1516,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A chat's mode decides for the tasks it started (#576). A task you started follows its chat's Ask or Auto while it runs, so a switch you made is not ignored by work that began earlier; a card already waiting stays for you. The mode only chooses between policies the task already had, a chore and a task another program or melo made keep their own mode, and Auto's limits are unchanged (see SECURITY.md).
+
 - A saved chore's run now has a browser with nobody at its side (#570). Its approvals, Auto and posting rules are those of a task you started, it uses and records no earlier approval, and, as for a task you started, melo works through a picture check on a page itself, within the same limits (a model that reads pictures, its own model only, 3 tries and then the take-over card, no outside service), so a daily run can solve a check with nobody at its side. What a repeating chore posts in your name asks each time, whatever its request says, because the schedule now reaches the posting review from code. A password you gave in the message that saved the chore is typed by the run that message started only. Each chore has one work folder that deleting the chore removes without following a link; its files are never read as project instructions. See SECURITY.md.
 
 - Developer only: memory items are written from chat text with secrets taken out, and an item that still holds a secret is not kept. Part of #428.
@@ -1745,6 +1758,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The live browser card docked at the top of the chat no longer shows lines of the chat cut off around it: above the card, through its rounded corners and at its bottom edge, whatever scrolls under it is hidden behind a band in the chat's colour that fades out below the card (#576).
 - Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.
 - melo no longer refuses a note because it quotes a form line you typed, reads the messages you add while it works, and stops after two refused attempts instead of retrying again and again. Part of #442.

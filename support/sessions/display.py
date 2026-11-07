@@ -31,6 +31,7 @@ from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.approvals import POINT_TYPING, WEB_PORTS
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
 from localmelo.support.words import said, said_in
@@ -673,10 +674,72 @@ def step_said(
     return words
 
 
+# A question the approval card asks about a site or an app, not a tool
+# (``browser-act:https://example.com``, ``takeover:https://example.com``): the
+# verb it reads as (``steps.ask.<verb>``), and whether it is about the site in
+# its name or about an app (named in the call's ``app``).
+_QUESTIONS: Final[Mapping[str, tuple[str, str]]] = {
+    "browser": ("open", "site"),
+    "browser-act": ("act", "site"),
+    "browser-point": ("act", "site"),
+    "browser-type": ("type", "site"),
+    "browser-submit": ("submit", "site"),
+    "browser-attach": ("attachTo", "site"),
+    "browser-dialog": ("confirm", "site"),
+    "takeover": ("takeover", "site"),
+    "handoff": ("open", "app"),
+    "desktop-act": ("act", "app"),
+    "window-read": ("lookAt", "window"),
+}
+
+
+def _site(address: str) -> str:
+    """A site as a question's name holds it: the host without ``www.``, and a port that is not the default."""
+    host = _host(address)
+    try:
+        parts = urlsplit(address)
+        port, default = parts.port, WEB_PORTS.get(parts.scheme.lower())
+    except ValueError:
+        port = default = None
+    # The port its own scheme has anyway is dropped; the other scheme's is another server.
+    return f"{host}:{port}" if host and port not in (None, default) else host
+
+
+def _question(tool: str, arguments: object) -> dict[str, Any] | None:
+    """The words for *tool* when it is a question about a site or an app, else ``None``."""
+    prefix, _, rest = tool.partition(":")
+    found = _QUESTIONS.get(prefix)
+    if found is None:
+        return None
+    verb, about = found
+    args: Mapping[str, Any] = arguments if isinstance(arguments, Mapping) else {}
+    if about == "site":
+        what: object = _site(rest) or said("steps.aPage")
+        if prefix == "browser" and args.get("via") == "web_fetch":
+            verb = "read"
+        # A point melo is to type into is not a click; only the provider's own word says so.
+        if prefix == "browser-point" and args.get("how") == POINT_TYPING:
+            verb = "type"
+    else:
+        app = " ".join(str(args.get("app") or "").split())[:_NAME_SHOWN]
+        if about == "window":
+            what = said("steps.windowOf", app=app) if app else said("steps.aWindow")
+        else:
+            what = app or said("steps.anApp")
+    return said(f"steps.ask.{verb}", what=what)
+
+
 def request_said(
     tool: str, arguments: object = None, *, root: str | None = None
 ) -> dict[str, Any]:
-    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``."""
+    """What a call that asked for approval would do, as a ``said``: ``Write slides.md``.
+
+    A question about a site or an app (``browser-act:<site>``) says what melo
+    wants to do there, never its internal name: ``Click or choose on example.com``.
+    """
+    asked = _question(tool, arguments)
+    if asked is not None:
+        return asked
     return step_said(tool, arguments, tense="ask", root=root)
 
 

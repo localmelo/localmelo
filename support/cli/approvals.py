@@ -31,7 +31,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from localmelo.melo.checker.review.gist import step_gist
+from localmelo.melo.checker.review.gist import request_gist
 from localmelo.melo.contracts.approvals import (
     DESKTOP_ACT,
     WINDOW_READ,
@@ -43,8 +43,14 @@ from localmelo.melo.contracts.approvals import (
     DenyAllPolicy,
     grant_offered,
     never_granted,
+    whole_site,
 )
-from localmelo.melo.contracts.review import because, review_title, url_site
+from localmelo.melo.contracts.review import (
+    because,
+    host_site,
+    review_title,
+    url_site,
+)
 from localmelo.support.browser.sites import TAKEOVER_NEEDS
 from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
@@ -251,7 +257,7 @@ def _says(request: ApprovalRequest, text: PanelText) -> PanelText:
     A tool whose question says as much itself (a file write, a tool's name, a
     site) has none.
     """
-    gist = step_gist(request.tool_name, request.arguments, request.review)
+    gist = request_gist(request)
     if gist is None:
         return text
     shown = gist.to_json()
@@ -682,12 +688,13 @@ def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str
     if request.outside is not None:
         return folder_options(request, everywhere=everywhere)[0]
     rest = "in every chat" if everywhere else "for the rest of this chat"
+    whole = whole_site(request.tool_name)  # what a kept answer covers (#577)
+    site = str(request.arguments.get("site") or "this site")
     if request.tool_name.startswith("browser:"):
-        site = str(request.arguments.get("site") or "this site")
-        return f"Yes, and allow {site} {rest}"
+        return f"Yes, and allow {f'all of {whole}' if whole else site} {rest}"
     if request.tool_name.startswith("browser-act:"):
-        site = str(request.arguments.get("site") or "this site")
-        return f"Yes, and allow clicking and choosing on {site} {rest}"
+        where = f"anywhere on {whole}" if whole else f"on {site}"
+        return f"Yes, and allow clicking and choosing {where} {rest}"
     if request.tool_name.startswith("handoff:"):
         app = str(request.arguments.get("app") or "that app")
         return f"Yes, and let pages open {app} {rest}"
@@ -954,6 +961,19 @@ def grant_site(name: str) -> str:
     return ""
 
 
+def grant_of_site(name: str, site: str) -> bool:
+    """Whether the grant *name* is one ``/approvals forget`` takes for the word *site*.
+
+    Its host, ``www.`` aside, or any host of the whole site it covers (#577).
+    """
+    site = site.lower().removeprefix("www.")
+    host, whole = grant_site(name), whole_site(name)
+    return bool(host) and (
+        host.removeprefix("www.") == site
+        or (whole is not None and whole == host_site(site))
+    )
+
+
 def grant_words(name: str) -> str:
     """A grant in words: ``shell commands``, ``clicking and choosing on example.com``."""
     if name in _GRANT_WORDS:
@@ -1085,9 +1105,8 @@ class Approvals:
         if tool_name is None or tool_name in self._policy.allowed_tools:
             self._policy.forget(tool_name)
             return
-        site = tool_name.lower().removeprefix("www.")
         for name in self._policy.allowed_tools:
-            if grant_site(name).removeprefix("www.") == site:
+            if grant_of_site(name, tool_name):
                 self._policy.forget(name)
 
     @property

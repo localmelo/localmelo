@@ -232,7 +232,7 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 - **When it finishes, the answer comes back.** When a task the chat started ends **Ready**, the chat takes one turn of its own: a row reads `melo follows up on “Plan the trip”: it finished`, marked `melo started this`, and the chat tells you the result first, in your language, then its key points and the files it wrote. A long answer is summarised, with the rest under **Open task**. It happens once per ending, is skipped if you wrote after the task ended (your turn read it), never continues the task, and Activity reads `Told you the answer: Plan the trip`.
 - **The chat owns the outcome.** When a task a chat started fails, runs out of steps, ends `Done, not finished`, or needs you, that chat takes one turn of its own, right after the task's card: a row reads `melo follows up on “Fix CI”: it ran out of steps`, marked `melo started this`.
 - **It does one thing, then says so.** It continues the task once with a short message (`Continued: Fix CI`), works around a step that was blocked (for an install Auto blocked: use what is installed, or write it without the package), or asks you one clear question. Then it tells you in one or two lines what got done and what did not.
-- **A blocked step never runs again.** In a task the chat continued, a step you, Auto or melo's rules blocked is refused before it is reviewed (`blocked earlier`), and so is one alike: the same command spelt another way (`pip3` for `pip`, other quoting, a quiet flag) or the same install. A site you or Auto refused when `web_fetch` or the browser asked about it counts too: that address, however it is written (spacing, capitals, `http` or `https`, another port, its international spelling), and every other page of that site, even when your request names it. A command or script that fetches an address on that site is refused as well: `curl`, `wget`, Python's `urllib`, `requests` or `httpx`, an address kept in a variable or written into an f-string, an address given to `curl` or `wget` without `http://`, a connection opened to the site's name, the site behind a reader, an archive or a proxy, in capitals, with a port, percent-encoded or in its international spelling. While a site is refused, a step whose address is put together while it runs is reviewed, even one that would otherwise run as routine, and the review is told which sites were refused. The task must find another way. Your own message to the task, or **Allow once**, lifts that. A question that was withdrawn (the gateway stopped) blocked nothing.
+- **A blocked step never runs again.** In a task the chat continued, a step you, Auto or melo's rules blocked is refused before it is reviewed (`blocked earlier`), and so is one alike: the same command spelt another way (`pip3` for `pip`, other quoting, a quiet flag) or the same install. A site you or Auto refused when `web_fetch` or the browser asked about it counts too: that address, however it is written (spacing, capitals, `http` or `https`, another port, its international spelling), every other page of that site and its other hosts (`login.example.com` after `www.example.com`), even when your request names it, and an answer kept for the site does not run it. A command or script that fetches an address on that site is refused as well: `curl`, `wget`, Python's `urllib`, `requests` or `httpx`, an address kept in a variable or written into an f-string, an address given to `curl` or `wget` without `http://`, a connection opened to the site's name, the site behind a reader, an archive or a proxy, in capitals, with a port, percent-encoded or in its international spelling. While a site is refused, a step whose address is put together while it runs is reviewed, even one that would otherwise run as routine, and the review is told which sites were refused. The task must find another way. Your own message to the task, or **Allow once**, lifts that. A question that was withdrawn (the gateway stopped) blocked nothing.
 - **It continues at most once.** For each message of yours, a task is continued by its chat at most once; if it stops again, the chat only reports and asks. A third stop gets the card alone.
 - **Your turn wins.** The follow-up never interrupts your message: it waits until the chat is free, and a message you send meanwhile is queued. If you write after the task ended, your turn reads the ending and the follow-up is skipped.
 - **Stop stays while more can run.** The `Started` row keeps **Stop** while the task runs, and after it ends for as long as the chat's follow-up on it may still continue it. Stop then ends the follow-up too, waiting or running, so it never continues the task. Once nothing more will run (the follow-up asked, reported or was skipped), Stop goes. Stop on a task with nothing left to stop offers no **Undo**.
@@ -420,8 +420,8 @@ I can't open websites myself.`; what it did is `Started a task: …`, `Offered a
 chat's row is named in the page's language.
 
 A row that asked you for approvals carries them folded under its result line: `1 approval`, `2 approvals, 1
-waiting`, or `1 approval waiting` when every request still waits. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`; never
-the command itself), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
+waiting`, or `1 approval waiting` when every request still waits. Select it to list each request in plain words (`Write slides.md`, `Run the tests`, `Run a command`, `Open example.com`, `Click or choose on example.com`; never
+the command itself or an internal name), how it was answered (`Allowed once`, `Allowed for this chat`, `Denied`, `No answer in time`) and
 when it was asked. A request that waits for you has **Allow once** and **Deny** right there, the same answers as the
 approval card in the chat, and **Review**, which opens the chat or task with the card and the exact content. There is
 no separate Approvals tab.
@@ -840,7 +840,7 @@ or a Python script starts with one plain sentence about what the step will do,
 which melo builds from the call and which names every effect it finds, in order
 ("Operate Safari, then delete files"; a command too long to show ends "and 2
 more"). The model's own words (a `why` argument, or a comment at the top of the
-code) always carry a label, "melo says: …". When the rules find nothing to ask
+code) always carry a label, "melo says: …". They show only in the language of your own recent messages: words the model wrote in another script (English under a Chinese chat, say) are left out and the card keeps melo's own sentence. When the rules find nothing to ask
 about, the words are the sentence and the code sits under it in a fold, **Show
 the code**. When the rules find something, the sentence stays melo's own, the
 words go in a line below it, and the code is open, so the words can never make a
@@ -957,7 +957,10 @@ commands and file changes.
 - **melo acts in your name; the cards ask.** What you ask for is done as you: applying with your resume, signing in, filling in and submitting a form, sending a message as you, booking. The model does not refuse it because it speaks in your name or cannot be undone, and it does not ask you to type a permission; which steps you confirm is decided by the cards in Ask and by Auto's review in Auto. Only what would harm other people is declined.
 - **Switch.** The chip beside the model under the message box reads **Ask**
   or **Auto**; its menu, "How melo works in this chat", switches the chat
-  from melo's next step (a card already waiting stays). A new chat starts in
+  from melo's next step (a card already waiting stays), and it reaches the
+  tasks the chat started that are still running: Auto to Ask at their next
+  decision, Ask to Auto at the one after the card that waits. A chore keeps
+  the mode it was saved with. A new chat starts in
   the mode of Settings → Chats and folders → **New chats start in**
   (`[approvals] mode`); the main chat follows that setting until you pick
   its mode.

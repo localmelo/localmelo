@@ -58,8 +58,11 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     because,
     block_words,
+    host_site,
     loose_keys,
     offers_grant,
+    site_host,
+    site_key_of,
     site_keys,
     step_key,
     url_site,
@@ -134,7 +137,9 @@ class ApprovalRequest:
     session grant covers only a call whose review is routine (or ``None``).
     ``outside`` is set for a file tool's call on a path outside the
     workspace (#405): the person is asked about the folder, and a tool
-    grant never covers it.
+    grant never covers it. ``person_cjk`` says whether the person's own recent
+    words have Chinese, Japanese or Korean characters (``None``: no words are
+    known): a card shows the model's reason only in that script (#576).
     """
 
     request_id: str
@@ -147,6 +152,7 @@ class ApprovalRequest:
     tier: ToolTier | None = None
     review: ActionReview | None = None
     outside: OutsideAccess | None = None
+    person_cjk: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -158,7 +164,8 @@ class ApprovalDecision:
     run reports it, and the surface's policy keeps the grant. For a folder
     outside the workspace (#405) it allows the folder for the chat, and
     ``always`` keeps the folder in the settings' extra folders as well.
-    ``origin`` says who decided (see :data:`ApprovalOrigin`).
+    ``origin`` says who decided (see :data:`ApprovalOrigin`). ``notice`` is
+    a sentence the model reads after a denial, for the person.
 
     A field of the wrong type raises ``TypeError``. ``ValueError`` is
     raised for an unknown origin, and for the pairs no policy may give:
@@ -173,6 +180,7 @@ class ApprovalDecision:
     remember: bool = False
     origin: ApprovalOrigin = "user"
     always: bool = False
+    notice: str = ""
 
     def __post_init__(self) -> None:
         for name, expected in (
@@ -181,6 +189,7 @@ class ApprovalDecision:
             ("remember", bool),
             ("origin", str),
             ("always", bool),
+            ("notice", str),
         ):
             value = getattr(self, name)
             if not isinstance(value, expected):
@@ -441,6 +450,37 @@ def never_granted(tool_name: str) -> bool:
 SITE_GRANTS: Final = ("browser:", "browser-act:")
 
 
+def whole_site(name: str) -> str | None:
+    """The site a kept answer to the question *name* covers: ``example.com`` (#577).
+
+    ``None`` for a question that is not one of :data:`SITE_GRANTS`, and for an
+    origin :func:`~localmelo.melo.contracts.review.host_site` does not read as
+    one site (the origin stays exact: a port that is not the scheme's own has
+    one written, which no plain name holds). An origin is spelt once, so a host
+    a second reading would change (a dot left at its end) is no origin's.
+    """
+    if not name.startswith(SITE_GRANTS):
+        return None
+    scheme, found, host = name.partition(":")[2].partition("://")
+    if not found or scheme not in ("http", "https") or site_host(host) != host:
+        return None
+    return host_site(host)
+
+
+def site_covers(kept: str, name: str) -> bool:
+    """Whether a kept answer to the question *kept* covers the question *name* on another host (#577).
+
+    The same kind of question, the same scheme and the same :func:`whole_site`.
+    The stored name stays as it was given: hosts are matched here, at lookup.
+    """
+    site = whole_site(name)
+    return (
+        site is not None
+        and site == whole_site(kept)
+        and name.partition("://")[0] == kept.partition("://")[0]
+    )
+
+
 def site_grant(request: ApprovalRequest) -> bool:
     """Whether a chat's grant of *request*'s question may cover it in auto mode (#465).
 
@@ -470,6 +510,12 @@ def site_grant(request: ApprovalRequest) -> bool:
 # no card ("Pay" too): Ask asks about every click of a site the person did not
 # allow themselves.
 STAYS_FOR_CHAT: Final = ("browser:",)
+# What a point question (``browser-point:<site>``) says in its ``how`` when the
+# point is typed into rather than clicked: the one value a card and the heading
+# read as typing, as the browser provider asks it (#576).
+POINT_TYPING: Final = "type into"
+# The port a web address has when it names none, by scheme.
+WEB_PORTS: Final = {"http": 80, "https": 443}
 
 
 def plain_address(url: object) -> bool:
@@ -529,8 +575,10 @@ def grant_offered(request: ApprovalRequest) -> bool:
 # The agent's also answers ``names_host(host)``: whether the user's own words
 # name a site, and ``refused_earlier(name, arguments, preview)``: the refusal
 # of a question blocked earlier in the task (#431), which a tool checks before
-# it lets a named site through; and ``granted(name)``: whether the run's chat
-# holds a grant of the question *name* (:func:`holds_grant`).
+# it asks; ``refused_unasked(name, arguments, preview)``: that, or one on a site
+# refused in this run (#577), which a tool checks before it lets something pass
+# with no question; and ``granted(name)``: whether the run's chat holds a grant
+# of the question *name* (:func:`holds_grant`).
 ToolAsk = Callable[[str, Mapping[str, Any], str], Awaitable[ApprovalDecision]]
 TOOL_ASK: ContextVar[ToolAsk | None] = ContextVar("localmelo_tool_ask", default=None)
 # Whether the run of the running tool may act (``Agent.run_task(acts=)``): what a
@@ -578,28 +626,50 @@ def find_folder_asker(policy: object) -> Any:
     return None
 
 
+def _grants_layer(policy: object, method: str) -> Any:
+    """*method* of the first layer that has it: *policy*, or one behind its ``inner`` wrappers or an Auto policy's ``asking``."""
+    layer, depth = policy, 0
+    while layer is not None and depth < 8:
+        found = getattr(layer, method, None)
+        if callable(found):
+            return found
+        below = getattr(layer, "inner", None)
+        layer, depth = (
+            below if below is not None else getattr(layer, "asking", None)
+        ), depth + 1
+    return None
+
+
 def holds_grant(policy: object, name: str) -> bool:
     """Whether *policy* holds a grant of the question *name* for the chat.
 
-    The first layer with a ``granted(name)`` method answers: *policy*, or a
-    layer behind its ``inner`` wrappers or an Auto policy's ``asking``. A
-    tool that keeps no question of its own asks this before it uses
-    something the person allowed for the chat, such as another app's
-    window (``window-read:<app>``). A question of :data:`NEVER_GRANTED`
-    is never held.
+    The first layer with a ``granted(name)`` method answers. A tool that keeps
+    no question of its own asks this before it uses something the person
+    allowed for the chat, such as another app's window
+    (``window-read:<app>``). A question of :data:`NEVER_GRANTED` is never held.
     """
-    if never_granted(name):
-        return False
-    layer, depth = policy, 0
-    while layer is not None and depth < 8:
-        check = getattr(layer, "granted", None)
-        if callable(check):
-            return check(name) is True
-        found = getattr(layer, "inner", None)
-        layer, depth = (
-            found if found is not None else getattr(layer, "asking", None)
-        ), depth + 1
-    return False
+    check = None if never_granted(name) else _grants_layer(policy, "granted")
+    return check is not None and check(name) is True
+
+
+# What the model reads when the file did not take a person's refusal (#577).
+REFUSAL_NOT_SAVED: Final = (
+    "Tell the person: this refusal holds for this run, but it could not be "
+    "saved. melo may ask again, and after a restart the answer they kept may "
+    "hold again until they take it back in Settings, under Permissions."
+)
+
+
+async def revoke_site(policy: object, key: str, by: str | None = None) -> bool:
+    """Take back what the chat or task of *policy* keeps about the site *key* (#577).
+
+    *key* is the ``ask:site:<site>`` of a refusal. A person's refusal takes
+    every answer kept there, on either scheme, so a later turn asks again and
+    no refusal has to be remembered. With *by* only that decider's go.
+    Whether it is saved: the answers stop holding here either way.
+    """
+    take_back = _grants_layer(policy, "take_back_site")
+    return True if take_back is None else await take_back(key, by)
 
 
 def find_auto(policy: object) -> AutoPolicy | None:
@@ -828,6 +898,13 @@ class AutoPolicy:
         )
 
 
+# Why a site question is refused that something other than the person would
+# have run: a kept answer, Auto, a page approved before (#577).
+SITE_REFUSED: Final = (
+    "This site was refused earlier in this task, and only the user's own answer "
+    "stands over that, so this does not run; find another way that does not "
+    "need it"
+)
 # Why a call is refused that was blocked before in the same task (#411);
 # {who} is who blocked it: "Auto mode", "the user" or "melo's rules".
 BLOCKED_EARLIER: Final = (
@@ -862,17 +939,23 @@ def question_key(name: str) -> str:
 
 
 def site_key(arguments: Mapping[str, Any]) -> str | None:
-    """The loose key of a question about a site: ``ask:site:<host>`` (#431).
+    """The loose key of a question about a site: ``ask:site:<site>`` (#431, #577).
 
     The host of the question's http(s) ``origin`` argument, in ASCII (IDNA),
-    lower case and without one final dot, so a refused site stays refused
-    whatever scheme, port or spelling a later address gives it; another host
-    (``www.`` too, or a parent domain) is another site. None when the
-    question names no such origin.
+    lower case and without one final dot, read as one site
+    (:func:`~localmelo.melo.contracts.review.site_key_of`): a refused site
+    stays refused on its other hosts and whatever scheme, port or spelling a
+    later address gives it. A host not read as one site keys itself. None when
+    the question names no such origin.
     """
     origin = arguments.get("origin")
     host = url_site(origin) if isinstance(origin, str) else None
-    return None if host is None else SITE_KEY + host
+    return None if host is None else site_key_of(host)
+
+
+def question_site_key(name: str) -> str | None:
+    """The :func:`site_key` of the question *name* (``browser:<origin>``, ``browser-act:<origin>``…), or None for one on no site."""
+    return site_key({"origin": name.partition(":")[2]})
 
 
 class EarlierBlocks:
@@ -889,8 +972,9 @@ class EarlierBlocks:
     :class:`AutoPolicy`) is not refused, nor is a call alike to it. It never
     allows anything.
 
-    A site refused earlier (a block with an ``ask:site:<host>`` key, kept
-    from a tool's own site question) stays refused for a ``shell_exec`` or
+    A site refused earlier (a block with an ``ask:site:<site>`` key, kept
+    from a tool's own site question, read again as one site when it was kept
+    under its host before #577) stays refused for a ``shell_exec`` or
     ``python_exec`` step that names an address on it (#433,
     :func:`~localmelo.melo.contracts.review.site_keys`), and one naming an
     address whose encoded host does not decode is refused while any site is.
@@ -904,7 +988,13 @@ class EarlierBlocks:
     ) -> None:
         self.inner = inner
         self._blocks = dict(blocks)
-        self._loose = {key: frozenset(keys) for key, keys in (loose or {}).items()}
+        self._loose = {
+            key: frozenset(
+                site_key_of(k[len(SITE_KEY) :]) if k.startswith(SITE_KEY) else k
+                for k in keys
+            )
+            for key, keys in (loose or {}).items()
+        }
 
     def _lifted(self, key: str) -> bool:
         auto = find_auto(self.inner)
@@ -996,6 +1086,19 @@ class DenyAllPolicy:
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         return ApprovalDecision(False, self.reason, origin="policy")
+
+
+def is_refusal(decision: ApprovalDecision) -> bool:
+    """Whether *decision* refuses the step: a person's Deny, an auto block, a policy's refusal.
+
+    Not a question nobody answered, a person's message that ended the wait, or
+    a withdrawn one: nobody said no to the step.
+    """
+    return (
+        not decision.allow
+        and decision.origin in ("user", "auto", "policy")
+        and not isinstance(decision, Withdrawal)
+    )
 
 
 def denial_text(decision: ApprovalDecision, review: ActionReview | None = None) -> str:

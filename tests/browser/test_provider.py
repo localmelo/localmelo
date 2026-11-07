@@ -26,7 +26,7 @@ from localmelo.support.browser.driver import BrowserError, Element, PageMovedErr
 from localmelo.support.browser.pagescript import wait_probe
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
 from localmelo.support.browser.sites import origin_of
-from localmelo.tests.browser.fakes import FakeDriver, link, page
+from localmelo.tests.browser.fakes import FakeDns, FakeDriver, link, page
 
 HOME = "https://example.com/"
 NEWS = "https://example.com/news"
@@ -218,6 +218,35 @@ async def test_following_a_link_to_the_same_site_asks_nobody() -> None:
         out = await run(tools, "browser_follow", ref="e1")
     assert "Today's news." in out.text and len(asks.asked) == 1
     assert "id=s2" in out.text and '[e3 link "Home" -> /]' in out.text
+
+
+async def test_following_a_link_to_another_host_of_the_site_asks_that_host() -> None:
+    # What opened the page may be an Allow once: only a kept answer covers a site.
+    login = "https://login.example.com/"
+    asks = Asks()
+    tools = await tools_of(
+        FakeDriver(page(HOME, "Welcome.", link("Sign in", login)), page(login, "In."))
+    )
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_follow", ref="e1")
+    assert [n for n, _, _ in asks.asked] == [
+        "browser:https://example.com",
+        "browser:https://login.example.com",
+    ]
+
+
+async def test_every_host_of_a_site_is_checked_before_its_question(
+    dns: FakeDns,
+) -> None:
+    # No answer about the site reaches past this: the host is refused unasked.
+    dns.answers["intra.example.com"] = ["10.0.0.5"]
+    asks = Asks()
+    tools = await tools_of(world())
+    with asking(asks):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_open", url="https://intra.example.com/")
+    assert out.is_error and len(asks.asked) == 1
 
 
 async def test_following_a_link_to_another_site_asks_that_site() -> None:
