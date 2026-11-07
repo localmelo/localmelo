@@ -20,7 +20,15 @@ from localmelo.support.sessions.picture_input import MAX_PICTURES, MAX_UPLOAD_BY
 
 from .test_ask_owner import Reply, answer, ask_console, held, until
 from .test_pictures_in import FakeVision, _request_pictures, _stage, _upload, png
-from .test_turn_notes import STEP, _events, _note, _queued, _seen, _start
+from .test_turn_notes import (
+    STEP,
+    _events,
+    _given_back,
+    _note,
+    _queued,
+    _seen,
+    _start,
+)
 from .test_turn_writes import _wait_turn
 
 
@@ -197,7 +205,7 @@ async def test_a_model_found_text_only_before_the_note_is_read_is_told_not_sent_
         assert "the person can" in words
 
 
-async def test_a_note_with_pictures_after_the_last_step_runs_as_the_next_turn_with_them(
+async def test_a_note_its_turn_ended_without_goes_back_with_its_pictures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sent = png(40, 20)
@@ -213,132 +221,74 @@ async def test_a_note_with_pictures_after_the_last_step_runs_as_the_next_turn_wi
         # The only step is under way: nothing will read the note before the turn ends.
         response = await _note(client, turn_id, "and this", images=[picture])
         assert response.status_code == 202, response.text
-        release.set()
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return len(turns) == 2 and turns[1].status != "running"
-
-        await until(ran)
-        first, second = await console.store.list_turns(main_id)
-        assert first.status == "completed"
-        assert (second.user_text, second.typed_text) == ("and this", "and this")
-        # The next turn keeps the picture as a message does, and its run was sent it.
-        kept = await console.store.turn_images(main_id, 2)
-        assert [i.mime_type for i in kept] == ["image/png"]
-        assert _request_pictures(models["main"].requests[1]) == [sent]
-        await console.asks.settle()
-        assert await _queued(console, main_id) == []
-
-
-async def test_a_picture_note_that_becomes_a_message_has_its_marker_when_it_has_no_words(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    release = asyncio.Event()
-    main: list[Reply] = [held(release, answer("All done.")), answer("I see it.")]
-    async with ask_console(
-        tmp_path, monkeypatch, main=main, vision=FakeVision(True), run=False
-    ) as (console, client, models):
-        main_id = str(console.main_id)
-        turn_id = await _start(client, console, "go")
-        await until(lambda: len(models["main"].requests) == 1)
-        picture = await _stage(client)
-        assert (await _note(client, turn_id, "", images=[picture])).status_code == 202
-        release.set()
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return len(turns) == 2 and turns[1].status != "running"
-
-        await until(ran)
-        _, second = await console.store.list_turns(main_id)
-        assert second.user_text == "[1 picture]"
-        assert len(await console.store.turn_images(main_id, 2)) == 1
-
-
-async def test_a_picture_note_unread_before_a_restart_runs_after_it_with_its_picture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    sent = png(40, 20)
-    never = asyncio.Event()
-    async with ask_console(
-        tmp_path,
-        monkeypatch,
-        main=[held(never, answer("stalled"))],
-        vision=FakeVision(True),
-        run=False,
-    ) as (console, client, models):
-        main_id = str(console.main_id)
-        turn_id = await _start(client, console, "go")
-        await until(lambda: len(models["main"].requests) == 1)
-        picture = await _stage(client, sent)
-        assert (
-            await _note(client, turn_id, "after the restart", images=[picture])
-        ).status_code == 202
-        info = await console.store.get_session(main_id)
-        assert info is not None
-        [queued] = info.meta["queued"]
-        assert queued["typed"] == "after the restart"
-        assert [i["mime_type"] for i in queued["images"]] == ["image/png"]
-    async with ask_console(
-        tmp_path,
-        monkeypatch,
-        main=[answer("Hi again.")],
-        vision=FakeVision(True),
-        run=False,
-    ) as (console, client, models):
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return turns[-1].user_text == "after the restart"
-
-        await until(ran)
-        await _wait_turn(client, main_id)
-        assert _request_pictures(models["main"].requests[0]) == [sent]
-        assert len(await console.store.turn_images(main_id, 2)) == 1
-        info = await console.store.get_session(main_id)
-        assert info is not None and info.meta.get("queued") is None
-
-
-async def test_stop_hands_the_pictures_of_unread_notes_back_to_be_sent_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    sent = png(40, 20)
-    never = asyncio.Event()
-    async with ask_console(
-        tmp_path,
-        monkeypatch,
-        main=[held(never, answer("stalled")), answer("Seen again.")],
-        vision=FakeVision(True),
-        run=False,
-    ) as (console, client, models):
-        main_id = str(console.main_id)
-        turn_id = await _start(client, console, "go")
-        await until(lambda: len(models["main"].requests) == 1)
-        picture = await _stage(client, sent)
-        await _note(client, turn_id, "not that way", images=[picture])
         await _note(client, turn_id, "only words")
-        stopped = await client.post(f"/api/turns/{turn_id}/cancel")
-        assert stopped.status_code == 202
-        back = stopped.json()["unread_notes"]
-        assert [n["text"] for n in back] == ["not that way", "only words"]
+        release.set()
+        await _wait_turn(client, main_id)
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
+        back = await _given_back(client, main_id)
+        assert [e["typed"] for e in back] == ["and this", "only words"]
         assert "images" not in back[1]
         [given] = back[0]["images"]
         # A staged picture again: the composer shows it and sends it with a message.
         assert given["mime_type"] == "image/png" and given["id"] != picture
         shown = await client.get(f"/api/uploads/{given['id']}")
         assert shown.status_code == 200 and shown.content == sent
-        await _wait_turn(client, main_id)
-        await console.asks.settle()
-        assert len(await console.store.list_turns(main_id)) == 1
-        assert await _queued(console, main_id) == []
         sent_again = await client.post(
             f"/api/sessions/{main_id}/turns",
-            json={"text": "not that way", "images": [given["id"]]},
+            json={"text": "and this", "images": [given["id"]]},
         )
         assert sent_again.status_code == 202, sent_again.text
         await _wait_turn(client, main_id)
         assert _request_pictures(models["main"].requests[1]) == [sent]
+
+
+async def test_a_note_of_a_picture_alone_goes_back_with_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    async with ask_console(
+        tmp_path, monkeypatch, main=[held(release, answer("All done."))],
+        vision=FakeVision(True), run=False,
+    ) as (console, client, models):  # fmt: skip
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        picture = await _stage(client)
+        assert (await _note(client, turn_id, "", images=[picture])).status_code == 202
+        release.set()
+        await _wait_turn(client, main_id)
+        await until(lambda: _given_back(client, main_id))
+        [back] = await _given_back(client, main_id)
+        assert back["typed"] == "" and len(back["images"]) == 1
+
+
+async def test_a_picture_note_a_restart_finds_starts_nothing_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    async with ask_console(
+        tmp_path, monkeypatch, main=[held(never, answer("stalled"))],
+        vision=FakeVision(True), run=False,
+    ) as (console, client, models):  # fmt: skip
+        main_id = str(console.main_id)
+        turn_id = await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        picture = await _stage(client, png(40, 20))
+        assert (
+            await _note(client, turn_id, "after the restart", images=[picture])
+        ).status_code == 202
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Hi again.")], vision=FakeVision(True),
+        run=False,
+    ) as (console, client, models):  # fmt: skip
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert models["main"].requests == []
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
 
 
 async def test_a_repeated_send_of_a_picture_note_is_one_note(
@@ -468,13 +418,15 @@ def _held_blobs(
     return entered, go, came
 
 
-async def test_a_picture_note_stop_caught_on_its_way_starts_nothing_and_stays_the_persons(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("later_stop", [False, True])
+async def test_a_picture_note_its_turn_ended_without_on_the_way_starts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, later_stop: bool
 ) -> None:
-    never = asyncio.Event()
+    """However long the store takes, and whatever turns come and go meanwhile."""
+    never, later = asyncio.Event(), asyncio.Event()
     async with ask_console(
-        tmp_path, monkeypatch, main=[held(never, answer("x"))], vision=FakeVision(True),
-        run=False,
+        tmp_path, monkeypatch, vision=FakeVision(True), run=False,
+        main=[held(never, answer("x")), held(later, answer("y"))],
     ) as (console, client, models):  # fmt: skip
         main_id = str(console.main_id)
         turn_id = await _start(client, console, "go")
@@ -487,13 +439,20 @@ async def test_a_picture_note_stop_caught_on_its_way_starts_nothing_and_stays_th
         await entered.wait()
         assert (await client.post(f"/api/turns/{turn_id}/cancel")).status_code == 202
         await _wait_turn(client, main_id)
+        turns = 1
+        if later_stop:
+            second = await _start(client, console, "something else")
+            await until(lambda: len(models["main"].requests) == 2)
+            assert (await client.post(f"/api/turns/{second}/cancel")).status_code == 202
+            await _wait_turn(client, main_id)
+            turns = 2
         go.set()
         answered = await sending
         assert answered.status_code == 409, answered.text
-        assert answered.json()["error"]["code"] == "turn_stopped"
+        assert answered.json()["error"]["code"] == "turn_not_running"
         await console.asks.settle()
         await asyncio.sleep(0.1)
-        assert len(await console.store.list_turns(main_id)) == 1
+        assert len(await console.store.list_turns(main_id)) == turns
         assert await _queued(console, main_id) == []
         # The picture is still staged: the composer sends it again with a message.
         assert console.pictures.resolve([picture])

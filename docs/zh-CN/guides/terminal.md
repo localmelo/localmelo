@@ -108,7 +108,7 @@ Started the gateway in the background on port 8401; it keeps running until melo 
 
 | 按键 | 作用 |
 |---|---|
-| Enter | 发送消息。主对话或侧边对话的轮次运行期间，这一行作为留言发给 melo，它在下一步读到，顺序与你输入的一样，网关收到后才显示；没有被接收的留言，以及停止时未读的留言，会回到输入框。在本地对话里（`-u`、`-c`、`-r`、`--yolo`），它加入队列，在该轮完成时发送。网页在你手里时（见[接管](browsing.md#taking-over-melos-browser)），在空行上按 Enter 就是“完成”。 |
+| Enter | 发送消息。主对话或侧边对话的轮次运行期间，这一行作为留言发给 melo，它在下一步读到，顺序与你输入的一样，网关收到后才显示，最多等待 20 条；错过这一轮的留言会回到输入框，不会开始任何工作。在本地对话里（`-u`、`-c`、`-r`、`--yolo`），它加入队列，在该轮完成时发送。网页在你手里时（见[接管](browsing.md#taking-over-melos-browser)），在空行上按 Enter 就是“完成”。 |
 | Alt+Enter、Ctrl+J 或 `\` 后按 Enter | 在消息中换行。 |
 | Esc | 关闭补全菜单；否则停止当前轮次。 |
 | Ctrl+C | 依次尝试关闭菜单、清除草稿、清除排队消息、停止当前轮次；2 秒内再次按 Ctrl+C 则退出。 |

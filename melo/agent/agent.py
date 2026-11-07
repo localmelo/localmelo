@@ -2078,12 +2078,12 @@ class Agent(_RecallLoop, _NotesLoop):
         marks_slot = TOOL_MARKS.set(marks) if marks is not None else None
         gate = None
         ask_slot = None
-        acts_slot = None
         # The questions the call's tool asked itself that were refused (#431).
         refused: list[dict[str, Any]] = []
         # What the tool's own check refused (refuse_call), for refused_steps.
         refusals: list[str] = []
         refusal_slot = CALL_REFUSED.set(refusals)
+        acts_slot = RUN_ACTS.set(run.acts)
         run.call_refused = False
         switch = self._auto_confinement
         if switch is not None:
@@ -2110,7 +2110,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 confinement=switch,
                 asks_itself=call.tool_name in self._self_asking_names,
             )
-            acts_slot = RUN_ACTS.set(run.acts)
             ask_slot = TOOL_ASK.set(
                 _ToolAsk(
                     run.approval,
@@ -2190,8 +2189,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 TOOL_MARKS.reset(marks_slot)
             if ask_slot is not None:
                 TOOL_ASK.reset(ask_slot)
-            if acts_slot is not None:
-                RUN_ACTS.reset(acts_slot)
+            RUN_ACTS.reset(acts_slot)
         run.call_refused = self._refused_free(
             call, result, outcome, gate, refusals, refused, run
         )
@@ -3019,7 +3017,7 @@ class Agent(_RecallLoop, _NotesLoop):
                 # An eviction took the latest reflection: it goes back once, at
                 # the end, where the eviction has already changed the prefix.
                 self.hippo.working.append(reflection)
-            inserted, pending = await self._read_inbox(run)
+            inserted, pending = self._read_inbox(run)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, run=run
@@ -3187,14 +3185,13 @@ class Agent(_RecallLoop, _NotesLoop):
         run.events.budget_used()
         return budget, "budget"
 
-    async def _read_inbox(
+    def _read_inbox(
         self, run: _RunState
     ) -> tuple[Message | None, list[tuple[int, str]]]:
         """The notes the user sent during the run, read as one user message.
 
         The message goes into working memory and is pinned. The notes count
         as accepted only once a request carries them (:meth:`_accept_inbox`).
-        An inbox that stores what is read (``claim``) has done so first.
         Returns ``(None, [])`` when there are none.
         """
         pending = run.inbox.poll() if run.inbox is not None else []
@@ -3202,9 +3199,6 @@ class Agent(_RecallLoop, _NotesLoop):
             return None, []
         assert run.inbox is not None
         pending, shown = _read_notes(run.inbox, pending)
-        claim = getattr(run.inbox, "claim", None)
-        if callable(claim) and not await claim([offset for offset, _ in pending]):
-            return None, []
         if run.from_person:
             pending = [(offset, self.hide_passwords(text)) for offset, text in pending]
         inserted = Message(

@@ -96,7 +96,7 @@ When the model is not the saved default, a row after the folder gives the server
 
 | Key | What it does |
 |---|---|
-| Enter | Send the message. During a turn of the main chat or a side chat, the line goes to melo as a note it reads at its next step, in the order you typed, and shows once the gateway has it; a note it did not take, and unread notes on Stop, come back to the input box. In the local chat (`-u`, `-c`, `-r`, `--yolo`) it is queued and sent when the turn completes. While you have a page of melo's ([taking over](browsing.md#taking-over-melos-browser)), Enter on an empty line is Done. |
+| Enter | Send the message. During a turn of the main chat or a side chat, the line goes to melo as a note it reads at its next step, in the order you typed, and shows once the gateway has it, up to 20 waiting; a note that misses its turn comes back to the input box and starts nothing. In the local chat (`-u`, `-c`, `-r`, `--yolo`) it is queued and sent when the turn completes. While you have a page of melo's ([taking over](browsing.md#taking-over-melos-browser)), Enter on an empty line is Done. |
 | Alt+Enter, Ctrl+J, or `\` then Enter | A new line in the message. |
 | Esc | Close the completion menu; otherwise stop the turn. |
 | Ctrl+C | Close the menu, else clear the draft, else clear a queued message, else stop the turn; a second Ctrl+C within 2 seconds quits. |

@@ -408,7 +408,6 @@ class SessionRunner:
         # the id before the first model call).
         self._create_scope_key = create_scope_key
         self._active: _Turn | None = None
-        self._stopped_turn = ""  # the newest turn the person stopped
         self._last: _Turn | None = None
         # A begin_turn under way, before its turn exists.
         self._begin: asyncio.Future[_Turn] | None = None
@@ -1482,11 +1481,7 @@ class SessionRunner:
         turn = self._active
         if turn is None or (turn_id is not None and turn.turn.id != turn_id):
             return False
-        if not self._cancel_turn(turn, reason, cause):
-            return False
-        if cause == "user_stop":
-            self._stopped_turn = turn.turn.id
-        return True
+        return self._cancel_turn(turn, reason, cause)
 
     def cancel_for_park(self, turn_id: str) -> bool:
         """Cancel exactly this turn for park only if it is not already stopping.
@@ -1675,10 +1670,6 @@ class SessionRunner:
             and not turn.closing
             and not self.run_ended
         )
-
-    def stopped(self, turn_id: str) -> bool:
-        """Whether the person stopped *turn_id*, the newest turn stopped, also once it ended."""
-        return self._stopped_turn == turn_id
 
     def running_calls(self, turn_id: str) -> frozenset[str]:
         """The ids of the calls turn *turn_id* has started and not finished.

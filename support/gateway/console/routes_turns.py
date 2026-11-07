@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
+from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
@@ -55,7 +56,6 @@ from localmelo.support.sessions.submissions import (
     text_sha256,
 )
 
-from .asks import MAX_NOTE_CHARS
 from .bodies import Body
 from .cards import card_json
 from .errors import ApiError
@@ -674,23 +674,19 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "turn_not_running",
                 t("errors.turnNotRunning"),
             )
-        # Words added to the turn that its run never read do not start another
-        # turn after a Stop: they go back to the composer.
-        unread = await console.asks.drop_notes(entry.session_id, turn_id)
-        content: dict[str, Any] = {"turn_id": turn_id, "cancelling": True}
-        if unread:
-            content["unread_notes"] = unread
-        return JSONResponse(status_code=202, content=content)
+        return JSONResponse(
+            status_code=202, content={"turn_id": turn_id, "cancelling": True}
+        )
 
     @app.post("/api/turns/{turn_id}/notes")
     async def add_note(turn_id: str, body: NoteRequest) -> JSONResponse:
         """Add words, and pictures, to a turn that runs: its run reads them at its next step (202).
 
-        If the turn ends before another step, they run as the chat's next turn.
-        A note may carry pictures on the terms of a message: the same kinds and
-        limits, and no words are needed with a picture. 409 ``turn_not_running``
-        when the turn is not running, or is being stopped; a client then sends
-        the words as a message.
+        If the turn ends before another step, they go back to the person and
+        start nothing. A note may carry pictures on the terms of a message: the
+        same kinds and limits, and no words are needed with a picture. 409
+        ``turn_not_running`` when the turn is not running, or is being stopped;
+        the words are the person's again.
         """
         console.require_store()
         key = _key(body.client_request_id)

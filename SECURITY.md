@@ -121,8 +121,8 @@ those tools can do.
   only tools that read, public web reads included, and no browser, also not
   through a search. That is a check on the run, made by code: the other tools
   are not offered and a call of one is refused, whatever the prompt or a page
-  says. A note a run may have read is never run again after a restart, and
-  words on their way when you press Stop start nothing.
+  says. A note that misses its turn never starts work by itself, after a Stop
+  or a restart included: it goes back to you, and you press Send.
 - **A chat's answer to a task never approves.** When a task asks its chat
   for help, the chat answers in a turn of its own (`origin` `ask_owner`).
   That turn has no tool that grants an approval, and the question and the

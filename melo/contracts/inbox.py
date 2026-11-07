@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Final, Protocol
 
 from localmelo.melo.schema import ImagePart
 
 
 class InboxError(ValueError):
     """The inbox cannot be read safely as an append-only file."""
+
+
+# How many notes a turn takes, and the length of one: the gateway and the terminal both hold to these.
+MAX_NOTES: Final = 20
+MAX_NOTE_CHARS: Final = 8_000
 
 
 class InboxSource(Protocol):
@@ -26,17 +31,6 @@ class InboxSource(Protocol):
     def poll(self) -> list[tuple[int, str]]: ...
 
     def accept(self, offset: int) -> None: ...
-
-
-class ClaimingInbox(InboxSource, Protocol):
-    """An inbox that stores what is being read before a request carries it.
-
-    ``claim(offsets)`` answers once that is stored, ``False`` when it could not
-    be: the run then leaves those messages unread this step. So what was read
-    is never taken for unread after a restart, whatever happens after it.
-    """
-
-    async def claim(self, offsets: Sequence[int]) -> bool: ...
 
 
 class PictureInbox(InboxSource, Protocol):

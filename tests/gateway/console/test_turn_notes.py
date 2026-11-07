@@ -14,13 +14,10 @@ from typing import Any
 import httpx
 import pytest
 
+from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console, asks
-from localmelo.support.gateway.console.asks import (
-    FORGET_TRIES,
-    MAX_NOTE_CHARS,
-    MAX_QUEUED,
-)
+from localmelo.support.gateway.console.asks import FORGET_TRIES, MAX_QUEUED
 from localmelo.support.gateway.console.notes import NOTE_MARK
 from localmelo.support.sessions.store import SessionStoreError
 
@@ -59,6 +56,12 @@ async def _note(
 async def _events(console: Console, turn: int) -> list[dict[str, Any]]:
     found = await console.store.list_events(str(console.main_id), turns=(turn, turn))
     return [{"type": e.event["type"], **e.event["data"]} for e in found]
+
+
+async def _given_back(client: httpx.AsyncClient, chat: str) -> list[dict[str, Any]]:
+    """The chat's rows of notes that went back to the person, oldest first."""
+    page = (await client.get(f"/api/sessions/{chat}/turns")).json()
+    return [echo for echo in page.get("echoes", []) if echo.get("note_back")]
 
 
 def _seen(request: list[Message]) -> str:
@@ -187,11 +190,11 @@ async def test_send_with_a_file_while_a_turn_runs_waits_for_the_next_turn(
         assert len(await console.store.list_turns(chat)) == 2
 
 
-async def test_a_note_after_the_last_step_becomes_the_next_turn(
+async def test_a_note_its_turn_ended_without_goes_back_and_starts_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = asyncio.Event()
-    main: list[Reply] = [held(release, answer("All done.")), answer("Got your note.")]
+    main: list[Reply] = [held(release, answer("All done."))]
     async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -203,30 +206,18 @@ async def test_a_note_after_the_last_step_becomes_the_next_turn(
         # The only step is under way: nothing will read the note before the turn ends.
         assert (await _note(client, turn_id, "one more thing")).status_code == 202
         release.set()
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return len(turns) == 2 and turns[1].status != "running"
-
-        await until(ran)
-        first, second = await console.store.list_turns(main_id)
-        assert first.user_text == "start the job" and first.status == "completed"
-        # The note is the person's message of the next turn, as typed.
-        assert (second.user_text, second.typed_text, second.origin) == (
-            "one more thing",
-            "one more thing",
-            "",
-        )
-        assert [e["type"] for e in await _events(console, 1)].count(
-            "inbox.accepted"
-        ) == 0
-        assert "turn.note" in [e["type"] for e in await _events(console, 1)]
+        await _wait_turn(client, main_id)
+        await until(lambda: _given_back(client, main_id))
         await console.asks.settle()
-        info = await console.store.get_session(main_id)
-        assert info is not None and info.meta.get("queued") is None
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert [e["typed"] for e in await _given_back(client, main_id)] == [
+            "one more thing"
+        ]
+        assert "inbox.accepted" not in [e["type"] for e in await _events(console, 1)]
+        assert await _queued(console, main_id) == []
 
 
-async def test_notes_keep_their_order_whether_they_are_read_or_become_turns(
+async def test_notes_are_read_in_order_and_the_ones_left_go_back_in_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     first_release, second_release = asyncio.Event(), asyncio.Event()
@@ -234,8 +225,6 @@ async def test_notes_keep_their_order_whether_they_are_read_or_become_turns(
         held(first_release, STEP),
         # Both notes arrive before the second request: it carries them in order.
         held(second_release, answer("Read both.")),
-        answer("Third."),
-        answer("Fourth."),
     ]
     async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
@@ -252,18 +241,18 @@ async def test_notes_keep_their_order_whether_they_are_read_or_become_turns(
         seen = _seen(models["main"].requests[1])
         assert seen.index("note a") < seen.index("note b")
         assert seen.count(NOTE_MARK) == 2
-        # Two more arrive after that last step: they run as two turns, in order.
+        # Two more arrive after that last step: they miss the turn.
         for text in ("note c", "note d"):
             assert (await _note(client, turn_id, text)).status_code == 202
         second_release.set()
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return len(turns) == 3 and all(t.status != "running" for t in turns)
-
-        await until(ran)
-        turns = await console.store.list_turns(main_id)
-        assert [t.user_text for t in turns] == ["go", "note c", "note d"]
+        await _wait_turn(client, main_id)
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert [e["typed"] for e in await _given_back(client, main_id)] == [
+            "note c",
+            "note d",
+        ]
+        assert len(await console.store.list_turns(main_id)) == 1
 
 
 async def test_a_repeated_send_of_a_note_is_one_note_also_after_it_was_read(
@@ -295,7 +284,7 @@ async def test_a_repeated_send_of_a_note_is_one_note_also_after_it_was_read(
         assert len(await console.store.list_turns(str(console.main_id))) == 1
 
 
-async def test_a_note_unread_before_a_restart_runs_after_it(
+async def test_a_note_a_restart_finds_starts_nothing_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     never = asyncio.Event()
@@ -306,21 +295,17 @@ async def test_a_note_unread_before_a_restart_runs_after_it(
         turn_id = await _start(client, console, "go")
         await until(lambda: len(models["main"].requests) == 1)
         assert (await _note(client, turn_id, "after the restart")).status_code == 202
-        info = await console.store.get_session(main_id)
-        assert info is not None
-        assert [q["typed"] for q in info.meta["queued"]] == ["after the restart"]
+        assert await _queued(console, main_id) == ["after the restart"]
     async with ask_console(
         tmp_path, monkeypatch, main=[answer("Hi again.")], run=False
-    ) as (console, client, _):
-
-        async def ran() -> bool:
-            turns = await console.store.list_turns(main_id)
-            return turns[-1].user_text == "after the restart"
-
-        await until(ran)
-        await _wait_turn(client, main_id)
-        info = await console.store.get_session(main_id)
-        assert info is not None and info.meta.get("queued") is None
+    ) as (console, client, models):
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert models["main"].requests == []
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
+        [told] = await _given_back(client, main_id)
+        assert told["typed"] == "after the restart"
 
 
 async def test_a_note_the_run_read_does_not_run_again_after_a_restart(
@@ -355,23 +340,22 @@ async def test_a_note_the_run_read_does_not_run_again_after_a_restart(
     async with ask_console(
         tmp_path, monkeypatch, main=[answer("Deleted it again.")], run=False
     ) as (console, client, models):
+        await until(lambda: _given_back(client, main_id))
         await console.asks.settle()
-        await asyncio.sleep(0.2)
         assert models["main"].requests == []
         assert len(await console.store.list_turns(main_id)) == 1
         assert await _queued(console, main_id) == []
-        page = (await client.get(f"/api/sessions/{main_id}/turns")).json()
-        [told] = [e for e in page["echoes"] if e["typed"] == "delete the copy"]
-        assert told["echo"] == "failed" and "may have read" in told["line"]
+        [told] = await _given_back(client, main_id)
+        assert told["typed"] == "delete the copy" and told["echo"] == "failed"
 
 
 @pytest.mark.parametrize("ending", ["stop", "finish"])
-async def test_a_note_caught_on_its_way_to_the_store_by_the_end_of_its_turn(
+async def test_a_note_its_turn_ended_without_on_the_way_to_the_store_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
 ) -> None:
-    """Words on their way when Stop comes are the person's once, and start nothing; a turn that only ended takes them next."""
+    """Words on their way when the turn ends stay the sender's: however it ended, nothing runs."""
     release = asyncio.Event()
-    main: list[Reply] = [held(release, answer("First.")), answer("Second.")]
+    main: list[Reply] = [held(release, answer("First."))]
     async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -395,34 +379,28 @@ async def test_a_note_caught_on_its_way_to_the_store_by_the_end_of_its_turn(
         monkeypatch.setattr(console.store, "update_session", slow)
         sending = asyncio.create_task(_note(client, turn_id, "on its way"))
         await entered.wait()
-        given: list[str] = []
         if ending == "stop":
-            stopped = await client.post(f"/api/turns/{turn_id}/cancel")
-            assert stopped.status_code == 202
-            given = [n["text"] for n in stopped.json().get("unread_notes", [])]
+            assert (
+                await client.post(f"/api/turns/{turn_id}/cancel")
+            ).status_code == 202
         else:
             release.set()
         await _wait_turn(client, main_id)
         go.set()
         answered = await sending
+        assert answered.status_code == 409, answered.text
+        assert answered.json()["error"]["code"] == "turn_not_running"
         await console.asks.settle()
         await asyncio.sleep(0.1)
-        turns = await console.store.list_turns(main_id)
-        if ending == "stop":
-            refused = answered.status_code == 409
-            assert refused != bool(given), (answered.text, given)
-            assert len(turns) == 1
-            assert await _queued(console, main_id) == []
-        else:
-            assert answered.json()["note"]["state"] == "next"
-            assert [turn.user_text for turn in turns] == ["go", "on its way"]
+        assert len(await console.store.list_turns(main_id)) == 1
+        assert await _queued(console, main_id) == []
 
 
-async def test_a_note_that_cannot_be_stored_as_read_stays_unread_and_runs_next(
+async def test_a_row_stop_could_not_remove_starts_nothing_after_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    release = asyncio.Event()
-    main: list[Reply] = [held(release, answer("First.")), answer("Second.")]
+    never = asyncio.Event()
+    main: list[Reply] = [held(never, answer("x"))]
     async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -431,28 +409,40 @@ async def test_a_note_that_cannot_be_stored_as_read_stays_unread_and_runs_next(
         main_id = str(console.main_id)
         turn_id = await _start(client, console, "go")
         await until(lambda: len(models["main"].requests) == 1)
-        assert (await _note(client, turn_id, "kept")).status_code == 202
-        update = console.store.update_session
+        update, entered, go = (
+            console.store.update_session,
+            asyncio.Event(),
+            asyncio.Event(),
+        )
 
-        async def full(session_id: str, **kwargs: Any) -> Any:
-            rows = (kwargs.get("meta_update") or {}).get("queued") or []
-            if any(row.get("reading") for row in rows):
+        async def stuck(session_id: str, **kwargs: Any) -> Any:
+            meta = kwargs.get("meta_update") or {}
+            if "queued" in meta and not meta["queued"]:
                 raise SessionStoreError("disk full")
+            if meta.get("queued") and not entered.is_set():
+                entered.set()
+                await go.wait()
             return await update(session_id, **kwargs)
 
-        monkeypatch.setattr(console.store, "update_session", full)
-        assert not await console.asks.notes_reading(
-            main_id, [n for n, _ in console.asks.unread_notes(main_id)]
-        )
-        assert [item.reading for item in console.asks._people[main_id]] == [False]
-        release.set()
-        await until(lambda: len(models["main"].requests) == 2)
-        assert NOTE_MARK not in _seen(models["main"].requests[1])
-        assert "kept" in _seen(models["main"].requests[1])
-        assert len(await console.store.list_turns(main_id)) == 2
+        monkeypatch.setattr(console.store, "update_session", stuck)
+        sending = asyncio.create_task(_note(client, turn_id, "half way"))
+        await entered.wait()
+        assert (await client.post(f"/api/turns/{turn_id}/cancel")).status_code == 202
+        await _wait_turn(client, main_id)
+        go.set()
+        await sending
+        await console.asks.settle()
+        assert await _queued(console, main_id) == ["half way"]
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Ran it.")], run=False
+    ) as (console, client, models):
+        await until(lambda: _given_back(client, main_id))
+        await console.asks.settle()
+        assert models["main"].requests == []
+        assert len(await console.store.list_turns(main_id)) == 1
 
 
-async def test_stop_hands_the_unread_notes_back_and_starts_no_turn(
+async def test_stop_gives_the_unread_notes_back_and_starts_no_turn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     never = asyncio.Event()
@@ -465,7 +455,6 @@ async def test_stop_hands_the_unread_notes_back_and_starts_no_turn(
         await _note(client, turn_id, "wait, not that")
         stopped = await client.post(f"/api/turns/{turn_id}/cancel")
         assert stopped.status_code == 202
-        assert [n["text"] for n in stopped.json()["unread_notes"]] == ["wait, not that"]
         # A turn being stopped takes no more words.
         late = await _note(client, turn_id, "too late")
         assert (
@@ -473,11 +462,13 @@ async def test_stop_hands_the_unread_notes_back_and_starts_no_turn(
             and late.json()["error"]["code"] == "turn_not_running"
         )
         await _wait_turn(client, main_id)
+        await until(lambda: _given_back(client, main_id))
         await console.asks.settle()
-        await asyncio.sleep(0.1)
+        assert [e["typed"] for e in await _given_back(client, main_id)] == [
+            "wait, not that"
+        ]
         assert len(await console.store.list_turns(main_id)) == 1
-        info = await console.store.get_session(main_id)
-        assert info is not None and info.meta.get("queued") is None
+        assert await _queued(console, main_id) == []
 
 
 async def test_a_note_is_refused_for_a_turn_that_is_not_running_or_a_bad_text(
@@ -733,3 +724,37 @@ async def test_what_waits_behind_a_turn_is_bounded_in_size_too(
         assert (await _post_turn(client, chat, f"b{long}")).status_code == 200
         over = await _post_turn(client, chat, f"c{long}")
         assert over.status_code == 409 and len(await _queued(console, chat)) == 2
+
+
+async def test_messages_on_their_way_to_the_queue_count_for_its_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    never = asyncio.Event()
+    main: list[Reply] = [held(never, answer("stalled"))]
+    monkeypatch.setattr(asks, "MAX_QUEUED_CHARS", 20_000)
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        await _start(client, console, "go")
+        await until(lambda: len(models["main"].requests) == 1)
+        front = console.front_for(chat)
+        echo, entered, go = front.echo, asyncio.Event(), asyncio.Event()
+
+        async def slow(data: dict[str, Any]) -> dict[str, Any]:
+            if data.get("echo") == "queued" and not entered.is_set():
+                entered.set()
+                await go.wait()
+            return await echo(data)
+
+        monkeypatch.setattr(front, "echo", slow)
+        first = asyncio.create_task(_post_turn(client, chat, "a" * 12_000))
+        await entered.wait()
+        second = await _post_turn(client, chat, "b" * 12_000)
+        go.set()
+        assert (await first).status_code == 200
+        assert second.status_code == 409, second.text
+        assert second.json()["error"]["code"] == "chat_queue_full"
+        assert await _queued(console, chat) == ["a" * 12_000]
