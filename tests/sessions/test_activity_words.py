@@ -396,6 +396,26 @@ _SITE = "https://www.example.com"
             "Click or choose on example.com",
             "在 example.com 上点击或选择",
         ),
+        # A point question asked for typing says typing; only the built-in
+        # action says so, any other word reads as a click.
+        (
+            f"browser-point:{_SITE}",
+            {"how": "type into"},
+            "Type into example.com",
+            "在 example.com 中输入",
+        ),
+        (
+            f"browser-point:{_SITE}",
+            {"how": "click"},
+            "Click or choose on example.com",
+            "在 example.com 上点击或选择",
+        ),
+        (
+            f"browser-point:{_SITE}",
+            {"how": "delete everything"},
+            "Click or choose on example.com",
+            "在 example.com 上点击或选择",
+        ),
         (f"browser-type:{_SITE}", {}, "Type into example.com", "在 example.com 中输入"),
         (
             f"browser-submit:{_SITE}",
@@ -423,6 +443,22 @@ _SITE = "https://www.example.com"
             "Open localhost:3000",
             "打开 localhost:3000",
         ),
+        # A port is dropped only where it is its scheme's own: the other
+        # scheme's port is another server.
+        (
+            "browser:https://localhost:80",
+            {},
+            "Open localhost:80",
+            "打开 localhost:80",
+        ),
+        (
+            "browser:http://localhost:443",
+            {},
+            "Open localhost:443",
+            "打开 localhost:443",
+        ),
+        ("browser:https://example.com:443", {}, "Open example.com", "打开 example.com"),
+        ("browser:http://example.com:80", {}, "Open example.com", "打开 example.com"),
         # A question about an app says the app's name, not its identifier.
         ("handoff:chat", {"app": "Slack"}, "Open Slack", "打开 Slack"),
         (

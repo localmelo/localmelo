@@ -473,6 +473,12 @@ def site_grant(request: ApprovalRequest) -> bool:
 # no card ("Pay" too): Ask asks about every click of a site the person did not
 # allow themselves.
 STAYS_FOR_CHAT: Final = ("browser:",)
+# What a point question (``browser-point:<site>``) says in its ``how`` when the
+# point is typed into rather than clicked: the one value a card and the heading
+# read as typing, as the browser provider asks it (#576).
+POINT_TYPING: Final = "type into"
+# The port a web address has when it names none, by scheme.
+WEB_PORTS: Final = {"http": 80, "https": 443}
 
 
 def plain_address(url: object) -> bool:

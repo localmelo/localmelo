@@ -31,6 +31,7 @@ from typing import Any, Final, Literal
 from urllib.parse import urlsplit
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.approvals import POINT_TYPING, WEB_PORTS
 from localmelo.melo.schema import split_thinking as split_thinking
 from localmelo.support.progress_line import run_elapsed
 from localmelo.support.words import said, said_in
@@ -696,10 +697,12 @@ def _site(address: str) -> str:
     """A site as a question's name holds it: the host without ``www.``, and a port that is not the default."""
     host = _host(address)
     try:
-        port = urlsplit(address).port
+        parts = urlsplit(address)
+        port, default = parts.port, WEB_PORTS.get(parts.scheme.lower())
     except ValueError:
-        port = None
-    return f"{host}:{port}" if host and port not in (None, 80, 443) else host
+        port = default = None
+    # The port its own scheme has anyway is dropped; the other scheme's is another server.
+    return f"{host}:{port}" if host and port not in (None, default) else host
 
 
 def _question(tool: str, arguments: object) -> dict[str, Any] | None:
@@ -714,6 +717,9 @@ def _question(tool: str, arguments: object) -> dict[str, Any] | None:
         what: object = _site(rest) or said("steps.aPage")
         if prefix == "browser" and args.get("via") == "web_fetch":
             verb = "read"
+        # A point melo is to type into is not a click; only the provider's own word says so.
+        if prefix == "browser-point" and args.get("how") == POINT_TYPING:
+            verb = "type"
     else:
         app = " ".join(str(args.get("app") or "").split())[:_NAME_SHOWN]
         if about == "window":

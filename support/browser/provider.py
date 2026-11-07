@@ -72,6 +72,7 @@ from typing import Any, Final, Literal, NamedTuple, NoReturn, cast
 
 from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.approvals import (
+    POINT_TYPING,
     SELF_ASKING_TOOLS,
     TOOL_ASK,
     ApprovalDecision,
@@ -2970,7 +2971,7 @@ class BrowserToolProvider(BaseToolProvider):
                 f"That text has {hidden}, which a question cannot show, so melo "
                 "does not type it."
             )
-        await _ask_foreign(snap.origin, item, "type into")
+        await _ask_foreign(snap.origin, item, POINT_TYPING)
         before = await self._acting(
             tab_id,
             snap,
