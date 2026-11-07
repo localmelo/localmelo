@@ -926,10 +926,13 @@ class OwnedTaskPolicy:
     async def take_back_site(self, key: str, by: str | None = None) -> bool:
         """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
 
-        Whether all of that is saved.
+        Both at once, so a write held up in one does not leave the other
+        holding. Whether all of that is saved.
         """
-        chat = not self._chat or await self._ledger.take_back_site(self._chat, key, by)
-        return await revoke_site(self.inner, key, by) and chat
+        taken: list[Awaitable[bool]] = [revoke_site(self.inner, key, by)]
+        if self._chat:
+            taken.append(self._ledger.take_back_site(self._chat, key, by))
+        return all(await asyncio.gather(*taken))
 
     async def _earlier(
         self, chat: str, request: ApprovalRequest

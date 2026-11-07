@@ -1296,16 +1296,26 @@ class BrowserToolProvider(BaseToolProvider):
         """Ask about *origin*. A refusal covers its whole site: no tab stays approved on it (#577).
 
         Their pages stay, and nothing read from them: the next read asks, in a
-        later turn too, with no refusal to remember.
+        later turn too, with no refusal to remember. Stop while the refusal is
+        being saved ends the question before its answer arrives: the refusal
+        stands all the same. Stop on a question nobody answered takes nothing.
         """
         try:
             await sites.require_site(origin)
         except sites.SiteRefusedError:
-            site = site_key({"origin": origin})
-            for tab, approved in list(self._origins.items()):
-                if site_key({"origin": approved}) == site:
-                    self._drop_reading(tab)
+            self._drop_site(origin)
             raise
+        except asyncio.CancelledError:
+            if sites.refused_unasked(origin) is not None:
+                self._drop_site(origin)
+            raise
+
+    def _drop_site(self, origin: str) -> None:
+        """Take the approval of every tab on the site of *origin*."""
+        site = site_key({"origin": origin})
+        for tab, approved in list(self._origins.items()):
+            if site_key({"origin": approved}) == site:
+                self._drop_reading(tab)
 
     async def _recheck(self, tab: str) -> None:
         """Check where *tab* is now, read in the tab: a page can move itself after it was read.

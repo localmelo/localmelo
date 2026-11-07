@@ -8,8 +8,11 @@ and never asks the inner policy or reviews the call.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import dataclasses
 import sqlite3
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -1490,6 +1493,83 @@ async def test_a_task_says_so_when_its_chat_s_take_back_is_not_saved() -> None:
     agent, _ = _reader(llm)
     await agent.run_task("summarise my notes", approval=task)
     assert NOT_SAVED in [m.content for m in llm.requests[-1] if m.role == "tool"][-1]
+
+
+@pytest.mark.asyncio
+async def test_stop_during_a_task_s_take_back_leaves_neither_scope_holding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    book, store = chat.book, chat.store
+    work = (await store.create_session(workspace="/work")).id
+    view = book.view(work, "task", inherit=False)
+    await view.grant("browser:https://cdn.collect.com")
+
+    held, release = asyncio.Event(), asyncio.Event()
+    real = store.component_transaction
+
+    @contextlib.asynccontextmanager
+    async def transaction(label: str) -> AsyncIterator[Any]:
+        if label == "grant_revoke":
+            held.set()
+            await release.wait()
+        async with real(label) as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "component_transaction", transaction)
+
+    async def owner() -> str:
+        return chat.chat
+
+    async def started(chat_id: str) -> float:
+        return 1.0
+
+    ledger = ApprovalLedger()
+    ledger.grants_of = book.allowed_for
+    ledger.site_kept = book.site_kept
+    ledger.take_back_site = book.take_back_site
+    task = OwnedTaskPolicy(
+        RememberingPolicy(Answers(NO), grants=view),
+        ledger,
+        work,
+        owner,
+        started=started,
+    )
+    await task.review_window()
+    agent, _ = _reader(ScriptedLLM([_reads(REFUSED)]))
+    run = asyncio.create_task(agent.run_task("read my notes", approval=task))
+    await asyncio.wait_for(held.wait(), 5)
+    run.cancel("Stopped")
+    stopped, _ = await asyncio.wait([run], timeout=5)
+    assert stopped, "Stop does not wait for the write"
+    assert book.live() == [], "every scope, with the write still held"
+    release.set()
+    await book.flush()
+    assert await chat.keys_after_a_restart() == []
+
+
+@pytest.mark.asyncio
+async def test_stop_at_the_moment_of_the_refusal_still_takes_the_answers_back(
+    tmp_path: Path,
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    run: asyncio.Task[Any] | None = None
+
+    async def person(request: ApprovalRequest) -> ApprovalDecision:
+        # Stop lands before the take-back's first step can run.
+        assert run is not None
+        asyncio.get_running_loop().call_soon(run.cancel, "Stopped")
+        return NO
+
+    policy = RememberingPolicy(person, grants=chat.book.view(chat.chat, "side"))
+    agent, _ = _reader(ScriptedLLM([_reads(REFUSED)]))
+    run = asyncio.create_task(agent.run_task("read my notes", approval=policy))
+    stopped, _ = await asyncio.wait([run], timeout=5)
+    assert stopped
+    await chat.book.flush()
+    assert await chat.keys_after_a_restart() == []
 
 
 @pytest.mark.asyncio

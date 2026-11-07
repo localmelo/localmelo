@@ -1068,7 +1068,7 @@ class _ToolAsk:
             elif (refusal := self._site_refusal(request)) is not None:
                 # Only the person's newer word stands over a refusal (#577). What
                 # Auto kept on the way to this answer goes with it.
-                await revoke_site(self._policy, site, "auto")
+                await self._take_back(site, "auto")
                 return refusal
         self._ended_by_words(request, decided, preview)
         if is_refusal(decided):
@@ -1189,9 +1189,20 @@ class _ToolAsk:
         # being there to ask.
         if site is None or decided.origin != "user":
             return decided
-        if await revoke_site(self._policy, site):
+        if await self._take_back(site):
             return decided
         return dataclasses.replace(decided, notice=REFUSAL_NOT_SAVED)
+
+    async def _take_back(self, site: str, by: str | None = None) -> bool:
+        """:func:`revoke_site` to its end, whatever stops the run: Stop ends only the wait (#577)."""
+        task = asyncio.ensure_future(revoke_site(self._policy, site, by))
+        _TAKE_BACKS.add(task)
+        task.add_done_callback(_TAKE_BACKS.discard)
+        return await asyncio.shield(task)
+
+
+# Take-backs under way: a run stopped meanwhile holds them no more (#577).
+_TAKE_BACKS: set[asyncio.Future[bool]] = set()
 
 
 def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:

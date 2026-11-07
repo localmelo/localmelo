@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections import deque
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,6 +25,8 @@ from localmelo.support.browser import sites
 from localmelo.support.browser.driver import Element
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
 from localmelo.support.sessions.approvals import RememberingPolicy
+from localmelo.support.sessions.grants import GrantBook
+from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.browser.fakes import FakeDriver, button, link, page
 
 HOME = "https://example.com/"
@@ -463,6 +469,115 @@ async def test_a_refused_destination_takes_the_approval_of_the_tabs_of_its_site(
         assert "Welcome" not in first_tab
         assert person.asked[-1] == "browser:https://www.collect.com"
         assert len(person.asked) == 5
+    finally:
+        await agent.close()
+
+
+def _hold_revokes(
+    store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> tuple[asyncio.Event, asyncio.Event]:
+    """Hold a take-back's write at the store: reached, and let go."""
+    held, release = asyncio.Event(), asyncio.Event()
+    real = store.component_transaction
+
+    @contextlib.asynccontextmanager
+    async def transaction(label: str) -> AsyncIterator[Any]:
+        if label == "grant_revoke":
+            held.set()
+            await release.wait()
+        async with real(label) as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "component_transaction", transaction)
+    return held, release
+
+
+@pytest.mark.parametrize(
+    ("later", "asks"),
+    [
+        (_tool("browser_read", tab="t1"), True),
+        (_tool("browser_read", tab="t1", part=2), False),
+    ],
+)
+async def test_stop_during_a_refusal_s_take_back_leaves_no_tab_of_the_site_approved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, later: Message, asks: bool
+) -> None:
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    book = GrantBook(store)
+    await book.open()
+    chat = (await store.create_session(workspace="/work")).id
+    await book.view(chat, "side").grant("browser:https://www.collect.com")
+    held, release = _hold_revokes(store, monkeypatch)
+
+    other = "https://www.other.com/"
+    person = Answers(ONCE, NO, NO)  # the other tab, the refusal, the next question
+    driver = FakeDriver(
+        page(SITE, LONG), page(SIBLING, "Sign in."), page(other, "Elsewhere.")
+    )
+    llm = ScriptedLLM(
+        [
+            _open(SITE),
+            _tool("browser_open", url=other, tab="new"),
+            _tool("browser_open", url=SIBLING, tab="new"),
+        ]
+    )
+    agent = _agent(llm, driver)
+    policy = RememberingPolicy(person, grants=book.view(chat, "side"))
+    try:
+        run = asyncio.create_task(agent.run_task("read the sites", approval=policy))
+        await asyncio.wait_for(held.wait(), 5)
+        run.cancel("Stopped")  # what the runner delivers on Stop
+        stopped, _ = await asyncio.wait([run], timeout=5)
+        assert stopped, "Stop does not wait for the write"
+
+        release.set()
+        await book.flush()
+        saved = GrantBook(store)
+        await saved.open()
+        assert saved.live() == [], "the write outlives the Stop"
+
+        llm.replies.extend([later, _tool("browser_read", tab="t2"), _say("ok")])
+        await agent.run_task("read them again", approval=policy)
+        first_tab, other_tab = _tool_texts(llm)[-2:]
+        assert "Chapter" not in first_tab
+        assert "Elsewhere" in other_tab, "the other site's tab keeps its approval"
+        assert len(person.asked) == (3 if asks else 2)
+        assert person.asked[-1] == (
+            "browser:https://www.collect.com"
+            if asks
+            else "browser:http://login.collect.com"
+        )
+    finally:
+        release.set()
+        await agent.close()
+        await store.aclose()
+
+
+async def test_stop_on_a_question_nobody_answered_takes_no_tab() -> None:
+    asked = asyncio.Event()
+    questions: list[str] = []
+
+    async def person(request: ApprovalRequest) -> ApprovalDecision:
+        questions.append(request.tool_name)
+        if request.tool_name == "browser:https://www.collect.com":
+            return ONCE
+        asked.set()
+        await asyncio.Event().wait()  # nobody answers
+        raise AssertionError("unreachable")
+
+    llm = ScriptedLLM([_open(SITE), _open(SIBLING)])
+    agent = _agent(llm, _collect())
+    policy = RememberingPolicy(person)
+    try:
+        run = asyncio.create_task(agent.run_task("read the site", approval=policy))
+        await asyncio.wait_for(asked.wait(), 5)
+        run.cancel("Stopped")
+        await asyncio.wait([run], timeout=5)
+        llm.replies.extend([_tool("browser_read"), _say("again")])
+        await agent.run_task("read that page again", approval=policy)
+        assert "Welcome" in _tool_texts(llm)[-1]
+        assert len(questions) == 2, "the tab reads on without a new question"
     finally:
         await agent.close()
 

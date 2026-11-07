@@ -210,8 +210,9 @@ those tools can do.
   approved before it, which is left for an empty one, and the rest of a page
   read before it.
   Only the person's newer answer stands over it, for what they allowed: that
-  question, or the whole site on that scheme when they keep the answer. Four
-  limits remain. An automatic block leaves kept answers alone, since it can come
+  question, or the whole site on that scheme when they keep the answer. Stop
+  while a refusal is being saved ends only the wait: the answers and the tabs
+  go all the same. Four limits remain. An automatic block leaves kept answers alone, since it can come
   from nobody being there to ask. The terminal's own chat reads the main chat's
   answers from a file it does not write: a refusal there stands for the run, and
   the answer holds again from the next turn. A refusal outside the browser does
