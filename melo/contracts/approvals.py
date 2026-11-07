@@ -161,7 +161,8 @@ class ApprovalDecision:
     run reports it, and the surface's policy keeps the grant. For a folder
     outside the workspace (#405) it allows the folder for the chat, and
     ``always`` keeps the folder in the settings' extra folders as well.
-    ``origin`` says who decided (see :data:`ApprovalOrigin`).
+    ``origin`` says who decided (see :data:`ApprovalOrigin`). ``notice`` is
+    a sentence the model reads after a denial, for the person.
 
     A field of the wrong type raises ``TypeError``. ``ValueError`` is
     raised for an unknown origin, and for the pairs no policy may give:
@@ -176,6 +177,7 @@ class ApprovalDecision:
     remember: bool = False
     origin: ApprovalOrigin = "user"
     always: bool = False
+    notice: str = ""
 
     def __post_init__(self) -> None:
         for name, expected in (
@@ -184,6 +186,7 @@ class ApprovalDecision:
             ("remember", bool),
             ("origin", str),
             ("always", bool),
+            ("notice", str),
         ):
             value = getattr(self, name)
             if not isinstance(value, expected):
@@ -637,16 +640,24 @@ def holds_grant(policy: object, name: str) -> bool:
     return check is not None and check(name) is True
 
 
-def revoke_site(policy: object, key: str, by: str | None = None) -> None:
+# What the model reads when the file did not take a person's refusal (#577).
+REFUSAL_NOT_SAVED: Final = (
+    "Tell the person: this refusal holds for this run, but it could not be "
+    "saved. melo may ask again, and after a restart the answer they kept may "
+    "hold again until they take it back in Settings, under Permissions."
+)
+
+
+async def revoke_site(policy: object, key: str, by: str | None = None) -> bool:
     """Take back what the chat or task of *policy* keeps about the site *key* (#577).
 
     *key* is the ``ask:site:<site>`` of a refusal. A person's refusal takes
     every answer kept there, on either scheme, so a later turn asks again and
     no refusal has to be remembered. With *by* only that decider's go.
+    Whether it is saved: the answers stop holding here either way.
     """
     take_back = _grants_layer(policy, "take_back_site")
-    if take_back is not None:
-        take_back(key, by)
+    return True if take_back is None else await take_back(key, by)
 
 
 def find_auto(policy: object) -> AutoPolicy | None:

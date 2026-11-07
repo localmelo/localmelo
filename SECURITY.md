@@ -206,10 +206,11 @@ those tools can do.
   refused takes the approval of every tab on the site, so a tab asks again in a
   later turn as well. A refusal of any kind then stands for the rest of the
   run, and in a task continued later, over all that would run with no answer
-  from the person: a kept answer, a site the request names, Auto, and a page
-  approved before it, which is left for an empty one.
+  from the person: a kept answer, a site the request names, Auto, a page
+  approved before it, which is left for an empty one, and the rest of a page
+  read before it.
   Only the person's newer answer stands over it, for what they allowed: that
-  question, or the whole site on that scheme when they keep the answer. Three
+  question, or the whole site on that scheme when they keep the answer. Four
   limits remain. An automatic block leaves kept answers alone, since it can come
   from nobody being there to ask. The terminal's own chat reads the main chat's
   answers from a file it does not write: a refusal there stands for the run, and
@@ -217,7 +218,10 @@ those tools can do.
   not reach every tab: after `web_fetch`'s question is refused, a tab of the
   site not touched in that run can be read in a later turn, and a refused shell
   or Python step is one refused step, not a refused site, so it takes nothing
-  back and stops no tab.
+  back and stops no tab. A take-back the sessions file refuses still stands for
+  the run and in that process, the person is told, and it is tried again with
+  the next grant change and at close; if it never lands, the answer holds again
+  after a restart.
 - **melo's Chrome keeps its sign-ins on disk.** Its profile
   (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
   each time Chrome starts, so that a page can move to a window for the person

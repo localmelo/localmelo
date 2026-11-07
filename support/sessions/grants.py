@@ -509,6 +509,8 @@ class GrantBook:
         self._open_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._pending: set[asyncio.Task[None]] = set()
+        # Take-backs the file refused, grant id to when: the next write tries.
+        self._owed: dict[str, float] = {}
         # Rows granted before the store opened, written when it does.
         self._unsaved: list[Grant] = []
         self.listeners: list[Callable[[], None]] = []
@@ -786,14 +788,14 @@ class GrantBook:
         self._drop(found)
         return found
 
-    def take_back_site(
+    async def take_back_site(
         self,
         session_id: str | None,
         key: str,
         by: str | None = None,
         *,
         inherit: bool = True,
-    ) -> None:
+    ) -> bool:
         """Take back what covers the site *key*, ``ask:site:<site>``, in a session (#577).
 
         A refusal of the site: both schemes, opening and clicking, the person's
@@ -801,9 +803,12 @@ class GrantBook:
         with *inherit*, the ``global`` ones that hold there: the person's newest
         word wins, and the main chat asks once more. :attr:`outside`'s rows are
         another file's and stay.
+
+        Whether the file took it. The checks stop using the rows at once, and
+        what the file refused stays owed to the next write.
         """
         sid = session_id or ""
-        self._drop(
+        write = self._drop(
             [
                 g
                 for g in self._rows.values()
@@ -813,6 +818,10 @@ class GrantBook:
                 and by in (None, g.decided_by)
             ]
         )
+        if write is None:
+            return True
+        await asyncio.wait([write])  # a run stopped now does not stop the write
+        return not write.cancelled() and write.exception() is None
 
     async def forget(
         self,
@@ -880,6 +889,8 @@ class GrantBook:
         async with self._write_lock:
             try:
                 await write
+                if self._owed:
+                    await self._mark_revoked([], 0.0)
             except (sqlite3.Error, OSError) as exc:
                 raise SessionStoreError(
                     f"Could not save a grant change: {exc}"
@@ -898,7 +909,9 @@ class GrantBook:
             raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
-        """Wait for every queued write (a failed one is logged)."""
+        """Wait for every queued write (a failed one is logged), and try what is owed."""
+        if self._owed and not self._pending:
+            self._queue(self._mark_revoked([], 0.0), "grant_revoke")
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
 
@@ -924,12 +937,15 @@ class GrantBook:
             )
 
     async def _mark_revoked(self, ids: list[str], at: float) -> None:
+        """Mark *ids*, and what the file refused before: owed until it lands (#577)."""
         assert self._store is not None
+        self._owed.update(dict.fromkeys(ids, at))
         async with self._store.component_transaction("grant_revoke") as conn:
             await conn.executemany(
                 "UPDATE grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-                [(at, grant_id) for grant_id in ids],
+                [(when, grant_id) for grant_id, when in self._owed.items()],
             )
+        self._owed.clear()
 
 
 class SessionGrants:
@@ -1061,9 +1077,11 @@ class SessionGrants:
         """Take back *key* (here and, when global, everywhere), or all this session gave."""
         return self.book.forget_now(self.session_id, key)
 
-    def take_back_site(self, key: str, by: str | None = None) -> None:
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
         """Take back what covers the site *key* here (:meth:`GrantBook.take_back_site`)."""
-        self.book.take_back_site(self.session_id, key, by, inherit=self.inherit)
+        return await self.book.take_back_site(
+            self.session_id, key, by, inherit=self.inherit
+        )
 
     def forget_folder_now(self, folder: str) -> bool:
         """Take back a folder's grant; whether one held here."""

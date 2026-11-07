@@ -33,6 +33,7 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     DESKTOP_ACT,
     NOBODY_TO_ASK,
+    REFUSAL_NOT_SAVED,
     SITE_REFUSED,
     STOPPED_NOTE,
     TAKEOVER,
@@ -1067,12 +1068,12 @@ class _ToolAsk:
             elif (refusal := self._site_refusal(request)) is not None:
                 # Only the person's newer word stands over a refusal (#577). What
                 # Auto kept on the way to this answer goes with it.
-                revoke_site(self._policy, site, "auto")
+                await revoke_site(self._policy, site, "auto")
                 return refusal
         self._ended_by_words(request, decided, preview)
         if is_refusal(decided):
             # A task its chat continues on its own never asks it again.
-            self._keep(request, decided)
+            decided = await self._keep(request, decided)
         if isinstance(decided, Chosen) and not decided.allow:
             # Don't allow on the card, or no answer, holds for the rest of the
             # turn (#465).
@@ -1158,12 +1159,15 @@ class _ToolAsk:
         )  # fmt: skip
         return ApprovalDecision(False, SITE_REFUSED, origin="policy")
 
-    def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
+    async def _keep(
+        self, request: ApprovalRequest, decided: ApprovalDecision
+    ) -> ApprovalDecision:
         """Keep a refused question as a blocked step: its call key and keys alike.
 
         A refused site joins the run's refused sites, which a later review
         is told of (#433), and the person's refusal takes back what the chat
-        keeps for it (#577).
+        keeps for it (#577). All of that stands before the take-back is
+        written; the decision comes back with a notice if the file refused it.
         """
         name, arguments = request.tool_name, request.arguments
         categories = () if request.review is None else request.review.categories
@@ -1173,10 +1177,6 @@ class _ToolAsk:
             if site[len(SITE_KEY) :] not in reviews.refused_sites:
                 reviews.refused_sites.append(site[len(SITE_KEY) :])
             reviews.allowed_sites.pop(site, None)  # the newest word stands
-            if decided.origin == "user":
-                # An automatic block leaves the person's word: it can come from
-                # nobody being there to ask.
-                revoke_site(self._policy, site)
         self.refused.append(
             {"request_id": request.request_id, "tool": name, "allowed": False,
              "origin": decided.origin, "reason": decided.reason,
@@ -1185,6 +1185,13 @@ class _ToolAsk:
              "loose_keys": [*loose_keys(name, arguments, categories),
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
+        # An automatic block leaves the person's word: it can come from nobody
+        # being there to ask.
+        if site is None or decided.origin != "user":
+            return decided
+        if await revoke_site(self._policy, site):
+            return decided
+        return dataclasses.replace(decided, notice=REFUSAL_NOT_SAVED)
 
 
 def _refused_sites(policy: ApprovalPolicy, run: _RunState) -> tuple[str, ...]:

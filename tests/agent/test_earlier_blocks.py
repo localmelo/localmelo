@@ -9,6 +9,8 @@ and never asks the inner policy or reviews the call.
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -42,6 +44,7 @@ from localmelo.support.sessions.approvals import (
     RememberingPolicy,
 )
 from localmelo.support.sessions.grants import Grant, GrantBook
+from localmelo.support.sessions.store import SessionStore
 
 from .test_approvals import (
     Policy,
@@ -1386,3 +1389,124 @@ async def test_naming_curl_without_a_refused_site_is_not_refused(command: str) -
     policy, root, _ = await _site_refused()
     assert policy.match("shell_exec", {"command": command}, root) is None
     assert reaches_unread_site("shell_exec", {"command": command}) is False
+
+
+class SavedChat:
+    """A side chat with a saved answer of its own and the main chat's, on one file."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.store = SessionStore(path, writer="gateway")
+        self.book = GrantBook(self.store)
+        self.chat = ""
+
+    async def open(self) -> None:
+        await self.store.open()
+        await self.book.open()
+        main = (await self.store.main_chat()).id
+        self.chat = (await self.store.create_session(workspace="/work")).id
+        await self.book.view(self.chat, "side").grant(KEPT)
+        await self.book.view(main, "main").grant("browser:https://a.collect.com")
+
+    def fail_revokes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = self.store.component_transaction
+
+        def transaction(label: str) -> Any:
+            if label == "grant_revoke":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real(label)
+
+        monkeypatch.setattr(self.store, "component_transaction", transaction)
+
+    async def refuse(self, *urls: str) -> tuple[RememberingPolicy, list[str]]:
+        """The person refuses each read of *urls*: the policy, and what each read answered."""
+        self.person = Answers(*(NO for _ in urls))
+        policy = RememberingPolicy(
+            self.person, grants=self.book.view(self.chat, "side")
+        )
+        llm = ScriptedLLM([*(_reads(url) for url in urls), _answer("No.")])
+        agent, self.reader = _reader(llm)
+        await agent.run_task("read my notes", approval=policy)
+        return policy, [m.content for m in llm.requests[-1] if m.role == "tool"]
+
+    async def keys_after_a_restart(self) -> list[str]:
+        await self.store.aclose()
+        store = SessionStore(self.path, writer="gateway")
+        await store.open()
+        try:
+            book = GrantBook(store)
+            await book.open()
+            return sorted(g.key for g in book.live())
+        finally:
+            await store.aclose()
+
+
+NOT_SAVED = "could not be saved"
+REFUSED = "http://login.collect.com/x"  # the kept answers are on https: it asks
+
+
+@pytest.mark.asyncio
+async def test_a_saved_refusal_stays_taken_back_after_a_restart(
+    tmp_path: Path,
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    policy, said = await chat.refuse(REFUSED)
+    assert policy.allowed_tools == set() and NOT_SAVED not in said[0]
+    assert await chat.keys_after_a_restart() == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_the_file_refuses_holds_for_the_run_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    chat.fail_revokes(monkeypatch)
+    policy, said = await chat.refuse(REFUSED, "https://www.collect.com/")
+    assert NOT_SAVED in said[0], "the person hears it may not last"
+    assert policy.allowed_tools == set(), "nothing kept holds in this run"
+    assert chat.reader.read == [] and len(chat.person.asked) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_task_says_so_when_its_chat_s_take_back_is_not_saved() -> None:
+    async def refused(chat_id: str, key: str, by: str | None) -> bool:
+        return False
+
+    async def owner() -> str:
+        return "chat"
+
+    async def started(chat_id: str) -> float:
+        return 1.0
+
+    ledger = ApprovalLedger()
+    ledger.take_back_site = refused
+    task = OwnedTaskPolicy(
+        RememberingPolicy(Answers(NO)), ledger, "task", owner, started=started
+    )
+    await task.review_window()
+    llm = ScriptedLLM([_reads(REFUSED), _answer("No.")])
+    agent, _ = _reader(llm)
+    await agent.run_task("summarise my notes", approval=task)
+    assert NOT_SAVED in [m.content for m in llm.requests[-1] if m.role == "tool"][-1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("then", ["a later write", "the close"])
+async def test_a_take_back_the_file_refused_lands_once_it_can(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, then: str
+) -> None:
+    chat = SavedChat(tmp_path / "sessions.db")
+    await chat.open()
+    with monkeypatch.context() as broken:
+        chat.fail_revokes(broken)
+        await chat.refuse(REFUSED)
+        await chat.book.flush()  # the write failed, not one still waiting
+    expected: list[str] = []
+    if then == "a later write":
+        await chat.book.view(chat.chat, "side").grant("python_exec")
+        expected = ["python_exec"]
+    else:
+        await chat.book.flush()
+    assert await chat.keys_after_a_restart() == expected

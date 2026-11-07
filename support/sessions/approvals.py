@@ -184,9 +184,9 @@ class RememberingPolicy:
         """Take back the chat's grant of *folder*; whether there was one."""
         return self.grants.forget_folder_now(folder)
 
-    def take_back_site(self, key: str, by: str | None = None) -> None:
-        """A refusal of a site: what this chat kept for it goes (#577)."""
-        self.grants.take_back_site(key, by)
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
+        """A refusal of a site: what this chat kept for it goes (#577). Whether that is saved."""
+        return await self.grants.take_back_site(key, by)
 
     def covered(self, path: str) -> str:
         """What lets the read of *path* run unasked: :data:`FOLDER_FOR_CHAT`, :data:`FOLDER_SAVED` or ``""``."""
@@ -673,6 +673,11 @@ class ApprovalUse:
     at: float
 
 
+async def _nothing_kept(chat_id: str, key: str, by: str | None) -> bool:
+    """:attr:`ApprovalLedger.take_back_site` with no book behind it: nothing to save."""
+    return True
+
+
 class ApprovalLedger:
     """The approvals the person gave in each chat: "already approved" by code.
 
@@ -693,8 +698,8 @@ class ApprovalLedger:
         # the site of a question (#577); the console sets it.
         self.site_kept: Callable[[str, str], bool] = lambda chat_id, name: False
         # Takes back what chat *id* itself kept about a refused site (#577).
-        self.take_back_site: Callable[[str, str, str | None], object] = (
-            lambda chat_id, key, by: None
+        self.take_back_site: Callable[[str, str, str | None], Awaitable[bool]] = (
+            _nothing_kept
         )
         # The folders outside the workspace chat *id* allowed for reading (#405).
         self.folders_of: Callable[[str], tuple[str, ...]] = lambda chat_id: ()
@@ -918,11 +923,13 @@ class OwnedTaskPolicy:
         """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
         return self._granted(name) or holds_grant(self.inner, name)
 
-    def take_back_site(self, key: str, by: str | None = None) -> None:
-        """A refusal of a site: what the task kept goes, and what it holds from its chat (#577)."""
-        if self._chat:
-            self._ledger.take_back_site(self._chat, key, by)
-        revoke_site(self.inner, key, by)
+    async def take_back_site(self, key: str, by: str | None = None) -> bool:
+        """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
+
+        Whether all of that is saved.
+        """
+        chat = not self._chat or await self._ledger.take_back_site(self._chat, key, by)
+        return await revoke_site(self.inner, key, by) and chat
 
     async def _earlier(
         self, chat: str, request: ApprovalRequest

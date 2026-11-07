@@ -310,29 +310,29 @@ async def test_a_task_uses_its_chat_s_kept_answer_for_the_site() -> None:
         lambda policy: EarlierBlocks(AutoPolicy(asking=policy), {}),
     ],
 )
-def test_a_refusal_reaches_the_kept_answers_through_the_layers_of_a_policy(
+async def test_a_refusal_reaches_the_kept_answers_through_the_layers_of_a_policy(
     layers: Callable[[RememberingPolicy], object],
 ) -> None:
     policy = _policy(Asker(), OPEN + KEPT, ACT + "http://cdn.example.com")
     other = OPEN + "https://www.example.org"
     assert policy.grants.grant_now(other) is not None
     assert policy.grants.grant_now(OPEN + OTHER_HOST, by="auto") is not None
-    revoke_site(layers(policy), "ask:site:example.com", "auto")
+    await revoke_site(layers(policy), "ask:site:example.com", "auto")
     assert OPEN + OTHER_HOST not in policy.allowed_tools, "only Auto's went"
     assert OPEN + KEPT in policy.allowed_tools
-    revoke_site(layers(policy), "ask:site:example.com")
+    await revoke_site(layers(policy), "ask:site:example.com")
     assert policy.allowed_tools == {other}
 
 
 @pytest.mark.parametrize("mode", ["ask", "auto"])
-def test_a_refusal_reaches_a_chat_s_and_the_terminal_s_answers(mode: str) -> None:
+async def test_a_refusal_reaches_a_chat_s_and_the_terminal_s_answers(mode: str) -> None:
     chat = ChatPolicy(Asker(), mode)  # type: ignore[arg-type]
     assert chat.grants.grant_now(OPEN + KEPT) is not None
-    revoke_site(chat, "ask:site:example.com")
+    await revoke_site(chat, "ask:site:example.com")
     assert chat.allowed_tools == frozenset()
     terminal = Approvals(Asker(), mode)  # type: ignore[arg-type]
     assert terminal._policy.grants.grant_now(OPEN + KEPT) is not None
-    revoke_site(terminal.policy(), "ask:site:example.com")
+    await revoke_site(terminal.policy(), "ask:site:example.com")
     assert terminal.allowed_tools == frozenset()
 
 

@@ -1589,3 +1589,4 @@ class ConsoleSessions:
                 await entry.agent.close()
             entry.agent = None
         self._sessions.clear()
+        await self.book.flush()  # a refused take-back has one more try

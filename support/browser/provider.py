@@ -1249,11 +1249,23 @@ class BrowserToolProvider(BaseToolProvider):
     # ── Pages ──
 
     def _snapshot_of(self, tab: str | None) -> render.Snapshot:
-        snap = self._snaps.get(self._current(tab))
+        """The newest reading of *tab*, the one way to a reading kept from before.
+
+        A page read afresh passes :meth:`_admit`; this is the same check for
+        what was kept: a site refused since takes the reading and the tab's
+        approval, so a later turn asks (#577).
+        """
+        tab_id = self._current(tab)
+        snap = self._snaps.get(tab_id)
         if snap is None:
             raise BrowserError(
                 "Nothing has been read in this tab yet. Use browser_open first."
             )
+        try:
+            sites.require_not_refused(snap.origin)
+        except BrowserError:
+            self._drop_reading(tab_id)
+            raise
         return snap
 
     async def _admit(self, url: str, tab: str, done: set[str]) -> None:
@@ -1942,7 +1954,7 @@ class BrowserToolProvider(BaseToolProvider):
         target = sites.require_origin(url)
         await addresses.require_public(url)
         if target != origin:
-            await sites.require_site(target)
+            await self._ask_site(target)
         done.add(target)
 
     def _no_public_boxes(self, snap: render.Snapshot, item: Element) -> None:

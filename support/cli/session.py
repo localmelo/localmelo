@@ -2188,4 +2188,5 @@ class CliSession:
         for agent in self.factory.live_agents():
             with contextlib.suppress(Exception):
                 await self.factory.close(agent)
+        await self.grant_book.flush()  # a refused take-back has one more try
         await self.store.aclose()

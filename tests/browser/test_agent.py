@@ -18,9 +18,10 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.browser import sites
+from localmelo.support.browser.driver import Element
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
 from localmelo.support.sessions.approvals import RememberingPolicy
-from localmelo.tests.browser.fakes import FakeDriver, link, page
+from localmelo.tests.browser.fakes import FakeDriver, button, link, page
 
 HOME = "https://example.com/"
 NEWS = "https://example.com/news"
@@ -109,7 +110,7 @@ async def test_a_site_asks_once_per_chat_and_a_new_chat_asks_again() -> None:
         await agent.close()
 
 
-def _tool(name: str, **arguments: str) -> Message:
+def _tool(name: str, **arguments: Any) -> Message:
     return Message(
         role="assistant", tool_call=ToolCall(tool_name=name, arguments=arguments)
     )
@@ -266,22 +267,13 @@ async def test_a_refused_redirect_takes_the_approval_of_the_tabs_of_its_site() -
         await agent.close()
 
 
-async def test_a_refusal_made_by_another_tool_stops_a_tab_for_its_run() -> None:
+def _with_read_site(agent: Agent) -> None:
+    """Add a tool that asks the question ``web_fetch`` asks."""
+
     async def read_site(url: str) -> str:
         await sites.require_site(sites.require_origin(url), via="web_fetch", url=url)
         return "page text"
 
-    person = Answers(NO)
-    read = ToolCall(tool_name="read_site", arguments={"url": SIBLING})
-    llm = ScriptedLLM(
-        [
-            _open(SITE),
-            Message(role="assistant", tool_call=read),
-            _tool("browser_read"),
-            _say("ok"),
-        ]
-    )
-    agent = _agent(llm, _collect())
     agent.hippo.register_tool(
         ToolDef(
             name="read_site",
@@ -295,6 +287,20 @@ async def test_a_refusal_made_by_another_tool_stops_a_tab_for_its_run() -> None:
         )
     )
     agent.executor.register("read_site", read_site)
+
+
+def _read_site(url: str) -> Message:
+    call = ToolCall(tool_name="read_site", arguments={"url": url})
+    return Message(role="assistant", tool_call=call)
+
+
+async def test_a_refusal_made_by_another_tool_stops_a_tab_for_its_run() -> None:
+    person = Answers(NO)
+    llm = ScriptedLLM(
+        [_open(SITE), _read_site(SIBLING), _tool("browser_read"), _say("ok")]
+    )
+    agent = _agent(llm, _collect())
+    _with_read_site(agent)
     try:
         await agent.run_task("read the site", approval=_kept(person))
         last = _tool_texts(llm)[-1]
@@ -374,6 +380,91 @@ async def test_a_run_without_a_policy_asks_nobody_and_reads_the_page() -> None:
     assert result.status == "completed"
     tool_message = next(m for m in llm.calls[-1]["messages"] if m.role == "tool")
     assert "Welcome." in tool_message.content
+
+
+LONG = "Chapter " * 4000
+
+
+def _long() -> FakeDriver:
+    return FakeDriver(page(SITE, LONG), page(SIBLING, "Sign in."))
+
+
+async def test_a_cached_part_reads_on_when_nothing_was_refused() -> None:
+    person = Answers(ONCE)
+    llm = ScriptedLLM([_open(SITE), _tool("browser_read", part=2), _say("ok")])
+    agent = _agent(llm, _long())
+    try:
+        await agent.run_task("read the site", approval=RememberingPolicy(person))
+        assert "Chapter" in _tool_texts(llm)[-1] and len(person.asked) == 1
+    finally:
+        await agent.close()
+
+
+async def test_a_cached_part_of_a_site_refused_since_is_not_read() -> None:
+    person = Answers(ONCE, NO, NO)
+    llm = ScriptedLLM(
+        [
+            _open(SITE),
+            _read_site(SIBLING),
+            _tool("browser_read", part=2),
+            _say("ok"),
+        ]
+    )
+    agent = _agent(llm, _long())
+    _with_read_site(agent)
+    policy = RememberingPolicy(person)
+    try:
+        await agent.run_task("read the site", approval=policy)
+        last = _tool_texts(llm)[-1]
+        assert "refused earlier in this task" in last and "Chapter" not in last
+        # That tab was touched, so a later turn asks about it.
+        llm.replies.extend([_tool("browser_read", part=3), _say("again")])
+        await agent.run_task("read on", approval=policy)
+        assert "Chapter" not in _tool_texts(llm)[-1]
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize(
+    "control", [link("Sign in", SIBLING), button("Send", submit=SIBLING)]
+)
+async def test_a_refused_destination_takes_the_approval_of_the_tabs_of_its_site(
+    control: Element,
+) -> None:
+    # Every tab on an Allow once, so no kept answer hides a question.
+    other = "https://www.other.com/"
+    person = Answers(ONCE, ONCE, ONCE, NO, NO)
+    driver = FakeDriver(page(SITE, "Welcome."), page(other, "Elsewhere.", control))
+    llm = ScriptedLLM(
+        [
+            _open(SITE),
+            _tool("browser_open", url=other, tab="new"),
+            _tool("browser_click", ref="e1"),
+            _say("ok"),
+        ]
+    )
+    agent = _agent(llm, driver)
+    policy = RememberingPolicy(person)
+    try:
+        await agent.run_task("sign in", approval=policy)
+        assert "login.collect.com" in _tool_texts(llm)[-1]
+        assert person.asked[-1] == "browser:http://login.collect.com"
+        assert not [c for c in driver.calls if c[0] == "act"], "nothing was sent"
+        llm.replies.extend(
+            [
+                _tool("browser_read", tab="t2"),
+                _tool("browser_read", tab="t1"),
+                _say("ok"),
+            ]
+        )
+        await agent.run_task("read both", approval=policy)
+        other_tab, first_tab = _tool_texts(llm)[-2:]
+        assert "Elsewhere" in other_tab, "the other site's tab keeps its approval"
+        assert "Welcome" not in first_tab
+        assert person.asked[-1] == "browser:https://www.collect.com"
+        assert len(person.asked) == 5
+    finally:
+        await agent.close()
 
 
 class Grouped(BaseToolProvider):

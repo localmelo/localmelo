@@ -169,7 +169,8 @@ def _question(
 
 def _refusal(origin: str, via: str, decision: ApprovalDecision) -> str:
     verb = "read" if via == "web_fetch" else "open"
-    return f"melo did not {verb} {host_of(origin)}. " + denial_text(decision)
+    said = f"melo did not {verb} {host_of(origin)}. " + denial_text(decision)
+    return f"{said} {decision.notice}" if decision.notice else said
 
 
 def refused_earlier(
