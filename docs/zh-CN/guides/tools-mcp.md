@@ -326,7 +326,7 @@ melo -X agent.tool_images=on --mcp browser.json --mcp-only "Describe the page th
 
 高影响调用在网页控制台有专门的卡片，在终端有专门的面板（参见[网页控制台](web-console.md#approvals-and-failures)和[终端](terminal.md#approvals)）。每张卡片：
 
-- 以一句平实的话开头，说明这一步要做什么。这句话由 melo 根据调用生成，并按顺序写出它发现的每个效果（“Run the command ls -1”、“Operate Safari, then delete files”）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”：只有规则什么都没发现时，它们才是这句话；否则它们放在这句话下面，所以永远不会让一步看起来更安全。如果这些话与代码不符，而代码会删除文件或把数据发出去，警告会引用模型的话。如果这些话指名了某个文件、文件夹或网站，而代码删除或发送到的还有话里没有点名的地方，也会警告（`melo described this as “Delete notes.tmp”, but the code deletes build/.`）；没有指名这些的话从不警告；
+- 以一句平实的话开头，说明这一步要做什么。这句话由 melo 根据调用生成，并按顺序写出它发现的每个效果（“Run the command ls -1”、“Operate Safari, then delete files”）。模型自己的话（`why` 参数，或代码开头的注释）始终带着标签“melo says: …”：只有规则什么都没发现时，它们才是这句话；否则它们放在这句话下面，所以永远不会让一步看起来更安全。这些话只在与你最近的话相同的文字时才显示：模型用另一种文字写的话（例如中文对话里的英文）会被略去，卡片保留 melo 自己的那句话。如果这些话与代码不符，而代码会删除文件或把数据发出去，警告会引用模型的话。如果这些话指名了某个文件、文件夹或网站，而代码删除或发送到的还有话里没有点名的地方，也会警告（`melo described this as “Delete notes.tmp”, but the code deletes build/.`）；没有指名这些的话从不警告；
 - 用一个问题说出调用要做什么（“Install software?”、“Change files outside demo-project?”、“Control an app?”）；
 - 列出最多三条原因，不提供会话授权的选项；
 - 在终端中默认选中 No，并用一行说明会话授权从不覆盖安装、下载或文件夹以外的更改；

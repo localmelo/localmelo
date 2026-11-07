@@ -298,6 +298,9 @@ class ConsoleSessions:
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
+        # Each chat's mode as last committed or read: what a task of the chat
+        # decides by (#576), set in the same step as the store's write.
+        self._modes: dict[str, ChatMode] = {}
         # Each Allow once's watch: it drops the allowance its turn left unused.
         self._allowance_watches: set[asyncio.Task[None]] = set()
         # One lock per client_request_id while a keyed create runs, so a
@@ -818,10 +821,32 @@ class ConsoleSessions:
             info = await self._store.update_session(
                 session_id, meta_update={"approvals": mode}
             )
+            # Nothing is awaited from the commit to here: a reader that sees
+            # the store's new mode finds this one too.
+            self._modes[session_id] = mode
             entry = self._sessions.get(session_id)
             if entry is not None:
                 entry.policy.mode = mode
             return info
+
+    async def current_mode(self, session_id: str) -> ChatMode:
+        """A chat's mode as the store has it now; :meth:`mode_now` gives it from here on.
+
+        A switch that commits while this reads is newer than what was read,
+        and stays. A chat that is gone has Ask.
+        """
+        seen = self._modes.get(session_id)
+        info = await self._store.get_session(session_id)
+        if info is None:
+            self._modes.pop(session_id, None)
+            return "ask"
+        if self._modes.get(session_id) == seen:
+            self._modes[session_id] = self.mode_of(info)
+        return self._modes[session_id]
+
+    def mode_now(self, session_id: str | None) -> ChatMode:
+        """A chat's mode as last committed or read, without waiting; Ask for a chat not read yet."""
+        return self._modes.get(session_id or "", "ask")
 
     def allowances(self, session_id: str) -> dict[str, float]:
         """The steps allowed once in this chat since the gateway started: key -> until."""
@@ -1535,6 +1560,7 @@ class ConsoleSessions:
                 raise ApiError(404, "not_found", t("errors.sessionNotFound"))
             # Its grants' rows went with it (ON DELETE CASCADE); the checks forget them now.
             self.book.forget_session(session_id)
+            self._modes.pop(session_id, None)
             if self._memory is not None:
                 try:
                     await self._memory.forget_session(session_id)

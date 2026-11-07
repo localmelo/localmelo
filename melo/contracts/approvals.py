@@ -134,7 +134,9 @@ class ApprovalRequest:
     session grant covers only a call whose review is routine (or ``None``).
     ``outside`` is set for a file tool's call on a path outside the
     workspace (#405): the person is asked about the folder, and a tool
-    grant never covers it.
+    grant never covers it. ``person_cjk`` says whether the person's own recent
+    words have Chinese, Japanese or Korean characters (``None``: no words are
+    known): a card shows the model's reason only in that script (#576).
     """
 
     request_id: str
@@ -147,6 +149,7 @@ class ApprovalRequest:
     tier: ToolTier | None = None
     review: ActionReview | None = None
     outside: OutsideAccess | None = None
+    person_cjk: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -470,6 +473,12 @@ def site_grant(request: ApprovalRequest) -> bool:
 # no card ("Pay" too): Ask asks about every click of a site the person did not
 # allow themselves.
 STAYS_FOR_CHAT: Final = ("browser:",)
+# What a point question (``browser-point:<site>``) says in its ``how`` when the
+# point is typed into rather than clicked: the one value a card and the heading
+# read as typing, as the browser provider asks it (#576).
+POINT_TYPING: Final = "type into"
+# The port a web address has when it names none, by scheme.
+WEB_PORTS: Final = {"http": 80, "https": 443}
 
 
 def plain_address(url: object) -> bool:

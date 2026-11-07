@@ -37,8 +37,8 @@ import time
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Final
 
-from localmelo.melo.checker.review.gist import step_gist
-from localmelo.melo.contracts.approvals import ApprovalRequest
+from localmelo.melo.checker.review.gist import request_gist
+from localmelo.melo.contracts.approvals import POINT_TYPING, ApprovalRequest
 from localmelo.melo.contracts.review import TITLES
 from localmelo.support.gateway.i18n import (
     current,
@@ -90,8 +90,11 @@ _READ: Final = (
     "remember",
     "ending",
 )
-# What a waiting card needs of an approval's arguments: where, never what.
-_WHERE: Final = ("path", "url")
+# What a waiting card needs of an approval's arguments: where (and, for a site or
+# an app, how it is read and which app), never what.
+_WHERE: Final = ("path", "url", "via", "app")
+# ``how`` of a point question is kept only as the one word that says it is typed into.
+_HOW: Final = (POINT_TYPING,)
 # Cards of the main chat looked through for the one an answer follows.
 _LOOK_BACK: Final = 200
 _ERROR_CHARS: Final = 100
@@ -204,6 +207,8 @@ class MainChatCards:
                     for key in _WHERE
                     if isinstance(arguments.get(key), str)
                 }
+                if arguments.get("how") in _HOW:
+                    where["how"] = arguments["how"]
                 light["arguments"] = {k: v[:500] for k, v in where.items()}
             event = {"type": kind, "ts": stored.event.get("ts"), "data": light}
             self._heard_events.append(
@@ -573,7 +578,7 @@ def _waiting_words(
     """
     tool = str(data.get("tool_name") or "")
     if request is not None:
-        gist = step_gist(tool, request.arguments, request.review)
+        gist = request_gist(request)
         if gist is not None and not gist.plain:
             what = {"gist": {"id": gist.id, "params": gist.params}}
             if gist.by == "model":

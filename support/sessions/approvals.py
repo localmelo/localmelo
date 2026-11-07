@@ -382,18 +382,58 @@ def chat_mode(meta: object, default: ChatMode = "ask") -> ChatMode:
     return "auto" if default == "auto" else "ask"
 
 
-class ChatPolicy:
-    """One chat's policy: Ask (a :class:`RememberingPolicy`) or Auto (#339).
+class ModePolicy:
+    """The Ask policy or the Auto policy, whichever :attr:`mode` names now (#339, #576).
 
     :attr:`mode` is read at every decision, so a switch applies from the
-    chat's next step; a call already waiting for a person keeps waiting.
+    next step; a call already waiting for a person keeps waiting. Both
+    policies keep their own state (Ask's grants, Auto's allowances) across
+    switches. ``inner`` is the policy of the mode now, for
+    :func:`~localmelo.melo.contracts.approvals.find_auto`. *mode* is a mode,
+    or a function that gives it: a task's policy reads its chat's mode that
+    way, so the task has no mode of its own to leave behind (#576).
+    """
+
+    def __init__(
+        self,
+        ask: ApprovalPolicy,
+        auto: AutoPolicy,
+        mode: ChatMode | Callable[[], ChatMode] = "ask",
+    ) -> None:
+        self._mode = mode
+        self.ask = ask
+        self.auto = auto
+
+    @property
+    def mode(self) -> ChatMode:
+        return self._mode() if callable(self._mode) else self._mode
+
+    @mode.setter
+    def mode(self, value: ChatMode) -> None:
+        self._mode = value
+
+    @property
+    def inner(self) -> ApprovalPolicy:
+        return self.auto if self.mode == "auto" else self.ask
+
+    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
+        return review_mode(self.inner, request)
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        return await self.inner.decide(request)
+
+
+class ChatPolicy(ModePolicy):
+    """One chat's policy: Ask (a :class:`RememberingPolicy`) or Auto (#339).
+
     The Ask policy keeps its grants and the :class:`AutoPolicy` its
-    allowances across switches. ``inner`` is the policy of the mode now,
-    for :func:`~localmelo.melo.contracts.approvals.find_auto`.
+    allowances across switches (:class:`ModePolicy`).
 
     The person is asked about a folder outside the workspace in either
     mode (:meth:`decide_folder`): auto mode never decides it.
     """
+
+    ask: RememberingPolicy
 
     def __init__(
         self,
@@ -404,17 +444,12 @@ class ChatPolicy:
         watch: AskWatch | None = None,
         grants: SessionGrants | None = None,
     ) -> None:
-        self.mode: ChatMode = mode
-        self.ask = RememberingPolicy(ask, folders=True, saved=saved, grants=grants)
+        asking = RememberingPolicy(ask, folders=True, saved=saved, grants=grants)
         # A step Auto stops that the person may allow asks them on the
         # chat's card while *watch* says someone sees the chat, and an
         # answer for the chat is a grant of the Ask policy (#465).
-        self.auto = AutoPolicy(asking=self.ask, watch=watch)
+        super().__init__(asking, AutoPolicy(asking=asking, watch=watch), mode)
         self.asks_folders = True
-
-    @property
-    def inner(self) -> ApprovalPolicy:
-        return self.auto if self.mode == "auto" else self.ask
 
     @property
     def allowed_tools(self) -> frozenset[str]:
@@ -438,14 +473,8 @@ class ChatPolicy:
     def forget_folder(self, folder: str) -> bool:
         return self.ask.forget_folder(folder)
 
-    def review_mode(self, request: ApprovalRequest) -> ReviewMode:
-        return "auto" if self.mode == "auto" else review_mode(self.ask, request)
-
     async def decide_folder(self, request: ApprovalRequest) -> ApprovalDecision:
         return await self.ask.decide_folder(request)
-
-    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        return await self.inner.decide(request)
 
 
 @dataclass
