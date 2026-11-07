@@ -15,6 +15,11 @@ The scope rule:
   ``session`` everywhere, the main chat included: only the person's word
   counts everywhere.
 
+The person's grant of a site question (opening, clicking and choosing) covers
+the other hosts of its site where it holds (#577): a row keeps the name it was
+given and :meth:`GrantBook.site_kept` matches hosts at lookup. Auto's read
+stays its exact origin.
+
 Nothing that must ask every time is ever written: the questions of
 :data:`~localmelo.melo.contracts.approvals.NEVER_GRANTED` (typing, sending
 a form, a click at a point, a press in another app), a step reviewed as a
@@ -57,7 +62,9 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     grant_offered,
     never_granted,
+    site_covers,
     stays_for_chat,
+    whole_site,
 )
 from localmelo.melo.contracts.folders import above_home, never_offered
 from localmelo.melo.contracts.review import CARD_ONLY, url_site
@@ -219,7 +226,8 @@ def describe(
         target = home_label(key)
         return f"Read files in {target}", target
     if kind == "site":
-        site = _site(key)
+        # What the person keeps covers the whole site (#577); Auto's read, its host.
+        site = (whole_site(key) if by == "person" else None) or _site(key)
         if key.startswith("browser-act:"):
             return f"Click and choose on {site}", site
         return (f"Read {site}" if by == "auto" else f"Open {site}"), site
@@ -613,6 +621,20 @@ class GrantBook:
         """The names a session holds a grant of (tools, sites, windows; Auto's site reads too)."""
         return frozenset(g.key for g in self.visible(session_id) if g.kind != "folder")
 
+    def site_kept(
+        self, session_id: str | None, name: str, *, inherit: bool = True
+    ) -> bool:
+        """Whether the person kept an answer that holds here about another host of the site of the question *name* (#577).
+
+        Matched at lookup, so the rows keep the names they were given. Never
+        Auto's: its read is about the host it let the chat read, and nobody
+        vouched for the site's others.
+        """
+        return any(
+            g.decided_by == "person" and site_covers(g.key, name)
+            for g in self.visible(session_id, inherit=inherit)
+        )
+
     def folders_for(self, session_id: str | None) -> tuple[str, ...]:
         """The folders outside the workspace a session may read in, oldest first."""
         return tuple(
@@ -919,6 +941,12 @@ class SessionGrants:
             g.key
             for g in self._visible()
             if g.kind != "folder" and g.decided_by == "person"
+        )
+
+    def covers(self, name: str) -> bool:
+        """Whether the person's kept answers here cover the question *name*: that name, or another host of its site."""
+        return name in self.names() or self.book.site_kept(
+            self.session_id or "", name, inherit=self.inherit
         )
 
     def passed(self) -> frozenset[str]:

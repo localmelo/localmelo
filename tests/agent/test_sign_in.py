@@ -211,6 +211,8 @@ def test_a_note_the_person_sends_mid_run_is_hidden_and_recalled_notes_are_not_re
     assert reviewer.sign_in_value("[password-1]", "forum.example") == "mine-12345"
     assert reviewer.sign_in_value("[password-2]", "forum.example") is None
     assert reviewer.signs_in("forum.example") and not reviewer.signs_in("evil.example")
+    # A password stays on the host the person named, not the rest of its site (#577).
+    assert reviewer.sign_in_value("[password-1]", "login.forum.example") is None
     # Another message of the same run keeps it; a run the person did not begin
     # (no message of theirs), or the next run, has none to type.
     reviewer.user_message("thanks")

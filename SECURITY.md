@@ -179,6 +179,26 @@ those tools can do.
   only resolves to this Mac (DNS rebinding, `/etc/hosts`) is checked by
   neither, and melo only blanks that tab after it lands and reads nothing
   from it. Safari's automation windows have no such check.
+- **The hosts of one site share a kept answer.** What the person keeps for
+  opening a site, or for clicking and choosing on it, covers the site's other
+  hosts where that answer holds, because a sign-in moves between them. One site
+  is the same scheme and the same registrable domain, read offline from a
+  public suffix list bundled with melo, its private section included, so each
+  account of a listed hosting service stays a site of its own. So a kept answer
+  trusts everyone who runs a host under that domain. The list is as new as the
+  installed package: a hosting service added since is read as one site. An
+  address by number, a local or one-word name, a host that is itself a public
+  suffix, an unlisted suffix and a port that is not the scheme's own stay the
+  exact origin, and `https` never covers `http` or the reverse. Nothing else
+  widened: an Allow once, typing, a form sent, a file attached, a click at a
+  point, a page's own question, a take-over, a page's request for another app,
+  passwords given in a message and high-impact steps stay as they were; a link
+  followed on a page opened by an Allow once asks on another host; what Auto
+  kept for a chat stays the host it read, and Auto keeps no click. Every host
+  still passes the check for a public address. A refusal covers the whole site
+  and beats a kept answer, in the run that heard it and in a task continued
+  later. In a plain chat a refusal lasts for its turn, as it always has, so a
+  later turn's kept answer applies again.
 - **melo's Chrome keeps its sign-ins on disk.** Its profile
   (`~/.cache/localmelo/browser/chrome`, mode 0700) restores its last session
   each time Chrome starts, so that a page can move to a window for the person

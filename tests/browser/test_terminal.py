@@ -47,8 +47,8 @@ def test_the_site_question_is_asked_in_plain_words() -> None:
         panel_text(_ask(), width=60, show_tier=False).header
         == "example.com · read only"
     )
-    assert (
-        session_option(_ask()) == "Yes, and allow example.com for the rest of this chat"
+    assert session_option(_ask()) == (
+        "Yes, and allow all of example.com for the rest of this chat"
     )
     other = ApprovalRequest("r", "run", "c", "mcp__x__y", {}, "", None)
     assert (

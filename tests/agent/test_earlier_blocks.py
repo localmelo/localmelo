@@ -8,6 +8,7 @@ and never asks the inner policy or reviews the call.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -16,6 +17,8 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
     AutoPolicy,
     DenyAllPolicy,
     EarlierBlocks,
@@ -31,6 +34,7 @@ from localmelo.melo.contracts.review import (
 )
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.browser import sites
+from localmelo.support.sessions.approvals import RememberingPolicy
 
 from .test_approvals import (
     Policy,
@@ -219,6 +223,7 @@ READ_SITE = ToolDef(
     },
     annotations={"readOnlyHint": True},
 )
+CLICK_SITE = dataclasses.replace(READ_SITE, name="click_site")
 
 
 class Reader:
@@ -226,6 +231,7 @@ class Reader:
 
     def __init__(self) -> None:
         self.read: list[str] = []
+        self.clicked: list[str] = []
 
     async def read_site(self, url: str) -> str:
         # The call itself asks nothing (read tier): the site question decides.
@@ -233,12 +239,19 @@ class Reader:
         self.read.append(url)
         return "page text"
 
+    async def click_site(self, url: str) -> str:
+        await sites.require_act(sites.require_origin(url), "click")
+        self.clicked.append(url)
+        return "clicked"
+
 
 def _reader(llm: ScriptedLLM) -> tuple[Agent, Reader]:
     agent, _ = _agent(llm)
     reader = Reader()
     agent.hippo.register_tool(READ_SITE)
     agent.executor.register("read_site", reader.read_site)
+    agent.hippo.register_tool(CLICK_SITE)
+    agent.executor.register("click_site", reader.click_site)
     return agent, reader
 
 
@@ -359,11 +372,132 @@ async def test_a_refused_site_is_refused_however_its_address_is_spelt(
 
 
 @pytest.mark.parametrize(
-    "other", ["https://www.collect.example/x", "https://collect.example.org/x"]
+    ("refused", "retry"),
+    [
+        ("https://www.collect.com/x", "https://login.collect.com/y"),  # another host
+        ("https://login.collect.com/x", "https://collect.com/y"),  # the bare domain
+        ("https://www.collect.com/x", "http://cdn.collect.com/y"),  # and another scheme
+        ("https://www.collect.com:8443/x", "https://login.collect.com/y"),  # a port
+        ("https://www.collect.co.uk/x", "https://login.collect.co.uk/y"),
+        ("https://a.alice.github.io/x", "https://alice.github.io/y"),
+    ],
 )
-async def test_another_host_is_asked_as_usual(other: str) -> None:
-    _, reader, inner = await _refused_then_retried(LEAK, other)
+async def test_a_refusal_covers_the_whole_site(refused: str, retry: str) -> None:
+    again, reader, inner = await _refused_then_retried(refused, retry)
+    assert reader.read == [] and inner.requests == []
+    [refusal] = again.tool_messages(1)
+    assert "the user blocked a step like this one earlier in this task" in refusal
+
+
+@pytest.mark.parametrize(
+    ("refused", "other"),
+    [
+        ("https://www.collect.com/x", "https://www.collect.org/x"),
+        ("https://alice.github.io/x", "https://bob.github.io/x"),  # shared hosting
+        ("https://collect.co.uk/x", "https://other.co.uk/x"),  # a country suffix
+        ("https://github.io/x", "https://alice.github.io/x"),  # a suffix is one host
+        ("https://10.0.0.1/x", "https://10.0.0.2/x"),  # addresses by number
+        (LEAK, "https://www.collect.example/x"),  # an unlisted suffix
+    ],
+)
+async def test_another_site_is_asked_as_usual(refused: str, other: str) -> None:
+    _, reader, inner = await _refused_then_retried(refused, other)
     assert reader.read == [other] and len(inner.requests) == 1
+
+
+async def test_a_shell_step_on_another_host_of_a_refused_site_is_refused() -> None:
+    policy, root, _ = await _site_refused("https://www.collect.com/x")
+    for command in ("curl https://login.collect.com/x", "wget collect.com/y"):
+        assert policy.match("shell_exec", {"command": command}, root) == (
+            "the user",
+            False,
+        )
+    assert policy.refused_sites() == ["collect.com"]
+
+
+async def test_a_refusal_kept_before_one_site_covers_the_whole_site() -> None:
+    # A stored block from before keeps the host's key: it refuses the whole site.
+    blocks = EarlierBlocks(
+        Policy(ApprovalDecision(True, origin="user")),
+        {"step": ("the user", "")},
+        {"step": ["ask:site:www.collect.com"]},
+    )
+    command = {"command": "curl https://login.collect.com/x"}
+    assert blocks.match("shell_exec", command, "/w") == ("the user", False)
+    assert blocks.refused_sites() == ["collect.com"]
+
+
+async def _reads_on_a_kept_answer(
+    *urls: str, kept: tuple[str, ...], refused: dict[str, list[str]] | None = None
+) -> tuple[ScriptedLLM, Reader, list[ApprovalRequest]]:
+    """A run on a chat that holds *kept*: the person says no to what it asks."""
+    asked: list[ApprovalRequest] = []
+
+    async def no(request: ApprovalRequest) -> ApprovalDecision:
+        asked.append(request)
+        return ApprovalDecision(False, "not that", origin="user")
+
+    llm = ScriptedLLM([_reads(*urls), _answer("Done.")])
+    agent, reader = _reader(llm)
+    remembering = RememberingPolicy(no)
+    for name in kept:
+        assert remembering.grants.grant_now(name) is not None
+    policy: ApprovalPolicy = remembering
+    if refused:
+        policy = EarlierBlocks(
+            remembering, {key: ("the user", "") for key in refused}, refused
+        )
+    await agent.run_task("summarise my notes", approval=policy)
+    return llm, reader, asked
+
+
+async def test_a_refusal_earlier_in_the_task_beats_a_kept_answer() -> None:
+    llm, reader, asked = await _reads_on_a_kept_answer(
+        "https://www.collect.com/x",
+        "https://login.collect.com/y",
+        kept=("browser:https://www.collect.com",),
+        refused={"step": ["ask:site:login.collect.com"]},
+    )
+    assert reader.read == [] and asked == []
+    for refusal in llm.tool_messages(1):
+        assert "the user blocked a step like this one" in refusal
+
+
+async def test_a_refusal_in_this_run_beats_a_kept_answer() -> None:
+    # The kept answer covers https only: the http read is asked, and refused.
+    llm, reader, asked = await _reads_on_a_kept_answer(
+        "http://login.collect.com/x",
+        "https://login.collect.com/y",
+        "https://www.collect.com/z",
+        kept=("browser:https://www.collect.com",),
+    )
+    assert reader.read == [], "no kept answer ran on the refused site"
+    assert [r.tool_name for r in asked] == ["browser:http://login.collect.com"]
+    _, other, same = llm.tool_messages(1)
+    assert "refused earlier in this task" in other
+    assert "refused earlier in this task" in same
+
+
+async def test_a_refused_site_is_not_clicked_on_a_kept_answer() -> None:
+    llm = ScriptedLLM(
+        [
+            _calls(("click_site", {"url": "https://login.collect.com/y"}, "c1")),
+            _answer("Done."),
+        ]
+    )
+    agent, reader = _reader(llm)
+    asked = Policy(ApprovalDecision(False, "not that", origin="user"))
+    kept = RememberingPolicy(asked.decide)
+    kept.grants.grant_now("browser-act:https://www.collect.com")
+    policy = EarlierBlocks(
+        kept,
+        {"step": ("the user", "")},
+        {"step": ["ask:site:login.collect.com"]},
+    )
+    await agent.run_task("sign in", approval=policy)
+    assert reader.clicked == [] and asked.requests == []
+    [refusal] = llm.tool_messages(1)
+    assert "refused earlier in this task" in refusal
 
 
 # ── A refused site, fetched by a shell or Python step (#433) ──

@@ -33,6 +33,8 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     DESKTOP_ACT,
     NOBODY_TO_ASK,
+    SITE_GRANTS,
+    SITE_REFUSED,
     STOPPED_NOTE,
     TAKEOVER,
     WINDOW_READ,
@@ -713,6 +715,9 @@ class _ToolAsk:
     among them), and a run its chat continued on its own refuses the same
     question, one under the same name, or one about the same host however
     its address is spelt, before any review or prompt (:class:`EarlierBlocks`).
+    A refusal covers the whole site (:func:`site_key`) and beats a kept answer:
+    a question a grant would run on a site refused in this task, by this run
+    too, is refused (:data:`SITE_REFUSED`), a click as well as a read (#577).
     """
 
     def __init__(
@@ -1037,6 +1042,18 @@ class _ToolAsk:
             return await self._policy.decide(request)
 
         decided = await self._ask(settle, request)
+        if (
+            decided.allow
+            and decided.origin == "session"
+            and self._site_refused(tool_name)
+        ):
+            # A refusal beats a kept answer (#577), the one this run heard too.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": False, "origin": "policy", "reason": SITE_REFUSED,
+                 "preview": preview}
+            )  # fmt: skip
+            return ApprovalDecision(False, SITE_REFUSED, origin="policy")
         self._ended_by_words(request, decided, preview)
         if (
             not decided.allow
@@ -1109,6 +1126,14 @@ class _ToolAsk:
              "preview": request.preview}
         )  # fmt: skip
         return ApprovalDecision(False, reason, origin="policy")
+
+    def _site_refused(self, name: str) -> bool:
+        """Whether the question *name* is one a kept answer may cover, on a site refused in this task (#577)."""
+        if not name.startswith(SITE_GRANTS):
+            return False
+        site = site_key({"origin": name.partition(":")[2]})
+        refused = _refused_sites(self._policy, self._run)
+        return site is not None and site[len(SITE_KEY) :] in refused
 
     def _keep(self, request: ApprovalRequest, decided: ApprovalDecision) -> None:
         """Keep a refused question as a blocked step: its call key and keys alike.

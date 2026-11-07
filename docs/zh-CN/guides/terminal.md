@@ -433,6 +433,7 @@ from-the-child
 - **规则：** 你在主对话里允许的，在所有对话里都算；在旁支对话里允许的，只在那里算。在终端里，主对话就是网关的主对话，终端自己的对话（`melo -X cli.chat=local`）也读取它的授权，而且每一步都重新读取：在主对话里收回的授权会立即失效，回合进行到一半也一样。
 - **列表会说明：** 在主对话里，保留授权的回答写作 `Yes, and allow … in every chat`（另一个应用的窗口写作 `Yes, and allow Chat everywhere`），下面还有一行：`In the main chat this counts in every chat, the tasks you start and the terminal, until you take it back with /grants.` 旁支对话和终端自己的对话里写作 `for this chat`。
 - **只在那里：** 旁支对话的授权只在那个对话里算，终端自己的对话的也只在那个对话里算，任务的 **Allow for this task** 只在那个任务里算。自动模式让对话读的网站只在那个对话里算，主对话也一样。
+- **一个网站：** 对网站的授权在它有效的地方也涵盖这个网站的其他主机，回答里也这样写（`Yes, and allow all of example.com …`）；见[浏览](browsing.md)。`/grants` 写的是网站，`/approvals forget NAME` 用网站或它的任何一个主机都能收回。
 - **`/grants`** 按控制台 **设置 › 授权** 的顺序编号：先是在所有对话里都算的，从新到旧，再是各个对话。`/grants revoke 2` 立即收回第二项。终端自己的对话列出自己的授权和主对话的；主对话的授权要在主对话里或在控制台里收回。在那里用 `/approvals forget NAME` 时会这样说明（`… was allowed in the main chat, so it counts everywhere and still holds here.`），`/approvals forget` 会列出仍然有效的主对话授权。
 - **总是询问，从不保留：** **Allow once**、点击密码、验证码或银行卡字段、同意控件或来自其他网站的框、在另一个应用的窗口里按键、付款、更改账号设置，以及每一个高影响步骤（在“自动”模式下也包括网页要求打开的应用）。输入文字和发送表单都不会为对话保留：“询问”模式每次都问；“自动”模式逐个对照你的请求检查，任务明显需要的直接运行，其余的拦下（询问你，涉及密钥则直接拦下）。
 - **何时结束：** 删除对话会删除它的授权。在终端自己的对话里，`/new` 和 `/clear` 开始时不带上一个对话的授权（主对话的仍然有效），恢复一个对话会带回它的授权。

@@ -1107,6 +1107,12 @@ token total.
   it (categories `["beyond_request"]` on a `browser:` or `browser-act:`
   question), whose `session` answer is a grant of that site question for the
   chat.
+- A `pending_approvals` entry's `kept_site` is the site a kept answer covers on
+  a `browser:` or `browser-act:` question (`example.com` for
+  `browser:https://login.example.com`), and `null` for any other question and
+  for an origin that stays exact (an address by number, a local name, a public
+  suffix, an unlisted suffix, a port that is not the scheme's own). The card
+  words its kept choice with it; the question keeps naming the exact host.
 - A `pending_approvals` entry's `offers_chat` says whether the card may offer
   `session` ("Allow for this chat"): true for a routine or unreviewed call of a
   tool whose answers may be kept and for such an Auto site stop, false for a
@@ -2269,13 +2275,16 @@ list: the data of **Settings › Permissions** and of `/grants`.
   it holds in every chat, task and terminal) or `session` (it holds in
   `session_id` only). `session_kind` is `main`, `side`, `task` or `terminal`;
   `chat_title` is that chat's title (`Main chat` for the main chat).
-- `kind` is `tool`, `site`, `folder` or `window`. `key` is the exact name a
-  check matches: `shell_exec`, `browser:https://example.com`,
-  `browser-act:https://example.com`, a folder path, `window-read:<app>`.
+- `kind` is `tool`, `site`, `folder` or `window`. `key` is the name as it was
+  kept: `shell_exec`, `browser:https://example.com`,
+  `browser-act:https://example.com`, a folder path, `window-read:<app>`. A
+  check matches it exactly, except that the person's site grant also covers
+  the other hosts of its site.
 - `label` is the words the page shows, in English. `action` is `tool`, `open`,
   `act` (click and choose), `read` (a site Auto let the chat read), `folder`
-  or `window`. `target` is the tool name, the site, the folder as `~/…` or the
-  app.
+  or `window`. `target` is the tool name, the site the grant covers (the host
+  for a read Auto kept, and for a row kept before a grant covered the whole
+  site), the folder as `~/…` or the app.
 - `by` is `person` or `auto`; `granted_at` is Unix seconds. Auto's grants are
   site reads and hold in their chat only, the main chat included.
 - The order is the one the page and `/grants` number: `global` grants first,

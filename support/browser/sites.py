@@ -1,12 +1,21 @@
 """Which sites melo may open: http and https pages, each site asked once per chat.
 
-A site is an origin (scheme, host and a port that is not the scheme's own).
-Before melo loads a page, and again where a redirect lands, the site is put to
-the run's approval policy as a request named ``browser:<origin>``. The policy
-keeps "allow for this chat" as a grant of that name, so a site asks once per
-chat, ``/new`` and ``/approvals forget`` take the grants back, and the console
-shows the question as its approval card. There is no grant that outlives the
-chat. Without a policy (``--yolo``, a library caller) nobody is asked.
+Each question names an origin (scheme, host and a port that is not the
+scheme's own). Before melo loads a page, and again where a redirect lands, the
+origin is put to the run's approval policy as a request named
+``browser:<origin>``. The policy keeps "allow for this chat" as a grant of that
+name, so a site asks once per chat, ``/new`` and ``/approvals forget`` take the
+grants back, and the console shows the question as its approval card. There is
+no grant that outlives the chat. Without a policy (``--yolo``, a library caller)
+nobody is asked.
+
+A site is the hosts of one registrable domain under one scheme (#577,
+:func:`~localmelo.melo.contracts.review.host_site`): what the person keeps for
+``browser:`` and ``browser-act:`` covers them all, and a refusal does too. What
+cannot be read that way (an address by number, a local name, a public suffix,
+an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
+Every other answer stays on the exact origin it was asked about: an Allow once,
+typing, a form, a file, a click at a point, a page's box and a take-over.
 """
 
 from __future__ import annotations

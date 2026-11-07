@@ -111,8 +111,10 @@ class RememberingPolicy:
     In auto mode it is the policy that asks about a step Auto stopped
     (#465): a site Auto stopped only as not asked for may be granted for
     the chat, and a grant of that site question covers it after
-    (:func:`~localmelo.melo.contracts.approvals.site_grant`). A site Auto
-    let the chat read (:meth:`passed_in_auto`) stays allowed for the chat:
+    (:func:`~localmelo.melo.contracts.approvals.site_grant`). A person's grant
+    of a site question covers the site's other hosts too
+    (:meth:`~localmelo.support.sessions.grants.SessionGrants.covers`, #577). A
+    site Auto let the chat read (:meth:`passed_in_auto`) stays allowed for the chat, on its exact origin:
     in Ask its plain reads run unasked, as on a grant, but never a click, an
     address that can carry data, a card-only kind or a step Auto's review
     stops (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`).
@@ -244,7 +246,7 @@ class RememberingPolicy:
     def silent_for(self, request: ApprovalRequest) -> bool:
         """Whether a grant would let *request* run unasked: the gate then lets
         the user's model review an undecided call first (#279 §3.3)."""
-        return request.tool_name in self.grants.names()
+        return self.grants.covers(request.tool_name)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.outside is not None:
@@ -254,7 +256,7 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if request.tool_name in self.grants.names() and (
+        if self.grants.covers(request.tool_name) and (
             covered_by_grant(request.review)
             or site_grant(request)
             or window_grant(request)
@@ -682,6 +684,9 @@ class ApprovalLedger:
         self._uses: deque[ApprovalUse] = deque(maxlen=USES_KEPT)
         # The tools chat *id* holds a grant of now; the console sets it.
         self.grants_of: Callable[[str], frozenset[str]] = lambda chat_id: frozenset()
+        # Whether the person kept an answer in chat *id* about another host of
+        # the site of a question (#577); the console sets it.
+        self.site_kept: Callable[[str, str], bool] = lambda chat_id, name: False
         # The folders outside the workspace chat *id* allowed for reading (#405).
         self.folders_of: Callable[[str], tuple[str, ...]] = lambda chat_id: ()
 
@@ -886,11 +891,14 @@ class OwnedTaskPolicy:
         return bool(chat) and self._window is not None and chat == self._window_chat
 
     def _granted(self, tool_name: str) -> bool:
-        chat = self._chat
+        chat = self._chat or ""
         return (
             self._reviewed_since(chat)
             and not self._auto()
-            and tool_name in self._ledger.grants_of(chat or "")
+            and (
+                tool_name in self._ledger.grants_of(chat)
+                or self._ledger.site_kept(chat, tool_name)
+            )
         )
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:

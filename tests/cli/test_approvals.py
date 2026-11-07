@@ -516,11 +516,59 @@ def test_the_chat_wide_answer_names_what_it_allows() -> None:
         return session_option(_request(name, site="example.com"))
 
     assert option("browser:https://example.com") == (
-        "Yes, and allow example.com for the rest of this chat"
+        "Yes, and allow all of example.com for the rest of this chat"
     )
-    assert "clicking and choosing on example.com" in option(
+    assert "clicking and choosing anywhere on example.com" in option(
         "browser-act:https://example.com"
     )
+
+
+@pytest.mark.parametrize(
+    ("origin", "host", "site"),
+    [
+        ("https://login.example.com", "login.example.com", "all of example.com"),
+        ("https://a.b.example.co.uk", "a.b.example.co.uk", "all of example.co.uk"),
+        ("https://a.alice.github.io", "a.alice.github.io", "all of alice.github.io"),
+        ("https://github.io", "github.io", "github.io"),  # a suffix stays one host
+        ("https://10.0.0.1", "10.0.0.1", "10.0.0.1"),
+        ("http://wiki", "wiki", "wiki"),
+        ("https://a.example.com:8443", "a.example.com:8443", "a.example.com:8443"),
+    ],
+)
+def test_the_kept_answer_names_the_site_it_covers(
+    origin: str, host: str, site: str
+) -> None:
+    asked = _request(f"browser:{origin}", site=host)
+    assert session_option(asked) == f"Yes, and allow {site} for the rest of this chat"
+    # The question itself keeps naming the exact host.
+    assert panel_text(asked, width=80).header.startswith(host)
+
+
+@pytest.mark.parametrize(
+    ("word", "gone"),
+    [
+        ("example.com", True),  # the site the card named
+        ("www.example.com", True),
+        ("login.example.com", True),  # the host it was kept on
+        ("cdn.example.com", True),  # another host it covers
+        ("example.org", False),
+        ("nothing", False),
+    ],
+)
+def test_forget_takes_a_kept_answer_back_by_any_name_of_its_site(
+    word: str, gone: bool
+) -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        raise AssertionError("nothing is asked here")
+
+    exact = "browser:http://wiki:8080"
+    approvals = Approvals(ask, "ask")
+    kept = "browser:https://login.example.com"
+    approvals._policy.grants.grant_now(kept)
+    approvals._policy.grants.grant_now(exact)
+    approvals.forget(word)
+    assert (kept not in approvals.allowed_tools) is gone
+    assert exact in approvals.allowed_tools, "an exact origin is not read as a site"
 
 
 def test_in_the_main_chat_the_answer_says_it_counts_in_every_chat() -> None:
@@ -528,10 +576,10 @@ def test_in_the_main_chat_the_answer_says_it_counts_in_every_chat() -> None:
         return session_option(_request(name, **arguments), everywhere=True)
 
     assert option("browser:https://example.com", site="example.com") == (
-        "Yes, and allow example.com in every chat"
+        "Yes, and allow all of example.com in every chat"
     )
     assert option("browser-act:https://example.com", site="example.com") == (
-        "Yes, and allow clicking and choosing on example.com in every chat"
+        "Yes, and allow clicking and choosing anywhere on example.com in every chat"
     )
     assert option("window-read:com.example.chat", app="Chat") == (
         "Yes, and allow Chat everywhere"

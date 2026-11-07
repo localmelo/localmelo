@@ -507,6 +507,30 @@ const siteStop = (extra = {}) => ({
   ...extra,
 });
 
+test('the kept answer names the whole site it covers, and the question keeps the exact host', () => {
+  const site = (tool, extra = {}) => ({request_id: 'w', tool_name: `${tool}https://login.example.com`, kept_site: 'example.com',
+    arguments: {site: 'login.example.com'}, arguments_complete: true, workspace_label: '~/w', ...extra});
+  const fetched = {arguments: {site: 'login.example.com', via: 'web_fetch', url: 'https://login.example.com/a'}};
+  const c = cards();
+  const open = c.draw(site('browser:'));
+  assert.equal(findNode(open, (node) => node.className === 'approval-title').textContent, 'Let melo open login.example.com?');
+  assert.equal(ruleOf(open, 'w'), 'melo will not ask again before opening all of example.com in this chat.');
+  assert.equal(ruleOf(c.draw(site('browser:', fetched)), 'w'), 'melo will not ask again before reading or opening all of example.com in this chat.');
+  const click = c.draw(site('browser-act:'));
+  assert.equal(findNode(click, (node) => node.className === 'approval-title').textContent, 'Let melo click and choose on login.example.com?');
+  assert.equal(ruleOf(click, 'w'), 'melo will not ask again before clicking or choosing anywhere on example.com in this chat. Typing is never covered by this.');
+  assert.equal(ruleOf(c.draw(site('browser:'), {scope: 'task'}), 'w'), 'melo will not ask again before opening all of example.com in this task.');
+  const main = cards({main: true});
+  assert.equal(ruleOf(main.draw(site('browser:')), 'w'), 'melo will not ask again before opening all of example.com in any chat.');
+  assert.equal(ruleOf(main.draw(site('browser:', fetched)), 'w'), 'melo will not ask again before reading or opening all of example.com in any chat.');
+  assert.equal(ruleOf(main.draw(site('browser-act:')), 'w'), 'melo will not ask again before clicking or choosing anywhere on example.com in any chat. Typing is never covered by this.');
+  // Without the server's word the card names the host it asks about, as an address read as no site does.
+  const exact = c.draw(site('browser:', {kept_site: null}));
+  assert.equal(ruleOf(exact, 'w'), 'melo will not ask again before opening login.example.com in this chat.');
+  // Typing keeps its own sentence: nothing of it is kept.
+  assert.match(ruleOf(c.draw(site('browser-type:', {arguments: {site: 'login.example.com', text: 'hi'}})), 'w'), /Typing always asks/);
+});
+
 test('Auto\'s card for a site stopped as not asked for offers the chat, and says why', () => {
   const c = cards();
   const card = c.draw(siteStop(), {asked: 'check the news'});

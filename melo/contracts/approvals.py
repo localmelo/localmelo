@@ -58,8 +58,10 @@ from localmelo.melo.contracts.review import (
     ActionReview,
     because,
     block_words,
+    host_site,
     loose_keys,
     offers_grant,
+    site_key_of,
     site_keys,
     step_key,
     url_site,
@@ -439,6 +441,34 @@ def never_granted(tool_name: str) -> bool:
 # (#465): opening or reading a site, and clicking or choosing on it. Typing and
 # sending a form never (:data:`NEVER_GRANTED`).
 SITE_GRANTS: Final = ("browser:", "browser-act:")
+
+
+def whole_site(name: str) -> str | None:
+    """The site a kept answer to the question *name* covers: ``example.com`` (#577).
+
+    ``None`` for a question that is not one of :data:`SITE_GRANTS`, and for an
+    origin :func:`~localmelo.melo.contracts.review.host_site` does not read as
+    one site (the origin stays exact: a port that is not the scheme's own has
+    one written, which no plain name holds).
+    """
+    if not name.startswith(SITE_GRANTS):
+        return None
+    scheme, found, host = name.partition(":")[2].partition("://")
+    return host_site(host) if found and scheme in ("http", "https") else None
+
+
+def site_covers(kept: str, name: str) -> bool:
+    """Whether a kept answer to the question *kept* covers the question *name* on another host (#577).
+
+    The same kind of question, the same scheme and the same :func:`whole_site`.
+    The stored name stays as it was given: hosts are matched here, at lookup.
+    """
+    site = whole_site(name)
+    return (
+        site is not None
+        and site == whole_site(kept)
+        and name.partition("://")[0] == kept.partition("://")[0]
+    )
 
 
 def site_grant(request: ApprovalRequest) -> bool:
@@ -825,6 +855,12 @@ class AutoPolicy:
         )
 
 
+# Why a site question is refused that a kept answer would have run (#577).
+SITE_REFUSED: Final = (
+    "This site was refused earlier in this task, and a refusal stands over an "
+    "answer kept for it, so this does not run; find another way that does not "
+    "need it"
+)
 # Why a call is refused that was blocked before in the same task (#411);
 # {who} is who blocked it: "Auto mode", "the user" or "melo's rules".
 BLOCKED_EARLIER: Final = (
@@ -859,17 +895,18 @@ def question_key(name: str) -> str:
 
 
 def site_key(arguments: Mapping[str, Any]) -> str | None:
-    """The loose key of a question about a site: ``ask:site:<host>`` (#431).
+    """The loose key of a question about a site: ``ask:site:<site>`` (#431, #577).
 
     The host of the question's http(s) ``origin`` argument, in ASCII (IDNA),
-    lower case and without one final dot, so a refused site stays refused
-    whatever scheme, port or spelling a later address gives it; another host
-    (``www.`` too, or a parent domain) is another site. None when the
-    question names no such origin.
+    lower case and without one final dot, read as one site
+    (:func:`~localmelo.melo.contracts.review.site_key_of`): a refused site
+    stays refused on its other hosts and whatever scheme, port or spelling a
+    later address gives it. A host not read as one site keys itself. None when
+    the question names no such origin.
     """
     origin = arguments.get("origin")
     host = url_site(origin) if isinstance(origin, str) else None
-    return None if host is None else SITE_KEY + host
+    return None if host is None else site_key_of(host)
 
 
 class EarlierBlocks:
@@ -886,8 +923,9 @@ class EarlierBlocks:
     :class:`AutoPolicy`) is not refused, nor is a call alike to it. It never
     allows anything.
 
-    A site refused earlier (a block with an ``ask:site:<host>`` key, kept
-    from a tool's own site question) stays refused for a ``shell_exec`` or
+    A site refused earlier (a block with an ``ask:site:<site>`` key, kept
+    from a tool's own site question, read again as one site when it was kept
+    under its host before #577) stays refused for a ``shell_exec`` or
     ``python_exec`` step that names an address on it (#433,
     :func:`~localmelo.melo.contracts.review.site_keys`), and one naming an
     address whose encoded host does not decode is refused while any site is.
@@ -901,7 +939,13 @@ class EarlierBlocks:
     ) -> None:
         self.inner = inner
         self._blocks = dict(blocks)
-        self._loose = {key: frozenset(keys) for key, keys in (loose or {}).items()}
+        self._loose = {
+            key: frozenset(
+                site_key_of(k[len(SITE_KEY) :]) if k.startswith(SITE_KEY) else k
+                for k in keys
+            )
+            for key, keys in (loose or {}).items()
+        }
 
     def _lifted(self, key: str) -> bool:
         auto = find_auto(self.inner)
