@@ -69,7 +69,9 @@ class BrowsingFactory(FakeFactory):
         super().__init__(root, {"m1": [answer("ok")]})
         self.driver = driver
 
-    async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
+    async def build(
+        self, model: str | None = None, *, url: str | None = None, start: bool = True
+    ) -> Agent:
         providers = (
             [] if self.browser_driver == "off" else [BrowserToolProvider(self.driver)]
         )
