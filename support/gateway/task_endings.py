@@ -726,7 +726,15 @@ def _python_writes(code: str) -> bool:
 
 
 @dataclass
-class _Call:
+class TurnCall:
+    """One tool call of a run, as its stored events show it (:func:`turn_calls`).
+
+    *start* and *finish* are the ids of its ``tool.started`` and
+    ``tool.finished`` events (``None`` while no finish is kept); *asked*
+    says the approval policy was asked about it, as for a call that can
+    change something.
+    """
+
     start: int
     name: str
     arguments: Mapping[str, Any]
@@ -734,6 +742,10 @@ class _Call:
     status: str = ""
     exit_code: int | None = None
     output: str = ""
+    step: int = 0
+    preview: str = ""
+    error: str = ""
+    asked: bool = False
 
     def _command(self) -> tuple[str, bool]:
         """``(command, passed on)`` of the test runner this call starts, or ``""``."""
@@ -1046,14 +1058,18 @@ async def baseline(folder: str | None) -> Baseline:
     return await asyncio.to_thread(_look, folder) if folder else Baseline(None)
 
 
-async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
-    """The tool calls of *turn*'s own run, each start paired with its finish."""
-    calls: list[_Call] = []
-    waiting: dict[str, list[_Call]] = {}
+async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[TurnCall]:
+    """The tool calls of *turn*'s own run, each start paired with its finish.
+
+    *turn* is a stored turn (its ``turn`` and ``run_id``): of a task, or of a
+    chat whose run hands its work on (#571).
+    """
+    calls: list[TurnCall] = []
+    waiting: dict[str, list[TurnCall]] = {}
     after = 0
     while True:
         page = await store.list_events(
-            task_id, after_id=after, limit=1000, turns=(turn.turn, turn.turn)
+            session_id, after_id=after, limit=1000, turns=(turn.turn, turn.turn)
         )
         for stored in page:
             kind, data = stored.event.get("type"), stored.event.get("data") or {}
@@ -1063,7 +1079,9 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
             if kind == "tool.started":
                 given = data.get("arguments")
                 given = given if isinstance(given, dict) else {}
-                call = _Call(stored.id, str(data.get("name") or ""), given)
+                call = TurnCall(stored.id, str(data.get("name") or ""), given)
+                call.step = int(data.get("step") or 0)
+                call.preview = str(data.get("preview") or "")
                 calls.append(call)
                 waiting.setdefault(key, []).append(call)
             elif kind == "tool.finished" and waiting.get(key):
@@ -1072,6 +1090,8 @@ async def _calls(store: SessionStore, task_id: str, turn: Any) -> list[_Call]:
                 call.finish, call.status = stored.id, str(data.get("status") or "")
                 call.exit_code = code if type(code) is int else None
                 call.output = str(data.get("output") or "")[-4000:]
+                call.error = str(data.get("error") or "")
+                call.asked = isinstance(data.get("approval"), dict)
         if len(page) < 1000:
             return calls
         after = page[-1].id or after
@@ -1159,9 +1179,9 @@ async def _evidence(
     asks_tests: bool,
     asks_commit: bool,
     finishing: bool,
-) -> tuple[list[str], list[tuple[_Call, tuple[str, str]]], list[str], list[str]]:
+) -> tuple[list[str], list[tuple[TurnCall, tuple[str, str]]], list[str], list[str]]:
     """Reasons about the run's tests and folder; its tests; its own changes; notes."""
-    calls = await _calls(store, task_id, turn) if turn is not None else []
+    calls = await turn_calls(store, task_id, turn) if turn is not None else []
     tests = [(call, found) for call in calls if (found := call.test())]
     seen = await _changes(folder, base)
     # With no folder to look at, only the run's own calls say whether code changed.

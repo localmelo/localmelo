@@ -11,6 +11,7 @@ models; memory words only; nothing reaches a model server or the network.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +20,11 @@ import pytest
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent._earlier import EARLIER_HEAD
 from localmelo.support.gateway.console import Console
-from localmelo.support.gateway.handover import (
-    HANDOFF_HEADER,
-    PICKED_HEADER,
-)
+from localmelo.support.gateway.handoff import HANDOFF_HEADER
+from localmelo.support.gateway.handover import PICKED_HEADER
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TASK_PACK_HEADER
+from localmelo.tests.checker.test_redaction import AWS, GITHUB
 from localmelo.tests.memory.test_recall_list import add_turn
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -37,6 +37,7 @@ FRIEND = "My friend Alex is looking for a new job."
 WANTS = "He wants a staff role at a large company."
 # A short request whose words alone do not say whom it is about.
 REQUEST = "find backend roles from his résumé"
+SITE = "example.com"
 
 
 def creates(objective: str) -> Reply:
@@ -247,8 +248,8 @@ async def test_a_chat_hands_the_rest_to_one_task_and_its_turn_ends_on_the_receip
         assert all(isinstance(d["event"], int) for d in packet["done"])
         info = await console.store.get_session(record.task_id)
         assert info is not None and info.meta["started_by"] == "chat"
-        [echo] = [r for r in await rows(console, chat) if r["echo"] == "started"]
-        assert echo["task_id"] == record.task_id
+        # The receipt is the one line: no "Started" row beside it.
+        assert [r for r in await rows(console, chat) if r["echo"] == "started"] == []
 
 
 async def test_the_task_reads_the_packet_as_data_and_never_as_the_persons_words(
@@ -333,3 +334,82 @@ async def test_a_retried_hand_off_finds_its_one_task_and_admits_no_other(
         assert len(await _handed(console, chat)) == 2
         again = (await console.store.list_turns(chat))[-1]
         assert record.title in again.answer
+
+
+async def test_an_admitted_hand_off_is_never_reported_as_not_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure after the commit: the task is found by its key before the chat
+    reads anything, and the turn ends on it."""
+    main: list[Reply] = [hands_off(), answer("Never asked: the work moved.")]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        workers, chat = console.workers, str(console.main_id)
+        original, failed = workers._body, []
+
+        async def flaky(record: Any) -> dict[str, Any]:
+            if not failed:  # the read right after the commit fails once
+                failed.append(record.task_id)
+                raise TaskStoreError("database is locked")
+            return await original(record)
+
+        monkeypatch.setattr(workers, "_body", flaky)
+        await say(client, console, TYPED)
+        [record] = await workers.tasks.list_tasks()
+        assert failed == [record.task_id]
+        assert len(models["main"].requests) == 1, "no step after the hand-off"
+        [result] = await _handed(console, chat)
+        assert record.title in result["result"]
+
+
+async def test_the_packet_is_redacted_where_it_is_kept_and_shown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [
+        tool_call("file_read", {"path": "keys.txt"}, "read-1"),
+        tool_call(
+            "task_create",
+            {"title": "Quarterly report", "objective": f"Use key {AWS}.",
+             "continue_current": True, "progress": f"Read keys.txt: {GITHUB}"},
+            "hand-1",
+        ),  # fmt: skip
+    ]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[[answer("Done.\nEnding: ready")]]
+    ) as (console, client, models, _):
+        (tmp_path / "work" / "keys.txt").write_text(f"token {GITHUB}\n")
+        await say(client, console, TYPED)
+        [record] = await console.workers.tasks.list_tasks()
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        first = "\n".join(
+            str(message.content) for message in models["workers"][0].requests[0]
+        )
+        listed = (await client.get("/api/tasks")).text
+        for shown in (json.dumps(record.spec), listed, first):
+            assert GITHUB not in shown and AWS not in shown
+        assert "[redacted]" in first[first.index(HANDOFF_HEADER) :]
+
+
+async def test_a_turn_given_a_password_keeps_its_work_here(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A password the person gave in this turn can only be typed in this run: the
+    work does not move to a task where it would be spent."""
+    main: list[Reply] = [hands_off(), answer("I sign in here and go on.")]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        await say(
+            client, console, f"{TYPED}; sign in to {SITE}, my password is x7-fire9"
+        )
+        assert await console.workers.tasks.list_tasks() == []
+        assert await _handed(console, str(console.main_id)) == []
+        told = tool_results(models["main"], 1)[-1]
+        assert told.startswith("Not done:") and "password" in told

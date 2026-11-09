@@ -122,11 +122,8 @@ class TaskSpec:
     say. Only trusted code sets it.
     ``handoff`` is the packet of a task that goes on with work begun elsewhere
     (#571): a chat's turn that handed its remaining work on, or an ended task
-    whose job a fresh task continues. Melo's own fields say where it comes
-    from (``from``, ``source``, ``turn``, ``key``, ``chain``), how that ended
-    and what its calls did (``ended``, ``done``); ``account``, ``remaining``
-    and ``note`` are words a model or melo wrote, which the task reads as data,
-    never as the person's (``handover.handoff_block``). Only trusted code sets it.
+    whose job a fresh task continues (``handoff.Handoff``, which says what each
+    field holds). Only trusted code sets it.
     """
 
     title: str

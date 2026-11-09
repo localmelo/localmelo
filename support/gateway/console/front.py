@@ -74,6 +74,8 @@ from pydantic import Field
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.approvals import TOOL_ASK
+from localmelo.melo.contracts.pause import TOOL_DEADLINE
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
@@ -133,10 +135,9 @@ from localmelo.support.gateway.front_rules import (
     triage,
     work_request,
 )
+from localmelo.support.gateway.handoff import Handoff, from_chat
 from localmelo.support.gateway.handover import (
-    ACCOUNT_CHARS,
     Handover,
-    done_calls,
     handover_of,
     task_line,
 )
@@ -764,25 +765,46 @@ class TaskTools(BaseToolProvider):
             return await self._hand_off(str(title), str(objective), str(progress))
         return await self._begin(str(title), str(objective), uses_website is True)
 
-    async def _hand_off(self, title: str, objective: str, progress: str) -> str:
-        """Hand the rest of the running turn's work to a fresh task (#571).
+    async def _may_start(self) -> tuple[TurnInfo | None, str, TaskRecord | None]:
+        """The running turn, why it may start no task (``""`` when it may), and
+        the task its message started already.
 
-        Only the person's own turn, and only as the one call of its step (the
-        agent refuses a mixed step before this runs). The task's request is the
-        person's message; the model's remaining objective and progress ride in
-        its packet as data, beside the turn's calls as melo's records show them.
-        A browser page this chat holds, its take-over card or an approval it
-        waits on keeps the work here: browser work does not move yet, and no
-        sign-in moves with the work. One task per message: a retry finds the
-        task this message handed its work to and ends on it again, admitting
-        nothing. When no task can be admitted nothing moved, the turn goes on,
-        and the model reads why. Admitting is the one commit that makes the
-        task runnable: a task that was not admitted never runs, after a restart
-        either.
+        Only the person's own turn starts a task, once per message: a retry
+        finds the task its message started (:meth:`Front.admitted`).
         """
         front = self._front
         turn = front.current_turn()
         refused = self._not_persons(turn)
+        if refused or turn is None:
+            return turn, refused, None
+        if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
+            refused = (
+                "Not done: one task per message. Tell the user what else could start."
+            )
+            return turn, refused, None
+        return turn, "", await front.admitted(turn)
+
+    async def _hand_off(self, title: str, objective: str, progress: str) -> str:
+        """Hand the rest of the running turn's work to a fresh task (#571).
+
+        The guards of any start (:meth:`_may_start`), and only as the one call
+        of its step (the agent refuses a mixed step before this runs). The
+        task's request is the person's message; the model's remaining
+        objective and progress ride in its packet as data, beside the turn's
+        calls and refusals as melo's records show them (``handoff.from_chat``).
+        Work stays here while this chat holds a browser page, its take-over
+        card or an approval, or a password the person gave in this turn: browser
+        work and sign-ins do not move yet.
+
+        Admitting is the one commit that makes the task runnable, and the
+        call's time limit does not cut it. Whatever happens after it, the task
+        is looked up by its key before the chat reads anything: admitted, the
+        turn ends on it; not found, the work is still the chat's and it reads
+        why; unknown, the turn ends saying so, never going on beside a task
+        that may hold the work. A retry finds the task and ends on it again.
+        """
+        front = self._front
+        turn, refused, started = await self._may_start()
         if refused or turn is None:
             return refused
         if not can_hand_off():
@@ -790,42 +812,39 @@ class TaskTools(BaseToolProvider):
                 "Not done: handing the rest of the work on must be the only call of "
                 "its step."
             )
-        if why := front.holds_browser():
-            return f"Not done: {why} The work stays here: finish it in this chat."
-        started = await front.admitted(turn)
         if started is not None:
-            packet = started.spec.get("handoff")
-            if isinstance(packet, dict) and packet.get("from") == "chat":
-                return hand_off(_receipt(started.title, turn.typed_text))
-            return (
-                f"Not done: this message started task {started.task_id} already: "
-                f"{_row(started)}. {_tell(turn.user_text)}"
+            if Handoff.read(started.spec).origin == "chat":
+                return hand_off(_receipt(turn.typed_text, started.title))
+            return _already(started, turn)
+        if why := front.holds_browser() or _holds_sign_in():
+            return f"Not done: {why} The work stays here: finish it in this chat."
+        _no_time_limit()
+        echo: dict[str, Any] = {}
+        try:
+            packet = await front.handoff_of(turn, account=progress, remaining=objective)
+            echo = await front.delegate(
+                turn.user_text,
+                typed=front.typed(),
+                title=title,
+                turn=turn,
+                handoff=packet,
             )
-        if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
-            return (
-                "Not done: one task per message. Tell the user what else could start."
+        except Exception:
+            logger.warning("A hand-off failed; looking for its task", exc_info=True)
+        try:
+            moved = await front.admitted(turn)
+        except Exception:
+            logger.warning(
+                "Could not tell whether a hand-off was admitted", exc_info=True
             )
-        echo = await front.delegate(
-            turn.user_text,
-            typed=front.typed(),
-            title=title,
-            turn=turn,
-            handoff={
-                "from": "chat",
-                "source": front.chat_id,
-                "turn": turn.id,
-                "key": await front.receipt(turn),
-                "done": await front.done_here(turn),
-                "account": progress.strip()[:ACCOUNT_CHARS],
-                "remaining": objective.strip()[:ACCOUNT_CHARS],
-            },
+            return hand_off(_receipt(turn.typed_text, None))
+        if moved is not None:
+            return hand_off(_receipt(turn.typed_text, moved.title))
+        why = echo.get("line") or "melo could not admit it"
+        return (
+            f"Not done: the work did not move to a task ({why}). It is still yours: "
+            "go on here, or tell the user exactly this."
         )
-        if echo.get("echo") != "started":
-            return (
-                f"Not done: the work did not move to a task ({echo.get('line', '')}). "
-                "It is still yours: go on here, or tell the user exactly this."
-            )
-        return hand_off(_receipt(str(echo["title"]), turn.typed_text))
 
     async def _begin(
         self,
@@ -842,21 +861,11 @@ class TaskTools(BaseToolProvider):
         is the finished task this work follows on.
         """
         front = self._front
-        turn = front.current_turn()
-        refused = self._not_persons(turn)
+        turn, refused, started = await self._may_start()
         if refused or turn is None:
             return refused
-        if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
-            return (
-                "Not done: one task per message. Tell the user what else could start."
-            )
-        started = await front.admitted(turn)
         if started is not None:
-            # A retry of the turn that started it: nothing starts twice.
-            return (
-                f"Not done: this message started task {started.task_id} already: "
-                f"{_row(started)}. {_tell(turn.user_text)}"
-            )
+            return _already(started, turn)  # a retry of the turn that started it
         typed = front.typed()
         # The model's reading rides along only where code read the words as
         # work it hands over as they are (/task); any other start is the
@@ -1134,10 +1143,43 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     return lines
 
 
-def _receipt(title: str, typed: str) -> str:
-    """The answer of a turn that handed its work on, in the language of *typed*."""
+def _receipt(typed: str, title: str | None) -> str:
+    """The answer of a turn that handed its work on to the task *title*, in the
+    language of *typed*; with ``None``, the line for a hand-off whose task melo
+    could not look up."""
     language = "zh-Hans" if is_chinese(typed) else "en"
+    if title is None:
+        return t_in(language, "front.handoff.unsure")
     return t_in(language, "front.handoff.receipt", title=title)
+
+
+def _already(started: TaskRecord, turn: TurnInfo) -> str:
+    """What the model reads when the turn's message started *started* already."""
+    return (
+        f"Not done: this message started task {started.task_id} already: "
+        f"{_row(started)}. {_tell(turn.user_text)}"
+    )
+
+
+def _holds_sign_in() -> str:
+    """Why the running turn's work stays in its run for a sign-in, or ``""`` (#571).
+
+    A password the person gave in this turn can be typed only in this run
+    (``ToolAsk.holds_sign_in``): a task the work moved to would hold it spent.
+    """
+    check = getattr(TOOL_ASK.get(), "holds_sign_in", None)
+    if callable(check) and check() is True:
+        return "a password the user gave in this turn can only be typed in this chat."
+    return ""
+
+
+def _no_time_limit() -> None:
+    """Admitting a task is one commit: the running call's time limit does not cut
+    it in two (#571). A Stop still goes through, as through any await."""
+    deadline = TOOL_DEADLINE.get()
+    if deadline is not None:
+        with contextlib.suppress(RuntimeError):
+            deadline.reschedule(None)
 
 
 def _ref(record: TaskRecord) -> TaskRef:
@@ -1932,22 +1974,30 @@ class Front:
             return "an approval in this chat waits for the user."
         return ""
 
-    async def done_here(self, turn: TurnInfo) -> list[dict[str, Any]]:
-        """The calls *turn* made, as its stored events show them (``handover.done_calls``).
+    async def handoff_of(
+        self, turn: TurnInfo, *, account: str, remaining: str
+    ) -> Handoff:
+        """The packet of *turn*, which hands its remaining work on (``handoff.from_chat``).
 
-        The events the run has queued are stored first; the call that hands
-        the work on, still running, is left out.
+        The events the run has queued are stored first, and the turn is read
+        again with them (its run's id is stored with its first event); the
+        call that hands the work on, still running, is left out.
         """
         entry = self.console.sessions.get(turn.session_id)
         if entry is not None:
             await entry.runner.flush()
-        try:
-            return await done_calls(
-                self.console.store, turn.session_id, turn.turn, skip=("task_create",)
-            )
-        except Exception:
-            logger.warning("Could not read the calls of a turn that hands off")
-            return []
+        store = self.console.store
+        rows = await store.list_turns(turn.session_id, before=turn.turn + 1, limit=1)
+        stored = rows[-1] if rows and rows[-1].turn == turn.turn else turn
+        return await from_chat(
+            store,
+            stored,
+            typed=self.typed(),
+            key=await self.receipt(turn),
+            account=account,
+            remaining=remaining,
+            skip=("task_create",),
+        )
 
     # ── Tasks: start, change, suggest ──
 
@@ -1964,7 +2014,7 @@ class Front:
         create_key: str | None = None,
         asked_at: float | None = None,
         earlier: TaskRecord | None = None,
-        handoff: dict[str, Any] | None = None,
+        handoff: Handoff | None = None,
     ) -> dict[str, Any]:
         """Start *work* as a task this chat owns, at the level the person's words give.
 
@@ -1979,7 +2029,7 @@ class Front:
         *earlier* is the finished task this work follows on: the new task works
         in its folder, and its record rides in the handover as background.
         *handoff* is the packet of a turn that hands the rest of its work on
-        (``TaskSpec.handoff``, #571).
+        (#571): its turn's receipt is the one line, so no echo is shown.
         """
         if turn is not None and key is None and create_key is None:
             create_key = await self.receipt(turn)
@@ -1994,9 +2044,7 @@ class Front:
         except TaskPolicyError as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
-        spec = dataclasses.replace(
-            spec, level=level, reason=reason, user_words=words, handoff=handoff or {}
-        )
+        spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
         # What the chat hands the task (#463): its earlier turns, and what this
         # turn of the person's recalled, searched or opened.
         handover = await handover_of(
@@ -2044,6 +2092,7 @@ class Front:
                 of=of,
                 create_key=create_key,
                 handover=handover,
+                handoff=handoff,
             )
             if saved is not None and echo.get("echo") == "started":
                 await self._ran(saved, str(echo["task_id"]))
@@ -2104,7 +2153,13 @@ class Front:
         word: str = "Started",
         create_key: str | None = None,
         handover: Handover | None = None,
+        handoff: Handoff | None = None,
     ) -> dict[str, Any]:
+        """Admit *spec* as a task this chat follows up on, and its echo.
+
+        Work a turn hands on (*handoff*) shows no echo: the turn's receipt is
+        its one line, and what is returned is the echo's data alone.
+        """
         try:
             # A task a chat starts is the chat's to follow up on (#411).
             task, repeated = await self.console.workers.create_spec(
@@ -2114,11 +2169,18 @@ class Front:
                 create_key=create_key,
                 chat_started=True,
                 handover=handover,
+                handoff=handoff,
             )
         except (TaskPolicyError, ValueError, TaskStoreError) as exc:
+            if handoff is not None:
+                line = t_in("en", "front.echo.startFailed", problem=str(exc))
+                return {"echo": "failed", "line": line}
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         if turn is not None:
             self._count(turn)
+        if handoff is not None:
+            return {"echo": "started", "task_id": task["task_id"],
+                    "title": task["title"], "level": task["level"]}  # fmt: skip
         for event in reversed(await self._echoes() if repeated else []):
             data = event.event.get("data") or {}
             if data.get("echo") == "started" and data.get("task_id") == task["task_id"]:
@@ -2169,31 +2231,29 @@ class Front:
         task never runs a step that was blocked before.
 
         A worker this chat started is one-time (#567, #571): once it ended,
-        nothing runs in it again. A job it finished takes *text* as new work: a
-        new task, under *key*, with its record as background (:meth:`delegate`).
-        A job it left unfinished (failed, out of steps, stopped, not finished)
-        goes on in a fresh task (``TaskWorkers.successor``): the person's *text*
-        follows the request as theirs, the chat's own is a note in its packet.
-        The worker's lock has the last word, for a job that ends while this reads.
+        nothing runs in it again. A job whose newest task finished it takes
+        *text* as new work: a new task, under *key*, with that task's record
+        as background (:meth:`delegate`). Any other ended job goes on
+        (:meth:`_successor`): in a fresh task, or in the task that holds it
+        already. The worker's lock has the last word, for a job that ends
+        while this reads.
         """
+        workers = self.console.workers
 
-        async def new_task(earlier: TaskRecord) -> dict[str, Any]:
-            if not job_finished(earlier) or automatic:
-                return await self._successor(
-                    earlier, text, typed=typed, show=show, of=of, turn=turn,
-                    automatic=automatic, create_key=create_key,
+        async def go_on(ended: TaskRecord) -> dict[str, Any]:
+            head = await workers.newest(ended)
+            if head.state in FINISHED and job_finished(head) and not automatic:
+                return await self.delegate(
+                    text, typed=typed, key=key, show=show, of=of, turn=turn,
+                    create_key=create_key, asked_at=asked_at, earlier=head,
                 )  # fmt: skip
-            return await self.delegate(
-                text, typed=typed, key=key, show=show, of=of, turn=turn,
-                create_key=create_key, asked_at=asked_at, earlier=earlier,
+            return await self._successor(
+                ended, text, typed=typed, show=show, of=of, turn=turn,
+                automatic=automatic,
             )  # fmt: skip
 
-        # A message for an ended worker reaches the task that holds its job now.
-        record = await self.console.workers.newest(record)
-        if record.state in FINISHED and await self.console.workers.one_time(
-            record.task_id
-        ):
-            return await new_task(record)
+        if record.state in FINISHED and await workers.one_time(record.task_id):
+            return await go_on(record)
         if automatic:
             return await self._failed(
                 show, "front.echo.sendFailed", title=record.title,
@@ -2209,7 +2269,7 @@ class Front:
                 same_job=True,
             )
         except JobFinishedError:
-            return await new_task(await self.record(record.task_id) or record)
+            return await go_on(await self.record(record.task_id) or record)
         except (SessionStoreError, TaskPolicyError, ValueError, RuntimeError) as exc:
             return await self._failed(
                 show, "front.echo.sendFailed", title=record.title, problem=_plain(exc)
@@ -2233,38 +2293,50 @@ class Front:
         of: int | None,
         turn: TurnInfo | None,
         automatic: bool,
-        create_key: str | None,
     ) -> dict[str, Any]:
-        """A fresh task that goes on with the unfinished job of *ended*, and its echo (#571).
+        """Go on with the job of *ended*, a chat's worker that ended, and its echo (#571).
 
-        Its key is the person's message (a retry finds the same task), or for
-        the chat's follow-up, the ending it follows up on.
+        ``TaskWorkers.successor`` reads the job's newest task: a fresh task
+        goes on with it, or the person's message reaches the task that holds
+        it already. The person's message (its receipt) is what asked, so a
+        retry finds what it did.
         """
-        if create_key is None and turn is not None and not automatic:
-            create_key = await self.receipt(turn)
-        if create_key is None and automatic:
-            create_key = f"followup:{ended.task_id}:{ended.finished_at}"
+        trigger = await self.receipt(turn) if turn is not None and not automatic else ""
         level, why = triage(typed)
         try:
-            body, _ = await self.console.workers.successor(
+            body, how = await self.console.workers.successor(
                 ended,
                 text,
                 by="chat" if automatic else "person",
-                key=create_key,
+                trigger=trigger,
                 level=None if automatic or level == 2 else level,
                 reason="" if automatic else why,
             )
-        except (TaskPolicyError, TaskStoreError, ValueError, RuntimeError) as exc:
+        except (
+            TaskPolicyError, TaskStoreError, SessionStoreError, ValueError, RuntimeError,
+        ) as exc:  # fmt: skip
             return await self._failed(
                 show, "front.echo.sendFailed", title=ended.title, problem=_plain(exc)
             )
+        task_id, title = str(body["task_id"]), str(body["title"])
+        if how == "running":
+            return await self._failed(
+                show, "front.echo.sendFailed", title=ended.title,
+                problem=f"its work goes on in task {task_id} already",
+            )  # fmt: skip
         if turn is not None:
             self._count(turn)
+        if how == "successor":
+            return await self._echo(
+                "started", task_id, title, f"Continued: {title}", show, of,
+                level=body["level"], reason=body["reason"], follows=ended.task_id,
+                said=said("front.echo.continued", title=title),
+            )  # fmt: skip
+        word = "Continued" if how == "continued" else "Sent to"
+        key = "front.echo.continued" if how == "continued" else "front.echo.sentTo"
         return await self._echo(
-            "started", str(body["task_id"]), str(body["title"]),
-            f"Continued: {body['title']}", show, of,
-            level=body["level"], reason=body["reason"], follows=ended.task_id,
-            said=said("front.echo.continued", title=body["title"]),
+            "sent", task_id, title, f"{word}: {title}", show, of,
+            how=how, said=said(key, title=title),
         )  # fmt: skip
 
     async def control(

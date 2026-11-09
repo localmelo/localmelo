@@ -339,7 +339,7 @@ async def test_a_password_is_good_for_the_persons_run_and_not_a_chats_own_contin
 
         # The chat's own continue goes on in a fresh task (#571): no handle moves.
         fresh, _ = await console.workers.successor(
-            record, "look at it again", by="chat", key=None
+            record, "look at it again", by="chat"
         )
         await ended(console, fresh["task_id"])
         assert models["agents"][1]._reviewer.sign_in_value(given, named) is None
@@ -350,7 +350,6 @@ async def test_a_password_is_good_for_the_persons_run_and_not_a_chats_own_contin
             await console.workers.tasks.get_task(fresh["task_id"]),
             hide_passwords(f"sign in to {named}, my password is other-pass-9"),
             by="person",
-            key=None,
         )
         await ended(console, later["task_id"])
         again = models["agents"][2]._reviewer

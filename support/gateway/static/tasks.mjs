@@ -253,7 +253,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), {disabled: Boolean(state.busy)}));
     }
-    if (isStopped(task)) {
+    if (task.successor?.task_id) {
+      // Its work went on in a newer task (#571): nothing here would start another.
+      nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
+    } else if (isStopped(task)) {
       actions.append(button('', t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), {disabled: Boolean(state.busy)}));
     } else if (canFinish(ending)) {
       // A draft finishes with one tap: the tests (and the commit), through the same continue.

@@ -32,8 +32,8 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.handoff import HANDOFF_HEADER
 from localmelo.support.gateway.handover import (
-    HANDOFF_HEADER,
     PICKED_HEADER,
     WORDS_HEADER,
     Handover,
@@ -605,7 +605,7 @@ async def test_a_fresh_task_on_the_same_job_reuses_the_words_and_the_handover(
     task_id = task["task_id"]
     await _ended(rig.workers, task_id, 1)
     record = await rig.workers.tasks.get_task(task_id)
-    fresh, how = await rig.workers.successor(record, "finish it", by="person", key=None)
+    fresh, how = await rig.workers.successor(record, "finish it", by="person")
     assert how == "successor"
     await _ended(rig.workers, fresh["task_id"], 1)
     second = _texts(rig.llm.requests[1])

@@ -76,9 +76,9 @@ def _tool_result(llm: Any, request: int = 1) -> str:
 async def _fresh(console: Console, task_id: str) -> Any:
     """The fresh task that went on with *task_id*'s job (#571): it ran no more."""
     assert (await _task(console, task_id)).state in ("done", "failed", "cancelled")
-    info = await console.store.get_session(task_id)
-    assert info is not None and info.meta.get("successor"), "no fresh task went on"
-    return await _task(console, str(info.meta["successor"]))
+    head = await console.workers.newest(await _task(console, task_id))
+    assert head.task_id != task_id, "no fresh task went on"
+    return head
 
 
 # ── A reply is what the model said ──

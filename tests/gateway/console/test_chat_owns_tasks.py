@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +19,14 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
-from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.approvals import (
+    AllowAllPolicy,
+    ApprovalDecision,
+    call_key,
+    find_earlier,
+)
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.melo.schema import Message
+from localmelo.melo.schema import INTERRUPT_LABEL, Message
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.followups import (
@@ -34,7 +39,8 @@ from localmelo.support.gateway.console.front import (
 )
 from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.handover import HANDOFF_HEADER
+from localmelo.support.gateway.handoff import HANDOFF_HEADER
+from localmelo.support.gateway.task_policy import TaskSpec, chore_workspace
 from localmelo.support.gateway.workers import _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
@@ -46,6 +52,7 @@ from .conftest import (
     PORT,
     FakeProbe,
     all_events,
+    core_event,
     make_cfg,
     quiet_gate,
     run_result,
@@ -211,10 +218,11 @@ async def started_task(console: Console) -> str:
 
 
 async def successor_of(console: Console, task_id: str) -> str:
-    """The fresh task that went on with *task_id*'s job (#571); fails without one."""
-    info = await console.store.get_session(task_id)
-    assert info is not None and info.meta.get("successor"), "no fresh task went on"
-    return str(info.meta["successor"])
+    """The task that holds *task_id*'s job now (#571); fails when none went on."""
+    record = await console.workers.tasks.get_task(task_id)
+    head = await console.workers.newest(record)
+    assert head.task_id != task_id, "no fresh task went on"
+    return head.task_id
 
 
 async def calls_of(console: Console, *task_ids: str) -> list[dict[str, Any]]:
@@ -232,12 +240,22 @@ async def state(console: Console, task_id: str) -> str:
 
 
 async def stop_run(
-    console: Console, task_id: str, report: str = "Wrote half of it."
+    console: Console,
+    task_id: str,
+    report: str = "Wrote half of it.",
+    events: Sequence[dict[str, Any]] = (),
 ) -> None:
-    """*task_id* ran one turn that used all its steps: it is stopped."""
+    """*task_id* ran one turn that used all its steps, with *events*: it is stopped."""
     store = console.store
     record = await console.workers.tasks.get_task(task_id)
     turn = await store.begin_turn(task_id, record.spec["objective"], holder=HOLDER)
+    if events:
+        await store.append_events(
+            task_id,
+            turn.turn,
+            [{**event, "run_id": turn.run_id} for event in events],
+            holder=HOLDER,
+        )
     await store.finish_turn(
         task_id,
         turn.turn,
@@ -572,8 +590,8 @@ async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
         # The person's newest turn, however many turns melo began since.
         person = await console.store.latest_person_turn(str(console.main_id))
         assert person is not None and person.typed_text.startswith("write the long")
-        chain = await console.workers.tasks.get_task(body["task_id"])
-        assert chain.spec["handoff"]["chain"] == [fresh, task_id]
+        first = await console.workers.tasks.get_task(task_id)
+        assert (await console.workers.newest(first)).task_id == body["task_id"]
         assert len(await console.workers.tasks.list_tasks()) == 3
 
 
@@ -693,8 +711,9 @@ async def test_a_follow_up_does_not_continue_a_task_the_person_continued_meanwhi
         assert fresh.state == "queued" and fresh.spec["handoff"]["by"] == "melo"
         info = await console.store.get_session(task_id)
         assert info is not None and not info.meta["followup"]["continued"]
+        # The card's Continue is melo's word, not a message: the job's refusals hold.
         kept = await console.store.get_session(fresh.task_id)
-        assert kept is not None and not kept.meta.get("followup_guard")
+        assert kept is not None and kept.meta.get("followup_guard") is True
         assert "Delete the old drafts" not in str(fresh.spec)
 
 
@@ -905,3 +924,153 @@ def test_a_follow_ups_question_is_its_last_question() -> None:
     )
     assert asked_question("要我把它拆成两个任务吗？") == "要我把它拆成两个任务吗？"
     assert asked_question("It is done.") == ""
+
+
+# ── #571: one job, one successor, and nothing starts over ──
+
+REPORT = "write the long report from my notes"
+
+
+async def test_one_ended_job_gets_one_successor_whatever_continues_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, run=False, follow_up=False
+    ) as (console, client, _, _):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await stop_run(console, task_id)
+        record = await console.workers.tasks.get_task(task_id)
+        echo = await console.front.follow(record, "go on", typed="go on")
+        assert echo["echo"] == "started"
+        first = str(echo["task_id"])
+        # The ended task's Continue, and a second message, reach the one successor.
+        body, how = await console.workers.continue_stopped(task_id)
+        assert (body["task_id"], how) == (first, "running")
+        more = await console.front.follow(
+            record, "add a summary", typed="add a summary"
+        )
+        assert (more["echo"], more["task_id"]) == ("sent", first)
+        tasks = await console.workers.tasks.list_tasks()
+        assert sorted(t.task_id for t in tasks) == sorted([task_id, first])
+        # Its card names where the job went and offers nothing that forks it.
+        card = (await client.get(f"/api/tasks/{task_id}")).json()["task"]
+        assert card["successor"]["task_id"] == first
+
+
+async def test_a_successor_of_a_repeating_chore_run_still_asks_before_each_post(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owner_console(tmp_path, monkeypatch, run=False, follow_up=False) as (
+        console,
+        _,
+        _,
+        _,
+    ):
+        spec = TaskSpec(
+            title="Weekly summary",
+            objective="summarize the week",
+            user_words="summarize the week",
+            repeats=True,
+            workspace=chore_workspace(console.workers.settings(), "c0ffee"),
+        )
+        body, _ = await console.workers.create_spec(
+            spec, front_id=console.main_id, origin="user_rule", chat_started=True
+        )
+        await stop_run(console, str(body["task_id"]))
+        fresh, how = await console.workers.continue_stopped(str(body["task_id"]))
+        assert how == "successor"
+        record = await console.workers.tasks.get_task(str(fresh["task_id"]))
+        assert record.spec.get("repeats") is True
+
+
+async def test_a_long_chain_keeps_one_head_its_request_and_its_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, run=False, follow_up=False
+    ) as (console, client, _, _):
+        await say(client, console, REPORT)
+        first = await started_task(console)
+        info = await console.store.get_session(first)
+        assert info is not None
+        refused = {"request_id": "r0", "allowed": False, "reason": "no",
+                   "remember": False, "origin": "user", "loose_keys": [],
+                   "call_key": call_key("python_exec", {"code": INSTALL}, info.workspace)}  # fmt: skip
+        await stop_run(
+            console, first, events=[core_event("tool.finished", approval=refused)]
+        )
+        ended = await console.workers.tasks.get_task(first)
+        for hop in range(10):
+            # Each message names the first task; each reaches the job's newest.
+            note = (f"note {hop}: " + "more detail " * 1000).strip()
+            echo = await console.front.follow(ended, note, typed=note)
+            assert echo["echo"] == "started", echo
+            await stop_run(console, str(echo["task_id"]))
+        head = await console.workers.newest(ended)
+        assert head.task_id == echo["task_id"]
+        assert len(await console.workers.tasks.list_tasks()) == 11
+        assert head.spec["objective"].startswith(REPORT)
+        assert head.spec["objective"].endswith(note)
+        assert head.spec["user_words"].count(note) == 1
+        # melo's Continue: the step the person refused in the first task is refused.
+        body, how = await console.workers.continue_stopped(first)
+        assert how == "successor"
+        fresh = await console.workers.tasks.get_task(str(body["task_id"]))
+        meta = await console.store.get_session(fresh.task_id)
+        assert meta is not None
+        policy = await console.workers._guard(fresh, meta.meta, AllowAllPolicy())
+        earlier = find_earlier(policy)
+        assert earlier is not None
+        assert earlier.match("python_exec", {"code": INSTALL}, info.workspace)
+
+
+async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cut = "import shutil\nshutil.rmtree('build')"
+    allowed = {"request_id": "r1", "allowed": True, "reason": "",
+               "remember": False, "origin": "user"}  # fmt: skip
+    events = [
+        core_event("tool.started", seq=1, call_id="p-0", name="python_exec",
+                   arguments={"code": cut}, preview="python"),
+        core_event("tool.finished", seq=2, call_id="p-0", name="python_exec",
+                   status="timeout", error="Execution timed out", approval=allowed),
+    ]  # fmt: skip
+    for n in range(25):  # more calls after it than the packet lists
+        events += [
+            core_event("tool.started", seq=3 + 2 * n, step=2 + n, call_id=f"r-{n}"),
+            core_event("tool.finished", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"),
+        ]
+    worker = [
+        tool_call("python_exec", {"code": cut}, "p-1"),
+        answer("Done.\nEnding: ready"),
+    ]
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[worker], run=False, follow_up=False
+    ) as (console, client, _, ran):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await stop_run(console, task_id, INTERRUPT_LABEL, events=events)
+        del console.workers._schedule  # tasks run from here on
+        body, how = await console.workers.continue_stopped(task_id)
+        fresh = str(body["task_id"])
+        record = await console.workers.tasks.get_task(fresh)
+        assert record.spec["handoff"]["account"] == "", "no placeholder carried"
+
+        async def asked_or_ended() -> bool:
+            now = await console.workers.tasks.get_task(fresh)
+            return bool(console.broker.pending(fresh)) or now.state in (
+                "done",
+                "failed",
+                "cancelled",
+            )
+
+        await until(asked_or_ended, timeout=15.0)
+        assert not console.broker.pending(fresh), "asked again instead of refused"
+        assert ran.codes == []
+        [approval] = await calls_of(console, fresh)
+        assert approval["allowed"] is False and approval["earlier"]

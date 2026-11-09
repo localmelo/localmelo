@@ -160,7 +160,7 @@ async def test_a_task_that_continues_and_ends_again_is_news_again(
         # The newest goes on in a fresh task (#571), which ends in its turn.
         record = await console.workers.tasks.get_task(tasks[-1])
         fresh, _ = await console.workers.successor(
-            record, "and the summary too", by="person", key=None
+            record, "and the summary too", by="person"
         )
         await _finished(console, fresh["task_id"], "Second result.")
         await _say(client, console, "two")

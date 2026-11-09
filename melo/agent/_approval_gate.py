@@ -811,6 +811,11 @@ class _ToolAsk:
         """Whether melo has sign-in details of the person's to try on *site*."""
         return self._reviewer is not None and self._reviewer.signs_in(site)
 
+    def holds_sign_in(self) -> bool:
+        """Whether a password the person gave in this run can be typed in it (#571):
+        work that moves elsewhere would hold it spent."""
+        return self._reviewer is not None and self._reviewer.holds_sign_in()
+
     def granted(self, name: str) -> bool:
         """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
         return holds_grant(self._policy, name)

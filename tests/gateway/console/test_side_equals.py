@@ -1225,6 +1225,50 @@ async def test_a_step_the_person_refuses_stays_undone_in_the_chats_own_run(
         assert not (folder / "notes.txt").exists()
 
 
+async def test_a_step_refused_in_the_chat_stays_refused_in_the_task_it_hands_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refusals carry from the chat's turn to the task it hands its work to: the
+    same step is refused there before any review, not asked again (#571)."""
+    hand = tool_call(
+        "task_create",
+        {"title": "Notes", "objective": "Write the word into notes.txt.",
+         "continue_current": True},
+        "h-1",
+    )  # fmt: skip
+    chat_script = [WRITE, hand, answer("Never asked.")]
+    worker_script = [WRITE, answer("Done.\nEnding: ready")]
+    async with built_chats(tmp_path, monkeypatch, chat_script, worker_script) as (
+        console,
+        client,
+        folder,
+        _,
+    ):
+        chat = str(console.main_id)
+        sent = await _post_turn(client, chat, ASKED)
+        assert sent.status_code == 202, sent.text
+        await until(lambda: console.broker.pending(chat))
+        [request] = console.broker.pending(chat)
+        denied = await client.post(
+            f"/api/approvals/{request.request_id}", json={"choice": "deny"}
+        )
+        assert denied.status_code == 200, denied.text
+        await until(console.workers.tasks.list_tasks)
+        [task] = await console.workers.tasks.list_tasks()
+
+        async def ended() -> bool:
+            record = await console.workers.tasks.get_task(task.task_id)
+            return bool(console.broker.pending(task.task_id)) or record.state in (
+                "done",
+                "failed",
+                "cancelled",
+            )
+
+        await until(ended, timeout=15.0)
+        assert not console.broker.pending(task.task_id), "asked again in the task"
+        assert not (folder / "notes.txt").exists()
+
+
 @pytest.mark.parametrize("where", ["main", "side"])
 @pytest.mark.parametrize("origin", [ASK_ORIGIN, FOLLOWUP_ORIGIN])
 async def test_a_turn_melo_began_cannot_change_anything_whatever_the_model_calls(
