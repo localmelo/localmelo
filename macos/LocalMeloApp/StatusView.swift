@@ -115,6 +115,8 @@ final class StatusView: NSView {
     required init?(coder: NSCoder) { nil }
 
     override var isOpaque: Bool { true }
+    // The window has no title band, and the view reaches its top edge: the strip there still moves the window.
+    override var mouseDownCanMoveWindow: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         Palette.canvas.setFill()

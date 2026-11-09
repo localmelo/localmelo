@@ -32,6 +32,7 @@ import { setupModelCard } from "./setup-card.mjs";
 import { setupImportCard } from "./import-card.mjs";
 import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
+import { setupWindowBar } from "./window-bar.mjs";
 import { activeSwitch, setupServe } from "./serve.mjs";
 import { allowState, blockCard, blockFacts } from "./blocked.mjs";
 import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
@@ -3939,5 +3940,7 @@ document.addEventListener("visibilitychange", () => {
 });
 globalThis.addEventListener?.("pagehide", () => browser.suspend());
 globalThis.addEventListener?.("pageshow", () => browser.resume());
+// The macOS app's window: its top strip moves it (window-bar.mjs).
+setupWindowBar();
 
 init();

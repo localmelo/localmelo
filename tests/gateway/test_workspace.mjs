@@ -729,6 +729,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/main-chat\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/endings\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/mode\.mjs";\n/m, '')
+  .replace(/^import \{[^}]*\} from "\.\/window-bar\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/serve\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/blocked\.mjs";\n/m, '')
   .replace(/^import \{[^}]*\} from "\.\/slash\.mjs";\n/m, '')
@@ -952,6 +953,8 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     setupImportCard: ({root}) => ({show(visible) { root.shown = visible; }}),
     folderName,
     setupFolderPicker,
+    // The app window's top strip has its own tests (test_window_bar.mjs).
+    setupWindowBar: () => false,
     picturesNode,
     setupPictureBox,
     shotsNode,

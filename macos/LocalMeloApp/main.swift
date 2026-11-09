@@ -4,6 +4,14 @@ import Foundation
 import WebKit
 
 final class ConsoleWebView: WKWebView {
+    /// The press the page may answer with a window request: a drag of the top strip starts from it.
+    private(set) var lastMouseDown: NSEvent?
+
+    override func mouseDown(with event: NSEvent) {
+        lastMouseDown = event
+        super.mouseDown(with: event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
               let key = event.charactersIgnoringModifiers?.lowercased() else {
@@ -18,7 +26,11 @@ final class ConsoleWebView: WKWebView {
 
 final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
-    private var webView: WKWebView!
+    private var webView: ConsoleWebView!
+    // The window's title bar as measured, and the strip the console page is told of (`windowBarScript`): the title
+    // bar's, or none in full screen.
+    private var titleBar = WindowBar()
+    private var windowBar = WindowBar()
     private var statusView: StatusView!
     private var menuBar: MenuBar!
     // Melo on the desktop while the window is put away, and the activity pill that takes the pet's place while work runs.
@@ -85,13 +97,31 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     func applicationDidUnhide(_ notification: Notification) { updatePet() }
     func windowDidMiniaturize(_ notification: Notification) { updatePet() }
     func windowDidDeminiaturize(_ notification: Notification) { updatePet() }
+    // Full screen has no buttons over the page, so the room for them closes; it opens again as they come back.
+    func windowWillEnterFullScreen(_ notification: Notification) { showWindowBar(WindowBar()) }
+    func windowWillExitFullScreen(_ notification: Notification) { showWindowBar(titleBar) }
+
+    private func showWindowBar(_ bar: WindowBar) {
+        windowBar = bar
+        guard let webView = webView else { return }
+        // A load the page makes itself (Settings after a language change) gets it at its start too.
+        installUserScripts(webView.configuration.userContentController)
+        webView.evaluateJavaScript(windowBarScript(bar))
+    }
+
+    private func installUserScripts(_ controller: WKUserContentController) {
+        controller.removeAllUserScripts()
+        // The console page picks its language as the app did, from the Mac's languages.
+        for source in [languagesScript(Locale.preferredLanguages), windowBarScript(windowBar)] {
+            controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+    }
 
     private func createWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                          backing: .buffered, defer: false)
-        window.title = "localmelo"
+        window = consoleWindow()
         window.backgroundColor = Palette.canvas
+        titleBar = WindowBar(titleBarOf: window)
+        windowBar = titleBar
         // The status view covers the window until the console has loaded, and comes back
         // when it cannot: the window never shows an empty web view.
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 800))
@@ -757,10 +787,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         if webView != nil { tearDownWebView(closingBrowser: false) }
         guard let content = window.contentView else { return }
         let configuration = WKWebViewConfiguration()
-        // The console page picks its language as the app did, from the Mac's languages.
-        configuration.userContentController.addUserScript(
-            WKUserScript(source: languagesScript(Locale.preferredLanguages), injectionTime: .atDocumentStart,
-                         forMainFrameOnly: true))
+        installUserScripts(configuration.userContentController)
         configuration.userContentController.addScriptMessageHandler(
             FolderBridge(gatewayPort: { [weak self] in self?.port ?? 0 },
                          choose: { [weak self] reply in self?.chooseFolder(reply) ?? reply(nil) },
@@ -780,6 +807,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         configuration.userContentController.add(
             BrowserBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, popOut: { [weak self] in self?.popOutBrowser($0) }),
             contentWorld: .page, name: BrowserBridge.name)
+        configuration.userContentController.add(
+            WindowBridge(gatewayPort: { [weak self] in self?.port ?? 0 }, pressed: { [weak self] request in
+                guard let self = self else { return }
+                request.perform(on: self.window, press: self.webView?.lastMouseDown)
+            }),
+            contentWorld: .page, name: WindowBridge.name)
         let view = ConsoleWebView(frame: content.bounds, configuration: configuration)
         view.autoresizingMask = [.width, .height]
         view.navigationDelegate = self
@@ -821,6 +854,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: DesktopBridge.name, contentWorld: .page)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: LanguageBridge.name, contentWorld: .page)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: BrowserBridge.name, contentWorld: .page)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: WindowBridge.name, contentWorld: .page)
         webView?.removeFromSuperview()
         webView = nil
         if closingBrowser { browserWindow?.close() }

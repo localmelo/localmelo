@@ -2913,3 +2913,13 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
   .model-picker { position: static; }
   .model-menu { left: 16px; right: 16px; width: auto; }
 }
+/* The macOS app's window has no title band (window-bar.mjs): its buttons sit over the top of the sidebar, which leaves
+   room for them, and over the header while the sidebar is put away. The app sets the sizes (0 in full screen, where
+   the buttons are gone); a browser sets none, so none of this applies there. */
+:root[data-window-bar] .sidebar { padding-top: max(22px, calc(var(--window-bar) + 8px)); }
+@media (min-width: 701px) and (max-width: 1179px) {
+  :root[data-window-bar] .sidebar { padding-top: max(18px, calc(var(--window-bar) + 8px)); }
+}
+@media (max-width: 700px) {
+  :root[data-window-bar] .chat-header { padding-left: max(15px, calc(var(--window-buttons) + 8px)); }
+}
