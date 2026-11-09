@@ -1044,7 +1044,7 @@ async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
             core_event("tool.started", seq=3 + 2 * n, step=2 + n, call_id=f"r-{n}"),
             core_event("tool.finished", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"),
         ]
-    worker = [
+    worker: list[Reply] = [
         tool_call("python_exec", {"code": cut}, "p-1"),
         answer("Done.\nEnding: ready"),
     ]

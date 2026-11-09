@@ -349,7 +349,8 @@ async def test_an_admitted_hand_off_is_never_reported_as_not_moved(
         _,
     ):
         workers, chat = console.workers, str(console.main_id)
-        original, failed = workers._body, []
+        original = workers._body
+        failed: list[str] = []
 
         async def flaky(record: Any) -> dict[str, Any]:
             if not failed:  # the read right after the commit fails once
