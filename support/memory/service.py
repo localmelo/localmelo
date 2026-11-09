@@ -97,6 +97,7 @@ from localmelo.support.config import (
 from localmelo.support.memory import (
     blocked,
     hippo_encode,
+    hippo_judge,
     note_gate,
     note_judge,
     records,
@@ -471,14 +472,16 @@ class Compressed:
     secret), for each item it kept in the order they were routed, the item and where
     the routing put it, and how many items were not kept because they held a secret
     (*refused*: those the encoder refused and those the gate before embedding or the
-    router did; none is in *routed*). *forgotten* says the *guard* of
-    :meth:`~ChatMemory.compress_chat` refused the result: nothing was stored and no
+    router did; none is in *routed*). *judge* counts what the judge did
+    (:class:`~.hippo_judge.Counts`). *forgotten* says the *guard* of
+    :meth:`~ChatMemory.compress_chat` refused the result: nothing more was stored and no
     mark was set."""
 
     encoding: hippo_encode.Encoding
     routed: list[tuple[hippo_encode.Piece, Route]] = field(default_factory=list)
     refused: int = 0
     forgotten: bool = False
+    judge: hippo_judge.Counts = field(default_factory=hippo_judge.Counts)
 
 
 @dataclass(frozen=True)
@@ -2473,27 +2476,38 @@ class ChatMemory:
         The chat's model reads the chat window by window (:func:`~.hippo_encode.encode`;
         no model call for a window the cache holds), each item is embedded as a
         document is, and the items are routed one by one in time order
-        (:class:`~.hippo_route.Router`: rules, no model call). Raises
-        ``RuntimeError`` when no chat model is set up. Nothing about the chat's
-        turns changes. *router* and *cache* are shared across the chats of one run
-        (the settings' otherwise). With *encoding* (what :meth:`encode_chat` gave
-        for these *turns*), the chat is not encoded again: it goes straight to
-        embedding and routing. An item whose title or text holds a secret
-        (:func:`~.index.holds_secret`, the test a note passes) is not embedded, routed
-        or stored, and is counted in :attr:`Compressed.refused`: the encoder refuses
-        such an item where it reads the reply, and this gate and the router check
-        again what any caller hands them. Once the items are stored the chat's mark
-        moves to the last of *turns* before the first exchange of a window that
+        (:class:`~.hippo_route.Router`). Raises ``RuntimeError`` when no chat model is
+        set up. Nothing about the chat's turns changes. *router* and *cache* are shared
+        across the chats of one run (the settings' otherwise). With *encoding* (what
+        :meth:`encode_chat` gave for these *turns*), the chat is not encoded again: it
+        goes straight to embedding and routing. An item whose title or text holds a
+        secret (:func:`~.index.holds_secret`, the test a note passes) is not embedded,
+        routed or stored, and is counted in :attr:`Compressed.refused`: the encoder
+        refuses such an item where it reads the reply, and this gate and the router
+        check again what any caller hands them. Once the items are stored the chat's
+        mark moves to the last of *turns* before the first exchange of a window that
         failed, or the last of them when none did
         (:meth:`.index.ConversationIndex.mark_encoded`): the turns the encoder has
         read, which :meth:`waiting_turns` skips. The mark says nothing about what
         recall reads: a turn is recalled until a stored item cites it, so a turn the
-        encoder left out, or whose items were all refused, stays. The routing and the
-        mark happen under one hold of the memory lock, the lock a forget takes. With
-        *guard*, it is awaited first, under that lock (it must not take it): when it
-        says ``False`` nothing is routed or stored, no mark is set and the result has
-        *forgotten* set.
+        encoder left out, or whose items were all refused, stays.
+
+        Each item that has close items of any kind (:meth:`~.hippo_route.Router.shortlist`)
+        is judged by the chat's model, one request (:mod:`.hippo_judge`, its reply kept
+        in the cache), and the answer decides whether it joins one of them or replaces
+        it; a failed request or an unclear answer routes it by the rules alone. The
+        request is made without the memory lock, which a forget and a delete take, so
+        they are never kept waiting for a model. Then, one hold of the lock for each
+        item: *guard* is awaited first (it must not take the lock); when it says
+        ``False`` nothing more is routed or stored, no mark is set and the result has
+        *forgotten* set. The answer is checked against the items it rested on, and
+        dropped, the rules deciding, if one was forgotten, merged or replaced in the
+        meantime. The item is routed. The mark is set under the lock after the last
+        item, with the guard checked again. A later item is judged against what the
+        earlier ones became.
         """
+        stats = stats if stats is not None else hippo_encode.Stats()
+        cache = cache or self.compress_cache()
         if encoding is None:
             encoding = await self.encode_chat(title, turns, stats=stats, cache=cache)
         encoding = encoding.without_secrets()
@@ -2514,32 +2528,58 @@ class ChatMemory:
         out = Compressed(encoding, refused=encoding.refused)
         # The mark does not pass a window that failed: its turns are read again.
         done = turns if encoding.failed_from is None else turns[: encoding.failed_from]
-        # One hold of the lock for the routing and the mark: a forget cannot come between.
+        provider = self.chat_provider()
+        if pieces:
+            async with self._lock:  # a read of the table is a hold of the lock
+                await router.load(model)
+        for piece, vector in zip(pieces, vectors, strict=True):
+            item = MemoryItem(
+                session_id=session_id,
+                title=piece.title,
+                text=piece.text,
+                kind=piece.kind,
+                created_at=piece.created_at,
+                sources=tuple((session_id, turns[n].turn) for n in piece.sources),
+                vector=None if vector is None else tuple(vector),
+                embed_model=model if vector is not None else "",
+                encoder=piece.encoder,
+            )
+            judged = None
+            if provider is not None:  # no lock: the model may take a while
+                # The person's own words of the turns the item cites, newest first.
+                cited = sorted(piece.sources)
+                judged = await hippo_judge.judge(
+                    router,
+                    provider,
+                    self._llm_backend(),
+                    item,
+                    [turns[n].typed for n in cited[-1:] + cited[:-1]],
+                    cache=cache,
+                    stats=stats,
+                    counts=out.judge,
+                )
+            async with self._lock:
+                if guard is not None and not await guard():
+                    out.forgotten = True
+                    return out
+                confirmed = await router.confirm(judged)
+                if judged is not None and confirmed is None:
+                    out.judge.fallbacks += 1
+                route = await router.route(item, confirmed)
+            if route.action == REFUSE:  # the router's own check, after the gate's
+                out.refused += 1
+            else:
+                out.routed.append((piece, route))
         async with self._lock:
             if guard is not None and not await guard():
                 out.forgotten = True
                 return out
-            for piece, vector in zip(pieces, vectors, strict=True):
-                item = MemoryItem(
-                    session_id=session_id,
-                    title=piece.title,
-                    text=piece.text,
-                    kind=piece.kind,
-                    created_at=piece.created_at,
-                    sources=tuple((session_id, turns[n].turn) for n in piece.sources),
-                    vector=None if vector is None else tuple(vector),
-                    embed_model=model if vector is not None else "",
-                    encoder=piece.encoder,
-                )
-                route = await router.route(item)
-                if route.action == REFUSE:  # the router's own check, after the gate's
-                    out.refused += 1
-                else:
-                    out.routed.append((piece, route))
             if done:
                 await index.mark_encoded(session_id, max(t.turn for t in done))
         if out.refused:  # the count only, never the text
             logger.info("Memory items: %d held a secret and were not kept", out.refused)
+        if out.judge.judged:  # numbers only, never the text
+            logger.info("Memory items judged: %s", out.judge.to_json())
         return out
 
     async def waiting_turns(

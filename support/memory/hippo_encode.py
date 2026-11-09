@@ -550,11 +550,12 @@ def check(raw: dict[str, Any], window: Window, turns: Sequence[Turn]) -> Checked
 # ── The cache ──
 
 
-def window_key(model: str, prompt: str) -> str:
+def window_key(model: str, prompt: str, version: str | None = None) -> str:
     """The cache key of a window: the prompt version, the chat model's id and the
-    whole user message, the exchanges with their dates."""
+    whole user message, the exchanges with their dates. Another job that keeps its
+    replies in the same cache (:mod:`.hippo_judge`) keys them with its own *version*."""
     digest = hashlib.sha256()
-    for part in (PROMPT_VERSION, model, prompt):
+    for part in (PROMPT_VERSION if version is None else version, model, prompt):
         digest.update(part.encode("utf-8", "replace"))
         digest.update(b"\0")
     return digest.hexdigest()

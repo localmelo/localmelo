@@ -34,7 +34,7 @@ from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, hippo_encode, service
-from localmelo.support.memory.hippo_route import Router
+from localmelo.support.memory.hippo_route import Judged, Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -1075,7 +1075,10 @@ async def test_a_repeated_fact_that_is_replaced_leaves_no_stale_turn(
         moved = MemoryItem(
             third, "Home", MOVED, "profile", time.time() - DAY, ((third, 1),)
         )
-        assert (await router.route(moved)).action == "UPDATE"
+        near = await router.shortlist(moved)
+        assert (
+            await router.route(moved, Judged("changes", near[0].id, near))
+        ).action == ("UPDATE")
         found = await ask(memory, store, "Where do I live now?")
         # The repeat's turn is behind the replaced item: it is not a second, current
         # statement of the old fact beside the new one.

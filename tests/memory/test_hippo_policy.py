@@ -1,8 +1,11 @@
-"""Hippo's five actions, its kinds and its v1 thresholds."""
+"""Hippo's five actions, its kinds and its v1 thresholds, and what the rules settle
+for a caller that has a judge (``certain_only``)."""
 
 from __future__ import annotations
 
 from typing import Any
+
+import pytest
 
 from localmelo.melo.memory.hippo import (
     CHANGE_MARKERS,
@@ -21,6 +24,7 @@ def _entry(
     entry_id: int,
     text: str,
     *,
+    kind: str = "episodic",
     admitted_by: str = "",
     created_at: float = 1.0,
     task_text: str = "",
@@ -28,7 +32,7 @@ def _entry(
     return {
         "id": entry_id,
         "text": text,
-        "kind": "episodic",
+        "kind": kind,
         "admitted_by": admitted_by,
         "created_at": created_at,
         "provenance": {"task_text": task_text},
@@ -42,12 +46,14 @@ def _decision(
     active: list[dict[str, Any]] | None = None,
     task_text: str = "",
     first_person: bool | None = None,
+    certain_only: bool = False,
 ) -> Any:
     return decide(
         text,
         kind=kind,
         provenance={"task_text": task_text},
         active=active or [],
+        certain_only=certain_only,
     )
 
 
@@ -86,7 +92,9 @@ def test_the_threshold_boundary_is_inclusive_at_0_90_and_0_35() -> None:
 
 
 def test_a_same_subject_compatible_fact_updates_and_the_old_one_is_superseded() -> None:
-    active = [_entry(1, "I live in Berlin near the river and work at Acme")]
+    active = [
+        _entry(1, "I live in Berlin near the river and work at Acme", kind="profile")
+    ]
     decision = _decision(
         "I live in Berlin near the park and work at Acme",
         kind="profile",
@@ -97,7 +105,7 @@ def test_a_same_subject_compatible_fact_updates_and_the_old_one_is_superseded() 
 
 
 def test_a_same_subject_changed_value_with_a_change_marker_updates() -> None:
-    active = [_entry(1, "I live in Berlin and work at Acme")]
+    active = [_entry(1, "I live in Berlin and work at Acme", kind="profile")]
     decision = _decision(
         "I moved to Paris and now live there and work at Acme",
         kind="profile",
@@ -107,7 +115,7 @@ def test_a_same_subject_changed_value_with_a_change_marker_updates() -> None:
 
 
 def test_a_same_subject_contradiction_without_a_marker_conflicts() -> None:
-    active = [_entry(1, "I live in Berlin in a small flat")]
+    active = [_entry(1, "I live in Berlin in a small flat", kind="profile")]
     decision = _decision(
         "I live in Paris in a large house", kind="profile", active=active
     )
@@ -116,7 +124,9 @@ def test_a_same_subject_contradiction_without_a_marker_conflicts() -> None:
 
 
 def test_an_overlapping_distinct_fact_is_related() -> None:
-    active = [_entry(1, "Alice's address is 12 Main Street in Springfield")]
+    active = [
+        _entry(1, "Alice's address is 12 Main Street in Springfield", kind="semantic")
+    ]
     decision = _decision(
         "Bob's address is 12 Main Street in Springfield",
         kind="semantic",
@@ -133,7 +143,7 @@ def test_a_new_fact_is_new() -> None:
 
 
 def test_a_same_subject_entry_never_produces_new() -> None:
-    active = [_entry(1, "I live in Berlin and work at Acme")]
+    active = [_entry(1, "I live in Berlin and work at Acme", kind="profile")]
     for text in (
         "I live in Berlin and work at Acme on the analytics team",
         "I live in Paris and work at Acme",
@@ -180,6 +190,17 @@ def test_the_marker_constants_are_public_and_hold_english_and_chinese() -> None:
     assert "搬到" in CHANGE_MARKERS
 
 
+@pytest.mark.parametrize("marker", ["改到", "改成", "调到", "换到"])
+def test_a_chinese_word_that_moves_a_value_is_a_change_marker(marker: str) -> None:
+    assert marker in CHANGE_MARKERS
+    active = [_entry(1, "I live in Berlin in a small flat", kind="profile")]
+    decision = _decision(
+        f"I live in Paris in a large house {marker}", kind="profile", active=active
+    )
+    # With a change marker the different value is an update, not a contradiction.
+    assert (decision.action, decision.target_id) == ("UPDATE", 1)
+
+
 def test_a_candidate_carries_its_items_and_remember_bool() -> None:
     candidate = MemoryCandidate(
         candidate_id="n1",
@@ -198,6 +219,7 @@ def test_the_target_tie_break_prefers_the_higher_id() -> None:
         _entry(1, "I live in Berlin near the river and work at Acme", created_at=1.0),
         _entry(2, "I live in Berlin near the river and work at Acme", created_at=1.0),
     ]
+    active = [{**entry, "kind": "profile"} for entry in active]
     decision = _decision(
         "I live in Berlin near the river and work at Acme",
         kind="profile",
@@ -218,8 +240,9 @@ def _boundary_texts(shared: int, total: int = 100) -> tuple[str, str]:
 def test_the_action_boundary_is_0_90_for_ignore() -> None:
     active_text, below_text = _boundary_texts(89)
     _active_text, at_text = _boundary_texts(90)
-    below = _decision(below_text, kind="semantic", active=[_entry(1, active_text)])
-    at = _decision(at_text, kind="semantic", active=[_entry(1, active_text)])
+    entry = _entry(1, active_text, kind="semantic")
+    below = _decision(below_text, kind="semantic", active=[entry])
+    at = _decision(at_text, kind="semantic", active=[entry])
     assert below.overlap == 0.89
     assert below.action != "IGNORE"
     assert at.overlap == 0.9
@@ -229,8 +252,92 @@ def test_the_action_boundary_is_0_90_for_ignore() -> None:
 def test_the_action_boundary_is_0_35_for_related() -> None:
     active_text, below_text = _boundary_texts(34)
     _active_text, at_text = _boundary_texts(35)
-    below = _decision(below_text, kind="semantic", active=[_entry(1, active_text)])
-    at = _decision(at_text, kind="semantic", active=[_entry(1, active_text)])
+    entry = _entry(1, active_text, kind="semantic")
+    below = _decision(below_text, kind="semantic", active=[entry])
+    at = _decision(at_text, kind="semantic", active=[entry])
     assert below.action == "NEW"
     assert at.overlap == 0.35
     assert at.action == "RELATED"
+
+
+# ── What the rules settle for a caller that has a judge ──
+
+
+def test_a_subject_is_compared_only_between_entries_of_one_kind() -> None:
+    old = _entry(1, "I live in Berlin in a small flat", kind="semantic")
+    text = "I live in Paris in a large house"
+    # The same words, but another kind: not the old fact's subject, so no contradiction.
+    other = _decision(text, kind="profile", active=[old])
+    assert other.action == "NEW"
+    same = _decision(text, kind="profile", active=[{**old, "kind": "profile"}])
+    assert same.action == "CONFLICT"
+    # An entry that names no kind is read as the new item's own.
+    unnamed = {k: v for k, v in old.items() if k != "kind"}
+    assert _decision(text, kind="profile", active=[unnamed]).action == "CONFLICT"
+
+
+def test_with_certain_only_a_near_duplicate_is_related_and_only_identical_text_is_ignored() -> (
+    None
+):
+    shared = [f"token{index}" for index in range(9)]
+    old = _entry(3, " ".join([*shared, "alpha"]), kind="semantic")
+    newer = " ".join([*shared, "beta"])
+    assert _decision(newer, kind="semantic", active=[old]).action == "IGNORE"
+    sure = _decision(newer, kind="semantic", active=[old], certain_only=True)
+    assert (sure.action, sure.target_id, sure.settled) == ("RELATED", 3, False)
+    # Every word of the old item plus a detail is not a repeat of it.
+    more = _decision(
+        old["text"] + " and a new detail",
+        kind="semantic",
+        active=[old],
+        certain_only=True,
+    )
+    assert more.action == "RELATED"
+    exact = _decision(old["text"], kind="semantic", active=[old], certain_only=True)
+    assert (exact.action, exact.reason, exact.settled) == (
+        "IGNORE",
+        "exact duplicate",
+        True,
+    )
+
+
+def test_with_certain_only_a_same_subject_item_is_related_never_an_update() -> None:
+    old = _entry(1, "The user lives in a small city by the sea", kind="profile")
+    text = "The user lives with two cats at home"
+    assert _decision(text, kind="profile", active=[old]).action == "UPDATE"
+    sure = _decision(text, kind="profile", active=[old], certain_only=True)
+    assert (sure.action, sure.target_id, sure.settled) == ("RELATED", 1, False)
+    assert sure.reason == "same subject; related to entry 1"
+
+
+def test_the_settled_decisions_are_the_certain_ones() -> None:
+    old = _entry(1, "The user said they eat spicy food every day", kind="profile")
+    for text, action in (
+        ("Paris", "IGNORE"),
+        ("read list_ops.py and tests/test_list_ops.py passed", "IGNORE"),
+        ("The user said they never eat spicy food every day", "CONFLICT"),
+        (old["text"], "IGNORE"),
+    ):
+        decision = _decision(text, kind="profile", active=[old], certain_only=True)
+        assert (decision.action, decision.settled) == (action, True), text
+    unsettled = _decision(
+        "I live in Paris in a large house",
+        kind="profile",
+        active=[_entry(1, "I live in Berlin in a small flat", kind="profile")],
+        certain_only=True,
+    )
+    # A contradiction of values is not certain: a judge may call it a change, so it
+    # is linked, never marked as a conflict (only an opposite polarity is one).
+    assert (unsettled.action, unsettled.target_id, unsettled.settled) == (
+        "RELATED",
+        1,
+        False,
+    )
+    assert unsettled.reason == "same subject; related to entry 1"
+    # The caller with no judge keeps its rule.
+    legacy = _decision(
+        "I live in Paris in a large house",
+        kind="profile",
+        active=[_entry(1, "I live in Berlin in a small flat", kind="profile")],
+    )
+    assert (legacy.action, legacy.settled) == ("CONFLICT", False)
