@@ -553,9 +553,11 @@ class StepReviewer:
 
     def signs_in(self, site: str) -> bool:
         """Whether a message of the person's run holds a password and their words name *site*."""
-        return any(VAULT.value(h) is not None for h in self._live) and self.names_host(
-            site
-        )
+        return self.holds_sign_in() and self.names_host(site)
+
+    def holds_sign_in(self) -> bool:
+        """Whether a message of the person's run holds a password melo can still type (#571)."""
+        return any(VAULT.value(h) is not None for h in self._live)
 
     @property
     def requests(self) -> tuple[str, ...]:

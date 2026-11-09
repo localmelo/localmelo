@@ -10,6 +10,8 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
+from localmelo.melo.checker.redaction import redact_secrets
+
 # Characters a preview keeps; a longer one ends in "...".
 PREVIEW_CHARS = 200
 # The calls of ``subprocess`` that run a command.
@@ -38,11 +40,12 @@ def call_preview(tool_name: str, arguments: Mapping[str, Any]) -> str:
     - any other tool, or an argument above that is missing or not a ``str``:
       the arguments as compact JSON, keys sorted.
 
-    A line break inside the summary becomes a space, and a summary longer
-    than :data:`PREVIEW_CHARS` keeps its first ``PREVIEW_CHARS - 3``
-    characters followed by ``...``. It never raises.
+    Secrets are redacted (:func:`redact_secrets`) before anything is cut, so
+    no cut leaves a piece of one. A line break inside the summary becomes a
+    space, and a summary longer than :data:`PREVIEW_CHARS` keeps its first
+    ``PREVIEW_CHARS - 3`` characters followed by ``...``. It never raises.
     """
-    text = _summary(tool_name, arguments)
+    text = redact_secrets(_summary(tool_name, arguments))[0]
     text = " ".join(text.splitlines())
     if len(text) > PREVIEW_CHARS:
         text = text[: PREVIEW_CHARS - 3] + "..."

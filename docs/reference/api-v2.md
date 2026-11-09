@@ -787,7 +787,13 @@ Tools run with the user's permissions, not in a sandbox.
   stopped, in its own session, with the console's words "Continue the task from
   where you stopped." as its next turn: 202 `{"task": ..., "message":
   "continued"}`; 404 `not_found`, and 409 `invalid_transition` for a task that
-  did not run out of steps.
+  did not run out of steps. A task a chat started runs once: the job goes on in
+  a fresh task instead, with those words as melo's note in its packet, and the
+  answer is 202 with that task and `"message": "successor"`. An ended task has
+  one successor at most: a second call, on it or on the ended task, answers 202
+  with the task that holds the job and `"message": "running"` while that runs.
+  The ended task's body then names it in `successor` (`task_id`, `title`;
+  `null` while its job did not go on) and allows none of its blocks.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. A browser card's Stop adds `source` (`gen`, `run`,
@@ -845,8 +851,9 @@ on without a blocked step. `POST
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
 "message": "queued"}` for a task that has not finished (it reads it at its
 next step), `"continued"` for one that stopped before its job was done (it
-runs again); 404 `not_found` for no such block, 409 `not_allowable` for one
-that cannot be allowed, 409 `already_allowed` once the step ran on an
+runs again), `"successor"` with a fresh task for a task a chat started that
+stopped (it runs once: the fresh task has the step allowed once); 404 `not_found` for no such block, 409 `not_allowable` for one
+that cannot be allowed (also on a task whose job went on in a newer one), 409 `already_allowed` once the step ran on an
 allowance or while one waits, 409 `invalid_transition` for a job that finished
 (`can_allow` is `false` then, and the block and its card carry `finished: true`:
 the step is new work for the chat). A task's allowances go when it finishes.
@@ -1299,10 +1306,11 @@ with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`; `action` `send` carries the message as `text`),
-  `ask` (`Start this as a task?`, only on a card already stored: nothing writes
-  new ones; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
-  `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
-  `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
+  `ask` (`Start this as a task?`, only on a card already stored, which takes no tap
+  now: a chat hands its own work on; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
+  `queued` for its next step or `continued` as a new turn of a task from the tasks page that stopped before finishing;
+  `line` `Sent to: <title>` or `Continued: <title>`; a chat's ended task gives a `started` echo with
+  `follows`, the ended task, for the fresh task that goes on with its job), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
   (the whole message), `schedule`, `when` and `level`, `receipt` (the message's key:
   what it starts or saves, it does once) and, when the message started its work
@@ -1351,11 +1359,11 @@ with the echo.
   task of another chat carries `from_main: true` or `from_chat`, that chat's
   title.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
-- `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
+- `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" |
   "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}` answers
   200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
-  `suggest`, start an `ask`, set a `started` or `level` echo's task to the
+  `suggest`, set a `started` or `level` echo's task to the
   person's level, revoke the approval an `earlier` echo used (a `revoked`
   echo answers), or Undo a `sleep` echo (the whole run is put back; an `undone`
   echo answers with `of` and `run_id`, and says how many notes came back; a run

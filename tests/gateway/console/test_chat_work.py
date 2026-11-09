@@ -288,7 +288,12 @@ async def test_stop_on_a_tasks_card_reaches_its_run_and_never_a_later_one(
         _,
     ):
         chat = str(console.main_id)
-        task = await begin(client, chat)
+        # A task given directly, which goes on in its own session (a chat's own
+        # worker runs once, #571).
+        made, _ = await console.workers.create(
+            {"prompt": f"read {HOME} for me", "front_id": chat}
+        )
+        task = str(made["task_id"])
         await allow_site(client, console, task)
         old = await card(console, chat)
         first.set()
@@ -332,17 +337,21 @@ async def test_a_password_is_good_for_the_persons_run_and_not_a_chats_own_contin
         [given] = handles_in(str(record.spec["objective"]))
         assert models["agents"][0]._reviewer.sign_in_value(given, named)
 
-        await console.workers.message(task, "look at it again", automatic=True)
-        await ended(console, task)
+        # The chat's own continue goes on in a fresh task (#571): no handle moves.
+        fresh, _ = await console.workers.successor(
+            record, "look at it again", by="chat"
+        )
+        await ended(console, fresh["task_id"])
         assert models["agents"][1]._reviewer.sign_in_value(given, named) is None
         assert not models["agents"][1]._reviewer.signs_in(named)
 
         # The person's own message gives one again, and only that one.
-        await console.workers.message(
-            task,
+        later, _ = await console.workers.successor(
+            await console.workers.tasks.get_task(fresh["task_id"]),
             hide_passwords(f"sign in to {named}, my password is other-pass-9"),
+            by="person",
         )
-        await ended(console, task)
+        await ended(console, later["task_id"])
         again = models["agents"][2]._reviewer
         assert again.sign_in_value(given, named) is None
         assert again.signs_in(named)

@@ -210,7 +210,7 @@ async def test_one_message_still_starts_one_task_through_a_finished_worker(
         assert len(await others(console, old)) == 1
 
 
-async def test_a_worker_that_stopped_before_finishing_continues_its_own_job(
+async def test_a_worker_that_stopped_before_finishing_goes_on_in_a_fresh_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ids: dict[str, str] = {}
@@ -220,8 +220,13 @@ async def test_a_worker_that_stopped_before_finishing_continues_its_own_job(
         old = ids["task"] = await task_of(client, console, "write the vendors list")
         await stop_run(console, old)
         await say(client, console, "the vendors need their prices too")
-        assert await state(console, old) == "queued"
-        assert await others(console, old) == []
+        # The same job, a fresh task (#571): the ended one never runs again.
+        assert await state(console, old) == "failed"
+        [new] = await others(console, old)
+        assert new.state == "queued" and new.spec["handoff"]["source"] == old
+        assert new.spec["objective"] == (
+            "write the vendors list\n\nthe vendors need their prices too"
+        )
 
 
 async def test_a_draft_is_a_job_not_finished_and_continue_reaches_it(
@@ -242,9 +247,10 @@ async def test_a_draft_is_a_job_not_finished_and_continue_reaches_it(
         response = await _post_turn(
             client, str(console.main_id), "continue the vendors list task"
         )
-        assert response.json()["echo"]["echo"] == "sent"
-        assert await state(console, old) == "queued"
-        assert await others(console, old) == []
+        assert response.json()["echo"]["echo"] == "started"
+        assert await state(console, old) == "done"
+        [new] = await others(console, old)
+        assert new.spec["handoff"]["source"] == old
 
 
 async def test_continue_on_a_finished_worker_goes_to_the_model_with_all_its_words(
