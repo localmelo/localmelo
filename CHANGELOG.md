@@ -19,10 +19,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   holds a password you gave in that message, or sits in a folder no task may use. A task a chat started now runs once:
   when it has ended it never runs again, and more work on its job (your message, the chat's follow-up, **Continue**,
   **Finish it**, **Allow once**, a message that arrived as it ended) goes on in one fresh task with its record as
-  background; a second tap or message reaches that task instead of starting another. The job keeps its follow-up count,
-  the steps refused in it (in the chat's turn too), which stay refused until your own message moves it on, and the calls
-  cut off with an unknown effect, which stay refused in every task of the job unless they only read. Tasks from the task
-  page and the API keep going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
+  background, with a step you allowed once that did not run yet; a second tap or message reaches that task instead of
+  starting another, and when it cannot start the chat says so. The job keeps its follow-up count, the steps refused in
+  it (in the chat's turn too), which stay refused until your own message moves it on, and the calls cut off with an
+  unknown effect: unless they only read (a page action or a navigation does not), each asks you on a card before it runs
+  again as it was, in Ask and in Auto, whatever a grant or melo's review says, and your Allow runs it once. A Stop as the
+  task is admitted shows the task, which runs. Tasks from the task page and the API keep going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
   request again; it can only be put away. (#571)
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
   Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
@@ -1530,6 +1532,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the line is ignored and `melo config` names it; `-X memory.followup_query=...` exits 2 and says it was removed.
 
 ### Security
+
+- A call's one-line preview, on its card and in its events, has its secrets redacted before it is shortened, so a cut
+  never leaves part of a key in it. Each call's start event keeps the key of the live call (`run_key`), so a call cut
+  off with no result kept is known by it later (#571).
 
 - A chat's mode decides for the tasks it started (#576). A task you started follows its chat's Ask or Auto while it runs, so a switch you made is not ignored by work that began earlier; a card already waiting stays for you. The mode only chooses between policies the task already had, a chore and a task another program or melo made keep their own mode, and Auto's limits are unchanged (see SECURITY.md).
 
