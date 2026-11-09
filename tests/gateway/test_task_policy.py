@@ -146,15 +146,11 @@ def test_allowlists_separate_principals_from_derived_tasks() -> None:
     for origin in ("user", "user_rule"):
         policy = worker_tool_allowlist(origin)
         assert policy.builtins == tools
-        assert policy.remember_approvals is True
-        assert policy.allow_unmarked_mcp is True
-        assert policy.allow_session_grants is True
+        assert policy.chat_approvals is True
     for origin in ("front", "harness", "agent", "channel", "sleep"):
         policy = worker_tool_allowlist(origin)
         assert policy.builtins == tools
-        assert policy.remember_approvals is False
-        assert policy.allow_unmarked_mcp is False
-        assert policy.allow_session_grants is False
+        assert policy.chat_approvals is False
     with pytest.raises(UnknownOriginError):
         worker_tool_allowlist("robot")
 

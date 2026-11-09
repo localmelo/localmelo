@@ -55,7 +55,6 @@ from pathlib import Path
 from typing import Any, Final, Literal, get_args
 
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
     SITE_GRANTS,
     STAYS_FOR_CHAT,
     ApprovalDecision,
@@ -260,9 +259,10 @@ def check_grant(
     """Raise :class:`GrantRefusedError` unless a grant of *key* may be kept.
 
     Never a question of :data:`NEVER_GRANTED`, a step of a card-only kind,
-    an Allow once (*decision* without ``remember``, or Auto's
-    :data:`ALLOWED_ONCE`), a high-impact step, or a path outside the
-    workspace as a tool's grant. Auto keeps a site read only
+    an Allow once (*decision* without ``remember`` or ``always``; Auto's
+    :class:`~localmelo.melo.contracts.approvals.Allowance` can carry
+    neither), a high-impact step, or a path outside the workspace as a
+    tool's grant. Auto keeps a site read only
     (:func:`stays_for_chat`). A folder must be one a chat may be granted.
     """
     if kind not in GRANT_KINDS or by not in DECIDERS:
@@ -277,9 +277,7 @@ def check_grant(
     elif grant_kind(key) != kind:
         raise GrantRefusedError(f"{key!r} is never kept for a chat")
     if decision is not None and (
-        not decision.allow
-        or decision.reason == ALLOWED_ONCE
-        or not (decision.remember or decision.always)
+        not decision.allow or not (decision.remember or decision.always)
     ):
         raise GrantRefusedError("an Allow once is never kept")
     if request is not None:
@@ -881,9 +879,24 @@ class GrantBook:
         return task
 
     def _settled(self, task: asyncio.Task[None]) -> None:
+        if task not in self._pending:
+            return  # a wait below dropped it already
         self._pending.discard(task)
         if not task.cancelled() and task.exception() is not None:
             logger.warning("Could not save a grant change", exc_info=task.exception())
+
+    def _unfinished(self) -> list[asyncio.Task[None]]:
+        """The queued writes still running, after dropping the finished ones here.
+
+        A write that finished in the loop pass in which a wait looks has its
+        done-callback still queued, and ``gather`` of done tasks returns
+        without yielding: a wait that left the drop to the callback spun on
+        it for ever. So each wait drops what is done itself, and waits only
+        on what still runs.
+        """
+        for task in [task for task in self._pending if task.done()]:
+            self._settled(task)
+        return list(self._pending)
 
     async def _ordered(self, write: Awaitable[None], label: str) -> None:
         async with self._write_lock:
@@ -900,20 +913,22 @@ class GrantBook:
         """Wait for every queued write; the first that failed raises :class:`SessionStoreError`."""
         failed: BaseException | None = None
         while self._pending:
+            # A finished write's result counts too: :meth:`_unfinished` drops it.
             for result in await asyncio.gather(
                 *list(self._pending), return_exceptions=True
             ):
                 if isinstance(result, BaseException) and failed is None:
                     failed = result
+            self._unfinished()
         if failed is not None:
             raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
         """Wait for every queued write (a failed one is logged), and try what is owed."""
-        if self._owed and not self._pending:
+        if self._owed and not self._unfinished():
             self._queue(self._mark_revoked([], 0.0), "grant_revoke")
-        while self._pending:
-            await asyncio.gather(*list(self._pending), return_exceptions=True)
+        while running := self._unfinished():
+            await asyncio.gather(*running, return_exceptions=True)
 
     async def _insert(self, grant: Grant) -> None:
         assert self._store is not None

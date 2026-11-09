@@ -1270,7 +1270,7 @@ test('approval buttons post only their explicit choices and Escape closes denial
   for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow for this chat']]) {
     const h = harness(baseRoutes({'POST /approvals/req': {outcome: 'allowed'}}));
     await h.run('init()');
-    h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+    h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, offers_chat: true};
     h.run('S.view.pending.set("req", request)');
     const card = h.run('approvalCard(request)');
     const target = findNode(card, (node) => node.textContent === label);
@@ -1478,7 +1478,7 @@ test('approval guard survives redraw but resets on navigation', async () => {
 });
 
 test('the chat\'s approval card follows the open chat: its folder when the request names none, and whether an answer counts everywhere', async () => {
-  const request = {request_id: 'wire', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+  const request = {request_id: 'wire', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, offers_chat: true};
   const title = (card) => findNode(card, (node) => node.className === 'approval-title').textContent;
   const answers = (card) => findNode(card, (node) => node.className === 'approval-actions').children.map((node) => node.textContent);
   const side = harness(baseRoutes());
@@ -1535,7 +1535,8 @@ test('incomplete or unconfirmed arguments cannot be allowed, but can be denied',
   for (const complete of [false, undefined]) {
     const h = harness(baseRoutes({'POST /approvals/unsafe': {outcome: 'denied'}}));
     await h.run('init()');
-    h.context.request = {request_id: 'unsafe', tool_name: 'shell_exec', arguments: {command: 'truncated…'}, arguments_complete: complete};
+    h.context.request = {request_id: 'unsafe', tool_name: 'shell_exec', arguments: {command: 'truncated…'}, arguments_complete: complete,
+      offers_chat: true};
     h.run('S.view.pending.set("unsafe", request)');
     const card = h.run('approvalCard(request)');
     h.run('approvalStates.get("unsafe").mountedAt -= 1000');

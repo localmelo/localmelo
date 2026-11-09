@@ -24,15 +24,13 @@ from localmelo.melo.contracts.approvals import (
     site_covers,
     whole_site,
 )
-from localmelo.melo.contracts.review import ActionReview, host_site
+from localmelo.melo.contracts.review import ActionReview, host_site, step_key
 from localmelo.support.browser import sites
 from localmelo.support.cli.approvals import Approvals
 from localmelo.support.sessions.approvals import (
-    ApprovalLedger,
     ChatPolicy,
     OwnedTaskPolicy,
     RememberingPolicy,
-    request_step,
 )
 from localmelo.support.sessions.grants import GrantBook
 
@@ -278,9 +276,6 @@ async def test_a_task_uses_its_chat_s_kept_answer_for_the_site() -> None:
     chat = book.view("chat", "side")
     assert chat.grant_now(OPEN + KEPT) is not None
     assert chat.grant_now(OPEN + "https://www.example.org", by="auto") is not None
-    ledger = ApprovalLedger()
-    ledger.grants_of = book.allowed_for
-    ledger.site_kept = book.site_kept
 
     async def owner() -> str:
         return "chat"
@@ -289,9 +284,7 @@ async def test_a_task_uses_its_chat_s_kept_answer_for_the_site() -> None:
         return 1.0
 
     asker = Asker()
-    task = OwnedTaskPolicy(
-        RememberingPolicy(asker), ledger, "t1", owner, started=started
-    )
+    task = OwnedTaskPolicy(RememberingPolicy(asker), book, owner, started=started)
     await task.review_window()
 
     assert (await task.decide(_question(OPEN + OTHER_HOST))).origin == "session"
@@ -427,7 +420,10 @@ async def test_an_allowance_in_auto_stays_one_step() -> None:
     auto = AutoPolicy()
     step = _question(OPEN + KEPT, STOPPED)
     other = _question(OPEN + OTHER_HOST, STOPPED)
-    auto.allow_once(request_step(step), ("beyond_request",))
+    auto.allow_once(
+        step_key(step.tool_name, step.arguments, step.workspace_root),
+        ("beyond_request",),
+    )
     decided = await auto.decide(step)
     assert decided.allow and decided.reason == ALLOWED_ONCE
     assert not (await auto.decide(other)).allow

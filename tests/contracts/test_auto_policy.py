@@ -13,6 +13,7 @@ from localmelo.melo.contracts.approvals import (
     LEFT_UNANSWERED,
     NO_ANSWER,
     AllowAllPolicy,
+    Allowance,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -120,9 +121,7 @@ async def test_an_allowance_runs_its_step_once_until_it_runs_out() -> None:
     key = step_key("python_exec", {"code": "pip"}, "/ws")
     policy.allow_once(key, INSTALL.categories)
     assert policy.has_allowances()
-    assert await policy.decide(request) == ApprovalDecision(
-        True, "allowed once", origin="user"
-    )
+    assert await policy.decide(request) == Allowance(True, ALLOWED_ONCE, origin="user")
     assert not policy.has_allowances()
     assert (await policy.decide(request)).allow is False
     policy.allow_once(key, INSTALL.categories)
@@ -463,6 +462,19 @@ async def test_an_allowance_still_runs_before_the_card() -> None:
 
     assert (decided.allow, decided.reason) == (True, ALLOWED_ONCE)
     assert asking.asked == []
+    # How it was decided is its type, not its text, and it can keep nothing.
+    assert isinstance(decided, Allowance) and not decided.remember
+    assert not isinstance(
+        ApprovalDecision(True, ALLOWED_ONCE, origin="user"), Allowance
+    )
+    with pytest.raises(ValueError):
+        Allowance(True, ALLOWED_ONCE, remember=True, origin="user")
+    with pytest.raises(ValueError):
+        Allowance(True, ALLOWED_ONCE, origin="user", always=True)
+    with pytest.raises(ValueError):
+        Allowance(False)
+    with pytest.raises(ValueError):
+        Allowance(True, origin="auto")
 
 
 def test_a_chosen_answer_is_the_persons() -> None:

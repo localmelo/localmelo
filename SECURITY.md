@@ -70,25 +70,30 @@ those tools can do.
   `shell_exec`, `python_exec`, `file_write` and other tools marked as
   requiring approval may run. It is asked after every other check, and a
   policy that fails denies the call. Without a policy, as in direct mode and
-  the gateway, these tools run without asking. The interactive UI asks in
-  its approval panel before each such call, unless it was started with
-  `--yolo`.
+  the gateway's `/v1` API, the tools a run offers run without asking. Neither
+  offers `shell_exec` by default: direct mode only when `--builtins` names it,
+  and the gateway never (its mode refuses the call even when it is named).
+  The interactive UI asks in its approval panel before each such call,
+  unless it was started with `--yolo`. Console and app chats and tasks ask on
+  their card.
 - **The fence applies only with a workspace root.**
   `AgentOptions(workspace_root=DIR)` keeps `file_read`, `file_write` and
   `list_files` inside that directory: paths are resolved before the check, a symlink
   that points out is refused, and so is anything but a regular file.
   Without a workspace root there is no fence.
-- **`shell_exec` and `python_exec` are not fenced in chats.** With a
+- **`shell_exec` and `python_exec` are not fenced in the terminal.** With a
   workspace root they start in it, and `python_exec` runs in a child process,
   but both can reach any path you can. An approval policy is their only
-  control. The terminal UI and other direct runs work this way; console and
-  app chats write only in their folder, as below.
+  control. The terminal UI and other direct runs work this way. Console and
+  app chats and tasks have no `shell_exec` (it is not offered, and the
+  gateway refuses a call of it), and their `python_exec` writes only in their
+  folder, as below.
 - **Worker runs write only in their workspace (macOS).** In a worker run
-  (`melo worker BRIEF`, `--brief`) with a workspace, in a saved task, and in a
-  console or app chat, whose folder is its workspace,
-  `shell_exec` and `python_exec` start under a `sandbox-exec` profile that
-  refuses every file write outside the workspace, whatever the command does
-  (`cd` elsewhere, a child `git` or Python). The exceptions are the caches
+  (`melo worker BRIEF`, `--brief`) with a workspace, `shell_exec` and
+  `python_exec` start under a `sandbox-exec` profile that refuses every file
+  write outside the workspace, whatever the command does (`cd` elsewhere, a
+  child `git` or Python). So does `python_exec` in a saved task and in a
+  console or app chat, whose folder is its workspace. The exceptions are the caches
   the project's tools write (uv's cache, black's cache, npm's cache), your own
   temporary folder (`/var/folders/.../T`, where macOS's `mktemp` writes; `/tmp`
   stays refused), a few devices (`/dev/null`, the terminal, the standard streams), and, when the
@@ -160,8 +165,8 @@ those tools can do.
   is unknown needs a fresh decision in every task of the job, whoever moved the
   job on, unless its tool only reads (a page action, a navigation included,
   does not): run again as it was, it is asked about whatever its tool, and only
-  the person decides, on a card in Ask and in Auto. No grant, earlier approval
-  or review by a model lets it run; in Auto with nobody watching it is blocked,
+  the person decides, on a card in Ask and in Auto. No grant or review by a
+  model lets it run; in Auto with nobody watching it is blocked,
   and the person may allow that block once. Their Allow runs it that one time. A step refused in the job is refused
   before any review until the person's own message moves it on; then each gets
   a fresh decision.
@@ -193,47 +198,43 @@ those tools can do.
   answer reach each side framed as data, not instructions. A step that needs
   approval is still decided by you (or Auto's review), never by one agent
   for another.
-- **A task reuses an approval only by an exact match in code.** In the web
-  console, a task's approval goes through the chat that started it. A step
-  you allowed in that chat (or in one of its tasks) runs again in that
-  chat's later tasks without asking only when code finds the same tool, the
-  same step key (the same command or Python syntax tree, the same file and
-  content, the same folder after resolving links, and the files melo's
-  rules read for it unchanged) and melo's rules read the step themselves
-  and found it routine, both times. That covers `python_exec`, `shell_exec`,
-  `file_write` and `file_edit` only. A tool allowed for the chat covers its
-  tasks' routine calls of that tool, as in the chat. Such a task's steps
-  are reviewed with every file changed since that chat began, not only
-  since the task began, so code an earlier task of the chat wrote is read
-  before an approval or grant covers a step; when that start cannot be
-  read, neither applies and the step asks. Each such step leaves a
-  row with Revoke, and the approval card says when an Allow will be kept.
-  Recorded approvals live in memory only: a restart, Revoke or deleting the
-  chat drops them.
-- **What never reuses an approval:** a high-impact step (any review
-  category, `self` and the click-only ones included); an undecided step
-  (melo could not see all it runs: a file too big or not read, a command
-  built at run time), a step a model settled, and a step nothing reviewed;
-  a tool the rules do not read (a network or MCP tool, or any other tool:
-  its calls are routine to the rules unread); a chore, or a task another
-  agent, a channel or melo itself started, which neither uses nor records
-  approvals; another chat's approvals; Auto's Allow once, which is one step,
-  once, and never recorded; an Allow answered after its chat was deleted;
-  a revoked approval. A task created with your gateway token (`POST
+- **Allow once is one call.** An Allow once answers the call it was asked
+  for and nothing else: the same step asks again later in the chat, in the
+  chat's tasks and in the terminal. "Allow for this chat" is the only answer
+  that stops the asking. It is a grant, kept in the sessions file (so it
+  outlives a restart), listed in Settings → Permissions and by `/grants`,
+  and taken back there. A grant of a tool covers that tool's routine calls
+  only: never a high-impact one, and one melo's rules could not read only
+  when your model's review then finds it routine; typing, a form sent, a file
+  attached, a click at a point melo cannot check, a page's own question, a
+  press in another app and a take-over are never kept. The card offers
+  "Allow for this chat" only where the server says the answer may be kept,
+  and the server refuses a kept answer sent for any other call: the card
+  still asks.
+- **A task uses its chat's grants, and nothing else kept.** In the web
+  console, a task's approval goes through the chat that started it. A tool
+  allowed for that chat (or in the main chat) covers the task's routine calls
+  of that tool, as in the chat. Such a task's steps are reviewed with every
+  file changed since that chat began, not only since the task began, so code
+  an earlier task of the chat wrote is read before a grant covers a step;
+  when that start cannot be read, no grant of the chat applies and the step
+  asks. A chore, or a task another agent, a channel or melo itself started,
+  uses no chat's grant. A task created with your gateway token (`POST
   /api/tasks`, `melo task new`) counts as yours and belongs to the main
-  chat, so it uses the main chat's approvals: a token holder acts as you.
-- **No model decides a match.** melo's explanation on an approval card is
-  written for your own tasks and chores only, from the task's title and
-  goal, the step and the review's reasons as data, never from tool output,
-  and nothing reads it back; the step, the buttons and what an answer
-  allows come from code. Auto's blocks are never lifted by an earlier
-  approval: Auto blocks only steps that are not routine, and those are never
-  kept.
+  chat, so it uses the main chat's grants: a token holder acts as you.
+- **No model decides what is allowed.** melo's explanation on an approval
+  card is written for your own tasks and chores only, from the task's title
+  and goal, the step and the review's reasons as data, never from tool
+  output, and nothing reads it back; the step, the buttons and what an
+  answer allows come from code.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;
-  - six destructive shell command patterns are blocked, which is easy to get
-    around;
+  - a mode refuses an `exec` tool it does not offer (the gateway refuses
+    `shell_exec` even when a run names it); there is no list of blocked
+    commands: melo's rules read each command and Python step, and one they
+    find high-impact asks every time (Auto blocks it or asks you); a reading
+    of code is not a wall, and a determined model can get around it;
   - tool output is cut to 50,000 characters, and memory writes are limited;
   - a `shell_exec` command is killed with its process group when it times out
     or the run is cancelled.
@@ -388,8 +389,9 @@ in more detail.
 
 In scope:
 
-- getting around the per-step tool allowlist, the shell command blocklist or
-  the filtering of MCP server environments;
+- getting around the per-step tool allowlist, the mode refusals, the
+  approvals (an answer kept that the person did not keep, a high-impact step
+  that runs on a kept answer) or the filtering of MCP server environments;
 - problems in the gateway or its web workspace;
 - secrets that leak into history, logs or output.
 

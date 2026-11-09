@@ -52,7 +52,6 @@ from localmelo.support.sessions.agents import (
 )
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
-    ApprovalLedger,
     AskFunction,
     CardWatch,
     ChatMode,
@@ -302,7 +301,6 @@ class ConsoleSessions:
         idle_close_s: float = IDLE_CLOSE_S,
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
-        ledger: ApprovalLedger | None = None,
         viewers: Callable[[str], int] | None = None,
         inbox_for: Callable[[str], InboxSource] | None = None,
         grants: GrantBook | None = None,
@@ -319,12 +317,6 @@ class ConsoleSessions:
         # Every chat's grants, in the store's table: what the person allows
         # in the main chat counts in every chat and task.
         self.book = grants if grants is not None else GrantBook()
-        # The person's Allows in each chat, which its tasks may use (#369).
-        self.ledger = ledger or ApprovalLedger()
-        self.ledger.grants_of = self.grants
-        self.ledger.site_kept = self.book.site_kept
-        self.ledger.take_back_site = self.book.take_back_site
-        self.ledger.folders_of = self.folder_grants
         # The folders "Always allow this folder" keeps, read from the settings file (#405).
         self.saved_folders = SavedFolders()
         self._settings = settings
@@ -744,11 +736,12 @@ class ConsoleSessions:
         self,
         session_id: str | Callable[[], str | None],
     ) -> AskFunction:
-        """The broker's ask, recording the person's Allow for the chat's tasks (#369).
+        """The broker's ask for the chat's card.
 
         *session_id* may be a callable, for a session whose first turn has
-        not created it yet: the id is read when a request asks. The chat's
-        grants are its policy's, kept in the table.
+        not created it yet: the id is read when a request asks. The answer
+        is the person's for this call; what they allow for the chat is the
+        chat policy's grant, kept in the table, and nothing else is kept.
         """
 
         async def timed(request: ApprovalRequest) -> ApprovalDecision:
@@ -757,15 +750,7 @@ class ConsoleSessions:
                 return Withdrawal(
                     False, "The session is not open yet.", origin="policy"
                 )
-            decision = await self._broker.asker(current)(request)
-            if (
-                isinstance(decision, ApprovalDecision)
-                and decision.allow
-                and decision.origin == "user"
-            ):
-                # The person's Allow: this chat's tasks may run the same step (#369).
-                self.ledger.record(current, request)
-            return decision
+            return await self._broker.asker(current)(request)
 
         return timed
 

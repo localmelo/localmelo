@@ -13,9 +13,9 @@ Three pieces of policy live here, all in code and never in a model's JSON:
   or empty). ``/`` and the home folder are never a worker's root.
 - :func:`chore_workspace` is the one folder a saved chore works in, run after
   run (:func:`remove_chore_workspace` deletes it with the chore).
-- :func:`worker_tool_allowlist` gives the origin's built-ins and says which
-  grants the worker may have. Tasks of a non-user origin get no unmarked MCP
-  tools and no session grants, and their approvals are never remembered.
+- :func:`worker_tool_allowlist` gives the origin's built-ins and says
+  whether the worker's approvals go through the person's chat. Tasks of a
+  non-user origin never ask through a chat and hold no chat's grants.
 
 The module is deliberately free of a store, FastAPI and a clock: the store
 is :mod:`localmelo.support.gateway.task_store` and the routes arrive in
@@ -60,7 +60,7 @@ _DEFERRED_FIELDS: Final = (
 
 # The built-ins a worker may register. The gateway's set already omits
 # `shell_exec` (P13a), and a worker never gains a tool by origin alone: the
-# origin only decides the MCP and session-grant flags below. It is its own
+# origin only decides whether its approvals go through a chat. It is its own
 # set, not the gateway chat's default, so a worker's tools do not change
 # with a chat's. `list_files` and `git_status` only read and never ask;
 # `file_edit` changes part of a file and asks as `file_write` does (#324).
@@ -528,30 +528,22 @@ def _user_workspace(path: str, home: str) -> bool:
 
 @dataclass(frozen=True)
 class WorkerToolPolicy:
-    """The tools and grants a worker of one origin may have (design 4.2)."""
+    """The tools a worker of one origin may have, and how it is approved (design 4.2)."""
 
     builtins: frozenset[str]
-    remember_approvals: bool
-    allow_unmarked_mcp: bool
-    allow_session_grants: bool
+    chat_approvals: bool
 
 
 def worker_tool_allowlist(origin: str) -> WorkerToolPolicy:
-    """The origin's built-ins and grants.
+    """The origin's built-ins, and whether its approvals go through a chat.
 
-    The user (and the user's rules) may have approvals remembered, unmarked
-    MCP tools and session grants. A task the agent, a channel, the harness or
-    the sleep pipeline started gets none of those: every marked call needs a
-    fresh approval, and an unmarked MCP tool is not offered at all.
+    The user (and the user's rules) may: a task's call is asked about in the
+    chat that owns it. A task the agent, a channel, the harness or the sleep
+    pipeline started may not: every marked call needs a fresh approval.
     """
     checked = check_origin(origin)
     principal = checked in _PRINCIPAL_ORIGINS
-    return WorkerToolPolicy(
-        builtins=_WORKER_BUILTINS,
-        remember_approvals=principal,
-        allow_unmarked_mcp=principal,
-        allow_session_grants=principal,
-    )
+    return WorkerToolPolicy(builtins=_WORKER_BUILTINS, chat_approvals=principal)
 
 
 __all__ = [

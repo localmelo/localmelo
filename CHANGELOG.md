@@ -1544,6 +1544,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- **Allow once** allows that one call. The same step asks again later in the chat, in its tasks and in the terminal;
+  only **Allow for this chat** stops the asking, and that answer is kept, listed in Settings → Permissions and by
+  `/grants`, and taken back there. An approval card offers **Allow for this chat** only where melo may keep the answer,
+  a page's file upload gets a card of its own, and a kept answer sent for a step that asks every time is refused, so the
+  card still asks (#591).
+
 - A call's one-line preview, on its card and in its events, has its secrets redacted before it is shortened, so a cut
   never leaves part of a key in it. Each call's start event keeps the key of the live call (`run_key`), so a call cut
   off with no result kept is known by it later (#571).

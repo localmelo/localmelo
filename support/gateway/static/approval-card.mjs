@@ -11,6 +11,10 @@
  * - `reload(id)`: read the request's details again;
  * - `takeOver()`: the chat opens the Browser panel when the person agrees to take over a page.
  *
+ * The answers offered are the server's word: "Allow for this chat" only where the request says
+ * `offers_chat: true`, and for a folder outside the workspace only where `outside.grantable` is true.
+ * A request without that word offers Allow once and Deny.
+ *
  * `states` keeps each request's state (the deny box, the folded code, an answer under way) by request
  * id, so that a redraw of the page does not lose it; the page owns it. `openWorkspace` is the label of
  * the folder of the chat that is open, for a request and a view that name none. `later(fn, ms)` is
@@ -208,6 +212,19 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("browser-attach:")) {
+    // A file from this computer for a page's upload field: asked every time. The sentence names the file and its
+    // folder; the page gets the file as soon as it is attached.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    const name = String(args.name || t("approval.theFile"));
+    const from = String(args.folder || "");
+    what = t("approval.willDo");
+    title = t("approval.attachTitle", { site });
+    caption = t("approval.attachCaption");
+    rule = t("approval.rule.attachOnce");
+    why = t(from ? "approval.attachContent" : "approval.attachContentNoFolder", { name, folder: from, site });
+    content = "";
+    noBox = true;
   } else if (tool.startsWith("handoff:")) {
     // A page asked to open an address of another app's kind, which the browser in the background does not
     // open itself: melo opens it on a yes, and a kept answer covers that kind of address where it is kept
@@ -405,18 +422,16 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     actions.hidden = true;
     grant.hidden = true;
     if (wide) wide.hidden = true;
-    if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
-  // The answers offered: a folder outside the workspace that may be kept has four.
-  // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || takeover || pointing || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
-    || tool.startsWith("desktop-act:");
-  const offered = form ? [once, chrome, deny] : everyTime ? [once, deny]
-    : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  // The answers offered, as the server says: an answer is kept for the chat only where `offers_chat` is true,
+  // and a folder outside the workspace that may be kept has four. Nothing else decides it.
+  const keeps = outside ? grantable : request.offers_chat === true;
+  const offered = form ? [once, chrome, deny] : !keeps ? [once, deny]
+    : outside ? [once, session, always, deny] : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
   const command = tool === "shell_exec" || tool === "python_exec";
@@ -444,12 +459,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     session.setAttribute("aria-describedby", `${grant.id} ${wide.id}`);
     card.append(wide);
   }
-  // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
-  const rememberedKey = view.scope === "task" ? "task" : everywhere ? "everywhere" : "chat";
-  const kept = !high && request.remembered === true
-    ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
-    : null;
-  if (kept) card.append(kept);
   if (state.submitting) card.append(el("p", "approval-sending", t("approval.sending")));
   const note = t("approval.instead");
   const label = el("label", "", note);
@@ -477,7 +486,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     actions.hidden = false;
     grant.hidden = false;
     if (wide) wide.hidden = false;
-    if (kept) kept.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -498,7 +506,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   actions.hidden = state.deny;
   grant.hidden = state.deny;
   if (wide) wide.hidden = state.deny;
-  if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false
