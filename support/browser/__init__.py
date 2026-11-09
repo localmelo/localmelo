@@ -5,7 +5,7 @@
 ``safari-automation`` (Safari's automation windows, which come to the front) or
 ``chrome`` (Google Chrome in the background, with no window).
 ``configured_driver`` is the driver a chat passes: the setting, or ``off`` when
-it names no driver.
+it names no driver. ``driver_for_on`` is the one turning browsing on picks.
 """
 
 from __future__ import annotations
@@ -32,6 +32,13 @@ def configured_driver(cfg: Config) -> str:
         "Invalid [browser] driver %r; browsing is off", driver
     )
     return "off"
+
+
+def driver_for_on() -> str:
+    """The driver turning browsing on picks: ``chrome``, which keeps sign-ins, when Chrome is installed; else ``safari-automation``."""
+    from localmelo.support.browser import chrome
+
+    return "chrome" if chrome.chrome_installed() else "safari-automation"
 
 
 def provider_for(
@@ -92,4 +99,10 @@ def provider_for(
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 
 
-__all__ = ["DRIVERS", "BrowserToolProvider", "configured_driver", "provider_for"]
+__all__ = [
+    "DRIVERS",
+    "BrowserToolProvider",
+    "configured_driver",
+    "driver_for_on",
+    "provider_for",
+]

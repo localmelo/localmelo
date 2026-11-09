@@ -5,7 +5,7 @@ Let melo read web pages, and click, type and choose on them, on a Mac, from the 
 ![A terminal chat in which melo opens a web page and says what it contains.](../assets/img/browser.webp)
 
 - Browsing is **off until you turn it on**.
-- Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. `/browser on` uses the browser you chose before, or Safari if you never chose one.
+- Two browsers: **Chrome in the background** (no window, never comes to the front; see [Chrome in the background](#chrome-in-the-background)) or **Safari's automation windows**, which come to the front. `/browser on` uses the browser you chose before; if you never chose one, Chrome when it is installed (it keeps sign-ins), else Safari.
 - melo opens pages, follows links and reads what it finds. It works in one tab, like a person would.
 - It can click a button or link, type into a text box and choose from a list, all **inside melo's own browser window**, with Safari's own clicks and keystrokes, and it says what changed after each one. It never types a password, a card number or a one-time code, and never reads your cookies. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret). Once a text is in a page, the page itself may send it: melo cannot stop every such send (see [Clicking, typing and choosing](#clicking-typing-and-choosing)).
 - It never types your password for you. When a page needs you (a sign-in, a code or a QR code), melo asks you to [take the page over](#taking-over-melos-browser): in Chrome it opens in a real window of melo's own Chrome, melo is paused, and it goes on when you press **Done** or close the window. Moving the mouse on your desktop is a different feature and is not part of this (see [What is coming](#what-is-coming)).
@@ -18,7 +18,7 @@ Every chat can read a public page without Safari, with the `web_fetch` tool. It 
 - It only reads: one request, no cookies, no sign-ins, no forms. A PDF is read as text, page by page, and a page with no text (a scan) comes as a picture when your model reads pictures; other files are refused.
 - It never reaches this Mac or your local network, except a server on this Mac that you wrote as `localhost:3000`, `127.0.0.1:3000` or `[::1]:3000` in your own message (never melo's own servers). `localhost`, private and link-local addresses, `.local` names, this Mac's own addresses (also a public IPv6 one) and the network around them, and a redirect or DNS answer that points to one of them are refused.
 - A site your own recent messages name reads at once: that exact site, with or without `www.`. A site under it (`docs.example.com` when you named `example.com`) and any other site ask once per chat ("Let melo read example.com?", with the full address), and one "allow for this chat" covers the browser too. A file name such as `README.md` does not name a site.
-- A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in Safari instead.
+- A page that needs a sign-in, blocks automated readers or is built by scripts says so. With browsing on, melo can try it in its browser instead.
 - Tasks have it too. Turn it off in Settings → Chats and folders → **Read web pages**, or with `melo config set tools.web_fetch false`. The limits and the exact rules are in [Tools](../reference/tools.md#reading-a-public-web-page).
 
 The rest of this page is about browsing in Safari, which also follows links, clicks, types and runs a page's scripts.
@@ -39,7 +39,7 @@ In the terminal chat:
 ```
 
 - It shows whether browsing is on and, when it is, checks that the browser answers; then a list offers to turn it on (Safari windows, or Chrome in the background), to switch browser, or to turn it off.
-- `/browser chrome` and `/browser safari` choose the browser and turn browsing on; `/browser on` turns it on with the browser chosen before (Safari when none was), and `/browser off` turns it off.
+- `/browser chrome` and `/browser safari` choose the browser and turn browsing on; `/browser on` turns it on with the browser chosen before (when none was: Chrome if it is installed, else Safari), and `/browser off` turns it off.
 - In the web console and the app: Settings → Chats and folders → **Browser** (Chrome, Safari or Off), or the same `/browser` words. Without Chrome, the choice says "Install Google Chrome to browse in the background", and nothing changes.
 - The choice is saved as `[browser] driver` in `~/.cache/localmelo/config.toml` when you have a saved configuration, and the chat goes on in a new Agent, so nothing you said is lost.
 - **Open chats switch at their next message.** In the web console and the app, a chat in the middle of a turn finishes it in the browser it has; its next message uses the new one.
@@ -278,7 +278,7 @@ A page melo acts on can make another app open a window, such as a chat app's sig
 
 Browsing is built in parts; none of these exists yet.
 
-- Chrome becoming the default browser, an "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
+- An "open in a window" choice for sites that refuse a browser without a window, and a button that clears melo's Chrome sign-ins.
 - Acting in your own signed-in browser (a Chrome extension): clicks and typing there, with a confirmation that `auto` and `--yolo` cannot skip for sending, posting, buying and signing in. The clicks on this page happen only inside melo's own automation window; moving your mouse on the desktop (computer use, for apps outside the browser) is a separate feature and the next way after a point of a picture.
 - Saved chores that remember the steps you approved once. A chore browses now, but it asks again each time.
 
