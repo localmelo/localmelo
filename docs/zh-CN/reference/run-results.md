@@ -88,6 +88,7 @@
 | `answered_on_stop` | 只会是 `true`，并且只出现在 `result` 来自 `answer_on_stop` 所发额外请求的运行中（见[状态](#statuses)）。其他情况下不出现。 |
 | `format_fixed` | 只会是 `true`，并且只出现在 `result` 通过 `answer_on_stop` 所发额外请求得到了任务要求的收尾行的运行中（见[状态](#statuses)）。其他情况下不出现。 |
 | `empty_reply` | 只出现在这样的运行中：会思考的模型以没有答案的回合结束，而 `empty_reply_fallback` 介入了：`{"thinking_off_retry": true or false, "from_thinking": true or false}`。`thinking_off_retry` 为 `true` 表示该回合关闭思考后又问了一次，`from_thinking` 则表示 `result` 是思考的最后几行，末尾带有 `(from melo's thinking)`。其他情况下不出现，使用 `-X agent.empty_reply_fallback=off` 时一定不出现。 |
+| `handed_off` | 只会是 `true`，而且只出现在最后一步把剩下的工作交给任务的运行中（对话里带 `continue_current` 的 `task_create`）：状态是 `completed`，`result` 是写明那个任务的回执，之后没有再运行任何一步。其他情况下不出现。 |
 
 `config` 包含：
 

@@ -49,6 +49,7 @@ from .test_chat_owns_tasks import (
     started_task,
     state,
     stop_run,
+    successor_of,
 )
 
 REPORT = "write the long report from my notes"
@@ -489,8 +490,12 @@ async def test_a_follow_up_queued_at_shutdown_runs_once_after_the_restart(
         [turn] = await internal_turns(console)
         assert f"follow-up on task {task_id} · " in turn.user_text
         assert "task_continue(" in turn.user_text
-        record = await console.workers.tasks.get_task(task_id)
-        assert record.state == "queued" and record.card == f"{NOTE_START}\n{go_on}"
+        # The ended task stays as it was; a fresh one goes on with the note.
+        assert await state(console, task_id) == "failed"
+        record = await console.workers.tasks.get_task(
+            await successor_of(console, task_id)
+        )
+        assert record.state == "queued" and record.spec["handoff"]["note"] == go_on
         # The task from the task page has none, after a restart too.
         info = await console.store.get_session(str(page["task_id"]))
         assert info is not None and "followup" not in info.meta
@@ -623,9 +628,10 @@ async def test_a_restored_follow_up_still_continues_at_most_once_per_message(
         task_id = await started_task(console)
         await stop_run(console, task_id)
         await settled(console)
-        assert await state(console, task_id) == "queued", "continued once"
+        fresh = await successor_of(console, task_id)
+        assert await state(console, fresh) == "queued", "continued once"
         hold_follow_ups(console, monkeypatch)
-        await stop_run(console, task_id, "Wrote another part.")
+        await stop_run(console, fresh, "Wrote another part.")
         await console.followups.settle()
     after: list[Reply] = [continues("Try once more."), answer(question)]
     async with owner_console(tmp_path, monkeypatch, main=after, run=False) as (
@@ -639,7 +645,8 @@ async def test_a_restored_follow_up_still_continues_at_most_once_per_message(
         assert "continued the task once already" in second.user_text
         refused = tool_results(models["main"], 1)[-1]
         assert refused.startswith("Not done: this task was continued once already")
-        assert await state(console, task_id) == "failed"
+        assert await state(console, fresh) == "failed"
+        assert len(await console.workers.tasks.list_tasks()) == 2
         assert second.answer == question
 
 
@@ -649,7 +656,7 @@ async def test_a_restored_follow_up_still_continues_at_most_once_per_message(
 async def test_each_did_not_finish_card_keeps_the_report_of_its_own_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    main: list[Reply] = [creates("Sales report"), answer("Started it as a task.")]
+    """A task given directly (the tasks page) still goes on in its own session."""
     workers: list[list[Reply]] = [
         [answer("Wrote the intro only: the sales data was missing.\nEnding: failed")],
         [
@@ -659,7 +666,7 @@ async def test_each_did_not_finish_card_keeps_the_report_of_its_own_run(
         ],
     ]
     async with owner_console(
-        tmp_path, monkeypatch, main=main, workers=workers, follow_up=False
+        tmp_path, monkeypatch, workers=workers, follow_up=False
     ) as (console, client, models, _ran):
         cards = console.cards
         flush = cards.flush
@@ -667,8 +674,15 @@ async def test_each_did_not_finish_card_keeps_the_report_of_its_own_run(
         async def later() -> None:
             pass
 
-        await say(client, console, "write the sales report from my notes")
-        task_id = await started_task(console)
+        made = await client.post(
+            "/api/tasks",
+            json={
+                "prompt": "write the sales report from my notes",
+                "front_id": str(console.main_id),
+            },
+        )
+        assert made.status_code == 202, made.text
+        task_id = str(made.json()["task"]["task_id"])
         # Both runs end before anything reads the chat: one flush writes both cards.
         monkeypatch.setattr(cards, "flush", later)
         await until(lambda: _is(console, task_id, "done"))
@@ -767,7 +781,9 @@ async def test_a_site_refused_in_a_task_is_never_read_in_the_run_its_chat_contin
         refusing = asyncio.create_task(the_person_refuses(task_id))
         try:
             await until(lambda: len(models["workers"]) == 2)
-            await until(lambda: _is(console, task_id, "done"))
+            # The chat's continue went to a fresh task, which keeps the refusal.
+            fresh = await successor_of(console, task_id)
+            await until(lambda: _is(console, fresh, "done"))
             await settled(console)
         finally:
             refusing.cancel()

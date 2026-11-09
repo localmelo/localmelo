@@ -49,6 +49,38 @@ def refuse_call(text: str) -> str:
     return text
 
 
+# The hand-off of the call that runs now: a list the agent sets only for a step
+# whose one call is a hand-off call (``ProvidedTool.hands_off``), ``None``
+# otherwise. See :func:`hand_off`.
+CALL_HANDS_OFF: ContextVar[list[str] | None] = ContextVar(
+    "localmelo_call_hands_off", default=None
+)
+
+
+def can_hand_off() -> bool:
+    """Whether the running call may hand the rest of the run's work on (:func:`hand_off`).
+
+    True only inside a run's step whose one call is this hand-off call: a tool
+    checks it before it moves any work, so work it moved never stays in a run
+    that goes on.
+    """
+    return CALL_HANDS_OFF.get() is not None
+
+
+def hand_off(text: str) -> str:
+    """Mark the running call as the run's hand-off; return *text*, its receipt.
+
+    The rest of the run's work moved elsewhere (a task now holds it). Once the
+    call's step is recorded, the agent ends the run ``completed`` with *text*
+    as its result and ``RunResult.handed_off`` true, and takes no other step.
+    Where :func:`can_hand_off` is false it only returns *text*.
+    """
+    found = CALL_HANDS_OFF.get()
+    if found is not None:
+        found.append(text)
+    return text
+
+
 @dataclass(frozen=True)
 class ProvidedTool:
     """A tool definition, the coroutine that runs it, and how it is run.
@@ -64,7 +96,10 @@ class ProvidedTool:
     melo's own browser tools, which ask their questions themselves: the agent
     honours it only for the few names melo lists
     (``contracts.approvals.SELF_ASKING_TOOLS``), so it does not let any other
-    tool skip the approval policy.
+    tool skip the approval policy. ``hands_off`` names a boolean argument that
+    makes a call of the tool the run's hand-off when it is true (see
+    :func:`hand_off`): the agent runs such a call only as the one call of its
+    step, and refuses a step that mixes it with others before running any.
     """
 
     definition: ToolDef
@@ -73,6 +108,7 @@ class ProvidedTool:
     requires_approval: bool = False
     group: str | None = None
     asks_itself: bool = False
+    hands_off: str = ""
 
 
 class BaseToolProvider(ABC):

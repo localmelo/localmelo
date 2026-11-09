@@ -1340,8 +1340,10 @@ function showHeld() {
 async function continueCard(card, button) {
   button.disabled = true;
   try {
-    await api(`/tasks/${encodeURIComponent(card.sourceId)}/continue`, { method: "POST" });
-    button.replaceWith(el("span", "main-card-note", t("tasks.continueAccepted")));
+    const outcome = await api(`/tasks/${encodeURIComponent(card.sourceId)}/continue`, { method: "POST" });
+    // Its work went on already (#571): the card names where, instead of a second start.
+    const going = outcome?.message === "running" ? outcome.task : null;
+    button.replaceWith(el("span", "main-card-note", going ? t("tasks.goesOn", { title: going.title }) : t("tasks.continueAccepted")));
     panel.refresh();
   } catch (error) {
     button.disabled = false;

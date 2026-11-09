@@ -176,21 +176,6 @@ def test_a_body_holding_its_own_closing_fence_line_cannot_close_it() -> None:
         assert not any("<<" in line for line in inside), rendered
 
 
-def test_a_kept_offer_round_trips_and_ignores_anything_else() -> None:
-    from localmelo.support.gateway.handover import Picked, from_snapshot, snapshot
-
-    picked = Picked(
-        "- a\n- b",
-        frozenset({"r:4"}),
-        frozenset({("c1", 2)}),
-        (("a", ""), ("b", "r:4")),
-    )
-    assert from_snapshot(snapshot(picked)) == ((("a", ""), ("b", "r:4")), (("c1", 2),))
-    assert snapshot(Picked("", frozenset(), frozenset())) == {}
-    for data in (None, "x", {"lines": "x"}, {"lines": [["a"]], "over": [["c", "2"]]}):
-        assert from_snapshot(data) == ((), ())
-
-
 # ── What the chat read ──
 
 

@@ -253,7 +253,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {
       actions.append(button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), {disabled: Boolean(state.busy)}));
     }
-    if (isStopped(task)) {
+    if (task.successor?.task_id) {
+      // Its work went on in a newer task (#571): nothing here would start another.
+      nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
+    } else if (isStopped(task)) {
       actions.append(button('', t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), {disabled: Boolean(state.busy)}));
     } else if (canFinish(ending)) {
       // A draft finishes with one tap: the tests (and the commit), through the same continue.
@@ -522,8 +525,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const outcome = await act('continue', (id) => api(`${path(id)}/continue`, {method: 'POST'}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, notice: t('tasks.continueAccepted'), pausing: false});
-      live?.sync(outcome.data.task);
+      // Its work went on already (#571): say where, not that it continues here.
+      const going = outcome.data.message === 'running';
+      const notice = going ? t('tasks.goesOn', {title: outcome.data.task.title}) : t('tasks.continueAccepted');
+      Object.assign(state, {task: going ? state.task : outcome.data.task, notice, pausing: false});
+      if (!going) live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
     render();
   }

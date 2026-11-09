@@ -415,14 +415,15 @@ class Executor:
                 # The tool opens this path and nothing else (open_checked).
                 CHECKED_PATH.set(CheckedPath(resolved, outside is not None))
 
-        # 8. Approval, for a tool that requires it, and for any call on a
-        #    path outside the root (#405): asked only about a call that
-        #    every check above let through, and before the tool's timeout
-        #    starts.
+        # 8. Approval, for a tool that requires it, for any call on a path
+        #    outside the root (#405), and for a call the request says to ask
+        #    about (#571): asked only about a call that every check above let
+        #    through, and before the tool's timeout starts.
         asked = False
         if approve is not None and (
             (outside is not None and not own_read)
             or self.requires_approval(request.tool_name)
+            or request.ask
         ):
             mismatch = _parameter_mismatch(fn, request.arguments)
             if mismatch:

@@ -37,6 +37,7 @@ from localmelo.melo.contracts.approvals import (
     SITE_REFUSED,
     STOPPED_NOTE,
     TAKEOVER,
+    UNKNOWN_RESULT,
     WINDOW_READ,
     ApprovalDecision,
     ApprovalPolicy,
@@ -123,6 +124,13 @@ class _ApprovalGate:
     only in a run the person started: auto mode never decides it and no
     tool grant covers it (see :meth:`asks_folders` and :meth:`_folder`).
 
+    A call of the job whose effect is unknown (#571, ``EarlierBlocks.fresh``,
+    :attr:`fresh`) is asked about whatever its tool (``ExecutionRequest.ask``),
+    a self-asking one too, and reviewed as only a person settles it: high
+    impact, of code melo cannot check (:func:`_fresh_review`). No grant, earlier
+    answer or model review lets it run, and Auto shows it on its card; the
+    person's Allow runs it that once.
+
     The run's cancellation propagates, and the prompt counts as withdrawn.
     The policy fails closed otherwise: an exception it raises, a
     ``CancelledError`` while nothing cancels the run, and a return value
@@ -160,6 +168,13 @@ class _ApprovalGate:
         self._mode: ReviewMode = "ask"
         self._key = ""
         self._allowance = False
+        # A call of the job whose effect is unknown, by the key its start keeps (#571).
+        blocks = find_earlier(policy)
+        self.fresh = (
+            blocks is not None
+            and bool(blocks.fresh)
+            and call_key(call.tool_name, call.arguments, workspace_root) in blocks.fresh
+        )
 
     def asks_folders(self, outside: OutsideAccess) -> bool:
         """Whether a person may be asked about *outside* (#405).
@@ -174,7 +189,7 @@ class _ApprovalGate:
         earlier = self._earlier(request)
         if earlier is not None:
             return earlier
-        if self._asks_itself:
+        if self._asks_itself and not self.fresh:
             # One of melo's own tools that ask their questions themselves (the
             # browser tools that act: per site, for every text typed and every
             # form sent) is not asked a second, empty question here about its
@@ -198,6 +213,8 @@ class _ApprovalGate:
         if self._reviewer is not None and self.review is not None:
             # A key or a script the person's words name asks on a card (#547).
             self.review = self._reviewer.name(self.review)
+        if self.fresh:
+            self.review = _fresh_review(self.review)
         asking = self._asking(request, review=self.review)
         preview = asking.preview
         self._mode = review_mode(self._policy, asking)
@@ -279,6 +296,7 @@ class _ApprovalGate:
             if (
                 self._reviewer is not None
                 and self.review is not None
+                and not self.fresh
                 and not (auto is not None and auto.allowed_once(self._key))
             ):
                 self.review = await self._reviewer.review(
@@ -580,6 +598,24 @@ class _ApprovalGate:
             )
 
 
+def _fresh_review(review: ActionReview | None) -> ActionReview:
+    """*review* of a call whose effect is unknown, as only a person settles it (#571).
+
+    High impact, with ``opaque`` (code melo cannot check, which words and the
+    model never allow, and Auto asks about on its card) beside what the rules
+    found, and why first.
+    """
+    if review is None:
+        return ActionReview("high", ("opaque",), (UNKNOWN_RESULT,))
+    categories = review.categories
+    return dataclasses.replace(
+        review,
+        verdict="high",
+        categories=categories if "opaque" in categories else (*categories, "opaque"),
+        reasons=(UNKNOWN_RESULT, *review.reasons),
+    )
+
+
 # Why a step is reviewed that the rules found routine: it reaches a host melo
 # cannot read while a site is refused in the task (#433).
 UNREAD_SITE: Final = (
@@ -810,6 +846,11 @@ class _ToolAsk:
     def signs_in(self, site: str) -> bool:
         """Whether melo has sign-in details of the person's to try on *site*."""
         return self._reviewer is not None and self._reviewer.signs_in(site)
+
+    def holds_sign_in(self) -> bool:
+        """Whether a password the person gave in this run can be typed in it (#571):
+        work that moves elsewhere would hold it spent."""
+        return self._reviewer is not None and self._reviewer.holds_sign_in()
 
     def granted(self, name: str) -> bool:
         """Whether the run's chat holds a grant of the question *name* (``window-read:<app>``)."""
