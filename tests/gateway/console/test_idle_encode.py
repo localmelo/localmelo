@@ -24,6 +24,7 @@ from localmelo.support.backends.openai_family import CLOUD_BACKENDS
 from localmelo.support.gateway.console.idle_encode import MAX_FAILURES
 from localmelo.support.gateway.console.idle_gates import IdleOptions
 from localmelo.support.gateway.task_policy import TaskSpec
+from localmelo.support.memory.hippo_encode import CHECKED_ENCODERS
 from localmelo.support.memory.service import MemoryTools
 from localmelo.support.sessions.store import NewSession
 from localmelo.tests.memory.hippo_helpers import StubEncoder, item, says
@@ -36,6 +37,7 @@ from .test_idle_sleep import AC, BATTERY, HOUR, World, world
 # The first turn of a chat written by :func:`chat` ended this long before the real clock.
 LONG_AGO = 30 * HOUR
 LOGGER = "localmelo.support.gateway.console.idle_encode"
+CHECKED = next(iter(CHECKED_ENCODERS))
 
 
 async def chat(
@@ -199,6 +201,25 @@ async def test_a_hosted_chat_model_is_never_used(
         )
         assert await w.console.idle_encode.tick() is None
         assert w.console.idle_encode.blocked == "hosted" and stub.prompts == []
+
+
+@pytest.mark.parametrize("how", ["off the list", "empty id", "hosted"])
+async def test_auto_waits_for_a_chat_model_we_have_checked(
+    tmp_path: Path, how: str
+) -> None:
+    async with world(tmp_path, sleep="off") as w:
+        await chat(w, padded(1))
+        stub = arm(w)
+        w.console.cfg.memory.recall_source = "auto"
+        stub.model = "" if how == "empty id" else CHECKED if how == "hosted" else "x"
+        if how == "hosted":
+            w.console.cfg.chat_backend = CLOUD_BACKENDS[0]
+        assert await w.console.idle_encode.tick() is None
+        assert w.console.idle_encode.blocked == "unchecked" and stub.prompts == []
+        # The explicit setting has no such check.
+        w.console.cfg.memory.recall_source = "items"
+        w.console.cfg.chat_backend = "mlc"
+        assert await w.console.idle_encode.tick() is not None
 
 
 async def test_without_a_chat_model_it_waits_and_counts_no_failure(
@@ -654,6 +675,57 @@ async def test_chats_are_encoded_over_several_looks_and_a_fact_is_found_througho
             refs = await found(w, query)
             assert refs and all(ref.startswith("m") for ref in refs), query
         assert [sid for sid, _ in seen.calls] == [bees, run_chat]
+
+
+async def test_auto_encodes_while_recall_reads_turns_and_reads_items_from_nine_tenths(
+    tmp_path: Path,
+) -> None:
+    async with world(tmp_path, sleep="off") as w:
+        now = time.time() - LONG_AGO
+        await chat(
+            w,
+            [("I keep bees on a rooftop.", "Bees like rooftops.")],
+            at=now,
+            title="Bees",
+        )
+        for n in range(9):
+            await chat(
+                w, [(f"Note {n}.", "Ok.")], at=now + HOUR * (n + 1), title=f"N{n}"
+            )
+        await w.console.memory.reindex(w.console.store)
+        stub = arm(w, facts)
+        stub.model = CHECKED
+        w.console.cfg.memory.recall_source = "auto"
+        w.console.cfg.memory.recall_form = "list"
+        seen = watch(w)
+        lock_after_each_window(w, seen)
+        index = w.console.memory.stores()[1]
+        # A turn that has ended (a running one makes the computer busy), to ask with.
+        begun = await w.console.store.begin_turn(
+            None, "q", holder=HOLDER, title="Ask", new_session=NewSession()
+        )
+        asking = await w.console.store.finish_turn(
+            begun.session_id,
+            begun.turn,
+            holder=HOLDER,
+            status="completed",
+            cause="run",
+            result=None,
+            answer="ok",
+        )
+        for n in range(1, 10):
+            run = await w.console.idle_encode.tick()
+            w.machine.lock = False
+            assert run is not None and run.windows == 1, n
+            assert await index.encoded_share() == n / 10
+            recall = await w.console.memory.before_turn(
+                w.console.store, asking, "bees on a rooftop"
+            )
+            assert recall.recall is not None
+            # The items are written all along; they are read from 9 of 10 on.
+            assert recall.recall.source == ("items" if n == 9 else "turns"), n
+            kinds = {ref[0] for ref in refs_of(recall.block)}
+            assert kinds == ({"m"} if n == 9 else {"t"}), n
 
 
 async def test_the_loop_encodes_by_itself_and_stops_on_close(tmp_path: Path) -> None:

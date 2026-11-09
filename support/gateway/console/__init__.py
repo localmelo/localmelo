@@ -256,8 +256,8 @@ class Console:
         self.chore_runner = ChoreRunner(self, self.options.chores)
         # Tidies the notes while the computer is idle (``[memory] sleep``, off by default).
         self.idle_sleep = IdleSleep(self, self.options.idle_sleep)
-        # Writes memory items from the chats while it is idle (``recall_source = "items"``);
-        # it and the sleep take turns on the memory.
+        # Writes memory items from the chats while it is idle (``recall_source`` is
+        # ``items`` or ``auto``); it and the sleep take turns on the memory.
         self.idle_encode = IdleEncode(
             self, self.options.idle_encode, busy=self.idle_sleep.busy
         )

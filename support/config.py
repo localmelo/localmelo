@@ -92,8 +92,9 @@ MEMORY_RECALL_OPEN_CHARS = (500, 16000)
 MEMORY_EXCERPT_OPEN = ("off", "on")
 # Whether recall draws on the chat turns or on memory items encoded from them, and
 # whether an opened item also shows its source turns; the size of the window a chat
-# is cut into for that encoding: see MemoryConfig.recall_source.
-MEMORY_RECALL_SOURCE = ("turns", "items")
+# is cut into for that encoding: see MemoryConfig.recall_source. ``auto`` reads turns
+# until the encoder has caught up, then items.
+MEMORY_RECALL_SOURCE = ("turns", "items", "auto")
 MEMORY_OPEN_SOURCES = ("off", "on")
 # Whether the list form's guide line also tells the model to say it has no record of
 # what a question names that none of the listed lines mention (on, the default; off
@@ -449,9 +450,12 @@ class MemoryConfig:
     (the block, the search result and the tools as before). It has no effect with
     ``recall_form = "list"`` (which always offers ``open_memory``) or
     ``recall_source = "items"``. Four more are about memory items (#428). ``recall_source``,
-    ``turns`` (recall draws on the chat turns, the default) or ``items`` (it draws
+    ``turns`` (recall draws on the chat turns, the default), ``items`` (it draws
     on the memory items a chat model encoded from the chats, in place of the turns;
-    ``melo memory ingest FILE -X ingest=compress`` writes them); ``open_sources``,
+    ``melo memory ingest FILE -X ingest=compress`` writes them) or ``auto`` (it draws
+    on the turns until the encoder has read nearly all of them, then on the items, in
+    the list form; only a chat model we have checked, and only items such a model
+    wrote, count); ``open_sources``,
     ``off`` (the default: an opened item shows its title and text only) or ``on``
     (it also shows its source turns whole, within ``recall_open_chars``);
     ``premise_check``, ``on`` (the default) or ``off``, ends the line above the list
@@ -507,7 +511,7 @@ class MemoryConfig:
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
     excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
-    recall_source: str = "turns"  # turns | items: recall draws on turns, or on items.
+    recall_source: str = "turns"  # turns | items | auto: what recall draws on.
     open_sources: str = "off"  # off | on: an opened item also shows its source turns.
     premise_check: str = "on"  # on | off: the list guide asks for "no record" first.
     compress_at_chars: int = 12000  # The size of a window a chat is encoded in.

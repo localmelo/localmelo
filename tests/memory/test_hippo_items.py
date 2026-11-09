@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -65,20 +66,27 @@ def make(
     )
 
 
-async def add_turn(index: ConversationIndex, session: str, turn: int) -> None:
+async def add_turn(
+    index: ConversationIndex,
+    session: str,
+    turn: int,
+    *,
+    kind: str = "chat",
+    answer: str = "Answer.",
+) -> None:
     await index.add_many(
         [
             Document(
                 session_id=session,
                 turn=turn,
                 surface="gateway",
-                kind="chat",
+                kind=kind,
                 title=f"Chat {session}",
                 text=text,
                 created_at=1000.0 + turn,
                 chunk=n,
             )
-            for n, text in enumerate(document_chunks(f"Question {turn}?", "Answer."))
+            for n, text in enumerate(document_chunks(f"Question {turn}?", answer))
         ]
     )
 
@@ -506,6 +514,51 @@ async def test_forgetting_clears_the_marks_but_one_turn_and_a_rebuild_do_not(
     assert [await index.encoded_turn(s) for s in ("s1", "s2")] == [None, 1]
     await index.forget_all()
     assert await index.encoded_turn("s2") is None
+
+
+async def test_the_encoded_share_is_the_turns_at_or_below_their_chats_mark(
+    index: ConversationIndex,
+) -> None:
+    assert await index.encoded_share() == 0.0  # no turns
+    for session in ("s1", "s2"):
+        for turn in (1, 2, 3, 4):
+            await add_turn(index, session, turn)
+    # A chunked turn counts once, a turn below 1 (a summary, an exchange) not at all,
+    # and a task's turns are indexed and never encoded, so they do not count either.
+    await add_turn(index, "s3", 1, answer="word " * 1500)
+    assert len(await index.turn_documents([("s3", 1)])) > 1
+    for turn in (-2, -1, 0):
+        await add_turn(index, "s1", turn)
+    for turn in (1, 2, 3):
+        await add_turn(index, "t1", turn, kind="task")
+        await add_turn(index, "t2", turn, kind="front_bg")
+    assert await index.encoded_share() == 0.0  # nothing read yet: 9 turns, no mark
+    await index.mark_encoded("s1", 2)
+    assert await index.encoded_share() == 2 / 9
+    # A mark past the last turn, a mark on a chat with no turns and a mark on a task
+    # change nothing but the turns they pass; no item cites any of these turns.
+    await index.mark_encoded("s2", 9)
+    await index.mark_encoded("nobody", 5)
+    await index.mark_encoded("t1", 3)
+    assert await index.count_items() == 0
+    assert await index.encoded_share() == 6 / 9
+    await index.mark_encoded("s3", 1)
+    assert await index.encoded_share() == 7 / 9
+    await index.forget_all()
+    assert await index.encoded_share() == 0.0
+    await add_turn(index, "s1", 1)
+    assert await index.encoded_share() == 0.0  # the marks went with the rest
+
+
+async def test_the_item_encoders_are_listed_once_each_whatever_the_status(
+    index: ConversationIndex,
+) -> None:
+    assert await index.item_encoders() == set()
+    old = await index.add_item(make("An old fact."))
+    new = await index.add_item(make("A new fact."))
+    await index.add_item(replace(make("One more."), encoder=""))
+    await relate(index, replace=(old, new))
+    assert await index.item_encoders() == {"1:stub", ""}
 
 
 # ── Routing ──

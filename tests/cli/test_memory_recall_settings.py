@@ -139,6 +139,7 @@ def test_a_saved_value_is_kept_and_a_missing_one_is_the_larger_default(
         ("excerpt_open", "on"),
         ("recall_source", "turns"),
         ("recall_source", "items"),
+        ("recall_source", "auto"),
         ("open_sources", "off"),
         ("open_sources", "on"),
         ("premise_check", "off"),
@@ -287,7 +288,7 @@ def test_the_bounds_and_values_are_accepted(name: str, value: object) -> None:
             "recall_source",
             "both",
             "[memory] recall_source 'both' is not recognised. "
-            "Must be one of ('turns', 'items').",
+            "Must be one of ('turns', 'items', 'auto').",
         ),
         (
             "premise_check",

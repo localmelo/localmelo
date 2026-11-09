@@ -9,6 +9,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: `recall_source = "auto"` stays on chat turns until the encoder has read nearly all of them, then reads
+  memory items. Part of #428.
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
   Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
   approvals in the chat. It becomes a task only when you ask for one or for background work, or when long work should

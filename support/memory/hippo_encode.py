@@ -91,6 +91,10 @@ _SEPARATOR: Final = "\n\n"
 _CONTINUED: Final = " (continued) "
 # What an item made by the rules, not the model, has as its ``encoder``.
 RULES_ENCODER: Final = "rules"
+# The chat models whose items recall may read with ``[memory] recall_source = "auto"``:
+# the ones a check found writing no false fact about the user. The id is compared
+# exactly with the model's; a smaller model is not on the list.
+CHECKED_ENCODERS: Final = frozenset({"Qwen3.8-Flash-Next-IQ3XXS-splash"})
 
 SYSTEM_PROMPT: Final = """\
 You are the memory of a personal assistant called melo. You read part of one chat \
@@ -982,6 +986,15 @@ async def encode(
     result.ignored = sorted(ignored - mentioned)
     result.unmentioned = sorted(set(range(len(turns))) - mentioned - ignored)
     return result
+
+
+def is_checked(encoder: str) -> bool:
+    """Whether an item's *encoder* is one recall may read with ``auto``: the rules
+    (:data:`RULES_ENCODER`), or ``<version>:<model>`` (as :func:`encode` writes it)
+    with a version and the model in :data:`CHECKED_ENCODERS`. An empty *encoder*, or
+    one with no version, is not checked."""
+    version, _, model = encoder.partition(":")
+    return encoder == RULES_ENCODER or bool(version) and model in CHECKED_ENCODERS
 
 
 def _force(turns: Sequence[Turn], mentioned: set[int]) -> list[Piece]:
