@@ -1093,6 +1093,58 @@ async def test_a_call_whose_effect_is_unknown_asks_the_person_again_down_the_cha
         assert ran.codes == [cut]
 
 
+async def test_a_call_the_person_allowed_that_timed_out_asks_again_in_the_successor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ask: the person allows a call (kept for the chat's later tasks), it times
+    out and the task fails; the chat's own continue runs the same call in a fresh
+    task: its effect is unknown, so it asks the person again, and the Allow kept
+    for the chat does not run it."""
+    export = "import time\nprint('exporting')\ntime.sleep(120)"
+    again = "Run the same export again and tell me what it printed."
+    main: list[Reply] = [
+        creates("Nightly export"),
+        answer("Started it as a task."),
+        continues(again),
+        answer("It goes on in a fresh task."),
+    ]
+    workers: list[list[Reply]] = [
+        [
+            tool_call("python_exec", {"code": export}, "e-1"),
+            answer("It did not finish in time.\nEnding: failed"),
+        ],
+        [tool_call("python_exec", {"code": export}, "e-2"), answer("Done.")],
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, workers=workers) as (
+        console,
+        client,
+        models,
+        ran,
+    ):
+
+        async def times_out(code: str) -> str:
+            ran.codes.append(code)
+            raise TimeoutError("python_exec timed out")
+
+        ran.python_exec = times_out  # type: ignore[method-assign]
+        await say(client, console, "run the nightly export")
+        task_id = await started_task(console)
+        await until(lambda: console.broker.pending(task_id), timeout=15.0)
+        [card] = console.broker.pending(task_id)
+        console.broker.answer(card.request_id, ApprovalDecision(True, origin="user"))
+        await until(lambda: len(models["workers"]) == 2, timeout=15.0)
+        fresh = await successor_of(console, task_id)
+
+        async def asked_or_ran() -> bool:
+            return bool(console.broker.pending(fresh)) or len(ran.codes) > 1
+
+        await until(asked_or_ran, timeout=15.0)
+        assert ran.codes == [export], "it ran again unasked"
+        [again_card] = console.broker.pending(fresh)
+        assert again_card.review is not None
+        assert UNKNOWN_RESULT in again_card.review.reasons
+
+
 async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
