@@ -15,7 +15,9 @@ one chunk of a turn, the best, whatever the chats' cap.
 A turn whose fact a newer note or a newer turn replaced comes after the rest,
 below the newer one, and reads as older (:func:`newer_first`); the recall block
 leaves such a turn out unless the message asks about the past
-(:func:`current_only`), so the model is given the current value only.
+(:func:`current_only`), so the model is given the current value only. A note
+stays in the block: one saved in the turn of a replaced memory item that says what
+the item says reads as older, and so does an item whose turns a note replaced.
 A chat's own turns are recalled like another chat's once the model's window no
 longer holds them (:func:`in_view`), and read as ``this chat`` (:func:`this_chat`).
 With ``[memory] recall_form = "list"`` a turn is not shown as an excerpt but as one
@@ -225,8 +227,9 @@ class Item:
     ``where`` names the chat and the day. A record's ``replaces`` are the
     turns (session id, turn) whose facts it replaced; a turn's ``said`` is
     what its typed words state about the user, each folded statement with
-    its subject key (``""`` for none). ``older`` is how such a turn reads
-    when a newer one replaced it: :data:`OLDER` or :data:`OLDER_TURN`. A
+    its subject key (``""`` for none). ``older`` is how such a turn, a note or
+    a memory item reads when a newer one replaced it: :data:`OLDER`,
+    :data:`OLDER_TURN` or :data:`OLDER_ITEM`. A
     document's ``chunk`` is 0 for the head of a turn and 1 and up for the later
     pieces of a long one (:mod:`.index`); ``more`` is set on the head of a turn that
     has later pieces, when the corpus is filled (:meth:`ChatMemory._sync`), so a
@@ -933,6 +936,7 @@ def newer_first(
     exclude_session: str = "",
     keep_from_turn: int | None = None,
     known: Mapping[str, Item] | None = None,
+    followed: Mapping[str, Item] | None = None,
 ) -> list[Item]:
     """*items* with each turn whose fact a newer note or turn *replaced* moved
     after the rest and marked older; the newer one comes in ahead of it if it
@@ -941,42 +945,67 @@ def newer_first(
 
     A memory item a newer item replaced (:attr:`Item.replaced_by`) is moved and
     marked the same way, the newer one looked up in *known* (the items by key).
-    The old fact stays as history, as people keep it, but the newer one wins.
+    So is a note that says what such an item says (*followed*: the note's key to
+    the item, ``records.notes_of_replaced``), when the item's newest replacement
+    is in *known*; it reads :data:`OLDER_ITEM` and :func:`current_only` keeps it,
+    for a note is the person's own statement. A memory item all of whose sources
+    are turns a note *replaced* is moved and reads :data:`OLDER`, as such a turn
+    does. The old fact stays as history, as people keep it, but the newer one wins.
     """
+    known = known or {}
+    followed = followed or {}
     keys = {item.key for item in items}
     fresh: list[Item] = []
     stale: list[Item] = []
     for item in items:
-        if item.is_memory:
-            newer = _newest(item, known or {}) if item.replaced_by else None
-            if not item.replaced_by:
-                fresh.append(item)
-                continue
-            if (
-                newer is not None
-                and newer.key not in keys
-                and not in_view(newer, exclude_session, keep_from_turn)
-            ):
-                keys.add(newer.key)
-                fresh.append(newer)
-            stale.append(dataclasses.replace(item, older=OLDER_ITEM))
-            continue
-        newer = None if item.is_record else replaced.get((item.session_id, item.turn))
-        if newer is None:
+        newer, older = _replacement(item, replaced, known, followed)
+        if not older:
             fresh.append(item)
             continue
-        # A newer turn a still newer note or turn replaced: that one wins.
-        for _ in range(len(replaced)):
-            if newer.is_record or (newer.session_id, newer.turn) not in replaced:
-                break
-            newer = replaced[(newer.session_id, newer.turn)]
-        here = in_view(newer, exclude_session, keep_from_turn)
-        if newer.key not in keys and not here:
+        if (
+            newer is not None
+            and newer.key not in keys
+            and not in_view(newer, exclude_session, keep_from_turn)
+        ):
             keys.add(newer.key)
             fresh.append(newer)
-        older = OLDER if newer.is_record else OLDER_TURN
         stale.append(dataclasses.replace(item, older=older))
     return fresh + stale
+
+
+def _replacement(
+    item: Item,
+    replaced: Mapping[tuple[str, int], Item],
+    known: Mapping[str, Item],
+    followed: Mapping[str, Item],
+) -> tuple[Item | None, str]:
+    """The newer one that replaced *item* (``None`` when it is not known) and the
+    mark *item* then reads with (``""``: nothing replaced it); see :func:`newer_first`.
+    """
+    if item.is_memory:
+        if item.replaced_by:
+            return _newest(item, known), OLDER_ITEM
+        notes = [
+            note
+            for turn in item.sources
+            if (note := replaced.get(turn)) is not None and note.is_record
+        ]
+        if item.sources and len(notes) == len(item.sources):
+            return max(notes, key=lambda note: (note.created_at, note.key)), OLDER
+        return None, ""
+    if item.is_record:
+        old = followed.get(item.key)
+        newer = _newest(old, known) if old is not None else None
+        return (newer, OLDER_ITEM) if newer is not None else (None, "")
+    newer = replaced.get((item.session_id, item.turn))
+    if newer is None:
+        return None, ""
+    # A newer turn a still newer note or turn replaced: that one wins.
+    for _ in range(len(replaced)):
+        if newer.is_record or (newer.session_id, newer.turn) not in replaced:
+            break
+        newer = replaced[(newer.session_id, newer.turn)]
+    return newer, OLDER if newer.is_record else OLDER_TURN
 
 
 def _newest(item: Item, known: Mapping[str, Item]) -> Item | None:
@@ -1008,8 +1037,10 @@ def asks_to_gather(message: str) -> bool:
 
 
 def current_only(items: Sequence[Item], message: str) -> list[Item]:
-    """*items* for the recall block: without a turn a newer note or message
-    replaced (:attr:`Item.older`), unless *message* asks about the past.
+    """*items* for the recall block: without a turn or memory item a newer one
+    replaced (:attr:`Item.older`), unless *message* asks about the past. A note
+    stays with its mark: it is the person's own statement, shown as older, never
+    left out on a model's verdict.
 
     The newer value is in the block (:func:`newer_first` brings it in), so the
     old one would only be named as history in an answer that wants the new
@@ -1017,7 +1048,7 @@ def current_only(items: Sequence[Item], message: str) -> list[Item]:
     """
     if asks_about_past(message):
         return list(items)
-    return [item for item in items if not item.older]
+    return [item for item in items if item.is_record or not item.older]
 
 
 def word_cut(text: str, limit: int) -> str:
