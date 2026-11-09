@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Long work no longer reads again what it already read. Each chat, task and direct run asks the model server once for
+  the context it runs the model with and fits its requests to it (up to 131,072 tokens), where it used to cut every
+  request at 100,000 characters whatever the server could take; the estimate now follows the server's own count, so
+  the whole budget is used. In our runs on a local model, a long summary that kept fetching parts of its source again
+  now reads each part once and finishes in a few minutes. `[agent] context_window` is now an override, and a context
+  too small for melo's instructions and tools says so in one sentence.
 - A chat hands the rest of its work to a fresh task when it grows. A chat finishes your work in its own turn when it can;
   when what is left would fill its context with large tool or page output, it hands that to one fresh task and its turn
   ends with a line that names the task. The task starts from your message, from what the chat did as melo's records show

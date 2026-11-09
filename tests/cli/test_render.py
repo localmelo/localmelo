@@ -746,7 +746,7 @@ _UNREACHABLE = (
             "1.2k tokens over",
             "⚠",
             "Context budget exceeded: 1.2k tokens over.",
-            "Reduce the task or increase the configured context window; then /retry.",
+            "Reduce the task or use a longer context; then /retry.",
         ),
         (
             "setup_error",

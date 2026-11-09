@@ -38,7 +38,7 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `extra_body` | 本地或云端后端 | 未设置 | 每次对话请求的额外字段；见[额外请求字段](#extra-request-fields-extra_body)。 |
 | `reasoning_field` | 本地或云端后端 | 未设置 | 推理随之发回的请求键：`auto`、`reasoning_content` 或 `reasoning`；`[ollama]` 改用 `auto` 或 `thinking`。见[推理](#reasoning)。 |
 | `requires_reasoning_replay` | 本地或云端后端 | `false` | 当服务器拒绝省略了回复推理的请求时为 `true`。见[推理](#reasoning)。 |
-| `context_window`、`output_reserve`、`safety_margin` | `[agent]` | 未设置 | 可选的上下文请求记账；三个正整数必须都能确定，且输入上限为正。见[上下文记账](#context-accounting)。 |
+| `context_window`、`output_reserve`、`safety_margin` | `[agent]` | 未设置：模型服务器的上下文 | 覆盖上下文预算；三个正整数必须都能确定，且输入上限为正。未设置时，预算是模型服务器报告的上下文长度，最多 131,072 个 token。见[上下文记账](#context-accounting)。 |
 | `reasoning` | `[agent]` | `"legacy"` | `legacy`、`drop`、`replay`、`compress` 或 `compress+replay`；直接运行、交互式界面和 API v2 控制台会话保存的默认值。见[推理](#reasoning)。 |
 | `replay_turns` | `[agent]` | 未设置 | 使用 `replay` 或 `compress+replay` 时，发送多少条最近助手轮次的推理；省略则发送范围内的每一轮。 |
 | `note_writer` | `[agent]` | `"auto"` | 压缩模式下，`auto`（模型的 `<note>`，否则用启发式）或 `heuristic`。 |
@@ -56,7 +56,7 @@ localmelo 只保存与默认值不同的设置，所以保存的文件很短：�
 | `lean_output` | `[agent]` | `false` | 实验性。`true` 让命令行给出的任务少输出 token；没有对应的标志，`-X agent.lean_output=true` 为一次运行设置它。交互式界面和网关会忽略它。见[上下文统计](#context-accounting)。 |
 | `tool_images` | `[agent]` | `"auto"` | 工具返回的图片是否发给模型：`on` 在每个规划请求中把最新的几张作为 `image_url` 部分发送，`off` 只注明它们，`auto` 在服务器表明模型能读图时，或对云端服务，在其预设把该模型列为能读图时（见[云端模型](../guides/hosted-models.md#pictures)）等同于 `on`。服务器的表明方式依次是：`GET /v1/models` 中该模型自己的条目（`vision` 为 true、`input_modalities` 含 `image`，或 `capabilities` 含 `vision` 表示能读；`vision` 为 false，或 `input_modalities` 不含 `image` 表示不能读），然后是 oMLX 的 `model_type` 为 `vlm`，最后是 Ollama 的 `vision` 能力。图片没有发送时（`off`，或服务器没有表明），它的工具消息以一行结尾，告诉模型它看不到这张图片。没有对应的标志，`-X agent.tool_images=on` 为一次运行设置它。见[工具返回的图片](../guides/tools-mcp.md#pictures-that-tools-return)。 |
 | `tool_images_keep`、`tool_images_retire` | `[agent]` | `3`、`2` | `tool_images` 开启时：最新的 `tool_images_keep` 张图片保留像素，有更多图片到来时最旧的 `tool_images_retire` 张一起失去像素，因此默认每个请求带 3 到 4 张图片。 |
-| `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
+| `window_messages` | `[agent]` | 本地服务器或 URL 上为 `64`（有 token 预算时为 `256`），云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。见[上下文统计](#context-accounting)。 |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`、`off`、`bm25`、`llm` 或 `embedding`：召回如何为文档排序。见[循环中的召回](../concepts/memory.md#recall-in-the-loop)。 |
 | `recall_at` | `[retrieval]` | 未设置 | 一个由 `start`、`attempt`、`step` 和 `tool` 组成的列表。省略则为 `start`、`attempt` 和 `step`；除非点名，`tool` 从不开启。 |
 | `k` | `[retrieval]` | `3` | 每次召回的任务内命中数，从 1 到 10。 |
@@ -251,19 +251,21 @@ tool_env = ["SSH_AUTH_SOCK", "HTTPS_PROXY"]
 
 ## 上下文记账
 
-把 `[agent] context_window`、`output_reserve` 和 `safety_margin` 设为正整数；窗口必须大于它们之和。直接运行和交互式界面的旗标会覆盖单个值；API v2 控制台会话使用配置。
+每次运行在有 token 预算时，都把规划和反思请求适配到这个预算。什么都没有设置时，预算来自模型服务器：每个对话、任务和直接运行在第一次运行之前向服务器询问一次它运行该模型所用的上下文长度（`GET /v1/models` 中该模型的条目、oMLX 的模型状态，或 Ollama 加载正在运行的模型时所用的上下文），并最多使用其中的 131,072 个 token。超过这个大小，个人电脑要为每个 token 付出两次代价：服务器的提示缓存要把它放在内存里，缓存丢失后，下一次回复要等整个提示重新读一遍。在这个上下文中，回复保留请求所发送的输出上限（`extra_body` 中的 `max_tokens`，或 Ollama 的 `num_predict`），否则保留八分之一；估算保留六十四分之一；两者合计不超过一半，因此较小的上下文也给请求留有空间。服务器不报告长度或无法连接时，仍使用此前 100,000 个字符的上限，下一个对话或任务会再次询问。上下文小到装不下 melo 的说明、工具和任务时，运行以一句点明服务器长度的话结束。
 
-旧版 `/v1` 不变。未设置时不记录任何记账。
+要覆盖预算，把 `[agent] context_window`、`output_reserve` 和 `safety_margin` 设为正整数；窗口必须大于它们之和。你设置的预算总是优先，比服务器的更大也一样（风险由你承担）。直接运行和交互式界面的旗标会覆盖单个值；API v2 控制台会话及其任务使用配置。
+
+旧版 `/v1` 会话也读取配置中的预算。
 
 对每次规划或反思尝试，`utf8-bytes-v2` 以 UTF-8 字节数除以三向上取整来估算组装后的消息和工具 schema 表示。尺寸已知时，每张图片增加 `ceil(width / 28) * ceil(height / 28)` 个 token，上限为 16,384；尺寸未知时使用该上限。
 
-同一模型和请求类型的最近一次正数的提示 token 计数会向上校准这一估算；缺失或为零的用量会重置该校准。估算是估计值，不是界限：模板和视觉模型各不相同。
+同一模型和请求类型的最近一次正数的提示 token 计数会向上或向下校准这一估算（不低于它的 0.6，即每个 token 五个字节），因此预算可以用到服务器实际计数的程度；缺失或为零的用量，或一次拒绝，会重置该校准。估算是估计值，不是界限：模板和视觉模型各不相同。
 
 当估算超过输入上限时，智能体会适配一份请求副本：它把可裁剪的旧工具结果变成预览，移除可选的旧思考和旧召回，然后淘汰旧的完整单元，直到降到上限的 70%。任务、工具 schema、匹配的调用/结果对和最新的反思会保留；图片、失败的检查和更早的反思只有在别无可删时才会移除。它不改历史记录和保留的对话。
 
 如果固定的上下文无法装下，运行以 `context_budget_exceeded` 和一条修复提示结束。被归类为上下文溢出的回复最多获得一次更小的请求重试，且不重新运行工具；其他提供方错误保持其既有的重试策略。
 
-事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本。输出预留不是提供方的生成长度上限；独立的字符限制仍然适用。
+事件和 JSON 结果报告估算值、可用时的实际提示计数，以及裁剪计数，但不保存提示文本；`/status` 显示上下文已用了多少。输出预留不是提供方的生成长度上限；100,000 个字符的限制只适用于没有 token 预算的运行。
 
 每个直接运行、交互式界面和 API v2 控制台运行都发送固定的系统前缀（`fixed-prefix-v2`）。它在每次运行开始时（包括跨越午夜时）快照本地日期和 UTC 偏移，并把会变化的召回和反思放进带标签的用户侧数据：召回在任务之前。长期召回（`reasoning = "legacy"`）在一次运行的第一步读取，之后的步骤沿用同一份，因此每个规划请求都是上一个请求的延续；只有当窗口丢掉最早的消息之后（这一步的请求本来就已改变）以及下一次运行时，才会重新读取。若每一步都重新读取，运行自己的步骤摘要一进入召回，召回就会变化，服务器就要重新预填之后的所有消息。最新的反思只在尝试边界追加到窗口一次（见下文），因此新的尝试只改变共享历史之后的部分；反思请求重复最近一次规划请求（相同的系统文本、相同的 `tools`、相同的轮次，再加上之后的轮次），并追加一条带反思提示的最终用户消息。
 
@@ -291,7 +293,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 `[agent] window_messages`（在本地服务器（Ollama、MLC、vLLM 或 oMLX、SGLang、melo_serve）和 `--base-url` 服务器上默认为 `64`，在云厂商的后端（OpenAI、Gemini、Anthropic 或 NVIDIA）上默认为 `20`；8 到 256；`--window-messages N` 会覆盖它）是工作窗口在 `window_eviction` 丢弃一些消息之前最多保存的消息数。云厂商的后端暂时保持 20：没有提示缓存时，更长的窗口会让每个请求多消耗输入 token。
 
-你设置的值在任何后端上都保持不变。上限较大时，由提示大小拟合来丢弃：超过 100,000 个字符的上限后，它先缩短旧的工具结果，再丢弃旧思考、旧召回和整单元（工具调用及其结果，绝不拆开），降到上限的 70%，因此历史可以在几个步骤内保持不变。
+你设置的值在任何后端上都保持不变。在本地服务器上未设置时，只要有 token 预算（见[上下文记账](#context-accounting)），它就是 256，由预算的适配来丢弃历史。上限较大时，由提示大小拟合来丢弃：超过它的上限（token 预算，或 100,000 个字符的上限）后，它先缩短旧的工具结果，再丢弃旧思考、旧召回和整单元（工具调用及其结果，绝不拆开），降到上限的 70%，因此历史可以在几个步骤内保持不变。
 
 按计数丢弃一次最多拿走窗口的一半，因此低于 16 的上限每次丢弃的消息少于八条。见 [Memory](../../reference/memory.md#working-memory-window)。
 
@@ -303,7 +305,7 @@ JSON 结果的 `prefix_cache.schema_changes` 统计运行期间所提供的规�
 
 固定前缀和 `window_eviction` 是在同一版本上，用本地模型对基准测试的编码任务做 A/B 比较后成为默认值的。你在 `[agent]` 中设置的键保持原样，`window_eviction` 和 `window_messages` 都一样；没有该键的文件使用默认值，保存时只有与默认值不同的键才会写入（`window_messages` 只要设置了就会写入）。
 
-`melo --developer --help` 把 `--window-eviction` 列在“实验性”下。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这两个键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
+`melo --developer --help` 把 `--window-eviction` 列在“实验性”下。API v2 控制台会话、控制台工作进程和旧版 `/v1` 会话会从配置读取这两个键以及上下文预算的键；旧版 `/v1` API 不读取其他 `[agent]` 键或 `[retrieval]`。
 
 五个用来在不同布局之间做选择的设置已被移除，各自的选项也一并移除：`[agent] fixed_prefix`、`reflect_tool_guard`、`cache_layout` 和 `reflection_gate`，以及 `[memory] admit_on_outcome`。每一项的行为都与它的默认值相同，`window_eviction = "slide"` 读作 `"chunk"`；仍含有其中某个键的配置文件照常加载，该行被忽略，`melo config` 会点名它（见[命令行](cli.md#settings)）。`[memory] followup_query` 也已被移除：没有自己内容的消息总是用你在对话最近几个轮次里输入的内容来搜索，和它原来的默认值 `"recent"` 一样，含有这个键的文件也按同样的方式处理。
 

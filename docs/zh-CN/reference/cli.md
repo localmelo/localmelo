@@ -342,7 +342,7 @@ worker 记录保存在本地、未加密，文件权限为 0600。保存的文�
 | `--inbox-fd N` | 未设置 | 与 `--brief` 一起使用时，从继承的、可读的管道文件描述符 `N` 接受同样的指令行。父进程必须保留写端；读端在工具启动前设置为 close-on-exec。不能与 `--inbox` 同时使用。 |
 | `--workspace DIR` | 当前文件夹 | 运行所在的文件夹：文件工具只能在其中操作，`shell_exec` 和 `python_exec` 从这里启动；见[带工作区根目录](../guides/tools-mcp.md#with-a-workspace-root)。 |
 | `--window-eviction chunk\|boundary` | `chunk` | 工作记忆如何丢弃旧轮次：`chunk` 每次丢弃八条消息；`boundary` 还会在下一次尝试时丢弃已结束尝试的轮次。它会覆盖 `[agent] window_eviction`；见[记忆](../../reference/memory.md#working-memory-window)。 |
-| `--window-messages N` | 本地服务器或 URL 上为 `64`，云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。它会覆盖 `[agent] window_messages`；见[记忆](../../reference/memory.md#working-memory-window)。 |
+| `--window-messages N` | 本地服务器或 URL 上为 `64`（有 token 预算时为 `256`），云厂商上为 `20` | 工作窗口的消息数上限，8 到 256；`20` 会发送此前的上限。它会覆盖 `[agent] window_messages`；见[记忆](../../reference/memory.md#working-memory-window)。 |
 | `--captured-history on\|off` | `off` | 把有界的、经过模式脱敏的捕获结果与模型预览分开存储；见[配置](configuration.md#context-accounting)。 |
 | `--brief-items on\|off` | `off` | 实验性。配合 `--brief`，在每个反思请求中，以及最后一次尝试结束前两步，指出简报中尚未被任何编辑触及的编号条目；见[运行 worker 任务](#brief-items)。它会覆盖 `[agent] brief_items`；没有 `--brief` 时不起作用。 |
 | `--context-window N`、`--output-reserve N`、`--safety-margin N` | 未设置 | 选择启用逐次请求的上下文记账；三者都必须解析为正整数，且窗口必须大于另外两者之和。 |

@@ -207,6 +207,7 @@ from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     EXTEND_WHEN,
+    LOCAL_WINDOW_MESSAGES,
     MAX_REFLECTION_CHARS,
     PICTURES_REFUSED_ERROR,
     SHORT_TERM_MAX,
@@ -216,6 +217,7 @@ from localmelo.melo.schema import (
     UNFINISHED_ANSWER_ERROR,
     WINDOW_EVICT_CHUNK,
     WINDOW_FIT_TARGET,
+    WINDOW_MESSAGES_MAX,
     ImagePart,
     MemoryCandidate,
     Message,
@@ -1244,8 +1246,19 @@ class Agent(_RecallLoop, _NotesLoop):
         self._images_on: bool | None = {"on": True, "off": False}.get(
             self.options.tool_images
         )
+        from localmelo.melo.agent._request_accounting import context_budget
+
+        # A set budget is known now; otherwise the server is asked once, before
+        # the first run (_ensure_budget).
+        budget = context_budget(
+            self.options.context_window,
+            self.options.output_reserve,
+            self.options.safety_margin,
+        )
+        self._budget_asked = budget is not None
+        self._budget_lock = asyncio.Lock()
         self.hippo = Hippo(
-            short_term_max=self.options.window_messages,
+            short_term_max=self._window_for(budget is not None),
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
@@ -1303,17 +1316,6 @@ class Agent(_RecallLoop, _NotesLoop):
                 else:
                     sentence = "Your thinking is kept for every step of this task."
                 instruction = instruction.replace(NOTE_REPLAY_SENTENCE, sentence)
-        from localmelo.melo.agent._request_accounting import ContextBudget
-
-        budget = None
-        if self.options.context_window is not None:
-            assert self.options.output_reserve is not None
-            assert self.options.safety_margin is not None
-            budget = ContextBudget(
-                self.options.context_window,
-                self.options.output_reserve,
-                self.options.safety_margin,
-            )
         self.chat = Chat(
             self._llm,
             system_notes=notes,
@@ -1417,17 +1419,63 @@ class Agent(_RecallLoop, _NotesLoop):
             [name for name in TEXT_READERS if self.hippo.get_tool(name) is not None]
         )
 
+    def _window_for(self, budgeted: bool) -> int:
+        """The working window's cap: ``window_messages``, else the default for a run with or without a token budget."""
+        if self.options.window_messages is not None:
+            return self.options.window_messages
+        return WINDOW_MESSAGES_MAX if budgeted else LOCAL_WINDOW_MESSAGES
+
+    @property
+    def window_messages(self) -> int:
+        """The working window's message cap in force now."""
+        return self.hippo.working.max_len
+
+    async def _ensure_budget(self) -> None:
+        """Ask the provider for the model's context length once, when nothing set a budget.
+
+        A length gives the chat its budget (see
+        :func:`~localmelo.melo.agent._request_accounting.context_budget`), and an
+        unset window then widens to :data:`WINDOW_MESSAGES_MAX`, so the budget's
+        fit is the limit that acts. No length, or a question that fails, leaves
+        the prompt cap as it was. A cancelled question is asked again.
+        """
+        if self._budget_asked:
+            return
+        async with self._budget_lock:
+            if self._budget_asked:
+                return
+            from localmelo.melo.agent._request_accounting import context_budget
+
+            try:
+                reported = await self._llm.context_length()
+                limit = self._llm.output_limit()
+            except Exception:  # a failed question is an unknown length
+                logger.info("Could not ask the model server for its context length")
+                reported = limit = None
+            self._budget_asked = True
+            budget = context_budget(
+                None,
+                None,
+                None,
+                reported=reported if type(reported) is int else None,
+                output_limit=limit if type(limit) is int and limit > 0 else None,
+            )
+            if budget is not None:
+                self.chat.context_budget = budget
+                self.hippo.working.widen(self._window_for(True))
+
     async def start(self) -> None:
-        """Start the tool providers and register their tools now.
+        """Ask for the context budget and start the tool providers now.
 
         That is the setup the first run would do otherwise (see
-        :meth:`_ensure_tools`), under the same lock, so it happens once:
-        a later call, and the first run, find it done. Its exception
-        propagates, also the ``RuntimeError`` of a setup that failed
-        earlier or of an agent that is closing. Start an agent whose runs
-        a caller may cancel before its first run: a cancellation during
-        the setup fails it for the agent's life.
+        :meth:`_ensure_budget` and :meth:`_ensure_tools`), under the same
+        locks, so it happens once: a later call, and the first run, find it
+        done. A tool setup's exception propagates, also the ``RuntimeError``
+        of a setup that failed earlier or of an agent that is closing. Start
+        an agent whose runs a caller may cancel before its first run: a
+        cancellation during the tool setup fails it for the agent's life.
         """
+        await self._ensure_budget()
         await self._ensure_tools()
 
     def list_tools(self) -> list[ToolInfo]:
@@ -3483,7 +3531,7 @@ class Agent(_RecallLoop, _NotesLoop):
         budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
         budget_hook = BUDGET_HOOK.set(
             (self.chat, run.events.context_budget)
-            if self.options.context_window is not None
+            if self.chat.context_budget is not None
             else None
         )
         # The retry notices of this run's model requests; only with a sink.
@@ -3835,6 +3883,7 @@ class Agent(_RecallLoop, _NotesLoop):
             )
         if chat_started is not None:
             self._reviewer.since = chat_started
+        await self._ensure_budget()
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
@@ -4752,8 +4801,8 @@ class Agent(_RecallLoop, _NotesLoop):
         if opts.max_calls is not None:
             config["max_calls"] = opts.max_calls
         config["window_eviction"] = opts.window_eviction
-        if opts.window_messages != SHORT_TERM_MAX:
-            config["window_messages"] = opts.window_messages
+        if self.window_messages != SHORT_TERM_MAX:
+            config["window_messages"] = self.window_messages
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns

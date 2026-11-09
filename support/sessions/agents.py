@@ -173,6 +173,22 @@ def configured_context_options(
     return dataclasses.replace(options, **fields)
 
 
+def configured_run_options(cfg: Config | None, options: AgentOptions) -> AgentOptions:
+    """*options* for a run that is not a person's chat: a task's worker, the gateway's plain session.
+
+    The config's context budget, cache settings, reflection switch and attempt
+    length, as a chat gets them (:func:`configured_session_options`). A budget
+    the config leaves unset is the model server's (``Agent`` asks it).
+    """
+    if cfg is None:
+        return options
+    try:
+        options = configured_context_options(cfg, options, {})
+    except ValueError as exc:
+        raise ValueError(f"[agent] {exc}") from None
+    return configured_attempt_options(cfg, configured_cache_options(cfg, options))
+
+
 def configured_session_options(
     cfg: Config | None,
     options: AgentOptions | None = None,

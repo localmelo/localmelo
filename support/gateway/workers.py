@@ -153,8 +153,7 @@ from localmelo.support.scheduler.model import (
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
     build_session_agent,
-    configured_attempt_options,
-    configured_cache_options,
+    configured_run_options,
 )
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
@@ -2741,23 +2740,20 @@ class TaskWorkers:
                     base_url=None,
                     model=None,
                     workspace=workspace,
-                    options=configured_attempt_options(
+                    options=configured_run_options(
                         settings,
-                        configured_cache_options(
-                            settings,
-                            AgentOptions(
-                                mode="gateway",
-                                memory=False,
-                                timeout_s=None,
-                                builtins=worker_tool_allowlist("user").builtins,
-                                confine_writes=settings.agent.confine_writes,
-                                tool_env=tool_env,
-                                identity=guide,
-                                task_aids=True,
-                                repeats=bool(record.spec.get("repeats")),
-                                max_extensions=(
-                                    MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
-                                ),
+                        AgentOptions(
+                            mode="gateway",
+                            memory=False,
+                            timeout_s=None,
+                            builtins=worker_tool_allowlist("user").builtins,
+                            confine_writes=settings.agent.confine_writes,
+                            tool_env=tool_env,
+                            identity=guide,
+                            task_aids=True,
+                            repeats=bool(record.spec.get("repeats")),
+                            max_extensions=(
+                                MAX_EXTENSIONS if chat is None else TASK_EXTENSIONS
                             ),
                         ),
                     ),
