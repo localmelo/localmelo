@@ -165,7 +165,7 @@ asyncio.run(main())
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
-| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local`, `phases` |
+| `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local`, `phases`, `effect` |
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
@@ -406,6 +406,10 @@ The number of `tool.started` events is `RunResult.n_tool`.
   (checking the tabs it touched and waiting for another app's window) and `read`
   (reading the page). Time waiting for the person's answer is in none of them. Only a
   browser call has it.
+- `effect`: `"none"` for a browser click, point click or Enter after which melo saw no
+  change on the page (its result's first line starts `No change seen`), so a count of such
+  acts needs no reading of the text. It is the only value; every other call has no
+  `effect`.
 
 ### note
 

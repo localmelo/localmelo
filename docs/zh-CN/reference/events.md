@@ -141,7 +141,7 @@ asyncio.run(main())
 | `assistant.message` | 步骤的规划回复到达时。 | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | 在压缩模式中，当笔记、反思的笔记或尝试摘要进入仅驻留 RAM 的笔记存储时。 | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | 每次工具调用交给执行器之前，也包括之后被检查拒绝的调用。 | `step`, `call_id`, `name`, `arguments`, `preview` |
-| `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local`, `phases` |
+| `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local`, `phases`, `effect` |
 | `notice` | 一次尝试结束时、模型给出空回复或只含未完成思考的回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | 召回块进入请求时：在 `start`、`attempt`、`step`，或由 `recall` 工具触发。 | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | 在一次尝试之后的反思开始之前。 | `attempt`, `failure_type` |
@@ -244,6 +244,7 @@ asyncio.run(main())
 - `tool_asks`：只有当调用的工具自己问了一个问题并被拒绝时才有（`web_fetch` 或浏览器要打开的网站，以 `browser:<origin>` 询问）：每个被拒绝的问题一项，`{request_id, tool, allowed: false, origin, reason, preview}`。被你、自动模式或策略拒绝的问题还带有 `call_key` 和 `loose_keys`（其中有 `ask:<tool>`，网站还有 `ask:site:<host>`），所以对话自己继续的任务不会再问它，也不会再问那个主机的其他任何内容，不管地址怎么写；对这种重复的拒绝带有 `earlier`（最先拒绝它的是谁），没有 `call_key`。没有得到决定的问题也在其中，形如 `{request_id, tool, allowed: false, origin, reason}`，没有 `call_key`：策略失败时 `origin` 为 `error`（`reason` 是失败原因），运行在策略做决定期间被取消时为 `withdrawn`。其他调用，以及在加入这个键之前存储的事件，没有 `tool_asks`。
 - `allowed_local`：为 `true`，且只出现在读取了开发者设置 `[tools] web_fetch_allow_local` 列出的这台电脑上的测试服务器的 `web_fetch` 调用中（见[工具](tools.md#test-servers-on-this-computer)）；网页随后返回错误时也有。其他调用，以及在加入这个键之前存储的事件，没有 `allowed_local`。
 - `phases`：浏览器调用的时间花在哪里，按阶段记秒数，与 `duration_s` 并列：`load`（打开页面）、`act`（点击、输入或选择）、`settle`（检查它动过的标签页，以及等待其他应用的窗口）和 `read`（读取页面）。等待用户回答的时间不计入任何一项。只有浏览器调用有它。
+- `effect`：浏览器的点击、按点点击或回车之后，melo 在页面上没有看到任何变化时为 `"none"`（结果第一行以 `No change seen` 开头），所以统计这类操作不必读结果文字。这是它唯一的取值；其他调用都没有 `effect`。
 
 <a id="note"></a>
 
