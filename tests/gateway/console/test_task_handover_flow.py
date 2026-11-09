@@ -21,11 +21,19 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import ToolDef
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.front import ECHO_EVENT
-from localmelo.support.gateway.handover import PICKED_CHARS, PICKED_HEADER
+from localmelo.support.gateway.handover import (
+    PICKED_CHARS,
+    PICKED_HEADER,
+    handover_of,
+    picked_lines,
+    snapshot,
+    turn_lines,
+)
+from localmelo.support.gateway.i18n import said
 from localmelo.support.gateway.workers import TASK_PACK_CHARS, TASK_PACK_HEADER
 from localmelo.support.memory import records
 from localmelo.support.memory.service import CHAT_TURN
-from localmelo.support.sessions.store import NewSession
+from localmelo.support.sessions.store import NewSession, TurnInfo
 from localmelo.tests.memory.test_recall_list import add_turn
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -169,7 +177,7 @@ async def test_a_start_tapped_later_hands_the_turns_before_its_proposal(
         await say(client, console, REQUEST)
         turns = await console.store.list_turns(str(console.main_id))
         # The chat offers "Start this as a task?" for the request ...
-        await console.front.ask_to_start(turns[-1])
+        await _card(console, turns[-1])
         # ... and the person talks about someone else before tapping Start.
         await say(client, console, "My friend Maya finished her thesis.")
         found = await console.store.events_of_type(
@@ -188,8 +196,29 @@ async def test_a_start_tapped_later_hands_the_turns_before_its_proposal(
         assert REQUEST not in record.spec["chat_turns"]
 
 
+async def _card(console: Console, turn: TurnInfo) -> None:
+    """The "Start this as a task?" card as a chat wrote it, with what its turn recalled.
+
+    No chat writes one now; the cards already in a chat still start on a tap.
+    """
+    front, memory = console.front, console.memory
+    handed: dict[str, Any] = {}
+    if memory.enabled:
+        handover = await handover_of(
+            console.store, front.chat_id, turn, CHAT_TURN.get()
+        )
+        if handover.used or handover.searched or handover.opened or handover.digest:
+            _, shown = turn_lines(handover)
+            handed = snapshot(await picked_lines(memory, handover, shown=shown))
+    await front.echo(
+        {"echo": "ask", "text": turn.user_text, "words": turn.typed_text,
+         "turn_id": turn.id, "turn": turn.turn, "line": "Start this as a task?",
+         "said": said("front.echo.ask"), **({"handed": handed} if handed else {})}
+    )  # fmt: skip
+
+
 class Offers(BaseToolProvider):
-    """A tool that makes the chat offer "Start this as a task?" for its running turn."""
+    """A tool that writes the "Start this as a task?" card for the running turn."""
 
     def __init__(self, search: str = "", opens: int = 0) -> None:
         self.console: Console | None = None
@@ -218,7 +247,7 @@ class Offers(BaseToolProvider):
             chat.add_searched(found)
             turns = [item for item in found if item.is_turn][: self.opens]
             chat.add_opened(turns)
-        await front.ask_to_start(turn)
+        await _card(self.console, turn)
         return "Offered."
 
     async def close(self) -> None:

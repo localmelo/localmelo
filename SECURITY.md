@@ -81,10 +81,11 @@ those tools can do.
 - **`shell_exec` and `python_exec` are not fenced in chats.** With a
   workspace root they start in it, and `python_exec` runs in a child process,
   but both can reach any path you can. An approval policy is their only
-  control. The terminal UI, the web console, the app and other direct runs
-  work this way.
+  control. The terminal UI and other direct runs work this way; console and
+  app chats write only in their folder, as below.
 - **Worker runs write only in their workspace (macOS).** In a worker run
-  (`melo worker BRIEF`, `--brief`) with a workspace, and in a saved task,
+  (`melo worker BRIEF`, `--brief`) with a workspace, in a saved task, and in a
+  console or app chat, whose folder is its workspace,
   `shell_exec` and `python_exec` start under a `sandbox-exec` profile that
   refuses every file write outside the workspace, whatever the command does
   (`cd` elsewhere, a child `git` or Python). The exceptions are the caches
@@ -111,6 +112,19 @@ those tools can do.
   confined. Auto is a reviewer, not a wall: a step that hands work to another
   app or program is judged by the review (blocked, or checked by your model),
   not walled off by the sandbox.
+- **A chat acts only on a turn a person began.** A console chat now does the
+  work itself, so it has the tools a task has, and the fences go with them:
+  every step passes the same checker and approvals, its writes are confined as
+  above, and in a folder a task may not use (outside your home, hidden, under
+  `~/Library`) it reads and answers and has no tool that changes a file. A turn
+  melo began itself, to answer a task's question or to follow one up, gets
+  only tools that read, public web reads included, and no browser, also not
+  through a search. That is a check on the run, made by code: the other tools
+  are not offered and a call of one is refused, whatever the prompt or a page
+  says. A note that misses its turn never starts work by itself, after a Stop
+  or a restart included: it goes back to you, and you press Send. After a
+  restart only a row stored as a message runs. Any other row, one stored by
+  an older version included, goes back the same way, without its picture.
 - **A chat's mode decides for the tasks it started.** A task you started
   follows the Ask or Auto of its chat while it runs, so a switch you make in
   the chat is not ignored by work that began earlier. Auto to Ask applies at

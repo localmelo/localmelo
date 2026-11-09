@@ -366,10 +366,11 @@ async def build_session_agent(
     extra body applies only to retrieve requests and is never saved.
     *browser_driver* names the browser the Agent may read web pages in (see
     :mod:`localmelo.support.browser`); ``off`` gives it no browser tools. Only
-    the surfaces that ask a person (the terminal chat and a console task a
-    person's chat owns) pass it. *desktop* false keeps it out of other apps'
-    windows whatever ``[browser] app_windows`` says (work that runs in the
-    background). *web_fetch* gives it the ``web_fetch`` tool (see
+    the surfaces that ask a person (the terminal chat, a console chat and a
+    console task a person's chat owns) pass it. *desktop* false keeps it out of
+    other apps' windows whatever ``[browser] app_windows`` says (a console chat
+    and its work, which may run with nobody at the screen). *web_fetch* gives it
+    the ``web_fetch`` tool (see
     :mod:`localmelo.support.web`), and *web_task* says it is a task's, which
     reads no site with nobody to ask: the chats and the console's tasks pass
     ``[tools] web_fetch``; direct runs pass nothing, so they never have it.
@@ -393,8 +394,8 @@ async def build_session_agent(
     says so and pins the user's About-you and Preferences notes, and the
     Agent gets ``search_memory`` and ``remember``. The runner does the rest per turn.
 
-    *tools* are more tool providers for this Agent (the main chat's task
-    tools), and *agent_class* the class it is made of (the main chat's
+    *tools* are more tool providers for this Agent (a console chat's task
+    tools), and *agent_class* the class it is made of (a console chat's
     :class:`~localmelo.support.gateway.console.front.FrontAgent`); every other
     caller passes neither.
 

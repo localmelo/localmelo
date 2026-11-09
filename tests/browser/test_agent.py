@@ -24,9 +24,11 @@ from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.browser import sites
 from localmelo.support.browser.driver import Element
 from localmelo.support.browser.provider import PAGE_NOTE, BrowserToolProvider
+from localmelo.support.config import Config
 from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.store import SessionStore
+from localmelo.support.web.search_tool import WebSearchProvider
 from localmelo.tests.browser.fakes import FakeDriver, button, link, page
 
 HOME = "https://example.com/"
@@ -668,3 +670,30 @@ async def test_a_picture_of_the_page_reaches_a_model_that_reads_images_in_the_ne
     assert len(pictured) == 1
     assert bool(pictured[0].images[0].data) is sees
     assert "1 image: sha256:" in pictured[0].content
+
+
+@pytest.mark.parametrize("acts", [False, True])
+async def test_a_run_with_no_authority_reaches_no_browser_through_a_search_with_no_policy(
+    acts: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def public(_: str) -> None:
+        return None
+
+    monkeypatch.setattr("localmelo.support.browser.addresses.require_public", public)
+    driver = _driver()
+    browser = BrowserToolProvider(driver)
+    cfg = Config()
+    cfg.web.search = True
+    cfg.web.search_order = ["browser"]
+    search = ToolCall(tool_name="web_search", arguments={"query": "tomatoes"})
+    agent = Agent(
+        llm=ScriptedLLM([Message(role="assistant", tool_call=search), _say("Done.")]),
+        options=AgentOptions(builtins=frozenset(), tool_exposure="all"),
+        tool_providers=[browser, WebSearchProvider(browser=browser, cfg=cfg)],
+    )
+    await agent.start()
+    try:
+        await agent.run_task("search for tomatoes", acts=acts)
+    finally:
+        await agent.close()
+    assert driver.started == (1 if acts else 0)

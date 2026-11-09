@@ -56,7 +56,7 @@
         <div class="diagram-scroll">
           <div class="diagram" id="dia-flow" style="width:800px;height:664px">
             <div class="group chats" id="f-side" style="left:420px;top:20px;width:360px;height:72px">
-              <span class="group-label">旁支对话 · 能力相同，共享记忆</span>
+              <span class="group-label">旁支对话 · 同样替你做事，共享记忆</span>
             </div>
             <div class="group workers" id="f-workers" style="left:20px;top:412px;width:760px;height:120px">
               <span class="group-label">后台</span>
@@ -64,7 +64,7 @@
 
             <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:220px;min-height:72px">
               <span class="node-title">主对话</span>
-              <span class="node-sub">每人一个</span>
+              <span class="node-sub">每人一个 · 替你做事</span>
             </a>
             <a class="node small" id="f-s1" href="#c-chats" style="left:432px;top:46px;width:108px;min-height:39px">
               <span class="node-title">旁支对话 1</span>
@@ -119,12 +119,13 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>localmelo 内部的调用和数据</div>
         </div>
-        <p class="diagram-caption">批准每一步的只有你，或自动模式的复核。你允许的事会保存为授权，重启后仍然有效。</p>
+        <p class="diagram-caption">批准每一步的只有你，或自动模式的复核，对话和后台任务都一样。你允许的事会保存为授权，重启后仍然有效。</p>
         <ul>
           <li>你和主对话交流。旁支对话能力相同，共享记忆，从第一条消息起就是如此。</li>
-          <li>对话的模型读你说的话，然后决定：回答，或者开始工作。中间没有词表拦着；只有明确说不要动手的话才会停下，这时会给你一个一键确认。</li>
-          <li>较大的工作交给调度器，来自主对话、旁支对话或定时事项。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
-          <li>任务属于启动它的对话：进展和结果回到那里；旁支对话结束时会给主对话留一份总结。</li>
+          <li>对话自己替你做事，就在它自己的运行里，用的是和后台任务相同的智能体、相同的检查和审批；大多数工作不会开任务。中间没有词表拦着：模型读你说的话，然后动手，或者说明为什么不做。</li>
+          <li>对话工作时你发的话是一条补充：它在下一步读到。停止会结束这一轮；旁支对话可以同时做别的事。</li>
+          <li>任务是单独的一次运行：你要求开任务，或对话把长工作分出去，定时事项也会按时启动。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
+          <li>任务属于启动它的对话：进展和结果回到那里；旁支对话会给主对话留一份已完成工作的总结。</li>
           <li>对话可以查看后台任务的状态，也可以在它运行时给它发消息。后台任务向所属对话求助；只有对话会来问你。</li>
           <li>一个后台任务只完成一项工作。针对已完成工作的新要求会交给新的后台任务，旧任务的记录作为背景带过去；没做完就停下的后台任务可以继续做同一项工作。</li>
           <li>对话启动的任务开始时带着你的原话、所属对话挑选的内容，以及一份上下文包：关于你、你的偏好和这个项目的笔记。</li>
@@ -334,7 +335,7 @@
         </div>
         <ul>
           <li>终端和 App 通过同一个端点文件找到正在运行的网关，所以后启动的那个会用已在运行的网关。</li>
-          <li>主对话自己回答，或按优先级把更大的工作交给调度器；结果以卡片的形式回到它那里。</li>
+          <li>主对话在自己的运行里替你做事；任务按优先级交给调度器，结果以卡片的形式回到它那里。</li>
           <li>定时事项按时启动任务；每 30 分钟，check-in 告诉主对话什么做完了或在等你。</li>
           <li>Worker 和对话运行同一个智能体；对话把记忆召回到每一轮里，worker 自己不保留记忆，开始时带一份来自所属对话的上下文包。</li>
         </ul>
@@ -416,8 +417,9 @@
             <ul>
               <li>每一轮在该对话自己的智能体上运行，一次一轮，并附上记忆为它召回的内容。</li>
               <li>控制台、App 和终端打开的是同一个主对话；旁支对话列在它下面，旁支对话结束或任务需要你时，它会显示一张卡片。</li>
-              <li>主对话自己回答简短的问题，或按优先级把更大的工作作为任务开始。</li>
-              <li>旁支对话也能启动自己的任务；它结束工作时，主对话会读到一行说明，记忆会保留它的总结。</li>
+              <li>对话在这一轮里自己替你做事：文件、Python、网页和浏览器，每一步的审批都一样。大多数工作不会开任务。</li>
+              <li>它工作时你发的话会作为补充加入这一轮，在下一步读到；停止会结束这一轮。</li>
+              <li>你仍然可以要求开任务，每个对话都能启动任务；旁支对话结束工作时，主对话会读到一行说明，记忆会保留它的总结。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
           </div>
@@ -457,7 +459,7 @@
           </div>
           <div class="comp-card" id="c-agent">
             <h3>智能体</h3>
-            <p>运行循环：规划一步，运行它的工具，在两次尝试之间反思。</p>
+            <p>运行循环：规划一步，运行它的工具，在两次尝试之间反思。对话的一轮和后台任务都是这个循环。</p>
             <ul>
               <li>每一步的请求包含任务、工作记忆、召回的记忆和最近一次反思。</li>
               <li>模型只能调用这一步提供的工具。</li>
@@ -588,7 +590,7 @@
             <tbody>
               <tr><td>终端</td><td>App 里同一个主对话、一次性任务、审批，开发者模式下显示本次运行的进度事实</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>控制台和 App</td><td>带旁支对话的主对话、对话旁边的面板、任务和 worker、活动胶囊，有中文和英文</td><td><span class="chip done">已完成</span></td></tr>
-              <tr><td>主对话和旁支对话</td><td>一个主对话：自己回答，或按优先级把更大的工作交给任务</td><td><span class="chip done">已完成</span></td></tr>
+              <tr><td>主对话和旁支对话</td><td>一个主对话：自己替你做事，你要求时再开任务</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>跨对话记忆</td><td>你要求或 melo 判断值得时记下的笔记、新的值取代旧的、带来源的召回、“记忆”标签页</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>定时事项</td><td>按时运行的事项和一次性提醒，以及每 30 分钟的 check-in</td><td><span class="chip done">已完成</span></td></tr>
               <tr><td>工具和审批</td><td>五个内置工具、MCP 服务器、对高影响调用的复核、每个对话可选“询问”或“自动”、可以列出也可以收回的授权</td><td><span class="chip done">已完成</span></td></tr>
@@ -637,10 +639,10 @@
       const DIAGRAMS = {
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "共享记忆" },
-          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "结束时的总结" },
-          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "任务", lt: 0.28 },
+          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "已完成工作的总结" },
+          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "需要时开任务", lt: 0.72 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "到期的事项" },
-          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "任务", lt: 0.28 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "需要时开任务", lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },
@@ -648,6 +650,8 @@
           { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
           { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, label: "同一条通道" },
           { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true },
+          { from: "f-main", fs: "bottom", ff: 0.9, to: "f-appr", ts: "top", tf: 0.02, bidi: true, label: "它自己的步骤", lt: 0.96 },
+          { from: "f-side", fs: "bottom", ff: 0.27, to: "f-appr", ts: "top", tf: 0.97, bidi: true },
           { from: "f-appr", fs: "right", to: "f-grants", ts: "left", bidi: true }
         ],
         "svg-worker": [

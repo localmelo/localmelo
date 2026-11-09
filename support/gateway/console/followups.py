@@ -30,7 +30,8 @@ Code holds the limits, not the prompt:
   :class:`~localmelo.melo.contracts.approvals.EarlierBlocks` and
   ``TaskWorkers.message(automatic=True)``);
 - a follow-up approves nothing and widens nothing: it has the chat's mode and
-  tools, and its continue goes as the chat's words, not the person's;
+  only the task tools, the run refuses every other call (``acts=False``), and
+  its continue goes as the chat's words, not the person's;
 - it never starts a task (``task_create`` refuses a turn melo began), so no
   task a follow-up made can start another chain;
 - it runs only while the chat is idle, after the person's queued messages and

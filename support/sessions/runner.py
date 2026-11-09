@@ -91,6 +91,8 @@ logger = logging.getLogger(__name__)
 
 # ChatMemory's tool that keeps a note of the person's words.
 _NOTE_TOOLS: Final = ("remember",)
+# The sessions where only a person's turn acts: the main chat and the side chats.
+CHAT_KINDS: Final = frozenset({"front", "chat"})
 
 EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
@@ -872,6 +874,12 @@ class SessionRunner:
                 session = await self._store.get_session(turn.turn.session_id)
                 if session is not None:
                     kwargs["chat_started"] = session.created_at
+            if kwargs.get("from_person") is False and (
+                session is None or session.kind in CHAT_KINDS
+            ):
+                # A chat's turn nobody asked for reads and answers; a task's turn
+                # is work admitted under its own origin's rules.
+                kwargs["acts"] = False
             earlier = await self._earlier_turns(turn)
             if earlier:
                 kwargs["earlier_turns"] = earlier

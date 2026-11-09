@@ -144,6 +144,7 @@ def test_the_defaults_are_the_shipped_numbers() -> None:
         "guide",  # gather: recall looks wider for a question that counts
         0.40,  # gather_floor: used only with gather on
         True,  # premise: the list form's guide line ends with the no-record sentence
+        False,  # auto: recall_source is turns
     )
     assert (cfg.recall_min_cosine, cfg.recall_min_coverage) == (0.55, 0.6)
     assert (MIN_COSINE, MIN_COVERAGE) == (0.55, 0.6)

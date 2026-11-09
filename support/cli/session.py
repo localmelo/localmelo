@@ -573,16 +573,12 @@ class CliSession:
             self.submit(text)
             return None
         if self._state == "running":
-            # While the person has a page, words go to the paused run as a note (main chat).
-            if (
-                self.renderer.in_control is not None
-                and self.remote is not None
-                and self.remote.note(text)
-            ):
-                symbols = self.renderer.symbols
-                self.out.print(
-                    self._text(f"{symbols.queued} Note for melo: {text}", "muted")
-                )
+            # Words go to the chat's running turn as a note: its run reads them at
+            # its next step. They show once the gateway has them.
+            if self.remote is not None:
+                if not self.remote.note(text):
+                    return "Too many notes are waiting, or this one is too long."
+                self._hint("Your note goes to melo at its next step")
                 return None
             if self.queued is not None:
                 return "One message is already queued (↑ edits it)."
@@ -676,6 +672,16 @@ class CliSession:
         self._state = "shell"
         self._work = self.spawn(self._run_shell(shell.text))
         return None
+
+    def say_note(self, text: str) -> None:
+        """The line that shows words added to the running turn."""
+        symbols = self.renderer.symbols
+        self.out.print(self._text(f"{symbols.queued} Note for melo: {text}", "muted"))
+
+    def words_back(self, text: str) -> None:
+        """A note that missed its turn: it is the person's again, in the input box."""
+        if self.app is not None:
+            self._give_back(text)
 
     def take_queued(self) -> str | None:
         text, self.queued = self.queued, None
