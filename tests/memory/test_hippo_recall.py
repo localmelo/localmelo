@@ -421,9 +421,15 @@ async def test_the_tools_of_the_item_list_form_are_ascii_and_name_the_ids(
             assert "memory item" in tool.description.lower()
         ids = opened.definition.parameters["properties"]["ids"]
         assert ids["description"] == "Ids from the list, such as m12 or t123."
-        assert "came from" not in opened.definition.description
-        assert "came from" in open_memory_items(True).description
+        # Sources off: the item comes with the ids of its turns; on: with the turns.
+        assert "and the ids of the turns it came from" in opened.definition.description
+        assert "the earlier chat turns" not in opened.definition.description
+        assert (
+            "the earlier chat turns it came from" in open_memory_items(True).description
+        )
+        assert "ids of the turns" not in open_memory_items(True).description
         assert open_memory_items(True).description.isascii()
+        assert opened.definition.description.isascii()
         # Turns mode keeps the turn tools.
         cfg.memory.recall_source = "turns"
         again = await MemoryTools(memory).start()
@@ -444,7 +450,10 @@ async def test_open_memory_opens_an_item_with_its_title_and_text(
         tools = MemoryTools(memory)
         when = day(time.time() - 3 * DAY)
         reply = await tools.open_memory(ids=[f"m{fill.item}"])
-        assert reply == f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}"
+        assert reply == (
+            f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}\n"
+            f"From turn t{fill.doc}: open it for what was said word for word."
+        )
         # A bracketed id and capitals read the same.
         assert await tools.open_memory(ids=[f"[M{fill.item}]"]) == reply
         assert await tools.open_memory(ids=f"m{fill.item}") == reply
@@ -500,10 +509,10 @@ async def test_the_sources_of_an_item_come_with_it_when_asked_for(
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         when = time.time() - 3 * DAY
-        session_id, _ = await add_turn(
+        session_id, (first,) = await add_turn(
             memory, store, "Which bed gets the sun?", "Bed one.", at=when, title="G"
         )
-        await add_turn(
+        _, (second,) = await add_turn(
             memory,
             store,
             "What do I stake it with?",
@@ -517,15 +526,205 @@ async def test_the_sources_of_an_item_come_with_it_when_asked_for(
         reply = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
         head, body = reply.split("\n", 1)
         assert head.startswith(f"[m{number}] ") and body.startswith(f"{TITLE}\n{TEXT}")
-        assert "Source turns:" in body
+        assert "Source turns:" in body and "From turn" not in reply
         turns = body.split("Source turns:\n")[1].split("\n")
         assert len(turns) == 2
         assert "Which bed gets the sun?" in turns[0] and "Bed one." in turns[0]
         assert "What do I stake it with?" in turns[1] and "Bamboo" in turns[1]
-        # Without the setting the item opens alone.
+        # Without the setting the turns are named, not shown.
         cfg.memory.open_sources = "off"
         alone = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
-        assert "Source turns:" not in alone and alone.endswith(TEXT)
+        assert "Source turns:" not in alone and "Bamboo" not in alone
+        assert alone.endswith(
+            f"\n{TEXT}\nFrom turns t{first}, t{second}: "
+            "open one for what was said word for word."
+        )
+    finally:
+        await memory.aclose()
+
+
+# ── An opened item names the turns it came from ──
+
+
+async def chat_of_turns(
+    memory: ChatMemory,
+    store: SessionStore,
+    answers: list[str],
+    *,
+    session_id: str | None = None,
+    at: float,
+) -> tuple[str, list[list[int]]]:
+    """Index one turn for each of *answers* (turn numbers from 1, a minute apart) in
+    a chat; its id and, for each turn, its documents (chunk 0 first)."""
+    docs: list[list[int]] = []
+    for number, answer in enumerate(answers, 1):
+        session_id, ids = await add_turn(
+            memory,
+            store,
+            f"Which tomato garden question {number}?",
+            answer,
+            at=at + 60 * number,
+            session_id=session_id,
+            turn=number,
+            title="G",
+        )
+        docs.append(ids)
+    assert session_id is not None
+    return session_id, docs
+
+
+def pointer_of(reply: str) -> str:
+    """The last line of an opened item."""
+    return reply.rsplit("\n", 1)[-1]
+
+
+@pytest.mark.parametrize("source", ["items", "auto"])
+async def test_an_opened_item_names_its_source_turns_and_each_id_opens_the_turn(
+    tmp_path: Path, store: SessionStore, source: str
+) -> None:
+    cfg = (
+        auto_config()
+        if source == "auto"
+        else config(recall_source="items", recall_form="list")
+    )
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        when = time.time() - 3 * DAY
+        tail = "The sealant is the grey one."
+        long_answer = "Bed one faces south all day. " * 80 + tail
+        session_id, (first, second) = await chat_of_turns(
+            memory, store, ["Bed two is shady.", long_answer], at=when
+        )
+        assert len(second) > 1  # the second turn is several documents
+        number = await put(
+            memory, session_id, TITLE, TEXT, turns=(1, 2), at=when, encoder=ENCODER
+        )
+        tools = MemoryTools(memory)
+        if source == "auto":  # every turn is read: the chat reads items
+            assert await memory.reading() == Reading(True, 1.0)
+        assert (await tools.start())[2].definition == open_memory_items(False)
+        reply = await tools.open_memory(ids=[f"m{number}"])
+        # Ids only, in time order; a turn's head names it.
+        assert reply == (
+            f"[m{number}] {day(when)} · chat “G”\n{TITLE}\n{TEXT}\n"
+            f"From turns t{first[0]}, t{second[0]}: "
+            "open one for what was said word for word."
+        )
+        assert "Bed two" not in reply and tail not in reply
+        # Each named id opens the whole turn, though the item stands for it.
+        opened = await tools.open_memory(ids=[f"t{first[0]}", f"t{second[0]}"])
+        short, whole = opened.split("\n\n")
+        assert short.startswith(f"[t{first[0]}] {day(when)} · chat “G”\n")
+        assert "Which tomato garden question 1?" in short and "Bed two" in short
+        assert "Which tomato garden question 2?" in whole and tail in whole
+        # The lookup names heads and reads no text; a turn not indexed has none.
+        heads = await memory.stores()[1].turn_heads(
+            [(session_id, 2), (session_id, 9), (session_id, 1)]
+        )
+        assert [head.id for head in heads] == [second[0], first[0]]
+    finally:
+        await memory.aclose()
+
+
+async def test_the_pointer_leaves_out_turns_the_chat_would_not_show(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        info = await _turn(store, "G")
+        when = time.time() - 3 * DAY
+        session_id, docs = await chat_of_turns(
+            memory,
+            store,
+            ["One.", "Two.", "Three."],
+            session_id=info.session_id,
+            at=when,
+        )
+        # Turn 9 was never indexed, so it is left out.
+        number = await put(memory, session_id, TITLE, TEXT, turns=(1, 2, 3, 9), at=when)
+        tools = MemoryTools(memory)
+        await memory.before_turn(store, info, QUESTION)
+        chat = CHAT_TURN.get()
+        assert chat is not None
+        reply = await tools.open_memory(ids=[f"m{number}"])
+        assert pointer_of(reply).startswith(
+            f"From turns t{docs[0][0]}, t{docs[1][0]}, t{docs[2][0]}: "
+        )
+        # The chat still shows turns 3 and up, so they are not named.
+        chat.keep_from_turn = 3
+        reply = await tools.open_memory(ids=[f"m{number}"])
+        assert pointer_of(reply) == (
+            f"From turns t{docs[0][0]}, t{docs[1][0]}: "
+            "open one for what was said word for word."
+        )
+        chat.keep_from_turn = 2
+        reply = await tools.open_memory(ids=[f"m{number}"])
+        assert pointer_of(reply) == (
+            f"From turn t{docs[0][0]}: open it for what was said word for word."
+        )
+        # Another chat's view leaves nothing out.
+        found = await memory.open_item(number)
+        assert not isinstance(found, str)
+        assert await memory.source_turns(
+            found.item, exclude_session="elsewhere", keep_from_turn=0
+        ) == [ids[0] for ids in docs]
+        # No source left to name: no line (outside the chat's own view).
+        CHAT_TURN.set(None)
+        none = await put(memory, session_id, TITLE, TEXT, turns=(8, 9), at=when)
+        reply = await tools.open_memory(ids=[f"m{none}"])
+        assert reply.endswith(f"\n{TITLE}\n{TEXT}") and "From turn" not in reply
+    finally:
+        CHAT_TURN.set(None)
+        await memory.aclose()
+
+
+async def test_the_pointer_names_the_newest_turns_when_there_are_many(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        when = time.time() - 3 * DAY
+        count = service.OPEN_AT_ONCE + 2
+        session_id, docs = await chat_of_turns(
+            memory, store, [f"Answer {n}." for n in range(count)], at=when
+        )
+        # Cited out of order: the line is still in time order.
+        number = await put(
+            memory,
+            session_id,
+            TITLE,
+            TEXT,
+            turns=tuple(reversed(range(1, count + 1))),
+            at=when,
+        )
+        named = ", ".join(f"t{ids[0]}" for ids in docs[-service.OPEN_AT_ONCE :])
+        reply = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
+        assert pointer_of(reply) == (
+            f"From turns {named}: open one for what was said word for word."
+        )
+    finally:
+        await memory.aclose()
+
+
+async def test_an_item_fits_recall_open_chars_with_its_pointer(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items", recall_form="list", recall_open_chars=1000)
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        when = time.time() - 3 * DAY
+        session_id, docs = await chat_of_turns(memory, store, ["One."], at=when)
+        sentence = "The user stakes the tomato plants with bamboo. "
+        number = await put(
+            memory, session_id, TITLE, sentence * 20, turns=(1,), at=when
+        )
+        reply = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
+        assert len(reply) <= 1000 and "… (cut)" in reply
+        assert pointer_of(reply) == (
+            f"From turn t{docs[0][0]}: open it for what was said word for word."
+        )
     finally:
         await memory.aclose()
 
@@ -928,7 +1127,10 @@ async def test_open_memory_opens_an_item_and_a_turn_in_one_call(
             ids=[f"m{fill.item}", f"T{fill.later}", f"t{fill.doc}"]
         )
         item, turn, encoded = reply.split("\n\n")
-        assert item == f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}"
+        assert item == (
+            f"[m{fill.item}] {when} · chat “Garden”\n{TITLE}\n{TEXT}\n"
+            f"From turn t{fill.doc}: open it for what was said word for word."
+        )
         assert turn.startswith(f"[t{fill.later}] {when} · chat “Garden”\n")
         assert LATER[0] in turn and LATER[1] in turn
         # An encoded turn is no longer listed, but the index has it, so it opens.
@@ -942,7 +1144,7 @@ async def test_open_memory_opens_an_item_and_a_turn_in_one_call(
         assert again.split("\n\n")[0] == (
             f"m{fill.item}: not an id from the list; ids look like t123."
         )
-        assert again.split("\n\n")[1].startswith(f"[t{fill.doc}] ")
+        assert again.split("\n\n")[1] == encoded  # the turn path is the same
     finally:
         await memory.aclose()
 

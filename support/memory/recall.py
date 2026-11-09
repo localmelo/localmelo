@@ -501,10 +501,18 @@ def in_view(item: Item, session_id: str, keep_from_turn: int | None) -> bool:
     Such a turn is not recalled: the chat has it already. A summary or an
     exchange (a turn below 0, :mod:`.index`) is never recalled to the chat it belongs to.
     """
-    return (
-        not item.is_record
-        and item.session_id == session_id
-        and (keep_from_turn is None or item.turn < 0 or item.turn >= keep_from_turn)
+    return not item.is_record and turn_in_view(
+        item.session_id, item.turn, session_id, keep_from_turn
+    )
+
+
+def turn_in_view(
+    turn_session: str, turn: int, session_id: str, keep_from_turn: int | None
+) -> bool:
+    """Whether turn *turn* of chat *turn_session* is one chat *session_id* still
+    sees (:func:`in_view`, for a turn that is not held as an item)."""
+    return turn_session == session_id and (
+        keep_from_turn is None or turn < 0 or turn >= keep_from_turn
     )
 
 
