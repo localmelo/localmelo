@@ -783,8 +783,11 @@ Tools run with the user's permissions, not in a sandbox.
   "continued"}`; 404 `not_found`, and 409 `invalid_transition` for a task that
   did not run out of steps. A task a chat started runs once: the job goes on in
   a fresh task instead, with those words as melo's note in its packet, and the
-  answer is 202 with that task and `"message": "successor"`; a second call for
-  the same ending answers the same task.
+  answer is 202 with that task and `"message": "successor"`. An ended task has
+  one successor at most: a second call, on it or on the ended task, answers 202
+  with the task that holds the job and `"message": "running"` while that runs.
+  The ended task's body then names it in `successor` (`task_id`, `title`;
+  `null` while its job did not go on) and allows none of its blocks.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. A browser card's Stop adds `source` (`gen`, `run`,
@@ -844,7 +847,7 @@ chat) and sends the go-ahead message to the task: 202 `{"task": ...,
 next step), `"continued"` for one that stopped before its job was done (it
 runs again), `"successor"` with a fresh task for a task a chat started that
 stopped (it runs once: the fresh task has the step allowed once); 404 `not_found` for no such block, 409 `not_allowable` for one
-that cannot be allowed, 409 `already_allowed` once the step ran on an
+that cannot be allowed (also on a task whose job went on in a newer one), 409 `already_allowed` once the step ran on an
 allowance or while one waits, 409 `invalid_transition` for a job that finished
 (`can_allow` is `false` then, and the block and its card carry `finished: true`:
 the step is new work for the chat). A task's allowances go when it finishes.

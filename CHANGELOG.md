@@ -13,13 +13,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   when what is left would fill its context with large tool or page output, it hands that to one fresh task and its turn
   ends with a line that names the task. The task starts from your message, from what the chat did as melo's records show
   it (which calls worked, which failed, and which may have done part of their work and are checked, never repeated
-  blindly) and from what the chat says is left, which it reads as data. A retry ends on the same task, a hand-off that
-  cannot be admitted moves nothing, and the chat keeps the work while it has a browser page open, a take-over card or an
-  approval waiting. No sign-in moves with the work. A task a chat started now runs once: when it has ended it never runs
+  blindly) and from what the chat says is left, which it reads as data, with secrets in it redacted. A retry ends on the
+  same task, a hand-off that cannot be admitted moves nothing, and one that may have been admitted is looked up before
+  the chat goes on. The chat keeps the work while it has a browser page open, a take-over card or an approval waiting,
+  or holds a password you gave in that message. A task a chat started now runs once: when it has ended it never runs
   again, and more work on its job (your message, the chat's follow-up, **Continue**, **Finish it**, **Allow once**) goes on
-  in a fresh task with its record as background, keeping the follow-up count and the steps blocked earlier. Tasks from
-  the task page and the API keep going on in their own session. A "Start this as a task?" card kept from an older
-  version no longer starts the whole request again; it can only be put away. (#571)
+  in one fresh task with its record as background; a second tap or message reaches that task instead of starting
+  another. The job keeps its follow-up count, the steps refused in it (in the chat's turn too) and the calls whose
+  effect is unknown, which stay refused until your own message moves it on. Tasks from the task page and the API keep
+  going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
+  request again; it can only be put away. (#571)
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
   Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
   approvals in the chat. It becomes a task only when you ask for one or for background work, or when long work should
