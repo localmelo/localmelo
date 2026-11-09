@@ -1790,6 +1790,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A chat no longer sends each tool call's summary to the embedding model. With an embedding model set up, that added one request per tool call, a failed request ended the turn, and the text it put at the start of the conversation made a local model server read the whole conversation again on most turns. Memory across chats (notes, recall, search) is unchanged. Part of #591.
 - A task's card in the chat names the file it was asked to write and did not. The card's line ended at
   "is missing:" with no name; the task's own page already had it.
 
