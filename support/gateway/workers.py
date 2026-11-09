@@ -480,6 +480,17 @@ MAX_MESSAGE_CHARS = 8_000
 _CONTINUABLE = frozenset({"done", "failed", "cancelled"})
 
 
+def _moved(spec: Mapping[str, Any]) -> bool:
+    """Whether *spec*'s task holds work moved to it that the person did not send now (#571).
+
+    A chat's turn that handed its work on, or an ended task's job the chat or
+    melo went on with. A fresh task the person's own message started holds
+    their message; its request's old handles were spent when it was made.
+    """
+    packet = spec.get("handoff")
+    return isinstance(packet, dict) and bool(packet) and packet.get("by") != "person"
+
+
 def ended_words(record: TaskRecord) -> str:
     """How *record* ended, in a few words, as a successor's packet says it (#571)."""
     if is_out_of_steps(record.state, record.wait_reason):
@@ -1218,12 +1229,14 @@ class TaskWorkers:
         successor (``meta.successor``). ``(body, "successor")``.
         """
         spec = record.spec
-        objective = str(spec.get("objective") or record.title)
-        words = str(spec.get("user_words") or "")
+        # The request's sign-in handles were its own run's: never given again.
+        objective = spent(str(spec.get("objective") or record.title))
+        words = spent(str(spec.get("user_words") or ""))
         packet_note = note.strip()
         if by == "person" and packet_note:
+            # The person's message now is theirs, a password in it included.
             objective = f"{objective}\n\n{packet_note}"
-            words = f"{words or str(spec.get('objective') or '')}\n\n{packet_note}"
+            words = f"{words or objective}\n\n{packet_note}"
             packet_note = ""
         prior = spec.get("handoff")
         prior = prior if isinstance(prior, dict) else {}
@@ -2848,18 +2861,18 @@ class TaskWorkers:
                             text, words = _turn_text(record)
                             if (
                                 record.origin == "user_rule"
-                                or record.spec.get("handoff")
+                                or _moved(record.spec)
                                 or (
                                     task_session
                                     and (task_session.meta or {}).get("followup_guard")
                                 )
                             ):
                                 # Its chat continued it, a saved message started it
-                                # again, or it goes on with work begun elsewhere
-                                # (#571), not the person's own message now: the
-                                # reviews still read the request, and no password in
-                                # it is given again (a handle was one run's). A park
-                                # and resume stays under this.
+                                # again, or work moved to it from elsewhere (#571),
+                                # not the person's own message now: the reviews
+                                # still read the request, and no password in it is
+                                # given again (a handle was one run's). A park and
+                                # resume stays under this.
                                 words = spent(text if words is None else words)
                             # Only when set: a stand-in runner takes no words.
                             own: dict[str, Any] = (

@@ -322,16 +322,18 @@ async def test_continue_the_task_picks_this_chats_stopped_task_first(
         ).json()["echo"]["task_id"]
         await _stopped(console, mine)
         await _stopped(console, theirs)
-        # Both titles hold "recovery card": this chat's stopped task continues at once.
+        # Both titles hold "recovery card": this chat's stopped task goes on at once,
+        # in a fresh task of this chat (#571).
         echo = await _say_in(client, side, "continue the recovery card task")
-        assert (echo["echo"], echo["task_id"]) == ("sent", mine)
+        assert (echo["echo"], echo["follows"]) == ("started", mine)
         assert "from_main" not in echo and "from_chat" not in echo
-        assert (await _task(console, mine)).state == "queued"
+        assert (await _task(console, echo["task_id"])).state == "queued"
+        assert (await _task(console, mine)).state == "failed"
         assert (await _task(console, theirs)).state == "failed"
         # With none of its own stopped task left to name, it reaches the main chat's and says so.
         other = await _say_in(client, side, "continue the section task")
-        assert (other["echo"], other["task_id"], other["from_main"]) == (
-            "sent",
+        assert (other["echo"], other["follows"], other["from_main"]) == (
+            "started",
             theirs,
             True,
         )
