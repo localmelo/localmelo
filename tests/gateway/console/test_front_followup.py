@@ -73,6 +73,14 @@ def _tool_result(llm: Any, request: int = 1) -> str:
     return str(llm.requests[request][-1].content)
 
 
+async def _fresh(console: Console, task_id: str) -> Any:
+    """The fresh task that went on with *task_id*'s job (#571): it ran no more."""
+    assert (await _task(console, task_id)).state in ("done", "failed", "cancelled")
+    info = await console.store.get_session(task_id)
+    assert info is not None and info.meta.get("successor"), "no fresh task went on"
+    return await _task(console, str(info.meta["successor"]))
+
+
 # ── A reply is what the model said ──
 
 
@@ -103,6 +111,10 @@ async def test_every_request_tells_the_chat_to_act(tmp_path: Path) -> None:
         await _say(client, console, "tidy my notes")
         await _wait_turn(client, str(console.main_id))
         assert FRONT_TEXT in llm.requests[0][0].content
+    # One instruction for handing the rest on (#571): no step count, no meter.
+    [rule] = [line for line in FRONT_TEXT.split(". ") if "continue_current" in line]
+    assert "finish it here" in FRONT_TEXT and "large tool or page material" in rule
+    assert not any(ch.isdigit() for ch in rule)
 
 
 # ── search_files: "which file defines X?" in one or two steps ──
@@ -163,19 +175,21 @@ async def test_finish_it_continues_the_newest_task_that_did_not_finish(
         await _say(client, console, "finish it: commit the change")
         turn = await _wait_turn(client, str(console.main_id))
         assert turn["status"] == "completed"
-        record = await _task(console, task_id)
-        # The same task, queued again with the message as its next turn.
-        assert (record.state, record.card) == ("queued", "finish it: commit the change")
-        assert len(await console.workers.tasks.list_tasks()) == 1
+        # A fresh task goes on with the job, the message after its request.
+        record = await _fresh(console, task_id)
+        assert record.state == "queued" and not record.card
+        assert record.spec["objective"].endswith("\n\nfinish it: commit the change")
+        assert record.spec["handoff"]["source"] == task_id
+        assert len(await console.workers.tasks.list_tasks()) == 2
         sent = (await _echoes(console))[-1]
-        assert (sent["echo"], sent["line"], sent["how"]) == (
-            "sent",
+        assert (sent["echo"], sent["line"], sent["follows"]) == (
+            "started",
             "Continued: Fix the e2e list_files check",
-            "continued",
+            task_id,
         )
         result = _tool_result(llm)
-        assert result.startswith(f"Sent to task {task_id}: Fix the e2e list_files")
-        assert "continues in its own session" in result and "in English" in result
+        assert result.startswith(f"Task {task_id} had ended, so task {record.task_id}")
+        assert "runs no more" in result and "in English" in result
 
 
 async def test_a_follow_up_word_and_a_task_that_stopped_continue_it_in_code(
@@ -245,7 +259,7 @@ async def test_page_or_tool_text_naming_a_task_never_continues_it(
             f"/api/front/echoes/{suggests[0]['id']}", json={"do": "apply"}
         )
         assert applied.json()["echo"]["line"] == "Continued: Old report"
-        assert (await _task(console, done)).state == "queued"
+        assert (await _fresh(console, done)).state == "queued"
 
 
 async def test_a_page_that_names_a_finished_task_reaches_neither_it_nor_its_record(
@@ -372,20 +386,46 @@ async def test_continue_the_task_continues_the_one_stopped_task_at_once(
         response = await _say(client, console, CONTINUE)
         assert response.status_code == 200, response.text
         echo = response.json()["echo"]
-        assert (echo["echo"], echo["how"], echo["task_id"]) == (
-            "sent",
-            "continued",
+        record = await _fresh(console, stopped)
+        assert (echo["echo"], echo["follows"], echo["task_id"]) == (
+            "started",
             stopped,
+            record.task_id,
         )
         assert echo["line"] == "Continued: Hide the recovery card section"
         assert echo["typed"] == CONTINUE
-        # No model call and no suggestion: the task runs again with the message.
-        record = await _task(console, stopped)
-        assert (record.state, record.card) == ("queued", CONTINUE)
+        # No model call and no suggestion: a fresh task goes on with the message.
+        assert record.state == "queued" and record.spec["objective"].endswith(CONTINUE)
         assert llm.requests == []
-        assert [e["echo"] for e in await _echoes(console)][-1:] == ["sent"]
+        assert [e["echo"] for e in await _echoes(console)][-1:] == ["started"]
         assert "suggest" not in [e["echo"] for e in await _echoes(console)]
         assert (await _task(console, other)).state == "done"
+
+
+async def test_a_stopped_task_stays_stopped_and_more_work_is_one_fresh_task(
+    tmp_path: Path,
+) -> None:
+    async with front_console(tmp_path) as (console, client, llm):
+        stopped = await _delegated(console, client, "Hide the recovery card section")
+        await console.workers.update(stopped, state="stop")
+        message = tool_call("task_message", {"task_id": stopped})
+        llm.replies.extend([message, answer("Sent."), message, answer("Sent again.")])
+        await _say(client, console, "use a toggle for that section instead")
+        chat = str(console.main_id)
+        turn = await _wait_turn(client, chat)
+        fresh = await _fresh(console, stopped)
+        # Stop stands: the stopped task never runs again, nor reloads its session.
+        assert (await _task(console, stopped)).state == "cancelled"
+        assert await console.store.list_turns(stopped) == []
+        assert fresh.spec["handoff"]["ended"].startswith("Stopped")
+        console.front.made.clear()  # what a restart forgets
+        retried = await client.post(
+            f"/api/sessions/{chat}/retry", json={"turn_id": turn["id"]}
+        )
+        assert retried.status_code == 202, retried.text
+        await _wait_turn(client, chat)
+        # The retry reaches the same fresh task; it admits no other.
+        assert len(await console.workers.tasks.list_tasks()) == 2
 
 
 async def test_continue_the_task_in_chinese(tmp_path: Path) -> None:
@@ -395,8 +435,8 @@ async def test_continue_the_task_in_chinese(tmp_path: Path) -> None:
         echo = (await _say(client, console, "继续恢复卡片任务，然后提交")).json()[
             "echo"
         ]
-        assert (echo["echo"], echo["how"]) == ("sent", "continued")
-        assert (await _task(console, stopped)).state == "queued"
+        assert (echo["echo"], echo["follows"]) == ("started", stopped)
+        assert (await _fresh(console, stopped)).state == "queued"
         assert llm.requests == []
 
 
@@ -421,7 +461,7 @@ async def test_several_stopped_tasks_are_each_offered_to_pick_from(
             f"/api/front/echoes/{offers[0]['id']}", json={"do": "apply"}
         )
         assert applied.status_code == 200, applied.text
-        assert (await _task(console, offers[0]["task_id"])).state == "queued"
+        assert (await _fresh(console, offers[0]["task_id"])).state == "queued"
         assert llm.requests == []
 
 

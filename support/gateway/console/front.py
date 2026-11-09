@@ -78,6 +78,8 @@ from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
     ProvidedTool,
+    can_hand_off,
+    hand_off,
     refuse_call,
 )
 from localmelo.melo.executor.search_files import (
@@ -132,7 +134,9 @@ from localmelo.support.gateway.front_rules import (
     work_request,
 )
 from localmelo.support.gateway.handover import (
+    ACCOUNT_CHARS,
     Handover,
+    done_calls,
     from_snapshot,
     handover_of,
     task_line,
@@ -172,6 +176,7 @@ from localmelo.support.task_cli import ending_words
 
 from .asks import ASK_ORIGIN, ASK_STEPS, FOLLOWUP_ORIGIN, PERSON_PARTS
 from .bodies import Body
+from .browser_cards import browser_of
 from .cards import CARD_EVENT, card_json, card_title
 from .errors import ApiError
 from .followups import fence
@@ -204,15 +209,18 @@ FRONT_TEXT: Final = (
     "user to follow themselves. Ask one short question only when a request is too "
     "unclear to act on. Never reply with only what you are about to do: do it, or "
     "say why you cannot. Your steps ask or are blocked as this chat's Ask or Auto "
-    "says. Words the user adds while you work reach you at your next step. A task "
-    "(task_create) is a separate run beside this chat: start one when the user asks "
-    "for a task or for background work, or for long work that should not hold this "
-    "chat. Work the user wants on a schedule (every day at 9, every weekday) goes "
+    "says. Words the user adds while you work reach you at your next step. Do the "
+    "work here, and finish it here when that is practical; when the rest of it "
+    "will hold large tool or page material, hand the remaining objective to a "
+    "task with task_create and continue_current true: your turn ends there, and "
+    "the task picks up from where you are without redoing what is done. A task "
+    "(task_create) is also for when the user asks for one or for background "
+    "work. Work the user wants on a schedule (every day at 9, every weekday) goes "
     "to task_schedule, which also runs it now when the same message asks for that. "
-    "A message for a task that is running or stopped before it finished goes to it "
-    "with task_message; a task that finished takes no new work. A question about a "
-    "task (is it done, what did it find) is answered from task_get, which gives its "
-    "whole answer and the files it wrote."
+    "A message for a running task goes to it with task_message; a task that ended "
+    "runs no more, and task_message then starts a fresh task that goes on from "
+    "its record. A question about a task (is it done, what did it find) is "
+    "answered from task_get, which gives its whole answer and the files it wrote."
 )
 # What a chat reads each turn while no browser is set up (#567).
 BROWSING_OFF_NOTE: Final = (
@@ -524,13 +532,18 @@ class FrontAgent(Agent):
 # ── The task tools ──
 
 
-def _tool(name: str, description: str, properties: dict[str, Any]) -> ToolDef:
+def _tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any],
+    optional: dict[str, Any] | None = None,
+) -> ToolDef:
     return ToolDef(
         name=name,
         description=description,
         parameters={
             "type": "object",
-            "properties": properties,
+            "properties": {**properties, **(optional or {})},
             "required": list(properties),
         },
         semantic_tags=["task"],
@@ -545,10 +558,12 @@ TASK_TOOLS: Final = (
     _tool(
         "task_create",
         "Start a separate task beside this chat, when the user asks for a task or for "
-        "background work, or for long work that should not hold this chat; do "
-        "anything else yourself with your own tools. Its steps ask or are blocked as "
-        "this chat's Ask or Auto says, and its result comes back to this chat. The "
-        "user's own message is its request; code sets its priority from their words.",
+        "background work; do anything else yourself with your own tools. With "
+        "continue_current true it takes over the rest of your current work instead: "
+        "your turn ends with this call, which must be the only call of its step. Its "
+        "steps ask or are blocked as this chat's Ask or Auto says, and its result "
+        "comes back to this chat. The user's own message is its request; code sets "
+        "its priority from their words.",
         {
             "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
@@ -563,6 +578,22 @@ TASK_TOOLS: Final = (
                 "description": (
                     "True when the work needs a website: signing in, clicking, "
                     "filling in a form, buying."
+                ),
+            },
+        },
+        {
+            "continue_current": {
+                "type": "boolean",
+                "description": (
+                    "True to hand the rest of your current work to this task: "
+                    "objective is then what is left to do."
+                ),
+            },
+            "progress": {
+                "type": "string",
+                "description": (
+                    "With continue_current: what you did and found, what is "
+                    "decided, and the next useful step, briefly."
                 ),
             },
         },
@@ -629,10 +660,10 @@ TASK_TOOLS: Final = (
     _tool(
         "task_message",
         "Send the user's latest message, as they wrote it, to the task it is "
-        "about: a running task reads it at its next step, and a task that stopped "
-        "before it finished goes on with it in its own session. A task that finished "
-        "takes no new work: the message starts a new task instead, with that task's "
-        "record as background.",
+        "about: a running task reads it at its next step. A task that ended runs no "
+        "more: the message starts a fresh task instead, which goes on with its job "
+        "when it stopped before finishing, or takes the message as new work with "
+        "its record as background when it finished.",
         {"task_id": _ID},
     ),
     _tool(
@@ -690,7 +721,12 @@ class TaskTools(BaseToolProvider):
         }
         return [
             *(
-                ProvidedTool(definition=d, function=_marked(functions[d.name]))
+                ProvidedTool(
+                    definition=d,
+                    function=_marked(functions[d.name]),
+                    # task_create with continue_current hands the turn's work on.
+                    hands_off="continue_current" if d.name == "task_create" else "",
+                )
                 for d in TASK_TOOLS
             ),
             # The chat's folder at each call: the main chat's follows the default folder.
@@ -721,9 +757,76 @@ class TaskTools(BaseToolProvider):
         title: str = "",
         objective: str = "",
         uses_website: bool = False,
+        continue_current: bool = False,
+        progress: str = "",
         **_: Any,
     ) -> str:
+        if continue_current is True:
+            return await self._hand_off(str(title), str(objective), str(progress))
         return await self._begin(str(title), str(objective), uses_website is True)
+
+    async def _hand_off(self, title: str, objective: str, progress: str) -> str:
+        """Hand the rest of the running turn's work to a fresh task (#571).
+
+        Only the person's own turn, and only as the one call of its step (the
+        agent refuses a mixed step before this runs). The task's request is the
+        person's message; the model's remaining objective and progress ride in
+        its packet as data, beside the turn's calls as melo's records show them.
+        A browser page this chat holds, its take-over card or an approval it
+        waits on keeps the work here: browser work does not move yet, and no
+        sign-in moves with the work. One task per message: a retry finds the
+        task this message handed its work to and ends on it again, admitting
+        nothing. When no task can be admitted nothing moved, the turn goes on,
+        and the model reads why. Admitting is the one commit that makes the
+        task runnable: a task that was not admitted never runs, after a restart
+        either.
+        """
+        front = self._front
+        turn = front.current_turn()
+        refused = self._not_persons(turn)
+        if refused or turn is None:
+            return refused
+        if not can_hand_off():
+            return (
+                "Not done: handing the rest of the work on must be the only call of "
+                "its step."
+            )
+        if why := front.holds_browser():
+            return f"Not done: {why} The work stays here: finish it in this chat."
+        started = await front.admitted(turn)
+        if started is not None:
+            packet = started.spec.get("handoff")
+            if isinstance(packet, dict) and packet.get("from") == "chat":
+                return hand_off(_receipt(started.title, turn.typed_text))
+            return (
+                f"Not done: this message started task {started.task_id} already: "
+                f"{_row(started)}. {_tell(turn.user_text)}"
+            )
+        if front.made.get(turn.id, 0) >= TASKS_PER_TURN:
+            return (
+                "Not done: one task per message. Tell the user what else could start."
+            )
+        echo = await front.delegate(
+            turn.user_text,
+            typed=front.typed(),
+            title=title,
+            turn=turn,
+            handoff={
+                "from": "chat",
+                "source": front.chat_id,
+                "turn": turn.id,
+                "key": await front.receipt(turn),
+                "done": await front.done_here(turn),
+                "account": progress.strip()[:ACCOUNT_CHARS],
+                "remaining": objective.strip()[:ACCOUNT_CHARS],
+            },
+        )
+        if echo.get("echo") != "started":
+            return (
+                f"Not done: the work did not move to a task ({echo.get('line', '')}). "
+                "It is still yours: go on here, or tell the user exactly this."
+            )
+        return hand_off(_receipt(str(echo["title"]), turn.typed_text))
 
     async def _begin(
         self,
@@ -943,6 +1046,8 @@ class TaskTools(BaseToolProvider):
         typed = front.typed()
         if turn is None or not typed.strip():
             return "Not done: no message of the user's is being answered."
+        # An ended worker's job may be held by a fresh task now (#571).
+        record = await front.console.workers.newest(record)
         newest = await front.newest_task() == record.task_id
         if job_finished(record):
             # A worker is one-time: the person's message is new work for a new
@@ -958,11 +1063,17 @@ class TaskTools(BaseToolProvider):
             await front.choose(record, "send", text=turn.user_text)
             return _WHICH
         echo = await front.follow(record, turn.user_text, typed=typed, turn=turn)
+        if echo.get("echo") == "started":
+            return (
+                f"Task {record.task_id} had ended, so task {echo['task_id']}: "
+                f"{echo['title']}{_from(echo)} goes on with its job, the user's message "
+                "after its request; the ended one runs no more. Its result comes back "
+                f"to this chat as a card. Name the task. {_tell(typed)}"
+            )
         if echo.get("echo") != "sent":
             return f"Not done: {echo.get('line', '')}"
         how = {
-            "continued": "it continues in its own session with the user's message "
-            "as its next turn",
+            "continued": "it continues with the user's message as its next turn",
             "answered": "the user's message answers the question it waited on",
         }.get(str(echo.get("how")), "it reads the user's message at its next step")
         return (
@@ -1022,6 +1133,12 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     if live.get("left"):
         lines.append(f"its last note: {answer_head(live['left'], ANSWER_CHARS)}")
     return lines
+
+
+def _receipt(title: str, typed: str) -> str:
+    """The answer of a turn that handed its work on, in the language of *typed*."""
+    language = "zh-Hans" if is_chinese(typed) else "en"
+    return t_in(language, "front.handoff.receipt", title=title)
 
 
 def _ref(record: TaskRecord) -> TaskRef:
@@ -1796,6 +1913,43 @@ class Front:
             await self.notice("front.echo.browsingOff")
         return True
 
+    def holds_browser(self) -> str:
+        """Why this chat's work cannot leave it for its browser now, or ``""`` (#571).
+
+        A page open in its browser, one the person holds, a take-over card that
+        waits, or an approval the chat waits on: browser work does not move to a
+        task yet, and a page is never closed and opened again to move it.
+        """
+        chat = self.chat_id
+        entry = self.console.sessions.get(chat) if chat is not None else None
+        browser = browser_of(entry.agent) if entry is not None else None
+        card = browser.card() if browser is not None else None
+        if card is not None:
+            return {
+                "you": "the user has this chat's browser page.",
+                "waiting": "a take-over card in this chat waits for the user.",
+            }.get(card.state, "this chat has a browser page open.")
+        if chat is not None and self.console.broker.pending(chat):
+            return "an approval in this chat waits for the user."
+        return ""
+
+    async def done_here(self, turn: TurnInfo) -> list[dict[str, Any]]:
+        """The calls *turn* made, as its stored events show them (``handover.done_calls``).
+
+        The events the run has queued are stored first; the call that hands
+        the work on, still running, is left out.
+        """
+        entry = self.console.sessions.get(turn.session_id)
+        if entry is not None:
+            await entry.runner.flush()
+        try:
+            return await done_calls(
+                self.console.store, turn.session_id, turn.turn, skip=("task_create",)
+            )
+        except Exception:
+            logger.warning("Could not read the calls of a turn that hands off")
+            return []
+
     # ── Tasks: start, change, suggest ──
 
     async def delegate(
@@ -1813,6 +1967,7 @@ class Front:
         asked_at: float | None = None,
         kept: object = None,
         earlier: TaskRecord | None = None,
+        handoff: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start *work* as a task this chat owns, at the level the person's words give.
 
@@ -1828,6 +1983,8 @@ class Front:
 
         *earlier* is the finished task this work follows on: the new task works
         in its folder, and its record rides in the handover as background.
+        *handoff* is the packet of a turn that hands the rest of its work on
+        (``TaskSpec.handoff``, #571).
         """
         if turn is not None and key is None and create_key is None:
             create_key = await self.receipt(turn)
@@ -1842,7 +1999,9 @@ class Front:
         except TaskPolicyError as exc:
             return await self._failed(show, "front.echo.startFailed", problem=str(exc))
         words = typed.strip()[:MAX_OBJECTIVE_CHARS]
-        spec = dataclasses.replace(spec, level=level, reason=reason, user_words=words)
+        spec = dataclasses.replace(
+            spec, level=level, reason=reason, user_words=words, handoff=handoff or {}
+        )
         # What the chat hands the task (#463): its earlier turns, and what this
         # turn of the person's recalled, searched or opened.
         handover = await handover_of(
@@ -2018,20 +2177,37 @@ class Front:
         text is the chat's own, in its follow-up on the task (#411), so the
         task never runs a step that was blocked before.
 
-        A worker is one-time (#567): a task that finished its job takes no new
-        work, so *text* starts a new task, under *key*, with this one's record as
-        background (:meth:`delegate`). The worker's lock has the last word, for a
-        job that finishes while this reads.
+        A worker this chat started is one-time (#567, #571): once it ended,
+        nothing runs in it again. A job it finished takes *text* as new work: a
+        new task, under *key*, with its record as background (:meth:`delegate`).
+        A job it left unfinished (failed, out of steps, stopped, not finished)
+        goes on in a fresh task (``TaskWorkers.successor``): the person's *text*
+        follows the request as theirs, the chat's own is a note in its packet.
+        The worker's lock has the last word, for a job that ends while this reads.
         """
 
         async def new_task(earlier: TaskRecord) -> dict[str, Any]:
+            if not job_finished(earlier) or automatic:
+                return await self._successor(
+                    earlier, text, typed=typed, show=show, of=of, turn=turn,
+                    automatic=automatic, create_key=create_key,
+                )  # fmt: skip
             return await self.delegate(
                 text, typed=typed, key=key, show=show, of=of, turn=turn,
                 create_key=create_key, asked_at=asked_at, earlier=earlier,
             )  # fmt: skip
 
-        if job_finished(record) and not automatic:
+        # A message for an ended worker reaches the task that holds its job now.
+        record = await self.console.workers.newest(record)
+        if record.state in FINISHED and await self.console.workers.one_time(
+            record.task_id
+        ):
             return await new_task(record)
+        if automatic:
+            return await self._failed(
+                show, "front.echo.sendFailed", title=record.title,
+                problem="it is not finished; only the user's own message reaches it now",
+            )  # fmt: skip
         level, why = triage(typed)
         try:
             _, how = await self.console.workers.message(
@@ -2039,8 +2215,7 @@ class Front:
                 text,
                 level=None if level == 2 else level,
                 reason=why,
-                automatic=automatic,
-                same_job=not automatic,
+                same_job=True,
             )
         except JobFinishedError:
             return await new_task(await self.record(record.task_id) or record)
@@ -2055,6 +2230,50 @@ class Front:
         return await self._echo(
             "sent", record.task_id, record.title, f"{word}: {record.title}", show, of,
             how=how, said=said(key, title=record.title),
+        )  # fmt: skip
+
+    async def _successor(
+        self,
+        ended: TaskRecord,
+        text: str,
+        *,
+        typed: str,
+        show: str | None,
+        of: int | None,
+        turn: TurnInfo | None,
+        automatic: bool,
+        create_key: str | None,
+    ) -> dict[str, Any]:
+        """A fresh task that goes on with the unfinished job of *ended*, and its echo (#571).
+
+        Its key is the person's message (a retry finds the same task), or for
+        the chat's follow-up, the ending it follows up on.
+        """
+        if create_key is None and turn is not None and not automatic:
+            create_key = await self.receipt(turn)
+        if create_key is None and automatic:
+            create_key = f"followup:{ended.task_id}:{ended.finished_at}"
+        level, why = triage(typed)
+        try:
+            body, _ = await self.console.workers.successor(
+                ended,
+                text,
+                by="chat" if automatic else "person",
+                key=create_key,
+                level=None if automatic or level == 2 else level,
+                reason="" if automatic else why,
+            )
+        except (TaskPolicyError, TaskStoreError, ValueError, RuntimeError) as exc:
+            return await self._failed(
+                show, "front.echo.sendFailed", title=ended.title, problem=_plain(exc)
+            )
+        if turn is not None:
+            self._count(turn)
+        return await self._echo(
+            "started", str(body["task_id"]), str(body["title"]),
+            f"Continued: {body['title']}", show, of,
+            level=body["level"], reason=body["reason"], follows=ended.task_id,
+            said=said("front.echo.continued", title=body["title"]),
         )  # fmt: skip
 
     async def control(

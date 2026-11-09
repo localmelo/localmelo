@@ -956,6 +956,7 @@
   "front.echo.undoneLevel": "Undone: {title} is back to {level}",
   "front.echo.undonePaused": "Undone: {title} is paused",
   "front.echo.unsaved": "Undone: {title} is not saved",
+  "front.handoff.receipt": "The rest of this continues in the task “{title}”: it picks up from here, and its result comes back to this chat.",
   "gist.list.many": "{head} and {last}",
   "gist.list.sep": ", ",
   "gist.list.two": "{first} and {second}",

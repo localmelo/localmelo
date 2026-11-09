@@ -1028,6 +1028,43 @@ async def test_a_chats_own_browser_shows_its_card_with_no_task(
         assert await console.workers.tasks.list_tasks() == []
 
 
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_chat_with_a_browser_page_keeps_its_work_and_hands_off_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    hand = tool_call(
+        "task_create",
+        {"title": "Read on", "objective": "Read the rest.", "continue_current": True},
+        "h-1",
+    )
+    script: list[Any] = [
+        tool_call("browser_open", {"url": HOME}, "b-1"),
+        hand,
+        answer("The page stays here, so I finish it in this chat."),
+    ]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(site()),  # type: ignore[arg-type]
+    )
+    async with built_chats(tmp_path, monkeypatch, script, driver="chrome") as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = await _chat(client, console, where, f"read {HOME}", folder)
+        [request] = [await _waiting(console, chat)]
+        await _answer(client, request.request_id, "once")
+        finished = await _wait_turn(client, chat)
+        assert finished["status"] == "completed"
+        assert finished["answer"].startswith("The page stays here")
+        told = [str(m.content) for m in models[0].requests[-1] if m.role == "tool"]
+        assert told[-1].startswith("Not done: this chat has a browser page open.")
+        assert await console.workers.tasks.list_tasks() == []
+
+
 KEYS_STEP = tool_call("python_exec", {"code": KEYS}, "k-1")
 MORE = tool_call("file_write", {"path": "more.txt", "content": "more\n"}, "w-2")
 

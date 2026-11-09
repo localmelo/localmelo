@@ -34,7 +34,8 @@ from localmelo.support.gateway.console.front import (
 )
 from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.workers import NOTE_START, _turn_text
+from localmelo.support.gateway.handover import HANDOFF_HEADER
+from localmelo.support.gateway.workers import _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionBusyError
@@ -207,6 +208,23 @@ async def started_task(console: Console) -> str:
     found = [r for r in await rows(console, console.main_id) if r["echo"] == "started"]
     assert found, "no task started"
     return str(found[-1]["task_id"])
+
+
+async def successor_of(console: Console, task_id: str) -> str:
+    """The fresh task that went on with *task_id*'s job (#571); fails without one."""
+    info = await console.store.get_session(task_id)
+    assert info is not None and info.meta.get("successor"), "no fresh task went on"
+    return str(info.meta["successor"])
+
+
+async def calls_of(console: Console, *task_ids: str) -> list[dict[str, Any]]:
+    """The approvals of every finished call of *task_ids*' runs, in order."""
+    return [
+        e.event["data"]["approval"]
+        for task_id in task_ids
+        for e in await all_events(console.store, task_id)
+        if e.event["type"] == "tool.finished"
+    ]
 
 
 async def state(console: Console, task_id: str) -> str:
@@ -422,8 +440,12 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         await say(client, console, "write a script that fetches today's weather")
         task_id = await started_task(console)
         await until(lambda: len(models["workers"]) == 2)
-        await until(lambda: _is(console, task_id, "done"))
+        # The chat's continue went to a fresh task; the ended one stays as it was.
+        fresh = await successor_of(console, task_id)
+        await until(lambda: _is(console, fresh, "done"))
         await settled(console)
+        # Never reopened: its one run is all its session holds.
+        assert len(await console.store.list_turns(task_id)) == 1
         assert ran.codes == [], "the install never ran"
         # The follow-up read the ending and the blocked step, as data; the
         # second turn told the ready answer.
@@ -450,7 +472,7 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         assert kinds == [
             "started",
             "followup",
-            "sent",
+            "started",
             "followed",
             "followup",
             "followed",
@@ -462,25 +484,26 @@ async def test_a_blocked_install_is_worked_around_and_never_run_again(
         )
         assert followup["said"]["key"] == "followup.row"
         assert followup["turn_id"] == turn.id, "written once its turn began"
-        assert (sent["how"], sent["task_id"]) == ("continued", task_id)
+        assert (sent["follows"], sent["task_id"]) == (task_id, fresh)
+        assert sent["said"]["key"] == "front.echo.continued"
         assert (followed["did"], followed["task_id"]) == ("continued", task_id)
-        # The continued run read the other way and the blocked step, as melo's note.
-        first = str(models["workers"][1].requests[0][-1].content)
-        assert first.startswith(NOTE_START)
-        assert other_way in first and "pip install requests" in first
+        # The fresh task read the other way and the blocked step in its packet,
+        # as the chat's note after the person's request.
+        first = "\n".join(
+            str(message.content) for message in models["workers"][1].requests[0]
+        )
+        packet = first[first.index(HANDOFF_HEADER) :]
+        assert first.index("fetches today's weather") < first.index(HANDOFF_HEADER)
+        assert other_way in packet and "pip install requests" in packet
         # The same call was refused before any review, saying who blocked it.
         [refused] = tool_results(models["workers"][1], 1)
         assert "Auto mode blocked this exact step earlier in this task" in refused
-        approvals = [
-            e.event["data"]["approval"]
-            for e in await all_events(console.store, task_id)
-            if e.event["type"] == "tool.finished"
-        ]
+        approvals = await calls_of(console, task_id, fresh)
         assert [a["origin"] for a in approvals] == ["auto", "policy"]
         assert approvals[1]["earlier"] == "Auto mode" and "review" not in approvals[1]
         assert "install:pip:requests" in approvals[0]["loose_keys"]
         assert "call_key" not in approvals[1], "a refused repeat is no new block"
-        info = await console.store.get_session(task_id)
+        info = await console.store.get_session(fresh)
         assert info is not None and info.meta["followup_guard"] is True
         assert info.meta["followup"]["continued"] is True
         # Activity says what the chat did, plainly.
@@ -514,16 +537,22 @@ async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
         task_id = await started_task(console)
         await stop_run(console, task_id)
         await settled(console)
-        record = await console.workers.tasks.get_task(task_id)
-        assert record.state == "queued" and record.card == f"{NOTE_START}\n{go_on}"
-        await stop_run(console, task_id, "Wrote another part.")
+        # The ended task stays as it was; a fresh one goes on with the chat's note.
+        assert await state(console, task_id) == "failed"
+        fresh = await successor_of(console, task_id)
+        record = await console.workers.tasks.get_task(fresh)
+        assert record.state == "queued" and not record.card
+        assert record.spec["handoff"]["note"] == go_on
+        assert record.spec["handoff"]["by"] == "chat"
+        await stop_run(console, fresh, "Wrote another part.")
         await settled(console)
         first, second = await internal_turns(console)
+        # The count is the job's: the fresh task does not start it over.
         assert "continued the task once already" in second.user_text
         assert "task_continue(" not in second.user_text
         refused = tool_results(models["main"], 5)[-1]
         assert refused.startswith("Not done: this task was continued once already")
-        assert await state(console, task_id) == "failed", "not continued again"
+        assert await state(console, fresh) == "failed", "not continued again"
         assert second.answer == question
         followed = [
             r for r in await rows(console, console.main_id) if r["echo"] == "followed"
@@ -533,16 +562,19 @@ async def test_out_of_steps_continues_once_then_asks_then_stops_following_up(
             ("asked", "Should I split it into smaller tasks?"),
         ]
         # A third stop (the person's Continue on the card) gets no follow-up: no loop.
-        await console.workers.continue_stopped(task_id)
-        await stop_run(console, task_id, "Wrote a third part.")
+        body, how = await console.workers.continue_stopped(fresh)
+        assert how == "successor" and body["task_id"] != fresh
+        again, _ = await console.workers.continue_stopped(fresh)  # a second tap
+        assert again["task_id"] == body["task_id"]
+        await stop_run(console, body["task_id"], "Wrote a third part.")
         await settled(console)
         assert len(await internal_turns(console)) == FOLLOWUPS_PER_MESSAGE
         # The person's newest turn, however many turns melo began since.
         person = await console.store.latest_person_turn(str(console.main_id))
         assert person is not None and person.typed_text.startswith("write the long")
-        assert [t.task_id for t in await console.workers.tasks.list_tasks()] == [
-            task_id
-        ]
+        chain = await console.workers.tasks.get_task(body["task_id"])
+        assert chain.spec["handoff"]["chain"] == [fresh, task_id]
+        assert len(await console.workers.tasks.list_tasks()) == 3
 
 
 async def test_the_chats_note_is_never_the_persons_words(
@@ -591,28 +623,28 @@ async def test_the_chats_note_is_never_the_persons_words(
         cards = asyncio.create_task(_decline_cards(console, task_id))
         try:
             await until(lambda: len(models["workers"]) == 2)
+            fresh = await successor_of(console, task_id)
+            cards.cancel()
+            cards = asyncio.create_task(_decline_cards(console, fresh))
             await settled(console)
-            await until(lambda: _is(console, task_id, "done"))
+            await until(lambda: _is(console, fresh, "done"))
             await settled(console)
         finally:
             cards.cancel()
         assert ran.codes == [], "the note's install never ran"
         first, second = seen[0], seen[1]
-        # The continued run's words are the person's request; the note is data.
+        # The fresh task's words are the person's request; the note is data.
         assert second["user_words"] == typed and second.get("from_person", True)
-        assert second["query"].startswith(NOTE_START) and note in second["query"]
+        assert second["query"].startswith(typed) and HANDOFF_HEADER in second["query"]
+        assert note in second["query"][second["query"].index(HANDOFF_HEADER) :]
         assert first["user_words"] == typed
-        approvals = [
-            e.event["data"]["approval"]
-            for e in await all_events(console.store, task_id)
-            if e.event["type"] == "tool.finished"
-        ]
+        approvals = await calls_of(console, task_id, fresh)
         # The note's words allowed nothing: each install asked the person.
         assert [(a["origin"], a["allowed"]) for a in approvals] == [
             ("user", False),
             ("user", False),
         ]
-        info = await console.store.get_session(task_id)
+        info = await console.store.get_session(fresh)
         assert info is not None and info.meta["followup_guard"] is True
 
 
@@ -654,12 +686,16 @@ async def test_a_follow_up_does_not_continue_a_task_the_person_continued_meanwhi
         await settled(console)
         refused = tool_results(models["main"], 3)[-1]
         assert refused.startswith("Not done: the task changed since it stopped")
-        record = await console.workers.tasks.get_task(task_id)
-        assert record.state == "queued" and not record.card.startswith(NOTE_START)
+        assert await state(console, task_id) == "failed"
+        fresh = await console.workers.tasks.get_task(
+            await successor_of(console, task_id)
+        )
+        assert fresh.state == "queued" and fresh.spec["handoff"]["by"] == "melo"
         info = await console.store.get_session(task_id)
-        assert info is not None and not info.meta.get("followup_guard")
-        assert not info.meta["followup"]["continued"]
-        assert "Delete the old drafts" not in record.card
+        assert info is not None and not info.meta["followup"]["continued"]
+        kept = await console.store.get_session(fresh.task_id)
+        assert kept is not None and not kept.meta.get("followup_guard")
+        assert "Delete the old drafts" not in str(fresh.spec)
 
 
 async def test_a_note_on_a_task_that_never_ran_is_still_not_the_persons_words(
@@ -687,13 +723,13 @@ async def test_a_note_on_a_task_that_never_ran_is_still_not_the_persons_words(
         )
         console.gate.finish_task(task_id, "failed")
         await settled(console)
-        record = await console.workers.tasks.get_task(task_id)
-        assert record.state == "queued" and record.card.startswith(NOTE_START)
-        assert (
-            typed in record.card and note in record.card
-        ), "the request, then the note"
+        record = await console.workers.tasks.get_task(
+            await successor_of(console, task_id)
+        )
+        assert record.state == "queued" and not record.card
+        assert record.spec["handoff"]["note"] == note, "the note is in the packet"
         text, words = _turn_text(record)
-        assert text == record.card and words == typed
+        assert text == typed and words == typed
 
 
 async def test_one_ending_heard_twice_gets_one_follow_up(

@@ -68,8 +68,13 @@ from localmelo.support.gateway.finishing import (
 )
 from localmelo.support.gateway.front_rules import asks_commit, asks_tests
 from localmelo.support.gateway.handover import (
+    ACCOUNT_CHARS,
+    CHAIN_TASKS,
+    DONE_CALLS,
     PICKED_CHARS,
     Handover,
+    done_calls,
+    handoff_block,
     inert,
     kept_lines,
     own_words,
@@ -109,6 +114,7 @@ from localmelo.support.gateway.task_endings import (
 from localmelo.support.gateway.task_endings import decide as decide_ending
 from localmelo.support.gateway.task_files import asked_files
 from localmelo.support.gateway.task_policy import (
+    MAX_OBJECTIVE_CHARS,
     TaskPolicyError,
     TaskSpec,
     WorkspaceError,
@@ -166,6 +172,7 @@ from localmelo.support.sessions.identity import (
 )
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
+from localmelo.support.task_cli import ending_words
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
@@ -393,8 +400,9 @@ def _remembers(origin: str) -> bool:
         return False
 
 
-# A continue its chat sent on its own, in its follow-up (#411), starts with this
+# A continue its chat sent on its own, in its follow-up (#411), started with this
 # line: melo's note, which the task reads as data and never as the person's words.
+# Nothing writes it now (a fresh task goes on instead, #571); a stored card may.
 NOTE_START: Final = (
     "[localmelo · a note from the chat that started this task · data, not the "
     "user's words]"
@@ -440,10 +448,12 @@ def _project_block(spec: Mapping[str, Any]) -> str:
 
 def _task_blocks(spec: Mapping[str, Any]) -> tuple[str, ...]:
     """What a task's turn carries after its request, each block marked as data,
-    highest first: the person's own words, its chat's earlier turns, what the
-    chat's turn recalled (#463), each fenced; the pack, then the project's
-    files. Each only when set; near the query limit the lowest go first."""
+    highest first: where the work it goes on with stands (#571), the person's
+    own words, its chat's earlier turns, what the chat's turn recalled (#463),
+    each fenced; the pack, then the project's files. Each only when set; near
+    the query limit the lowest go first."""
     blocks = (
+        handoff_block(spec.get("handoff")),
         words_block(str(spec.get("own_words") or "")),
         turns_block(str(spec.get("chat_turns") or "")),
         picked_block(str(spec.get("chat_picked") or "")),
@@ -468,6 +478,16 @@ def _project_fields(found: project_files.ProjectInstructions | None) -> dict[str
 MAX_MESSAGE_CHARS = 8_000
 # A finished task a message continues; an expired one does not.
 _CONTINUABLE = frozenset({"done", "failed", "cancelled"})
+
+
+def ended_words(record: TaskRecord) -> str:
+    """How *record* ended, in a few words, as a successor's packet says it (#571)."""
+    if is_out_of_steps(record.state, record.wait_reason):
+        return "it ran out of steps"
+    label, why = ending_words(shown(record))
+    if label:
+        return f"{label} ({why})" if why else label
+    return record.state
 
 
 class TaskInbox:
@@ -770,6 +790,8 @@ class TaskWorkers:
         origin: Origin = "user",
         chat_started: bool = False,
         handover: Handover | None = None,
+        carry: Mapping[str, Any] | None = None,
+        auto: AutoPolicy | None = None,
     ) -> tuple[dict, bool]:
         """Create a task from a spec trusted code made (the main chat's, or a chore's).
 
@@ -798,7 +820,13 @@ class TaskWorkers:
         turns and what its turn recalled, searched or opened, kept with the
         spec ahead of the pack (the turns only, with memory off). The person's
         ``user_words`` ride along as ``own_words`` when the objective does not
-        hold them.
+        hold them. Without a handover, a spec that already holds a chat's turns
+        and picks (a successor's, #571) keeps them.
+
+        *carry* is session meta a successor keeps from the task it follows
+        (its follow-up count, the refusal of steps blocked earlier), and *auto*
+        the Auto policy it starts with (a step the person allowed once): both
+        are in place before the task can run.
         """
         front, key = front_id, request_key
         task_id = uuid.uuid4().hex[:12]
@@ -850,8 +878,8 @@ class TaskWorkers:
                     spec,
                     context_pack=pack,
                     own_words=own_words(spec.user_words, spec.objective),
-                    chat_turns=turns,
-                    chat_picked=picked,
+                    chat_turns=turns or spec.chat_turns,
+                    chat_picked=picked or spec.chat_picked,
                     **_project_fields(found),
                 )
             # The task keeps the mode its chat has now (#339): Ask or Auto.
@@ -872,6 +900,7 @@ class TaskWorkers:
                     "approvals": mode,
                     **({"started_by": "chat"} if chat_started else {}),
                     **({"in_chat": True} if chat_started or front else {}),
+                    **(carry or {}),
                 },
                 _recovery_proof=True,
             )
@@ -886,6 +915,8 @@ class TaskWorkers:
                 self.gate.finish_task(record.task_id, "failed")
                 self._ready.pop(record.task_id, None)
             elif not repeated:
+                if auto is not None:
+                    self._auto[record.task_id] = auto
                 self._register(record)
                 self._eligible.add(record.task_id)
                 if record.level == 5:
@@ -1082,29 +1113,26 @@ class TaskWorkers:
         *,
         level: int | None = None,
         reason: str = "",
-        automatic: bool = False,
         same_job: bool = False,
     ) -> tuple[dict, str]:
         """Give *task_id* the person's message; the task's body and what happened.
 
         ``queued``: a task that has not finished reads it at its next step
-        (a paused one when it resumes). ``continued``: a done, failed or
-        stopped task runs again in its own session, the message as its next
-        turn after the earlier ones; *level* (from the person's words)
-        replaces its old level. A message the run never read continues the
-        task once the run ends. A worker is one-time: with *same_job* the
-        message is for the job it was given, and :class:`JobFinishedError` says
-        under the lock that the job finished meanwhile, so a chat starts a new
-        task (:meth:`Front.follow`).
+        (a paused one when it resumes). ``answered``: it waited on an answer,
+        and the message is that answer. ``continued``: a done, failed or
+        stopped task given directly (the tasks page, the API) runs again in
+        its own session, the message as its next turn after the earlier ones;
+        *level* (from the person's words) replaces its old level. A message
+        the run never read continues such a task once the run ends.
 
-        *automatic*: the message is its chat's own, in its follow-up (#411).
-        It only continues a finished task (never answers its question nor
-        reaches a running task), as a note the task reads as data
-        (:data:`NOTE_START`), never as the person's words; and until the
-        person speaks to the task again, its runs refuse every step blocked
-        earlier in it, and steps alike (``meta.followup_guard``, set once the
-        task was continued; see :meth:`_guard`). Any other message is the
-        person's, and lifts that.
+        A worker a chat started is one-time (#567, #571): once it ended, nothing
+        runs in it again. :class:`JobFinishedError` says so under the lock, and
+        the chat starts a fresh task that goes on from its record
+        (:meth:`successor`, ``Front.follow``). With *same_job* a task that
+        finished its job raises it too, whoever started it.
+
+        Any message here is the person's, and lifts the refusal of steps
+        blocked earlier that a chat's own continue set (``meta.followup_guard``).
         """
         text = text.strip()
         if not text:
@@ -1115,8 +1143,6 @@ class TaskWorkers:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined:
             raise TaskStoreError("worker cleanup failed; slot held until restart")
-        if automatic:
-            return await self._continue_noted(task_id, text, level, reason)
         await self._set_guard(task_id, False)
         if self.owner is not None and await self.owner.reply(task_id, text):
             # It waited on an answer: the person's words are the answer.
@@ -1128,6 +1154,8 @@ class TaskWorkers:
             if same_job and job_finished(current):
                 raise JobFinishedError("it finished; a finished task takes no new work")
             if current.state in _CONTINUABLE:
+                if await self.one_time(task_id):
+                    raise JobFinishedError("it ended; a chat's worker runs once")
                 record = await self._continue(current, text, level=level, reason=reason)
                 await self._schedule()
                 return await self._body(record), "continued"
@@ -1140,25 +1168,116 @@ class TaskWorkers:
             self._inboxes.setdefault(task_id, TaskInbox()).put(text)
             return await self._body(current), "queued"
 
-    async def _continue_noted(
-        self, task_id: str, text: str, level: int | None, reason: str
+    async def one_time(self, task_id: str) -> bool:
+        """Whether *task_id* is a worker a chat started, which runs one job once (#571)."""
+        info = await self.store.get_session(task_id)
+        return info is not None and (info.meta or {}).get("started_by") == "chat"
+
+    async def newest(self, record: TaskRecord) -> TaskRecord:
+        """The task that holds *record*'s job now: its successor's successor, … (#571)."""
+        for _ in range(CHAIN_TASKS):
+            info = await self.store.get_session(record.task_id)
+            after = (info.meta or {}).get("successor") if info is not None else None
+            if not isinstance(after, str) or not after:
+                break
+            try:
+                record = await self.tasks.get_task(after)
+            except TaskStoreError:
+                break
+        return record
+
+    async def successor(
+        self,
+        record: TaskRecord,
+        note: str = "",
+        *,
+        by: str,
+        key: str | None,
+        level: int | None = None,
+        reason: str = "",
+        auto: AutoPolicy | None = None,
     ) -> tuple[dict, str]:
-        """Continue the finished *task_id* with its chat's own note (#411); see :meth:`message`."""
-        async with self._lock:
-            if self._closed:
-                raise RuntimeError("workers are closed")
-            current = await self.tasks.get_task(task_id)
-            if current.state not in _CONTINUABLE:
-                raise TaskStoreError(
-                    "it is not finished; only the user's own message reaches it now"
-                )
-            record = await self._continue(
-                current, f"{NOTE_START}\n{text}", level=level, reason=reason
+        """A fresh task that goes on with the job of *record*, which ended (#571).
+
+        A worker a chat started runs once: more work on its job is a new task,
+        a new session and a new Agent, never its old session again. The new
+        task has the same request, chat, folder and level, the chat's turns and
+        picks it was made with, and a packet (``TaskSpec.handoff``): how
+        *record* ended, its calls and those it was handed, and what it said
+        last, all bounded. *by* says who asks for it: the ``person`` (their
+        *note* is their message, which follows the request as theirs), the
+        ``chat`` in its follow-up or ``melo`` (Finish it, Continue, Allow
+        once): their *note* is data in the packet, never the person's words.
+
+        *key* is the successor's one key (``task_creates``): asked again, the
+        same successor is returned. Budgets and refusals do not start over: it
+        keeps the chat's follow-up count of the job (``meta.followup``), and
+        after the chat's own continue it refuses every step blocked earlier in
+        the job (``meta.followup_guard``, :meth:`_guard`). *auto* is the Auto
+        policy it starts with. The predecessor keeps its record and names its
+        successor (``meta.successor``). ``(body, "successor")``.
+        """
+        spec = record.spec
+        objective = str(spec.get("objective") or record.title)
+        words = str(spec.get("user_words") or "")
+        packet_note = note.strip()
+        if by == "person" and packet_note:
+            objective = f"{objective}\n\n{packet_note}"
+            words = f"{words or str(spec.get('objective') or '')}\n\n{packet_note}"
+            packet_note = ""
+        prior = spec.get("handoff")
+        prior = prior if isinstance(prior, dict) else {}
+        done = [d for d in prior.get("done") or [] if isinstance(d, dict)]
+        turns = await self.store.list_turns(record.task_id, limit=1)
+        if turns:
+            done += await done_calls(self.store, record.task_id, turns[-1].turn)
+        said = turns[-1].answer if turns else str(record.wait_reason or "")
+        session = await self.store.get_session(record.task_id)
+        kept = (session.meta or {}).get("followup") if session is not None else None
+        carry: dict[str, Any] = {}
+        if isinstance(kept, dict):
+            names = ("person_turn", "runs", "continued")
+            carry["followup"] = {name: kept[name] for name in names if name in kept}
+        if by == "chat":
+            carry["followup_guard"] = True
+        task_spec = replace(
+            TaskSpec.from_payload({"objective": objective, "title": record.title}),
+            workspace=(session.workspace if session is not None else "") or "",
+            level=record.level if level is None else level,
+            reason=reason or record.reason,
+            user_words=words[:MAX_OBJECTIVE_CHARS],
+            chat_turns=str(spec.get("chat_turns") or ""),
+            chat_picked=str(spec.get("chat_picked") or ""),
+            handoff={
+                "from": "task",
+                "source": record.task_id,
+                "key": key or "",
+                "by": by,
+                "ended": ended_words(record),
+                "done": done[-DONE_CALLS:],
+                "account": said.strip()[:ACCOUNT_CHARS],
+                "note": packet_note[:ACCOUNT_CHARS],
+                "chain": [record.task_id, *list(prior.get("chain") or [])][
+                    :CHAIN_TASKS
+                ],
+            },
+        )
+        body, _ = await self.create_spec(
+            task_spec,
+            front_id=record.front_id,
+            create_key=key,
+            origin=cast(Origin, record.origin),
+            chat_started=True,
+            carry=carry,
+            auto=auto,
+        )
+        try:
+            await self.store.update_session(
+                record.task_id, meta_update={"successor": body["task_id"]}
             )
-            # Only once it was continued, and before any run of it can start.
-            await self._set_guard(task_id, True)
-            await self._schedule()
-            return await self._body(record), "continued"
+        except Exception:
+            log.warning("Could not link task %s to its successor", record.task_id)
+        return body, "successor"
 
     async def _set_guard(self, task_id: str, on: bool) -> None:
         """Turn the refusal of steps blocked earlier on or off for *task_id*'s next runs."""
@@ -1170,22 +1289,27 @@ class TaskWorkers:
             )
 
     async def _guard(
-        self, task_id: str, meta: Mapping[str, Any] | None, policy: ApprovalPolicy
+        self, record: TaskRecord, meta: Mapping[str, Any] | None, policy: ApprovalPolicy
     ) -> ApprovalPolicy:
-        """*policy*, refusing the steps blocked earlier in *task_id* when its chat continued it (#411).
+        """*policy*, refusing the steps blocked earlier in *record*'s job when its chat continued it (#411).
 
         Each blocked call's key is kept with its record (``approval.call_key``);
         a call with the same key is refused before any review, saying who
-        blocked it. Nothing is refused while the person's own message (or
-        Allow once) continued the task last.
+        blocked it. The job is the task and the ended tasks it goes on from
+        (``handoff.chain``, #571): a fresh task does not reset the refusals.
+        Nothing is refused while the person's own message (or Allow once)
+        continued the task last.
         """
         if not (meta or {}).get("followup_guard"):
             return policy
-        try:
-            blocks = await denied_steps(self.store, task_id, limit=200)
-        except Exception:
-            log.exception("Could not read the blocked steps of task %s", task_id)
-            return policy
+        packet = record.spec.get("handoff")
+        chain = packet.get("chain") if isinstance(packet, dict) else None
+        blocks = []
+        for task_id in [record.task_id, *(chain or [])]:
+            try:
+                blocks += await denied_steps(self.store, str(task_id), limit=200)
+            except Exception:
+                log.exception("Could not read the blocked steps of task %s", task_id)
         if not blocks:
             return policy
         return EarlierBlocks(
@@ -1218,6 +1342,24 @@ class TaskWorkers:
         policy.allow_once(key, categories, tool)
         try:
             return await self.message(task_id, go_ahead_text(categories), same_job=True)
+        except JobFinishedError:
+            policy.withdraw(key)
+            record = await self.tasks.get_task(task_id)
+            if job_finished(record):
+                raise
+            # A chat's worker that ended runs once (#571): a fresh task goes on,
+            # with this step allowed once in it.
+            if held is None:
+                self._auto.pop(task_id, None)
+            fresh = AutoPolicy(task=True)
+            fresh.allow_once(key, categories, tool)
+            return await self.successor(
+                record,
+                go_ahead_text(categories),
+                by="melo",
+                key=f"next:{task_id}:{record.finished_at}",
+                auto=fresh,
+            )
         except BaseException:
             policy.withdraw(key)
             raise
@@ -1233,13 +1375,20 @@ class TaskWorkers:
         """
         record = await self.tasks.get_task(task_id)
         if is_out_of_steps(record.state, record.wait_reason):
-            return await self.message(task_id, words("failure.continueMessage"))
-        ending = shown(record)
-        if ending is None or not can_finish(ending):
-            raise TaskStoreError(
-                "only a task that ran out of steps or is not finished continues here"
+            text = words("failure.continueMessage")
+        else:
+            ending = shown(record)
+            if ending is None or not can_finish(ending):
+                raise TaskStoreError(
+                    "only a task that ran out of steps or is not finished continues here"
+                )
+            text = finish_message(ending)
+        if record.state in _CONTINUABLE and await self.one_time(task_id):
+            # A chat's worker runs once (#571): a fresh task goes on with its job.
+            return await self.successor(
+                record, text, by="melo", key=f"next:{task_id}:{record.finished_at}"
             )
-        return await self.message(task_id, finish_message(ending))
+        return await self.message(task_id, text)
 
     async def _continue(
         self, current: TaskRecord, text: str, *, level: int | None, reason: str
@@ -1254,13 +1403,9 @@ class TaskWorkers:
         self._inboxes.pop(task_id, None)
         ran = bool(await self.store.list_turns(task_id, limit=1))
         if not ran:
-            # Stopped before it ever ran: the new turn carries the request too,
-            # after the lead of a chat's note, which stays first.
+            # Stopped before it ever ran: the new turn carries the request too.
             request = str(current.spec.get("objective") or current.title)
-            if text.startswith(NOTE_START):
-                text = f"{NOTE_START}\n{request}\n\n{text[len(NOTE_START) :].lstrip()}"
-            else:
-                text = f"{request}\n\n{text}"
+            text = f"{request}\n\n{text}"
         # Finish it's run is kept on the task, so a park and resume keeps it.
         finishing = finish_run([text], continued=True, ran_before=ran)
         record = await self.tasks.reopen(
@@ -2661,7 +2806,7 @@ class TaskWorkers:
                 policy = auto
             # A run its chat continued on its own never repeats a blocked step (#411).
             policy = await self._guard(
-                task_id, task_session.meta if task_session else None, policy
+                record, task_session.meta if task_session else None, policy
             )
             async with self._lock:
                 self._runners[task_id] = runner
@@ -2701,15 +2846,20 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
-                            if record.origin == "user_rule" or (
-                                task_session
-                                and (task_session.meta or {}).get("followup_guard")
+                            if (
+                                record.origin == "user_rule"
+                                or record.spec.get("handoff")
+                                or (
+                                    task_session
+                                    and (task_session.meta or {}).get("followup_guard")
+                                )
                             ):
-                                # Its chat continued it, or a saved message started
-                                # it again, not the person's own message: the reviews
-                                # still read the request, and no password in it is
-                                # given again (a saved message's handle was one
-                                # message's). A park and resume stays under this.
+                                # Its chat continued it, a saved message started it
+                                # again, or it goes on with work begun elsewhere
+                                # (#571), not the person's own message now: the
+                                # reviews still read the request, and no password in
+                                # it is given again (a handle was one run's). A park
+                                # and resume stays under this.
                                 words = spent(text if words is None else words)
                             # Only when set: a stand-in runner takes no words.
                             own: dict[str, Any] = (
@@ -3084,6 +3234,16 @@ class TaskWorkers:
         continued = bool(record.card) and not record.card.startswith(CARD_START)
         if continued and NOTE_START not in record.card:
             said.append(record.card)
+        # A fresh task that goes on with an ended one's job (#571): melo's note
+        # (Finish it, Continue) asks as the person's tap did; the chat's does not.
+        packet = record.spec.get("handoff")
+        if (
+            isinstance(packet, dict)
+            and packet.get("by") == "melo"
+            and packet.get("note")
+        ):
+            said.append(str(packet["note"]))
+            continued = True
         inbox = self._inboxes.get(task_id)
         said += inbox.read if inbox is not None else []
         asked += said

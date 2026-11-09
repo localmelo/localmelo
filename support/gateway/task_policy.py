@@ -29,7 +29,7 @@ import re
 import shutil
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, cast, get_args
 
 from localmelo.support.scheduler.model import Origin
@@ -120,6 +120,13 @@ class TaskSpec:
     ``repeats`` says the task is one run of a saved chore that repeats on a
     schedule: the posting review then asks before each post whatever the words
     say. Only trusted code sets it.
+    ``handoff`` is the packet of a task that goes on with work begun elsewhere
+    (#571): a chat's turn that handed its remaining work on, or an ended task
+    whose job a fresh task continues. Melo's own fields say where it comes
+    from (``from``, ``source``, ``turn``, ``key``, ``chain``), how that ended
+    and what its calls did (``ended``, ``done``); ``account``, ``remaining``
+    and ``note`` are words a model or melo wrote, which the task reads as data,
+    never as the person's (``handover.handoff_block``). Only trusted code sets it.
     """
 
     title: str
@@ -137,6 +144,7 @@ class TaskSpec:
     project_files: tuple[tuple[str, int, bool], ...] = ()
     project_skipped: tuple[str, ...] = ()
     repeats: bool = False
+    handoff: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
@@ -226,6 +234,8 @@ class TaskSpec:
             out["project_skipped"] = list(self.project_skipped)
         if self.repeats:
             out["repeats"] = True
+        if self.handoff:
+            out["handoff"] = dict(self.handoff)
         return out
 
 
