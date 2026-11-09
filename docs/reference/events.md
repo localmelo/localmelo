@@ -164,7 +164,7 @@ asyncio.run(main())
 | `step.started` | At the start of each planning step. | `step`, `attempt` |
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
-| `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
+| `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview`, `run_key` |
 | `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local` |
 | `notice` | When an attempt ends, the model gave an empty reply or one that is only unfinished thinking, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
@@ -290,8 +290,14 @@ too (see [Model calls](memory.md#model-calls)).
 
 - `step`, `call_id` and `name`: the step, the tool call's id and the tool.
 - `arguments`: the arguments as the model sent them.
-- `preview`: a one-line summary of the call, at most 200 characters; a
-  longer one keeps its first 197 characters and ends with `...`.
+- `preview`: a one-line summary of the call, at most 200 characters, with
+  secrets redacted before it is cut; a longer one keeps its first 197
+  characters and ends with `...`.
+- `run_key`: the key of the live call (32 hex characters: the tool, the folder
+  and the arguments as the model sent them, as `call_key` is a denial's),
+  whatever the store keeps of its arguments. When the call's result is
+  unknown, a task that goes on with the job asks the person before it runs the
+  call again by that key (#571). A call stored before this field has none.
 
 | Tool | Preview |
 |---|---|

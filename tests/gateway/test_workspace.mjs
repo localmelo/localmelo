@@ -5290,17 +5290,19 @@ test('Run as a task sends the message as a task; a control echo\'s Undo goes onc
   assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Undo'), null, 'An undone line offers no second Undo');
 });
 
-test('a suggestion and "Start this as a task?" are one tap; echoes arrive on the stream; levels show as P-codes', async () => {
+test('a suggestion is one tap, a stored "Start this as a task?" card only goes away; echoes arrive on the stream; levels show as P-codes', async () => {
   const echoes = [
     echoRow(60, {echo: 'suggest', action: 'stop', task_id: 't1', title: 'Slides', line: 'Suggested: stop Slides'}),
     echoRow(61, {echo: 'ask', text: 'which laptop?', turn_id: 'turn-1', line: 'Start this as a task?'}),
   ];
   const h = harness(mainRoutes({'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards: [], echoes}}));
   await h.run('init()');
-  assert.match(h.text('messages'), /Suggested: stop Slides.*Stop.*Start this as a task\?.*Start as a task.*Not now/);
+  assert.match(h.text('messages'), /Suggested: stop Slides.*Stop.*Start this as a task\?.*Not now/);
+  // A stored card starts nothing now (#571): a chat hands its own work on.
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Start as a task'), null);
   findNode(h.element('messages'), (node) => node.textContent === 'Not now').click();
   await settle();
-  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Start as a task'), null);
+  assert.equal(findNode(h.element('messages'), (node) => node.textContent === 'Not now'), null);
   h.stream().emit({id: 62, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'started', task_id: 't2', title: 'Fix CI', level: 1, line: 'Started: Fix CI · P1'}});
   assert.match(h.text('messages'), /Started: Fix CI\b(?!.*· P1).*P1/, 'The line drops its level; the chip says it');
   assert.equal(h.state().view.turns.length, 0, 'An echo is no turn');

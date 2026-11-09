@@ -79,7 +79,7 @@ class _Source:
     )
 
 
-def _browser_of(agent: object) -> BrowserToolProvider | None:
+def browser_of(agent: object) -> BrowserToolProvider | None:
     return next(
         (
             p
@@ -113,7 +113,7 @@ class BrowserCards:
         self._follow(task_id, agent, owner)
 
     def _follow(self, session_id: str, agent: object, owner: str | None) -> None:
-        provider = _browser_of(agent)
+        provider = browser_of(agent)
         old = self._sources.pop(session_id, None)
         if old is not None:
             _retire(old)

@@ -36,7 +36,9 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "duration_s",
             }
         ),
-        "tool.started": frozenset({"step", "call_id", "name", "arguments", "preview"}),
+        "tool.started": frozenset(
+            {"step", "call_id", "name", "arguments", "preview", "run_key"}
+        ),
         "tool.finished": frozenset(
             {
                 "step",
@@ -160,6 +162,8 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         # allowed_local, true only for a web_fetch call that read a test server
         # on this computer that the developer setting lists.
         "tool.finished": frozenset({"tool_asks", "allowed_local"}),
+        # The live call's key (#571): a call stored before it was kept has none.
+        "tool.started": frozenset({"run_key"}),
         "reflection": frozenset(
             {
                 "prefix",

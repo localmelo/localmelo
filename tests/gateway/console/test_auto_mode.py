@@ -25,6 +25,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.auto_blocks import blocked_steps, go_ahead_text
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
@@ -674,6 +675,61 @@ async def test_a_task_made_in_auto_runs_in_auto_and_lists_its_blocks(
             409,
             "already_allowed",
         )
+
+
+@pytest.mark.asyncio
+async def test_allow_once_on_a_chats_ended_task_goes_on_in_a_fresh_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker a chat started runs once (#571): the allowed step runs in a fresh task."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plans = [
+        step(KEYS),
+        _answer("It needs that step.\nEnding: blocked: may it read the key?"),
+        step(KEYS, "call_2"),
+        _answer("Deleted."),
+    ]
+    async with auto_console(tmp_path, plans, monkeypatch=monkeypatch) as (
+        console,
+        client,
+        ran,
+        _llm,
+    ):
+        folder = tmp_path / "ws"
+        folder.mkdir()
+        assert console.main_id is not None
+        await console.store.update_session(
+            console.main_id, meta_update={"approvals": "auto"}
+        )
+        spec = TaskSpec.from_payload({"objective": "tidy the notes"})
+        task, _ = await console.workers.create_spec(
+            dataclasses.replace(spec, workspace=str(folder)), chat_started=True
+        )
+        task_id = task["task_id"]
+        deadline = time.monotonic() + TIMEOUT_S
+        while (await console.workers.get(task_id))["state"] not in ("done", "failed"):
+            assert time.monotonic() < deadline, "the task did not finish"
+            await asyncio.sleep(0.02)
+        [blocked] = (await console.workers.get(task_id))["blocked"]
+        turns = await console.store.list_turns(task_id)
+        response = await client.post(
+            f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"
+        )
+        assert response.status_code == 202, response.text
+        fresh = response.json()["task"]
+        assert response.json()["message"] == "successor"
+        assert fresh["task_id"] != task_id
+        assert set(fresh["allowances"]) == {blocked["step_key"]}
+        deadline = time.monotonic() + TIMEOUT_S
+        while not ran.codes or (await console.workers.get(fresh["task_id"]))[
+            "state"
+        ] not in ("done", "failed"):
+            assert time.monotonic() < deadline, "the fresh task did not go ahead"
+            await asyncio.sleep(0.02)
+        assert ran.codes == [KEYS], "the allowed step ran once, in the fresh task"
+        # The ended task was never reopened, and keeps no policy.
+        assert await console.store.list_turns(task_id) == turns
+        assert task_id not in console.workers._auto
 
 
 @pytest.mark.asyncio
