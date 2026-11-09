@@ -93,6 +93,17 @@ async function change(h, id, value, event = 'input') {
   await node.emit(event);
 }
 
+// The listing route of the form's local server: Settings asks for it on its own (`GET /models`), with the model it shows.
+const LISTED = (model = 'old', url = 'http%3A%2F%2Flocalhost%2Fv1', backend = 'mlc') => `GET /models?backend=${backend}&url=${url}&model=${model}`;
+const listing = (chat, check = {state: 'ok', model: '', use: '', line: ''}) => ({
+  models: [...chat, 'embed-small'], chat_models: chat, embedding_models: ['embed-small'], suggested_embedding: 'embed-small', check,
+});
+const pickValues = (h) => h.element('s-model-pick').children.map((option) => option.value);
+const withModel = (model) => {
+  const base = fixture();
+  return {...base, sections: {...base.sections, mlc: {...base.sections.mlc, chat_model: model}}};
+};
+
 test('the sections are a tablist: a click or the arrow keys choose one, and only its panel shows', async () => {
   const h = harness({'GET /settings': fixture()});
   await h.open();
@@ -139,14 +150,14 @@ test('load, discover, save and notify with revision and only writable selected f
   const value = fixture();
   const h = harness({
     'GET /settings': value,
-    'GET /models?backend=mlc&url=http%3A%2F%2Flocalhost%2Fv1': {models: ['first', 'second']},
+    [LISTED()]: listing(['first', 'second']),
     'PUT /settings': {...value, revision: 'rev2'},
   });
   await h.open();
   assert.equal(h.element('settings-dialog').open, true);
   assert.equal(h.element('s-chat-model').value, 'old');
-  await h.element('discover-btn').emit('click');
-  assert.deepEqual(h.element('s-model-options').children.map((option) => option.value), ['first', 'second']);
+  await flush();
+  assert.deepEqual(pickValues(h), ['first', 'second', ''], 'the server was asked without a click');
   await change(h, 's-chat-model', 'manual-model');
   await change(h, 's-embed-backend', 'vllm', 'change');
   await change(h, 's-embed-model', 'manual-embedding');
@@ -161,6 +172,116 @@ test('load, discover, save and notify with revision and only writable selected f
   assert.equal(h.element('settings-saved-text').textContent, 'Saved: the connection.');
   assert.equal(h.element('settings-undo').hidden, false);
   assert.equal(h.element('s-editor').hidden, true, 'the form closes on a save');
+});
+
+test('Settings lists the chat models the server offers when it opens, and Other is for typing', async () => {
+  const h = harness({'GET /settings': withModel('second'), [LISTED('second')]: listing(['first', 'second'])});
+  await h.open();
+  await flush();
+  assert.deepEqual(pickValues(h), ['first', 'second', '']);
+  assert.equal(h.element('s-model-pick').children.at(-1).textContent, 'Other…');
+  assert.equal(h.element('s-model-pick').value, 'second');
+  assert.equal(h.element('s-model-pick').hidden, false);
+  assert.equal(h.element('s-chat-model').hidden, true, 'a listed model needs no typing');
+  assert.equal(h.element('discover-status').textContent, 'Choose the chat model from the list, or pick Other to type a name.');
+  assert.deepEqual(h.element('s-model-options').children, [], 'embedding models are not offered as the chat model');
+});
+
+test('a model is picked from the list, and Other brings the typing field back', async () => {
+  const value = withModel('second');
+  const h = harness({'GET /settings': value, [LISTED('second')]: listing(['first', 'second']), 'PUT /settings': value});
+  await h.open();
+  await flush();
+  await change(h, 's-model-pick', 'first', 'change');
+  assert.equal(h.element('s-chat-model').value, 'first');
+  assert.equal(h.element('s-chat-model').hidden, true);
+  await change(h, 's-model-pick', '', 'change');
+  assert.equal(h.element('s-chat-model').hidden, false);
+  assert.equal(document.activeElement, h.element('s-chat-model'));
+  await change(h, 's-chat-model', 'typed-name');
+  await h.element('create-btn').emit('click');
+  assert.equal(h.puts().at(-1).options.body.sections.mlc.chat_model, 'typed-name');
+});
+
+test('a model the server no longer has is replaced by its only chat model, and one line says so', async () => {
+  const line = '“old” is not on the server, so melo uses “only”, the only chat model it offers.';
+  const value = fixture();
+  const h = harness({
+    'GET /settings': value,
+    [LISTED()]: listing(['only'], {state: 'switch', model: 'old', use: 'only', line}),
+    'PUT /settings': value,
+  });
+  await h.open();
+  await flush();
+  assert.equal(h.element('s-model-pick').value, 'only');
+  assert.equal(h.element('s-chat-model').value, 'only');
+  assert.equal(h.element('discover-status').textContent, line);
+  await h.element('create-btn').emit('click');
+  assert.equal(h.puts().at(-1).options.body.sections.mlc.chat_model, 'only', 'Save keeps what melo uses');
+});
+
+test('with several chat models the missing one stays in the typing field and the line points to the list', async () => {
+  const line = '“old” is not on the server. Pick one of the 2 chat models it offers from the list.';
+  const h = harness({
+    'GET /settings': fixture(),
+    [LISTED()]: listing(['a', 'b'], {state: 'missing', model: 'old', use: '', line}),
+  });
+  await h.open();
+  await flush();
+  assert.deepEqual(pickValues(h), ['a', 'b', '']);
+  assert.equal(h.element('s-model-pick').value, '', 'nothing is chosen for the person');
+  assert.equal(h.element('s-chat-model').hidden, false);
+  assert.equal(h.element('s-chat-model').value, 'old');
+  assert.equal(h.element('discover-status').textContent, line);
+});
+
+test('a new server address lists the models of that server once the address is entered', async () => {
+  const other = 'http%3A%2F%2Fother%2Fv1';
+  const h = harness({
+    'GET /settings': fixture(),
+    [LISTED()]: listing(['a']),
+    [LISTED('old', other)]: listing(['b', 'c']),
+  });
+  await h.open();
+  await flush();
+  assert.deepEqual(pickValues(h), ['a', '']);
+  await change(h, 's-chat-url', 'http://other/v1');
+  assert.deepEqual(pickValues(h), [], 'the list of the old server is dropped while the address is typed');
+  assert.equal(h.element('s-chat-model').hidden, false);
+  await h.element('s-chat-url').emit('change');
+  await flush();
+  assert.deepEqual(pickValues(h), ['b', 'c', '']);
+  const asked = h.calls.filter((call) => call.path.startsWith('/models'));
+  assert.equal(asked.length, 2);
+  await h.element('discover-btn').emit('click');
+  assert.equal(h.calls.filter((call) => call.path.startsWith('/models')).length, 3, 'the button lists again');
+});
+
+test('opening the form with Change lists the models again, so the list is there when the form shows', async () => {
+  const h = harness({'GET /settings': fixture(), [LISTED()]: listing(['a', 'b'])});
+  await h.open();
+  await flush();
+  assert.equal(h.element('s-editor').hidden, true);
+  await h.element('s-change').emit('click');
+  await flush();
+  assert.equal(h.element('s-editor').hidden, false);
+  assert.deepEqual(pickValues(h), ['a', 'b', '']);
+  assert.equal(h.calls.filter((call) => call.path.startsWith('/models')).length, 2, 'the form asked when it opened');
+});
+
+test('a hosted service is never asked for a list of models', async () => {
+  const h = harness({
+    'GET /settings': fixture(),
+    [LISTED()]: listing(['a']),
+    'GET /settings/key-status?preset=openai': {keychain: 'missing', env_set: false},
+  });
+  await h.open();
+  await flush();
+  await change(h, 's-adapter', 'openai', 'change');
+  await flush();
+  assert.equal(h.element('s-model-pick').hidden, true);
+  assert.equal(h.element('s-chat-model').hidden, false);
+  assert.equal(h.calls.filter((call) => call.path.startsWith('/models')).length, 1, 'only the local server was asked');
 });
 
 test('unconfigured defaults, cloud manual model and safe key status', async () => {
@@ -234,7 +355,7 @@ test('load and discovery failures remain recoverable without losing typed model'
   let loads = 0;
   const h = harness({
     'GET /settings': () => { if (++loads === 1) throw new Error('offline'); return fixture(); },
-    'GET /models?backend=mlc&url=http%3A%2F%2Flocalhost%2Fv1': () => { throw new Error('server unavailable'); },
+    [LISTED('typed')]: () => { throw new Error('server unavailable'); },
   });
   await h.open();
   assert.equal(h.element('create-btn').disabled, true);
@@ -244,6 +365,8 @@ test('load and discovery failures remain recoverable without losing typed model'
   await h.element('discover-btn').emit('click');
   assert.equal(h.element('discover-status').textContent, 'server unavailable');
   assert.equal(h.element('s-chat-model').value, 'typed');
+  assert.equal(h.element('s-chat-model').hidden, false, 'with no list the name is typed');
+  assert.equal(h.element('s-model-pick').hidden, true);
 });
 
 test('stale discovery and key-status responses cannot overwrite current backend', async () => {
@@ -251,18 +374,17 @@ test('stale discovery and key-status responses cannot overwrite current backend'
   const key = deferred();
   const h = harness({
     'GET /settings': fixture(),
-    'GET /models?backend=mlc&url=http%3A%2F%2Flocalhost%2Fv1': () => models.promise,
+    [LISTED()]: () => models.promise,
     'GET /settings/key-status?preset=openai': () => key.promise,
   });
   await h.open();
-  const pendingModels = h.element('discover-btn').emit('click');
   await change(h, 's-adapter', 'openai', 'change');
   await change(h, 's-adapter', 'vllm', 'change');
-  models.resolve({models: ['stale']});
+  models.resolve(listing(['stale']));
   key.resolve({keychain: 'saved'});
-  await pendingModels;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(h.element('s-model-options').children, []);
+  await flush();
+  assert.deepEqual(h.element('s-model-pick').children, []);
+  assert.equal(h.element('s-model-pick').hidden, true);
   assert.equal(h.element('s-key-status').textContent, '');
   assert.equal(h.element('s-key-env-status').textContent, '');
   assert.equal(h.element('s-chat-url').value, 'http://vllm/v1');
@@ -411,15 +533,16 @@ test('developer mode lists the Developer section, and the layout is chosen befor
 const NAMES = ['settings-description', 's-adapter-label', 's-chat-url-label', 's-chat-url-hint'];
 
 test('default mode names the server and its address in plain words', async () => {
-  const h = harness({'GET /settings': fixture({mode: 'default'})});
+  const h = harness({'GET /settings': fixture({mode: 'default'}), [LISTED()]: listing(['a'])});
   await h.open();
+  await flush();
   assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
     'The models Melo runs on, and the server that serves them. Changes apply to your next message.',
     'Model server',
     'Server address',
     'The address your model server prints when it starts, such as http://127.0.0.1:8000/v1.',
   ]);
-  assert.equal(h.element('discover-status').textContent, 'Lists the models this server offers.');
+  assert.equal(h.element('discover-status').textContent, 'Choose the chat model from the list, or pick Other to type a name.');
   await change(h, 's-chat-url', '');
   await h.element('discover-btn').emit('click');
   assert.equal(h.element('discover-status').textContent, 'Enter a server address before listing its models.');
@@ -428,14 +551,16 @@ test('default mode names the server and its address in plain words', async () =>
 });
 
 test('developer mode keeps the technical words of the dialog', async () => {
-  const h = harness({'GET /settings': fixture({mode: 'developer'})}, new Map(), () => true);
+  const h = harness({'GET /settings': fixture({mode: 'developer'}), [LISTED()]: listing(['a'])}, new Map(), () => true);
   await h.open();
+  await flush();
   assert.deepEqual(NAMES.map((id) => h.element(id).textContent), [
     'Settings apply to subsequent turns. Current turns finish with their existing connection.',
     'Chat backend',
     'Chat API URL',
     "Use your model server's API address. oMLX supports the OpenAI-compatible adapter.",
   ]);
+  await change(h, 's-chat-url', 'http://localhost:9/v1');
   assert.equal(h.element('discover-status').textContent, 'Discovery lists models without starting a chat.');
   await change(h, 's-chat-url', '');
   await h.element('discover-btn').emit('click');
@@ -453,15 +578,17 @@ test('a server that lists an embedding model offers "Remember across chats with 
   const value = fixture({chat_backend: 'vllm', across_chats: true, sections: {...fixture().sections, vllm: {chat_url: 'http://srv/v1', chat_model: 'chat-8b', embedding_url: '', embedding_model: ''}}});
   const h = harness({
     'GET /settings': value,
-    'GET /models?backend=vllm&url=http%3A%2F%2Fsrv%2Fv1': {models: ['chat-8b', 'Qwen3-Embedding-0.6B'], embedding_models: ['Qwen3-Embedding-0.6B'], suggested_embedding: 'Qwen3-Embedding-0.6B'},
+    [LISTED('chat-8b', 'http%3A%2F%2Fsrv%2Fv1', 'vllm')]: {
+      models: ['chat-8b', 'Qwen3-Embedding-0.6B'], chat_models: ['chat-8b'], embedding_models: ['Qwen3-Embedding-0.6B'],
+      suggested_embedding: 'Qwen3-Embedding-0.6B', check: {state: 'ok', model: 'chat-8b', use: '', line: ''},
+    },
     'PUT /settings': {...value, revision: 'rev2'},
   });
   await h.open();
   assert.equal(h.element('s-across-chats').checked, true);
-  assert.equal(h.element('s-embed-offer').hidden, true, 'no offer before the server is asked');
+  await flush();
+  assert.equal(h.element('s-embed-offer').hidden, false, 'the server was asked on its own');
   assert.match(h.element('s-memory-hint').textContent, /by words only/);
-  await h.element('discover-btn').emit('click');
-  assert.equal(h.element('s-embed-offer').hidden, false);
   assert.equal(h.element('s-embed-offer-label').textContent, 'Remember across chats with Qwen3-Embedding-0.6B?');
   assert.equal(h.element('s-embed-use').checked, false, 'the offer is an offer: nothing is chosen for the person');
   h.element('s-embed-use').checked = true;

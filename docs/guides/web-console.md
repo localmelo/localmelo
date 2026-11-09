@@ -449,7 +449,7 @@ its handle closes it (Esc first leaves a task shown in it). The [macOS app](maco
 
 - The switch **Remember across chats** turns memory on or off, and a line under it says how melo searches: `Searching
   by meaning with Qwen3-Embedding-0.6B, and by words.` or `Searching by words only.` Settings asks `Remember across chats
-  with <model>?` once **Discover models** finds an embedding model on your server.
+  with <model>?` once the model list finds an embedding model on your server.
 - The notes come newest first, each with its topic (About you, Preferences, People, Projects, Decisions) and where it
   came from: `From chat “Planning”, Oct 30`, or `From a deleted chat, Oct 30`, since a note outlives its chat. The search
   box filters them.
@@ -725,7 +725,13 @@ save carries the revision it read, so a change made elsewhere meanwhile asks you
 - **Model server**: the chat model and the embedding model, each with its state
   (`Connected · <model> · checked 12 s ago`, `Not reachable`, `Off`), the server's
   address, **Test connection** (it never shows a key) and **Change…**, the form that picks
-  the server, its address and the model (**Discover models** lists them). The form is the
+  the server, its address and the model. The form asks the server which models it offers
+  by itself, when Settings opens, when the form opens and when you enter the address, and
+  the chat model is a list of its chat models (embedding models are kept apart; **Other**
+  lets you type a name); **Refresh** asks again. A saved model the server no longer has is
+  replaced by the one chat model it offers, with a line that says so, and **Save connection**
+  keeps it; when it offers several, the line asks you to pick one from the list, and a chat
+  that hit the missing model names it and points to the list. The form is the
   one change saved with a button, **Save connection**; **Cancel** puts the saved one back.
   Under **Hosted services** the list offers OpenAI, Google Gemini, Anthropic, NVIDIA,
   DeepSeek and Other (OpenAI format): the form then has an **API key** field with

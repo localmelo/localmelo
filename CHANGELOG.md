@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The chat model is picked from what the server offers. Settings asks the model server which models it has by itself,
+  when it opens, when the form opens and when you enter the address, and the chat model is a list of its chat models
+  (embedding models are kept apart; **Other** types a name); **Refresh** asks again. `/model` lists the same models and its
+  numbers count the rows it shows. When the saved model is no longer on the server and the server offers exactly one chat
+  model, melo uses that one and says so in one line, in Settings and in the chat that hit it; Save keeps it. With several,
+  the chat names the missing model and points to the list. `GET /api/models` adds `chat_models` and `check`. (#582)
 - Developer only: `recall_source = "auto"` stays on chat turns until the encoder has read nearly all of them, then reads
   memory items. Part of #428.
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs

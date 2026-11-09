@@ -36,7 +36,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.schema import RunResult
 from localmelo.support import config
-from localmelo.support.backends import discovery
+from localmelo.support.backends import discovery, model_offer
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.backends.openai_family import USUAL_URL
 from localmelo.support.cli import browsing, commands, hanging, serve_model, usershell
@@ -132,17 +132,24 @@ def _toggle(arguments: str, current: bool) -> bool | None:
     return None
 
 
+def _shown_models(models: list[str]) -> list[str]:
+    """The models ``/model`` lists, in its order: Settings' chat models, or all when none is one."""
+    return list(model_offer.offer(models).chat) or models
+
+
 async def _model_rows(url: str, models: list[str]) -> tuple[list[ModelRow], str | None]:
     """The rows of a server's model list, and the model the list starts on.
 
-    The chat models only, when there are any; a model is marked when the server
-    says it is in memory (asked only between several chat models). The start is
-    what :func:`discovery.pick_model` allows, None when nothing is known loaded.
+    The chat models only, when there are any (:func:`_shown_models`); a model is
+    marked when the server says it is in memory (asked only between several chat
+    models). The start is what :func:`discovery.pick_model` allows, None when
+    nothing is known loaded.
     """
-    kinds = {model: discovery.model_kind(model) for model in models}
-    chat = [model for model in models if kinds[model] == "chat"]
-    loaded = await discovery.loaded_among(url, chat)
-    shown = chat or models
+    shown = _shown_models(models)
+    kinds = {model: discovery.model_kind(model) for model in shown}
+    loaded = await discovery.loaded_among(
+        url, [model for model in shown if kinds[model] == "chat"]
+    )
     rows = [ModelRow(model, model in loaded.ids, kinds[model]) for model in shown]
     return rows, discovery.pick_model(shown, loaded)
 
@@ -1900,15 +1907,16 @@ class CliSession:
                     )
                 )
                 return
-            if not 1 <= int(name) <= len(self.models):
+            shown = _shown_models(self.models)
+            if not 1 <= int(name) <= len(shown):
                 self.out.print(
                     self._text(
-                        f"✗ Type a number from 1 to {len(self.models)}, or a model id.",
+                        f"✗ Type a number from 1 to {len(shown)}, or a model id.",
                         style="error",
                     )
                 )
                 return
-            name = self.models[int(name) - 1]
+            name = shown[int(name) - 1]
         await self._switch(name, url=None)
 
     async def _pick_current_server_model(self) -> None:

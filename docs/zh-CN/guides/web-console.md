@@ -276,7 +276,7 @@ melo 回答时，消息框仍然可用。它的提示是 `Add to what melo is do
 
 **Memory** 列出 melo 记得的关于你的内容：它根据你输入的话保存的笔记（见[跨对话记忆](../concepts/memory.md#memory-across-chats)）。
 
-- 开关 **Remember across chats** 打开或关闭跨对话记忆，下面一行说明 melo 怎样搜索：`Searching by meaning with Qwen3-Embedding-0.6B, and by words.` 或 `Searching by words only.`。设置里点 **Discover models** 在你的服务器上找到嵌入模型后，会问 `Remember across chats with <model>?`。
+- 开关 **Remember across chats** 打开或关闭跨对话记忆，下面一行说明 melo 怎样搜索：`Searching by meaning with Qwen3-Embedding-0.6B, and by words.` 或 `Searching by words only.`。设置里的模型列表在你的服务器上找到嵌入模型后，会问 `Remember across chats with <model>?`。
 - 笔记按时间从新到旧排列，每条带主题（About you、Preferences、People、Projects、Decisions）和来源：`From chat “Planning”, Oct 30`，对话被删除后是 `From a deleted chat, Oct 30`，因为笔记比对话活得久。搜索框可以筛选。
 - **Edit** 打开笔记供改写；**Save** 保存新文字（看起来像密码或密钥的文字会被拒绝并说明原因）。**Delete** 会问 `Forget this note?`，选项是 **Keep it** 和 **Forget it**。
 - **Forget everything…** 在删除之前说明将删除什么：`This removes 12 notes and melo's search index of 48 chat turns. Your chats stay. It cannot be undone.` **Keep everything** 排在第一位。开发者模式下，**Rebuild search index** 会重新读取对话。
@@ -410,7 +410,7 @@ melo 在后台的 Chrome 中浏览时（见[用 melo 浏览网页](browsing.md#w
 
 侧边栏的 **Settings**（或 macOS app 菜单里的 **Settings…**）按主题分成几个分区。每项更改立即保存，并在底部显示 `Saved: …` 和 **Undo**；保存时带上读取时的修订版本，所以如果文件在此期间被别处改过，会提示你重新加载。
 
-- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型（**Discover models** 会列出模型）；这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。在 **Hosted services** 下，列表提供 OpenAI、Google Gemini、Anthropic、NVIDIA、DeepSeek 和 Other (OpenAI format)：表单里会有带 **Save key** 的 **API key** 字段（密钥保存在你 Mac 的钥匙串里，只显示为 **Saved in the keychain**，并带有 **Replace** 和 **Remove**）；对有思考开关的服务，还有 **Let the model think before it answers**。这时 **Test connection** 会列出服务的模型，并试一条带工具的简短对话。见[云端模型](hosted-models.md)。
+- **Model server**：聊天模型和嵌入模型各自的状态（`Connected · <model> · checked 12 s ago`、`Not reachable`、`Off`）、服务器地址、**Test connection**（绝不显示密钥）和 **Change…**。**Change…** 打开的表单用来选择服务器、地址和模型。表单会自己向服务器询问它提供哪些模型：打开设置时、打开表单时、输入地址后；对话模型是它的对话模型列表（嵌入模型单独放，选 **Other** 可以手动输入名称），**Refresh** 再问一次。已保存的模型如果服务器上没有了，而服务器只提供一个对话模型，就换成那一个，并用一行话说明，**Save connection** 会保存它；如果提供好几个，这一行请你从列表里选一个，碰到缺失模型的对话会说出它的名字并指向列表。这是唯一用按钮保存的更改，即 **Save connection**，**Cancel** 恢复已保存的内容。在 **Hosted services** 下，列表提供 OpenAI、Google Gemini、Anthropic、NVIDIA、DeepSeek 和 Other (OpenAI format)：表单里会有带 **Save key** 的 **API key** 字段（密钥保存在你 Mac 的钥匙串里，只显示为 **Saved in the keychain**，并带有 **Replace** 和 **Remove**）；对有思考开关的服务，还有 **Let the model think before it answers**。这时 **Test connection** 会列出服务的模型，并试一条带工具的简短对话。见[云端模型](hosted-models.md)。
 - **Memory**：**Remember across chats**、Melo 查找笔记的方式（**By words and meaning** 或 **By words only**；开发者模式再加两种，并显示键 `memory.retriever`），以及打开笔记本身的 **Open Memory**。
 - **Chats and folders**：新对话的默认文件夹（**Change…** 在 app 里打开系统的文件夹面板，在浏览器里显示路径输入框）、新对话的开始方式（**New chats start in**）、**Read web pages**（默认开启；让对话和任务用 [`web_fetch`](../reference/tools.md#reading-a-public-web-page) 读取公开网页）、**Web search**（默认关闭；让对话和任务用 [`web_search`](../reference/tools.md#searching-the-web) 查资料，搜索用的关键词会离开这台电脑）、**Reflect when stuck after many steps**（默认开启；任务做了 50 步仍没完成时，先停下来反思一次再继续，这会多花一个模型请求；关闭后一直做到 100 步；键是 `agent.reflection`）、**melo 可以读取的其他文件夹**（你选了 **总是允许这个文件夹** 的文件夹，每个都有 **移除**；见[工作区之外的文件夹](tools-mcp.md#folders-outside-the-workspace)），以及最近用过的文件夹，每个都有 **Make default**。
 - **授权**：你允许过的事，分两组，**所有对话** 和 **单个对话**（见[授权](#permissions)）。

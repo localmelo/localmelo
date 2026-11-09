@@ -519,6 +519,10 @@ class OpenAICompatLLM(BaseLLMProvider):
             transport=transport,
             follow_redirects=False,
         )
+        # What a refused model asks the server's own listing through (see
+        # :meth:`_missing_model`); a service that needs a key has none to ask.
+        self._listing_transport = transport
+        self._lists_models = not api_key
 
     def _payload(
         self,
@@ -583,6 +587,39 @@ class OpenAICompatLLM(BaseLLMProvider):
         self.model = exc.served
         return True
 
+    async def _missing_model(self, exc: ProviderError) -> None:
+        """A 404 for the chat model: when the server's listing shows what to do, say so.
+
+        With exactly one chat model on offer, this provider asks for it from
+        now on and raises a retryable error whose text, and ``notice``, is the one
+        line that says so
+        (:meth:`~localmelo.support.backends.model_offer.ModelCheck.line`), so a
+        run asks again and shows that line alone. With several, or when the listing
+        cannot be read, the refusal stands. A service that needs a key is never
+        asked: it has no listing of local models to offer.
+        """
+        if not self._lists_models:
+            return
+        from localmelo.support.backends import discovery, model_offer
+
+        try:
+            models = await discovery.list_models(
+                discovery.OPENAI_COMPATIBLE,
+                str(self._http.base_url),
+                timeout_s=model_offer.CHECK_TIMEOUT_S,
+                transport=self._listing_transport,
+            )
+        except discovery.DiscoveryError:
+            return
+        check = model_offer.check_chat_model(self.model, models)
+        if check.state != "switch":
+            return
+        self.model = check.use
+        line = check.line()
+        raise ProviderError(
+            line, status_code=exc.status_code, retryable=True, notice=line
+        ) from exc
+
     def _asking(self) -> Callable[[ProviderError], Awaitable[bool]]:
         """For one request: whether to ask again after an error, once any wait is over.
 
@@ -590,8 +627,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         the time the server names, until the switch ends. Only a server that
         never ends it reaches :data:`~localmelo.support.melo_serve.LOAD_BOUND_S`:
         then the error stands, and is no longer one to retry. A model switched
-        meanwhile is followed once (:meth:`_follow`). Stop cancels the task,
-        which ends the wait at once.
+        meanwhile is followed once (:meth:`_follow`). A 404 for a model the
+        server does not have asks its listing (:meth:`_missing_model`). Stop
+        cancels the task, which ends the wait at once.
         """
         deadline: float | None = None
         followed = False
@@ -609,6 +647,8 @@ class OpenAICompatLLM(BaseLLMProvider):
                 await asyncio.sleep(min(wait, deadline - now))
                 return True
             if followed or not self._follow(exc):
+                if exc.status_code == 404 and not exc.served:
+                    await self._missing_model(exc)
                 return False
             followed = True
             return True

@@ -81,6 +81,10 @@ class ProviderError(Exception):
     ``switching_s`` is set while the server is switching its model (a 503
     ``switching``): the seconds it says to wait, 0.0 when it names none, and
     ``None`` for any other error. A provider waits that out rather than fail.
+    ``notice`` is a sentence for the person when the provider has already put
+    the cause right and the request is worth sending again (a model the server
+    no longer has, swapped for the one it offers): the retry notice shows it
+    alone, in place of "Model request failed".
     """
 
     def __init__(
@@ -93,6 +97,7 @@ class ProviderError(Exception):
         detail: str = "",
         served: str = "",
         switching_s: float | None = None,
+        notice: str = "",
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -101,6 +106,7 @@ class ProviderError(Exception):
         self.detail = detail
         self.served = served
         self.switching_s = switching_s
+        self.notice = notice
 
 
 @dataclass(frozen=True)

@@ -44,6 +44,7 @@ from localmelo.support import (
 from localmelo.support import settings as setting_keys
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryError
+from localmelo.support.backends.model_offer import check_chat_model, offer
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.backends.registry import get_backend, in_use
 from localmelo.support.browser import chrome, desktop
@@ -52,7 +53,7 @@ from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
 from localmelo.support.gateway.console.running import running_status
 from localmelo.support.gateway.guard import BODY_BYTES_LIMIT
-from localmelo.support.gateway.i18n import t
+from localmelo.support.gateway.i18n import current, t
 from localmelo.support.onboard_probe import ProbeError
 from localmelo.support.option_tiers import (
     ADVANCED,
@@ -1005,12 +1006,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/models")
     async def api_models(
-        backend: str | None = None, url: str | None = None
+        backend: str | None = None, url: str | None = None, model: str | None = None
     ) -> JSONResponse:
         if backend is not None:
             _check_single_line("backend", backend)
         if url is not None:
             _check_single_line("url", url)
+        if model is not None:
+            _check_single_line("model", model)
 
         saved = config.load() if os.path.isfile(config.config_path()) else console.cfg
         resolved_backend = backend if backend else saved.chat_backend
@@ -1056,11 +1059,22 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "backend_unreachable",
                 t("errors.noModelsAt", url=shown_url),
             )
-        embedding = discovery.embedding_models(models)
+        offered = offer(models)
+        if model is None:  # the saved chat model of that backend
+            sec = getattr(saved, resolved_backend, None)
+            model = getattr(sec, "chat_model", "") if sec is not None else ""
+        check = check_chat_model(model, models)
         return JSONResponse(
             content={
                 "models": models,
-                "embedding_models": embedding,
-                "suggested_embedding": discovery.recommend_embedding(embedding),
+                "chat_models": list(offered.chat),
+                "embedding_models": list(offered.embedding),
+                "suggested_embedding": discovery.recommend_embedding(offered.embedding),
+                "check": {
+                    "state": check.state,
+                    "model": check.model,
+                    "use": check.use,
+                    "line": check.line(current()),
+                },
             }
         )
