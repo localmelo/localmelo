@@ -395,10 +395,11 @@
                 </div>
                 <datalist id="s-model-options"></datalist>
                 <div class="field">
-                  <label for="s-chat-model" data-i18n="html.chatModel">Chat model</label>
+                  <label for="s-chat-model" id="s-chat-model-label" data-i18n="html.chatModel">Chat model</label>
                   <div class="st-inline">
+                    <select id="s-model-pick" aria-describedby="discover-status" hidden></select>
                     <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" aria-describedby="discover-status" />
-                    <button type="button" class="outline-button" id="discover-btn" data-i18n="html.discoverBtn">Discover models</button>
+                    <button type="button" class="outline-button" id="discover-btn" data-i18n="html.discoverBtn">Refresh</button>
                   </div>
                   <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
                 </div>

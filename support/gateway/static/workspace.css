@@ -2511,7 +2511,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-secret .st-state { margin: 0; }
 #s-address-text { margin: 0 0 var(--space-4); overflow-wrap: anywhere; }
 .st-inline { align-items: center; }
-.st-inline input { flex: 1; min-width: 0; }
+.st-inline input, .st-inline select { flex: 1; min-width: 0; }
 .st-inline button { flex: none; min-height: 38px; }
 .st-status:empty { display: none; }
 .st-status { margin: 0 0 var(--space-4); }

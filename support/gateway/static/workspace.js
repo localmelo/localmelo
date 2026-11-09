@@ -1777,7 +1777,7 @@ function failureHint(turn, can, error) {
       if (error === PICTURES_REFUSED) return "";
       // A person reads what went wrong as a sentence; the server's own text is under Details.
       const kind = developerMode ? "" : httpFailure(turn.status, error);
-      if (kind) return t(`failure.http.${kind}`);
+      if (kind) return t(`failure.http.${kind}`, { model: S.health?.model?.name || t("failure.thisModel") });
       if (serverUnreachable(turn.status, error)) {
         if (S.health?.model?.backend && !localBackend()) return t("failure.network");
         const where = serverAddress(unreachableUrl(error) || S.health?.model_server?.url_label || "");

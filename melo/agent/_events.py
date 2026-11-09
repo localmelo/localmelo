@@ -570,7 +570,7 @@ class _Emitter:
         """
         if self._sink is None:
             return
-        message = (
+        message = error.notice or (
             f"Model request failed; retrying in {delay:g} s: "
             f"{str(error)[:RETRY_ERROR_CHARS]}"
         )

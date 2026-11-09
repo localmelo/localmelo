@@ -46,6 +46,8 @@ SERVE = ROOT / "support/melo_serve.py"
 LISTING = ROOT / "support/server_setup/listing.py"
 # How to start a model server by hand: it names the keys of its notes.
 DISCOVERY = ROOT / "support/backends/discovery.py"
+# The one line that says what to do about a chat model the server lacks.
+MODEL_OFFER = ROOT / "support/backends/model_offer.py"
 # The terminal's main chat, which writes the catalog's English (``t_in("en", …)``).
 TERMINAL = ROOT / "support/cli/main_chat.py"
 APP = ROOT / "macos/LocalMeloApp"
@@ -235,6 +237,11 @@ def test_a_key_falls_back_to_english_then_to_itself() -> None:
     assert t("running.more", n=2) == "and 2 more"
 
 
+def test_a_chat_that_hit_a_missing_model_names_it_in_both_languages() -> None:
+    for language in ("en", "zh-Hans"):
+        assert "qwen-old" in t_in(language, "failure.http.missing", model="qwen-old")
+
+
 def test_accept_language_is_read_by_quality() -> None:
     assert accept_languages("en-US;q=0.5, zh-CN, *;q=0.1, fr;q=0") == ["zh-CN", "en-US"]
     assert accept_languages("de;q=oops, en") == ["en"]
@@ -316,6 +323,7 @@ def named_keys() -> tuple[set[str], set[str], set[str]]:
         HOSTED_CHECK,
         LISTING,
         DISCOVERY,
+        MODEL_OFFER,
     ]:
         quoted |= set(_QUOTED_KEY.findall(path.read_text("utf-8")))
     built = {key for key in found if "{" in key or "$" in key}
