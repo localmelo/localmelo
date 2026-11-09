@@ -1256,7 +1256,8 @@ class TaskWorkers:
         task_spec = replace(
             TaskSpec.from_payload({"objective": objective, "title": record.title}),
             workspace=(session.workspace if session is not None else "") or "",
-            level=record.level if level is None else level,
+            # A task paused at P5 when it ended goes on at P2, as a continue did.
+            level=(record.level if record.level < 5 else 2) if level is None else level,
             reason=reason or record.reason,
             user_words=words[:MAX_OBJECTIVE_CHARS],
             chat_turns=str(spec.get("chat_turns") or ""),

@@ -94,21 +94,23 @@ def _step(*calls: tuple[str, dict[str, Any]]) -> Message:
     )
 
 
-async def _run(replies: list[Message]) -> tuple[Any, FakeLLM, Tools]:
+async def _run(
+    replies: list[Message], query: str = "do the work", **options: Any
+) -> tuple[Any, FakeLLM, Tools]:
     llm, tools = FakeLLM(replies), Tools()
     agent = Agent(
         llm=llm,
         options=AgentOptions(
             builtins=frozenset(),
             attempt_policy="none",
-            answer_on_stop=False,
             tool_exposure="all",
+            **{"answer_on_stop": False, **options},
         ),
         tool_providers=[tools],
     )
     await agent.start()
     try:
-        outcome = await agent.run_task("do the work")
+        outcome = await agent.run_task(query)
     finally:
         await agent.close()
     return outcome, llm, tools
@@ -127,6 +129,16 @@ async def test_a_lone_hand_off_ends_the_run_with_its_receipt() -> None:
     assert (outcome.status, outcome.result) == ("completed", "Handed on: the rest.")
     assert outcome.handed_off is True and outcome.to_dict()["handed_off"] is True
     assert llm.calls == 2
+
+
+async def test_a_receipt_gets_no_closing_line_the_request_asked_an_answer_for() -> None:
+    outcome, llm, _ = await _run(
+        [_step(("move", {"what": "the rest", "rest": True}))],
+        "Do the work. End with a final line that starts with FINAL ANSWER:",
+        answer_on_stop=True,
+    )
+    assert outcome.result == "Handed on: the rest." and not outcome.format_fixed
+    assert llm.calls == 1, "no request after the hand-off"
 
 
 async def test_a_step_that_mixes_a_hand_off_with_another_call_runs_neither() -> None:

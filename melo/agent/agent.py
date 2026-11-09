@@ -4949,9 +4949,14 @@ class Agent(_RecallLoop, _NotesLoop):
         it is added after the answer, which stays as it was.
         ``RunResult.format_fixed`` is then true. A request that fails or that
         ``max_calls`` leaves no call for, or a reply with no such line, leaves
-        the run as it was.
+        the run as it was, and so does a run that handed its work on: its
+        result is the receipt of that hand-off, not an answer.
         """
-        if run.status not in ("completed", "gate_stopped", "budget_exhausted"):
+        if run.handed_off or run.status not in (
+            "completed",
+            "gate_stopped",
+            "budget_exhausted",
+        ):
             return
         _, answer = split_thinking(run.result)
         label = requested_closing_label(run.task_text) if answer else None
