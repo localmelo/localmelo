@@ -310,6 +310,50 @@ def test_with_certain_only_a_same_subject_item_is_related_never_an_update() -> N
     assert sure.reason == "same subject; related to entry 1"
 
 
+def test_an_opposite_polarity_is_certain_only_for_the_same_text() -> None:
+    likes = _entry(1, "The user likes olives", kind="profile")
+    for text in (
+        "The user does not like olives",
+        "The user doesn't like olives",
+        "The user never likes olives",
+    ):
+        sure = _decision(text, kind="profile", active=[likes], certain_only=True)
+        assert (sure.action, sure.target_id, sure.settled) == ("CONFLICT", 1, True)
+    # The same holds the other way round, and for a copula that the negation took.
+    dislikes = _entry(2, "The user does not like olives", kind="profile")
+    back = _decision(
+        "The user likes olives",
+        kind="profile",
+        active=[dislikes],
+        certain_only=True,
+    )
+    assert (back.action, back.settled) == ("CONFLICT", True)
+    open_ = _entry(3, "The corner cafe is open on Sunday", kind="semantic")
+    shut = _decision(
+        "The corner cafe is not open on Sunday",
+        kind="semantic",
+        active=[open_],
+        certain_only=True,
+    )
+    assert (shut.action, shut.settled) == ("CONFLICT", True)
+
+
+def test_two_texts_about_different_things_are_no_certain_conflict() -> None:
+    allergy = _entry(1, "Priya is allergic to walnuts", kind="profile")
+    advice = (
+        "melo suggested asking the caterer for desserts that do not contain "
+        "walnuts for Priya"
+    )
+    # They share words, so they are close, and one has a negative assertion; but the
+    # texts do not say the same thing, so no rule may call them a conflict.
+    sure = _decision(advice, kind="semantic", active=[allergy], certain_only=True)
+    assert sure.overlap >= 0.35
+    assert (sure.action, sure.target_id, sure.settled) == ("RELATED", 1, False)
+    # The caller with no judge keeps its rule.
+    legacy = _decision(advice, kind="semantic", active=[allergy])
+    assert (legacy.action, legacy.target_id, legacy.settled) == ("CONFLICT", 1, True)
+
+
 def test_the_settled_decisions_are_the_certain_ones() -> None:
     old = _entry(1, "The user said they eat spicy food every day", kind="profile")
     for text, action in (

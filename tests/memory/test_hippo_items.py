@@ -1294,6 +1294,46 @@ async def test_a_different_value_for_the_same_subject_is_linked_never_conflicted
     assert [i.id for i in await index.active_items()] == [1, 2]
 
 
+@pytest.mark.parametrize("answer", ["same", "other"])
+async def test_a_pair_about_different_things_is_no_conflict_and_goes_to_the_judge(
+    index: ConversationIndex, answer: str
+) -> None:
+    """Two true items in the link zone, one with a negative assertion, are not a
+    conflict by rule (they do not say one thing): the judge reads them, and the pair
+    ends as its answer says."""
+    router = Router(index)
+    await route(router, "Priya is allergic to walnuts", kind="profile", at=1.0)
+    advice = make(
+        "melo suggested asking the caterer for desserts that do not contain walnuts "
+        "for Priya",
+        kind="semantic",
+        at=2.0,
+    )
+    provider = StubEncoder(lambda _: verdict(answer, 1))
+    counts = hippo_judge.Counts()
+    judged = await hippo_judge.judge(
+        router,
+        provider,
+        None,
+        advice,
+        ("Ask the caterer about nuts.",),
+        cache=Cache(""),
+        stats=hippo_encode.Stats(),
+        counts=counts,
+    )
+    assert len(provider.prompts) == 1 and counts.judged == 1  # no rule settled it
+    result = await router.route(advice, judged)
+    first = (await index.fetch_items([1]))[0]
+    assert first.status == "active" and first.conflicts == ()
+    if answer == "same":
+        assert (result.action, result.item, result.target) == ("IGNORE", None, 1)
+        assert await index.count_items() == 1
+    else:
+        assert (result.action, result.item, result.target) == ("RELATED", 2, 1)
+        assert (await index.fetch_items([2]))[0].status == "active"
+        assert first.related == (2,)
+
+
 async def test_a_same_and_an_other_are_counted_and_only_the_same_gives_a_verdict(
     index: ConversationIndex,
 ) -> None:
