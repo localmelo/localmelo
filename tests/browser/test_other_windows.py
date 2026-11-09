@@ -445,7 +445,7 @@ async def test_a_panel_of_an_app_that_came_to_the_front_is_new_only_against_its_
             unread = await run(tools, "window_read")
             screen.front = Front("Safari", "com.apple.Safari", 10)
             await run(tools, "browser_open", url=HOME)
-            again = await run(tools, "browser_click", ref="e3")
+            again = await run(tools, "browser_click", ref="e5")
     finally:
         await provider.close()
     assert "(w1)" not in once.text

@@ -458,7 +458,8 @@ class BrowserDriver(Protocol):
 
         For an act that changed nothing, so a click at that point can be
         offered. The element is brought into view as an act does; None when it
-        is not on the page as it was read, or the driver cannot say.
+        is not on the page as it was read, or the driver cannot say; raises
+        :class:`CoveredError` when something covers all of it.
         """
 
     async def blank(self, tab: str | None) -> None:

@@ -87,7 +87,7 @@ async def test_a_point_on_a_drawing_is_clicked_and_looked_at_again() -> None:
     out = await pointed(driver)
     assert not out.is_error
     head, said = out.text.split("\n")[:2]
-    assert head.startswith("No effect: a point click at (500, 300) changed nothing")
+    assert head.startswith("No change seen on the page in 2 s after a point click")
     assert said == "Clicked the point (500, 300) (via point)."
     # What the point was on is page words: inside a block, never on the first lines.
     assert "the point was on: a drawing or picture" in out.text.split("<<page", 1)[1]
@@ -105,6 +105,38 @@ async def test_a_point_from_a_reading_needs_no_picture() -> None:
         out = await run(tools, "browser_click_point", x=500, y=300)
     # The reading's view is the one coordinate space: the point lands as on a picture.
     assert not out.is_error and driver.acts[0].point == (500, 150)
+    # A driver that cannot say what was in view gives no space to read a point in.
+    blind = point_world(PointHit("canvas", canvas))
+    blind.shot_view = None
+    tools = await tools_of(blind)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click_point", x=500, y=300)
+    assert out.is_error and not blind.acts
+    assert out.text.startswith("melo has no view of this tab to read a point on")
+
+
+async def test_numbers_given_for_one_view_are_never_read_on_a_newer_one() -> None:
+    driver = world(button("Pay"), button("Keep"))
+    driver.via = "page-script"
+    # Measuring an element's centre scrolls it into view, as an act does.
+    driver.centres["Pay"], driver.scrolls["Pay"] = (500.0, 200.0), 300.0
+    driver.centres["Keep"], driver.scrolls["Keep"] = (300.0, 250.0), 900.0
+    driver.hits[(500, 200)] = PointHit("control", button("Keep"))
+    driver.hits[(300, 250)] = PointHit("control", button("Keep"))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        pay = await run(tools, "browser_click", ref="e1")
+        keep = await run(tools, "browser_click", ref="e2")
+        assert "x=500 y=400" in pay.text and "x=300 y=500" in keep.text
+        # Pay's numbers belong to the view Pay was scrolled into: the page has
+        # scrolled on since, so they are refused, not read on Keep's view.
+        old = await run(tools, "browser_click_point", x=500, y=400)
+        assert old.is_error and "scrolled" in old.text
+        assert not any(act.point for act in driver.acts)
+        # Keep's numbers are on the view the page is at: they press Keep.
+        new = await run(tools, "browser_click_point", x=300, y=500)
+    assert not new.is_error and driver.acts[-1].point == (300, 250)
 
 
 async def test_a_point_on_nothing_is_refused() -> None:

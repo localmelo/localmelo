@@ -23,6 +23,7 @@ from localmelo.support.browser.driver import (
     Upload,
     View,
 )
+from localmelo.support.browser.pagescript import STALE
 from localmelo.support.browser.sites import origin_of
 
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kg"
@@ -111,7 +112,10 @@ class FakeDriver:
     ``holds`` answers (a condition that held before any waiting).
     ``becomes`` maps a label to the page its address shows after an act on it,
     in the same document; ``centres`` maps a label to the middle of that
-    element in the view (page pixels), as ``centre`` says it.
+    element in the view (page pixels), as ``centre`` says it, and ``scrolls``
+    to how far down ``centre`` scrolls the page to bring it into view.
+    ``scroll`` is how far the page is scrolled now: every view is read there,
+    and ``hit`` refuses a view scrolled otherwise, as the page script does.
     """
 
     name = "fake"
@@ -155,6 +159,8 @@ class FakeDriver:
         self.shot_view: View | None = View("", "d1", 1000.0, 500.0)
         self.becomes: dict[str, RawPage] = {}
         self.centres: dict[str, tuple[float, float]] = {}
+        self.scrolls: dict[str, float] = {}
+        self.scroll = (0.0, 0.0)
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -215,7 +221,11 @@ class FakeDriver:
     def viewed(self, tab: str | None, raw: RawPage) -> RawPage:
         """*raw* with the view it is read in (the picture's size, on its address and document)."""
         view = self.shot_view and dataclasses.replace(
-            self.shot_view, url=self._url(tab), doc=raw.doc
+            self.shot_view,
+            url=self._url(tab),
+            doc=raw.doc,
+            x=self.scroll[0],
+            y=self.scroll[1],
         )
         return dataclasses.replace(raw, view=view)
 
@@ -284,13 +294,17 @@ class FakeDriver:
         self.marks.append(mark)
         view = self.shot_view
         if view is not None:
-            view = dataclasses.replace(view, url=self._url(tab))
+            view = dataclasses.replace(
+                view, url=self._url(tab), x=self.scroll[0], y=self.scroll[1]
+            )
         return Shot("image/png", PNG, view)
 
     async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
         self.calls.append(("hit", f"{x:g},{y:g}"))
         if self._url(tab) != view.url:
             raise StaleElementError("The page is not the one that was read.", "page")
+        if (view.x, view.y) != self.scroll:
+            raise StaleElementError(STALE["scrolled"], "scrolled")
         return self.hits.get((round(x), round(y)), PointHit("none"))
 
     async def centre(
@@ -301,8 +315,14 @@ class FakeDriver:
         if at is None or self.shot_view is None:
             return None
         here = tab or self.current or ""
+        if act.element.label in self.scrolls:
+            self.scroll = (0.0, self.scrolls[act.element.label])
         view = dataclasses.replace(
-            self.shot_view, url=self._url(tab), doc=self.docs.get(here, "d1")
+            self.shot_view,
+            url=self._url(tab),
+            doc=self.docs.get(here, "d1"),
+            x=self.scroll[0],
+            y=self.scroll[1],
         )
         return view, at[0], at[1]
 

@@ -716,3 +716,21 @@ async def test_a_browser_call_records_how_long_its_phases_took() -> None:
     assert finished.data["duration_s"] >= 0
     assert set(finished.data["phases"]) == {"load", "read"}
     assert all(seconds >= 0 for seconds in finished.data["phases"].values())
+
+
+async def test_an_act_that_changed_nothing_is_marked_so_on_its_event() -> None:
+    llm = ScriptedLLM([_open(HOME), _call("browser_click", ref="e1"), _say("ok")])
+    agent = _agent(llm, FakeDriver(page(HOME, "Welcome.", button("Go"))))
+    found: list[Any] = []
+    try:
+        await agent.run_task(
+            "press Go",
+            on_event=found.append,
+            approval=RememberingPolicy(Panel().ask),
+        )
+    finally:
+        await agent.close()
+    opened, clicked = [e.data for e in found if e.type == "tool.finished"]
+    # A benchmark counts a click with no effect without reading its text.
+    assert clicked["name"] == "browser_click" and clicked["effect"] == "none"
+    assert "effect" not in opened

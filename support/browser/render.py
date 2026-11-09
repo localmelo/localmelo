@@ -167,15 +167,18 @@ def make_snapshot(
     origin: str,
     first_ref: int,
     before: Snapshot | None = None,
+    acted: Element | None = None,
 ) -> Snapshot:
     """A :class:`Snapshot` of *raw*. New refs are ``e<first_ref>`` onward, never reused.
 
     With *before*, the reading an act was done on, an element of the same
     document and address keeps its ref there when it is the same element:
-    the same kind, words, destination, field, frame and place (``context``),
-    and the only one like that in both readings (its value or state may have
-    changed). Every other element gets a new ref, so an old ref never names
-    another element than the one it named.
+    the same kind, words, destination, field, frame and place (``context``,
+    which it must have: an element nothing places is never carried), and the
+    only one like that in both readings (its value or state may have
+    changed). The element the act was done on (*acted*) is never carried: what
+    it is now was not read. Every other element gets a new ref, so an old ref
+    never names another element than the one it named.
     """
     snap = Snapshot(
         sid,
@@ -224,7 +227,7 @@ def make_snapshot(
         and before.doc == raw.doc
         and before.url.split("#", 1)[0] == raw.url.split("#", 1)[0]
     ):
-        carried = _carried(before, kept)
+        carried = _carried(before, kept, acted)
         snap.since = before.id if carried else ""
     fresh = first_ref
     for i, item in enumerate(kept):
@@ -252,18 +255,27 @@ def _identity(item: Element) -> tuple[object, ...]:
     )
 
 
-def _carried(before: Snapshot, kept: list[Element]) -> dict[int, str]:
-    """The refs of *before* that elements of *kept* keep: by position in *kept*, each one unique by :func:`_identity` in both."""
+def _carried(
+    before: Snapshot, kept: list[Element], acted: Element | None
+) -> dict[int, str]:
+    """The refs of *before* that elements of *kept* keep: by position in *kept*, each one unique by :func:`_identity` in both.
+
+    Neither an element without a ``context`` nor one like *acted* is carried.
+    """
     old: dict[tuple[object, ...], list[str]] = {}
     for ref, item in before.elements.items():
         old.setdefault(_identity(item), []).append(ref)
     new: dict[tuple[object, ...], list[int]] = {}
     for i, item in enumerate(kept):
         new.setdefault(_identity(item), []).append(i)
+    out = None if acted is None else _identity(acted)
     return {
         at[0]: refs[0]
         for key, at in new.items()
-        if len(at) == 1 and len(refs := old.get(key, [])) == 1
+        if len(at) == 1
+        and len(refs := old.get(key, [])) == 1
+        and kept[at[0]].context
+        and key != out
     }
 
 
@@ -412,8 +424,9 @@ def render_change(
     document at the same address. It holds *changes* (see :func:`changes_lines`),
     the lines of text the page shows now that it did not, and the elements that
     are new or changed (with new refs, or their kept ref when only their
-    value or state changed); every other element keeps its ref and is not
-    listed again. None when the change is too large to describe that way
+    value or state changed); an element that kept its ref and did not change
+    is not listed again. Text that went away is not told. None when the
+    change is too large to describe that way
     (more than half a part of new text, or more than :data:`FIND_LIMIT`
     elements): the caller shows the whole page then.
     """
@@ -454,10 +467,7 @@ def render_change(
             unreached_line(origin, snap.aims.get(origin), snap.solved)
             for origin in snap.unreached
         )
-    lines.append(
-        "[everything else is as it was, and its refs still hold; browser_read "
-        "shows the whole page]"
-    )
+    lines.append("[refs not listed here still hold; browser_read shows the whole page]")
     attrs = (
         f"tab={field_text(snap.tab, 40)} origin={snap.origin} "
         f'title="{field_text(snap.title, TITLE_CHARS)}" since={before.id}'

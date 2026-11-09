@@ -486,8 +486,9 @@ async def test_enter_in_a_field_is_a_form_send_that_asks_by_itself() -> None:
         await run(tools, "browser_open", url=HOME)
         typed = await run(tools, "browser_type", ref="e1", text="cats")
         assert not any(name.startswith("browser-submit:") for name in asks.names)
-        # Typing left the page as it was: the box keeps its ref.
-        sent = await run(tools, "browser_type", ref="e1", text="cats", submit=True)
+        # The page was read again after typing: nothing places the box, so it
+        # has a new ref (e2).
+        sent = await run(tools, "browser_type", ref="e2", text="cats", submit=True)
     assert (
         not typed.is_error
         and "Typed 4 character(s) into e1 (via browser)." in typed.text
@@ -613,11 +614,9 @@ async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant(
         await run(tools, "browser_open", url=HOME)
         await run(tools, "browser_type", ref="e1", text=long)
         # The click and the choice keep one answer for the site; typing asks again.
-        await run(tools, "browser_click", ref="e2")  # the refs typing left as they were
-        await run(
-            tools, "browser_open", url=HOME
-        )  # a new reading: e4 Notes, e5 Check in
-        await run(tools, "browser_type", ref="e4", text="second")
+        await run(tools, "browser_click", ref="e4")  # the page was read again: new refs
+        await run(tools, "browser_open", url=HOME)
+        await run(tools, "browser_type", ref="e6", text="second")
     typing = [(n, a, p) for n, a, p in asks.asked if n.startswith("browser-type:")]
     assert [n for n, _, _ in typing] == ["browser-type:https://example.com"] * 2
     first, second = typing[0][1], typing[1][1]

@@ -339,7 +339,7 @@ melo 操作的网页可能让另一个应用打开窗口，比如聊天应用请
 | `melo cannot read other apps' windows: ...` 或 `melo can't read other apps' windows: ...` | 安装桌面控制助手（见[需要什么](#what-you-need)），或在“系统设置 → 隐私与安全性 → 辅助功能”里打开 Cua Driver，然后开一个新对话。 |
 | `no Screen Recording permission` | 助手能读取文字和按钮、按名字按下按钮，但没有图片。给它“录屏”权限后才有图片和按点点击。 |
 | `a box from ... that melo can't reach` | 来自其他网站的框架，常见的是登录框，Safari 没有在其中列出任何东西。请自己填写，或让 melo 点击它截图上的一点。 |
-| `Take a browser_screenshot of this tab first` 或 `The page scrolled since the picture` | 一个点属于同一页面、同一视图的上一张图；请重新拍一张。 |
+| `melo has no view of this tab` 或 `The page scrolled since that point was given` | 一个点属于给出它的那个视图（一张图、一次读取或一步的结果）；请重新读取页面或重新拍一张。 |
 | `The page moved while melo was reading it` | 标签页的地址在检查和读取之间变了，所以什么都没读。用 `browser_read` 再试一次。 |
 | `That text is N characters; melo types at most 1000` | 分段输入：问题会显示每段文字的全部内容。 |
 | `melo could not set up its safe page checks` | 网页挡住了 melo 检查所用的隐藏框架。这时 melo 只读文字，并且不在页面上做任何操作。 |

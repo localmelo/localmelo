@@ -436,15 +436,13 @@ async def test_over_chrome_a_hand_off_and_a_confirm_go_to_the_person(
     with asking(asks):
         page = await run(found, "browser_open", url="https://example.com/app")
         assert '[e1 button "Open in Chat"]' in page.text
-        delete = re.search(r'\[(e\d+) button "Delete"\]', page.text)
-        assert delete is not None
         handed = await run(found, "browser_click", ref="e1")
-        # The page is the same document: the Delete button keeps its ref.
-        assert "<<page" in handed.text and "Delete" not in handed.text
-        deleted = await run(found, "browser_click", ref=delete.group(1))
+        # Nothing on this page places its buttons: they have new refs.
+        assert '[e7 button "Delete"]' in handed.text
+        deleted = await run(found, "browser_click", ref="e7")
     assert opener.opened == [CHAT]
     assert "melo opened it, so Chat comes to the front" in handed.text
-    assert "Nothing on the page changed" not in handed.text
+    assert "No change seen" not in handed.text
     assert [n for n in asks.names if n.startswith("browser-dialog:")] == [
         "browser-dialog:https://example.com"
     ]
