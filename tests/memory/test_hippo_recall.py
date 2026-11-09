@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -1386,6 +1387,7 @@ async def test_the_switch_is_at_nine_tenths_of_the_turns_read_with_no_rounding(
         ("3:small-model", False),
         ("", False),
         ("3:", False),
+        (f":{CHECKED}", False),  # no version
         (ENCODER, True),
         (hippo_encode.RULES_ENCODER, True),
     ],
@@ -1401,6 +1403,68 @@ async def test_a_stored_item_an_unchecked_encoder_wrote_keeps_recall_on_turns(
             # Until a person deletes it: the check is on what would be read.
             assert await memory.stores()[1].delete_item(fill.item) is not None
             assert await memory.reading() == Reading(True, 1.0)
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("encoder", "opens"),
+    [
+        ("3:small-model", False),
+        ("", False),
+        (f":{CHECKED}", False),
+        (ENCODER, True),
+        (hippo_encode.RULES_ENCODER, True),
+    ],
+)
+async def test_auto_opens_an_item_only_when_its_encoder_is_checked(
+    tmp_path: Path, store: SessionStore, encoder: str, opens: bool
+) -> None:
+    cfg = auto_config()
+    fill = await held(tmp_path, store, cfg, encoder=encoder)
+    memory = fill.memory
+    try:
+        await catch_up(fill, store, 5, 1)  # the chat reads turns now
+        assert (await memory.reading()) == Reading(False, 0.2)
+        reply = await memory.open_item(fill.item)
+        said = await MemoryTools(memory).open_memory(ids=[f"m{fill.item}"])
+        if opens:
+            assert not isinstance(reply, str) and TEXT in said
+        else:
+            # The same answer as an id nothing has.
+            assert reply == NO_SUCH_TURN == await memory.open_item(fill.item + 100)
+            assert said == f"m{fill.item}: {NO_SUCH_TURN}"
+        # The explicit setting opens every item, as it always did.
+        cfg.memory.recall_source = "items"
+        assert not isinstance(await memory.open_item(fill.item), str)
+    finally:
+        await memory.aclose()
+
+
+async def test_the_tools_register_the_turns_state_when_the_state_cannot_be_read(
+    tmp_path: Path,
+    store: SessionStore,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fill = await held(tmp_path, store, auto_config(), encoder=ENCODER)
+    memory = fill.memory
+    try:
+        # Every turn is read, so a working read would give the items state.
+        assert (await memory.reading()) == Reading(True, 1.0)
+
+        async def broken() -> Reading:
+            raise sqlite3.OperationalError("disk I/O error on a private path")
+
+        monkeypatch.setattr(memory, "reading", broken)
+        tools = await MemoryTools(memory).start()
+        names = [t.definition.name for t in tools]
+        assert names == ["search_memory", "remember", "open_memory"]
+        assert tools[0].definition == SEARCH_MEMORY
+        assert tools[2].definition == OPEN_MEMORY
+        # The log holds the error's class and nothing it said.
+        assert any("OperationalError" in line for line in caplog.messages)
+        assert not any("private path" in line for line in caplog.messages)
     finally:
         await memory.aclose()
 

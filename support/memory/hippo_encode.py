@@ -991,8 +991,10 @@ async def encode(
 def is_checked(encoder: str) -> bool:
     """Whether an item's *encoder* is one recall may read with ``auto``: the rules
     (:data:`RULES_ENCODER`), or ``<version>:<model>`` (as :func:`encode` writes it)
-    with the model in :data:`CHECKED_ENCODERS`. An empty *encoder* is not checked."""
-    return encoder == RULES_ENCODER or encoder.partition(":")[2] in CHECKED_ENCODERS
+    with a version and the model in :data:`CHECKED_ENCODERS`. An empty *encoder*, or
+    one with no version, is not checked."""
+    version, _, model = encoder.partition(":")
+    return encoder == RULES_ENCODER or bool(version) and model in CHECKED_ENCODERS
 
 
 def _force(turns: Sequence[Turn], mentioned: set[int]) -> list[Piece]:

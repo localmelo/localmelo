@@ -1586,9 +1586,15 @@ class ChatMemory:
         is not opened, an item a newer one replaced reads as older and the asking
         chat's own reads as ``this chat``. With *sources*, the whole text of each
         turn it came from comes with it, in order (a turn no longer indexed is
-        left out).
+        left out). With ``recall_source = "auto"`` an item whose encoder is not a
+        checked one (:func:`~.hippo_encode.is_checked`) is not opened, as if there
+        were none with that id; the explicit ``items`` setting opens every item.
         """
         async with self._lock:
+            if self.recall_settings().auto:
+                stored = await self.stores()[1].fetch_items([item_id])
+                if not stored or not hippo_encode.is_checked(stored[0].encoder):
+                    return NO_SUCH_TURN
             corpus = await self._sync(item=True)
             item = corpus.items.get(f"m:{item_id}")
             if item is None:
@@ -3710,7 +3716,16 @@ class MemoryTools(BaseToolProvider):
         # An Agent registers its tools once, and with ``auto`` a chat may cross from
         # one state to the other afterwards, so the state is worked out here, not read
         # from a turn (this may run outside one). The handlers follow each turn's state.
-        reading = await self._memory.reading() or Reading(False, 0.0)
+        try:
+            reading = await self._memory.reading() or Reading(False, 0.0)
+        except Exception as exc:
+            # A read that fails must not end the Agent's tool setup, which is never
+            # retried: register the turns state's tools, which are always safe.
+            logger.warning(
+                "Memory tools: could not read the recall state (%s); using turns",
+                type(exc).__name__,
+            )
+            reading = Reading(False, 0.0)
         settings = self._memory.recall_settings(reading)
         remember = ProvidedTool(
             definition=remember_for(self._memory.note_settings().level),
