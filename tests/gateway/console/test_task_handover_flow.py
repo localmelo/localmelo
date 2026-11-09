@@ -31,7 +31,7 @@ from localmelo.tests.sessions.helpers import answer, tool_call
 from .conftest import all_events
 from .test_ask_owner import Reply, rows, tool_results, until
 from .test_chat_owns_tasks import owner_console, say, started_task
-from .test_turn_writes import _wait_turn
+from .test_turn_writes import _post_turn, _wait_turn
 
 FRIEND = "My friend Alex is looking for a new job."
 WANTS = "He wants a staff role at a large company."
@@ -423,6 +423,7 @@ async def test_a_long_output_shows_its_start_and_leaves_no_part_of_a_secret(
     reaches the packet, and a call's entry starts where its output starts."""
     main: list[Reply] = [
         tool_call("file_read", {"path": "keys.txt"}, "read-1"),
+        tool_call("file_read", {"path": "pad.txt"}, "read-2"),
         hands_off(),
     ]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
@@ -433,13 +434,54 @@ async def test_a_long_output_shows_its_start_and_leaves_no_part_of_a_secret(
     ):
         lines = "".join(f"key {n}: {GITHUB}\n" for n in range(300))
         (tmp_path / "work" / "keys.txt").write_text(f"START of the keys\n{lines}")
+        # Folded spaces bring what the start's cut leaves of a key into view.
+        padded = f"START of the pad{' ' * 954}{GITHUB}\n"
+        (tmp_path / "work" / "pad.txt").write_text(padded)
         await say(client, console, TYPED)
         [record] = await console.workers.tasks.list_tasks()
         kept = json.dumps(record.spec["handoff"])
         pieces = {GITHUB[at : at + 8] for at in range(len(GITHUB) - 7)}
         assert not [piece for piece in pieces if piece in kept]
-        [read] = [d for d in record.spec["handoff"]["done"] if d["tool"] == "file_read"]
-        assert "START of the keys" in read["said"]
+        keys, pad = [
+            d for d in record.spec["handoff"]["done"] if d["tool"] == "file_read"
+        ]
+        assert "START of the keys" in keys["said"] and "START of the pad" in pad["said"]
+
+
+async def test_a_stop_as_the_task_is_admitted_shows_it_and_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Stop that lands as the commit admits the task: the chat shows the task
+    with its own Stop, and the task runs; none is shown that never starts."""
+    main: list[Reply] = [hands_off(), answer("Never asked: the turn stopped.")]
+    async with owner_console(tmp_path, monkeypatch, main=main) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        tasks, chat = console.workers.tasks, str(console.main_id)
+        original = tasks.create_task
+        committed, release = asyncio.Event(), asyncio.Event()
+
+        async def slow_commit(*args: Any, **kwargs: Any) -> Any:
+            made = await original(*args, **kwargs)
+            committed.set()
+            await release.wait()  # the Stop lands as the commit returns
+            return made
+
+        monkeypatch.setattr(tasks, "create_task", slow_commit)
+        assert (await _post_turn(client, chat, TYPED)).status_code == 202
+        await until(committed.is_set)
+        entry = console.sessions.get(chat)
+        assert entry is not None and entry.runner.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        await _wait_turn(client, chat)
+        [record] = await tasks.list_tasks()
+        shown = [r for r in await rows(console, chat) if r["echo"] == "started"]
+        assert [r["task_id"] for r in shown] == [record.task_id]
+        await until(lambda: models["workers"] and models["workers"][0].requests)
 
 
 async def test_a_chat_whose_folder_no_task_may_use_keeps_its_work(

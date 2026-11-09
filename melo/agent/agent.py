@@ -2087,7 +2087,7 @@ class Agent(_RecallLoop, _NotesLoop):
         # The run's gate for tools, beside the one in Chat._request: what the model
         # chose before the person took a page starts once they give the run back.
         await run.hold.wait()
-        events.tool_started(call)
+        events.tool_started(call, self.executor.workspace_root)
         # A list for an event, and in the compress modes for the rehearsal
         # signal too; elsewhere, without a sink, the slot stays unset as
         # before.
@@ -2145,6 +2145,7 @@ class Agent(_RecallLoop, _NotesLoop):
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,
                 arguments=dict(call.arguments),
+                ask=gate is not None and gate.fresh,
             )
             outcome = await self.executor.execute_structured(
                 exec_request, allowed=allowed, approve=gate
@@ -2260,7 +2261,7 @@ class Agent(_RecallLoop, _NotesLoop):
         )
         result = outcome.to_tool_result()
         run.call_refused = False
-        run.events.tool_started(call)
+        run.events.tool_started(call, self.executor.workspace_root)
         run.events.tool_finished(call, outcome, result, exit_codes=None)
         return result
 

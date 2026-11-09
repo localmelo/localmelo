@@ -9,6 +9,7 @@ import pytest
 
 from localmelo.melo.executor import call_preview
 from localmelo.melo.executor.preview import PREVIEW_CHARS
+from localmelo.tests.checker.test_redaction import AWS, GITHUB
 
 
 class _Unprintable:
@@ -79,6 +80,13 @@ def test_a_long_preview_ends_in_three_dots() -> None:
     assert preview == ("echo " + "x" * 300)[:197] + "..."
     exact = "y" * 200
     assert call_preview("file_read", {"path": exact}) == exact
+
+
+def test_a_secret_is_redacted_before_the_preview_is_cut() -> None:
+    """A key the cut would split leaves no piece of itself (#571)."""
+    preview = call_preview("shell_exec", {"command": f"{AWS} {'x' * 140} {GITHUB}"})
+    pieces = {GITHUB[at : at + 6] for at in range(len(GITHUB) - 5)}
+    assert AWS not in preview and not [p for p in pieces if p in preview]
 
 
 def test_it_is_one_line() -> None:

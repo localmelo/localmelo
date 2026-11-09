@@ -917,6 +917,13 @@ BLOCKED_ALIKE: Final = (
     "install or site), so it does not run again; find another way that does not "
     "need it"
 )
+# Why a call of the job whose effect is unknown asks the person (#571): an
+# earlier run of the same call was cut off, so it may have done its work.
+UNKNOWN_RESULT: Final = (
+    "An earlier run of this exact step was cut off before its result was known, "
+    "so it may have done its work already; only the person decides that it runs "
+    "again."
+)
 
 
 def call_key(
@@ -978,6 +985,12 @@ class EarlierBlocks:
     ``python_exec`` step that names an address on it (#433,
     :func:`~localmelo.melo.contracts.review.site_keys`), and one naming an
     address whose encoded host does not decode is refused while any site is.
+
+    *fresh* are the :func:`call_key` of calls of the job whose effect is
+    unknown (#571), each as the call's start kept it (``run_key``). None is
+    refused: the agent's gate asks the person about each, whatever its tool's
+    tier, the mode, a grant or an earlier answer say, and only their answer
+    runs it, that once (see ``_ApprovalGate``).
     """
 
     def __init__(
@@ -985,8 +998,10 @@ class EarlierBlocks:
         inner: ApprovalPolicy,
         blocks: Mapping[str, tuple[str, str]],
         loose: Mapping[str, Sequence[str]] | None = None,
+        fresh: Iterable[str] = (),
     ) -> None:
         self.inner = inner
+        self.fresh = frozenset(fresh)
         self._blocks = dict(blocks)
         self._loose = {
             key: frozenset(

@@ -21,11 +21,14 @@ from fastapi import FastAPI
 from localmelo.melo.agent import Agent
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import (
+    UNKNOWN_RESULT,
     AllowAllPolicy,
     ApprovalDecision,
+    AutoPolicy,
     call_key,
     find_earlier,
 )
+from localmelo.melo.contracts.review import step_key
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import INTERRUPT_LABEL, Message, ToolDef
 from localmelo.support.gateway.chat_gate import GatedLLM
@@ -47,7 +50,7 @@ from localmelo.support.gateway.handoff import (
     handoff_block,
 )
 from localmelo.support.gateway.task_policy import TaskSpec, chore_workspace
-from localmelo.support.gateway.task_store import TaskRecord
+from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.gateway.workers import _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
@@ -1029,16 +1032,20 @@ async def test_a_long_chain_keeps_one_head_its_request_and_its_refusals(
         fresh = await console.workers.tasks.get_task(str(body["task_id"]))
         meta = await console.store.get_session(fresh.task_id)
         assert meta is not None
-        policy = await console.workers._guard(fresh, meta.meta, AllowAllPolicy())
+        policy = await console.workers._guard(
+            fresh, meta.meta, AllowAllPolicy(), lambda _: None
+        )
         earlier = find_earlier(policy)
         assert earlier is not None
         assert earlier.match("python_exec", {"code": INSTALL}, info.workspace)
 
 
-async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
+async def test_a_call_whose_effect_is_unknown_asks_the_person_again_down_the_chain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The store keeps its arguments redacted; the gate's key is of the live call.
+    """Each call is fenced by the live key it started with, whatever the store kept
+    of it (redacted, no finish kept); run again, it is the person's card, and their
+    Allow runs it once."""
     cut = f"import os\nos.environ['TOKEN'] = '{GITHUB}'\nos.system('deploy')"
     worker: list[Reply] = [
         tool_call("python_exec", {"code": cut}, "p-1"),
@@ -1052,21 +1059,22 @@ async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
         task_id = await started_task(console)
         info = await console.store.get_session(task_id)
         assert info is not None
-        allowed = {"request_id": "r1", "allowed": True, "reason": "",
-                   "remember": False, "origin": "user",
-                   "run_key": call_key("python_exec", {"code": cut}, info.workspace)}  # fmt: skip
-        stored = {"code": redact_secrets(cut)[0]}
-        events = [
+        crash = {"command": f"deploy --token {GITHUB}"}
+        events = [  # what the store keeps of them: their arguments redacted
             core_event("tool.started", seq=1, call_id="p-0", name="python_exec",
-                       arguments=stored, preview="python"),
+                       arguments={"code": redact_secrets(cut)[0]}, preview="python",
+                       run_key=call_key("python_exec", {"code": cut}, info.workspace)),
             core_event("tool.finished", seq=2, call_id="p-0", name="python_exec",
-                       status="timeout", error="Execution timed out", approval=allowed),
+                       status="timeout", error="Execution timed out"),
+            core_event("tool.started", seq=3, call_id="s-0", name="shell_exec",
+                       arguments={"command": redact_secrets(crash["command"])[0]},
+                       run_key=call_key("shell_exec", crash, info.workspace)),
         ]  # fmt: skip
-        for n in range(25):  # more calls after it than the packet lists
+        for n in range(25):  # more calls after them than the packet lists
             events += [
-                core_event("tool.started", seq=3 + 2 * n, step=2 + n, call_id=f"r-{n}"),
+                core_event("tool.started", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"),
                 core_event(
-                    "tool.finished", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"
+                    "tool.finished", seq=5 + 2 * n, step=2 + n, call_id=f"r-{n}"
                 ),
             ]
         await stop_run(console, task_id, INTERRUPT_LABEL, events=events)
@@ -1075,20 +1083,14 @@ async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
         fresh = str(body["task_id"])
         record = await console.workers.tasks.get_task(fresh)
         assert record.spec["handoff"]["account"] == "", "no placeholder carried"
-
-        async def asked_or_ended() -> bool:
-            now = await console.workers.tasks.get_task(fresh)
-            return bool(console.broker.pending(fresh)) or now.state in (
-                "done",
-                "failed",
-                "cancelled",
-            )
-
-        await until(asked_or_ended, timeout=15.0)
-        assert not console.broker.pending(fresh), "asked again instead of refused"
-        assert ran.codes == []
-        [approval] = await calls_of(console, fresh)
-        assert approval["allowed"] is False and approval["earlier"]
+        fenced = [b["tool"] for b in record.spec["handoff"]["blocks"]]
+        assert fenced == ["python_exec", "shell_exec"]
+        await until(lambda: console.broker.pending(fresh), timeout=15.0)
+        [card] = console.broker.pending(fresh)
+        assert card.review is not None and UNKNOWN_RESULT in card.review.reasons
+        console.broker.answer(card.request_id, ApprovalDecision(True, origin="user"))
+        await until(lambda: ran.codes, timeout=15.0)
+        assert ran.codes == [cut]
 
 
 async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor(
@@ -1109,6 +1111,77 @@ async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor
         fresh = await _went_on(console, task_id)
         assert len(await console.store.list_turns(task_id)) == 1, "never reopened"
         assert "also add a short summary" in fresh.spec["objective"]
+
+
+async def test_an_allow_once_still_unread_at_the_end_goes_on_as_the_allowance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Allow once on a running worker queues melo's go-ahead (``allow_once``); when
+    the run ends without reading it, the successor runs the allowed step on that
+    allowance, with no card."""
+    release = asyncio.Event()
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    first: list[Reply] = [held(release, answer("Done.\nEnding: ready"))]
+    then: list[Reply] = [
+        tool_call("python_exec", {"code": INSTALL}, "i-1"),
+        answer("Done.\nEnding: ready"),
+    ]
+    async with owner_console(
+        tmp_path,
+        monkeypatch,
+        main=main,
+        workers=[first, then],
+        approvals="auto",
+        follow_up=False,
+    ) as (console, client, models, ran):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        workers = console.workers
+        info = await console.store.get_session(task_id)
+        assert info is not None
+        allowed = workers._auto.setdefault(task_id, AutoPolicy(task=True))
+        allowed.allow_once(
+            step_key("python_exec", {"code": INSTALL}, info.workspace),
+            ["install"],
+            "python_exec",
+        )
+        _, how = await workers.message(task_id, "Go ahead.", same_job=True)
+        assert how == "queued"
+        release.set()
+        fresh = await _went_on(console, task_id)
+        await until(lambda: _is(console, fresh.task_id, "done"), timeout=15.0)
+        assert ran.codes == [INSTALL]
+
+
+async def test_a_message_whose_successor_cannot_start_is_said_in_the_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    worker: list[Reply] = [held(release, answer("Done.\nEnding: ready"))]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[worker], follow_up=False
+    ) as (console, client, models, _):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        _, how = await console.workers.message(task_id, "also add a short summary")
+        assert how == "queued"
+
+        async def full(*_: Any, **__: Any) -> Any:
+            raise TaskStoreError("the task store is full")
+
+        monkeypatch.setattr(console.workers, "successor", full)
+        release.set()
+
+        async def told() -> bool:
+            return any(
+                r["echo"] == "failed" and "the task store is full" in r["line"]
+                for r in await rows(console, console.main_id)
+            )
+
+        await until(told, timeout=10.0)
 
 
 async def test_a_second_message_for_an_ended_job_never_reopens_its_successor(
@@ -1161,10 +1234,13 @@ async def test_every_turn_of_an_ended_task_keeps_its_unknown_effects(
     ) as (console, client, _, _):
         await say(client, console, REPORT)
         task_id = await started_task(console)
-        cut = core_event("tool.started", call_id="w-0", name="file_write",
-                         arguments={"path": "out.txt", "content": "part one"},
-                         preview="out.txt")  # fmt: skip
         record = await console.workers.tasks.get_task(task_id)
+        info = await console.store.get_session(task_id)
+        assert info is not None
+        written = {"path": "out.txt", "content": "part one"}
+        cut = core_event("tool.started", call_id="w-0", name="file_write",
+                         arguments=written, preview="out.txt",
+                         run_key=call_key("file_write", written, info.workspace))  # fmt: skip
         turn = await console.store.begin_turn(
             task_id, record.spec["objective"], holder=HOLDER
         )
@@ -1198,8 +1274,9 @@ async def test_only_a_read_cut_off_may_run_again_whoever_moved_the_job_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The tool's own tier decides: a cut-off read may run again, a cut-off page
-    action or write may not, in a successor the person's message started too;
-    a step the person refused gets a fresh decision there, and the packet says so."""
+    action or write asks the person first, in a successor the person's message
+    started too; a step the person refused gets a fresh decision there, and the
+    packet says so."""
     tools = {
         "web_fetch": _tool("web_fetch", read=True),
         "browser_click": _tool("browser_click", read=False, tags=("browser",)),
@@ -1235,11 +1312,12 @@ async def test_only_a_read_cut_off_may_run_again_whoever_moved_the_job_on(
             earlier = find_earlier(policy)
             assert earlier is not None
 
-            def refused(name: str, guard: Any = earlier) -> bool:
-                return guard.match(name, {"n": 1}, None) is not None
+            def key(name: str) -> str:
+                return call_key(name, {"n": 1}, None)
 
-            assert not refused("web_fetch") and refused("browser_click")
-            assert refused("python_exec") is (by != "person")
+            assert earlier.fresh == {key("browser_click")}
+            refused = earlier.match("python_exec", {"n": 1}, None) is not None
+            assert refused is (by != "person")
             said = handoff_block(record.spec["handoff"])
             assert "browser_click" in said and "web_fetch" in said
-            assert "melo refuses" in said
+            assert "melo asks the person" in said

@@ -18,11 +18,13 @@ fresh task, its successor. Either way the new task carries one packet, a
   out), whether it asks before each post (``repeats``) and its chat's follow-up
   count (``followup``, kept in the session's meta).
 
-The blocks are refused again before any review (``EarlierBlocks``). A call
-whose effect is unknown is refused in every task of the job when its tool can
-change something; a step refused in it is refused unless the person's own
-message moved the job on (:attr:`Handoff.by_person`), which gives each such
-step a fresh decision, as after the person's message to a task (#411). Every text a call or a model gave is redacted before it is kept: the
+The blocks hold again in every task of the job (``EarlierBlocks``). A call
+whose effect is unknown, by the key its start kept, needs a fresh decision
+when its tool can change something: the person is asked before it runs again
+(``EarlierBlocks.fresh``); a step refused in it is refused before any review
+unless the person's own message moved the job on (:attr:`Handoff.by_person`),
+which gives each such step a fresh decision, as after the person's message to
+a task (#411). Every text a call or a model gave is redacted before it is kept: the
 task's row, ``/api/tasks`` and the task's request all read the kept copy. The
 task reads the packet after its request, fenced (:func:`handoff_block`).
 
@@ -34,14 +36,11 @@ asked to go on, finds the successor instead of making another.
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
-from localmelo.melo.checker.redaction import REDACTED, redact_secrets
-from localmelo.melo.contracts.approvals import call_key
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import spent
 from localmelo.melo.schema import CALL_NOT_STARTED, is_no_answer_label, split_thinking
 from localmelo.support.gateway.auto_blocks import denied_steps
@@ -61,18 +60,15 @@ HANDOFF_HEADER: Final = (
 DONE_CALLS: Final = 20
 DONE_CHARS: Final = 160
 END_CHARS: Final = 40
-# How an event's text that was too long to keep ends (``json_safe_payload``).
-_CLIPPED: Final = re.compile(r"… \[\+\d+ chars\]")
 # The room of each text a model or melo wrote in a packet.
 ACCOUNT_CHARS: Final = 1500
 # The person's messages a job keeps after its request: the newest that fit.
 NOTES_CHARS: Final = 8_000
 # The blocks a job keeps: the newest, one per step.
 MAX_BLOCKS: Final = 200
-# Who refuses a call whose effect is unknown, as the refusal names it.
-UNKNOWN_EFFECT: Final = (
-    "melo, as an earlier run of it may have done its work (its result is unknown),"
-)
+# The ``who`` of a block of a call whose effect is unknown: asked about again,
+# never refused (#571).
+UNKNOWN_EFFECT: Final = "an earlier run whose result is unknown"
 # The session meta a successor keeps of its job's follow-ups (#411).
 FOLLOWUP_KEPT: Final = ("person_turn", "runs", "continued")
 # How a call's status reads in a packet.
@@ -215,8 +211,7 @@ async def from_chat(
     (*typed* as they typed it) and the model's *account* and *remaining*.
     """
     calls = await turn_calls(store, turn.session_id, turn)
-    info = await store.get_session(turn.session_id)
-    done, unknown = _calls_of(calls, (info.workspace if info else "") or "", skip)
+    done, unknown = _calls_of(calls, skip)
     found = await denied_steps(store, turn.session_id, limit=MAX_BLOCKS)
     refused = [b for b in found if b["turn"] == turn.turn]
     return Handoff(
@@ -254,7 +249,7 @@ async def from_task(
     # Every turn: a resume after a restart or a park is a turn of its own.
     turns = await store.list_turns(record.task_id)
     calls = [c for turn in turns for c in await turn_calls(store, record.task_id, turn)]
-    done, unknown = _calls_of(calls, (session.workspace if session else "") or "", ())
+    done, unknown = _calls_of(calls, ())
     refused = await denied_steps(store, record.task_id, limit=MAX_BLOCKS)
     said = split_thinking(turns[-1].answer)[1] if turns else record.wait_reason
     note = note.strip()
@@ -278,14 +273,14 @@ async def from_task(
 
 
 def _calls_of(
-    calls: Sequence[TurnCall], root: str, skip: Collection[str]
+    calls: Sequence[TurnCall], skip: Collection[str]
 ) -> tuple[tuple[dict[str, Any], ...], list[dict[str, Any]]]:
     """The packet's entries for *calls* (the newest :data:`DONE_CALLS`), and a
     block for each call whose result is unknown.
 
-    A block holds the key the gate gave the live call (``run_key``), else that
-    of its stored arguments when the store kept them whole; a call with
-    neither is only listed. Which blocks refuse is decided where the tools are
+    A block holds the key of the live call its start kept (``run_key``),
+    whatever the store kept of its arguments; a call stored without one is only
+    listed. Which blocks ask the person again is decided where the tools are
     known (``TaskWorkers._guard``): a call that changes nothing may run again.
     """
     done: list[dict[str, Any]] = []
@@ -303,11 +298,10 @@ def _calls_of(
             "said": _brief(call),
         }
         done.append(entry)
-        key = call.key or (_whole_key(call, root) if status == "unknown" else "")
-        if status == "unknown" and key:
+        if status == "unknown" and call.key:
             unknown.append(
                 {
-                    "call_key": key,
+                    "call_key": call.key,
                     "loose_keys": [],
                     "who": UNKNOWN_EFFECT,
                     "step_key": "",
@@ -318,21 +312,13 @@ def _calls_of(
     return tuple(done[-DONE_CALLS:]), unknown
 
 
-def _whole_key(call: TurnCall, root: str) -> str:
-    """The key of *call*'s stored arguments, when the store kept them whole:
-    nothing redacted, no text clipped; ``""`` when it did not."""
-    stored = json.dumps(call.arguments, ensure_ascii=False)
-    if REDACTED in stored or _CLIPPED.search(stored):
-        return ""
-    return call_key(call.name, call.arguments, root or None)
-
-
 def _brief(call: TurnCall) -> str:
     """What *call* returned, for its entry: redacted before anything is cut;
-    its start, and for a long output its end too."""
+    its start (:attr:`TurnCall.head`, redacted already), and for a long output
+    its end too."""
     if call.finish is None:
         return "no result was kept"
-    start = _flat(redact_secrets(call.head)[0])
+    start = _flat(call.head)
     if len(call.head) < HEAD_CHARS and len(start) <= DONE_CHARS:
         return start
     end = "" if call.error else _flat(redact_secrets(call.output)[0])[-END_CHARS:]
@@ -440,8 +426,8 @@ def handoff_block(packet: object) -> str:
     if unknown:
         lines.append(
             "Calls in this job whose effect is unknown (cut off, they may have done "
-            "part of their work): look at what they left first; melo refuses the ones "
-            "that can change something if they are run again as they were:"
+            "part of their work): look at what they left first; melo asks the person "
+            "before one that can change something runs again as it was:"
         )
         lines += [f"- {b.get('tool') or ''} · {b.get('what')}" for b in unknown]
     texts = (

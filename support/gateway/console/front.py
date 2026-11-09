@@ -75,7 +75,6 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import TOOL_ASK
-from localmelo.melo.contracts.pause import TOOL_DEADLINE
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
@@ -794,12 +793,13 @@ class TaskTools(BaseToolProvider):
         calls and refusals as melo's records show them (``handoff.from_chat``).
         Work stays here while this chat holds a browser page, its take-over
         card or an approval, or a password the person gave in this turn (browser
-        work and sign-ins do not move yet), or when no task may work in the
-        folder this chat's tasks inherit.
+        work and sign-ins do not move yet), or when no task may work in this
+        chat's folder (:meth:`Front.folder_refused`), the one its tasks inherit.
 
         Admitting is the one commit that makes the task runnable, and from
-        there to its lookup the call's time limit does not cut it; a Stop then
-        shows the task it admitted, with its own Stop. Whatever happens after it, the task
+        there to its lookup the call's time limit does not cut it
+        (``TaskWorkers.create_spec``); a Stop then shows the task it admitted,
+        which runs, with its own Stop. Whatever happens after it, the task
         is looked up by its key before the chat reads anything: admitted, the
         turn ends on it; not found, the work is still the chat's and it reads
         why; unknown, the turn ends saying so, never going on beside a task
@@ -818,13 +818,17 @@ class TaskTools(BaseToolProvider):
             if Handoff.read(started.spec).origin == "chat":
                 return hand_off(_receipt(turn.typed_text, started.title))
             return _already(started, turn)
-        why = front.holds_browser() or _holds_sign_in() or await front.no_task_folder()
+        folder = front.folder_refused()
+        why = (
+            front.holds_browser()
+            or _holds_sign_in()
+            or (folder and f"no task may work in this chat's folder ({folder}).")
+        )
         if why:
             return f"Not done: {why} The work stays here: finish it in this chat."
         echo: dict[str, Any] = {}
         try:
             packet = await front.handoff_of(turn, account=progress, remaining=objective)
-            _no_time_limit()
             echo = await front.delegate(
                 turn.user_text,
                 typed=front.typed(),
@@ -1180,16 +1184,6 @@ def _holds_sign_in() -> str:
     if callable(check) and check() is True:
         return "a password the user gave in this turn can only be typed in this chat."
     return ""
-
-
-def _no_time_limit() -> None:
-    """Admitting a task is one commit, read back by its key: from here the running
-    call's time limit does not cut that in two (#571). A Stop still goes through,
-    as through any await."""
-    deadline = TOOL_DEADLINE.get()
-    if deadline is not None:
-        with contextlib.suppress(RuntimeError):
-            deadline.reschedule(None)
 
 
 def _ref(record: TaskRecord) -> TaskRef:
@@ -1950,7 +1944,8 @@ class Front:
         """Why this chat's folder is read and not changed, ``""`` when work goes on there.
 
         The rule a person's task is held to (:func:`folder_problem`), read as the
-        chat's composition reads it.
+        chat's composition reads it. It is the folder the chat's tasks inherit,
+        so no work moves from the chat to a task while it is refused (#571).
         """
         folder = self.folder()
         return "" if folder is None else folder_problem(folder, self.console.cfg)
@@ -1963,17 +1958,6 @@ class Front:
             self._told_browsing = True
             await self.notice("front.echo.browsingOff")
         return True
-
-    async def no_task_folder(self) -> str:
-        """Why no task may work in the folder this chat's tasks inherit, or ``""`` (#571).
-
-        The chat itself opens there, reading only (``registry.chat_options``);
-        a task would be made failed before it starts, so no work moves to one.
-        """
-        workers = self.console.workers
-        folder = await workers.chat_folder(self.chat_id)
-        problem = folder_problem(folder, workers.settings())
-        return f"no task may work in this chat's folder ({problem})." if problem else ""
 
     def holds_browser(self) -> str:
         """Why this chat's work cannot leave it for its browser now, or ``""`` (#571).

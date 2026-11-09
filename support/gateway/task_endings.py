@@ -735,9 +735,9 @@ class TurnCall:
 
     *start* and *finish* are the ids of its ``tool.started`` and
     ``tool.finished`` events (``None`` while no finish is kept). *output* is
-    the end of what it returned and *head* the start of that, or of its
-    error (:data:`HEAD_CHARS`), as stored. *key* is the live call's key the
-    approval record kept for an allowed call (``run_key``), ``""`` without one.
+    the end of what it returned, as stored, and *head* the start of that, or of
+    its error (:data:`HEAD_CHARS`), redacted before it is cut. *key* is the live
+    call's key its start kept (``run_key``), ``""`` for a call stored without one.
     """
 
     start: int
@@ -1088,6 +1088,7 @@ async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[Tu
                 call = TurnCall(stored.id, str(data.get("name") or ""), given)
                 call.step = int(data.get("step") or 0)
                 call.preview = str(data.get("preview") or "")
+                call.key = str(data.get("run_key") or "")
                 calls.append(call)
                 waiting.setdefault(key, []).append(call)
             elif kind == "tool.finished" and waiting.get(key):
@@ -1098,10 +1099,7 @@ async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[Tu
                 output = str(data.get("output") or "")
                 call.output = output[-4000:]
                 call.error = str(data.get("error") or "")
-                call.head = (call.error or output)[:HEAD_CHARS]
-                approval = data.get("approval")
-                if isinstance(approval, dict):
-                    call.key = str(approval.get("run_key") or "")
+                call.head = redact_secrets(call.error or output)[0][:HEAD_CHARS]
         if len(page) < 1000:
             return calls
         after = page[-1].id or after

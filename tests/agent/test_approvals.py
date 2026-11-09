@@ -354,8 +354,7 @@ def _approval(
     """The ``approval`` of a tool.finished event for *request*.
 
     A denial by the person or a policy keeps the call's key, so a task its
-    chat continues never runs the same step again (#411); an allowed call
-    keeps it as ``run_key``.
+    chat continues never runs the same step again (#411).
     """
     approval: dict[str, Any] = {
         "request_id": request.request_id,
@@ -369,11 +368,6 @@ def _approval(
             request.tool_name, request.arguments, request.workspace_root
         )
         approval["loose_keys"] = loose_keys(request.tool_name, request.arguments)
-    if allowed:
-        # The live call's key, whatever the stored arguments keep (#571).
-        approval["run_key"] = call_key(
-            request.tool_name, request.arguments, request.workspace_root
-        )
     return approval
 
 

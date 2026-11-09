@@ -238,6 +238,7 @@ class Console:
         self.workers.chat_modes = self.sessions
         self.workers.on_earlier = self._used_earlier
         self.workers.on_ask = self.explanations.start
+        self.workers.on_unsent = self._unsent
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         # A switch of melo_serve's chat model holds every chat's turns first.
         self.serve = ServeSwitch(self)
@@ -390,6 +391,21 @@ class Console:
                 "preview": use.preview,
                 "line": t_in("en", "approvals.used", time=clock),
                 "said": said("approvals.used", time=clock),
+            }
+        )
+
+    async def _unsent(self, record: TaskRecord, problem: str) -> None:
+        """The person's message *record* never read did not go on in a fresh task
+        (#571): its chat says so, and the message stays theirs to send again."""
+        params = {"title": record.title, "problem": problem}
+        front = self.front_for(await self.effective_owner(record.front_id))
+        await front.echo(
+            {
+                "echo": "failed",
+                "task_id": record.task_id,
+                "title": record.title,
+                "line": t_in("en", "front.echo.sendFailed", **params),
+                "said": said("front.echo.sendFailed", **params),
             }
         )
 

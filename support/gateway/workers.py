@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import contextlib
 import contextvars
 import logging
 import os
@@ -25,6 +26,7 @@ from localmelo.melo.contracts.approvals import (
     EarlierBlocks,
 )
 from localmelo.melo.contracts.events import AgentEvent
+from localmelo.melo.contracts.pause import no_time_limit
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
@@ -172,7 +174,7 @@ from localmelo.support.sessions.identity import (
     ACTING_RULE,
     LANGUAGE_RULE,
 )
-from localmelo.support.sessions.runner import SessionRunner
+from localmelo.support.sessions.runner import SessionRunner, settle
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 from localmelo.support.task_cli import ending_words
 
@@ -498,12 +500,10 @@ class _StillGoingError(Exception):
     """The task a successor would follow runs again: the job goes on in it."""
 
 
-def _changes(
-    block: Mapping[str, Any], tools: Callable[[str], ToolDef | None] | None
-) -> bool:
+def _changes(block: Mapping[str, Any], tools: Callable[[str], ToolDef | None]) -> bool:
     """Whether the call of *block* can change something: its tool's definition
     (*tools*) says it does more than read, or the tool is not known."""
-    found = tools(str(block.get("tool") or "")) if tools is not None else None
+    found = tools(str(block.get("tool") or ""))
     return found is None or not changes_nothing(found)
 
 
@@ -702,6 +702,9 @@ class TaskWorkers:
         self.chat_modes: ChatModes | None = None
         self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
+        # Told why the person's messages a chat's worker never read could not
+        # go on in a fresh task (#571), so its chat says so.
+        self.on_unsent: Callable[[TaskRecord, str], Awaitable[None]] | None = None
         # What each running task did last, for task_get (see live()).
         self._live: dict[str, dict[str, Any]] = {}
 
@@ -855,6 +858,11 @@ class TaskWorkers:
         (``Handoff.meta``), in the commit that admits it. *auto* is the Auto
         policy it starts with (a step the person allowed once). Both are in
         place before the task can run.
+
+        From the write that admits it on, admitting the task goes on to its
+        registration and schedule whatever stops the call (a Stop raises once
+        it is done), and the running tool call's time limit does not cut it,
+        nor what reads the task back after it (#571).
         """
         front, key = front_id, request_key
         if handoff is not None:
@@ -920,42 +928,58 @@ class TaskWorkers:
                 owner.meta if owner is not None else None,
                 self._new_chat_mode() if owner and owner.kind == "front" else "ask",
             )
-            record, repeated = await self.tasks.create_task(
-                spec,
-                origin=origin,
-                workspace=workspace,
-                request_key=key,
-                create_key=create_key,
-                task_id=task_id,
-                front_id=front or self.front_id,
-                meta={
-                    "approvals": mode,
-                    **({"started_by": "chat"} if chat_started else {}),
-                    **({"in_chat": True} if chat_started or front else {}),
-                    **(handoff.meta() if handoff is not None else {}),
-                },
-                _recovery_proof=True,
-            )
-            if not repeated and refused:
-                self._register(record)
-                record = await self.tasks.change(
-                    record.task_id,
-                    state="failed",
-                    actor="scheduler",
-                    failure_reason="invalid_workspace",
+
+            async def admit() -> tuple[TaskRecord, bool]:
+                record, repeated = await self.tasks.create_task(
+                    spec,
+                    origin=origin,
+                    workspace=workspace,
+                    request_key=key,
+                    create_key=create_key,
+                    task_id=task_id,
+                    front_id=front or self.front_id,
+                    meta={
+                        "approvals": mode,
+                        **({"started_by": "chat"} if chat_started else {}),
+                        **({"in_chat": True} if chat_started or front else {}),
+                        **(handoff.meta() if handoff is not None else {}),
+                    },
+                    _recovery_proof=True,
                 )
-                self.gate.finish_task(record.task_id, "failed")
-                self._ready.pop(record.task_id, None)
-            elif not repeated:
-                if auto is not None:
-                    self._auto[record.task_id] = auto
-                self._register(record)
-                self._eligible.add(record.task_id)
-                if record.level == 5:
+                if not repeated and refused:
+                    self._register(record)
                     record = await self.tasks.change(
-                        record.task_id, state="parked", actor="user"
+                        record.task_id,
+                        state="failed",
+                        actor="scheduler",
+                        failure_reason="invalid_workspace",
                     )
-                await self._schedule()
+                    self.gate.finish_task(record.task_id, "failed")
+                    self._ready.pop(record.task_id, None)
+                elif not repeated:
+                    if auto is not None:
+                        self._auto[record.task_id] = auto
+                    self._register(record)
+                    self._eligible.add(record.task_id)
+                    if record.level == 5:
+                        record = await self.tasks.change(
+                            record.task_id, state="parked", actor="user"
+                        )
+                    await self._schedule()
+                return record, repeated
+
+            # From the write that admits it on, the task is registered and
+            # scheduled whatever stops this call, a Stop or its time limit:
+            # none is shown that never runs (#571).
+            no_time_limit()
+            admitting = asyncio.ensure_future(admit())
+            try:
+                record, repeated = await asyncio.shield(admitting)
+            except asyncio.CancelledError:
+                await settle(admitting)
+                if not admitting.cancelled():
+                    admitting.exception()  # retrieved: the cancellation goes on
+                raise
             return await self._body(record), repeated
 
     def _new_chat_mode(self) -> ChatMode:
@@ -1334,28 +1358,32 @@ class TaskWorkers:
         record: TaskRecord,
         meta: Mapping[str, Any] | None,
         policy: ApprovalPolicy,
-        tools: Callable[[str], ToolDef | None] | None = None,
+        tools: Callable[[str], ToolDef | None],
     ) -> ApprovalPolicy:
-        """*policy*, refusing again the steps blocked earlier in *record*'s job (#411, #571).
+        """*policy*, holding again the steps blocked earlier in *record*'s job (#411, #571).
 
-        Each blocked call's key is kept with its record (``approval.call_key``);
-        a call with the same key, or one alike, is refused before any review,
-        saying who blocked it. Two kinds:
+        Two kinds:
 
-        - a call of the job whose effect is unknown (``Handoff.blocks``) is
-          refused in every task of the job, whoever moved it on, when its tool
-          can change something: the run's own definition of it (*tools*) says,
-          by :func:`~localmelo.melo.checker.tiers.changes_nothing`, and a tool
-          it does not know counts as one that can;
+        - a call of the job whose effect is unknown (``Handoff.blocks``, by the
+          key its start kept) needs a fresh decision in every task of the job,
+          whoever moved it on, when its tool can change something: the run's
+          own definition of it (*tools*) says, by
+          :func:`~localmelo.melo.checker.tiers.changes_nothing`, and a tool it
+          does not know counts as one that can. The person is asked before it
+          runs (``EarlierBlocks.fresh``);
         - a step refused in the job (the task's own denials, and those its
-          packet carries) is refused while melo or the chat moved the job on
-          (``meta.followup_guard``): the person's own message gives each a
-          fresh decision.
+          packet carries, each by the key its record kept, ``approval.call_key``)
+          is refused before any review, saying who blocked it, while melo or
+          the chat moved the job on (``meta.followup_guard``): the person's own
+          message gives each a fresh decision.
         """
         carried = Handoff.read(record.spec).blocks
-        blocks = [
-            b for b in carried if b.get("who") == UNKNOWN_EFFECT and _changes(b, tools)
+        fresh = [
+            b["call_key"]
+            for b in carried
+            if b.get("who") == UNKNOWN_EFFECT and _changes(b, tools)
         ]
+        blocks: builtins.list[Mapping[str, Any]] = []
         if (meta or {}).get("followup_guard"):
             blocks += [b for b in carried if b.get("who") != UNKNOWN_EFFECT]
             try:
@@ -1364,12 +1392,13 @@ class TaskWorkers:
                 log.exception(
                     "Could not read the blocked steps of task %s", record.task_id
                 )
-        if not blocks:
+        if not blocks and not fresh:
             return policy
         return EarlierBlocks(
             policy,
             {b["call_key"]: (b["who"], b["step_key"]) for b in blocks},
             {b["call_key"]: b["loose_keys"] for b in blocks},
+            fresh,
         )
 
     async def allow_once(self, task_id: str, request_id: str) -> tuple[dict, str]:
@@ -2857,12 +2886,12 @@ class TaskWorkers:
                 auto.asking = None
                 policy = auto
             # A run its chat continued on its own never repeats a blocked step
-            # (#411), nor a call of its job whose effect is unknown (#571).
+            # (#411), and a call of its job whose effect is unknown asks (#571).
             policy = await self._guard(
                 record,
                 task_session.meta if task_session else None,
                 policy,
-                getattr(getattr(agent, "hippo", None), "get_tool", None),
+                lambda name: agent.hippo.get_tool(name),  # read only with such a call
             )
             async with self._lock:
                 self._runners[task_id] = runner
@@ -3023,7 +3052,7 @@ class TaskWorkers:
                     await self._close_worker(runner, agent)
                 except Exception:
                     log.exception("Could not close worker %s", task_id)
-            going_on: tuple[TaskRecord, str] | None = None
+            going_on: tuple[TaskRecord, str, AutoPolicy | None] | None = None
             async with self._lock:
                 park = task_id in self._park_winners and not (
                     self._closed
@@ -3146,14 +3175,18 @@ class TaskWorkers:
                     # Messages that came after the run's last step: the task
                     # goes on with them as its next turn. A chat's worker runs
                     # once (#571): its job goes on in a successor instead, once
-                    # this lock is free.
+                    # this lock is free, with what was allowed once and not used
+                    # (its go-ahead is among the messages).
                     try:
                         current = await self.tasks.get_task(task_id)
                         if current.state not in _CONTINUABLE:
                             pass
                         elif await self.one_time(task_id):
-                            self._auto.pop(task_id, None)
-                            going_on = (current, "\n\n".join(unread))
+                            going_on = (
+                                current,
+                                "\n\n".join(unread),
+                                self._auto.pop(task_id, None),
+                            )
                         else:
                             await self._continue(
                                 current, "\n\n".join(unread), level=None, reason=""
@@ -3164,10 +3197,14 @@ class TaskWorkers:
                         )
                 await self._schedule()
             if going_on is not None:
+                ended, text, allowed = going_on
                 try:
-                    await self.successor(going_on[0], going_on[1], by="person")
-                except Exception:
+                    await self.successor(ended, text, by="person", auto=allowed)
+                except Exception as exc:
                     log.exception("Task %s could not go on with its messages", task_id)
+                    with contextlib.suppress(Exception):
+                        if self.on_unsent is not None:
+                            await self.on_unsent(ended, str(exc) or type(exc).__name__)
 
     def _card_watch(self, task_id: str) -> CardWatch:
         """Who sees the card Auto shows for *task_id*, and how long it waits (#465).
