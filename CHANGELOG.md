@@ -1779,6 +1779,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A task's card in the chat names the file it was asked to write and did not. The card's line ended at
+  "is missing:" with no name; the task's own page already had it.
+
 - The live browser card docked at the top of the chat no longer shows lines of the chat cut off around it: above the card, through its rounded corners and at its bottom edge, whatever scrolls under it is hidden behind a band in the chat's colour that fades out below the card (#576).
 - Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.
