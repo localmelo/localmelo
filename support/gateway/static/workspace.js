@@ -69,7 +69,6 @@ import {
   PICTURES_REFUSED,
   printable,
   reflectionLine,
-  returnNotes,
   serverAddress,
   serverUnreachable,
   shownItems,
@@ -944,7 +943,10 @@ function startStream(id) {
       // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
       if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
       if (frame.type === "attention.card") holdOrShow(S.view, frame);
-      if (frame.type === "attention.echo") S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
+      if (frame.type === "attention.echo") {
+        S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
+        if (frame.data?.note_back) noteBack(frame.data);
+      }
       if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
       if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
       noteFrame(frame);
@@ -1405,11 +1407,17 @@ async function stopBrowsingTask(card) {
 
 /**
  * Stop in the Browser view, which covers the composer: a task's browser ends that task, as its card's Stop does; a chat's
- * is the chat's own run, as the composer's Stop does. False when there is no run to stop.
+ * is the chat's own run, as the composer's Stop does, only while the composer holds the turn the card names: its run may
+ * be over and the composer's turn a later one. False when there is no run to stop.
  */
 async function stopBrowsingRun(card) {
   if (card.task) return stopBrowsingTask(card);
-  if (composerTurn() === null) return false;
+  const turn = composerTurn();
+  if (turn === null) return false;
+  if (turn.turn !== card.turn) {
+    notify(t("errors.staleBrowser"));
+    return false;
+  }
   await stop();
   return true;
 }
@@ -2313,8 +2321,8 @@ async function queueMessage(text, {clearInput = false, asTask = false, carry = n
 
 /**
  * Add *text*, and the pictures in the strip, to the turn that runs. The gateway keeps them for the
- * run's next step, or, when the turn ends first, sends them as the next message. A turn that ended
- * while the words were typed makes them a message; a refusal gives the words and pictures back.
+ * run's next step. A refusal gives the words and pictures back, and so does the gateway when the
+ * turn ends first (`noteBack`): a note that misses its turn waits for the person to press Send.
  */
 async function addNote(text, { clearInput = false } = {}) {
   const turn = composerTurn();
@@ -2351,12 +2359,6 @@ async function addNote(text, { clearInput = false } = {}) {
     return;
   } catch (error) {
     dropNote(turn, item);
-    if (error.code === "turn_not_running" && S.activeId === sessionId) {
-      // The turn ended first: these words and pictures are a message now.
-      await reloadSession(sessionId);
-      // A message still on its way (the outbox holds one) cannot take them: they go back to the box.
-      if (composerTurn() === null && pendingOutbox() === null) return queueMessage(text, { carry: carried });
-    }
     if (carried.length) returnMedia(sessionId, carried);
     if (text) giveBack(text);
     notify(t("composer.noteFailed", { problem: error.message }), { sticky: true });
@@ -2370,6 +2372,12 @@ function returnMedia(slot, items) {
   if (items.length === 0) return;
   if ((S.activeId ?? "new") === slot) media.restore(items);
   else S.media[slot] = [...items, ...(S.media[slot] ?? [])];
+}
+
+/** A note its turn ended without, from the gateway: its words and pictures are in the box again. A reload reads the row, not this. */
+function noteBack(echo) {
+  if (echo.images?.length) returnMedia(S.activeId ?? "new", pictureItems(echo.images));
+  if (echo.typed) giveBack(echo.typed);
 }
 
 /** Put words back in the box, before what is typed there now. */
@@ -2428,6 +2436,13 @@ async function submit(slot, key, text) {
       // The main chat started or changed a task in code: no turn, an echo line.
       delete S.outbox[slot];
       if (S.view?.id === sessionId) S.view.echoes = mergeEchoes(S.view.echoes ?? [], [body.echo]);
+      renderMessages(true);
+      syncUI();
+      return;
+    }
+    if (body.note) {
+      // A turn was running after all: the words joined it, and its stream shows them.
+      delete S.outbox[slot];
       renderMessages(true);
       syncUI();
       return;
@@ -2554,19 +2569,9 @@ async function stop() {
   S.cancelling.add(turn.id);
   syncUI();
   try {
-    const stopped = await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+    await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
     // The run stops at its next step, not on the instant: the panel says so until the turn ends.
     turn.stopping = true;
-    // Words the run never read do not start another turn after a Stop: they are in the box again.
-    const unread = stopped.unread_notes ?? [];
-    if (unread.length > 0) {
-      returnNotes(turn, unread);
-      renderMessages(false);
-      const pictures = unread.flatMap((note) => note.images ?? []);
-      if (pictures.length > 0) returnMedia(S.activeId ?? "new", pictureItems(pictures));
-      const words = unread.map((note) => note.text).filter(Boolean).join("\n\n");
-      if (words) giveBack(words);
-    }
   } catch (error) {
     if (error.status !== 409 && error.status !== 404) {
       notify(t("chat.stopFailed", { problem: error.message }), { sticky: true });

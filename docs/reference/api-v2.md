@@ -1293,8 +1293,8 @@ with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`; `action` `send` carries the message as `text`),
-  `ask` (`Start this as a task?`, with `text`, the whole message, `words`, what
-  was typed, and `turn_id`), `sent` (a message given to a task, `how`
+  `ask` (`Start this as a task?`, only on a card already stored: nothing writes
+  new ones; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
   `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
   `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
@@ -1397,7 +1397,7 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
 - `ask_end` (`how`: `person` with `text`, `timeout`, `stopped` or `expired`;
   `of` the question or the escalation).
 - `queued` (`typed`) and `dequeued` (`of`): a message sent while the chat
-  answers a task is kept, `POST /api/sessions/{id}/turns` answering 200 with the
+  answers a task, or that cannot be a note of its running turn yet, is kept, `POST /api/sessions/{id}/turns` answering 200 with the
   `queued` echo instead of 409, and runs as the chat's next turn, after a
   restart too, and once: a turn its `client_request_id` (or melo's own key)
   already started is not run again. It is accepted only once it is stored;
@@ -1699,6 +1699,7 @@ These codes answer on the write routes besides the shared ones above:
 | 409 | `model_text_only` | a turn, or the retry of one, has pictures and the chat's model is known not to read them |
 | 409 | `chat_answering` | a message with pictures arrived while the chat answers a task's question |
 | 409 | `session_busy` | a turn is already running in the session |
+| 409 | `chat_queue_full` | too many messages wait behind the chat's turn |
 | 409 | `not_latest_turn` | retry or undo named a turn that is not the newest finished one |
 | 409 | `not_retryable` | retry named a turn that answered a task's question |
 | 409 | `submission_conflict` | the `client_request_id` was used for a different message |
@@ -1799,8 +1800,13 @@ is no `workspace` here — the session's own folder is the Agent's.
   reopens from that conversation and reports `null`.
 - A task session returns 409 `task_session_read_only`; use the task routes
   instead of starting a chat turn.
-- 409 `session_busy` while a turn runs. One turn runs per session; a second
-  is refused before anything is queued.
+- One turn runs per session. On a chat, words sent while a person's turn runs
+  answer 202 `{"note": {...}}`, the same note as `POST /api/turns/{turn_id}/notes`,
+  read at the run's next step. A message that cannot be a note yet keeps its
+  place (200, a `queued` echo), at most 20 messages and 2,000,000 characters
+  together, then 409 `chat_queue_full`; pictures with nowhere to wait are 409
+  `chat_answering`. On any other session the answer is 409 `session_busy`, before
+  anything is queued.
 - A repeated `client_request_id` answers 200 with that key's stored turn
   and `"repeated": true`, whether the turn still runs or not.
 - The session's folder must still exist: a deleted folder is 400
@@ -1865,12 +1871,8 @@ Stop a running turn, from the id the events gave.
   `[interrupt: no assistant output for this turn]` when it said nothing.
 - Cancelling while an approval waits withdraws the card: the request is
   answered `withdrawn` and leaves `pending_approvals`.
-- Words [added to the turn](#post-apiturnsturn_idnotes) that its run had not read do not start
-  another turn: they are dropped from the queue and come back as `"unread_notes": [{"note": 3,
-  "text": "use the 2024 file"}]`, for the client to put back into its message box. A note that had
-  pictures also has `"images"`: those pictures staged again, each as [`POST /api/uploads`](#post-apiuploads)
-  answers (`id`, `name`, `mime_type`, `size_bytes`, `width`, `height`, `model_reads`), for the client to put back
-  in its row of pictures and send with a message. The key is absent when there are none.
+- Words [added to the turn](#post-apiturnsturn_idnotes) that its run had not read start nothing:
+  they go back to the person, as that route says.
 
 ## POST /api/turns/{turn_id}/notes
 
@@ -1896,13 +1898,17 @@ With a picture ([staged first](#post-apiuploads); its id goes in `images`):
 {"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
 ```
 
-- 202. `state` is `sent` when the running turn takes the words, and `next` when the turn ended while they
-  were stored: they run as the chat's next turn. `client_request_id` is optional and makes the call safe
-  to repeat (the same body comes back, also after the turn ended).
+- 202, `state` `sent`. 409 `turn_not_running` also when the turn ended while they were stored: the sender
+  keeps them. `client_request_id` is optional and makes the call safe to repeat (the same body comes back,
+  also after the turn ended).
 - The run puts each note into its next model request as the person's message, marked as added while it
-  worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note the run did not
-  read before the turn ended is sent as the chat's next turn, in order with the queued messages; they live in
-  the same store, so a restart keeps them. A Stop gives the unread ones back ([cancel](#post-apiturnsturn_idcancel)).
+  worked, and says so with `inbox.accepted` (its `offset` is the note's number). A note that misses its turn
+  never starts work by itself: once the chat is idle, however the turn ended, a Stop or a restart included, a
+  `failed` echo says so with `note_back: true`, `typed` and `images` (its pictures staged again, each as
+  [`POST /api/uploads`](#post-apiuploads) answers), and a client on the stream puts them back in its input.
+  After a restart there is no `images`, and the line says a picture did not come back. Only a row stored as a
+  message runs after a restart: any other row returns this way, one stored before the mark included, with `of`
+  when it has a `queued` echo.
 - A card that a step of the turn is waiting on (an approval, a take-over, a question about another app's
   window) ends when a note is sent: `approval.resolved` with `outcome` `denied` and `origin` `words`, and the
   call returns at once, so the run reads the note at its next step. Words never allow anything, whatever they
@@ -1915,8 +1921,7 @@ With a picture ([staged first](#post-apiuploads); its id goes in `images`):
   `model_text_only` when the chat model is known not to read pictures). The answer lists them under `images`
   as a turn's `images` are listed (`sha256`, `mime_type`, `size_bytes`; the picture itself is
   [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256)), and the `turn.note` event does the
-  same. They are kept in the chat before the call answers, so a note that becomes the next turn, or waits through
-  a restart, still has them. The run sends them as image parts of the note's message at its next step (at
+  same. They are kept in the chat before the call answers. The run sends them as image parts of the note's message at its next step (at
   most 8 pictures a step: further notes are read at the step after); a model found not to read pictures by
   then is told so in the note's words and sent none.
 - 409 `turn_not_running` for a turn that is not running, is being stopped or has finished its run: the

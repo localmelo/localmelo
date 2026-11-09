@@ -20,11 +20,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.support.backends import discovery
 from localmelo.support.cli.agents import AgentFactory, config_backend, url_backend
 from localmelo.support.config import CloudVendorConfig, Config, LocalBackendConfig
-from localmelo.support.gateway.console.front import (
-    CHAT_NOTE,
-    FRONT_TEXT,
-    build_front_agent,
-)
+from localmelo.support.gateway.console.front import FRONT_TEXT, FrontAgent
 from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.gateway.workers import WORKER_GUIDE
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
@@ -175,9 +171,10 @@ def test_a_worker_acts_for_the_user_too() -> None:
 
 
 def test_every_chat_is_told_to_start_the_work_not_to_talk_about_it() -> None:
-    assert "start it with task_create right away" in FRONT_TEXT
+    assert "you do their work yourself" in FRONT_TEXT
+    assert "start right away" in FRONT_TEXT
     assert "Do not ask whether to start it" in FRONT_TEXT
-    assert "You have no browser" in FRONT_TEXT
+    assert "no browser" not in FRONT_TEXT.casefold()
     assert "find openings and apply" in FRONT_TEXT
     assert "is work, not advice" in FRONT_TEXT
     assert "with a list of links" in FRONT_TEXT
@@ -439,7 +436,9 @@ async def say_hello(surface: str, url: str, workspace: str) -> None:
         finally:
             await factory.close(agent)
     else:
-        agent = await build_front_agent(cfg, workspace, surface, tools=NoTools())
+        agent = await default_builder(
+            cfg, workspace, None, surface, tools=[NoTools()], agent_class=FrontAgent
+        )
         try:
             await agent.run_task("hello")
         finally:
@@ -481,7 +480,7 @@ async def test_each_chat_acts_for_the_user_and_the_chats_remind_it_next_to_the_m
     assert system.count(APPROVALS_RULE) == 1
     # The main chat and the side chats carry the reminder after the user's words.
     assert last.startswith("hello")
-    assert last.endswith(CHAT_NOTE) is (surface != "terminal")
+    assert last.endswith(ACTING_NOTE) is (surface != "terminal")
 
 
 def test_the_option_must_be_a_text() -> None:

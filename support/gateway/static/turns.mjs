@@ -535,16 +535,16 @@ export function approvalTag(status, errorCategory, approval) {
 
 /**
  * The person's words added to a turn while melo works. Each is an item of the turn's work:
- * `{kind: "note", key, note, text, pictures, images, sending, seen, step, returned}`. `note` is the
+ * `{kind: "note", key, note, text, pictures, images, sending, seen, step}`. `note` is the
  * number the gateway gave it (the run's `inbox.accepted` names it as `offset`); it is null until the
  * gateway answers or its `turn.note` event arrives, whichever is first. A note is shown as
  * sending, sent (the run reads it at its next step), seen, or, when its turn ended first,
- * as the next message, or, after a Stop, as given back to the box. A note may carry pictures:
+ * as given back to the box. A note may carry pictures:
  * `pictures` are the ones the person added, `{name, url, bytes}`, shown until the gateway lists
  * them as `images` (the references a turn's events carry, served by the chat's blobs).
  */
 export function startNote(turn, text, key, pictures = []) {
-  const item = {kind: "note", key, note: null, text, pictures, images: [], sending: true, seen: false, step: 0, returned: false};
+  const item = {kind: "note", key, note: null, text, pictures, images: [], sending: true, seen: false, step: 0};
   turn.items.push(item);
   return item;
 }
@@ -582,7 +582,7 @@ function noteHeard(turn, number, text, images) {
     local.images = refs;
     return;
   }
-  turn.items.push({kind: "note", key: "", note: number, text, pictures: [], images: refs, sending: false, seen: false, step: 0, returned: false});
+  turn.items.push({kind: "note", key: "", note: number, text, pictures: [], images: refs, sending: false, seen: false, step: 0});
 }
 
 /** An `inbox.accepted` event: the run read note *offset*. False when the turn has no such note. */
@@ -600,20 +600,11 @@ export function dropNote(turn, item) {
   if (at >= 0) turn.items.splice(at, 1);
 }
 
-/** After a Stop: the notes the gateway gave back (`[{note, text}]`) are in the box again. */
-export function returnNotes(turn, given) {
-  for (const back of given) {
-    const item = findNote(turn, int(back.note));
-    if (item !== null) item.returned = true;
-  }
-}
-
-/** `sending`, `sent`, `seen`, `returned` (stopped and given back), or `next` (its turn ended before another step). */
+/** `sending`, `sent`, `seen`, or `returned` (its turn ended first: it is back in the box). */
 export function noteState(turn, item) {
   if (item.seen) return "seen";
-  if (item.returned) return "returned";
   if (item.sending) return "sending";
-  return turn.finishedAt ? "next" : "sent";
+  return turn.finishedAt ? "returned" : "sent";
 }
 
 /** The muted line under a note. */

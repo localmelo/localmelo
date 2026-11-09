@@ -19,16 +19,10 @@ import pytest
 
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.chores import CHECKIN_S
-from localmelo.support.gateway.console.front import (
-    CHAT_NOTE,
-    FRONT_TEXT,
-    NO_ANSWER_TEXT,
-    NO_ANSWER_TEXT_ZH,
-    TASK_TOOLS,
-)
-from localmelo.support.gateway.front_rules import create_rule
+from localmelo.support.gateway.console.front import FRONT_TEXT, TASK_TOOLS
 from localmelo.support.gateway.task_policy import configured_root
 from localmelo.support.gateway.workers import NO_BROWSER_NOTE
+from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .test_ask_owner import Reply, rows, tool_results, until
@@ -88,56 +82,8 @@ async def test_the_models_call_on_a_persons_turn_starts_the_task(
         ]
 
 
-@pytest.mark.parametrize(
-    "typed",
-    [
-        "",
-        "don't change anything, only tell me what is wrong",
-        "不用开任务，看一下我的简历然后告诉我适合什么工作",
-        "don't do anything yet",
-        "先别动手，只解释一下这个错误",
-        # A word that looks like a verb in what it is about changes nothing.
-        "the fix report: don't start a task, just explain it",
-    ],
-)
-def test_words_that_plainly_say_not_to_act_are_offered(typed: str) -> None:
-    assert create_rule(typed) == "offer"
-
-
-@pytest.mark.parametrize(
-    "typed",
-    [
-        # A limit on the work is no word against the work.
-        "fix the login bug without changing anything else",
-        "修复登录的 bug，别改其他文件",
-        "帮我订机票，别改其他东西",
-        "book the hotel, don't touch anything else",
-        "don't do it before noon, book it at one",
-        # A limit on what comes back is no word against the work.
-        "do it and just tell me the result",
-        "book the table and only tell me the time",
-        "订好机票，只告诉我结果就行",
-        # A question and work in one message: the model read them both.
-        "到底好了没，好了就去订票",
-        "is it done, and book the table for tonight",
-        "briefly, what is in my inbox and can you clear it?",
-        # Words after a colon are not always text to explain.
-        "总结一下：我这周的邮件",
-        "translate my site: all pages to French",
-        # No list stands in the way of the model's own reading.
-        "is it done?",
-        "is the fix report done?",
-        "hi",
-    ],
-)
-def test_no_other_words_stand_between_the_model_and_the_work(typed: str) -> None:
-    assert create_rule(typed) == "start"
-
-
 def test_nothing_sends_the_person_to_rephrase() -> None:
-    told = " ".join(
-        (FRONT_TEXT, CHAT_NOTE, NO_ANSWER_TEXT, NO_ANSWER_TEXT_ZH)
-    ).casefold()
+    told = " ".join((FRONT_TEXT, ACTING_NOTE)).casefold()
     assert "as a task" not in told and "作为任务" not in told
     assert "with more detail" not in told and "说得更具体" not in told
 
@@ -262,21 +208,6 @@ async def test_one_message_still_starts_one_task_through_a_finished_worker(
         await say(client, console, "add the prices")
         assert tool_results(models["main"])[-1].startswith("Not done: one task")
         assert len(await others(console, old)) == 1
-
-
-async def test_words_that_say_not_to_act_start_no_worker_through_a_finished_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ids: dict[str, str] = {}
-    async with owner_console(
-        tmp_path, monkeypatch, main=[messages(ids), OK], follow_up=False, run=False
-    ) as (console, client, _, _):
-        old = ids["task"] = await task_of(client, console, "write the vendors list")
-        await _finished(console, old, REPORT)
-        typed = "don't start a task, only tell me what the vendors list says"
-        await say(client, console, typed)
-        assert await others(console, old) == []
-        assert await state(console, old) == "done"
 
 
 async def test_a_worker_that_stopped_before_finishing_continues_its_own_job(
@@ -623,19 +554,6 @@ async def test_a_schedule_melo_cannot_keep_saves_nothing_and_says_so(
         assert await console.workers.tasks.list_tasks() == []
 
 
-async def test_words_that_say_not_to_act_get_the_card_not_a_saved_chore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    typed = "every day at 9 brief me on the news, but don't start anything yet"
-    async with owner_console(
-        tmp_path, monkeypatch, main=[schedules(True), OK], run=False
-    ) as (console, client, _, _):
-        await say(client, console, typed)
-        assert await chores(console) == []
-        assert await console.workers.tasks.list_tasks() == []
-        assert [r["echo"] for r in await rows(console, console.main_id)] == ["chore"]
-
-
 async def test_only_a_persons_own_words_save_a_schedule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -670,13 +588,12 @@ async def test_a_new_chats_first_message_reads_codes_rules_like_any_other(
             body: dict[str, Any] = made.json()
             return body
 
-        # /task and a change to named files start a task the new chat owns.
+        # /task starts a task the new chat owns.
         body = await first("/task tidy the notes", "first-1")
         assert body["echo"]["echo"] == "started" and "turn" not in body
         chat = body["session"]["id"]
         record = await console.workers.tasks.get_task(body["echo"]["task_id"])
         assert record.front_id == chat
-        assert (await first("fix notes.md"))["echo"]["echo"] == "started"
         # A reminder is proposed there, and a control phrase reaches its task.
         reminder = await first("remind me to call Sam on Friday at 9")
         assert reminder["echo"]["echo"] == "chore"
@@ -823,7 +740,6 @@ async def test_a_task_whose_question_waits_for_the_person_shows_in_the_check_in(
 
 # ── One message, one receipt ──
 
-PROMISE = answer("I'll take care of that now.")
 SAVED = answer("It is saved for every day at 9.")
 
 
@@ -869,7 +785,7 @@ async def test_just_once_after_the_message_started_its_work_starts_nothing_more(
 async def test_just_once_and_a_retry_start_the_same_work_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    main: list[Reply] = [answer("That is a good habit."), PROMISE]
+    main: list[Reply] = [answer("That is a good habit."), creates("Invoice"), OK]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,
@@ -886,13 +802,10 @@ async def test_just_once_and_a_retry_start_the_same_work_once(
         assert len(await console.workers.tasks.list_tasks()) == 1
 
 
-@pytest.mark.parametrize(
-    "again", [[PROMISE], [schedules(True), PROMISE]], ids=["promise", "schedule"]
-)
 async def test_a_retry_of_a_message_that_only_saved_a_schedule_runs_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, again: list[Reply]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    main: list[Reply] = [schedules(False), SAVED, *again, SAVED]
+    main: list[Reply] = [schedules(False), SAVED, schedules(True), SAVED]
     async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
         console,
         client,

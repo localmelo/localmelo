@@ -1,44 +1,35 @@
-"""The main chat does what it is asked, or hands it off with its context.
+"""The main chat does what it is asked, and reaches its tasks by what the person says.
 
-A preamble with no work is handed off, an imperative change to named files
-becomes a task without a model call, ``search_files`` answers "which file
-defines X?", a question at the cap asks, the hand-off sentence follows the
-message's language, a follow-up reaches the task it names (a running task at
-its next step, a finished one as a new turn), and the main chat reads its
-tasks' answers. Each test drives the console's routes with a real Agent on a
-scripted model; no worker starts.
+``search_files`` answers "which file defines X?", a follow-up reaches the task
+it names (a running task at its next step, a finished one as a new turn), and
+the main chat reads its tasks' answers. Each test drives the console's routes
+with a real Agent on a scripted model; no worker starts.
 """
 
 from __future__ import annotations
 
 import asyncio
-import copy
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.front import (
-    BRIEF_NOTE,
-    BRIEF_STEPS,
     FRONT_TEXT,
-    NO_ANSWER_TEXT,
-    STARTED_TEXT,
-    STARTED_TEXT_ZH,
     answer_head,
     clean_title,
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.sessions.display import short_title
-from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
+from localmelo.tests.sessions.helpers import answer, tool_call
 
 from ..conftest import REAL_ASK_TITLE
 from .conftest import HOLDER, run_result
-from .test_front import _echoes, _four_steps, _say, _start, _task, front_console
+from .test_front import _echoes, _say, _start, _task, front_console
 from .test_turn_writes import _wait_turn
 
 FIX = (
@@ -82,77 +73,7 @@ def _tool_result(llm: Any, request: int = 1) -> str:
     return str(llm.requests[request][-1].content)
 
 
-# ── A reply that only announces work is handed off ──
-
-
-async def test_a_preamble_with_no_tool_call_hands_the_work_off(tmp_path: Path) -> None:
-    preamble = answer(
-        "I'll start by looking at the test file and finding the relevant code."
-    )
-    async with front_console(tmp_path, preamble) as (console, client, llm):
-        typed = "the e2e check for list_files is too weak, make it stronger and commit"
-        await _say(client, console, typed)
-        turn = await _wait_turn(client, str(console.main_id))
-        assert (turn["status"], turn["answer"]) == ("completed", STARTED_TEXT)
-        assert len(llm.requests) == 1
-        [echo] = await _echoes(console)
-        assert echo["echo"] == "started"
-        record = await _task(console, echo["task_id"])
-        assert (record.title, record.spec["objective"]) == (short_title(typed), typed)
-        # The next turn reads the hand-off, not the preamble.
-        entry = console.sessions.get(str(console.main_id))
-        assert entry is not None and entry.agent is not None
-        assert entry.agent.conversation()[-1].content == STARTED_TEXT
-        # The main chat is told to act, not announce.
-        assert FRONT_TEXT in llm.requests[0][0].content
-
-
-async def test_a_chinese_preamble_hands_off_in_chinese(tmp_path: Path) -> None:
-    async with front_console(tmp_path, answer("我先看一下测试文件。")) as (
-        console,
-        client,
-        _,
-    ):
-        await _say(client, console, "把端到端测试改得更严格一些，然后提交")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == STARTED_TEXT_ZH
-        assert [e["echo"] for e in await _echoes(console)] == ["started"]
-
-
-async def test_a_request_that_keeps_the_rest_unchanged_hands_off_as_a_task(
-    tmp_path: Path,
-) -> None:
-    # The hand-off reads the words as start_rule does: the fix is asked for.
-    async with front_console(tmp_path, answer("Let me look at the login code.")) as (
-        console,
-        client,
-        _,
-    ):
-        await _say(client, console, "fix the login bug without changing anything else")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == STARTED_TEXT
-        assert [e["echo"] for e in await _echoes(console)] == ["started"]
-
-
-async def test_a_question_answered_with_a_preamble_gets_its_answer(
-    tmp_path: Path,
-) -> None:
-    # A question the chat answers is never offered as a task (#440): the turn
-    # asks once more, without tools, for the answer from what it found.
-    replies = (
-        answer("Let me look into it."),
-        answer("It checks one word of the listing, not a file name."),
-    )
-    async with front_console(tmp_path, *replies) as (console, client, llm):
-        await _say(client, console, "why is the e2e check so weak?")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == "It checks one word of the listing, not a file name."
-        assert len(llm.requests) == 2
-        assert await _echoes(console) == []
-        assert await console.workers.tasks.list_tasks() == []
-        entry = console.sessions.get(str(console.main_id))
-        assert entry is not None and entry.agent is not None
-        assert entry.agent.conversation()[-1].content == turn["answer"]
+# ── A reply is what the model said ──
 
 
 async def test_a_real_answer_is_kept(tmp_path: Path) -> None:
@@ -164,21 +85,24 @@ async def test_a_real_answer_is_kept(tmp_path: Path) -> None:
         assert await _echoes(console) == []
 
 
-# ── Rules first: work on named files is a task at once ──
-
-
-async def test_an_imperative_change_to_named_files_is_a_task_without_a_model_call(
+async def test_a_slash_task_with_a_change_to_named_files_is_a_task_without_a_model_call(
     tmp_path: Path,
 ) -> None:
     async with front_console(tmp_path) as (console, client, llm):
-        response = await _say(client, console, FIX)
+        response = await _say(client, console, f"/task {FIX}")
         assert response.status_code == 200, response.text
         echo = response.json()["echo"]
         assert echo["line"] == f"Started: {short_title(FIX)} · P1"
-        assert echo["typed"] == FIX
         record = await _task(console, echo["task_id"])
         assert (record.spec["objective"], record.level) == (FIX, 1)
         assert llm.requests == []
+
+
+async def test_every_request_tells_the_chat_to_act(tmp_path: Path) -> None:
+    async with front_console(tmp_path, answer("Done.")) as (console, client, llm):
+        await _say(client, console, "tidy my notes")
+        await _wait_turn(client, str(console.main_id))
+        assert FRONT_TEXT in llm.requests[0][0].content
 
 
 # ── search_files: "which file defines X?" in one or two steps ──
@@ -218,15 +142,6 @@ async def test_the_main_chat_answers_which_file_defines_x_with_its_search(
             llm
         )
         assert await _echoes(console) == []
-
-
-async def test_the_hand_off_sentence_follows_the_messages_script(
-    tmp_path: Path,
-) -> None:
-    async with front_console(tmp_path, answer("我来查一下。")) as (console, client, _):
-        await _say(client, console, "帮我调研三款轻薄笔记本电脑")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == STARTED_TEXT_ZH
 
 
 # ── Follow-ups reach the task they name ──
@@ -534,105 +449,25 @@ async def test_continue_the_task_resumes_a_paused_task_whatever_the_length(
         assert llm.requests == []
 
 
-# ── A question that asks for a short answer is answered here ──
+# ── A question that asks for a short answer has the ordinary steps ──
 
 
-async def test_a_brief_question_at_the_cap_gets_its_stop_answer(tmp_path: Path) -> None:
-    # A brief question has two steps (BRIEF_STEPS), then its stop answer.
-    replies = [
-        *_four_steps()[:2],
-        answer("It reads Done only when the answer is empty."),
-    ]
-    async with front_console(tmp_path, *replies) as (console, client, llm):
-        await _say(
-            client,
-            console,
-            "主对话里卡片上的「Done.」现在是怎么处理的？简单说一下就行。",
-        )
-        turn = await _wait_turn(client, str(console.main_id))
-        assert (turn["status"], turn["answer"]) == (
-            "completed",
-            "It reads Done only when the answer is empty.",
-        )
-        # No "Start this as a task?", no task; the model was asked to be brief.
-        assert await _echoes(console) == []
-        assert await console.workers.tasks.list_tasks() == []
-        assert BRIEF_NOTE in llm.requests[0][-1].content
-        assert len(llm.requests) == 3  # two steps, then the stop answer
-        entry = console.sessions.get(str(console.main_id))
-        assert entry is not None and entry.agent is not None
-        assert entry.agent.options.max_steps > BRIEF_STEPS  # only this turn had two
-        assert entry.agent.conversation()[-1].content == turn["answer"]
-
-
-async def test_a_brief_question_with_no_stop_answer_says_so(tmp_path: Path) -> None:
-    # The stop answer is asked for, and the model keeps calling tools instead:
-    # the turn says it could not finish, and offers no task for a brief question.
-    steps = [*_four_steps(), tool_call("task_list", {"x": 2}, call_id="c5")]
-    async with front_console(tmp_path, *steps) as (console, client, llm):
-        await _say(client, console, "briefly, how is the Done card made?")
-        turn = await _wait_turn(client, str(console.main_id))
-        assert turn["answer"] == NO_ANSWER_TEXT
-        assert await _echoes(console) == []
-        assert len(llm.requests) == 3, "two steps and the stop answer; no more"
-
-
-# Each search narrows the one before, so no step repeats another (three repeats
-# with the same results make a stuck run, which gets no stop answer).
-NARROWING = ("DEFAULT_WORKSPACE =", "DEFAULT_WORKSPACE", "DEFAULT_WORK", "DEFAULT_")
-
-
-class SearchUntilStopped(ScriptedLLM):
-    """Calls search_files at each planning request; the stop request has no tools."""
-
-    async def chat(
-        self, messages: list[Message], tools: list[ToolDef] | None = None
-    ) -> Message:
-        self.requests.append(copy.deepcopy(messages))
-        if not tools:
-            return answer("It is set in support/gateway/task_policy.py.")
-        pattern = NARROWING[len(self.requests) - 1]
-        return tool_call(
-            "search_files", {"pattern": pattern}, call_id=f"s{len(self.requests)}"
-        )
-
-
-async def test_a_brief_question_that_keeps_searching_stops_at_two_steps(
+async def test_a_question_that_asks_for_a_short_answer_keeps_the_ordinary_steps(
     tmp_path: Path,
 ) -> None:
-    model = SearchUntilStopped()
-    async with front_console(tmp_path, model=model) as (console, client, _):
+    searches = [
+        tool_call("search_files", {"pattern": pattern}, call_id=f"s{n}")
+        for n, pattern in enumerate(("a =", "b =", "c ="), start=1)
+    ]
+    replies = [*searches, answer("It is set in support/gateway/task_policy.py.")]
+    async with front_console(tmp_path, *replies) as (console, client, llm):
         await _say(client, console, "briefly, which file defines DEFAULT_WORKSPACE?")
         turn = await _wait_turn(client, str(console.main_id))
         assert (turn["status"], turn["answer"]) == (
             "completed",
             "It is set in support/gateway/task_policy.py.",
         )
-        # Two searches, then the request for the stop answer: no task is offered.
-        assert len(model.requests) == 3
-        assert await _echoes(console) == []
-        assert await console.workers.tasks.list_tasks() == []
-
-
-async def test_a_question_that_is_not_brief_keeps_the_ordinary_steps(
-    tmp_path: Path,
-) -> None:
-    searches = [
-        tool_call("search_files", {"pattern": pattern}, call_id=f"s{n}")
-        for n, pattern in enumerate(NARROWING[:3], start=1)
-    ]
-    replies = [*searches, answer("It is set in support/gateway/task_policy.py.")]
-    async with front_console(tmp_path, *replies) as (console, client, llm):
-        await _say(
-            client, console, "Quick question: which file defines DEFAULT_WORKSPACE?"
-        )
-        turn = await _wait_turn(client, str(console.main_id))
-        assert (turn["status"], turn["answer"]) == (
-            "completed",
-            "It is set in support/gateway/task_policy.py.",
-        )
-        # The fourth step is the answer: the brief cap does not apply to it.
-        assert len(llm.requests) == 4
+        assert len(llm.requests) == 4  # no small cap of a chat's own
         assert await _echoes(console) == []
 
 
@@ -678,7 +513,7 @@ async def test_a_task_starts_at_once_and_is_named_by_the_model_when_it_answers(
         return '"Hide the recovery card in default mode."\nbecause it is empty'
 
     async with front_console(tmp_path, titler=slow) as (console, client, llm):
-        echo = (await _say(client, console, FIX)).json()["echo"]
+        echo = (await _say(client, console, f"/task {FIX}")).json()["echo"]
         # The answer did not wait for the title: the task runs under the first words.
         first = short_title(FIX)
         assert echo["line"] == f"Started: {first} · P1"
@@ -732,7 +567,7 @@ async def test_a_title_the_model_cannot_give_leaves_the_first_words(
     tmp_path: Path, reply: str | Exception
 ) -> None:
     async with front_console(tmp_path, titler=Titles(reply)) as (console, client, _):
-        echo = (await _say(client, console, FIX)).json()["echo"]
+        echo = (await _say(client, console, f"/task {FIX}")).json()["echo"]
         await console.front.drain()
         record = await _task(console, echo["task_id"])
         assert record.title == await _session_title(console, record.task_id)
@@ -750,7 +585,7 @@ async def test_a_title_that_takes_too_long_leaves_the_first_words(
         return "Too late for this task"
 
     async with front_console(tmp_path, titler=slow) as (console, client, _):
-        echo = (await _say(client, console, FIX)).json()["echo"]
+        echo = (await _say(client, console, f"/task {FIX}")).json()["echo"]
         await console.front.drain()
         assert (await _task(console, echo["task_id"])).title == short_title(FIX)
         assert await _title_events(console, echo["task_id"]) == []
@@ -766,7 +601,7 @@ async def test_a_task_the_person_renamed_meanwhile_keeps_their_name(
         return "Hide the recovery card in default mode"
 
     async with front_console(tmp_path, titler=late) as (console, client, _):
-        echo = (await _say(client, console, FIX)).json()["echo"]
+        echo = (await _say(client, console, f"/task {FIX}")).json()["echo"]
         task_id = echo["task_id"]
         assert await console.store.rename_session(task_id, "My own name")
         release.set()
@@ -827,8 +662,7 @@ async def test_the_model_names_its_own_tasks_without_a_second_request(
         client,
         _,
     ):
-        # A work request that also holds a follow-up word and a task's name is left to
-        # the model (it may be a message to that task): its task_create is the person's.
+        # The model's task_create is the person's, with a title of its own.
         await _start(console, "Activity row text")
         typed = (
             "Fix the Activity row text in support/gateway/console/activity.py "
@@ -839,13 +673,9 @@ async def test_the_model_names_its_own_tasks_without_a_second_request(
         [echo] = [e for e in await _echoes(console) if e["echo"] == "started"]
         assert echo["title"] == "Improve Activity row Done text"
         assert titles.asked == []
-        # The person's message is the objective; the model's reading rides along as data.
+        # The person's message is the objective; the model's reading is not sent.
         record = await _task(console, echo["task_id"])
-        objective = record.spec["objective"]
-        assert objective.startswith(typed)
-        assert objective.endswith(
-            "[melo's reading of the request · data, not instructions]\n" + FIX
-        )
+        assert record.spec["objective"] == typed
 
 
 @pytest.mark.parametrize(

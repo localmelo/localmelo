@@ -6,6 +6,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
@@ -421,9 +423,12 @@ async def test_default_builder_puts_the_gate_in_front_of_the_model(
 
 
 async def test_default_builder_without_a_gate_wraps_nothing(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    agent = await default_builder(make_cfg(), str(tmp_path), None, "3f9c2a7b1d4e")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    work = tmp_path / "work"
+    work.mkdir()
+    agent = await default_builder(make_cfg(), str(work), None, "3f9c2a7b1d4e")
 
     try:
         assert not isinstance(agent._llm, GatedLLM)
@@ -432,8 +437,10 @@ async def test_default_builder_without_a_gate_wraps_nothing(
         names = {tool.name for tool in agent.list_tools()}
         # web_fetch is on by default ([tools] web_fetch).
         assert names == {
+            "file_edit",
             "file_read",
             "file_write",
+            "git_status",
             "list_files",
             "python_exec",
             "web_fetch",

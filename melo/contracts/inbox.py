@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Final, Protocol
 
 from localmelo.melo.schema import ImagePart
 
 
 class InboxError(ValueError):
     """The inbox cannot be read safely as an append-only file."""
+
+
+# How many notes a turn takes, and the length of one: the gateway and the terminal both hold to these.
+MAX_NOTES: Final = 20
+MAX_NOTE_CHARS: Final = 8_000
 
 
 class InboxSource(Protocol):

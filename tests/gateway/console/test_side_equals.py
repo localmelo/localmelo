@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import socket
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -24,24 +25,32 @@ from fastapi import FastAPI
 from localmelo.melo.agent import AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.schema import Message
+from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console import front as front_module
+from localmelo.support.gateway.console.asks import ASK_ORIGIN, FOLLOWUP_ORIGIN
+from localmelo.support.gateway.console.browser_cards import BROWSER_EVENT
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.chores import ChoreOptions
 from localmelo.support.gateway.console.front import (
     BROWSING_OFF_NOTE,
-    CHAT_NOTE,
     ECHO_EVENT,
     FRONT_TEXT,
     SIDE_SUMMARY_EVENT,
     FrontAgent,
-    front_options,
 )
+from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.sessions.agents import session_options
+from localmelo.support.sessions.identity import ACTING_NOTE
 from localmelo.support.sessions.store import StoredEvent
+from localmelo.tests.browser.fakes import FakeDns, FakeDriver
+from localmelo.tests.browser.test_agent import SIBLING, SITE, _collect
+from localmelo.tests.browser.test_live import HOME, site
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, tool_call
 
 from .conftest import PORT, FakeProbe, make_cfg, quiet_gate
+from .test_ask_owner import Script, held, until
+from .test_auto_mode import KEYS
 from .test_front import _say, _task
 from .test_front_followup import _finished, _stopped
 from .test_turn_writes import _post_turn, _wait_turn
@@ -69,7 +78,7 @@ async def chats_console(
     holder: list[Console] = []
 
     async def front(settings: Any, workspace: str, mcp: Any, session_id: str) -> Any:
-        options = session_options(front_options(settings), workspace)
+        options = session_options(chat_options(settings, workspace), workspace)
         agent = FrontAgent(
             llm=models["main"], options=options, tool_providers=[holder[0].front.tools]
         )
@@ -172,7 +181,7 @@ def _hear(console: Console, session: str, kind: str, data: dict[str, Any]) -> No
 
 def _asked(llm: ScriptedLLM, request: int = -1) -> str:
     """The user message the model was last sent, without the chat's reminder."""
-    said = str(llm.requests[request][-1].content).removesuffix("\n\n" + CHAT_NOTE)
+    said = str(llm.requests[request][-1].content).removesuffix("\n\n" + ACTING_NOTE)
     return said.removesuffix("\n\n" + BROWSING_OFF_NOTE)
 
 
@@ -795,14 +804,16 @@ async def test_every_chat_is_built_the_same_on_its_own_front(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake(settings: Any, workspace: str, session_id: str, **kw: Any) -> Any:
+    async def fake(
+        settings: Any, workspace: str, mcp: Any, session_id: str, **kw: Any
+    ) -> Any:
         seen.update(kw, session_id=session_id)
-        return FrontAgent(
+        return kw["agent_class"](
             llm=ScriptedLLM([]),
-            options=session_options(front_options(settings), workspace),
+            options=session_options(chat_options(settings, workspace), workspace),
         )
 
-    monkeypatch.setattr("localmelo.support.gateway.console.build_front_agent", fake)
+    monkeypatch.setattr("localmelo.support.gateway.console.default_builder", fake)
     console = Console(
         make_cfg(),
         port=PORT,
@@ -818,7 +829,7 @@ async def test_every_chat_is_built_the_same_on_its_own_front(
         assert chat is not None
         agent = await console._chat_agent(console.cfg, str(tmp_path), None, chat)
         front = console.front_for(chat)
-        assert seen["tools"] is front.tools
+        assert seen["tools"] == [front.tools]
         assert isinstance(agent, FrontAgent) and agent.front is front
         assert (front is console.front) is (kind == "main")
     finally:
@@ -852,3 +863,484 @@ async def test_a_chat_that_reads_past_four_steps_goes_on_and_starts_nothing(
 
 def test_the_front_module_names_what_the_memory_lane_hears() -> None:
     assert front_module.SIDE_SUMMARY_EVENT == "side.summary"
+
+
+# ── A chat does the person's work itself (#571) ──
+
+WRITE = tool_call("file_write", {"path": "notes.txt", "content": "done\n"}, "w-1")
+ASKED = "write the word done into notes.txt"
+
+
+@contextlib.asynccontextmanager
+async def built_chats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *scripts: list[Message],
+    driver: str = "off",
+    search_order: tuple[str, ...] = (),
+) -> AsyncIterator[tuple[Console, httpx.AsyncClient, Path, list[Script]]]:
+    """A console built as the gateway builds it: only the model is a script.
+
+    Each chat's Agent comes from the real composition, on the next of *scripts*
+    (the order the chats open in), in a home folder of the test's.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # A page's name is looked up before it opens: never on the network here.
+    monkeypatch.setattr(socket, "getaddrinfo", FakeDns().getaddrinfo)
+    folder = tmp_path / "work"
+    folder.mkdir()
+    waiting = [Script(tuple(script)) for script in scripts]
+    models: list[Script] = []
+
+    def providers(*_: Any) -> tuple[Script, None]:
+        models.append(waiting.pop(0))
+        return models[-1], None
+
+    monkeypatch.setattr("localmelo.support.sessions.agents.providers_for", providers)
+    cfg = make_cfg()
+    cfg.gateway.workspace = str(folder)
+    cfg.browser.driver = driver
+    cfg.web.search_order = list(search_order)
+    cfg.web.search = bool(search_order)
+    console = Console(
+        cfg,
+        port=PORT,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    await console.start()
+    app = FastAPI()
+    console.mount(app)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url=f"http://127.0.0.1:{PORT}"
+    )
+    try:
+        yield console, client, folder, models
+    finally:
+        await client.aclose()
+        await console.aclose()
+
+
+async def _chat(
+    client: httpx.AsyncClient, console: Console, where: str, words: str, folder: Path
+) -> str:
+    """Send *words* to the main chat, a side chat's second turn, or a new chat's first."""
+    if where == "main":
+        chat = str(console.main_id)
+    else:
+        first = "hello" if where == "side" else words
+        made = await client.post(
+            "/api/sessions",
+            json={"turn": {"text": first}, "workspace": str(folder)},
+        )
+        assert made.status_code == 201, made.text
+        chat = str(made.json()["session"]["id"])
+        if where == "first":
+            return chat
+        await _wait_turn(client, chat)
+    sent = await _post_turn(client, chat, words)
+    assert sent.status_code == 202, sent.text
+    return chat
+
+
+@pytest.mark.parametrize("where", ["main", "side", "first"])
+async def test_a_chat_does_the_work_in_its_own_run_and_starts_no_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    script = [WRITE, answer("Wrote it.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    async with built_chats(tmp_path, monkeypatch, script) as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = await _chat(client, console, where, ASKED, folder)
+        # The approval is the chat's own: the step waits for the person's card.
+        await until(lambda: console.broker.pending(chat))
+        [request] = console.broker.pending(chat)
+        answered = await client.post(
+            f"/api/approvals/{request.request_id}", json={"choice": "once"}
+        )
+        assert answered.status_code == 200, answered.text
+        finished = await _wait_turn(client, chat)
+        assert finished["status"] == "completed"
+        assert (folder / "notes.txt").read_text() == "done\n"
+        assert await console.workers.tasks.list_tasks() == []
+        offered = set(models[0].offered[-1])
+        assert {
+            "file_read",
+            "file_write",
+            "file_edit",
+            "list_files",
+            "git_status",
+            "python_exec",
+            "search_files",
+            "task_create",
+            "task_schedule",
+        } <= offered
+        assert "shell_exec" not in offered
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_chats_own_browser_shows_its_card_with_no_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    release = asyncio.Event()
+    step = tool_call("browser_open", {"url": HOME}, "b-1")
+    script: list[Any] = [held(release, step), answer("Read it.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(site()),  # type: ignore[arg-type]
+    )
+    async with built_chats(tmp_path, monkeypatch, script, driver="chrome") as (
+        console,
+        client,
+        folder,
+        _,
+    ):
+        chat = await _chat(client, console, where, f"read {HOME}", folder)
+
+        async def shown() -> list[Any]:
+            return await console.store.events_of_type(chat, BROWSER_EVENT, limit=50)
+
+        await until(lambda: console.browser_cards.source_of(chat))
+        release.set()
+        await until(lambda: console.broker.pending(chat))
+        await until(shown)
+        card = (await shown())[-1].event["data"]
+        assert (card["owner_chat_id"], card["source_session_id"]) == (chat, chat)
+        assert card["state"] == "working" and "source_kind" not in card
+        [request] = console.broker.pending(chat)
+        await client.post(
+            f"/api/approvals/{request.request_id}", json={"choice": "once"}
+        )
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        await until(
+            lambda: console.browser_cards.source_of(chat) is None
+        )  # its run is over: nothing of it is live
+        assert await console.workers.tasks.list_tasks() == []
+
+
+KEYS_STEP = tool_call("python_exec", {"code": KEYS}, "k-1")
+MORE = tool_call("file_write", {"path": "more.txt", "content": "more\n"}, "w-2")
+
+
+async def _mode(client: httpx.AsyncClient, chat: str, mode: str) -> None:
+    sent = await client.patch(f"/api/sessions/{chat}", json={"approvals": mode})
+    assert sent.status_code == 200, sent.text
+
+
+async def _waiting(console: Console, chat: str) -> ApprovalRequest:
+    await until(lambda: console.broker.pending(chat))
+    [request] = console.broker.pending(chat)
+    return request
+
+
+async def _answer(client: httpx.AsyncClient, request_id: str, choice: str) -> None:
+    sent = await client.post(f"/api/approvals/{request_id}", json={"choice": choice})
+    assert sent.status_code == 200, sent.text
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_chats_mode_decides_each_step_of_its_own_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    release = asyncio.Event()
+    script: list[Any] = [WRITE, KEYS_STEP, held(release, MORE), answer("Done.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    async with built_chats(tmp_path, monkeypatch, script) as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = await _chat(client, console, where, ASKED, folder)
+        first = await _waiting(console, chat)
+        await _mode(client, chat, "auto")
+        # The card that waits stays for the person.
+        assert console.broker.pending(chat) == [first]
+        planned = len(models[0].requests)
+        await _answer(client, first.request_id, "once")
+        # Ask to Auto: the next step is Auto's, and nobody is asked.
+        await until(lambda: len(models[0].requests) == planned + 2)
+        assert console.broker.pending(chat) == []
+        # Auto to Ask: the step the run is about to take asks.
+        await _mode(client, chat, "ask")
+        release.set()
+        last = await _waiting(console, chat)
+        assert last.call_id == "w-2"
+        await _answer(client, last.request_id, "once")
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert (folder / "notes.txt").read_text() == "done\n"
+        assert (folder / "more.txt").read_text() == "more\n"
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_task_a_chats_own_run_started_follows_that_chats_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    start = tool_call(
+        "task_create", {"objective": "tidy the notes", "title": "Tidy"}, "t-1"
+    )
+    script: list[Any] = [start, answer("Started.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    work = [WRITE, KEYS_STEP, answer("It was blocked.")]
+    async with built_chats(tmp_path, monkeypatch, script, work) as (
+        console,
+        client,
+        folder,
+        _,
+    ):
+        chat = await _chat(client, console, where, "tidy the notes in a task", folder)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        [record] = await console.workers.tasks.list_tasks()
+        task_id = record.task_id
+        first = await _waiting(console, task_id)
+        await _mode(client, chat, "auto")
+        assert console.broker.pending(task_id) == [first]
+        await _answer(client, first.request_id, "once")
+
+        async def ended() -> bool:
+            return (await console.workers.get(task_id))["state"] in ("done", "failed")
+
+        await until(ended)
+        # The task's next decision was Auto's: its chat's switch reached it.
+        body = await console.workers.get(task_id)
+        assert body["approvals"] == "auto" and len(body["blocked"]) == 1
+        assert console.broker.pending(task_id) == []
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_site_refused_in_a_chats_turn_takes_its_kept_answer_and_its_tabs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    kept = tool_call("browser_open", {"url": SITE}, "b-1")
+    refused = tool_call("browser_open", {"url": SIBLING}, "b-2")
+    again = tool_call("browser_read", {}, "b-3")
+    script: list[Any] = [kept, refused, answer("It was refused."), again, answer("Ok.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(_collect()),  # type: ignore[arg-type]
+    )
+    async with built_chats(tmp_path, monkeypatch, script, driver="chrome") as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = await _chat(client, console, where, "read the site", folder)
+        first = await _waiting(console, chat)
+        await _answer(client, first.request_id, "session")
+        entry = console.sessions.get(chat)
+        assert entry is not None
+        await until(lambda: first.tool_name in entry.policy.allowed_tools)
+        await until(lambda: console.broker.pending(chat))
+        [second] = console.broker.pending(chat)
+        assert second.tool_name != first.tool_name
+        await _answer(client, second.request_id, "deny")
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        # The person's newest word on the site stands: the chat keeps nothing for it.
+        assert first.tool_name not in entry.policy.allowed_tools
+        # A later turn asks again, about the page of the tab that was approved.
+        assert (await _post_turn(client, chat, "read it again")).status_code == 202
+        third = await _waiting(console, chat)
+        assert third.tool_name == first.tool_name
+        await _answer(client, third.request_id, "deny")
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        tools = [m.content for m in models[0].requests[-1] if m.role == "tool"]
+        assert "Welcome" not in str(tools[-1])
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_step_the_person_refuses_stays_undone_in_the_chats_own_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    script = [WRITE, answer("I did not write it.")]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    async with built_chats(tmp_path, monkeypatch, script) as (
+        console,
+        client,
+        folder,
+        _,
+    ):
+        chat = await _chat(client, console, where, ASKED, folder)
+        await until(lambda: console.broker.pending(chat))
+        [request] = console.broker.pending(chat)
+        answered = await client.post(
+            f"/api/approvals/{request.request_id}", json={"choice": "deny"}
+        )
+        assert answered.status_code == 200, answered.text
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert not (folder / "notes.txt").exists()
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+@pytest.mark.parametrize("origin", [ASK_ORIGIN, FOLLOWUP_ORIGIN])
+async def test_a_turn_melo_began_cannot_change_anything_whatever_the_model_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str, origin: str
+) -> None:
+    calls = [
+        tool_call("file_write", {"path": "notes.txt", "content": "x"}, "w-1"),
+        tool_call("python_exec", {"code": "open('notes.txt', 'w')"}, "w-2"),
+        answer("I can only read here."),
+    ]
+    script = [*([answer("Hello.")] if where == "side" else []), *calls]
+    async with built_chats(tmp_path, monkeypatch, script) as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = str(console.main_id)
+        if where == "side":
+            made = await client.post(
+                "/api/sessions",
+                json={"turn": {"text": "hello"}, "workspace": str(folder)},
+            )
+            chat = str(made.json()["session"]["id"])
+            await _wait_turn(client, chat)
+        await console.sessions.start_internal(chat, "a task's words: write it", origin)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert not (folder / "notes.txt").exists()
+        assert console.broker.pending(chat) == []
+        offered = set(models[0].offered[-1])
+        assert not offered & {"file_write", "file_edit", "python_exec"}
+        assert await console.workers.tasks.list_tasks() == []
+
+
+async def _search_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> FakeDriver:
+    """The stand-in behind every browser this test's chats build, with no address looked up."""
+    driver = site()
+
+    async def public(_: str) -> None:
+        return None
+
+    monkeypatch.setattr("localmelo.support.browser.addresses.require_public", public)
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(driver),  # type: ignore[arg-type]
+    )
+    return driver
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_turn_melo_began_starts_no_browser_work_through_a_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    calls = [tool_call("web_search", {"query": "tomatoes"}, "s-1"), answer("Nothing.")]
+    script = [*([answer("Hello.")] if where == "side" else []), *calls]
+    driver = await _search_browser(monkeypatch)
+    async with built_chats(
+        tmp_path, monkeypatch, script, driver="chrome", search_order=("browser",)
+    ) as (console, client, folder, models):
+        chat = str(console.main_id)
+        if where == "side":
+            made = await client.post(
+                "/api/sessions",
+                json={"turn": {"text": "hello"}, "workspace": str(folder)},
+            )
+            chat = str(made.json()["session"]["id"])
+            await _wait_turn(client, chat)
+        await console.sessions.start_internal(chat, "a task's question", ASK_ORIGIN)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert "web_search" in models[0].offered[-1]
+        assert (driver.started, driver.calls) == (0, [])
+        assert await console.store.events_of_type(chat, BROWSER_EVENT, limit=50) == []
+
+
+async def test_a_turn_the_person_began_still_searches_with_the_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = [tool_call("web_search", {"query": "tomatoes"}, "s-1"), answer("Found.")]
+    driver = await _search_browser(monkeypatch)
+    async with built_chats(
+        tmp_path, monkeypatch, script, driver="chrome", search_order=("browser",)
+    ) as (console, client, folder, _):
+        chat = await _chat(client, console, "main", "search for tomatoes", folder)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert driver.started >= 1
+
+
+async def test_a_reply_that_only_says_what_it_will_do_is_the_reply_and_starts_nothing(
+    tmp_path: Path,
+) -> None:
+    said = "I'll look into it."
+    async with chats_console(tmp_path, main=[answer(said)]) as (console, client, _):
+        chat = str(console.main_id)
+        sent = await _post_turn(client, chat, "find the openings and apply for me")
+        assert sent.status_code == 202, sent.text
+        finished = await _wait_turn(client, chat)
+        assert (finished["status"], finished["answer"]) == ("completed", said)
+        assert await console.workers.tasks.list_tasks() == []
+
+
+async def test_a_change_to_a_named_file_is_the_chats_to_do_not_a_task_by_its_words(
+    tmp_path: Path,
+) -> None:
+    async with chats_console(tmp_path, main=[answer("Fixed.")]) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        sent = await _post_turn(client, chat, "fix the typo in docs/notes.md")
+        assert sent.status_code == 202, sent.text
+        await _wait_turn(client, chat)
+        assert len(models["main"].requests) == 1
+        assert await console.workers.tasks.list_tasks() == []
+
+
+async def test_no_list_of_words_stands_between_the_models_call_and_the_task(
+    tmp_path: Path,
+) -> None:
+    create = tool_call(
+        "task_create", {"title": "Plan", "objective": "plan", "uses_website": False}
+    )
+    async with chats_console(tmp_path, main=[create, answer("Started.")]) as (
+        console,
+        client,
+        _,
+    ):
+        chat = str(console.main_id)
+        sent = await _post_turn(client, chat, "do not start a task, plan the trip")
+        assert sent.status_code == 202, sent.text
+        await _wait_turn(client, chat)
+        assert len(await console.workers.tasks.list_tasks()) == 1
+
+
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_chat_in_a_folder_no_task_may_use_reads_and_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    """The rule a person's task is held to, read when a chat is built."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    home = tmp_path / "person"
+    home.mkdir()
+    script = [WRITE, answer("I cannot change anything here.")]
+    async with built_chats(home, monkeypatch, script) as (console, client, _, models):
+        if where == "main":
+            console.cfg.gateway.workspace = str(outside)
+            chat = await _chat(client, console, where, ASKED, outside)
+        else:
+            chat = await _chat(client, console, "first", ASKED, outside)
+        assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert not (outside / "notes.txt").exists()
+        offered = set(models[0].offered[0])
+        assert {"file_read", "list_files"} <= offered
+        assert not offered & {"file_write", "file_edit", "python_exec"}
+        assert "inside your home folder" in str(models[0].requests[0][-1].content)
