@@ -22,6 +22,7 @@ import pytest
 
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, records, sleep
+from localmelo.support.memory.index import ConversationIndex
 from localmelo.support.sessions.store import NewSession, SessionStore
 from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 
@@ -290,6 +291,41 @@ async def test_an_undo_log_with_the_changes_of_the_removed_model_pass_still_undo
         "Her office is on Pine Street.",
     }
     assert saved_runs(memory) == [] and await memory.undo_sleep("earlier") is None
+
+
+async def test_an_index_with_the_removed_turn_table_opens_with_it_empty(
+    tmp_path: Path,
+) -> None:
+    """The removed model pass kept turn ids in ``sleep_processed``: its rows go when
+    the file opens, the table stays; a file without it opens as before."""
+    old, new = str(tmp_path / "old.db"), str(tmp_path / "new.db")
+    raw = sqlite3.connect(old)
+    raw.executescript("""
+        CREATE TABLE sleep_processed (
+            session_id TEXT NOT NULL, turn INTEGER NOT NULL,
+            note_id INTEGER NOT NULL DEFAULT 0, finished REAL NOT NULL,
+            failures INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, turn, note_id));
+        INSERT INTO sleep_processed (session_id, turn, finished) VALUES ('s1', 4, 1.0);
+        """)
+    raw.commit()
+    raw.close()
+    for path in (old, new):
+        index = ConversationIndex(path)
+        try:
+            assert await index.count() == 0
+        finally:
+            await index.aclose()
+
+    def tables(path: str, name: str) -> list[Any]:
+        with sqlite3.connect(path) as conn:
+            return conn.execute(
+                "SELECT name FROM sqlite_master WHERE name = ?", (name,)
+            ).fetchall()
+
+    with sqlite3.connect(old) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sleep_processed").fetchone() == (0,)
+    assert tables(old, "sleep_processed") and not tables(new, "sleep_processed")
 
 
 # ── 2. A cancelled run keeps its undo log ──

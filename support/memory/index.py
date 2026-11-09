@@ -480,6 +480,20 @@ async def _add_chunks(conn: aiosqlite.Connection) -> None:
         raise
 
 
+async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
+    """Delete the rows of ``sleep_processed`` in an index.db an older version made.
+
+    The removed model pass kept turn ids there and nothing reads them now; the table
+    stays, so an older process on the same file still finds it."""
+    async with conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sleep_processed'"
+    ) as cur:
+        if await cur.fetchone() is None:
+            return
+    await conn.execute("DELETE FROM sleep_processed")
+    await conn.commit()
+
+
 def _document(row: Sequence[Any]) -> Document:
     blob = row[8]
     return Document(
@@ -515,6 +529,7 @@ class ConversationIndex:
                 try:
                     await prepare_connection(conn, _SCHEMA)
                     await _add_chunks(conn)
+                    await _empty_removed_table(conn)
                 except BaseException:
                     with contextlib.suppress(Exception):
                         await conn.close()
