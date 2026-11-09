@@ -1769,6 +1769,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A chat no longer sends each tool call's summary to the embedding model. With an embedding model set up, that added one request per tool call, a failed request ended the turn, and the text it put at the start of the conversation made a local model server read the whole conversation again on most turns. Memory across chats (notes, recall, search) is unchanged. Part of #591.
 - The live browser card docked at the top of the chat no longer shows lines of the chat cut off around it: above the card, through its rounded corners and at its bottom edge, whatever scrolls under it is hidden behind a band in the chat's colour that fades out below the card (#576).
 - Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.
