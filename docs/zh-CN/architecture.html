@@ -93,15 +93,15 @@
             </a>
             <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 1 · 主对话</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node worker" id="f-w2" href="#c-workers" style="left:290px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 2 · 主对话</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node worker" id="f-w3" href="#c-workers" style="left:540px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 3 · 旁支对话 1</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node approval" id="f-appr" href="#c-checker" style="left:280px;top:568px;width:240px;min-height:72px">
               <span class="node-title">审批</span>
@@ -124,10 +124,10 @@
           <li>你和主对话交流。旁支对话能力相同，共享记忆，从第一条消息起就是如此。</li>
           <li>对话自己替你做事，就在它自己的运行里，用的是和后台任务相同的智能体、相同的检查和审批；大多数工作不会开任务。中间没有词表拦着：模型读你说的话，然后动手，或者说明为什么不做。</li>
           <li>对话工作时你发的话是一条补充：它在下一步读到。停止会结束这一轮；旁支对话可以同时做别的事。</li>
-          <li>任务是单独的一次运行：你要求开任务，或对话把长工作分出去，定时事项也会按时启动。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
+          <li>任务是单独的一次运行：你要求开任务，或对话把长工作剩下的部分交出去（它的回合就此结束，任务从它做过的和剩下的开始），定时事项也会按时启动。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
           <li>任务属于启动它的对话：进展和结果回到那里；旁支对话会给主对话留一份已完成工作的总结。</li>
           <li>对话可以查看后台任务的状态，也可以在它运行时给它发消息。后台任务向所属对话求助；只有对话会来问你。</li>
-          <li>一个后台任务只完成一项工作。针对已完成工作的新要求会交给新的后台任务，旧任务的记录作为背景带过去；没做完就停下的后台任务可以继续做同一项工作。</li>
+          <li>一个后台任务只运行一次：新的上下文、一项工作，然后保存结果。之后关于这项工作的事，不管是新的要求、没做完的部分、继续还是收尾，都交给新的后台任务，旧任务的记录作为背景带过去；旧任务不会再运行。</li>
           <li>对话启动的任务开始时带着你的原话、所属对话挑选的内容，以及一份上下文包：关于你、你的偏好和这个项目的笔记。</li>
         </ul>
 
@@ -452,7 +452,8 @@
               <li>网关按优先级启动排队的任务，每次几个，各在所属对话的文件夹里。</li>
               <li><code>melo worker</code> 根据任务说明文件运行一个任务，返回 JSON 结果。</li>
               <li>控制台的 Workers 视图列出每一次运行。</li>
-              <li>Worker 自己没有长期记忆；所属对话可以查看它的状态，也可以给它发消息。</li>
+              <li>Worker 自己没有长期记忆；它运行时，所属对话可以查看它的状态，也可以给它发消息。</li>
+              <li>对话开始的 worker 只运行一次：结束以后它的记录作为背景保留，之后的工作交给新的 worker。</li>
               <li>它开始时带一份来自所属对话的上下文包，遇到阻碍时向该对话求助。</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">Worker 参考</a>
@@ -640,9 +641,9 @@
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "共享记忆" },
           { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "已完成工作的总结" },
-          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "需要时开任务", lt: 0.72 },
+          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "需要时交出工作", lt: 0.72 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "到期的事项" },
-          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "需要时开任务", lt: 0.28 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "需要时交出工作", lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },

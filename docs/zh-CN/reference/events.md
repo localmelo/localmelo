@@ -140,7 +140,7 @@ asyncio.run(main())
 | `step.started` | 每个规划步骤开始时。 | `step`, `attempt` |
 | `assistant.message` | 步骤的规划回复到达时。 | `step`, `content`, `thinking`, `tool_calls`, `usage`, `prefix`, `duration_s` |
 | `note` | 在压缩模式中，当笔记、反思的笔记或尝试摘要进入仅驻留 RAM 的笔记存储时。 | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
-| `tool.started` | 每次工具调用交给执行器之前，也包括之后被检查拒绝的调用。 | `step`, `call_id`, `name`, `arguments`, `preview` |
+| `tool.started` | 每次工具调用交给执行器之前，也包括之后被检查拒绝的调用。 | `step`, `call_id`, `name`, `arguments`, `preview`, `run_key` |
 | `tool.finished` | 该调用完成、被拒绝、被取消或异常终止时。 | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code`, `tool_asks`, `allowed_local`, `phases`, `effect` |
 | `notice` | 一次尝试结束时、模型给出空回复或只含未完成思考的回复时，或模型请求被重试时。 | `kind`, `message`, `step`, `attempt`, `detail` |
 | `recall` | 召回块进入请求时：在 `start`、`attempt`、`step`，或由 `recall` 工具触发。 | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
@@ -212,7 +212,8 @@ asyncio.run(main())
 
 - `step`、`call_id` 和 `name`：步骤、工具调用的 id 和工具名。
 - `arguments`：模型发送的参数，原样保留。
-- `preview`：调用的一行摘要，最多 200 个字符；更长的保留前 197 个字符，并以 `...` 结尾。
+- `preview`：调用的一行摘要，最多 200 个字符，截短之前先隐去其中的密钥；更长的保留前 197 个字符，并以 `...` 结尾。
+- `run_key`：实际调用的键（32 个十六进制字符：工具、文件夹和模型发送的参数，就像拒绝带有 `call_key`），不管存储下来的参数保留了什么。调用的结果未知时，接着做这项工作的任务要再次运行它之前，会按这个键先询问本人（#571）。在有这个字段之前存储的调用没有它。
 
 | 工具 | 预览 |
 |---|---|

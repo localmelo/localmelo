@@ -36,7 +36,9 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "duration_s",
             }
         ),
-        "tool.started": frozenset({"step", "call_id", "name", "arguments", "preview"}),
+        "tool.started": frozenset(
+            {"step", "call_id", "name", "arguments", "preview", "run_key"}
+        ),
         "tool.finished": frozenset(
             {
                 "step",
@@ -164,6 +166,8 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         # a browser call's time went (seconds by phase), and effect, "none" for
         # a browser act after which no change was seen.
         "tool.finished": frozenset({"tool_asks", "allowed_local", "phases", "effect"}),
+        # The live call's key (#571): a call stored before it was kept has none.
+        "tool.started": frozenset({"run_key"}),
         "reflection": frozenset(
             {
                 "prefix",

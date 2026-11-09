@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.approvals import call_key
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
 from localmelo.melo.contracts.providers import ProviderError
 from localmelo.melo.contracts.tools import NO_EFFECT
@@ -342,7 +343,9 @@ class _Emitter:
 
         self._emit("recall", lambda: json_safe_payload(event_fields(record)))
 
-    def tool_started(self, call: ToolCall) -> None:
+    def tool_started(self, call: ToolCall, workspace_root: str | None) -> None:
+        """*call* starts; ``run_key`` is its :func:`call_key` in *workspace_root*,
+        of the live arguments, whatever the store keeps of them (#571)."""
         if self._sink is None:
             return
         step = self._step
@@ -355,6 +358,7 @@ class _Emitter:
                     "name": call.tool_name,
                     "arguments": call.arguments,
                     "preview": call_preview(call.tool_name, call.arguments),
+                    "run_key": call_key(call.tool_name, call.arguments, workspace_root),
                 }
             ),
         )

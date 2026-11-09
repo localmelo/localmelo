@@ -143,6 +143,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import (
+    CALL_HANDS_OFF,
     CALL_REFUSED,
     TOOL_MARKS,
     BaseToolProvider,
@@ -158,7 +159,12 @@ from localmelo.melo.executor import (
     register_builtins,
 )
 from localmelo.melo.executor.env import child_env
-from localmelo.melo.executor.models import ErrorCategory, ExecutionRequest
+from localmelo.melo.executor.models import (
+    ErrorCategory,
+    ExecutionOutcome,
+    ExecutionRequest,
+    ExecutionStatus,
+)
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -548,6 +554,11 @@ def _within_turn_budget(
 # (TOOL_CALL_TEXT_LABEL and TOOL_CALL_TEXT_NUDGE for a tool call written as
 # text; see melo.schema), and the model plans again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
+# What each call of a step that mixed a hand-off call with others reads: none ran.
+HAND_OFF_ALONE = (
+    "Not run: handing the rest of the work on must be the only call of its step. "
+    "Nothing in this step ran; call it again alone, or keep working here."
+)
 
 # The line a brief run adds to the window when an attempt boundary finds the
 # workspace unchanged since the run started.
@@ -741,6 +752,8 @@ class _RunState:
     patience_spent: bool = False
     # answer_on_stop: whether result is the answer of the extra request.
     answered_on_stop: bool = False
+    # Whether the run's last step handed the rest of its work on (hand_off).
+    handed_off: bool = False
     # answer_on_stop: whether result got the closing line the task asks for.
     format_fixed: bool = False
     # How the run ended on its own limit or on a refusal: "calls" (max_calls) or
@@ -1153,6 +1166,8 @@ class Agent(_RecallLoop, _NotesLoop):
         # Of those, melo's own browser tools that ask their questions themselves:
         # the only calls the approval gate does not ask a second question about.
         self._self_asking_names: frozenset[str] = frozenset()
+        # Each hand-off tool and the boolean argument that makes its call one.
+        self._hand_off_args: dict[str, str] = {}
         # close() or begin_exit() has begun: no tool provider is started
         # from then on.
         self._closing = False
@@ -1676,6 +1691,11 @@ class Agent(_RecallLoop, _NotesLoop):
                 for tool in provided
                 if tool.asks_itself and tool.definition.name in SELF_ASKING_TOOLS
             )
+            self._hand_off_args = {
+                tool.definition.name: tool.hands_off
+                for tool in provided
+                if tool.hands_off
+            }
             self.chat.add_system_notes(
                 [note for provider in started for note in provider.system_notes()]
             )
@@ -2067,7 +2087,7 @@ class Agent(_RecallLoop, _NotesLoop):
         # The run's gate for tools, beside the one in Chat._request: what the model
         # chose before the person took a page starts once they give the run back.
         await run.hold.wait()
-        events.tool_started(call)
+        events.tool_started(call, self.executor.workspace_root)
         # A list for an event, and in the compress modes for the rehearsal
         # signal too; elsewhere, without a sink, the slot stays unset as
         # before.
@@ -2125,6 +2145,7 @@ class Agent(_RecallLoop, _NotesLoop):
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,
                 arguments=dict(call.arguments),
+                ask=gate is not None and gate.fresh,
             )
             outcome = await self.executor.execute_structured(
                 exec_request, allowed=allowed, approve=gate
@@ -2224,6 +2245,25 @@ class Agent(_RecallLoop, _NotesLoop):
             run.attempt_calls.append((call, result))
             await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
+
+    def _hands_off(self, call: ToolCall) -> bool:
+        """Whether *call* is a hand-off call: its tool's hand-off argument is true."""
+        name = self._hand_off_args.get(call.tool_name)
+        return name is not None and call.arguments.get(name) is True
+
+    def _not_run(self, call: ToolCall, run: _RunState, why: str) -> ToolResult:
+        """*call*, refused before it ran: its events and an error result saying *why*."""
+        outcome = ExecutionOutcome(
+            tool_name=call.tool_name,
+            status=ExecutionStatus.ERROR,
+            error=why,
+            error_category=ErrorCategory.INVALID_ARGUMENTS,
+        )
+        result = outcome.to_tool_result()
+        run.call_refused = False
+        run.events.tool_started(call, self.executor.workspace_root)
+        run.events.tool_finished(call, outcome, result, exit_codes=None)
+        return result
 
     def _refused_free(
         self,
@@ -3149,16 +3189,35 @@ class Agent(_RecallLoop, _NotesLoop):
                 thought_aliases=thought_aliases,
             )
             refused_all = bool(calls)
-            for call in calls:
-                # Counted when handed over, so a call that timeout_s cuts
-                # short counts too.
-                run.n_tool += 1
-                result, cut = await self._do_execute(call, allowed=allowed, run=run)
-                inflight.results.append(result)
-                inflight.cut_before.append(cut)
-                refused_all = refused_all and run.call_refused
+            # A hand-off call runs only as the one call of its step: a step that
+            # mixes it with others runs none of them (see ProvidedTool.hands_off).
+            handing = [call for call in calls if self._hands_off(call)]
+            mixed = bool(handing) and len(calls) > 1
+            handed: list[str] = []
+            handed_slot = CALL_HANDS_OFF.set(handed if handing and not mixed else None)
+            try:
+                for call in calls:
+                    # Counted when handed over, so a call that timeout_s cuts
+                    # short counts too.
+                    run.n_tool += 1
+                    if mixed:
+                        result, cut = self._not_run(call, run, HAND_OFF_ALONE), 0
+                    else:
+                        result, cut = await self._do_execute(
+                            call, allowed=allowed, run=run
+                        )
+                    inflight.results.append(result)
+                    inflight.cut_before.append(cut)
+                    refused_all = refused_all and run.call_refused
+            finally:
+                CALL_HANDS_OFF.reset(handed_slot)
             await self._do_memorize(task.task_id, inflight, run)
             run.inflight = None
+            if handed:
+                # The rest of the work moved elsewhere: the run ends on its receipt.
+                run.handed_off = True
+                run.end("completed", result=handed[-1])
+                return step + 1, ""
             if run.reviews.stop:
                 # Auto mode blocked the same kind of step twice: the run
                 # answers with the explanation instead of trying again.
@@ -4645,6 +4704,7 @@ class Agent(_RecallLoop, _NotesLoop):
             confinement=self._confinement_record(run),
             answered_on_stop=run.answered_on_stop,
             format_fixed=run.format_fixed,
+            handed_off=run.handed_off,
             empty_reply=(
                 {
                     "thinking_off_retry": run.fallback_retried,
@@ -4890,9 +4950,14 @@ class Agent(_RecallLoop, _NotesLoop):
         it is added after the answer, which stays as it was.
         ``RunResult.format_fixed`` is then true. A request that fails or that
         ``max_calls`` leaves no call for, or a reply with no such line, leaves
-        the run as it was.
+        the run as it was, and so does a run that handed its work on: its
+        result is the receipt of that hand-off, not an answer.
         """
-        if run.status not in ("completed", "gate_stopped", "budget_exhausted"):
+        if run.handed_off or run.status not in (
+            "completed",
+            "gate_stopped",
+            "budget_exhausted",
+        ):
             return
         _, answer = split_thinking(run.result)
         label = requested_closing_label(run.task_text) if answer else None

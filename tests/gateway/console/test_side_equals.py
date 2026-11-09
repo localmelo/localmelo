@@ -322,16 +322,18 @@ async def test_continue_the_task_picks_this_chats_stopped_task_first(
         ).json()["echo"]["task_id"]
         await _stopped(console, mine)
         await _stopped(console, theirs)
-        # Both titles hold "recovery card": this chat's stopped task continues at once.
+        # Both titles hold "recovery card": this chat's stopped task goes on at once,
+        # in a fresh task of this chat (#571).
         echo = await _say_in(client, side, "continue the recovery card task")
-        assert (echo["echo"], echo["task_id"]) == ("sent", mine)
+        assert (echo["echo"], echo["follows"]) == ("started", mine)
         assert "from_main" not in echo and "from_chat" not in echo
-        assert (await _task(console, mine)).state == "queued"
+        assert (await _task(console, echo["task_id"])).state == "queued"
+        assert (await _task(console, mine)).state == "failed"
         assert (await _task(console, theirs)).state == "failed"
         # With none of its own stopped task left to name, it reaches the main chat's and says so.
         other = await _say_in(client, side, "continue the section task")
-        assert (other["echo"], other["task_id"], other["from_main"]) == (
-            "sent",
+        assert (other["echo"], other["follows"], other["from_main"]) == (
+            "started",
             theirs,
             True,
         )
@@ -1028,6 +1030,43 @@ async def test_a_chats_own_browser_shows_its_card_with_no_task(
         assert await console.workers.tasks.list_tasks() == []
 
 
+@pytest.mark.parametrize("where", ["main", "side"])
+async def test_a_chat_with_a_browser_page_keeps_its_work_and_hands_off_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    hand = tool_call(
+        "task_create",
+        {"title": "Read on", "objective": "Read the rest.", "continue_current": True},
+        "h-1",
+    )
+    script: list[Any] = [
+        tool_call("browser_open", {"url": HOME}, "b-1"),
+        hand,
+        answer("The page stays here, so I finish it in this chat."),
+    ]
+    if where == "side":
+        script = [answer("Hello."), *script]
+    monkeypatch.setattr(
+        "localmelo.support.browser.provider_for",
+        lambda *_, **__: BrowserToolProvider(site()),  # type: ignore[arg-type]
+    )
+    async with built_chats(tmp_path, monkeypatch, script, driver="chrome") as (
+        console,
+        client,
+        folder,
+        models,
+    ):
+        chat = await _chat(client, console, where, f"read {HOME}", folder)
+        [request] = [await _waiting(console, chat)]
+        await _answer(client, request.request_id, "once")
+        finished = await _wait_turn(client, chat)
+        assert finished["status"] == "completed"
+        assert finished["answer"].startswith("The page stays here")
+        told = [str(m.content) for m in models[0].requests[-1] if m.role == "tool"]
+        assert told[-1].startswith("Not done: this chat has a browser page open.")
+        assert await console.workers.tasks.list_tasks() == []
+
+
 KEYS_STEP = tool_call("python_exec", {"code": KEYS}, "k-1")
 MORE = tool_call("file_write", {"path": "more.txt", "content": "more\n"}, "w-2")
 
@@ -1183,6 +1222,50 @@ async def test_a_step_the_person_refuses_stays_undone_in_the_chats_own_run(
         )
         assert answered.status_code == 200, answered.text
         assert (await _wait_turn(client, chat))["status"] == "completed"
+        assert not (folder / "notes.txt").exists()
+
+
+async def test_a_step_refused_in_the_chat_stays_refused_in_the_task_it_hands_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refusals carry from the chat's turn to the task it hands its work to: the
+    same step is refused there before any review, not asked again (#571)."""
+    hand = tool_call(
+        "task_create",
+        {"title": "Notes", "objective": "Write the word into notes.txt.",
+         "continue_current": True},
+        "h-1",
+    )  # fmt: skip
+    chat_script = [WRITE, hand, answer("Never asked.")]
+    worker_script = [WRITE, answer("Done.\nEnding: ready")]
+    async with built_chats(tmp_path, monkeypatch, chat_script, worker_script) as (
+        console,
+        client,
+        folder,
+        _,
+    ):
+        chat = str(console.main_id)
+        sent = await _post_turn(client, chat, ASKED)
+        assert sent.status_code == 202, sent.text
+        await until(lambda: console.broker.pending(chat))
+        [request] = console.broker.pending(chat)
+        denied = await client.post(
+            f"/api/approvals/{request.request_id}", json={"choice": "deny"}
+        )
+        assert denied.status_code == 200, denied.text
+        await until(console.workers.tasks.list_tasks)
+        [task] = await console.workers.tasks.list_tasks()
+
+        async def ended() -> bool:
+            record = await console.workers.tasks.get_task(task.task_id)
+            return bool(console.broker.pending(task.task_id)) or record.state in (
+                "done",
+                "failed",
+                "cancelled",
+            )
+
+        await until(ended, timeout=15.0)
+        assert not console.broker.pending(task.task_id), "asked again in the task"
         assert not (folder / "notes.txt").exists()
 
 

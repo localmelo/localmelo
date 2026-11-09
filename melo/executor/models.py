@@ -70,6 +70,8 @@ class ExecutionRequest:
 
     ``outside`` is set by the executor alone, on the request it hands the
     approval gate, for a file tool's path outside the workspace (#405).
+    ``ask``: the gate is asked about this call whatever its tool, as about one
+    that requires approval (a call whose effect is unknown, #571).
     """
 
     tool_name: str
@@ -77,6 +79,7 @@ class ExecutionRequest:
     timeout_ms: float | None = None
     workspace_root: str | None = None
     outside: OutsideAccess | None = None
+    ask: bool = False
 
 
 @dataclass

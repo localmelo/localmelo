@@ -27,6 +27,7 @@ any await.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
@@ -82,3 +83,16 @@ PAUSE: ContextVar[RunPause | None] = ContextVar("localmelo_pause", default=None)
 TOOL_DEADLINE: ContextVar[asyncio.Timeout | None] = ContextVar(
     "localmelo_tool_deadline", default=None
 )
+
+
+def no_time_limit() -> None:
+    """From here on, the running tool call's time limit does not cut it short.
+
+    For work that must not be cut in two, such as a commit and what reads it
+    back; outside a call it does nothing. A Stop still goes through, as
+    through any await.
+    """
+    deadline = TOOL_DEADLINE.get()
+    if deadline is not None:
+        with contextlib.suppress(RuntimeError):
+            deadline.reschedule(None)
