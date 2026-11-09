@@ -31,12 +31,14 @@ from localmelo.tests.memory.hippo_helpers import (
     CUT_OFF,
     StubEncoder,
     by_label,
+    is_judge,
     item,
     labels,
     numbers_in,
     padded,
     says,
     turn,
+    verdict,
     window_sizes,
 )
 from localmelo.tests.memory.test_ingest_compress import close, compress, settings
@@ -529,7 +531,10 @@ def data() -> dict[str, Any]:
 
 
 def facts(prompt: str) -> str:
-    """Items that replace one another across chats, so routing order matters."""
+    """Items that replace one another across chats, so routing order matters. The
+    judge, asked for each that has close items, answers ``other``."""
+    if is_judge(prompt):
+        return verdict()
     title = re.search(r"Chat title: (\S+)", prompt)
     name = title.group(1) if title else "?"
     return says(
@@ -576,7 +581,8 @@ async def test_ingest_in_parallel_gives_the_serial_reports_items_and_routes(
             await close(chats, memory)
     serial, many = made["serial"], made["parallel"]
     assert many["report"] == serial["report"]
-    assert many["stats"] == serial["stats"] == (9, 0)
+    # Nine windows, and a judge request for each of the eight items that had close ones.
+    assert many["stats"] == serial["stats"] == (17, 0)
     assert many["items"] == serial["items"]
     assert len(serial["items"]) == 9
     assert serial["model"].most == 1
@@ -599,7 +605,7 @@ async def test_ingest_cache_hits_make_no_request_and_a_parallel_cache_serves_a_s
         cfg=settings(tmp_path, compress_at_chars=4000, compress_parallel=4),
     )
     await close(chats, memory)
-    assert (report.stats.calls, report.stats.cache_hits) == (9, 0)
+    assert (report.stats.calls, report.stats.cache_hits) == (17, 0)
     for sub, parallel in (("serial", 1), ("parallel", 4)):
         model = Slow(facts)
         again, chats, memory = await compress(
@@ -610,8 +616,8 @@ async def test_ingest_cache_hits_make_no_request_and_a_parallel_cache_serves_a_s
             cfg=settings(tmp_path, compress_at_chars=4000, compress_parallel=parallel),
         )
         await close(chats, memory)
-        assert model.prompts == []
-        assert (again.stats.calls, again.stats.cache_hits) == (0, 9)
+        assert model.prompts == []  # no window, and no judge request either
+        assert (again.stats.calls, again.stats.cache_hits) == (0, 17)
 
 
 async def test_compress_chat_with_an_encoding_does_not_ask_again(
@@ -623,15 +629,19 @@ async def test_compress_chat_with_an_encoding_does_not_ask_again(
     cfg = settings(tmp_path)
     _, chats, memory = await compress(tmp_path, data(), model, sub="x", cfg=cfg)
     try:
-        asked = len(model.prompts)
+
+        def windows() -> int:
+            return len([p for p in model.prompts if not is_judge(p)])
+
+        asked = windows()
         turns = chat(2)
         encoding = await memory.encode_chat(
             "T", turns, cache=Cache(str(tmp_path / "c"))
         )
-        assert len(model.prompts) == asked + 1  # one window of two short exchanges
-        before = len(model.prompts)
+        assert windows() == asked + 1  # one window of two short exchanges
+        before = windows()
         done = await memory.compress_chat("s", "T", turns, encoding=encoding)
-        assert len(model.prompts) == before
+        assert windows() == before
         assert done.encoding is encoding
         assert ingest.MODES  # the module the ingest drives is the same one
     finally:
@@ -732,6 +742,8 @@ def test_the_service_reads_it_and_falls_back_to_one() -> None:
 
 def facts_by_label(prompt: str) -> str:
     """Items for the exchanges a prompt shows, a part of one exchange named as such."""
+    if is_judge(prompt):
+        return verdict()
     title = re.search(r"Chat title: (\S+)", prompt)
     name = title.group(1) if title else "?"
     more = ", in its second part" if "(continued)" in prompt else ""
@@ -779,10 +791,11 @@ async def test_ingest_splits_windows_that_run_out_the_same_in_both_modes(
             await close(chats, memory)
     serial, many = made["serial"], made["parallel"]
     assert many == serial
-    # Nine windows, each asked, then split in two: 27 requests, none cached.
-    assert serial["stats"] == (27, 0) and serial["items"]
+    # Nine windows, each asked, then split in two: 27 requests, none cached, and a
+    # judge request for each of the 17 items that had close ones.
+    assert serial["stats"] == (44, 0) and serial["items"]
     out = serial["report"]
-    assert out["model_calls"] == 27 and out["split"] == 18 and out["failed_parts"] == 0
+    assert out["model_calls"] == 44 and out["split"] == 18 and out["failed_parts"] == 0
     # Both halves of every window were read: two routed items for each exchange.
     assert [len(chat["routes"]) for chat in out["compress"].values()] == [6, 6, 6]
     rows = [w for chat in out["compress"].values() for w in chat["windows"]]

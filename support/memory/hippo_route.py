@@ -1,7 +1,6 @@
 """Hippo's routing: each new memory item is compared with the items kept (#428).
 
-A new item is routed by :func:`localmelo.melo.memory.hippo.policy.decide` against
-the active items of its kind, by rules and no model call, to one of five actions:
+A new item is routed against the active items of every kind to one of five actions:
 
 - ``NEW``: the item is stored.
 - ``UPDATE``: it is stored and the item it updates is marked replaced by it (that
@@ -18,23 +17,38 @@ the active items of its kind, by rules and no model call, to one of five actions
   :meth:`~.index.ConversationIndex.add_item`, the only writer of the items table, so
   no item that holds a secret reaches it by any path.
 
-:class:`Router` keeps the active items in memory and updates them as it stores, so a
-run does not read the whole table again for each item. The policy sorts the items it
-is given by the same-subject flag, the content overlap and the cosine, and acts on
-the first; so :class:`Router` hands it only the few that sort first by those same
-numbers, which gives the decision it would give for all of them.
+Code settles only what is certain, by rules and no model call
+(:func:`localmelo.melo.memory.hippo.policy.decide` with ``certain_only``): a meta
+claim, a short fact, a fact about files only, an opposite polarity, an identical
+text. Whether two notes say the same thing, or the newer one says it changed, is a
+question of meaning, so :meth:`Router.shortlist` finds the active items that may
+say it by content, across kinds, and a judge (:mod:`.hippo_judge`) reads them. Its
+clear answer is the :class:`Judged` that :meth:`Router.route` acts on: ``same`` is an
+``IGNORE`` and ``changes`` an ``UPDATE``. With none, a same-subject item is only
+``RELATED``: no item replaces another on a word they share.
+
+:class:`Router` keeps the active items in one map, whatever their kind, and updates
+it as it stores, so a run does not read the whole table again for each item. The
+policy sorts the items it is given by the same-subject flag, the content overlap and
+the cosine, and acts on the first; so :class:`Router` hands it only the few that sort
+first by those same numbers, which gives the decision it would give for all of them.
+What a write rests on is read again from the table, under the same hold of the lock
+the write is made in (:meth:`Router.confirm` and :meth:`Router.route`), because an
+item may be forgotten or deleted while a judge is asked.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
 import numpy as np
 
 from localmelo.melo.memory.hippo.policy import (
+    LINK_COSINE,
+    LINK_OVERLAP,
     PolicyDecision,
     content_tokens,
     decide,
@@ -47,6 +61,8 @@ from localmelo.support.memory.index import ConversationIndex, MemoryItem, holds_
 REFUSE: Final = "REFUSE"
 # How many of the best-matching active items are handed to the policy.
 POOL: Final = 8
+# How many active items one new item is judged against.
+SHORTLIST: Final = 3
 
 
 @dataclass(frozen=True)
@@ -66,16 +82,30 @@ class Route:
 @dataclass(frozen=True)
 class Entry:
     """An active item in the shape the policy reads: ``text``, ``vector``, ``id``,
-    ``created_at`` and a ``provenance`` that gives it an item-local subject."""
+    ``created_at``, its ``kind`` and a ``provenance`` that gives it an item-local
+    subject. ``sources`` are the turns it cites."""
 
     id: int
     text: str
+    kind: str
     created_at: float
+    sources: tuple[tuple[str, int], ...]
     vector: tuple[float, ...] | None
     provenance: Mapping[str, Any]
     subject: tuple[str, ...]
     tokens: frozenset[str]
     unit: np.ndarray | None
+
+
+@dataclass(frozen=True)
+class Judged:
+    """A judge's clear answer for one new item (:mod:`.hippo_judge`): ``same`` or
+    ``changes`` for the active item *target*, read among the *shortlist* as each
+    item stood when the judge was asked."""
+
+    verdict: str
+    target: int
+    shortlist: tuple[Entry, ...]
 
 
 def _unit(vector: Sequence[float] | None) -> np.ndarray | None:
@@ -86,6 +116,12 @@ def _unit(vector: Sequence[float] | None) -> np.ndarray | None:
     return array / norm if norm > 0 else None
 
 
+def _cosine(mine: np.ndarray | None, entry: Entry) -> float:
+    if mine is None or entry.unit is None or mine.shape != entry.unit.shape:
+        return 0.0
+    return float(np.dot(mine, entry.unit))
+
+
 def _entry(item: MemoryItem, model: str) -> Entry:
     # An item's episodic subject is its own (the policy then never replaces one
     # episode with another); profile and semantic subjects come from its text.
@@ -94,7 +130,9 @@ def _entry(item: MemoryItem, model: str) -> Entry:
     return Entry(
         id=item.id,
         text=item.text,
+        kind=item.kind,
         created_at=item.created_at,
+        sources=item.sources,
         vector=vector,
         provenance=provenance,
         subject=subjects(item.text, item.kind, item_key=f"m{item.id}:0"),
@@ -108,22 +146,31 @@ class Router:
 
     def __init__(self, index: ConversationIndex) -> None:
         self._index = index
-        self._active: dict[str, dict[int, Entry]] | None = None
+        self._active: dict[int, Entry] | None = None
         self._model = ""
         self._count = 0
 
-    async def _load(self, model: str) -> dict[str, dict[int, Entry]]:
-        if self._active is None or model != self._model:
+    async def load(self, model: str) -> dict[int, Entry]:
+        """Read the active items of every kind, with their vectors of embedding
+        model *model*. Read once: again only for another model, an item with no
+        vector (*model* ``""``) compares by words and keeps what is loaded."""
+        if self._active is None or (model and model != self._model):
             self._model = model
-            self._active = {}
-            for item in await self._index.active_items():
-                self._active.setdefault(item.kind, {})[item.id] = _entry(item, model)
+            self._active = {
+                item.id: _entry(item, model)
+                for item in await self._index.active_items()
+            }
         return self._active
 
+    def _provenance(self) -> dict[str, Any]:
+        """What gives the item being routed a subject of its own: never the
+        subject of a stored item."""
+        return {"candidate_id": "new", "item_index": self._count + 1}
+
     def _pool(self, item: MemoryItem, provenance: Mapping[str, Any]) -> list[Entry]:
-        """The :data:`POOL` active items of the item's kind that the policy ranks
-        first for it (its own order: same subject, overlap, cosine, newest, id)."""
-        entries = list((self._active or {}).get(item.kind, {}).values())
+        """The :data:`POOL` active items that the policy ranks first for the item (its
+        own order: same subject and kind, overlap, cosine, newest, id)."""
+        entries = list((self._active or {}).values())
         if len(entries) <= POOL:
             return entries
         subject = subjects(
@@ -135,56 +182,130 @@ class Router:
         mine = _unit(item.vector if item.embed_model == self._model else None)
 
         def rank(entry: Entry) -> tuple[bool, float, float, float, int]:
-            cosine = (
-                float(np.dot(mine, entry.unit))
-                if mine is not None
-                and entry.unit is not None
-                and mine.shape == entry.unit.shape
-                else 0.0
-            )
             return (
-                entry.subject == subject,
+                entry.kind == item.kind and entry.subject == subject,
                 overlap(tokens, entry.tokens),
-                cosine,
+                _cosine(mine, entry),
                 entry.created_at,
                 entry.id,
             )
 
         return sorted(entries, key=rank, reverse=True)[:POOL]
 
-    async def route(self, item: MemoryItem) -> Route:
-        """Compare *item* with the active items of its kind and act on the
-        policy's decision (see the module's list). Stores the item unless it is
-        ignored or refused."""
-        if holds_secret(item.title, item.text):
-            return Route(REFUSE, None, None, "holds a secret")
-        active = await self._load(item.embed_model)
-        self._count += 1
-        provenance = {"candidate_id": "new", "item_index": self._count}
-        decision: PolicyDecision = decide(
+    def _rules(self, item: MemoryItem, provenance: Mapping[str, Any]) -> PolicyDecision:
+        return decide(
             item.text,
             kind=item.kind,
             provenance=provenance,
             active=self._pool(item, provenance),
             embedding=item.vector,
+            certain_only=True,
         )
-        action, target = decision.action, decision.target_id
-        kind = active.setdefault(item.kind, {})
-        if action == "IGNORE" or (action != "NEW" and target is None):
-            if target is not None:
+
+    async def shortlist(self, item: MemoryItem) -> tuple[Entry, ...]:
+        """The active items a judge reads for *item*, best match first: at most
+        :data:`SHORTLIST` of those close enough to link (the overlap or the cosine
+        of the policy's link zone), of any kind, ranked by overlap and then cosine,
+        not by subject, so a few items that share a verb with it cannot crowd out
+        the one that says the same. None when the rules settle the item without a
+        model (a secret, a meta claim, a short fact, a fact about files only, an
+        opposite polarity, an identical text)."""
+        if holds_secret(item.title, item.text):
+            return ()
+        active = await self.load(item.embed_model)
+        if self._rules(item, self._provenance()).settled:
+            return ()
+        tokens = frozenset(content_tokens(item.text))
+        mine = _unit(item.vector if item.embed_model == self._model else None)
+        near: list[tuple[float, float, float, int, Entry]] = []
+        for entry in active.values():
+            ratio, cosine = overlap(tokens, entry.tokens), _cosine(mine, entry)
+            if ratio >= LINK_OVERLAP or cosine >= LINK_COSINE:
+                near.append((ratio, cosine, entry.created_at, entry.id, entry))
+        near.sort(key=lambda found: found[:4], reverse=True)
+        return tuple(found[4] for found in near[:SHORTLIST])
+
+    async def _refresh(self, entries: Iterable[Entry]) -> bool:
+        """Whether each of *entries* is still stored, active and as it was (its id,
+        time and sources), read from the table. What is not is brought up to date:
+        an item that is gone or no longer active leaves the run's map."""
+        wanted = {entry.id: entry for entry in entries}
+        rows = {row.id: row for row in await self._index.fetch_items(wanted)}
+        same = True
+        for item_id, entry in wanted.items():
+            row = rows.get(item_id)
+            active = row is not None and row.status == "active"
+            if (
+                row is not None
+                and active
+                and row.created_at == entry.created_at
+                and set(row.sources) == set(entry.sources)
+            ):
+                continue
+            same = False
+            if row is not None and active:
+                assert self._active is not None
+                self._active[item_id] = _entry(row, self._model)
+            elif self._active is not None:
+                self._active.pop(item_id, None)
+        return same
+
+    async def confirm(self, judged: Judged | None) -> Judged | None:
+        """*judged* if every item of its shortlist still exists, active and as it
+        was when the judge read it; otherwise ``None``, and the item is routed by
+        the rules alone. Call it under the hold of the lock that :meth:`route`
+        runs in: nothing may change between the two."""
+        if judged is None or await self._refresh(judged.shortlist):
+            return judged
+        return None
+
+    async def route(self, item: MemoryItem, judged: Judged | None = None) -> Route:
+        """Compare *item* with the active items and act on the policy's decision
+        (see the module's list), or on *judged* (confirmed, by :meth:`confirm`, in the
+        same hold of the lock) unless the rules were certain. Stores the item unless it
+        is ignored or refused. The item the action rests on is read again first: one
+        that is gone is left out, so a repeat whose target was deleted is stored."""
+        if holds_secret(item.title, item.text):
+            return Route(REFUSE, None, None, "holds a secret")
+        active = await self.load(item.embed_model)
+        self._count += 1
+        provenance = {"candidate_id": "new", "item_index": self._count}
+        while True:
+            decision = self._rules(item, provenance)
+            target = (
+                None if decision.target_id is None else active.get(decision.target_id)
+            )
+            if target is None or await self._refresh([target]):
+                break
+        action, target_id, reason = decision.action, decision.target_id, decision.reason
+        picked = None if judged is None else active.get(judged.target)
+        if (
+            judged is not None
+            and not decision.settled
+            and picked is not None
+            and await self._refresh([picked])
+        ):
+            same = judged.verdict == "same"
+            action, target_id = ("IGNORE" if same else "UPDATE"), judged.target
+            reason = (
+                f"judged {'the same as' if same else 'a change of'} entry {target_id}"
+            )
+        if action == "IGNORE" or (action != "NEW" and target_id is None):
+            if target_id is not None:
                 # The item repeats one kept: that one now cites this item's turns too,
                 # so they stay behind it, whatever replaces it, and come back to
                 # recall if it is forgotten; and it is as new as the repeat.
-                await self._index.add_sources(target, item.sources, item.created_at)
-                entry = kind.get(target)
-                if entry is not None and item.created_at > entry.created_at:
-                    kind[target] = dataclasses.replace(
-                        entry, created_at=item.created_at
+                await self._index.add_sources(target_id, item.sources, item.created_at)
+                entry = active.get(target_id)
+                if entry is not None:
+                    active[target_id] = dataclasses.replace(
+                        entry,
+                        created_at=max(entry.created_at, item.created_at),
+                        sources=tuple(dict.fromkeys((*entry.sources, *item.sources))),
                     )
-            return Route("IGNORE", None, target, decision.reason)
-        replace = target if action == "UPDATE" else None
-        reason = decision.reason
-        if replace is not None and item.created_at < kind[replace].created_at:
+            return Route("IGNORE", None, target_id, reason)
+        replace = target_id if action == "UPDATE" else None
+        if replace is not None and item.created_at < active[replace].created_at:
             # Newer always wins, whatever order the chats are encoded in: an older
             # fact is kept, already replaced by the newer one it would have replaced.
             item = dataclasses.replace(item, status="replaced", replaced_by=replace)
@@ -195,14 +316,14 @@ class Router:
         new_id = await self._index.add_item(
             item,
             replace=replace,
-            link=target if action in ("RELATED", "CONFLICT") else None,
+            link=target_id if action in ("RELATED", "CONFLICT") else None,
             conflict=action == "CONFLICT",
         )
         if replace is not None:
-            kind.pop(replace, None)
-        elif action == "CONFLICT" and target is not None:
-            kind.pop(target, None)  # a conflict is no longer an active item
-            return Route(action, new_id, target, reason)
+            active.pop(replace, None)
+        elif action == "CONFLICT" and target_id is not None:
+            active.pop(target_id, None)  # a conflict is no longer an active item
+            return Route(action, new_id, target_id, reason)
         if item.status == "active":
-            kind[new_id] = _entry(dataclasses.replace(item, id=new_id), self._model)
-        return Route(action, new_id, target, reason)
+            active[new_id] = _entry(dataclasses.replace(item, id=new_id), self._model)
+        return Route(action, new_id, target_id, reason)

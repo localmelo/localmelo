@@ -3,15 +3,16 @@
 The ``items`` table is created with the others and holds what a chat model encoded
 from chats; deleting a chat, or one turn an item names, takes the item with it, and
 ``forget_all`` clears them. A turn is hidden from recall only while a stored item
-cites it. A new item is routed by the pure policy against the active items of its
-kind: NEW, UPDATE (the target is marked replaced, unless it is the newer fact),
-RELATED (linked both ways), CONFLICT (both marked, both stay) or IGNORE (not
-stored), and is stored in one transaction with its update or link. Synthetic items,
-no model.
+cites it. A new item is routed against the active items of every kind: NEW, UPDATE (the
+target is marked replaced, unless it is the newer fact; only a judge's clear answer
+gives one), RELATED (linked both ways), CONFLICT (both marked, both stay) or IGNORE
+(not stored), and is stored in one transaction with its update or link. Synthetic
+items, no model: a judge's answer is built by hand.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import AsyncIterator
@@ -20,15 +21,22 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.memory.hippo.policy import decide
-from localmelo.support.memory import hippo_route
-from localmelo.support.memory.hippo_route import POOL, REFUSE, Router
+from localmelo.support.memory import hippo_encode, hippo_judge, hippo_route, note_judge
+from localmelo.support.memory.hippo_encode import Cache
+from localmelo.support.memory.hippo_route import (
+    POOL,
+    REFUSE,
+    SHORTLIST,
+    Judged,
+    Router,
+)
 from localmelo.support.memory.index import (
     ConversationIndex,
     Document,
     MemoryItem,
     document_chunks,
 )
-from localmelo.tests.memory.hippo_helpers import relate
+from localmelo.tests.memory.hippo_helpers import Held, StubEncoder, relate, verdict
 
 MODEL = "fixed-embed"
 
@@ -312,7 +320,14 @@ async def test_deleting_the_one_two_older_items_were_replaced_by_keeps_the_newer
         (UTRECHT, 2.0, 2),
         (PITTSBURGH, 1.0, 1),
     ):
-        await route(router, text, kind="profile", at=at, turns=(turn,))
+        await route(
+            router,
+            text,
+            "changes" if turn < 3 else None,
+            kind="profile",
+            at=at,
+            turns=(turn,),
+        )
     lisbon, utrecht, pittsburgh = await index.fetch_items([1, 2, 3])
     assert (utrecht.replaced_by, pittsburgh.replaced_by) == (1, 1)
     await index.delete("s1", 3)
@@ -514,8 +529,18 @@ PITTSBURGH = "The user said they live in Pittsburgh."
 UTRECHT = "The user said they now live in Utrecht."
 
 
-async def route(router: Router, text: str, **kw: object):  # type: ignore[no-untyped-def]
-    return await router.route(make(text, **kw))  # type: ignore[arg-type]
+async def route(  # type: ignore[no-untyped-def]
+    router: Router, text: str, judge: str | tuple[str, int] | None = None, **kw: object
+):
+    """Route a new item. With *judge*, what a judge says of its best match (``same`` or
+    ``changes``), or of the item whose id it names (``("changes", 1)``); without, the
+    rules alone."""
+    item = make(text, **kw)  # type: ignore[arg-type]
+    if judge is None:
+        return await router.route(item)
+    near = await router.shortlist(item)
+    says, target = (judge, near[0].id) if isinstance(judge, str) else judge
+    return await router.route(item, Judged(says, target, near))
 
 
 async def test_a_new_fact_is_stored_as_new(index: ConversationIndex) -> None:
@@ -581,16 +606,16 @@ async def test_an_update_stores_the_new_item_and_marks_the_old_one_replaced(
 ) -> None:
     router = Router(index)
     old = await route(router, PITTSBURGH, kind="profile", at=1.0)
-    new = await route(router, UTRECHT, kind="profile", at=2.0)
+    new = await route(router, UTRECHT, "changes", kind="profile", at=2.0)
     assert (new.action, new.item, new.target) == ("UPDATE", 2, old.item)
-    assert new.reason == "same subject; update of entry 1"
+    assert new.reason == "judged a change of entry 1"
     first, second = await index.fetch_items([1, 2])
     assert (first.status, first.replaced_by) == ("replaced", 2)
     assert (second.status, second.replaced_by) == ("active", None)
     # The replaced item is no longer compared with, the new one is.
     assert [i.id for i in await index.active_items("profile")] == [2]
     third = await route(
-        router, "The user said they now live in Lisbon.", kind="profile"
+        router, "The user said they now live in Lisbon.", "changes", kind="profile"
     )
     assert (third.action, third.target) == ("UPDATE", 2)
 
@@ -601,8 +626,8 @@ async def test_the_newer_fact_stays_current_whatever_order_they_are_routed_in(
 ) -> None:
     router = Router(index)
     facts = [(PITTSBURGH, 1.0), (UTRECHT, 2.0)]
-    for text, at in reversed(facts) if newer_first else facts:
-        await route(router, text, kind="profile", at=at)
+    for n, (text, at) in enumerate(reversed(facts) if newer_first else facts):
+        await route(router, text, "changes" if n else None, kind="profile", at=at)
     # An older statement that arrives late is kept, but already replaced.
     by_text = {i.text: i for i in await index.fetch_items([1, 2])}
     older, newer = by_text[PITTSBURGH], by_text[UTRECHT]
@@ -611,7 +636,7 @@ async def test_the_newer_fact_stays_current_whatever_order_they_are_routed_in(
     assert [i.id for i in await index.active_items("profile")] == [newer.id]
     # The router keeps comparing with the newer one only.
     third = await route(
-        router, "The user said they now live in Lisbon.", kind="profile"
+        router, "The user said they now live in Lisbon.", "changes", kind="profile"
     )
     assert (third.action, third.target) == ("UPDATE", newer.id)
 
@@ -628,13 +653,13 @@ async def test_an_update_and_its_item_are_stored_together_or_not_at_all(
     with monkeypatch.context() as patch:
         patch.setattr(ConversationIndex, "_replace", fail)
         with pytest.raises(RuntimeError):
-            await route(router, UTRECHT, kind="profile", at=2.0)
+            await route(router, UTRECHT, "changes", kind="profile", at=2.0)
     # Neither the new item nor the replacement was kept.
     assert await index.count_items() == 1
     (old,) = await index.fetch_items([1])
     assert (old.status, old.replaced_by) == ("active", None)
     # A retry is not mistaken for a duplicate: it completes the update.
-    again = await route(router, UTRECHT, kind="profile", at=2.0)
+    again = await route(router, UTRECHT, "changes", kind="profile", at=2.0)
     assert (again.action, again.item, again.target) == ("UPDATE", 2, 1)
     assert [i.status for i in await index.fetch_items([1, 2])] == ["replaced", "active"]
 
@@ -718,6 +743,7 @@ async def test_a_fact_repeated_later_is_not_older_than_an_update_dated_between(
     late = await route(
         Router(index) if new_run else router,
         UTRECHT,
+        "changes",
         kind="profile",
         at=tuesday,
         session="s3",
@@ -740,7 +766,7 @@ async def test_an_episode_never_replaces_another_episode(
     assert later.action == "RELATED"  # not UPDATE: each episode is its own subject
 
 
-async def test_items_are_compared_by_kind_and_a_vector_can_relate_them(
+async def test_items_of_every_kind_are_compared_and_a_vector_can_relate_them(
     index: ConversationIndex,
 ) -> None:
     router = Router(index)
@@ -768,7 +794,9 @@ async def test_items_are_compared_by_kind_and_a_vector_can_relate_them(
         kind="semantic",
         vector=(0.8, 0.6),
     )
-    assert other_kind.action == "NEW"  # an episodic item is not a semantic one's peer
+    # Items are compared by content, whatever their kind: the same fact told as a
+    # semantic item is linked to the episodic one, and replaces nothing on its own.
+    assert (other_kind.action, other_kind.target) == ("RELATED", 1)
 
 
 async def test_a_vector_of_another_model_is_not_compared(
@@ -815,12 +843,13 @@ async def test_the_pool_gives_the_decision_the_policy_gives_for_all_of_them(
         kind="semantic",
         at=50.0,
     )
-    everything = await index.active_items("semantic")
+    everything = await index.active_items()
     expected = decide(
         new.text,
         kind="semantic",
         provenance={"candidate_id": "new", "item_index": 99},
-        active=[_Entry(i.id, i.text, i.created_at) for i in everything],
+        active=[_Entry(i.id, i.text, i.kind, i.created_at) for i in everything],
+        certain_only=True,
     )
     result = await router.route(new)
     assert result.action == expected.action
@@ -830,7 +859,453 @@ async def test_the_pool_gives_the_decision_the_policy_gives_for_all_of_them(
 class _Entry:
     """An active item as the policy reads it, with no vector and an item-local subject."""
 
-    def __init__(self, id: int, text: str, created_at: float) -> None:
-        self.id, self.text, self.created_at = id, text, created_at
+    def __init__(self, id: int, text: str, kind: str, created_at: float) -> None:
+        self.id, self.text, self.kind, self.created_at = id, text, kind, created_at
         self.vector = None
         self.provenance = {"candidate_id": f"m{id}", "item_index": 0}
+
+
+# ── What the rules settle and what a judge decides ──
+
+CHOIR = "The user's choir rehearsal is on Mondays at 19:00."
+CHOIR_AGAIN = "The user said their choir rehearsal is on Mondays at 19:00."
+CHOIR_MOVED = "The user said the choir rehearsal moved to Wednesdays."
+
+
+async def test_a_change_written_under_another_kind_replaces_the_old_fact(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    old = await route(router, CHOIR, kind="profile", at=1.0)
+    new = await route(router, CHOIR_MOVED, "changes", kind="semantic", at=2.0)
+    assert (new.action, new.item, new.target) == ("UPDATE", 2, old.item)
+    first, second = await index.fetch_items([1, 2])
+    assert (first.status, first.replaced_by) == ("replaced", 2)
+    assert (second.status, second.kind) == ("active", "semantic")
+    # A third chat that repeats the change, under a third kind, joins the new item.
+    third = await route(
+        router,
+        "The user said the choir now rehearses on Wednesdays.",
+        "same",
+        kind="episodic",
+        at=3.0,
+        session="s2",
+        turns=(4,),
+    )
+    assert (third.action, third.item, third.target) == ("IGNORE", None, 2)
+    assert [i.id for i in await index.active_items()] == [2]
+    (kept,) = await index.fetch_items([2])
+    assert kept.sources == (("s1", 1), ("s2", 4))
+
+
+async def test_a_reworded_repeat_joins_the_old_item_whatever_its_kind(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    await route(router, CHOIR, kind="profile", at=1.0, turns=(1,))
+    again = await route(
+        router, CHOIR_AGAIN, "same", kind="semantic", at=5.0, session="s2", turns=(4,)
+    )
+    assert (again.action, again.item, again.target) == ("IGNORE", None, 1)
+    (kept,) = await index.fetch_items([1])
+    assert kept.sources == (("s1", 1), ("s2", 4)) and kept.created_at == 5.0
+    assert await index.count_items() == 1
+    # With no judge, the same repeat is stored and linked, not dropped.
+    plain = await route(router, CHOIR_AGAIN, kind="semantic", at=6.0, turns=(5,))
+    assert (plain.action, plain.item, plain.target) == ("RELATED", 2, 1)
+
+
+async def test_two_facts_that_share_a_verb_are_linked_not_replaced(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    await route(router, "The user lives with three rabbits.", kind="profile", at=1.0)
+    other = await route(
+        router, "The user lives in a small harbour town.", kind="profile", at=2.0
+    )
+    assert (other.action, other.target) == ("RELATED", 1)
+    first, second = await index.fetch_items([1, 2])
+    assert (first.status, second.status) == ("active", "active")
+    assert (first.related, second.related) == ((2,), (1,))
+
+
+async def test_an_item_with_every_word_of_an_old_one_and_a_detail_is_not_dropped(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    await route(router, "The user plays tennis on Saturday mornings.", at=1.0)
+    more = await route(
+        router,
+        "The user plays tennis on Saturday mornings at the club with a friend.",
+        at=2.0,
+    )
+    assert (more.action, more.item, more.target) == ("RELATED", 2, 1)
+    assert await index.count_items() == 2
+
+
+async def test_the_shortlist_is_by_content_across_kinds_and_not_by_subject(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    await route(
+        router,
+        "The user bought the old stone cottage by the river bend in 2019.",
+        kind="episodic",
+        at=1.0,
+    )
+    for n, text in enumerate(
+        (
+            "The user lives in a rented cottage near the harbour.",
+            "The user lives in a rented flat by the river.",
+            "The user lives in a rented house near the river.",
+            "The user lives in a rented cottage by the sea.",
+        )
+    ):  # four profile items that share the verb, and so the subject, of the new one
+        await route(router, text, kind="profile", at=2.0 + n)
+    new = make(
+        "The user lives in the old stone cottage by the river bend.",
+        kind="profile",
+        at=10.0,
+    )
+    near = await router.shortlist(new)
+    assert len(near) == SHORTLIST == 3
+    # The best match by words comes first, though it is of another kind.
+    assert near[0].id == 1 and near[0].kind == "episodic"
+    assert [e.kind for e in near[1:]] == ["profile", "profile"]
+
+
+async def test_nothing_is_shortlisted_when_the_rules_settle_the_item_or_none_is_close(
+    index: ConversationIndex,
+) -> None:
+    router = Router(index)
+    spicy = "The user said they eat spicy food every day."
+    await route(router, spicy, kind="profile")
+    for text in (
+        "Hi",  # a short fact
+        spicy,  # the same text
+        "The user said they never eat spicy food every day.",  # the opposite
+        "The user said their card number is 4111 1111 1111 1111.",  # a secret
+        "The user adopted a grey cat named Pixel on 2023-04-02.",  # nothing close
+    ):
+        assert await router.shortlist(make(text, kind="profile")) == (), text
+    near = await router.shortlist(
+        make("The user said they eat spicy food on most days.", kind="profile")
+    )
+    assert [e.id for e in near] == [1]
+
+
+@pytest.mark.parametrize("changed", ["deleted", "replaced", "sources", "time"])
+async def test_a_verdict_is_dropped_when_an_item_it_rested_on_changed(
+    index: ConversationIndex, changed: str
+) -> None:
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=1.0)
+    await route(router, "The user adopted a grey cat named Pixel on 2023-04-02.")
+    new = make(UTRECHT, kind="profile", at=2.0)
+    near = await router.shortlist(new)
+    judged = Judged("changes", near[0].id, near)
+    assert await router.confirm(judged) is judged  # nothing changed yet
+    assert await router.confirm(None) is None
+    if changed == "deleted":
+        await index.delete_item(1)
+    elif changed == "replaced":
+        await relate(index, replace=(1, 2))
+    elif changed == "sources":
+        await index.add_sources(1, [("s9", 3)])
+    else:
+        await index.add_sources(1, [], 99.0)
+    assert await router.confirm(judged) is None
+    # Routed by the rules alone: stored, never lost.
+    stored = await router.route(new)
+    assert stored.item is not None and stored.action in ("NEW", "RELATED")
+
+
+@pytest.mark.parametrize("says", ["same", "changes"])
+async def test_a_repeat_whose_target_is_gone_is_stored_as_a_new_item(
+    index: ConversationIndex, says: str
+) -> None:
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=1.0)
+    await index.delete_item(1)  # behind the router's back
+    again = await route(
+        router, PITTSBURGH, kind="profile", at=2.0, session="s2", turns=(4,)
+    )
+    assert (again.action, again.item) == ("NEW", 2)  # not an IGNORE of a gone item
+    # A judge's answer about an item that has since gone is not acted on either.
+    item = make(UTRECHT, kind="profile", at=3.0, session="s3", turns=(7,))
+    near = await router.shortlist(item)
+    await index.delete_item(2)
+    stored = await router.route(item, Judged(says, near[0].id, near))
+    assert (stored.action, stored.item) == ("NEW", 3)
+    assert [i.id for i in await index.active_items()] == [3]
+
+
+@pytest.mark.parametrize(
+    "repeat_first", [True, False], ids=["repeat first", "change first"]
+)
+async def test_a_shorter_repeat_not_called_the_same_leaves_the_old_time_alone(
+    index: ConversationIndex, repeat_first: bool
+) -> None:
+    """Folding a shorter repeat into the old item would move its time to the repeat's,
+    and a real change dated between them, encoded later, would then be rejected as
+    older. Answered ``other``, the repeat is stored and linked, and the change still
+    replaces the old item, whichever of the two is encoded first."""
+    router = Router(index)
+    full = "The user's choir rehearsal is on Mondays at 19:00 in the church hall."
+    short = "The user has a choir rehearsal on Mondays."
+    first = await route(router, full, kind="profile", at=1000.0)
+
+    async def repeat() -> None:
+        route_ = await route(router, short, kind="profile", at=3000.0, session="s2")
+        assert route_.action == "RELATED"
+        (kept,) = await index.fetch_items([first.item or 0])
+        assert kept.created_at == 1000.0 and len(kept.sources) == 1
+
+    async def change() -> None:
+        moved = await route(
+            router,
+            CHOIR_MOVED,
+            ("changes", first.item or 0),
+            kind="semantic",
+            at=2000.0,
+            session="s3",
+        )
+        assert (moved.action, moved.target) == ("UPDATE", first.item)
+
+    for step in (repeat, change) if repeat_first else (change, repeat):
+        await step()
+    (old,) = await index.fetch_items([first.item or 0])
+    assert (old.status, old.replaced_by) == ("replaced", 3 if repeat_first else 2)
+
+
+# ── The judge ──
+
+
+async def seeded(index: ConversationIndex) -> Router:
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=1.0)
+    return router
+
+
+async def judge_once(
+    router: Router,
+    provider: StubEncoder,
+    typed: tuple[str, ...] = ("I live in Utrecht now.",),
+    *,
+    text: str = UTRECHT,
+    cache: Cache | None = None,
+    counts: hippo_judge.Counts | None = None,
+    stats: hippo_encode.Stats | None = None,
+) -> Judged | None:
+    return await hippo_judge.judge(
+        router,
+        provider,
+        None,
+        make(text, kind="profile", at=2.0),
+        typed,
+        cache=cache or Cache(""),
+        stats=stats or hippo_encode.Stats(),
+        counts=counts or hippo_judge.Counts(),
+    )
+
+
+async def test_a_clear_changes_the_typed_words_support_is_acted_on_and_counted(
+    index: ConversationIndex,
+) -> None:
+    router = await seeded(index)
+    provider = StubEncoder(lambda _: verdict("changes", 1))
+    counts, stats = hippo_judge.Counts(), hippo_encode.Stats()
+    got = await judge_once(router, provider, counts=counts, stats=stats)
+    assert got is not None and (got.verdict, got.target) == ("changes", 1)
+    assert counts.to_json() == {
+        "judged": 1,
+        "same": 0,
+        "changes": 1,
+        "unsupported": 0,
+        "other": 0,
+        "failed": 0,
+        "fallbacks": 0,
+    }
+    assert stats.calls == 1
+    # One request through the quiet path: the texts and the typed words, as data.
+    (prompt,) = provider.prompts
+    request = json.loads(prompt)
+    assert set(request) == {"new", "old", "typed"}
+    assert request["new"]["text"] == UTRECHT
+    assert [(o["item"], o["text"]) for o in request["old"]] == [(1, PITTSBURGH)]
+    assert request["typed"] == ["I live in Utrecht now."]
+    assert provider.systems == [hippo_judge.SYSTEM_PROMPT]
+    assert provider.bodies[0]["temperature"] == 0
+
+
+async def test_a_changes_the_typed_words_do_not_support_only_counts(
+    index: ConversationIndex,
+) -> None:
+    router = await seeded(index)
+    counts = hippo_judge.Counts()
+    provider = StubEncoder(lambda _: verdict("changes", 1))
+    got = await judge_once(router, provider, ("Where is that again?",), counts=counts)
+    assert got is None
+    assert (counts.judged, counts.changes, counts.unsupported) == (1, 1, 1)
+    assert counts.failed == counts.same == counts.other == 0
+
+
+async def test_a_same_and_an_other_are_counted_and_only_the_same_gives_a_verdict(
+    index: ConversationIndex,
+) -> None:
+    router = await seeded(index)
+    counts = hippo_judge.Counts()
+    same = await judge_once(
+        router, StubEncoder(lambda _: verdict("same")), counts=counts
+    )
+    assert same is not None and (same.verdict, same.target) == ("same", 1)
+    other = await judge_once(router, StubEncoder(lambda _: verdict()), counts=counts)
+    assert other is None
+    assert (counts.judged, counts.same, counts.other, counts.failed) == (2, 1, 1, 0)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "RAISE",
+        "no idea",
+        "```json\n" + verdict("same") + "\n```",
+        '{"verdict": "same", "item": 4}',
+        '{"verdict": "same", "item": 0}',
+        '{"verdict": "same", "item": true}',
+        '{"verdict": "same", "item": null}',
+        '{"verdict": "same", "item": 1, "why": "alike"}',
+        '{"verdict": "same"}',
+        '{"verdict": "maybe", "item": 1}',
+        '{"verdict": "other", "item": 9}',
+        "[1]",
+    ],
+    ids=[
+        "error",
+        "not json",
+        "code fence",
+        "item not shown",
+        "item zero",
+        "item a boolean",
+        "same without an item",
+        "extra key",
+        "missing key",
+        "unknown verdict",
+        "other with an item not shown",
+        "not an object",
+    ],
+)
+async def test_any_failure_counts_as_other_and_acts_on_nothing(
+    index: ConversationIndex, reply: str
+) -> None:
+    router = await seeded(index)
+    counts = hippo_judge.Counts()
+    got = await judge_once(router, StubEncoder(reply), counts=counts)
+    assert got is None
+    assert (counts.judged, counts.failed) == (1, 1)
+    assert counts.same == counts.changes == counts.other == counts.unsupported == 0
+
+
+async def test_a_request_that_never_answers_times_out_as_other(
+    index: ConversationIndex, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(note_judge, "JUDGE_TIMEOUT_S", 0.05)
+    router = await seeded(index)
+    counts = hippo_judge.Counts()
+    held = Held()  # a judge request waits, and nothing releases it
+    assert await judge_once(router, held, counts=counts) is None
+    assert held.asked.is_set() and (counts.judged, counts.failed) == (1, 1)
+    assert held.prompts == []  # one attempt, and it never answered
+
+
+async def test_a_reply_is_cached_by_the_judge_version_and_a_second_ask_makes_no_request(
+    index: ConversationIndex, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    router = await seeded(index)
+    cache = Cache(str(tmp_path / "cache.jsonl"))
+    provider = StubEncoder(lambda _: verdict("same"))
+    stats = hippo_encode.Stats()
+    for _ in range(2):
+        got = await judge_once(router, provider, cache=cache, stats=stats)
+        assert got is not None and got.verdict == "same"
+    assert len(provider.prompts) == 1 and (stats.calls, stats.cache_hits) == (1, 1)
+    # The file holds a key and a verdict, no text of an item or of the person.
+    kept = (tmp_path / "cache.jsonl").read_text(encoding="utf-8")
+    assert "Utrecht" not in kept and "Pittsburgh" not in kept and "same" in kept
+    # A new judge version is a new key; the encoder's own key does not move.
+    window_key = hippo_encode.window_key("stub-encoder", "a window")
+    monkeypatch.setattr(hippo_judge, "JUDGE_VERSION", "judge-next")
+    assert hippo_encode.window_key("stub-encoder", "a window") == window_key
+    await judge_once(router, provider, cache=cache, stats=stats)
+    assert len(provider.prompts) == 2
+
+
+async def test_no_request_is_made_for_an_item_with_no_close_item(
+    index: ConversationIndex,
+) -> None:
+    router = await seeded(index)
+    provider, counts = StubEncoder(lambda _: verdict("same")), hippo_judge.Counts()
+    got = await judge_once(
+        router,
+        provider,
+        text="The user adopted a grey cat named Pixel on 2023-04-02.",
+        counts=counts,
+    )
+    assert got is None and provider.prompts == [] and counts.judged == 0
+
+
+async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bounded(
+    index: ConversationIndex,
+) -> None:
+    router = await seeded(index)
+    provider = StubEncoder(lambda _: verdict())
+    typed = (
+        "I live in Utrecht now. My card is 4242 4242 4242 4242. "
+        "My password is hunter2.",
+        "x" * (note_judge.MAX_TYPED_CHARS * 2),
+    )
+    await judge_once(router, provider, typed)
+    (prompt,) = provider.prompts
+    assert "4242" not in prompt and "hunter2" not in prompt
+    sent = json.loads(prompt)["typed"]
+    assert sent[0].startswith("I live in Utrecht now")
+    assert sum(len(text) for text in sent) <= note_judge.MAX_TYPED_CHARS
+
+
+@pytest.mark.parametrize(
+    ("new", "old", "said", "wanted"),
+    [
+        (
+            "The user now lives in Utrecht.",
+            PITTSBURGH,
+            ["I live in Utrecht now."],
+            True,
+        ),
+        (
+            "The user pays 120 euros a month.",
+            "The user pays 100 euros a month.",
+            ["it is 120 now"],
+            True,
+        ),
+        ("用户现在住在上海。", "用户住在北京。", ["我搬到上海了"], True),
+        ("The user now lives in Utrecht.", PITTSBURGH, ["I moved house."], False),
+        ("The user now lives in Utrecht.", PITTSBURGH, [], False),
+        (  # a word the old item has is not new
+            "The user said they live in Utrecht.",
+            "The user said they live in Utrecht, near the canal.",
+            ["I live in Utrecht"],
+            False,
+        ),
+        (  # a plain lowercase word is not distinctive
+            "The user now uses a standing desk.",
+            "The user uses a regular desk.",
+            ["I got a standing desk"],
+            False,
+        ),
+    ],
+    ids=["name", "number", "cjk", "not typed", "nothing typed", "old has it", "plain"],
+)
+def test_a_change_needs_a_distinctive_new_word_in_the_typed_words(
+    new: str, old: str, said: list[str], wanted: bool
+) -> None:
+    assert hippo_judge.supported(new, old, said) is wanted
