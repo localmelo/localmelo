@@ -1769,6 +1769,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The console page and its scripts are checked with the gateway on every use, so a browser or the app's window no longer keeps an old version of the console after an update. A file that did not change still costs only a short check.
 - The terminal keeps a running turn when its connection to the gateway breaks. It opens the stream again from the last event it showed and draws the rest of the turn, as the console does, instead of ending the turn as failed and putting your message back in the input box (where Enter would have sent the same words into the turn that was still running). A line says the gateway is not answering only after 5 s, and the turn is given up only after 30 s without an answer.
 - One task that cannot be restored after a restart no longer stops the console. It waits for you with the reason on its page, as a task stopped by a restart does, and the console opens with every other task; before, the whole console stayed unavailable.
 - The live browser card docked at the top of the chat no longer shows lines of the chat cut off around it: above the card, through its rounded corners and at its bottom edge, whatever scrolls under it is hidden behind a band in the chat's colour that fades out below the card (#576).
