@@ -3,6 +3,7 @@ JSON, and small builders. Nothing here calls a model server."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Callable
@@ -68,6 +69,26 @@ class StubEncoder(BaseLLMProvider):
         return None
 
 
+class Held(StubEncoder):
+    """A stub chat model whose judge requests wait until ``release`` is set, and say
+    so (``asked``) when one arrives. With ``release`` never set, a request is one
+    that never answers. Encoder requests are answered at once."""
+
+    def __init__(self, reply: Reply | str = '{"items": [], "ignore": []}') -> None:
+        super().__init__(reply)
+        # Events, shared with the copy the encoder makes of the provider.
+        self.asked = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        if is_judge(str(messages[-1].content)):
+            self.asked.set()
+            await self.release.wait()
+        return await super().chat(messages, tools)
+
+
 def says(
     items: list[dict[str, Any]] | None = None, ignore: list[int] | None = None
 ) -> str:
@@ -82,6 +103,32 @@ def item(
     sources: list[int] | None = None,
 ) -> dict[str, Any]:
     return {"title": title, "text": text, "kind": kind, "sources": sources or [0]}
+
+
+def is_judge(prompt: str) -> bool:
+    """Whether a request is the judge's, a JSON object, not an encoder window (which
+    starts with the chat title)."""
+    return prompt.startswith("{")
+
+
+def verdict(kind: str = "other", item: int | None = None) -> str:
+    """The JSON a well-behaved judge replies with (``other`` names no item)."""
+    return json.dumps({"verdict": kind, "item": None if kind == "other" else item or 1})
+
+
+def judging(
+    encode: Reply | str, judge: Callable[[dict[str, Any]], str] | None = None
+) -> Reply:
+    """A stub reply that answers the judge's requests with ``judge(request)`` (the
+    request's JSON; ``other`` when none is given) and the encoder's with *encode*."""
+    asked = encode if callable(encode) else (lambda _prompt, text=encode: text)
+
+    def reply(prompt: str) -> str:
+        if not is_judge(prompt):
+            return asked(prompt)
+        return judge(json.loads(prompt)) if judge else verdict()
+
+    return reply
 
 
 def at(day: str, clock: str = "14:02") -> float:
