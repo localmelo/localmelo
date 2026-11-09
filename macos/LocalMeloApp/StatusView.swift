@@ -19,6 +19,9 @@ enum Palette {
     // against the ring and against a light or a dark bar of the system's own greys.
     static let badge = pair(0xd70015, 0xff453a)
     static let badgeRing = pair(0xffffff, 0x1c1c1e)
+    // The menu-bar mark's ears and crown: Melo's fur, made darker or lighter until it has 3:1 against a light or a
+    // dark bar (scripts/make_menu_bar_mark.py derives it from the head picture).
+    static let fur = pair(0xca7200, 0xfa9e41)
 }
 
 /// Melo's portrait in the mood the window is in: a poster of the moves (`startPortrait`). The pictures are

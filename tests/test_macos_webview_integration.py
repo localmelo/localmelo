@@ -374,8 +374,10 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
-    for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):  # the menu-bar item's logo
-        shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
+    for mark in (ROOT / "macos/assets").glob(
+        "MenuBarMark*.png"
+    ):  # the menu-bar item's mark
+        shutil.copy(mark, bundle / "Resources" / mark.name)
     # The pet's moves, its stills and the start window's portrait: where the bundled gateway serves them.
     shutil.copytree(
         ROOT / "support/gateway/static/moves",

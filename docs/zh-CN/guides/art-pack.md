@@ -2,7 +2,7 @@
 
 # 美术包：替换 Melo 的每一张图片
 
-一条命令检查一个装着 Melo 美术的文件夹或 zip，并用它替换仓库里 Melo 的每一张图片：桌面宠物、控制台的画像、各种脸、标签页图标、应用图标和菜单栏标志。本指南写给绘制或提供美术、并从检出的仓库构建 localmelo 的人。
+一条命令检查一个装着 Melo 美术的文件夹或 zip，并用它替换仓库里 Melo 的每一张图片：桌面宠物、控制台的画像、各种脸、标签页图标、应用图标和菜单栏标记。本指南写给绘制或提供美术、并从检出的仓库构建 localmelo 的人。
 
 ![Melo 六个状态各自的海报图，附状态名：startup、thinking、working、attention、idle_rest 和 idle_play。](../../assets/img/art-pack-moves.webp)
 
@@ -28,7 +28,7 @@ Art pack: melo-pack
 
 Missing -> uses instead
   brand/app-icon.png: AppIcon.icns stays as it is
-  brand/menubar.png: MenuBarLogo.png, MenuBarLogo@2x.png and the website's round logo stay as they are
+  brand/menubar.png: docs/assets/icon_small.png (the website's round logo) stays as it is
   brand/emblem.png: docs/assets/melo.png (the README emblem) stays as it is
 
 Problems (2)
@@ -90,7 +90,7 @@ melo-pack/
   heads/head-smile.png           optional: the head for small sizes
   heads/head-neutral.png         optional: the calm head for small sizes
   brand/app-icon.png             optional: the macOS app icon
-  brand/menubar.png              optional: the menu-bar logo and the website's round logo
+  brand/menubar.png              optional: the website's round logo
   brand/emblem.png               optional: the README emblem
 ```
 
@@ -154,12 +154,12 @@ melo-pack/
 | `stills/error.png` | 耳朵向后，低着头 | 刚刚失败的运行，或连不上的模型服务器；那条回答上的脸 |
 | `stills/offline.png` | 蜷成一团 | 还什么都不知道：正在连接，或 localmelo 没有回应 |
 | `heads/head-smile.png` | 正面、微笑的头 | 回答的头像、主对话和手机上的面板标签 |
-| `heads/head-neutral.png` | 平静的头，耳朵竖起 | 侧边栏和登录页、16、32 和 64 px 的浏览器标签页，以及终端欢迎页的标志 |
+| `heads/head-neutral.png` | 平静的头，耳朵竖起 | 侧边栏和登录页、16、32 和 64 px 的浏览器标签页、终端欢迎页的标志和菜单栏标记 |
 
 - 活动胶囊、批准栏和回答里显示的脸，是用固定的框从海报图和静态图里裁出来的；给了头部图的地方，用头部图取代裁出的脸。
 - 头部图是放进头部框里的半身像（见[画布](#the-canvas)）：在 512 px 的画布上是 464 px 见方，底边落在锚点线上。
 - 标签页图标从平静的头里裁得更近，不要脖子，这样 16 px 时也还看得清。
-- 终端欢迎页的标志由平静的头计算得出，所以 `support/cli/mark.py` 会随它一起变。
+- 终端欢迎页的标志和菜单栏标记（线描的头）由平静的头计算得出，所以 `support/cli/mark.py` 和 `macos/assets/MenuBarMark*.png` 会随它一起变。
 
 <a id="brand-pictures"></a>
 
@@ -170,7 +170,7 @@ melo-pack/
 | 文件 | 必须 | 变成 |
 |---|---|---|
 | `brand/app-icon.png` | 正方形，1024 px 或更大（512 px 会警告） | `macos/assets/AppIcon.icns`，所有尺寸 |
-| `brand/menubar.png` | 正方形 | `MenuBarLogo.png`（18 px）、`MenuBarLogo@2x.png`（36 px）和网站的圆形标志（64 px） |
+| `brand/menubar.png` | 正方形 | 网站的圆形标志，64 px |
 | `brand/emblem.png` | 小于 2 MB | `docs/assets/melo.png`，即 README 的徽标；没有 `brand/app-icon.png` 时也用它做应用图标 |
 
 - 应用图标请画成整幅方形，带一个平整的纸色背景：构建时把它放在 macOS 图标网格的圆角底板上，并让它的边缘渐隐进底板的颜色里。
@@ -199,7 +199,7 @@ melo-pack/
 | `heads/head-smile.png` | 回答的脸从 `startup` 的海报图里裁出 |
 | `heads/head-neutral.png` | 品牌的脸就是回答的脸，标签页图标从 `startup` 的海报图里裁出 |
 | `brand/app-icon.png` | 应用图标由 `brand/emblem.png` 画出，否则 `AppIcon.icns` 保持原样 |
-| `brand/menubar.png` | `MenuBarLogo.png`、`MenuBarLogo@2x.png` 和网站的圆形标志保持原样 |
+| `brand/menubar.png` | 网站的圆形标志保持原样 |
 | `brand/emblem.png` | `docs/assets/melo.png` 保持原样 |
 
 - 动作文件夹里始终有全部九张海报图，所以控制台和应用不会遇到空缺。
@@ -252,15 +252,15 @@ Melo 是一只秋田犬。这只是对美术的指引，不是检查：没有任
 | `head box` | 头部图画到了框外，会被裁掉 |
 | `stills`、`heads` | 同一个文件在根目录和文件夹里各有一份 |
 | `colour profile`、`emblem`、`app icon`、`menu-bar logo` | 不是 sRGB 的配置文件、太重的徽标、小于 1024 px 或带透明像素的图标、小于 64 px 的标志 |
-| `terminal mark`、`encoder` | 标志无法生成；Pillow 不是固定的版本，字节可能与已提交的不同 |
+| `terminal mark`、`menu-bar mark`、`encoder` | 标志无法生成，或菜单栏标记的毛色需要应用调色板里的其他颜色；Pillow 不是固定的版本，字节可能与已提交的不同 |
 
 <a id="what-apply-writes"></a>
 
 ## apply 写入什么
 
 - 动作文件夹 `support/gateway/static/moves` 被整个替换：拼图、海报图、静态图、脸、标签页图标和 `manifest.json`。不在新文件集里的文件会被删除。
-- 终端欢迎页的标志 `support/cli/mark.py` 由新的平静的脸计算得出。
-- 有品牌图片时：`macos/assets/AppIcon.icns`、`MenuBarLogo.png`、`MenuBarLogo@2x.png`、`docs/assets/melo.png` 和 `docs/assets/icon_small.png`。
+- 终端欢迎页的标志 `support/cli/mark.py` 和菜单栏标记 `macos/assets/MenuBarMark*.png` 由新的平静的脸计算得出。
+- 有品牌图片时：`macos/assets/AppIcon.icns`、`docs/assets/melo.png` 和 `docs/assets/icon_small.png`。
 - 本指南的两张图片 `docs/assets/img/art-pack-moves.webp` 和 `art-pack-canvas.webp`，由新的海报图重新绘制。`art_pack.py figures` 可以单独重画它们。
 
 美术包里的东西，除了它点名的品牌图片之外，一律不会被复制。美术包本身留在仓库之外。

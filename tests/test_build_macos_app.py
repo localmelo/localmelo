@@ -370,7 +370,13 @@ def test_build_assembles_locked_runtime_and_swift(
     (root / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
     (root / "macos/assets").mkdir(parents=True)
     # Each asset holds its own name, so a copy under the wrong name shows.
-    for name in ("AppIcon.icns", "MenuBarLogo.png", "MenuBarLogo@2x.png"):
+    marks = (
+        "MenuBarMark.png",
+        "MenuBarMark@2x.png",
+        "MenuBarMarkFur.png",
+        "MenuBarMarkFur@2x.png",
+    )
+    for name in ("AppIcon.icns", *marks):
         (root / "macos/assets" / name).write_bytes(name.encode())
     moves = root / "support/gateway/static/moves"
     moves.mkdir(parents=True)
@@ -425,11 +431,16 @@ def test_build_assembles_locked_runtime_and_swift(
     runtime = output / "Contents/Resources/runtime/bin"
     assert (runtime / "melo").is_file()
     assert (runtime / "python/bin/uv").is_file()  # beside the bundled Python
-    # The committed icon and menu-bar logo are copied, the icon under the name the plist gives.
+    # The committed icon and menu-bar mark are copied, the icon under the name the plist gives.
     resources = output / "Contents/Resources"
     assert (resources / "LocalMelo.icns").read_bytes() == b"AppIcon.icns"
-    assert (resources / "MenuBarLogo.png").read_bytes() == b"MenuBarLogo.png"
-    assert (resources / "MenuBarLogo@2x.png").read_bytes() == b"MenuBarLogo@2x.png"
+    for name in (
+        "MenuBarMark.png",
+        "MenuBarMark@2x.png",
+        "MenuBarMarkFur.png",
+        "MenuBarMarkFur@2x.png",
+    ):
+        assert (resources / name).read_bytes() == name.encode()
     # No other pictures of Melo ride along: the moves are the only ones.
     assert not (resources / "akita").exists()
     # Melo's moves are the console's files, once: inside the package the gateway serves, where the app reads them.
@@ -546,11 +557,6 @@ def test_the_committed_icon_holds_every_size() -> None:
     assert {b"ic04", b"ic05", *pixels} <= set(entries)
     for kind, size in pixels.items():
         assert png_header(entries[kind]) == (size, size, 6), kind
-
-
-def test_the_committed_menu_bar_logo_has_a_png_for_each_scale() -> None:
-    for name, size in (("MenuBarLogo.png", 18), ("MenuBarLogo@2x.png", 36)):
-        assert png_header((ASSETS / name).read_bytes()) == (size, size, 6), name
 
 
 def test_bundled_python_is_precompiled_and_nothing_writes_bytecode(

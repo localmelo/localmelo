@@ -262,8 +262,8 @@ def build_app(root: Path) -> Path:
     python.parent.mkdir(parents=True)
     python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     python.chmod(0o755)
-    for logo in ("MenuBarLogo.png", "MenuBarLogo@2x.png"):
-        shutil.copy(ROOT / "macos/assets" / logo, bundle / "Resources" / logo)
+    for mark in (ROOT / "macos/assets").glob("MenuBarMark*.png"):
+        shutil.copy(mark, bundle / "Resources" / mark.name)
     shutil.copytree(
         ROOT / "support/gateway/static/moves",
         python.parent.parent
