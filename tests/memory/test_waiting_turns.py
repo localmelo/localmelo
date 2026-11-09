@@ -229,6 +229,27 @@ async def test_a_window_the_model_failed_sets_no_mark(
     assert await numbers(memory, store, sid) == [1, 2, 3]
 
 
+async def test_the_encoded_share_follows_the_mark_and_a_failed_window_leaves_it(
+    memory: ChatMemory, store: SessionStore
+) -> None:
+    sid = await padded_chat(store, 4)
+    await memory.reindex(store)
+    _, index = memory.stores()
+    assert await index.encoded_share() == 0.0
+    good = StubEncoder(reply)
+    memory.chat_provider = lambda: good  # type: ignore[method-assign]
+    waiting = await memory.waiting_turns(store, sid)
+    assert await memory.encode_window(store, sid, "Chat", waiting) is not None
+    assert await index.encoded_share() == 2 / 4  # the first window held two turns
+    bad = StubEncoder("RAISE")
+    memory.chat_provider = lambda: bad  # type: ignore[method-assign]
+    out = await memory.encode_window(
+        store, sid, "Chat", await memory.waiting_turns(store, sid)
+    )
+    assert out is not None and out.encoding.failed_from == 0
+    assert await index.encoded_share() == 2 / 4
+
+
 async def test_nothing_to_read_is_none(memory: ChatMemory, store: SessionStore) -> None:
     sid = (await turn(store, None, "one")).session_id
     assert await memory.encode_window(store, sid, "Chat", []) is None

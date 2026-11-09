@@ -9,6 +9,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Developer only: `recall_source = "auto"` stays on chat turns until the encoder has read nearly all of them, then reads
+  memory items. Part of #428.
 - The hosts of one site count as one site. A sign-in that moves from a site's main host to its sign-in host asks once:
   what you keep for a site, opening it or clicking and choosing on it, now covers its other hosts for that chat or task,
   and the card names the whole site ("all of example.com"), in the console, the app and the terminal. One site is the same

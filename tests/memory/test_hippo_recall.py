@@ -8,12 +8,15 @@ turn's memory event says which items were used, searched and opened. A turn leav
 recall only while a stored item cites it (whatever the item's status), whatever the
 chat's progress mark says: a chat nobody encoded, or a turn the encoder left out, is
 not lost, and a store with no items reads as the turns source. With every turn cited,
-recall reads items alone. With the default source, ``turns``, nothing changes.
+recall reads items alone. With the default source, ``turns``, nothing changes. With
+``auto``, a turn reads turns until the encoder has read nine in ten of them, then
+items, when the chat model and every stored item's encoder are on the checked list.
 Synthetic items, words and fixed vectors, no model.
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import AsyncIterator
@@ -24,8 +27,12 @@ from unittest import mock
 import numpy as np
 import pytest
 
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
-from localmelo.support.memory import ChatMemory, service
+from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.backends.openai_family import CLOUD_BACKENDS
+from localmelo.support.config import Config
+from localmelo.support.memory import ChatMemory, hippo_encode, service
 from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
@@ -41,16 +48,22 @@ from localmelo.support.memory.recall import (
     ranked,
 )
 from localmelo.support.memory.service import (
+    CAUGHT_UP,
     CHAT_TURN,
     IN_THIS_CHAT,
     NO_SUCH_TURN,
+    OPEN_MEMORY,
     OPEN_USAGE_ITEMS,
+    SEARCH_MEMORY,
     MemoryTools,
+    Reading,
     open_memory_items,
     search_memory_listing,
+    search_memory_opening,
 )
 from localmelo.support.sessions.store import SessionStore
-from localmelo.tests.memory.hippo_helpers import relate
+from localmelo.tests.agent.test_tool_exposure import FakeLLM
+from localmelo.tests.memory.hippo_helpers import StubEncoder, relate
 from localmelo.tests.memory.test_recall_bars import (
     FAR_QUESTION,
     MODEL,
@@ -96,6 +109,7 @@ async def put(
     at: float | None = None,
     cosine: float | None = None,
     encoded: bool = True,
+    encoder: str = "1:stub",
 ) -> int:
     """Store a memory item of chat *session_id* and give its number. As the encoder
     does (:meth:`ChatMemory.compress_chat`), it also marks the chat encoded up to the
@@ -111,7 +125,7 @@ async def put(
             sources=tuple((session_id, turn) for turn in turns),
             vector=tuple(vector_at(cosine)) if cosine is not None else None,
             embed_model=MODEL if cosine is not None else "",
-            encoder="1:stub",
+            encoder=encoder,
         )
     )
     if encoded:
@@ -1281,4 +1295,328 @@ async def test_a_reindex_gives_the_items_vectors_of_the_new_embedding_model(
         found = await memory.search(paraphrase)
         assert [i.key for i in found if i.is_memory] == [f"m:{number}"]
     finally:
+        await memory.aclose()
+
+
+# ── recall_source = "auto": turns until the encoder has caught up ──
+
+CHECKED = next(iter(hippo_encode.CHECKED_ENCODERS))
+ENCODER = f"3:{CHECKED}"
+# A chat model's address that is never called: only its name is read.
+STUB_URL = "http://127.0.0.1:59999/v1"
+NEWER = "The user now props the plants with cedar poles."
+
+
+def auto_config(**memory: Any) -> Config:
+    """``recall_source = "auto"`` with a chat model on the checked list."""
+    cfg = config(recall_source="auto", **memory)
+    cfg.vllm.chat_model = CHECKED
+    return cfg
+
+
+async def catch_up(fill: Held, store: SessionStore, turns: int, read: int) -> None:
+    """Give the chat *turns* turns in all, *read* of them read by the encoder (the
+    first is already)."""
+    for turn in range(2, turns + 1):
+        await add_turn(
+            fill.memory,
+            store,
+            f"Which tomato garden bed {turn}?",
+            f"Bed {turn}.",
+            session_id=fill.session_id,
+            turn=turn,
+            title="Garden",
+        )
+    await fill.memory.stores()[1].mark_encoded(fill.session_id, read)
+
+
+async def test_auto_reads_turns_until_the_encoder_has_caught_up_and_then_items(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = auto_config()  # recall_form stays at excerpt
+    fill = await held(tmp_path, store, cfg, later=LATER, encoder=ENCODER)
+    memory, index = fill.memory, fill.memory.stores()[1]
+    try:
+        assert await index.encoded_share() == 0.5
+        auto = await ask(memory, store)
+        search = await MemoryTools(memory).search(query=QUESTION)
+        cfg.memory.recall_source = "turns"
+        plain = await ask(memory, store)
+        assert auto.block == plain.block != ""
+        assert [i.key for i in auto.used] == [i.key for i in plain.used]
+        assert await MemoryTools(memory).search(query=QUESTION) == search
+        assert not has_item_line(auto.block) and TITLE not in auto.block
+        # The encoder reads the last turn: items, in the list form.
+        await index.mark_encoded(fill.session_id, 2)
+        cfg.memory.recall_source = "auto"
+        auto = await ask(memory, store)
+        search = await MemoryTools(memory).search(query=QUESTION)
+        cfg.memory.recall_source, cfg.memory.recall_form = "items", "list"
+        plain = await ask(memory, store)
+        assert auto.block == plain.block != ""
+        assert refs_of(auto.block) == [f"m{fill.item}", f"t{fill.later}"]
+        assert ITEM_LIST_GUIDE in auto.block
+        assert await MemoryTools(memory).search(query=QUESTION) == search
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("turns", "read", "items"),
+    [(10, 9, True), (20, 18, True), (19, 17, False), (10, 8, False), (1, 1, True)],
+)
+async def test_the_switch_is_at_nine_tenths_of_the_turns_read_with_no_rounding(
+    tmp_path: Path, store: SessionStore, turns: int, read: int, items: bool
+) -> None:
+    fill = await held(tmp_path, store, auto_config(), encoder=ENCODER)
+    try:
+        await catch_up(fill, store, turns, read)
+        assert CAUGHT_UP == 0.9
+        assert await fill.memory.reading() == Reading(items, read / turns)
+        found = await ask(fill.memory, store)
+        assert found.recall is not None
+        assert found.recall.source == ("items" if items else "turns")
+    finally:
+        await fill.memory.aclose()
+
+
+@pytest.mark.parametrize(
+    ("encoder", "items"),
+    [
+        ("3:small-model", False),
+        ("", False),
+        ("3:", False),
+        (ENCODER, True),
+        (hippo_encode.RULES_ENCODER, True),
+    ],
+)
+async def test_a_stored_item_an_unchecked_encoder_wrote_keeps_recall_on_turns(
+    tmp_path: Path, store: SessionStore, encoder: str, items: bool
+) -> None:
+    fill = await held(tmp_path, store, auto_config(), encoder=encoder)
+    memory = fill.memory
+    try:
+        assert await memory.reading() == Reading(items, 1.0)  # every turn is read
+        if not items:
+            # Until a person deletes it: the check is on what would be read.
+            assert await memory.stores()[1].delete_item(fill.item) is not None
+            assert await memory.reading() == Reading(True, 1.0)
+    finally:
+        await memory.aclose()
+
+
+async def test_a_replaced_item_of_an_unchecked_encoder_counts_too(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    fill = await held(tmp_path, store, auto_config(), encoder="3:small-model")
+    memory = fill.memory
+    try:
+        newer = await put(memory, fill.session_id, "Poles", NEWER, encoder=ENCODER)
+        await relate(memory.stores()[1], replace=(fill.item, newer))
+        assert await memory.reading() == Reading(False, 1.0)
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize("model", ["Qwen3.8-Flash", "", "stub-encoder"])
+async def test_a_local_model_off_the_list_or_without_an_id_is_not_checked(
+    tmp_path: Path, store: SessionStore, model: str
+) -> None:
+    cfg = auto_config()
+    cfg.vllm.chat_model = model
+    fill = await held(tmp_path, store, cfg, encoder=ENCODER)
+    try:
+        assert not fill.memory.chat_model_checked()
+        assert await fill.memory.reading() == Reading(False, 1.0)
+        found = await ask(fill.memory, store)
+        assert found.recall is not None and found.recall.source == "turns"
+    finally:
+        await fill.memory.aclose()
+
+
+async def test_a_hosted_backend_is_not_checked_and_a_named_server_is_local(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = auto_config()
+    fill = await held(tmp_path, store, cfg, encoder=ENCODER)
+    memory = fill.memory
+    try:
+        assert memory.chat_model_checked()
+        cfg.chat_backend = CLOUD_BACKENDS[0]
+        # The model has the checked id, but a hosted backend is never trusted.
+        memory.chat_provider = lambda: StubEncoder(model=CHECKED)  # type: ignore[method-assign]
+        assert not memory.chat_model_checked()
+        assert await memory.reading() == Reading(False, 1.0)
+        named = ChatMemory(
+            lambda: cfg,
+            directory=str(tmp_path / "named"),
+            chat_url=STUB_URL,
+            chat_model=CHECKED,
+        )
+        try:
+            assert named.chat_model_checked()
+        finally:
+            await named.aclose()
+    finally:
+        await memory.aclose()
+
+
+async def test_the_event_says_what_auto_read_and_how_much_the_encoder_had_read(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = auto_config()
+    fill = await held(tmp_path, store, cfg, later=LATER, encoder=ENCODER)
+    memory = fill.memory
+    try:
+        found = await ask(memory, store)
+        data = found.event()
+        assert data is not None
+        assert data["recall"]["source"] == "turns"
+        assert data["recall"]["encoded_share"] == 0.5
+        await memory.stores()[1].mark_encoded(fill.session_id, 2)
+        data = (await ask(memory, store)).event()
+        assert data is not None
+        assert data["recall"]["source"] == "items"
+        assert data["recall"]["encoded_share"] == 1.0
+        # With turns or items the two fields are not there at all.
+        for source in ("turns", "items"):
+            cfg.memory.recall_source = source
+            data = (await ask(memory, store)).event()
+            assert data is not None
+            assert "source" not in data["recall"]
+            assert "encoded_share" not in data["recall"]
+    finally:
+        await memory.aclose()
+
+
+async def test_two_turns_can_read_in_different_states_at_once(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = auto_config(retriever="llm")
+    fill = await held(tmp_path, store, cfg, encoder=ENCODER)
+    memory = fill.memory
+    try:
+        newer = await put(memory, fill.session_id, "Poles", NEWER, encoder=ENCODER)
+        await relate(memory.stores()[1], replace=(fill.item, newer))
+        # The chat model answers nothing readable, and the first call waits.
+        gate, entered = asyncio.Event(), asyncio.Event()
+        stub = StubEncoder("no ids here", model=CHECKED)
+        answer, calls = stub.chat, []
+
+        async def chat(messages: Any, tools: Any = None) -> Any:
+            calls.append(messages)
+            if len(calls) == 1:
+                entered.set()
+                await gate.wait()
+            return await answer(messages, tools)
+
+        stub.chat = chat  # type: ignore[method-assign]
+        memory.chat_provider = lambda: stub  # type: ignore[method-assign]
+        first = asyncio.create_task(ask(memory, store))
+        await entered.wait()
+        # Every turn is read, so the first turn is in the items state and holds the
+        # items it found. Now the chat gets a turn nobody has read: the next turn
+        # reads turns, and its sync must not take the first one's items away.
+        await add_turn(
+            memory, store, *LATER, session_id=fill.session_id, turn=2, title="Garden"
+        )
+        second = await ask(memory, store)
+        assert second.recall is not None and second.recall.source == "turns"
+        assert not has_item_line(second.block)
+        gate.set()
+        found = await first
+        assert found.recall is not None and found.recall.source == "items"
+        # The item that replaced the one its words matched is what the block shows.
+        assert refs_of(found.block) == [f"m{newer}"]
+        assert memory._auto_items.keys("m:") == {f"m:{fill.item}", f"m:{newer}"}
+        assert not memory._corpus.keys("m:")
+        assert len(memory._corpus.keys("d:")) == 2
+    finally:
+        await memory.aclose()
+
+
+@pytest.mark.parametrize("excerpt_open", ["on", "off"])
+async def test_one_agent_keeps_working_as_its_chat_crosses_between_the_states(
+    tmp_path: Path,
+    store: SessionStore,
+    monkeypatch: pytest.MonkeyPatch,
+    excerpt_open: str,
+) -> None:
+    monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
+    monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
+    cfg = auto_config(excerpt_open=excerpt_open)
+    fill = await held(tmp_path, store, cfg, later=LATER, encoder=ENCODER)
+    memory = fill.memory
+    index = memory.stores()[1]
+    llm = FakeLLM()
+    # One Agent for the whole chat: it registers the memory tools once, at its first
+    # run, in the state the chat is in then.
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            tool_exposure="all",
+            builtins=frozenset(),
+            attempt_policy="none",
+            max_steps=4,
+        ),
+        tool_providers=[MemoryTools(memory)],
+    )
+
+    def called(name: str, arguments: dict[str, Any]) -> Message:
+        return Message(
+            "assistant", "", tool_call=ToolCall(tool_name=name, arguments=arguments)
+        )
+
+    async def turn(ids: list[str]) -> tuple[str, list[ToolDef], str, str]:
+        """One turn: the recall block, the tools the Agent offered, and what the
+        model's ``search_memory`` and ``open_memory`` calls read."""
+        block = (await ask(memory, store)).block
+        llm.responses.extend(
+            [
+                called("search_memory", {"query": QUESTION}),
+                called("open_memory", {"ids": ids}),
+                Message("assistant", "done"),
+            ]
+        )
+        assert await agent.run(QUESTION) == "done"
+        tools = llm.calls[-3]["tools"]
+        searched, opened = [
+            m.content for m in llm.calls[-1]["messages"] if m.role == "tool"
+        ][-2:]
+        return block, tools, searched, opened
+
+    try:
+        # Half the turns are read: the chat reads turns, and `open_memory` is offered
+        # even with `excerpt_open = "off"`.
+        block, tools, searched, opened = await turn([f"t{fill.doc}"])
+        registered = {t.name: t for t in tools}
+        assert set(registered) == {"search_memory", "remember", "open_memory"}
+        opening = excerpt_open == "on"
+        assert registered["search_memory"] == (
+            search_memory_opening() if opening else SEARCH_MEMORY
+        )
+        assert registered["open_memory"] == OPEN_MEMORY
+        assert not has_item_line(block) and not has_item_line(searched)
+        assert TURN[0] in opened and TURN[1] in opened
+        # The encoder catches up: items, as with the list form, though the tools
+        # keep their old wording. A turn the chat saw before still opens, and so
+        # does an item.
+        await index.mark_encoded(fill.session_id, 2)
+        block, tools, searched, opened = await turn(
+            [f"t{fill.doc}", f"m{fill.item}", f"t{fill.later}"]
+        )
+        assert tools == list(registered.values())
+        assert (
+            refs_of(block) == refs_of(searched) == [f"m{fill.item}", f"t{fill.later}"]
+        )
+        assert TURN[0] in opened and TEXT in opened and LATER[0] in opened
+        # The chat gets turns nobody has read: back to turns, and the item it saw
+        # still opens, beside a turn it saw.
+        await catch_up(fill, store, 5, 2)
+        block, tools, searched, opened = await turn([f"m{fill.item}", f"t{fill.doc}"])
+        assert tools == list(registered.values())
+        assert not has_item_line(block) and not has_item_line(searched)
+        assert TEXT in opened and TURN[0] in opened
+    finally:
+        await agent.close()
         await memory.aclose()

@@ -16,8 +16,8 @@ present when above 0); ``GET /api/memory/import/offer`` says whether the offer t
 was never made (the first run's card) and ``DELETE`` on it records "Not now" and answers
 whether the offer is still open (it is when the record could not be written).
 ``GET /api/memory/items`` lists the memory items melo wrote from the chats (the
-developer setting ``recall_source = "items"``) newest first, each with the chat it
-came from and a link to it; ``DELETE /api/memory/items/{id}`` deletes one at once (the
+developer setting ``recall_source`` ``items`` or ``auto``) newest first, each with the
+chat it came from and a link to it; ``DELETE /api/memory/items/{id}`` deletes one at once (the
 turns it cited are recalled as turns again) and says how long ``POST
 /api/memory/items/{id}/restore`` can put it back; nothing of it stays on disk meanwhile.
 ``PUT /api/memory`` switches
