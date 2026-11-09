@@ -1383,7 +1383,6 @@ async def test_a_reply_is_cached_by_the_judge_version_and_a_second_ask_makes_no_
     await judge_once(router, provider, cache=cache, stats=stats)
     assert len(provider.prompts) == 2
     # A reply kept under the previous judge version is not reused.
-    assert hippo_judge.JUDGE_VERSION != "judge-1"
     stale = Cache("")
     stale.put(
         hippo_encode.window_key("stub-encoder", provider.prompts[0], "judge-1"),
@@ -1391,6 +1390,7 @@ async def test_a_reply_is_cached_by_the_judge_version_and_a_second_ask_makes_no_
     )
     fresh = StubEncoder(lambda _: verdict())
     monkeypatch.undo()
+    assert hippo_judge.JUDGE_VERSION != "judge-1"  # the real constant, not the patch
     assert await judge_once(router, fresh, cache=stale) is None
     assert len(fresh.prompts) == 1
 
@@ -1522,6 +1522,68 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
         ),
         ("课改到周五了。", "课在周三。", ["我改到星期五了"], True),
         ("会议改到15点了。", "会议在10点。", ["改到15点"], True),
+        (  # a plain word typed only in a question names a topic, not a value
+            "The user now takes the ferry to work.",
+            "The user takes the bus to work.",
+            ["do you know when the ferry leaves?"],
+            False,
+        ),
+        (  # a fragment of "that's" is no value
+            "The user's scarf is wool.",
+            "The user has a cotton scarf.",
+            ["that's my scarf."],
+            False,
+        ),
+        (  # one CJK character, from a question
+            "用户养了一只猫。",
+            "用户养了一只狗。",
+            ["我的猫是什么颜色？"],
+            False,
+        ),
+        (  # a modal in a question
+            "The user would host it in the garden.",
+            "The user declined to host it.",
+            ["would that work? could they come?"],
+            False,
+        ),
+        (  # a word that carries no value, in a statement
+            "The user will bring the cake.",
+            "The user declined to bring the cake.",
+            ["I will see."],
+            False,
+        ),
+        (
+            "The user is not coming.",
+            "The user is coming.",
+            ["I am not sure."],
+            False,
+        ),
+        (  # the plain word is in a statement, after a question
+            "The user now drinks oat milk.",
+            "The user drinks cow milk.",
+            ["which one? We switched to oat milk."],
+            True,
+        ),
+        (  # a number word in a statement
+            "The user keeps seven hens.",
+            "The user keeps three hens.",
+            ["we have seven now."],
+            True,
+        ),
+        (  # a distinctive value counts in a question too
+            "The user's dance class is now on Thursdays.",
+            "The user's dance class is on Tuesdays.",
+            ["can you move it to Thursday?"],
+            True,
+        ),
+        (
+            "The user's call is at 14:30.",
+            "The user's call is at 9:00.",
+            ["is 14:30 ok?"],
+            True,
+        ),
+        ("用户喜欢喝豆浆。", "用户喜欢喝咖啡。", ["我最近改喝豆浆了。"], True),
+        ("用户喜欢喝豆浆。", "用户喜欢喝咖啡。", ["豆浆还有吗？"], True),
     ],
     ids=[
         "name",
@@ -1551,6 +1613,18 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
         "capitalised change word",
         "change word and a Chinese weekday",
         "change word and a number",
+        "plain word only in a question",
+        "fragment of a contraction",
+        "one CJK character in a question",
+        "modal in a question",
+        "no-value word will",
+        "no-value word not",
+        "plain word in a statement after a question",
+        "number word in a statement",
+        "distinctive word in a question",
+        "number in a question",
+        "Chinese value in a statement",
+        "Chinese value in a question",
     ],
 )
 def test_a_change_needs_a_new_value_word_in_the_typed_words(
