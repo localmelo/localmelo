@@ -189,6 +189,16 @@ class ItemState(NamedTuple):
     sources: tuple[tuple[str, int], ...]
 
 
+class TurnHead(NamedTuple):
+    """A turn's head document without its text: its id (the one ``open_memory`` takes
+    as ``t<id>``), the session and turn it belongs to, and its time."""
+
+    id: int
+    session_id: str
+    turn: int
+    created_at: float
+
+
 def _ids(raw: object) -> tuple[int, ...]:
     """The ids of a JSON list column; nothing for a value that is not one."""
     try:
@@ -619,6 +629,23 @@ class ConversationIndex:
                 (session_id, turn),
             ) as cur:
                 out.extend(_document(row) for row in await cur.fetchall())
+        return out
+
+    async def turn_heads(self, turns: Iterable[tuple[str, int]]) -> list[TurnHead]:
+        """The head (chunk 0) of each ``(session id, turn)`` of *turns*, in the order
+        given, with no text or vector read; a turn that is not indexed has none."""
+        conn = await self._ready()
+        out: list[TurnHead] = []
+        for session_id, turn in dict.fromkeys(turns):
+            async with conn.execute(
+                "SELECT id, created_at FROM documents "
+                "WHERE session_id = ? AND turn = ? AND chunk = 0",
+                (session_id, turn),
+            ) as cur:
+                out.extend(
+                    TurnHead(int(row[0]), session_id, turn, float(row[1]))
+                    for row in await cur.fetchall()
+                )
         return out
 
     async def recent(
