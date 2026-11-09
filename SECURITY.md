@@ -135,23 +135,31 @@ those tools can do.
   person's words, so they add no file, site or post the person did not ask for,
   and every text a call or a model gave is redacted before it is kept. When the
   hand-off fails after the commit, the task is looked up before the chat reads
-  anything, so the chat never goes on beside a task that holds the work. It has
+  anything, so the chat never goes on beside a task that holds the work, and a
+  Stop that lands after the commit shows the task it admitted. It has
   its chat's mode, folder and grants, and the same reviews. No sign-in moves:
   the request's password handles do not work in the task, and a turn that holds
   a password the person gave keeps its work. While the chat holds a browser
   page, a take-over card or an approval waiting, the work stays in the chat; a
-  page is never closed and opened again to move it. A task a chat started runs
+  page is never closed and opened again to move it. A chat whose folder no task
+  may use keeps its work too. A task a chat started runs
   once: more work on its job is one fresh task per ended task, admitted under a
   key of the ended one, so a second trigger reaches it instead of starting
-  another. The job keeps its follow-up count (the chat continues it once), the
+  another; a message that reaches a worker as it ends goes on in that fresh task,
+  never in the ended one's session. The job keeps its follow-up count (the chat
+  continues it at most once per message of the person's in that chat), the
   "asks before each post" of a repeating chore, the steps refused in it,
   including in the chat's turn that handed it on, and the calls whose effect is
-  unknown. Those steps are refused before any review in every task of the job
-  until the person's own message moves it on; then each gets a fresh decision.
+  unknown, from every turn of every task of the job. A call whose effect is
+  unknown is refused before any review in every task of the job, by the key of
+  the live call, whoever moved the job on, unless its tool only reads. A step
+  refused in the job is refused before any review until the person's own
+  message moves it on; then each gets a fresh decision.
   Stop stays final for the task it stopped. Step budgets do not carry: each
   task gets the configured step budget, and what bounds the chain is that a
   hand-off happens at most once per message of the person's and the chat
-  continues a job by itself at most once.
+  continues a job by itself at most once per message of the person's in that
+  chat.
 - **A chat's mode decides for the tasks it started.** A task you started
   follows the Ask or Auto of its chat while it runs, so a switch you make in
   the chat is not ignored by work that began earlier. Auto to Ask applies at

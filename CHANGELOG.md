@@ -16,12 +16,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   blindly) and from what the chat says is left, which it reads as data, with secrets in it redacted. A retry ends on the
   same task, a hand-off that cannot be admitted moves nothing, and one that may have been admitted is looked up before
   the chat goes on. The chat keeps the work while it has a browser page open, a take-over card or an approval waiting,
-  or holds a password you gave in that message. A task a chat started now runs once: when it has ended it never runs
-  again, and more work on its job (your message, the chat's follow-up, **Continue**, **Finish it**, **Allow once**) goes on
-  in one fresh task with its record as background; a second tap or message reaches that task instead of starting
-  another. The job keeps its follow-up count, the steps refused in it (in the chat's turn too) and the calls whose
-  effect is unknown, which stay refused until your own message moves it on. Tasks from the task page and the API keep
-  going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
+  holds a password you gave in that message, or sits in a folder no task may use. A task a chat started now runs once:
+  when it has ended it never runs again, and more work on its job (your message, the chat's follow-up, **Continue**,
+  **Finish it**, **Allow once**, a message that arrived as it ended) goes on in one fresh task with its record as
+  background; a second tap or message reaches that task instead of starting another. The job keeps its follow-up count,
+  the steps refused in it (in the chat's turn too), which stay refused until your own message moves it on, and the calls
+  cut off with an unknown effect, which stay refused in every task of the job unless they only read. Tasks from the task
+  page and the API keep going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
   request again; it can only be put away. (#571)
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
   Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
