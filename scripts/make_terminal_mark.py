@@ -31,6 +31,7 @@ import struct
 import sys
 import zlib
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 FACE = ROOT / "support/gateway/static/moves/face-brand.png"
@@ -146,8 +147,19 @@ def _near(point: Point) -> list[Point]:
     return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
 
 
-def pixels(path: Path = FACE) -> tuple[str, ...]:
-    """The mark's rows of ``.`` (empty), ``o`` fur, ``c`` cream, ``b`` shade, ``k`` dark."""
+class Head(NamedTuple):
+    """The head in a picture, as sets of pixels: what each pixel is (`classify`), the outline and the inside (both
+    above `bottom`), and the picture's size."""
+
+    kinds: dict[Point, str]
+    outline: set[Point]
+    inside: set[Point]
+    width: int
+    height: int
+
+
+def head(path: Path = FACE, bottom: float = HEAD_BOTTOM) -> Head:
+    """The head in the picture at `path`, cut `bottom` of the way down (see the module's notes)."""
     image = read_png(path)
     height, width = len(image), len(image[0])
     kinds = {(x, y): classify(image[y][x]) for y in range(height) for x in range(width)}
@@ -155,10 +167,16 @@ def pixels(path: Path = FACE) -> tuple[str, ...]:
     outside = _flood(edge, {p for p, kind in kinds.items() if kind == " "})
     dark = {p for p, kind in kinds.items() if kind == "k"}
     touching = [p for p in dark if any(q in outside for q in _near(p))]
-    bottom = HEAD_BOTTOM * height
-    outline = {p for p in _flood(touching, dark) if p[1] < bottom}
+    cut = bottom * height
+    outline = {p for p in _flood(touching, dark) if p[1] < cut}
     inside = {p for p in kinds if p not in outside and p not in outline}
-    inside = {p for p in inside if p[1] < bottom}
+    inside = {p for p in inside if p[1] < cut}
+    return Head(kinds, outline, inside, width, height)
+
+
+def pixels(path: Path = FACE) -> tuple[str, ...]:
+    """The mark's rows of ``.`` (empty), ``o`` fur, ``c`` cream, ``b`` shade, ``k`` dark."""
+    kinds, outline, inside, _, _ = head(path)
     x0, x1 = min(x for x, _ in inside) - 1, max(x for x, _ in inside) + 2
     y0, y1 = min(y for _, y in inside) - 1, max(y for _, y in inside) + 2
     counts: list[list[dict[str, float]]] = []
