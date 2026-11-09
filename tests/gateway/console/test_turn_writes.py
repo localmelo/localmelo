@@ -268,8 +268,10 @@ async def test_a_turn_starts_on_an_existing_session(tmp_path: Path) -> None:
         assert (await _wait_turn(client, session_id))["answer"] == "second"
 
 
-async def test_a_running_turn_is_session_busy(tmp_path: Path) -> None:
-    async with console_with(tmp_path) as (_console, client, _):
+async def test_a_message_while_a_turn_runs_starts_no_second_turn(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
         created = await client.post("/api/sessions", json=_workspace(tmp_path))
         session_id = created.json()["session"]["id"]
         # The scripted model blocks once its replies run out.
@@ -277,11 +279,9 @@ async def test_a_running_turn_is_session_busy(tmp_path: Path) -> None:
 
         second = await _post_turn(client, session_id, "again")
 
-        assert second.status_code == 409
-        assert second.json()["error"]["code"] == "session_busy"
-        assert second.json()["error"]["message"] == (
-            "A turn is already running in this session."
-        )
+        assert second.status_code == 202, second.text
+        assert second.json()["note"]["text"] == "again"
+        assert len(await console.store.list_turns(session_id)) == 1
 
 
 async def test_retry_runs_the_newest_finished_turn_again(tmp_path: Path) -> None:

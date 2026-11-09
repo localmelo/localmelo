@@ -335,7 +335,7 @@ export function requestOf(taken) {
 }
 
 /**
- * Strip items for pictures the gateway staged again (`unread_notes[].images` of a Stop): the same
+ * Strip items for pictures the gateway staged again (`images` of a note it gave back): the same
  * items an upload makes, so they go back into the strip and are sent with the next message.
  */
 export function pictureItems(staged) {

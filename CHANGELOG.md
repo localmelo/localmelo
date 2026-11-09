@@ -11,6 +11,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Developer only: `recall_source = "auto"` stays on chat turns until the encoder has read nearly all of them, then reads
   memory items. Part of #428.
+- A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
+  Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
+  approvals in the chat. It becomes a task only when you ask for one or for background work, or when long work should
+  not hold the chat. The main chat and side chats are one agent that differ only in identity, folder, grants and how
+  they show. Send while melo works is a note it reads at its next step, in the console, the app, the terminal's main
+  chat and the API, never a second turn. A note that misses its turn never starts work by itself, after a Stop or a
+  restart included: it goes back to your message box, and you press Send. After a restart its picture does not come
+  back, and the line says so. Anything waiting from an older version comes back once the same way, a real queued
+  message included, which needs one more Send. What waits behind a turn
+  is bounded. A turn melo began itself, to answer a task's
+  question or to follow one up, reads and answers and changes nothing, by a check on the run and not by its wording.
+  The rules that read action words, the short-answer mode and the fallback that turned a promise into a task are gone. (#571)
 - The hosts of one site count as one site. A sign-in that moves from a site's main host to its sign-in host asks once:
   what you keep for a site, opening it or clicking and choosing on it, now covers its other hosts for that chat or task,
   and the card names the whole site ("all of example.com"), in the console, the app and the terminal. One site is the same
@@ -198,7 +210,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   restart; Stop gives both back to the message box. Same kinds and limit as a message (up to 4); a model known not to
   read pictures is refused with the usual sentence. Text files still cannot join a running turn. `POST
   /api/turns/{turn_id}/notes` takes `images` (ids from `POST /api/uploads`) and answers them under `images`; the
-  `turn.note` event and each entry of the cancel answer's `unread_notes` carry them too.
+  `turn.note` event carries them too.
 - WeChat quick login in Chrome in the background. A sign-in box may reach the app on this Mac it signs in with
   when melo lists that app (today WeChat's quick login, so its button shows as in Safari): melo makes those
   requests itself, only for that box, only to the app's own ports and never to melo's own. Chrome's own check

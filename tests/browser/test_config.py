@@ -147,13 +147,7 @@ async def test_the_terminal_passes_the_configured_driver_and_no_console_chat_doe
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.browser.driver = "safari-automation"
     await registry.default_builder(cfg, "/w", None, "s1")
-    monkeypatch.setattr(
-        "localmelo.support.gateway.console.front.build_session_agent", fake_build
-    )
-    from localmelo.support.gateway.console import front
-
-    await front.build_front_agent(cfg, "/w", "main", tools=_NoTools())
-    assert seen == ["safari-automation", "safari-automation", "off"]
+    assert seen == ["safari-automation", "safari-automation"]
 
 
 class _NoTools(BaseToolProvider):
@@ -168,13 +162,12 @@ class _NoTools(BaseToolProvider):
     ("driver", "count"),
     [("safari-automation", 13), ("chrome", 13), ("off", 0), ("firefox", 0)],
 )
-async def test_a_chats_work_has_the_browser_tools_the_setting_names_and_its_chat_none(
+async def test_a_chat_and_its_tasks_have_the_browser_tools_the_setting_names(
     driver: str, count: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """What a chat's task is built with, and a chat; a driver that is not one is off."""
+    """What a chat and its task are built with; a driver that is not one is off."""
     from localmelo.support import browser
     from localmelo.support.browser import configured_driver
-    from localmelo.support.gateway.console import front
 
     asked_for: dict[str, Any] = {}
     real = browser.provider_for
@@ -187,7 +180,9 @@ async def test_a_chats_work_has_the_browser_tools_the_setting_names_and_its_chat
     cfg = config.Config(chat_backend="vllm", embedding_backend="none")
     cfg.vllm.chat_url = "http://127.0.0.1:9/v1"
     cfg.browser.driver = driver
-    chat = await front.build_front_agent(cfg, str(Path.cwd()), "main", tools=_NoTools())
+    chat = await registry.default_builder(
+        cfg, str(Path.cwd()), None, "main", tools=[_NoTools()]
+    )
     work = await session_agents.build_session_agent(
         cfg=cfg,
         base_url=None,
@@ -198,9 +193,11 @@ async def test_a_chats_work_has_the_browser_tools_the_setting_names_and_its_chat
         desktop=False,
     )
     try:
-        assert not [t for t in chat.list_tools() if t.name.startswith("browser_")]
         names = [t.name for t in work.list_tools() if t.name.startswith("browser_")]
         assert len(names) == count
+        assert names == [
+            t.name for t in chat.list_tools() if t.name.startswith("browser_")
+        ]
         # Other apps stay out of work nobody sits beside.
         assert not [t for t in work.list_tools() if t.name.startswith("window_")]
         if count:

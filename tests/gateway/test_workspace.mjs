@@ -1315,6 +1315,19 @@ test('a high-impact card: Allow once and Deny answer, there is no session answer
   assert.deepEqual(h.net.callsTo('/approvals/high')[0].body, {choice: 'once'});
 });
 
+test("Stop in the Browser view ends the run its card names, never a later turn of the chat", async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A later job'}});
+  const stop = h.browserView.options.stop;
+  // A card of the turn before, still shown as working because its last update is late.
+  const stale = {task: false, session: 'main', turn: 1, run: 'run-1', gen: 'g', state: 'working'};
+  assert.equal(await stop(stale), false);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  assert.equal(await stop({...stale, turn: 2, run: 'run-2'}), true);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1);
+});
+
 test('Escape leaves the deny box first, and stops a running turn only while focus is in the composer', async () => {
   const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
   await h.run('init()');
@@ -2840,6 +2853,16 @@ async function runningChat(routes = {}) {
 
 const noteReply = (number, text, extra = {}) => ({status: 202, body: {note: {note: number, turn_id: 'turn-2', text, state: 'sent', ...extra}}});
 
+test('A send the gateway made a note of a turn this page had not seen leaves nothing waiting', async () => {
+  const h = harness(baseRoutes({'POST /sessions/a/turns': {status: 202, body: {note: {note: 3, turn_id: 'turn-9', text: 'and the blue one', state: 'sent'}}}}));
+  await h.run('init()');
+  h.element('input').value = 'and the blue one';
+  await h.run('send()');
+  assert.equal(h.net.callsTo('/sessions/a/turns').length, 1);
+  assert.equal(h.element('input').value, '');
+  assert.equal(h.state().outbox.a, undefined, 'the words are not waiting to be sent');
+});
+
 test('Enter during a running turn posts the words to that turn, shows them as sent, and empties the box', async () => {
   const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'use the blue one')});
   assert.equal(h.element('input').placeholder, 'Add to what melo is doing…');
@@ -2869,12 +2892,12 @@ test('a note turns to seen at the step that read it, and that step is named', as
   assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
 });
 
-test('a note that the turn did not read before it ended says it is the next message', async () => {
+test('a note that the turn did not read before it ended says it is back in the box', async () => {
   const h = await runningChat({'POST /turns/turn-2/notes': noteReply(1, 'one more thing')});
   h.element('input').value = 'one more thing';
   await h.run('send()');
   h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: null, cause: 'run'}});
-  assert.match(h.text('messages'), /melo finished first\. This goes next as your message\./);
+  assert.match(h.text('messages'), /Not read: the turn ended first\. Nothing runs from it until you send it again\./);
 });
 
 test('a note refused because the turn just ended is sent as a message', async () => {
@@ -2890,6 +2913,24 @@ test('a note refused because the turn just ended is sent as a message', async ()
   assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 0, 'a finished turn takes no notes');
 });
 
+for (const [how, cause, status] of [['Stop here or elsewhere', 'user_stop', 'cancelled'], ['the end of its turn', 'run', 'completed']]) {
+  test(`a note refused after ${how} gives the words back and starts no turn`, async () => {
+    let refuse;
+    const refused = new Promise((done) => { refuse = () => done({status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}}); });
+    const h = await runningChat({
+      'POST /turns/turn-2/notes': () => refused,
+      'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'wait, not that'})}},
+    });
+    h.element('input').value = 'wait, not that';
+    const sending = h.run('send()');
+    h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status, error: null, cause}});
+    refuse();
+    await sending;
+    assert.equal(h.net.callsTo('/sessions/a/turns').filter((call) => call.method === 'POST').length, 0);
+    assert.equal(h.element('input').value, 'wait, not that');
+  });
+}
+
 test('a refused note gives the words back to the box and says why', async () => {
   const h = await runningChat({'POST /turns/turn-2/notes': {status: 400, body: {error: {code: 'invalid_request', message: 'a turn takes at most 20 added messages'}}}});
   h.element('input').value = 'too many';
@@ -2899,17 +2940,16 @@ test('a refused note gives the words back to the box and says why', async () => 
   assert.match(h.text('notice'), /Could not add that: .*at most 20/);
 });
 
-test('Stop gives the unread words back to the box and the turn starts nothing else', async () => {
-  const h = await runningChat({
-    'POST /turns/turn-2/notes': noteReply(4, 'not that way'),
-    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true, unread_notes: [{note: 4, text: 'not that way'}]}},
-  });
+test('a note its turn ended without is back in the box, and a reload does not put it there again', async () => {
+  const h = await runningChat({'POST /turns/turn-2/notes': noteReply(4, 'not that way')});
   h.element('input').value = 'not that way';
   await h.run('send()');
   assert.equal(h.element('input').value, '');
-  await h.run('stop()');
+  h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', error: null, cause: 'user_stop'}});
+  h.stream().emit({id: 24, turn: null, ts: 54, type: 'attention.echo', data: {id: 24, echo: 'failed', note_back: true, typed: 'not that way', line: 'It is back.'}});
   assert.equal(h.element('input').value, 'not that way');
-  assert.match(h.text('messages'), /Not read: the turn was stopped\. It is back in the message box\./);
+  assert.match(h.text('messages'), /Not read: the turn ended first\. Nothing runs from it until you send it again\./);
+  assert.equal(h.net.callsTo('/sessions/a/turns').filter((call) => call.method === 'POST').length, 0);
 });
 
 // ── The note reducer on its own ──
@@ -2954,7 +2994,7 @@ test('a note is one item however its answer and its event arrive', () => {
   assert.equal(turns.noteState(turn, turn.items.find((entry) => entry.kind === 'note')), 'sent');
 });
 
-test('a note read by the run is seen; one read by nobody before the turn ends is next', () => {
+test('a note read by the run is seen; one read by nobody before the turn ends is back', () => {
   const {view, turn} = started();
   applyEvent(view, {id: 2, turn: 1, ts: 101, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 1, text: 'first'}});
   applyEvent(view, {id: 3, turn: 1, ts: 102, type: 'turn.note', data: {turn: 1, turn_id: 'turn-1', note: 2, text: 'second'}});
@@ -2965,7 +3005,7 @@ test('a note read by the run is seen; one read by nobody before the turn ends is
   assert.equal(turns.noteState(turn, second), 'sent');
   assert.equal(turn.items.filter((entry) => entry.kind === 'fact').length, 0, 'a read note adds no second line');
   turn.finishedAt = 110;
-  assert.equal(turns.noteState(turn, second), 'next');
+  assert.equal(turns.noteState(turn, second), 'returned');
 });
 
 test('an inbox line that is no note of the person stays a fact line', () => {
@@ -6395,35 +6435,31 @@ test('a note the gateway refuses gives the words and the pictures back', async (
   assert.doesNotMatch(h.text('messages'), /Sent\. melo reads it/);
 });
 
-test('a note refused because the turn just ended is sent as a message with its pictures', async () => {
+test('a note refused because the turn just ended gives its pictures back and starts nothing', async () => {
   const h = await runningChat({
     'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
     'POST /turns/turn-2/notes': {status: 409, body: {error: {code: 'turn_not_running', message: 'that turn is not running'}}},
     'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-3', turn: turnRow({turn_id: 'turn-3', turn: 3, user_text: 'late'})}},
   });
   await dropFiles(h, [fileOf('shot.png', 'image/png')]);
-  // The page still thinks the turn runs when the words are sent; the gateway knows it ended.
   h.element('input').value = 'late';
   await h.run('send()');
-  assert.equal(h.net.callsTo('/turns/turn-2/notes').length, 1, 'the note was tried first');
-  const [sent] = h.net.callsTo('/sessions/a/turns');
-  assert.ok(sent, 'it went out as a message');
-  assert.deepEqual([sent.body.text, sent.body.images], ['late', ['up1']]);
-  assert.equal(h.element('media-tray').hidden, true, 'the pictures went with it');
+  assert.equal(h.net.callsTo('/sessions/a/turns').filter((call) => call.method === 'POST').length, 0);
+  assert.equal(h.element('input').value, 'late');
+  assert.equal(tiles(h, 'media-thumb').length, 1, 'the picture is back in the strip');
 });
 
-test('Stop gives the pictures of unread notes back to the strip beside their words', async () => {
+test('the pictures of a note its turn ended without are back in the strip beside their words', async () => {
   const back = {id: 'up9', name: 'photo.png', mime_type: 'image/png', size_bytes: 3000, width: 640, height: 480, model_reads: true};
   const h = await runningChat({
     'POST /uploads?name=shot.png': stagedPicture('up1', 'shot.png'),
     'POST /turns/turn-2/notes': noteWithPicture(4, 'not that way'),
-    'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true, unread_notes: [{note: 4, text: 'not that way', images: [back]}]}},
   });
   await dropFiles(h, [fileOf('shot.png', 'image/png')]);
   h.element('input').value = 'not that way';
   await h.run('send()');
   assert.equal(h.element('media-tray').hidden, true);
-  await h.run('stop()');
+  h.stream().emit({id: 24, turn: null, ts: 54, type: 'attention.echo', data: {id: 24, echo: 'failed', note_back: true, typed: 'not that way', images: [back], line: 'It is back.'}});
   assert.equal(h.element('input').value, 'not that way');
   const [thumb] = tiles(h, 'media-thumb');
   assert.equal(thumb.src, '/api/uploads/up9', 'the picture is staged again and waits in the strip');
@@ -6595,7 +6631,7 @@ test('Stop in the Browser view stops a task by its run and a chat by its own tur
   const task = {session: 't1', task: true, gen: 'a1b2c3d4', run: 'run-1', owner: 'a', key: 't1:run-1', state: 'working'};
   assert.equal(await stop(task), true);
   assert.deepEqual(h.net.callsTo('/tasks/t1').map((call) => call.body), [{state: 'stop', source: {gen: 'a1b2c3d4', run: 'run-1', owner: 'a'}}], 'the card\'s own stop, naming the run');
-  const chat = {session: 'a', task: false, gen: 'a1b2c3d4', run: 'run-2', key: 'a:run-2', state: 'working'};
+  const chat = {session: 'a', task: false, gen: 'a1b2c3d4', run: 'run-2', turn: 2, key: 'a:run-2', state: 'working'};
   assert.equal(await stop(chat), false, 'the chat has no run going');
   assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
   h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Look at the page'}});

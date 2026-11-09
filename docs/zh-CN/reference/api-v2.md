@@ -624,7 +624,7 @@ melo 浏览时（一个浏览步骤、在浏览器里读结果的网页搜索，
 {"echo": {"id": 41, "ts": 1793405483.9, "echo": "started", "task_id": "3f9c2a71b0de", "title": "summarize the readme", "level": 2, "reason": "you asked for it", "line": "Started: summarize the readme · P2", "typed": "/task summarize the readme"}}
 ```
 
-- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（没做完就停下的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（说了时间安排却什么也没保存的消息，或说了先不要开始的消息：`Run this every weekday at 8:30?`，带 `title`、`text`（完整消息）、`schedule`、`when` 和 `level`、`receipt`（这条消息的键：它开始或保存的内容只做一次），这条消息已经开始了工作时还带 `ran`（那个任务；此时 `once` 返回 400）；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`；回答 `chore` 回执时带 `of`，由对话保存时没有）、`checkin`（check-in 的说明，带 `items`）、`sleep`（melo 在你不在时整理了笔记：`run_id`、`count`、`variant`、最多五条 `{change, text}` 的 `items`，其中 `change` 为 `merged`、`updated`、`added`、`reworded`、`retired` 或 `changed`，没有列出的改动数为 `more`，`line` 为 `While you were away, melo tidied 3 notes`）、`undone`、`failed`、`notice`（对已做之事的一句平实说明，比如浏览功能没有打开）、`earlier`（任务的一步凭本人之前的批准运行：`task_id`、`title`、`entry_id`、`approved_at`、`preview`，`line` 为 `Used your approval from 14:02`）或 `revoked`（那个批准已撤回；`of` 是那条 `earlier` 回执）。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
+- `echo` 为 `started`、`control`（带 `action` 和 `undo`）、`level`（带 `undo`）、`suggest`（本人的话没有要求的改变，带 `action`，可能带 `level`；`action` 为 `send` 时以 `text` 带上那条消息）、`ask`（`Start this as a task?`，只出现在已保存的卡片上，不再写入新的；带完整消息 `text`、键入的文字 `words` 和 `turn_id`）、`sent`（交给某个任务的消息，`how` 为 `queued`（下一步读到）或 `continued`（没做完就停下的任务的新一轮）；`line` 为 `Sent to: <title>` 或 `Continued: <title>`）、`chore`（说了时间安排却什么也没保存的消息，或说了先不要开始的消息：`Run this every weekday at 8:30?`，带 `title`、`text`（完整消息）、`schedule`、`when` 和 `level`、`receipt`（这条消息的键：它开始或保存的内容只做一次），这条消息已经开始了工作时还带 `ran`（那个任务；此时 `once` 返回 400）；带时间的提醒用语给出 `Remind you on Fri Oct 30 at 9:00?`，带 `reminder: true`、`text` 为 `Reminder: <words>`、`work`（原话）、`once` 的 `schedule`，没有 `level`）、`chore_saved`（带 `chore_id`；回答 `chore` 回执时带 `of`，由对话保存时没有）、`checkin`（check-in 的说明，带 `items`）、`sleep`（melo 在你不在时整理了笔记：`run_id`、`count`、`variant`、最多五条 `{change, text}` 的 `items`，其中 `change` 为 `merged`、`updated`、`added`、`reworded`、`retired` 或 `changed`，没有列出的改动数为 `more`，`line` 为 `While you were away, melo tidied 3 notes`）、`undone`、`failed`、`notice`（对已做之事的一句平实说明，比如浏览功能没有打开）、`earlier`（任务的一步凭本人之前的批准运行：`task_id`、`title`、`entry_id`、`approved_at`、`preview`，`line` 为 `Used your approval from 14:02`）或 `revoked`（那个批准已撤回；`of` 是那条 `earlier` 回执）。提醒用语没有可用的时间（没有时间、时间已过、或在一年之后）时，改为给出带 `ask: "when"` 和 `work` 的 `ask` 回执（`When should I remind you?`）；它没有按钮，一小时内下一条如果只是一个时间（`Friday at 9`），就用 `chore` 回执答复它（`of` 是这条提问）。`line` 是平实的话，优先级用代码表示（`Started: <title> · P2`、`<title> → P3`、`Undone: <title> is back to P2`）；`typed` 是它回应的消息；`of` 是它回应的回执。
 - 在任务会话上使用 `as_task` 返回 400 `invalid_request`；主对话和旁支对话都接受它（`POST /api/sessions` 带 `turn.as_task` 也一样：先创建一个空对话，用这条消息命名，返回 201 以及 `session` 和任务的 `echo`，没有轮次；带 `client_request_id` 时它是创建范围的一次提交：已取消的键为 409 `submission_withdrawn`，已为另一条消息接受的键为 409 `submission_conflict`（在为任务创建过对话的键下创建消息也是 409：两种键在存储里分开保存），重复的请求返回 200，带着第一次创建的对话和回执以及 `repeated: true`（网关在任务和回执之间停止过，则回执会重新写出），`GET /api/submissions/{key}` 读到 `accepted`，带对话的 `session_id`（对话被删除、任务交给主对话之后是主对话的）和 `task_id`，该键的取消会停止任务（202，`cancelling`）而不是存一条撤回；任务无法开始则为 400 且不会留下对话，已经开始的任务则保留它的对话），旁支对话从第一条消息起适用代码规则（`/task`、控制短语、跟进和提醒），任务属于那个旁支对话：`POST /api/sessions` 带一条由代码处理的消息时，和 `turn.as_task` 一样返回 201 以及 `session` 和 `echo`，没有轮次；用同一个 `client_request_id` 重复时返回 200，带那个对话、它的第一条回执和 `repeated: true`，不管这些话此时读起来如何。委派时重复的 `client_request_id` 返回同一条回执。
 - 对话会把它已告知的新闻记成一个 `attention.news` 事件（轮次为 `null`；含 `floor`、`tasks`、`sides`），客户端忽略它。
 - 一轮的回执存在被说话的那个对话里。关于别的对话的任务的回执带 `from_main: true` 或 `from_chat`（那个对话的标题）。
@@ -644,7 +644,7 @@ melo 浏览时（一个浏览步骤、在浏览器里读结果的网页搜索，
 - `answer_sent`（`typed`、`undo_s`）：这个对话里恰好有一个任务在等本人时，一条不是提问、工作请求、命令、控制短语或问候的消息就是它的回答（以 200 返回这条回执，不开始轮次）。`undo_s` 秒（10）后交给任务，随后有一条 `answer_delivered` 回执（`of`）；在此之前用 `{"do": "undo"}` 会返回 `undone` 回执，任务继续等待，消息作为一轮开始（交付后为 409 `already_answered`）。`/answer TASK TEXT` 按标题立即回答在等的任务（返回 `ask_end`）；有几个在等却没写标题，或者没有任务在等，会有一条 `failed` 回执说明。
 - 消息正在排队保存时，重复同一个 `client_request_id` 会等它的结果，并得到同样的回答。
 - `ask_end`（`how`：带 `text` 的 `person`、`timeout`、`stopped` 或 `expired`；`of` 指问题或那条询问）。
-- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
+- `queued`（`typed`）和 `dequeued`（`of`）：对话回答任务期间发来的消息，或暂时不能成为运行中轮次补充的消息，会被保留，`POST /api/sessions/{id}/turns` 以 200 返回 `queued` 回执而不是 409，并作为对话的下一轮运行；重启后也会运行，且只运行一次：用它的 `client_request_id`（或 melo 自己的键）已经开始的轮次不会再运行。消息只有存下之后才算接受；否则返回 503 `store_unavailable`，并有一条 `failed` 回执（`of` 指那条排队回执，带 `typed`）说明它没有发出。
 
 对话的内部轮次是带 `"origin": "ask_owner"` 的轮次（本人的轮次没有这个键，轮次记录和 `turn.started` 中都是如此），键入文字为空，用户文字就是那个问题。任务等待期间，任务的请求体带 `ask`：`{"ask_id", "chat_id", "chat_title", "on": "owner" | "person"}`，否则为 `null`。
 
@@ -840,6 +840,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 | 409 | `model_text_only` | 轮次（或对它的重试）带有图片，而对话模型已知读不了图片 |
 | 409 | `chat_answering` | 对话正在回答任务的提问时，收到了带图片的消息 |
 | 409 | `session_busy` | 该会话中已有轮次正在运行 |
+| 409 | `chat_queue_full` | 对话的轮次后面等待的消息太多 |
 | 409 | `not_latest_turn` | 重试或撤销所指的轮次不是最新已结束的那一个 |
 | 409 | `not_retryable` | 重试所指的轮次回答的是任务的提问 |
 | 409 | `submission_conflict` | 该 `client_request_id` 已用于另一条消息 |
@@ -899,7 +900,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 
 - 返回 202，附带轮次和恢复键。当本次调用必须从会话文件重建智能体时，恢复键会被填充：即本网关的任何路由都未打开过的会话上的第一个轮次，例如重启之后的第一个轮次。本网关关闭并保存在内存中的会话，会从该对话重新打开，并报告 `null`。
 - 任务会话返回 409 `task_session_read_only`；请使用任务路由，而不是开始一个对话轮次。
-- 轮次运行期间返回 409 `session_busy`。每个会话同时只运行一个轮次；第二个请求会在任何东西进入队列之前被拒绝。
+- 每个会话同时只运行一个轮次。在对话上，本人的轮次运行期间发来的话返回 202 `{"note": {...}}`，与 `POST /api/turns/{turn_id}/notes` 的补充相同，运行在下一步读到。暂时不能成为补充的消息保持顺序（200，`queued` 回执），合计最多 20 条、2,000,000 个字符，超过时返回 409 `chat_queue_full`；图片无处等待时返回 409 `chat_answering`。在其他会话上返回 409 `session_busy`，在任何东西进入队列之前。
 - 重复的 `client_request_id` 会以 200 返回该键已保存的轮次和 `"repeated": true`，无论该轮次是否仍在运行。
 - 会话的文件夹必须仍然存在：文件夹被删除则返回 400 `invalid_workspace`，且轮次不会开始。
 - `attachments` 和 `images` 与创建时相同。要向正在运行的轮次补充话语，请使用 [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes)，而不是等待。
@@ -946,7 +947,7 @@ worker 运行或终端对话从 CLI 的文件读取。
 - 本网关运行该轮次时返回 202；对于已结束的轮次，或本网关不运行的轮次，返回 409 `turn_not_running`。
 - 轮次在其下一个边界处停止，并以 `cancelled` 结束，原因为 `user_stop`；`turn.finished` 会说明这一点。若它没有说任何话，其保存的 `answer` 为 `[interrupt: no assistant output for this turn]`。
 - 在审批等待期间取消，会撤回该卡片：请求会被答复为 `withdrawn`，并离开 `pending_approvals`。
-- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始另一个轮次：它们会从队列中移除，并以 `"unread_notes": [{"note": 3, "text": "use the 2024 file"}]` 返回，由客户端放回消息框。带图片的补充还有 `"images"`：这些图片重新暂存后的样子，每张与 [`POST /api/uploads`](#post-apiuploads) 的回答相同（`id`、`name`、`mime_type`、`size_bytes`、`width`、`height`、`model_reads`），由客户端放回图片那一行，随下一条消息发送。没有时不会有这个键。
+- [补充到该轮次](#post-apiturnsturn_idnotes)、但其运行尚未读到的话不会开始任何工作：它们回到本人那里，见该路由。
 
 ## POST /api/turns/{turn_id}/notes
 
@@ -972,9 +973,10 @@ worker 运行或终端对话从 CLI 的文件读取。
 {"note": {"note": 4, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "text": "this is the file I mean", "client_request_id": "curl-note-2", "state": "sent", "images": [{"sha256": "3f2a9c0d1b7e4a58b6c3d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4", "mime_type": "image/png", "size_bytes": 20481}]}}
 ```
 
-- 返回 202。`state` 为 `sent` 表示正在运行的轮次接收了这些话，为 `next` 表示这些话保存期间轮次已经结束：它们会作为对话的下一个轮次运行。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
+- 返回 202，`state` 为 `sent`。这些话保存期间轮次已经结束时也返回 409 `turn_not_running`，由发送方保留。`client_request_id` 是可选的，使调用可以安全地重复（同样的内容会原样返回，轮次结束之后也一样）。
+- 错过这一轮的补充绝不会自己开始工作：对话空闲后，不管这一轮怎样结束，停止和重启也一样，`failed` 回执带上 `note_back: true`、`typed` 和 `images`（图片重新暂存，每张与 [`POST /api/uploads`](#post-apiuploads) 的回答相同）说明这一点，流上的客户端把它们放回输入框。重启后没有 `images`，那一行会说明图片没有回来。重启后只有存为消息的行才会运行：其他行都这样返回，包括这个标记出现之前存下的行，有 `queued` 回执时带上 `of`。
 - 轮次里某一步正在等待的卡片（批准、接管、关于另一个应用窗口的询问）会在发送补充时结束：`approval.resolved`，`outcome` 为 `denied`，`origin` 为 `words`，调用立刻返回，所以运行在下一步就读到这条补充。文字不会允许任何事，不论写了什么；不属于该轮次任何运行中步骤的卡片（任务的卡片）保持打开。
-- 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。运行在轮次结束前没有读到的补充，会作为对话的下一个轮次发送，与排队的消息按顺序排列；它们在同一个存储里，所以重启后仍会保留。停止会把没读到的还给客户端（见[取消](#post-apiturnsturn_idcancel)）。
+- 运行会把每条补充放进下一次模型请求，作为用户的消息，并标明是它工作时补充的，同时用 `inbox.accepted` 说明已读到（它的 `offset` 就是这条补充的编号）。
 - `text` 会去掉首尾空白，最多 8,000 个字符，并经过与普通消息相同的检查器（400 `invalid_request`，400 `text_rejected`）。除非 `images` 里有图片，否则不能为空；此时模型读到的是 `[1 picture]`，`text` 为 `""`。一个轮次最多接收 20 条补充。
 - `images` 可选：来自 [`POST /api/uploads`](#post-apiuploads) 的 id，最多 4 个，不能重复，且都还在暂存区，规则与消息的 `images` 相同（400 `invalid_request`、400 `picture_gone`；已知聊天模型读不了图片时为 409 `model_text_only`）。回答在 `images` 下列出它们，写法与轮次的 `images` 相同（`sha256`、`mime_type`、`size_bytes`；图片本身用 [`GET /api/sessions/{id}/blobs/{sha256}`](#get-apisessionsidblobssha256) 取），`turn.note` 事件也一样。它们在调用返回之前就已保存在对话里，所以变成下一个轮次、或等过一次重启的补充仍然带着它们。运行在下一步把它们作为这条补充消息的图片部分发送（每一步最多 8 张，其余的补充在再下一步读到）；若到那时发现模型读不了图片，补充的文字里会说明这一点，并且不发送图片。
 - 对没有在运行、正在被停止或其运行已结束的轮次返回 409 `turn_not_running`：客户端应把这些话和图片作为一条消息发送。对不是用户开始的轮次，以及任务会话，返回 409 `not_your_turn`。

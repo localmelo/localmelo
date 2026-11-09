@@ -3,8 +3,8 @@
 The Agent's run polls its inbox at the start of each step and accepts a
 message once the request that carries it is built (``inbox.accepted``).
 :class:`ChatNotes` is that inbox for a console chat: it reads the chat's notes
-from the queued-message store (:class:`~.asks.OwnerAsks`), so a note the run
-never read stays queued and runs as the chat's next turn. The model reads each
+from the queued-message store (:class:`~.asks.OwnerAsks`). A note the run never
+read starts nothing: it goes back to the person. The model reads each
 note as the person's message, marked as added while it worked. A note may carry
 pictures: they go to the model with its words (``pictures``), unless the model
 is known not to read pictures by then, when the words say so instead.

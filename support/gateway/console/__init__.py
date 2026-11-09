@@ -85,13 +85,18 @@ from .chores import ChoreOptions, ChoreRunner
 from .errors import ApiError, store_message, store_unavailable
 from .explain import Explainer, Explanations
 from .followups import TaskFollowups
-from .front import Front, FrontAgent, build_front_agent
+from .front import Front, FrontAgent
 from .idle_encode import IdleEncode
 from .idle_gates import IdleOptions
 from .idle_sleep import IdleSleep, IdleSleepOptions
 from .notes import ChatNotes
 from .probe import ModelServerProbe, Probe
-from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+from .registry import (
+    SWEEP_INTERVAL_S,
+    AgentBuilder,
+    ConsoleSessions,
+    default_builder,
+)
 from .serve_switch import ServeSwitch
 from .setup_flow import SetupFlow
 from .shapes import session_json
@@ -138,7 +143,7 @@ class ConsoleOptions:
     detect_transport: httpx.AsyncBaseTransport | None = None
     memory_dir: str | None = None
     dev_routes: bool = False
-    # The main chat's Agent; None builds the front (FrontAgent), or, when a
+    # The main chat's Agent; None builds the chat's (FrontAgent), or, when a
     # test passes its own *builder*, the main chat runs on that one.
     front_builder: AgentBuilder | None = None
     # The chore clock and check-in; a test replaces the clock, the beats and the summary.
@@ -309,15 +314,17 @@ class Console:
     async def _chat_agent(
         self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
-        """A chat's Agent, main or side: the same class, tools and options, on its own front."""
+        """A chat's Agent, main or side: one composition, on its own front."""
         front = self.front_for(session_id)
-        agent = await build_front_agent(
+        agent = await default_builder(
             settings,
             workspace,
+            mcp_config,
             session_id,
-            tools=front.tools,
             gate=self.gate,
             memory=self.memory,
+            tools=[front.tools],
+            agent_class=FrontAgent,
         )
         if isinstance(agent, FrontAgent):
             agent.front = front

@@ -56,7 +56,7 @@
         <div class="diagram-scroll">
           <div class="diagram" id="dia-flow" style="width:800px;height:664px">
             <div class="group chats" id="f-side" style="left:420px;top:20px;width:360px;height:72px">
-              <span class="group-label">Side chats · same abilities, shared memory</span>
+              <span class="group-label">Side chats · do your work too, shared memory</span>
             </div>
             <div class="group workers" id="f-workers" style="left:20px;top:412px;width:760px;height:120px">
               <span class="group-label">Workers</span>
@@ -64,7 +64,7 @@
 
             <a class="node chat" id="f-main" href="#c-chats" style="left:20px;top:20px;width:220px;min-height:72px">
               <span class="node-title">Main chat</span>
-              <span class="node-sub">One per person</span>
+              <span class="node-sub">One per person · does your work</span>
             </a>
             <a class="node small" id="f-s1" href="#c-chats" style="left:432px;top:46px;width:108px;min-height:39px">
               <span class="node-title">Side chat 1</span>
@@ -119,12 +119,13 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-line"></div>calls and data inside localmelo</div>
         </div>
-        <p class="diagram-caption">You, or Auto's review, approve a step. What you allow is kept as a grant, and it survives a restart.</p>
+        <p class="diagram-caption">You, or Auto's review, approve a step, in a chat as in a worker. What you allow is kept as a grant, and it survives a restart.</p>
         <ul>
           <li>You talk to the main chat. Side chats have the same abilities and share its memory, from their first message.</li>
-          <li>The chat's model reads what you say and decides: it answers, or starts the work. No word list stands in its way; only words that say not to act stop it, and those get a one-tap offer.</li>
-          <li>Bigger work goes to the task scheduler, from the main chat, a side chat or a scheduled chore. It orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
-          <li>A task belongs to the chat that started it: its news and result come back there, and a finished side chat leaves a summary for the main chat.</li>
+          <li>A chat does your work itself, in its own run, with the same agent and the same checks and approvals as a worker; most work starts no task. No word list stands in its way: its model reads what you say and acts, or says why not.</li>
+          <li>Words you send while a chat works are a note: they reach it at its next step. Stop ends the turn, and a side chat is free for something else.</li>
+          <li>A task is a separate run: you ask for one, or the chat sets long work apart, and a scheduled chore starts one on time. The task scheduler orders tasks by level, P0 to P5, and by model slot, then starts workers; a worker's name says which chat it works for.</li>
+          <li>A task belongs to the chat that started it: its news and result come back there, and a side chat leaves a summary of finished work for the main chat.</li>
           <li>A chat can check on a worker and message it while it runs. A worker asks its chat for help; only the chat asks you.</li>
           <li>A worker does one job. New work on what it finished goes to a new worker, with the old one's record as background; a worker that stopped before finishing can go on with that job.</li>
           <li>A task a chat starts comes with your own words, what the chat picks, and a context pack of notes about you, your preferences and this project.</li>
@@ -334,7 +335,7 @@
         </div>
         <ul>
           <li>The terminal and the app find the running gateway through one endpoint file, so whichever starts second uses it.</li>
-          <li>The main chat answers, or hands bigger work to the scheduler by priority; results come back to it as cards.</li>
+          <li>The main chat does your work in its own run; a task goes to the scheduler by priority, and its result comes back as a card.</li>
           <li>Scheduled chores start tasks on time, and a check-in every 30 minutes tells the main chat what finished or waits.</li>
           <li>Workers and chats run the same agent; a chat recalls memory into each turn, a worker keeps none of its own and starts with a context pack from its chat.</li>
         </ul>
@@ -416,8 +417,9 @@
             <ul>
               <li>A turn runs on the chat's own agent, one turn at a time, with what memory recalls for it.</li>
               <li>The console, the app and the terminal open the same main chat; side chats sit under it, and it shows a card when one finishes or a task needs you.</li>
-              <li>The main chat answers a quick question itself, or starts bigger work as a task by priority.</li>
-              <li>A side chat starts tasks of its own too; when it finishes work, the main chat reads a line about it, and memory keeps its summary.</li>
+              <li>A chat does your work itself in that turn: files, Python, the web and the browser, with the same approvals as any step. Most work starts no task.</li>
+              <li>What you send while it works joins the turn as a note, read at its next step; Stop ends the turn.</li>
+              <li>You can still ask for a task, and any chat can start one; when a side chat finishes work, the main chat reads a line about it, and memory keeps its summary.</li>
             </ul>
             <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions reference</a>
           </div>
@@ -457,7 +459,7 @@
           </div>
           <div class="comp-card" id="c-agent">
             <h3>Agent</h3>
-            <p>The run loop: plan a step, run its tools, reflect between attempts.</p>
+            <p>The run loop: plan a step, run its tools, reflect between attempts. A chat's turn and a worker's task are both this loop.</p>
             <ul>
               <li>Each step's request holds the task, working memory, recalled memory and the last reflection.</li>
               <li>The model calls only the tools the step offers.</li>
@@ -588,7 +590,7 @@
             <tbody>
               <tr><td>Terminal</td><td>The main chat the app shows, one-off tasks, approvals, and the run's progress facts in developer mode</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Console and app</td><td>A main chat with side chats, the panel beside a chat, tasks and workers, the activity pill, in English or Chinese</td><td><span class="chip done">done</span></td></tr>
-              <tr><td>Main chat and side chats</td><td>One main chat that answers, or hands bigger work to tasks by priority</td><td><span class="chip done">done</span></td></tr>
+              <tr><td>Main chat and side chats</td><td>One main chat that does your work itself, with tasks beside it when you ask</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Memory across chats</td><td>Notes kept when you ask or melo judges them worth keeping, the newer value wins, recall with sources, the Memory tab</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Scheduled chores</td><td>Chores and one-time reminders that run on time, and a check-in every 30 minutes</td><td><span class="chip done">done</span></td></tr>
               <tr><td>Tools and approvals</td><td>Five built-ins, MCP servers, review of high-impact calls, Ask or Auto for each chat, grants you can list and revoke</td><td><span class="chip done">done</span></td></tr>
@@ -637,10 +639,10 @@
       const DIAGRAMS = {
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "shared memory" },
-          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "summary at the end" },
-          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "tasks", lt: 0.28 },
+          { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "finished-work summary" },
+          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "a task, when wanted", lt: 0.72 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "due chores" },
-          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "tasks", lt: 0.28 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "a task, when wanted", lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },
@@ -648,6 +650,8 @@
           { from: "f-chan", fs: "bottom", ff: 0.523, to: "f-workers", ts: "top", tf: 0.134, bidi: true },
           { from: "f-side", fs: "bottom", ff: 0.78, to: "f-workers", ts: "top", tf: 0.9, bidi: true, label: "same channel" },
           { from: "f-workers", fs: "bottom", ff: 0.5, to: "f-appr", ts: "top", tf: 0.5, bidi: true },
+          { from: "f-main", fs: "bottom", ff: 0.9, to: "f-appr", ts: "top", tf: 0.02, bidi: true, label: "its own steps", lt: 0.96 },
+          { from: "f-side", fs: "bottom", ff: 0.27, to: "f-appr", ts: "top", tf: 0.97, bidi: true },
           { from: "f-appr", fs: "right", to: "f-grants", ts: "left", bidi: true }
         ],
         "svg-worker": [

@@ -19,10 +19,8 @@ import pytest
 from localmelo.support.gateway.console import front as front_module
 from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.front import (
-    ECHO_EVENT,
     NEWS_EVENT,
     NEWS_ROWS,
-    READING_HEAD,
     Front,
 )
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -45,21 +43,6 @@ from .test_turn_writes import _post_turn, _wait_turn
 # ── R1. A question, a matching title, a negation: no task from the model's call ──
 
 
-async def test_a_title_that_matches_words_that_say_not_to_act_starts_no_task(
-    tmp_path: Path,
-) -> None:
-    typed = "Do not start a task; just explain what report.md contains."
-    call = {"title": "Delete report", "objective": "Delete report.md"}
-    scripts = [[tool_call("task_create", call), answer("I offered it.")]]
-    async with chats_console(tmp_path, sides=scripts) as (console, client, models):
-        side = (await _open(client, typed))["session"]["id"]
-        await _wait_turn(client, side)
-        assert await console.workers.tasks.list_tasks() == []
-        [offer] = await _events(console, side, ECHO_EVENT)
-        assert (offer["echo"], offer["text"]) == ("ask", typed)
-        assert str(models[side].requests[1][-1].content).startswith("Not done")
-
-
 async def test_what_runs_is_the_persons_words_whatever_the_model_wrote(
     tmp_path: Path,
 ) -> None:
@@ -73,30 +56,6 @@ async def test_what_runs_is_the_persons_words_whatever_the_model_wrote(
         [task] = await console.workers.tasks.list_tasks()
         assert task.spec["objective"] == typed
         assert "Delete every other file" not in str(task.spec)
-
-
-async def test_an_admitted_task_is_the_persons_message_and_the_models_reading_is_data(
-    tmp_path: Path,
-) -> None:
-    # A work request that also holds a follow-up word and a task's name is left to the model.
-    typed = (
-        "Fix the Activity row text in support/gateway/console/activity.py and finish it"
-    )
-    call = {"title": "Activity row fix", "objective": "Also delete the build folder"}
-    main = [tool_call("task_create", call), answer("Started.")]
-    async with chats_console(tmp_path, main=main) as (console, client, _):
-        await _say(client, console, "/task Activity row text")
-        await _say(client, console, typed)
-        await _wait_turn(client, str(console.main_id))
-        [started] = [
-            e
-            for e in await _events(console, str(console.main_id), ECHO_EVENT)
-            if e["echo"] == "started" and e["title"] == "Activity row fix"
-        ]
-        objective = (await _task(console, started["task_id"])).spec["objective"]
-        # The person's words are the task; the title only names it; the rest is data.
-        assert objective.startswith(typed)
-        assert objective.endswith(f"{READING_HEAD}\nAlso delete the build folder")
 
 
 # ── R2. A chat deleted while work ends and cards arrive hands all of it over ──

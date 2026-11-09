@@ -3,7 +3,9 @@
 Every route here writes. A turn starts under the session's lock and returns
 as soon as its row exists (202); its events arrive on the stream of
 ``routes_sessions``. A ``client_request_id`` makes a send safe to repeat:
-the same key again answers 200 with the turn it started. A console turn
+the same key again answers 200 with the turn it started. A message to a chat
+whose turn runs starts no second turn: it is a note of that turn, or, while no
+turn takes one yet, the next message in order (:func:`_while_running`). A console turn
 passes the scheduler gate: ``default_builder`` wraps the Agent's providers
 with ``GatedLLM``/``GatedEmbedding``, so its model calls wait for a slot on
 the one gate this gateway shares with the workspace page.
@@ -20,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
+from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
@@ -39,6 +42,8 @@ from localmelo.support.sessions.attachments import (
 from localmelo.support.sessions.display import short_title
 from localmelo.support.sessions.picture_input import MAX_PICTURES
 from localmelo.support.sessions.store import (
+    SessionBusyError,
+    SessionInfo,
     TurnInfo,
     check_title,
 )
@@ -51,7 +56,6 @@ from localmelo.support.sessions.submissions import (
     text_sha256,
 )
 
-from .asks import MAX_NOTE_CHARS
 from .bodies import Body
 from .cards import card_json
 from .errors import ApiError
@@ -240,11 +244,19 @@ class _Sent:
     in it is already cut out, once, where it came in (:func:`_sent`).
     """
 
-    def __init__(self, typed: str, words: str, whole: str, extras: TurnExtras) -> None:
+    def __init__(
+        self,
+        typed: str,
+        words: str,
+        whole: str,
+        extras: TurnExtras,
+        staged: list[Staged],
+    ) -> None:
         self.typed = typed
         self.words = words
         self.whole = whole
         self.extras = extras
+        self.staged = staged
 
 
 def _marker(pictures: int, files: list[str]) -> str:
@@ -283,7 +295,11 @@ async def _sent(
             400, "invalid_request", t("errors.filesTooLong", n=MAX_QUERY_LEN)
         )
     return _Sent(
-        typed, words, whole, TurnExtras(tuple(attached), tuple(images_of(staged)))
+        typed,
+        words,
+        whole,
+        TurnExtras(tuple(attached), tuple(images_of(staged))),
+        staged,
     )
 
 
@@ -319,6 +335,41 @@ def _resume_json(resumed: ResumeInfo | None) -> dict[str, Any]:
 
 def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
+
+
+async def _while_running(
+    console: Console, info: SessionInfo, sent: _Sent, key: str | None
+) -> JSONResponse:
+    """A message to a chat that is busy: a note of the person's running turn (202).
+
+    One Agent run per chat, so this is never a second turn. The run reads the
+    note at its next step, and the person sees it in the turn; Stop stays its own
+    route. While no turn takes a note (the turn begins or ends, or it is one melo
+    began), or the message is more than a note (a file, words over a note's
+    limit), it is the chat's next message, in order.
+    """
+    session_id = info.id
+    entry = console.sessions.get(session_id)
+    runner = None if entry is None else entry.runner
+    turn = None if runner is None else runner.current_turn
+    words = sent.typed.strip()
+    if (
+        runner is not None
+        and turn is not None
+        and not turn.origin
+        and runner.takes_notes(turn.id)
+        and not sent.extras.attachments
+        and len(words) <= MAX_NOTE_CHARS
+    ):
+        note = await console.asks.add_note(
+            session_id, turn.id, words, sent.words, key, sent.staged
+        )
+        return JSONResponse(status_code=202, content={"note": note})
+    if sent.extras.images:
+        # A queued message keeps words; these pictures wait in the composer.
+        raise ApiError(409, "chat_answering", t("errors.picturesWhileAnswering"))
+    echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
+    return JSONResponse(status_code=200, content={"echo": echo})
 
 
 async def _create_for_code(
@@ -551,6 +602,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
             if echo is not None:
                 return JSONResponse(status_code=200, content={"echo": echo})
+            kept = console.asks.note_of(session_id, key)
+            if kept is not None:
+                # A repeat of a send that became a note gets that note back.
+                return JSONResponse(status_code=202, content={"note": kept})
             if console.asks.holds(session_id):
                 if pictured:
                     raise ApiError(
@@ -577,6 +632,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
+        except SessionBusyError:
+            if info.kind not in ("front", "chat"):
+                raise
+            return await _while_running(console, info, sent, key)
         return JSONResponse(status_code=202, content=_turn_body(turn, resumed))
 
     @app.post("/api/sessions/{session_id}/retry")
@@ -615,23 +674,19 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "turn_not_running",
                 t("errors.turnNotRunning"),
             )
-        # Words added to the turn that its run never read do not start another
-        # turn after a Stop: they go back to the composer.
-        unread = await console.asks.drop_notes(entry.session_id, turn_id)
-        content: dict[str, Any] = {"turn_id": turn_id, "cancelling": True}
-        if unread:
-            content["unread_notes"] = unread
-        return JSONResponse(status_code=202, content=content)
+        return JSONResponse(
+            status_code=202, content={"turn_id": turn_id, "cancelling": True}
+        )
 
     @app.post("/api/turns/{turn_id}/notes")
     async def add_note(turn_id: str, body: NoteRequest) -> JSONResponse:
         """Add words, and pictures, to a turn that runs: its run reads them at its next step (202).
 
-        If the turn ends before another step, they run as the chat's next turn.
-        A note may carry pictures on the terms of a message: the same kinds and
-        limits, and no words are needed with a picture. 409 ``turn_not_running``
-        when the turn is not running, or is being stopped; a client then sends
-        the words as a message.
+        If the turn ends before another step, they go back to the person and
+        start nothing. A note may carry pictures on the terms of a message: the
+        same kinds and limits, and no words are needed with a picture. 409
+        ``turn_not_running`` when the turn is not running, or is being stopped;
+        the words are the person's again.
         """
         console.require_store()
         key = _key(body.client_request_id)
