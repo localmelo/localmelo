@@ -17,11 +17,8 @@ from localmelo.support import onboard
 from localmelo.support.cli import launch
 
 ROOT = Path(__file__).resolve().parents[2]
-TROUBLESHOOTING = (
-    "docs/reference/troubleshooting.md",
-    "docs/zh-CN/reference/troubleshooting.md",
-)
-CLI_REFERENCE = ("docs/reference/cli.md", "docs/zh-CN/reference/cli.md")
+TROUBLESHOOTING = ("docs/reference/troubleshooting.md",)
+CLI_REFERENCE = ("docs/reference/cli.md",)
 
 
 def _squash(text: str) -> str:
