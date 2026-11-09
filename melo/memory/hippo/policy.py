@@ -20,6 +20,7 @@ from localmelo.melo.memory.notes import (
     has_negative_assertion,
     is_meta_claim,
     path_spans,
+    without_negation,
 )
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
@@ -243,7 +244,8 @@ class PolicyDecision:
     """One action for one item, and the target it compared against.
 
     *settled* says the rules were certain: a meta claim, a short fact, a file-only
-    fact, an opposite polarity or an identical text, which no judge may overrule."""
+    fact, an opposite polarity of the same text or an identical text, which no judge
+    may overrule."""
 
     action: str
     kind: str
@@ -276,6 +278,28 @@ def normalise(text: str) -> str:
 def content_tokens(text: str) -> set[str]:
     """The text's BM25 terms without the stopwords."""
     return {token for token in tokenize(normalise(text)) if token not in STOPWORDS}
+
+
+# The auxiliaries a negation rides on in English: "does not like" says "likes".
+_DO_SUPPORT = frozenset({"do", "does", "did"})
+
+
+def _positive_form(text: str) -> list[str]:
+    """The content words of *text*, in order, with its negation taken out: the
+    negation words, the do-support they ride on and a closing ``s`` are folded away,
+    so "likes olives" and "does not like olives" read alike."""
+    words = tokenize(normalise(without_negation(text)))
+    return [
+        word[:-1] if len(word) > 3 and word.endswith("s") else word
+        for word in words
+        if word not in STOPWORDS and word not in _DO_SUPPORT
+    ]
+
+
+def _same_but_for_negation(text: str, other: str) -> bool:
+    """Whether the two texts say one thing, one of them denying it."""
+    words = _positive_form(text)
+    return bool(words) and words == _positive_form(other)
 
 
 def _has_phrase(text: str, phrase: str) -> bool:
@@ -527,8 +551,10 @@ def decide(
     certain: a near-duplicate is no longer ignored, and a same-subject item is
     ``RELATED`` to the entry, never an ``UPDATE`` (the decision of a judge, not of a
     word shared with it) and never a ``CONFLICT`` of values (a different value may be
-    a change: only an opposite polarity is a certain conflict). The ``settled``
-    decisions are the certain ones.
+    a change: only an opposite polarity of the same text is a certain conflict; two
+    texts that differ by more than their negation may be about different things,
+    so the pair goes on as any other). The ``settled`` decisions are the certain
+    ones.
     """
     folded = normalise(text)
     task_text = str(provenance.get("task_text") or "")
@@ -606,10 +632,14 @@ def decide(
     if target is not None:
         other_text = _entry_text(target.entry)
         opposite = has_negative_assertion(text) != has_negative_assertion(other_text)
-        if opposite and (
-            target.same_subject
-            or target.overlap >= LINK_OVERLAP
-            or target.cosine >= LINK_COSINE
+        if (
+            opposite
+            and (
+                target.same_subject
+                or target.overlap >= LINK_OVERLAP
+                or target.cosine >= LINK_COSINE
+            )
+            and (not certain_only or _same_but_for_negation(text, other_text))
         ):
             return PolicyDecision(
                 action="CONFLICT",

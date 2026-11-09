@@ -1084,6 +1084,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Developer only: two memory items are marked as conflicting without the chat model only when one says exactly what the other denies. Part of #428.
 - Developer only: an opened memory item names the chat turns it came from, so melo can open one when it needs what was said word for word. Part of #428.
 - Developer only: a memory item that repeats one already kept joins it, and one that changes it replaces it, as the chat's model judges; two different facts that share a word such as "lives" no longer replace each other. Part of #428.
 - Approval cards read plainly and follow your mode (#576). A question about a site or an app says what melo wants to do and where (`Open example.com`, `Click or choose on example.com`, `Needs you on example.com`), in the words of the console, the app and the terminal, on the card, in the activity line and in the event line, never the internal name of the question. melo's explanation under a step shows only in the language of your own recent messages: words a model wrote in another script (English under a Chinese chat) are left out and the card keeps melo's own sentence, and a task now carries the rule to answer in your language like a chat does. A task you started follows its chat's Ask or Auto while it runs: Auto to Ask at its next decision, Ask to Auto at the one after the card that waits (that card stays for you); a chore keeps the mode it was saved with, and a task that ended keeps its last mode.

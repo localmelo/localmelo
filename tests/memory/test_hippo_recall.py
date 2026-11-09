@@ -1291,6 +1291,95 @@ async def test_a_repeated_fact_that_is_replaced_leaves_no_stale_turn(
         await memory.aclose()
 
 
+SYNC_TURN = (
+    "Heads up, Wednesday is when our weekly team sync happens.",
+    "Noted, Wednesday it is.",
+)
+SYNC_NOW = "The weekly team sync is now on Thursday."
+SYNC_BEFORE = "The weekly team sync is on Wednesday."
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        {"recall_source": "items"},
+        {"recall_source": "items", "recall_form": "list"},
+        {"recall_source": "auto"},
+    ],
+    ids=["items", "items-list", "auto"],
+)
+async def test_a_turn_cited_by_a_replaced_item_is_not_recalled_as_a_turn_on_any_path(
+    tmp_path: Path, store: SessionStore, variant: dict[str, str]
+) -> None:
+    """Item 1 cites chat A's turn and item 2, from chat B, replaces it through the
+    router. A new chat that asks about both finds the items, never A's turn: not in the
+    block, nor in a search, nor in the corpus, with the shipped excerpt-open, premise
+    and gather settings and whatever the question (a past one included)."""
+    encoder = ENCODER if variant["recall_source"] == "auto" else "1:stub"
+    cfg = (
+        auto_config(excerpt_open="on", premise_check="on")
+        if variant["recall_source"] == "auto"
+        else config(excerpt_open="on", premise_check="on", **variant)
+    )
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        _, index = memory.stores()
+        router = Router(index)
+        items: list[int] = []
+        for n, (typed, answer, text) in enumerate(
+            (
+                (*SYNC_TURN, SYNC_BEFORE),
+                ("It moved to Thursday.", "Thursday, noted.", SYNC_NOW),
+            )
+        ):
+            when = time.time() - (4 - 2 * n) * DAY
+            session_id, _ = await add_turn(
+                memory, store, typed, answer, at=when, title=f"Sync {n}"
+            )
+            item = MemoryItem(
+                session_id,
+                "Sync day",
+                text,
+                "episodic",
+                when,
+                ((session_id, 1),),
+                encoder=encoder,
+            )
+            near = await router.shortlist(item)
+            route = await router.route(item, Judged("changes", 1, near) if n else None)
+            assert route.action == ("UPDATE" if n else "NEW") and route.item
+            await index.mark_encoded(session_id, 1)
+            items.append(route.item)
+        old, new = items
+        older, newer = await index.fetch_items([old, new])
+        assert (older.status, older.replaced_by, newer.status) == (
+            "replaced",
+            new,
+            "active",
+        )
+        assert await index.ids(uncited=True) == set()
+        for question, keys in (
+            ("when is the weekly team sync?", [f"m:{new}"]),
+            ("all my weekly team sync before", None),
+        ):
+            found = await ask(memory, store, question)
+            assert found.recall and found.recall.gather == (keys is None)
+            assert found.used and all(i.key.startswith("m:") for i in found.used)
+            if keys is not None:
+                assert [i.key for i in found.used] == keys
+            else:
+                assert [i.key for i in found.used] == [f"m:{new}", f"m:{old}"]
+            assert "Noted, Wednesday it is" not in found.block
+            reply = await MemoryTools(memory).search(query="weekly team sync")
+            assert "Noted, Wednesday it is" not in reply
+            assert not [ref for ref in refs_of(reply) if ref.startswith("t")]
+            assert SYNC_NOW in reply or f"m{new}" in reply
+        for corpus in (memory._corpus, memory._auto_items):
+            assert not corpus.keys("d:")
+    finally:
+        await memory.aclose()
+
+
 async def test_forgetting_the_first_chat_of_a_repeated_fact_brings_the_second_back(
     tmp_path: Path, store: SessionStore
 ) -> None:

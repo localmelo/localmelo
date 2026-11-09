@@ -19,13 +19,15 @@ A new item is routed against the active items of every kind to one of five actio
 
 Code settles only what is certain, by rules and no model call
 (:func:`localmelo.melo.memory.hippo.policy.decide` with ``certain_only``): a meta
-claim, a short fact, a fact about files only, an opposite polarity, an identical
-text. Whether two notes say the same thing, or the newer one says it changed, is a
-question of meaning, so :meth:`Router.shortlist` finds the active items that may
-say it by content, across kinds, and a judge (:mod:`.hippo_judge`) reads them. Its
-clear answer is the :class:`Judged` that :meth:`Router.route` acts on: ``same`` is an
-``IGNORE`` and ``changes`` an ``UPDATE``. With none, a same-subject item is only
-``RELATED``: no item replaces another on a word they share.
+claim, a short fact, a fact about files only, an opposite polarity of the same
+text (two texts that differ by more than their negation may be about different
+things), an identical text. Whether two notes say the same thing, or the newer one
+says it changed, is a question of meaning, so :meth:`Router.shortlist` finds the
+active items that may say it by content, across kinds, and a judge
+(:mod:`.hippo_judge`) reads them. Its clear answer is the :class:`Judged` that
+:meth:`Router.route` acts on: ``same`` is an ``IGNORE`` and ``changes`` an
+``UPDATE``. With none, a same-subject item is only ``RELATED``: no item replaces
+another on a word they share.
 
 :class:`Router` keeps the active items in one map, whatever their kind, and updates
 it as it stores, so a run does not read the whole table again for each item. The
@@ -225,7 +227,7 @@ class Router:
         not by subject, so a few items that share a verb with it cannot crowd out
         the one that says the same. None when the rules settle the item without a
         model (a secret, a meta claim, a short fact, a fact about files only, an
-        opposite polarity, an identical text)."""
+        opposite polarity of the same text, an identical text)."""
         if holds_secret(item.title, item.text):
             return ()
         active = await self.load(item.embed_model)
