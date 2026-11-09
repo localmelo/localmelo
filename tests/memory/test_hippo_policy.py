@@ -313,5 +313,18 @@ def test_the_settled_decisions_are_the_certain_ones() -> None:
         active=[_entry(1, "I live in Berlin in a small flat", kind="profile")],
         certain_only=True,
     )
-    # A contradiction of values is not certain: a judge may call it a change.
-    assert (unsettled.action, unsettled.settled) == ("CONFLICT", False)
+    # A contradiction of values is not certain: a judge may call it a change, so it
+    # is linked, never marked as a conflict (only an opposite polarity is one).
+    assert (unsettled.action, unsettled.target_id, unsettled.settled) == (
+        "RELATED",
+        1,
+        False,
+    )
+    assert unsettled.reason == "same subject; related to entry 1"
+    # The caller with no judge keeps its rule.
+    legacy = _decision(
+        "I live in Paris in a large house",
+        kind="profile",
+        active=[_entry(1, "I live in Berlin in a small flat", kind="profile")],
+    )
+    assert (legacy.action, legacy.settled) == ("CONFLICT", False)

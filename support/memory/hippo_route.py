@@ -32,9 +32,13 @@ it as it stores, so a run does not read the whole table again for each item. The
 policy sorts the items it is given by the same-subject flag, the content overlap and
 the cosine, and acts on the first; so :class:`Router` hands it only the few that sort
 first by those same numbers, which gives the decision it would give for all of them.
-What a write rests on is read again from the table, under the same hold of the lock
-the write is made in (:meth:`Router.confirm` and :meth:`Router.route`), because an
-item may be forgotten or deleted while a judge is asked.
+An item whose text is identical is looked up in the whole map first, whatever its kind
+or subject, and is the only one handed over: a repeat is never missed for an item that
+only shares a subject with it. What a write rests on is read again from the table,
+under the same hold of the lock the write is made in (:meth:`Router.confirm` and
+:meth:`Router.route`), because an item may be forgotten or deleted while a judge is
+asked; when one of them is out of step, the whole map is read again, since a forget
+can also make an item active again.
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ from localmelo.melo.memory.hippo.policy import (
     PolicyDecision,
     content_tokens,
     decide,
+    normalise,
     overlap,
     subjects,
 )
@@ -83,7 +88,7 @@ class Route:
 class Entry:
     """An active item in the shape the policy reads: ``text``, ``vector``, ``id``,
     ``created_at``, its ``kind`` and a ``provenance`` that gives it an item-local
-    subject. ``sources`` are the turns it cites."""
+    subject. ``sources`` are the turns it cites; ``folded`` is its normalised text."""
 
     id: int
     text: str
@@ -95,6 +100,7 @@ class Entry:
     subject: tuple[str, ...]
     tokens: frozenset[str]
     unit: np.ndarray | None
+    folded: str
 
 
 @dataclass(frozen=True)
@@ -138,6 +144,7 @@ def _entry(item: MemoryItem, model: str) -> Entry:
         subject=subjects(item.text, item.kind, item_key=f"m{item.id}:0"),
         tokens=frozenset(content_tokens(item.text)),
         unit=_unit(vector),
+        folded=normalise(item.text),
     )
 
 
@@ -156,11 +163,14 @@ class Router:
         vector (*model* ``""``) compares by words and keeps what is loaded."""
         if self._active is None or (model and model != self._model):
             self._model = model
-            self._active = {
-                item.id: _entry(item, model)
-                for item in await self._index.active_items()
-            }
+            self._active = await self._read()
         return self._active
+
+    async def _read(self) -> dict[int, Entry]:
+        return {
+            item.id: _entry(item, self._model)
+            for item in await self._index.active_items()
+        }
 
     def _provenance(self) -> dict[str, Any]:
         """What gives the item being routed a subject of its own: never the
@@ -168,9 +178,15 @@ class Router:
         return {"candidate_id": "new", "item_index": self._count + 1}
 
     def _pool(self, item: MemoryItem, provenance: Mapping[str, Any]) -> list[Entry]:
-        """The :data:`POOL` active items that the policy ranks first for the item (its
+        """The active items the policy is given for the item: the one with an
+        identical text if there is one (of the item's kind first, then the newest),
+        whatever its subject, else the :data:`POOL` that the policy ranks first (its
         own order: same subject and kind, overlap, cosine, newest, id)."""
         entries = list((self._active or {}).values())
+        folded = normalise(item.text)
+        same = [entry for entry in entries if entry.folded == folded]
+        if same:
+            return [max(same, key=lambda e: (e.kind == item.kind, e.created_at, e.id))]
         if len(entries) <= POOL:
             return entries
         subject = subjects(
@@ -227,28 +243,25 @@ class Router:
 
     async def _refresh(self, entries: Iterable[Entry]) -> bool:
         """Whether each of *entries* is still stored, active and as it was (its id,
-        time and sources), read from the table. What is not is brought up to date:
-        an item that is gone or no longer active leaves the run's map."""
+        time and sources), read from the table. When one is not, the whole map is read
+        again, in place: it did not change only there (a forget that deletes an item
+        makes the one it replaced active again)."""
         wanted = {entry.id: entry for entry in entries}
         rows = {row.id: row for row in await self._index.fetch_items(wanted)}
-        same = True
         for item_id, entry in wanted.items():
             row = rows.get(item_id)
-            active = row is not None and row.status == "active"
             if (
-                row is not None
-                and active
-                and row.created_at == entry.created_at
-                and set(row.sources) == set(entry.sources)
+                row is None
+                or row.status != "active"
+                or row.created_at != entry.created_at
+                or set(row.sources) != set(entry.sources)
             ):
-                continue
-            same = False
-            if row is not None and active:
                 assert self._active is not None
-                self._active[item_id] = _entry(row, self._model)
-            elif self._active is not None:
-                self._active.pop(item_id, None)
-        return same
+                fresh = await self._read()
+                self._active.clear()
+                self._active.update(fresh)
+                return False
+        return True
 
     async def confirm(self, judged: Judged | None) -> Judged | None:
         """*judged* if every item of its shortlist still exists, active and as it
@@ -270,6 +283,9 @@ class Router:
         active = await self.load(item.embed_model)
         self._count += 1
         provenance = {"candidate_id": "new", "item_index": self._count}
+        picked = None if judged is None else active.get(judged.target)
+        if picked is not None and not await self._refresh([picked]):
+            picked = None  # it changed since the judge read it: the rules decide
         while True:
             decision = self._rules(item, provenance)
             target = (
@@ -278,13 +294,7 @@ class Router:
             if target is None or await self._refresh([target]):
                 break
         action, target_id, reason = decision.action, decision.target_id, decision.reason
-        picked = None if judged is None else active.get(judged.target)
-        if (
-            judged is not None
-            and not decision.settled
-            and picked is not None
-            and await self._refresh([picked])
-        ):
+        if judged is not None and not decision.settled and picked is not None:
             same = judged.verdict == "same"
             action, target_id = ("IGNORE" if same else "UPDATE"), judged.target
             reason = (

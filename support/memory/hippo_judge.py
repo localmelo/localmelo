@@ -15,7 +15,8 @@ answer acts, as in :mod:`.note_judge`:
   (:meth:`~.hippo_route.Router.route`). Two texts cannot show the new one is true (it
   may come from a page or a misread recap), so code checks the answer before it acts
   (:func:`supported`): a distinctive word of the new item that the old one lacks must
-  be among the typed words of the turns the new item cites.
+  be among the typed words of the turns the new item cites (the forms of a weekday
+  count as one word).
 - ``other``: anything else. The item is routed by the rules alone.
 
 Every failure counts as ``other``: a timeout, an error, a reply that is not strict
@@ -32,6 +33,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -106,12 +108,60 @@ class Counts:
         return dataclasses.asdict(self)
 
 
+_WEEKDAYS: Final = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+# Every written form of an English weekday, lower case: "friday", "fridays", "fri".
+_ENGLISH_DAYS: Final = {
+    **{day.lower() + plural: day for day in _WEEKDAYS for plural in ("", "s")},
+    "mon": "Monday",
+    "tue": "Tuesday",
+    "tues": "Tuesday",
+    "wed": "Wednesday",
+    "thu": "Thursday",
+    "thur": "Thursday",
+    "thurs": "Thursday",
+    "fri": "Friday",
+    "sat": "Saturday",
+    "sun": "Sunday",
+}
+# A short form that is also a word ("sat", "sun", "wed") counts only when capitalised.
+_PLAIN_WORDS: Final = frozenset({"wed", "sat", "sun"})
+_ENGLISH_WORD: Final = re.compile(r"\b[A-Za-z]+\b")
+_CHINESE_DAY: Final = re.compile(r"(?:周|星期|礼拜)([一二三四五六日天])")
+
+
+def _weekday(match: re.Match[str]) -> str:
+    word = match.group(0)
+    day = _ENGLISH_DAYS.get(word.lower())
+    if day is None or (word.lower() in _PLAIN_WORDS and not word[0].isupper()):
+        return word
+    return day
+
+
+def _weekdays(text: str) -> str:
+    """*text* with each written form of a weekday as one: "Fridays" and "fri" are
+    "Friday", "星期五" and "礼拜五" are "周五" (and "天" is "日"). The forms of a day and
+    nothing else, so a typed word and an item's can be matched literally."""
+    text = _CHINESE_DAY.sub(lambda m: "周" + m.group(1).replace("天", "日"), text)
+    return _ENGLISH_WORD.sub(_weekday, text)
+
+
 def supported(new: str, old: str, said: Sequence[str]) -> bool:
     """Whether the typed words *said* back a change from *old* to *new*: at least one
     distinctive word of *new* that *old* lacks (a number, a capitalised word, a run
     of CJK) is among them. Not every such word: the encoder writes "next week" as a
-    date the person never typed."""
-    typed = content_tokens(" ".join(said))
+    date the person never typed. Words are matched as written, except that the forms
+    of a weekday are one (:func:`_weekdays`): "Fridays" in an item is what "friday"
+    typed says."""
+    new, old = _weekdays(new), _weekdays(old)
+    typed = content_tokens(_weekdays(" ".join(said)))
     return any(
         token in typed and _is_distinctive(token, new)
         for token in content_tokens(new) - content_tokens(old)

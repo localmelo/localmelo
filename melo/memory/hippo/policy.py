@@ -522,7 +522,9 @@ def decide(
     caller that has a judge for repeats and changes, the rules settle only what is
     certain: a near-duplicate is no longer ignored, and a same-subject item is
     ``RELATED`` to the entry, never an ``UPDATE`` (the decision of a judge, not of a
-    word shared with it). The ``settled`` decisions are the certain ones.
+    word shared with it) and never a ``CONFLICT`` of values (a different value may be
+    a change: only an opposite polarity is a certain conflict). The ``settled``
+    decisions are the certain ones.
     """
     folded = normalise(text)
     task_text = str(provenance.get("task_text") or "")
@@ -635,7 +637,7 @@ def decide(
                 settled=exact,
             )
         if target.same_subject:
-            if target.contradicts:
+            if target.contradicts and not certain_only:
                 return PolicyDecision(
                     action="CONFLICT",
                     kind=kind,

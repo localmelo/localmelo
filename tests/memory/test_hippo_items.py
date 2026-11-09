@@ -1040,6 +1040,60 @@ async def test_a_repeat_whose_target_is_gone_is_stored_as_a_new_item(
     assert [i.id for i in await index.active_items()] == [3]
 
 
+async def test_a_repeat_of_an_item_that_became_active_again_is_found_after_a_refresh(
+    index: ConversationIndex,
+) -> None:
+    for session in ("s1", "s2"):
+        await add_turn(index, session, 1)
+    router = Router(index)
+    await route(router, PITTSBURGH, kind="profile", at=1.0)  # item 1, chat s1
+    await route(  # item 2, chat s2: replaces item 1
+        router, UTRECHT, "changes", kind="profile", at=2.0, session="s2"
+    )
+    assert [i.id for i in await index.active_items()] == [2]
+    repeat = make(PITTSBURGH, kind="profile", at=3.0, session="s3", turns=(7,))
+    near = await router.shortlist(repeat)
+    assert [e.id for e in near] == [2]
+    # Chat s2 is forgotten while the repeat is judged: item 1, which item 2 replaced,
+    # is current again, though the router never loaded it as such.
+    await index.delete("s2")
+    assert [i.id for i in await index.active_items()] == [1]
+    judged = await router.confirm(Judged("changes", 2, near))
+    assert judged is None
+    stored = await router.route(repeat, judged)
+    assert (stored.action, stored.item, stored.target) == ("IGNORE", None, 1)
+    assert await index.count_items() == 1  # not stored again beside item 1
+    (kept,) = await index.fetch_items([1])
+    assert kept.sources == (("s1", 1), ("s3", 7))
+
+
+@pytest.mark.parametrize(
+    "same_subject", [1, POOL + 1], ids=["few", "more than the pool"]
+)
+async def test_an_identical_text_is_found_whatever_its_kind_and_the_items_that_share_a_subject(
+    index: ConversationIndex, same_subject: int
+) -> None:
+    router = Router(index)
+    text = "The user lives in the old stone cottage by the river bend."
+    await route(router, text, kind="semantic", at=1.0)  # item 1, another kind
+    places = ("flat", "house", "barn", "loft", "villa", "hut", "lodge", "mill", "farm")
+    for n, place in enumerate(places[:same_subject]):
+        await route(
+            router, f"The user lives in a rented {place} number {n}.", kind="profile"
+        )
+    assert len(await index.active_items()) == same_subject + 1
+    again = await route(router, text, kind="profile", at=50.0, session="s2", turns=(4,))
+    # The profile items share its verb and its subject, and rank before the identical
+    # item of another kind; the identical text is looked up in the whole map first.
+    assert (again.action, again.item, again.target) == ("IGNORE", None, 1)
+    assert again.reason == "exact duplicate"
+    assert await index.count_items() == same_subject + 1
+    (kept,) = await index.fetch_items([1])
+    assert kept.sources == (("s1", 1), ("s2", 4))
+    # With the shortlist too: nothing is asked of a judge for an identical text.
+    assert await router.shortlist(make(text, kind="profile", at=60.0)) == ()
+
+
 @pytest.mark.parametrize(
     "repeat_first", [True, False], ids=["repeat first", "change first"]
 )
@@ -1148,6 +1202,43 @@ async def test_a_changes_the_typed_words_do_not_support_only_counts(
     assert got is None
     assert (counts.judged, counts.changes, counts.unsupported) == (1, 1, 1)
     assert counts.failed == counts.same == counts.other == 0
+
+
+@pytest.mark.parametrize("answer", ["no judge", "unsupported", "other", "failure"])
+async def test_a_different_value_for_the_same_subject_is_linked_never_conflicted(
+    index: ConversationIndex, answer: str
+) -> None:
+    """Only an opposite polarity is a conflict without a model: a different value may
+    be a change, and the old fact, which may well be true, is not marked for it."""
+    router = Router(index)
+    await route(router, "Your timezone is Lisbon.", kind="profile", at=1.0)
+    new = make("Your timezone is Madrid.", kind="profile", at=2.0)
+    judged = None
+    if answer != "no judge":
+        provider = StubEncoder(
+            {
+                "unsupported": lambda _: verdict("changes", 1),
+                "other": lambda _: verdict(),
+                "failure": lambda _: "RAISE",
+            }[answer]
+        )
+        judged = await hippo_judge.judge(
+            router,
+            provider,
+            None,
+            new,
+            ("Where is that again?",),
+            cache=Cache(""),
+            stats=hippo_encode.Stats(),
+            counts=hippo_judge.Counts(),
+        )
+        assert judged is None
+    result = await router.route(new, judged)
+    assert (result.action, result.item, result.target) == ("RELATED", 2, 1)
+    first, second = await index.fetch_items([1, 2])
+    assert (first.status, second.status) == ("active", "active")
+    assert (first.related, second.related) == ((2,), (1,))
+    assert [i.id for i in await index.active_items()] == [1, 2]
 
 
 async def test_a_same_and_an_other_are_counted_and_only_the_same_gives_a_verdict(
@@ -1302,8 +1393,59 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
             ["I got a standing desk"],
             False,
         ),
+        (  # a weekday is one, however it is written
+            "The user's class is now on Fridays.",
+            "The user's class is on Wednesdays.",
+            ["it moved to friday"],
+            True,
+        ),
+        (
+            "The user now has class on Thursdays.",
+            "The user has class on Mondays.",
+            ["moved it to Thurs"],
+            True,
+        ),
+        ("周五有课。", "周三有课。", ["星期五吧"], True),
+        ("周五有课。", "周三有课。", ["礼拜五吧"], True),
+        ("周日有课。", "周三有课。", ["星期天吧"], True),
+        (
+            "The user's class is now on Saturdays.",
+            "The user's class is on Wednesdays.",
+            ["it moved to friday"],
+            False,
+        ),
+        (  # a short form that is also a word counts only when capitalised
+            "The user's class is now on Saturdays.",
+            "The user's class is on Wednesdays.",
+            ["I sat down for a while"],
+            False,
+        ),
+        ("周五有课。", "周三有课。", ["星期四吧"], False),
+        (  # the old item has the day already, written another way
+            "The user's class is now on Fridays at 18:00.",
+            "The user's class is on Friday.",
+            ["friday"],
+            False,
+        ),
     ],
-    ids=["name", "number", "cjk", "not typed", "nothing typed", "old has it", "plain"],
+    ids=[
+        "name",
+        "number",
+        "cjk",
+        "not typed",
+        "nothing typed",
+        "old has it",
+        "plain",
+        "weekday plural",
+        "weekday short form",
+        "weekday 星期",
+        "weekday 礼拜",
+        "weekday 星期天",
+        "another weekday",
+        "a word that is not a day",
+        "another Chinese weekday",
+        "old has the weekday",
+    ],
 )
 def test_a_change_needs_a_distinctive_new_word_in_the_typed_words(
     new: str, old: str, said: list[str], wanted: bool
