@@ -75,7 +75,7 @@ async def test_an_act_on_the_same_page_returns_what_changed_and_keeps_the_other_
     assert "Liked by you" in body and "Welcome." not in body
     assert '[e4 button "Undo"]' in body and "e2" not in body
     # The element acted on is never carried: it has a new ref, and its old one is gone.
-    assert '[e3 button "Like"]' in body and "gone: e1]" in body
+    assert '[e3 button "Like"]' in body and "of s1 not kept: e1;" in body
     # A ref of an element the act did not change still works.
     follow = await run(tools, "browser_follow", ref="e2")
     assert not follow.is_error and "Checked in." in follow.text

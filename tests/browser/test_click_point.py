@@ -19,7 +19,7 @@ from localmelo.support.browser.driver import (
 )
 from localmelo.support.browser.provider import PAGE_NOTE, TOOLS, parse_point
 from localmelo.tests.browser.fakes import button, link, page
-from localmelo.tests.browser.test_acting import HOME, OTHER, Asks, asking, world
+from localmelo.tests.browser.test_acting import DONE, HOME, OTHER, Asks, asking, world
 from localmelo.tests.browser.test_local_addresses import CONSOLE, assert_refused
 from localmelo.tests.browser.test_native_input import DAILY, native, opened
 from localmelo.tests.browser.test_provider import run, tools_of
@@ -137,6 +137,24 @@ async def test_numbers_given_for_one_view_are_never_read_on_a_newer_one() -> Non
         # Keep's numbers are on the view the page is at: they press Keep.
         new = await run(tools, "browser_click_point", x=300, y=500)
     assert not new.is_error and driver.acts[-1].point == (300, 250)
+
+
+async def test_numbers_given_on_one_page_are_read_on_a_new_pages_picture() -> None:
+    driver = world(button("Pay"), link("Done", DONE))
+    driver.via = "page-script"
+    driver.centres["Pay"] = (500.0, 200.0)
+    driver.hits[(500, 200)] = PointHit("control", button("Again"))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        pay = await run(tools, "browser_click", ref="e1")
+        assert "x=500 y=400" in pay.text
+        await run(tools, "browser_click", ref="e2")  # the tab moves to another page
+        await run(tools, "browser_screenshot")
+        # The same numbers, read off the new page's picture, are pressed there.
+        out = await run(tools, "browser_click_point", x=500, y=400)
+    assert not out.is_error and driver.acts[-1].element.label == "Again"
+    assert driver.acts[-1].url == DONE
 
 
 async def test_a_point_on_nothing_is_refused() -> None:
@@ -262,7 +280,7 @@ async def test_a_point_in_a_box_from_elsewhere_never_says_nothing_changed() -> N
     out = await pointed(driver, Asks())
     assert not out.is_error and out.images
     first = out.text.split("\n", 1)[0]
-    assert "Nothing on the page changed" not in first
+    assert "No change seen" not in first
     assert "inside the box shows only in the new picture" in first
 
 

@@ -36,10 +36,11 @@ from localmelo.melo.schema import CALL_NOT_STARTED, Message, ToolCall, ToolDef
 
 # The keys an event may lack: run.finished's reviews without an approval
 # policy (#339), tool.finished's tool_asks when no question was refused (#431)
-# and its allowed_local unless web_fetch read a listed local test server.
+# its allowed_local unless web_fetch read a listed local test server, and its
+# phases and effect unless a browser call set them.
 OPTIONAL_KEYS: dict[str, set[str]] = {
     "run.finished": {"reviews"},
-    "tool.finished": {"tool_asks", "allowed_local"},
+    "tool.finished": {"tool_asks", "allowed_local", "phases", "effect"},
 }
 # The texts the model reads, pinned literally.
 ENDING = (

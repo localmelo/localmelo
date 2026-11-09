@@ -32,7 +32,12 @@ from localmelo.support.browser.desktop import (
 )
 from localmelo.support.browser.driver import Changes, Element, PointHit
 from localmelo.support.browser.provider import BrowserToolProvider
-from localmelo.tests.browser.fakes import FakeDriver, button, forget_helper_status
+from localmelo.tests.browser.fakes import (
+    FakeDriver,
+    button,
+    forget_helper_status,
+    page,
+)
 from localmelo.tests.browser.test_acting import DONE, HOME, Asks, asking, world
 from localmelo.tests.browser.test_other_windows import (
     FAKE,
@@ -247,6 +252,27 @@ async def test_the_wait_stops_when_the_page_changes_by_itself(screen: Screen) ->
     # result never says that nothing changed.
     assert "No effect" not in out.text and "No change" not in out.text
     assert "Checked in." in out.text
+
+
+async def test_a_page_that_loads_again_at_its_address_during_the_wait_is_read(
+    screen: Screen,
+) -> None:
+    driver = world(button("Send"))
+    provider, tools = await opened(driver, watch(screen))
+
+    def reload() -> None:
+        # The form posts and the site answers with a new page at the same address.
+        driver.docs["t1"] = "d2"
+        driver.pages[HOME] = page(HOME, "Thanks, it was sent.", title="Home")
+
+    try:
+        with asking(Asks()):
+            screen.clock.at(1.0, reload)
+            out = await run(tools, "browser_click", ref="e1")
+    finally:
+        await provider.close()
+    assert not out.is_error
+    assert "No change seen" not in out.text and "Thanks, it was sent." in out.text
 
 
 async def test_the_address_of_an_app_hands_the_act_off_and_the_window_is_waited_for(

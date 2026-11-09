@@ -405,6 +405,12 @@ class BrowserDriver(Protocol):
 
     async def close_tab(self, tab: str) -> None: ...
 
+    async def document(self, tab: str | None) -> str:
+        """The id of the document *tab* shows now, as :attr:`RawPage.doc` names it (``""`` when the driver cannot say).
+
+        A page that loaded again at the same address is another document.
+        """
+
     async def location(self, tab: str | None) -> str:
         """The address the browser reports for the tab now, or ``""`` when it cannot say.
 

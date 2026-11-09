@@ -260,6 +260,10 @@ class FakeDriver:
         if self.current == tab:
             self.current = None
 
+    async def document(self, tab: str | None) -> str:
+        here = tab or self.current or ""
+        return self.docs.get(here, self.pages[self._url(tab)].doc)
+
     async def location(self, tab: str | None) -> str:
         here = tab or self.current or ""
         if here in self.location_empty:

@@ -1789,6 +1789,12 @@ class PageScriptActs:
                 with contextlib.suppress(BrowserError):
                     await self._read(mark_script(self._ring, *mark, on=False))
 
+    async def document(self, tab: str | None) -> str:
+        """The document *tab* shows now, as the view probe reads it (see :meth:`BrowserDriver.document`)."""
+        await self._focus(tab)
+        view = _view(await self._read(VIEW_JS))
+        return "" if view is None else view.doc
+
     async def centre(
         self, tab: str | None, act: Act
     ) -> tuple[View, float, float] | None:

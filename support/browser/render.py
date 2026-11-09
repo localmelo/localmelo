@@ -261,6 +261,8 @@ def _carried(
     """The refs of *before* that elements of *kept* keep: by position in *kept*, each one unique by :func:`_identity` in both.
 
     Neither an element without a ``context`` nor one like *acted* is carried.
+    A stated limit: an element whose only context is a heading that did not
+    change is still carried when another element took its place under it.
     """
     old: dict[tuple[object, ...], list[str]] = {}
     for ref, item in before.elements.items():
@@ -456,7 +458,9 @@ def render_change(
         lines.extend(element_line(ref, item, snap.origin) for ref, item in listed)
     if gone:
         lines.append(
-            f"[{len(gone)} element(s) of {before.id} gone: {', '.join(gone[:FIND_LIMIT])}]"
+            f"[{len(gone)} ref(s) of {before.id} not kept: "
+            f"{', '.join(gone[:FIND_LIMIT])}; an element still on the page is "
+            "listed above with a new ref]"
         )
     if (snap.unreached, snap.aims, snap.solved) != (
         before.unreached,

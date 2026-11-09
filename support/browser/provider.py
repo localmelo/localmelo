@@ -209,8 +209,11 @@ _PAGE_NOTE = (
     "one on a site they named. Never type any other password, a card number or "
     "a one-time code: {sign_in} An act's first line says whether the page "
     'changed: one that starts "No change seen" names the way used and the '
-    "next way to try. An act on the same page returns only what changed, and "
-    "the refs it does not list still hold. Points (x, y) run 0-1000 across and "
+    "next way to try. An act on the same page returns what changed and the "
+    "elements whose refs are new; a ref is kept only for an element the page "
+    "places (in a row, under a heading or beside text), never for the one "
+    "acted on, and the refs it does not list still hold. Points (x, y) run "
+    "0-1000 across and "
     "down the visible page, the same in a picture, a reading and a step's "
     "result: browser_click_point presses one, for what the element list lacks "
     "(a drawing, a box from another site) or after a script click with no "
@@ -1464,8 +1467,9 @@ class BrowserToolProvider(BaseToolProvider):
     def _give(self, tab: str, view: View | None, x: int, y: int) -> None:
         """Remember that melo printed the point (*x*, *y*) of *tab* for *view*.
 
-        A press of those numbers is read on that view, whatever view came
-        after: the page script refuses it once the page is no longer there.
+        A press of those numbers on that document is read on that view,
+        whatever view of it came after: the page script refuses it once the
+        page has scrolled. On another document the kept view reads it.
         """
         if view is not None:
             self._given.setdefault(tab, {})[(float(x), float(y))] = view
@@ -2663,8 +2667,12 @@ class BrowserToolProvider(BaseToolProvider):
             and not (opened or moved or lines or changes.changed)
             and not result.handoff
             and prior is not None
-            # The tab may have moved on while melo waited for another app's window.
-            and not (waited and await stop())
+            # The tab may have moved on, or loaded again at its address, while
+            # melo waited for another app's window: then it is read.
+            and not (
+                waited
+                and (await stop() or not await self._same_document(landed, prior.doc))
+            )
         ):
             # No change seen: the reading the act was done on is not made again.
             head = await self._no_effect(landed, result, act, target)
@@ -2900,6 +2908,14 @@ class BrowserToolProvider(BaseToolProvider):
         """The notes about the helper that wait to be told, once."""
         notes, self._notes = self._notes, []
         return notes
+
+    async def _same_document(self, tab: str, doc: str) -> bool:
+        """Whether *tab* still shows the document *doc*; False when that cannot be told."""
+        try:
+            now = await self._driver.document(self._raw[tab])
+        except (BrowserError, KeyError):
+            return False
+        return bool(doc) and now == doc
 
     def _page_moved(
         self, tab_id: str, url: str, before: set[str]
@@ -3303,9 +3319,17 @@ class BrowserToolProvider(BaseToolProvider):
         tab_id = self._approved(tab)
         kept = self._views.get(tab_id)
         px, py = parse_point(x, y, rest, kept)
-        # Numbers melo printed are read on the view they were printed for; any
-        # other on the last picture's or reading's.
-        view = self._given.get(tab_id, {}).get((px, py), kept)
+        # Numbers melo printed are read on the view they were printed for, while
+        # the tab shows that document at that address; any other on the last
+        # picture's or reading's.
+        given = self._given.get(tab_id, {}).get((px, py))
+        view = kept
+        if (
+            given is not None
+            and kept is not None
+            and (given.url, given.doc) == (kept.url, kept.doc)
+        ):
+            view = given
         if view is None:
             raise BrowserError(
                 "melo has no view of this tab to read a point on: browser_read or "
