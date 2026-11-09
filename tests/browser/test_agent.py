@@ -697,3 +697,22 @@ async def test_a_run_with_no_authority_reaches_no_browser_through_a_search_with_
     finally:
         await agent.close()
     assert driver.started == (1 if acts else 0)
+
+
+async def test_a_browser_call_records_how_long_its_phases_took() -> None:
+    llm = ScriptedLLM([_open(HOME), _say("ok")])
+    agent = _agent(llm, _driver())
+    found: list[Any] = []
+    try:
+        await agent.run_task(
+            "read the site",
+            on_event=found.append,
+            approval=RememberingPolicy(Panel().ask),
+        )
+    finally:
+        await agent.close()
+    [finished] = [e for e in found if e.type == "tool.finished"]
+    # The call's own duration, and beside it where the time went.
+    assert finished.data["duration_s"] >= 0
+    assert set(finished.data["phases"]) == {"load", "read"}
+    assert all(seconds >= 0 for seconds in finished.data["phases"].values())

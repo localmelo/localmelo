@@ -368,7 +368,7 @@ class _Emitter:
         exit_codes: Sequence[int] | None,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
-        marks: Mapping[str, bool] | None = None,
+        marks: Mapping[str, Any] | None = None,
     ) -> None:
         """The checked *result* of *call*, whose executor *outcome* gives the status.
 
@@ -418,7 +418,7 @@ class _Emitter:
         not_started: bool = False,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
-        marks: Mapping[str, bool] | None = None,
+        marks: Mapping[str, Any] | None = None,
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
@@ -834,9 +834,24 @@ def _asks(asks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return {"tool_asks": [dict(ask) for ask in asks]} if asks else {}
 
 
-def _marks(marks: Mapping[str, bool] | None) -> dict[str, Any]:
-    """``allowed_local`` of a tool event: only when the call's tool set it (true)."""
-    return {"allowed_local": True} if marks and marks.get("allowed_local") else {}
+def _marks(marks: Mapping[str, Any] | None) -> dict[str, Any]:
+    """What the call's tool said of its own call, for its event: each key only when it set it.
+
+    ``allowed_local`` (true), and ``phases``: seconds by phase name, numbers only.
+    """
+    if not marks:
+        return {}
+    out: dict[str, Any] = {}
+    if marks.get("allowed_local") is True:
+        out["allowed_local"] = True
+    phases = marks.get("phases")
+    if isinstance(phases, dict) and phases:
+        out["phases"] = {
+            str(name): float(seconds)
+            for name, seconds in phases.items()
+            if isinstance(seconds, int | float) and not isinstance(seconds, bool)
+        }
+    return out
 
 
 def _image_entry(image: ImagePart) -> dict[str, Any]:

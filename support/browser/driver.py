@@ -128,7 +128,10 @@ class RawPage:
     ``aims`` say where the boxes of a human check are: (address, x, y) on the
     0-1000 scale of the picture of the view, at the checkbox's spot as the page
     shows it (beyond that scale when it is out of view). ``solved`` is set when
-    an answer field of a check holds something: the check was passed.
+    an answer field of a check holds something: the check was passed. ``view``
+    is the part of the page in view when it was read: the one space a point
+    of the 0-1000 scale is in, for a reading as for a picture (None when the
+    driver cannot say).
     """
 
     url: str
@@ -143,6 +146,7 @@ class RawPage:
     unreached: tuple[str, ...] = ()
     aims: tuple[tuple[str, int, int], ...] = ()
     solved: bool = False
+    view: View | None = None
 
 
 @dataclass(frozen=True)
@@ -292,9 +296,7 @@ class ActResult:
     meanwhile (a send nobody asked about), or ``""``; ``via`` the way it acted
     and ``why`` the reason a better way was not used (``""`` when none was
     passed over); ``changes`` what it saw change, or None when the page became
-    another document. ``native_failed`` says the browser's own input did not
-    work there, so the site starts with the page script next time.
-    ``handoff`` is an address of another app's kind (``chat://...``) the page
+    another document. ``handoff`` is an address of another app's kind (``chat://...``) the page
     asked the browser to open meanwhile, which the browser did not open
     (``""``: none); melo asks the person before it opens it itself. ``late``
     are such addresses the page asked for before this act began (while no act
@@ -306,7 +308,6 @@ class ActResult:
     via: Way = "page-script"
     why: str = ""
     changes: Changes | None = None
-    native_failed: bool = False
     handoff: str = ""
     late: tuple[str, ...] = ()
     dialogs: tuple[Dialog, ...] = ()
@@ -330,9 +331,7 @@ class Act:
     (a click on its submit button, or Enter): a driver tries to stop any other
     attempt by the page to send a form while the action runs. That is best
     effort and holds only that long; once a text is in a page, the page may send
-    it itself. ``native`` lets the driver use the browser's own input first;
-    False starts with the page script (a site where the browser's own input
-    did not work earlier). ``point`` is a click at that place of ``view`` (page
+    it itself. The browser's own input is tried first, every time. ``point`` is a click at that place of ``view`` (page
     pixels), with the browser's own click, on the control ``element`` that was
     found there; the driver does nothing unless the point still resolves to it
     and the view has not scrolled. ``proof`` is the address of the frame of a
@@ -348,7 +347,6 @@ class Act:
     enter: bool = False
     doc: str = ""
     send: bool = False
-    native: bool = True
     point: tuple[float, float] | None = None
     view: View | None = None
     proof: str = ""
@@ -451,6 +449,16 @@ class BrowserDriver(Protocol):
         """What is at (*x*, *y*) of *view* (page pixels), the view of the last picture.
 
         Raises :class:`StaleElementError` when the page is not that one, or it scrolled.
+        """
+
+    async def centre(
+        self, tab: str | None, act: Act
+    ) -> tuple[View, float, float] | None:
+        """Where the element of *act* is now: the view, and its middle in that view (page pixels).
+
+        For an act that changed nothing, so a click at that point can be
+        offered. The element is brought into view as an act does; None when it
+        is not on the page as it was read, or the driver cannot say.
         """
 
     async def blank(self, tab: str | None) -> None:

@@ -402,7 +402,7 @@ async def test_questions_tools_and_the_note_name_the_background_browser() -> Non
     assert asks.asked[0][1]["browser"] == "chrome"
     assert asks.asked[1][2] == 'click a button "Go" on example.com in Chrome'
     described = found["browser_open"].definition.description
-    assert "Chrome, in the background" in described and "Safari" not in described
+    assert "melo's browser" in described and "Safari" not in described
     assert provider.system_notes()[0] == BACKGROUND_NOTE != PAGE_NOTE
     assert "Browser panel" in BACKGROUND_NOTE and "cannot type" not in BACKGROUND_NOTE
     assert sites.BROWSER.get() == "Safari"  # only while a call runs
@@ -436,9 +436,12 @@ async def test_over_chrome_a_hand_off_and_a_confirm_go_to_the_person(
     with asking(asks):
         page = await run(found, "browser_open", url="https://example.com/app")
         assert '[e1 button "Open in Chat"]' in page.text
+        delete = re.search(r'\[(e\d+) button "Delete"\]', page.text)
+        assert delete is not None
         handed = await run(found, "browser_click", ref="e1")
-        assert '[e7 button "Delete"]' in handed.text  # the page read again
-        deleted = await run(found, "browser_click", ref="e7")
+        # The page is the same document: the Delete button keeps its ref.
+        assert "<<page" in handed.text and "Delete" not in handed.text
+        deleted = await run(found, "browser_click", ref=delete.group(1))
     assert opener.opened == [CHAT]
     assert "melo opened it, so Chat comes to the front" in handed.text
     assert "Nothing on the page changed" not in handed.text

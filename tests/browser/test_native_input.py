@@ -101,7 +101,7 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
     try:
         button = el(raw, "Check in")
         done = await driver.act(None, Act("click", raw.url, button, doc=raw.doc))
-        assert done.via == "browser" and done.why == "" and not done.native_failed
+        assert done.via == "browser" and done.why == ""
         assert native(log) == [
             {
                 "node": str(100 + button.at),
@@ -118,11 +118,11 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
 
 
 async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) -> None:
-    for mode, why, site in (
-        ("no_native", "melo's browser cannot act on page elements itself", False),
-        ("no_uids", "could not name that element", False),
-        ("native_missed", "did not reach it", True),
-        ("native_error", "did not reach it", True),
+    for mode, why in (
+        ("no_native", "melo's browser cannot act on page elements itself"),
+        ("no_uids", "could not name that element"),
+        ("native_missed", "did not reach it"),
+        ("native_error", "did not reach it"),
     ):
         driver, raw, _ = await opened(mode, tmp_path / mode)
         try:
@@ -130,7 +130,6 @@ async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) 
                 None, Act("click", raw.url, el(raw, "Check in"), doc=raw.doc)
             )
             assert done.via == "page-script" and why in done.why, mode
-            assert done.native_failed is site, mode
             # This page ignores a script's click: nothing changed, and the act says so.
             assert done.changes is not None and done.changes.texts == (), mode
         finally:
@@ -144,7 +143,7 @@ async def test_a_covered_element_is_clicked_by_the_page_script(tmp_path: Path) -
             None, Act("click", raw.url, el(raw, "Hidden away"), doc=raw.doc)
         )
         assert done.via == "page-script" and "covers it" in done.why
-        assert not done.native_failed and native(log) == []
+        assert native(log) == []
     finally:
         await driver.close()
 
@@ -158,7 +157,7 @@ async def test_an_element_the_browsers_reading_names_twice_is_left_to_the_page_s
             None, Act("click", raw.url, el(raw, "Happy"), doc=raw.doc)
         )
         assert done.via == "page-script" and "could not name" in done.why
-        assert not done.native_failed and native(log) == []
+        assert native(log) == []
     finally:
         await driver.close()
 
@@ -338,18 +337,6 @@ async def test_a_stale_element_is_refused_before_the_browser_acts(
         await driver.close()
 
 
-async def test_a_site_starts_with_the_page_script_when_asked(tmp_path: Path) -> None:
-    driver, raw, log = await opened("", tmp_path)
-    try:
-        done = await driver.act(
-            None,
-            Act("click", raw.url, el(raw, "Happy"), doc=raw.doc, native=False),
-        )
-        assert done.via == "page-script" and done.why == "" and native(log) == []
-    finally:
-        await driver.close()
-
-
 async def test_a_redraw_is_seen_as_the_element_gone_and_the_page_waited_for(
     tmp_path: Path,
 ) -> None:
@@ -449,6 +436,21 @@ async def test_a_click_waits_for_the_first_change_then_for_quiet(timing: None) -
     typing = Polled([])
     await typing._look("k", "d", a_click("type"))
     assert 1 <= typing.polls <= 8
+
+
+async def test_a_trusted_click_that_reached_nothing_is_not_waited_on_for_a_reply(
+    timing: None,
+) -> None:
+    missed = {"doc": True, "count": 0, "quiet": 9999, "target": False, "reached": False}
+    driver = Polled([])
+    driver.answers_end = missed
+    await driver._look("k", "d", a_click())
+    # Quiet for QUIET_S is enough: no event reached the element, so no reply can come.
+    assert driver.polls <= 8
+    # A script click reports no events: it waits for the page's first change, to the cap.
+    script = Polled([])
+    await script._look("k", "d", a_click())
+    assert script.polls >= 20
 
 
 async def test_the_look_stops_at_the_cap_and_says_the_page_was_still_changing(

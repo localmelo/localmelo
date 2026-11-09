@@ -547,18 +547,13 @@ class SafariAutomationDriver(PageScriptActs):
         if act.element.frame.startswith("x"):
             return await self._foreign_act(act)
         spec = act_spec(act)
-        passed, failed = "", False
-        if act.native or act.point is not None:
-            done = await self._native(spec, act)
-            if isinstance(done, ActResult):
-                return done
-            passed, failed = done
-        return await self._scripted(spec, act, passed, failed)
+        done = await self._native(spec, act)
+        if isinstance(done, ActResult):
+            return done
+        return await self._scripted(spec, act, done)
 
-    async def _native(
-        self, spec: dict[str, Any], act: Act
-    ) -> ActResult | tuple[str, bool]:
-        """The act by the browser's own input; else why not, and whether that holds for the site.
+    async def _native(self, spec: dict[str, Any], act: Act) -> ActResult | str:
+        """The act by the browser's own input; else why not.
 
         The element is scrolled to the middle of the view first. This Safari
         clicks the node itself, not a point melo picks, so an element whose
@@ -569,20 +564,20 @@ class SafariAutomationDriver(PageScriptActs):
         got it.
         """
         if not self._has("interact"):
-            return PASSED_OVER["tool"], False
+            return PASSED_OVER["tool"]
         for attempt in range(2):
             uid = ""
             if act.point is None:
                 if act.element.frame:
-                    return PASSED_OVER["frame"], False
+                    return PASSED_OVER["frame"]
                 if not self._has("content"):
-                    return PASSED_OVER["tool"], False
+                    return PASSED_OVER["tool"]
                 ready = await self._scrolled(spec)
                 if ready.get("covered") is True or ready.get("shifted") is True:
-                    return covered_why(ready.get("by")), False
+                    return covered_why(ready.get("by"))
                 uid = bind(ready, await self._nodes())
                 if not uid:
-                    return PASSED_OVER["name"], False
+                    return PASSED_OVER["name"]
             key = new_key()
             armed = await self._script(
                 act_script({**spec, "mode": "arm", "key": key, "uid": uid})
@@ -609,7 +604,7 @@ class SafariAutomationDriver(PageScriptActs):
         if not reached(act, data, frame=armed.get("frame") is True):
             if act.point is not None and armed.get("frame") is True:
                 raise BrowserError(STALE["reach"])
-            return PASSED_OVER["missed"], True
+            return PASSED_OVER["missed"]
         self._check_typed(act, data)
         return ActResult(
             stopped(blocked),

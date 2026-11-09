@@ -444,7 +444,7 @@ async def test_a_card_about_a_window_that_closed_is_withdrawn_and_tells_nothing(
             screen.clock.at(1.0, lambda: screen.show(SIGN_IN))
             click = await run(tools, "browser_click", ref="e1")
             async with asyncio.timeout(5):
-                while not screen.pacer.waiting.is_set():
+                while not (screen.pacer.waiting.is_set() and person.cards):
                     await asyncio.sleep(0.01)  # the card is up, its window watched
             assert len(person.cards) == 1 and provider._cards
             windows = screen.load()["windows"]

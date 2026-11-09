@@ -113,7 +113,7 @@ async def test_a_click_stopped_by_what_covers_the_element_keeps_the_page_and_its
         ("page", "t1"),
     ]
     other = await run(tools, "browser_click", ref="e2")
-    assert not other.is_error and other.text.startswith("Clicked e2")
+    assert not other.is_error and "Clicked e2" in other.text
 
 
 async def test_a_click_acts_on_the_page_and_reads_it_again() -> None:
@@ -486,8 +486,8 @@ async def test_enter_in_a_field_is_a_form_send_that_asks_by_itself() -> None:
         await run(tools, "browser_open", url=HOME)
         typed = await run(tools, "browser_type", ref="e1", text="cats")
         assert not any(name.startswith("browser-submit:") for name in asks.names)
-        # The page was read again after typing: its refs are new (e2 is the box).
-        sent = await run(tools, "browser_type", ref="e2", text="cats", submit=True)
+        # Typing left the page as it was: the box keeps its ref.
+        sent = await run(tools, "browser_type", ref="e1", text="cats", submit=True)
     assert (
         not typed.is_error
         and "Typed 4 character(s) into e1 (via browser)." in typed.text
@@ -613,9 +613,11 @@ async def test_every_typing_asks_with_all_of_its_text_and_is_never_a_chat_grant(
         await run(tools, "browser_open", url=HOME)
         await run(tools, "browser_type", ref="e1", text=long)
         # The click and the choice keep one answer for the site; typing asks again.
-        await run(tools, "browser_click", ref="e4")  # the page was read again: new refs
-        await run(tools, "browser_open", url=HOME)
-        await run(tools, "browser_type", ref="e6", text="second")
+        await run(tools, "browser_click", ref="e2")  # the refs typing left as they were
+        await run(
+            tools, "browser_open", url=HOME
+        )  # a new reading: e4 Notes, e5 Check in
+        await run(tools, "browser_type", ref="e4", text="second")
     typing = [(n, a, p) for n, a, p in asks.asked if n.startswith("browser-type:")]
     assert [n for n, _, _ in typing] == ["browser-type:https://example.com"] * 2
     first, second = typing[0][1], typing[1][1]

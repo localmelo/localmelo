@@ -1084,6 +1084,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Acting on a web page says what happened. A click that changed nothing says so on its first line, with the way melo used and the next one to try (a trusted click at the element's centre, by numbers you can use at once); the unchanged page is not printed again. An act on the same page returns only what changed, and the other refs keep working. A point needs no picture first: a reading's coordinates work too. A click that missed no longer makes every later click on that site a script click, a missed click is not waited on for a reply, and each browser step records where its time went (`phases` on `tool.finished`).
 - Developer only: two memory items are marked as conflicting without the chat model only when one says exactly what the other denies. Part of #428.
 - Developer only: an opened memory item names the chat turns it came from, so melo can open one when it needs what was said word for word. Part of #428.
 - Developer only: a memory item that repeats one already kept joins it, and one that changes it replaces it, as the chat's model judges; two different facts that share a word such as "lives" no longer replace each other. Part of #428.

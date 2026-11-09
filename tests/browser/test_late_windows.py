@@ -208,7 +208,7 @@ async def test_acts_that_cannot_hand_off_do_not_wait(screen: Screen) -> None:
     try:
         with asking(Asks()):
             typed = await run(tools, "browser_type", ref="e1", text="Alex")
-            chosen = await run(tools, "browser_select", ref="e5", option="Large")
+            chosen = await run(tools, "browser_select", ref="e2", option="Large")
     finally:
         await provider.close()
     assert not typed.is_error and not chosen.is_error

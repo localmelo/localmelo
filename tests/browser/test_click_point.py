@@ -86,23 +86,31 @@ async def test_a_point_on_a_drawing_is_clicked_and_looked_at_again() -> None:
     driver = point_world(PointHit("canvas", canvas))
     out = await pointed(driver)
     assert not out.is_error
-    assert out.text.startswith(
-        "Clicked a drawing or picture at (500, 300) (via point). Nothing on the page changed."
-    )
+    head, said = out.text.split("\n")[:2]
+    assert head.startswith("No effect: a point click at (500, 300) changed nothing")
+    assert said == "Clicked the point (500, 300) (via point)."
+    # What the point was on is page words: inside a block, never on the first lines.
+    assert "the point was on: a drawing or picture" in out.text.split("<<page", 1)[1]
     assert driver.acts[0].point == (500, 150) and driver.acts[0].view is not None
     # It looks again: a new picture, with the point drawn on it.
     assert out.images and driver.marks[-1] == (driver.acts[0].view, 500, 150)
 
 
-async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused() -> (
-    None
-):
+async def test_a_point_from_a_reading_needs_no_picture() -> None:
+    canvas = Element("button", "", at=-1, fp="canvas|1")
+    driver = point_world(PointHit("canvas", canvas))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_click_point", x=500, y=300)
+    # The reading's view is the one coordinate space: the point lands as on a picture.
+    assert not out.is_error and driver.acts[0].point == (500, 150)
+
+
+async def test_a_point_on_nothing_is_refused() -> None:
     driver = point_world(PointHit("none", tag="p", words=True))
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
-    first = await run(tools, "browser_click_point", x=500, y=300)
-    assert first.is_error and "browser_screenshot of this tab first" in first.text
-    await run(tools, "browser_screenshot")
     out = await run(tools, "browser_click_point", x=500, y=300)
     assert out.is_error and not driver.acts
     # What is there is told; a point on the 0-1000 scale is never doubted.
@@ -255,7 +263,7 @@ async def test_the_point_tool_asks_for_itself_and_the_note_names_the_order() -> 
         "destructiveHint": False,
         "idempotentHint": False,
     }
-    assert "browser_screenshot, then browser_click_point" in PAGE_NOTE
+    assert "the same in a picture, a reading and a step's result" in PAGE_NOTE
 
 
 async def test_a_point_on_a_label_clicks_its_field_where_the_field_is() -> None:

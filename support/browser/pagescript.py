@@ -69,7 +69,8 @@ MOVED = "moved"
 # before an element found covered is looked at once more.
 COVER_AGAIN_S = 0.25
 # Looking at the page after an act: a poll this often, done once nothing changed for
-# QUIET_S (a click waits up to LOOK_CAP_S for the page's first change), never longer.
+# QUIET_S (a click waits up to LOOK_CAP_S for the page's first change, unless the
+# browser's own input reached nothing: no reply can come then), never longer.
 # A page that never goes quiet (a feed, a clock, an ad that keeps drawing) is waited
 # on for LOOK_BUSY_S after its first change at most, since nothing says which of its
 # changes the act made; what it shows later is in the reading that follows.
@@ -649,7 +650,7 @@ _PAGE_JS = (
     out.hidden = hid;
     out.spots.push(["", best.r.left, best.r.top, best.r.width, best.r.height]);
   }
-  out.view = [window.innerWidth || 0, window.innerHeight || 0];
+  out.view = [window.innerWidth || 0, window.innerHeight || 0, window.scrollX || 0, window.scrollY || 0, window.devicePixelRatio || 1];
   // Whether a check's answer field holds something: the check was passed.
   var answers = P.qsa.call(document, ANSWER_SEL);
   for (var ai = 0; ai < answers.length && ai < 10; ai++) {
@@ -947,7 +948,10 @@ def act_script(spec: dict[str, Any]) -> str:
     };
     var poll = function () {
       unguard(held);  // the act is over: the person's own clicks are theirs again
-      return P.json({doc: true, count: count, quiet: Date.now() - last, target: P.json(stateOf(n)) !== s0, moved: blocked.indexOf("moved") >= 0});
+      // Whether the browser's own input reached the element: only an armed act counts its events.
+      var reached = null;
+      if (mode === "arm" && !(hit && hit.surface === "frame")) { reached = false; for (var k in seen) { reached = true; break; } }
+      return P.json({doc: true, count: count, quiet: Date.now() - last, target: P.json(stateOf(n)) !== s0, moved: blocked.indexOf("moved") >= 0, reached: reached});
     };
     var timer = window.setTimeout(finish, 20000);
     undo.push(function () { window.clearTimeout(timer); });
@@ -1324,6 +1328,21 @@ def _view(data: Any) -> View | None:
     )
 
 
+def _page_view(data: dict[str, Any]) -> View | None:
+    """The view a reading was made in (``view`` of :func:`page_script`: width, height, scroll, pixel ratio), or None.
+
+    Its address is the page's own (``location.href``), as for a picture's
+    view: a point is checked against it in the page.
+    """
+    view, url, doc = data.get("view"), data.get("url"), data.get("doc")
+    if not isinstance(view, list) or len(view) != 5 or not isinstance(doc, str):
+        return None
+    width, height, x, y, ratio = (as_number(v) for v in view)
+    if width <= 0 or height <= 0 or not isinstance(url, str):
+        return None
+    return View(url, doc, width, height, x, y, ratio if ratio > 0 else 2.0)
+
+
 def as_number(value: Any) -> float:
     return float(value) if isinstance(value, int | float) else 0.0
 
@@ -1530,7 +1549,7 @@ def _aims(
     """
     spots = data.get("spots") if placed is None else placed
     view = data.get("view")
-    if not isinstance(spots, list) or not isinstance(view, list) or len(view) != 2:
+    if not isinstance(spots, list) or not isinstance(view, list) or len(view) < 2:
         return ()
     width, height = as_number(view[0]), as_number(view[1])
     hidden = next(iter(_check_boxes(data.get("hidden"))), "")
@@ -1665,6 +1684,7 @@ class PageScriptActs:
             unreached=boxes,
             aims=_aims(data, placed),
             solved=data.get("solved") is True,
+            view=_page_view(data),
         )
 
     async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
@@ -1765,6 +1785,27 @@ class PageScriptActs:
                 with contextlib.suppress(BrowserError):
                     await self._read(mark_script(self._ring, *mark, on=False))
 
+    async def centre(
+        self, tab: str | None, act: Act
+    ) -> tuple[View, float, float] | None:
+        """Where the element of *act* is now, as the scroll step of an act finds it (see :meth:`BrowserDriver.centre`)."""
+        if act.point is not None or act.element.frame:
+            return None
+        await self._focus(tab)
+        try:
+            ready = await self._script(act_script({**act_spec(act), "mode": "scroll"}))
+        except BrowserError:
+            return None
+        x, y = ready.get("cx"), ready.get("cy")
+        view = _view(await self._read(VIEW_JS))
+        if (
+            view is None
+            or not isinstance(x, int | float)
+            or not isinstance(y, int | float)
+        ):
+            return None
+        return view, float(x), float(y)
+
     async def _settled_blank(self, tab: str | None) -> bool:
         """Whether the browser says *tab* is empty now (it may take a moment to say so)."""
         for attempt in range(BLANK_TRIES):
@@ -1811,9 +1852,7 @@ class PageScriptActs:
             ready = await self._script(act_script({**spec, "mode": "scroll"}))
         return ready
 
-    async def _scripted(
-        self, spec: dict[str, Any], act: Act, passed: str, failed: bool
-    ) -> ActResult:
+    async def _scripted(self, spec: dict[str, Any], act: Act, passed: str) -> ActResult:
         """The act by the page script, with the look after it."""
         key = new_key()
         try:
@@ -1835,7 +1874,6 @@ class PageScriptActs:
             "point" if act.point is not None else "page-script",
             passed,
             observed(data, quiet),
-            native_failed=failed,
         )
 
     @staticmethod
@@ -1848,7 +1886,10 @@ class PageScriptActs:
 
         The page is quiet once nothing changed for :data:`QUIET_S` (and that
         long after the act); a click, or Enter, first waits for the page's
-        first change, since a reply from the site may take a moment. It never
+        first change, since a reply from the site may take a moment, except
+        when the browser's own input reached nothing (the observer saw none of
+        its events on the element): the act missed, and the page script is
+        tried next with a look of its own. It never
         waits longer than :data:`LOOK_CAP_S`, and a page that has changed but
         does not go quiet is left :data:`LOOK_BUSY_S` after its first change.
         A page that left for another
@@ -1882,7 +1923,8 @@ class PageScriptActs:
             if changed and changed_at is None:
                 changed_at = spent
             still = as_number(now.get("quiet")) >= QUIET_S * 1000
-            if spent >= QUIET_S and still and (changed or not first):
+            missed = now.get("reached") is False
+            if spent >= QUIET_S and still and (changed or not first or missed):
                 break
             limit = LOOK_CAP_S
             if changed_at is not None:

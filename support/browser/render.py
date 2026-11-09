@@ -156,12 +156,27 @@ class Snapshot:
         default_factory=dict
     )  # where the box of a human check is: origin -> (x, y) on the 0-1000 scale
     solved: bool = False  # a human check on the page was passed
+    since: str = ""  # the reading whose refs this one keeps (see make_snapshot)
 
 
 def make_snapshot(
-    raw: RawPage, *, sid: str, tab: str, origin: str, first_ref: int
+    raw: RawPage,
+    *,
+    sid: str,
+    tab: str,
+    origin: str,
+    first_ref: int,
+    before: Snapshot | None = None,
 ) -> Snapshot:
-    """A :class:`Snapshot` of *raw*. Refs are ``e<first_ref>`` onward, never reused."""
+    """A :class:`Snapshot` of *raw*. New refs are ``e<first_ref>`` onward, never reused.
+
+    With *before*, the reading an act was done on, an element of the same
+    document and address keeps its ref there when it is the same element:
+    the same kind, words, destination, field, frame and place (``context``),
+    and the only one like that in both readings (its value or state may have
+    changed). Every other element gets a new ref, so an old ref never names
+    another element than the one it named.
+    """
     snap = Snapshot(
         sid,
         tab,
@@ -202,8 +217,54 @@ def make_snapshot(
         snap.payment = True  # a payment page is not read at all
         return snap
     snap.parts = split_parts(raw.text)
-    snap.elements = {f"e{first_ref + i}": item for i, item in enumerate(kept)}
+    carried: dict[int, str] = {}
+    if (
+        before is not None
+        and before.doc
+        and before.doc == raw.doc
+        and before.url.split("#", 1)[0] == raw.url.split("#", 1)[0]
+    ):
+        carried = _carried(before, kept)
+        snap.since = before.id if carried else ""
+    fresh = first_ref
+    for i, item in enumerate(kept):
+        ref = carried.get(i)
+        if ref is None:
+            ref, fresh = f"e{fresh}", fresh + 1
+        snap.elements[ref] = item
     return snap
+
+
+def _identity(item: Element) -> tuple[object, ...]:
+    """What makes an element the same one in two readings of a document: all but its value and state."""
+    return (
+        item.kind,
+        item.label,
+        item.href,
+        item.sensitive,
+        item.also,
+        item.submit,
+        item.attrs,
+        item.frame,
+        item.site,
+        item.plain,
+        item.context,
+    )
+
+
+def _carried(before: Snapshot, kept: list[Element]) -> dict[int, str]:
+    """The refs of *before* that elements of *kept* keep: by position in *kept*, each one unique by :func:`_identity` in both."""
+    old: dict[tuple[object, ...], list[str]] = {}
+    for ref, item in before.elements.items():
+        old.setdefault(_identity(item), []).append(ref)
+    new: dict[tuple[object, ...], list[int]] = {}
+    for i, item in enumerate(kept):
+        new.setdefault(_identity(item), []).append(i)
+    return {
+        at[0]: refs[0]
+        for key, at in new.items()
+        if len(at) == 1 and len(refs := old.get(key, [])) == 1
+    }
 
 
 def boxes_of(raw: RawPage, origin: str) -> tuple[str, ...]:
@@ -339,6 +400,68 @@ def render_page(
         lines.append(
             f"[part {part} of {total}: browser_read part={part + 1} continues]"
         )
+    return block(snap.id, attrs, "\n".join(lines))
+
+
+def render_change(
+    snap: Snapshot, before: Snapshot, changes: list[str] | None = None
+) -> str | None:
+    """The page block of *snap* as what changed since *before*, the reading an act was done on.
+
+    Only for a reading that kept refs of *before* (``since``): the same
+    document at the same address. It holds *changes* (see :func:`changes_lines`),
+    the lines of text the page shows now that it did not, and the elements that
+    are new or changed (with new refs, or their kept ref when only their
+    value or state changed); every other element keeps its ref and is not
+    listed again. None when the change is too large to describe that way
+    (more than half a part of new text, or more than :data:`FIND_LIMIT`
+    elements): the caller shows the whole page then.
+    """
+    if not snap.since or snap.since != before.id or snap.payment:
+        return None
+    was = set("\n".join(before.parts).split("\n"))
+    added = [
+        line for line in "\n".join(snap.parts).split("\n") if line and line not in was
+    ]
+    if sum(weight(c) for line in added for c in line) > TEXT_BUDGET // 2:
+        return None
+    told = set(changes or [])  # new text the act's observer saw is said once
+    added = [line for line in added if f'new text: "{line}"' not in told]
+    listed = [
+        (ref, item)
+        for ref, item in snap.elements.items()
+        if before.elements.get(ref) != item
+    ]
+    gone = [ref for ref in before.elements if ref not in snap.elements]
+    if len(listed) > FIND_LIMIT:
+        return None
+    lines = changes_lines(changes or [])
+    if added:
+        lines += ["text now on the page that was not:", *added]
+    if listed:
+        lines.append("elements new or changed:")
+        lines.extend(element_line(ref, item, snap.origin) for ref, item in listed)
+    if gone:
+        lines.append(
+            f"[{len(gone)} element(s) of {before.id} gone: {', '.join(gone[:FIND_LIMIT])}]"
+        )
+    if (snap.unreached, snap.aims, snap.solved) != (
+        before.unreached,
+        before.aims,
+        before.solved,
+    ):
+        lines.extend(
+            unreached_line(origin, snap.aims.get(origin), snap.solved)
+            for origin in snap.unreached
+        )
+    lines.append(
+        "[everything else is as it was, and its refs still hold; browser_read "
+        "shows the whole page]"
+    )
+    attrs = (
+        f"tab={field_text(snap.tab, 40)} origin={snap.origin} "
+        f'title="{field_text(snap.title, TITLE_CHARS)}" since={before.id}'
+    )
     return block(snap.id, attrs, "\n".join(lines))
 
 

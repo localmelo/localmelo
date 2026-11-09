@@ -19,10 +19,12 @@ ToolFunction = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
 # What a running tool says about its own call, for the call's ``tool.finished``
 # event. Each call of a run with an event sink gets a new dict; a tool sets a
 # key in it (never the variable, which a copy of the context would not carry
-# back). The only key the event takes is ``allowed_local``: web_fetch read a
-# test server on this computer that ``[tools] web_fetch_allow_local`` lists.
-# Unset (None) outside such a run, where there is no event to mark.
-TOOL_MARKS: ContextVar[dict[str, bool] | None] = ContextVar(
+# back). The event takes two keys: ``allowed_local`` (true: web_fetch read a
+# test server on this computer that ``[tools] web_fetch_allow_local`` lists) and
+# ``phases`` (seconds by phase of the call, beside its ``duration_s``: where a
+# browser step's time went). Unset (None) outside such a run, where there is no
+# event to mark.
+TOOL_MARKS: ContextVar[dict[str, Any] | None] = ContextVar(
     "localmelo_tool_marks", default=None
 )
 

@@ -1,13 +1,13 @@
-"""The ways in order: a site where Safari's own input did not work starts with the page script."""
+"""The ways in order: every element click tries the browser's own input first, and one miss does not stick to the site."""
 
 from __future__ import annotations
 
-from localmelo.tests.browser.fakes import button, page
-from localmelo.tests.browser.test_acting import HOME, OTHER, Asks, asking, world
+from localmelo.tests.browser.fakes import button
+from localmelo.tests.browser.test_acting import HOME, world
 from localmelo.tests.browser.test_provider import run, tools_of
 
 
-async def test_a_site_where_the_browsers_input_failed_starts_with_the_page_script() -> (
+async def test_a_miss_of_the_browsers_input_on_one_element_does_not_stick_to_the_site() -> (
     None
 ):
     driver = world(button("Happy"), button("Sad"))
@@ -15,18 +15,9 @@ async def test_a_site_where_the_browsers_input_failed_starts_with_the_page_scrip
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     first = await run(tools, "browser_click", ref="e1")
-    assert first.text.startswith(
-        "Clicked e1 (via page-script: the browser's own input did not reach it)."
-    )
-    second = await run(tools, "browser_click", ref="e4")
-    assert driver.acts[1].native is False
-    assert second.text.startswith(
-        "Clicked e4 (via page-script: the browser's own input did not reach this "
-        "site's elements earlier in this chat)."
-    )
-    # Another site still starts with the browser's own input.
-    driver.pages[OTHER] = page(OTHER, "Other.", button("Go"))
-    with asking(Asks()):
-        await run(tools, "browser_open", url=OTHER)
-        await run(tools, "browser_click", ref="e7")
-    assert driver.acts[2].native is True
+    assert first.text.startswith("No effect: a script click on e1")
+    assert "the browser's own input did not reach it" in first.text
+    # The next click on the site is tried with the browser's own input again.
+    second = await run(tools, "browser_click", ref="e2")
+    assert "the browser's own input did not reach it" in second.text
+    assert "earlier in this chat" not in second.text
