@@ -1524,6 +1524,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - `[memory] followup_query` is removed (#452). A message with no content of its own is always searched with what
   you typed in the chat's last turns, as its default `"recent"` did. A config file that still holds the key loads,
   the line is ignored and `melo config` names it; `-X memory.followup_query=...` exits 2 and says it was removed.
+- Developer only: the `model` and `model+tags` values of `[memory] sleep` are gone, and a saved setting with either now means `rules`. They showed no gain over `rules` in our tests. Part of #363.
 
 ### Security
 

@@ -3188,18 +3188,16 @@ class ChatMemory:
         *,
         now: float | None = None,
         chats: SessionStore | None = None,
-        budget: int | None = None,
         began: float | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
-        only duplicates are merged). Model variants share a twelve-call limit;
-        each request to a model server first checks the lock (``[memory]
-        sleep_lock``, else the shared GPU lock ``[scheduler] gpu_lock_file``,
-        where a lock of ``lock_self`` is ours) and new activity: a chat, main
-        chat, task or worker turn that started after *began*, the time the
-        caller took before its own idle checks (``None``: now). The run then
-        stops, saved and undoable. Nothing happens with memory off or ``off``.
+        only duplicates are merged). Each embedding request first checks the lock
+        (``[memory] sleep_lock``, else the shared GPU lock ``[scheduler]
+        gpu_lock_file``, where a lock of ``lock_self`` is ours) and new activity:
+        a chat, main chat, task or worker turn that started after *began*, the
+        time the caller took before its own idle checks (``None``: now). The run
+        then stops, saved and undoable. Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
         began = time.time() if began is None else began
@@ -3212,17 +3210,7 @@ class ChatMemory:
         until = await index.meta("sleep_until")
         forgotten = await index.forgotten_at()
         turns = (
-            await sleeping.sleep_turns(
-                chats,
-                (
-                    max(until, forgotten)
-                    if variant == "rules"
-                    else max(
-                        forgotten,
-                        (began if now is None else now) - sleeping.BACKLOG_SECONDS,
-                    )
-                ),
-            )
+            await sleeping.sleep_turns(chats, max(until, forgotten))
             if chats is not None
             else []
         )
@@ -3238,19 +3226,6 @@ class ChatMemory:
                     ):
                         return True
             return False
-
-        async def notes_for(typed: str) -> list[int]:
-            embedded = await self._embed([typed], EMBED_TIMEOUT_S, query=True)
-            vector = unit(embedded.vectors[0]) if embedded.vectors else None
-            found = ranked(
-                await self._sync(),
-                typed,
-                vector,
-                embedded.model,
-                now=clock.now(),
-                coverage=0.0,
-            )
-            return [int(item.key[2:]) for item in found if item.is_record][:6]
 
         async def embed_note(text: str) -> tuple[Sequence[float] | None, str]:
             embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
@@ -3270,13 +3245,8 @@ class ChatMemory:
                     variant=variant,
                     now=now,
                     until=max(until, forgotten),
-                    provider=(
-                        self.chat_provider() if variant.startswith("model") else None
-                    ),
-                    notes_for=notes_for,
                     is_active=active,
                     lock=lock,
-                    budget=budget,
                     embed_note=embed_note if self.embedding()[0] is not None else None,
                     lock_self=lock_self,
                 )

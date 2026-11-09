@@ -56,10 +56,6 @@ CHANGE_WORDS: Final = {
     "O1": "merged",
     "O2": "updated",
     "O3": "added",
-    "O4": "reworded",
-    "ADD": "added",
-    "UPDATE": "updated",
-    "RETIRE": "retired",
 }
 
 
