@@ -781,7 +781,10 @@ Tools run with the user's permissions, not in a sandbox.
   stopped, in its own session, with the console's words "Continue the task from
   where you stopped." as its next turn: 202 `{"task": ..., "message":
   "continued"}`; 404 `not_found`, and 409 `invalid_transition` for a task that
-  did not run out of steps.
+  did not run out of steps. A task a chat started runs once: the job goes on in
+  a fresh task instead, with those words as melo's note in its packet, and the
+  answer is 202 with that task and `"message": "successor"`; a second call for
+  the same ending answers the same task.
 - `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. A browser card's Stop adds `source` (`gen`, `run`,
@@ -839,7 +842,8 @@ on without a blocked step. `POST
 chat) and sends the go-ahead message to the task: 202 `{"task": ...,
 "message": "queued"}` for a task that has not finished (it reads it at its
 next step), `"continued"` for one that stopped before its job was done (it
-runs again); 404 `not_found` for no such block, 409 `not_allowable` for one
+runs again), `"successor"` with a fresh task for a task a chat started that
+stopped (it runs once: the fresh task has the step allowed once); 404 `not_found` for no such block, 409 `not_allowable` for one
 that cannot be allowed, 409 `already_allowed` once the step ran on an
 allowance or while one waits, 409 `invalid_transition` for a job that finished
 (`can_allow` is `false` then, and the block and its card carry `finished: true`:

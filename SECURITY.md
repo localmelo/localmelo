@@ -125,6 +125,22 @@ those tools can do.
   or a restart included: it goes back to you, and you press Send. After a
   restart only a row stored as a message runs. Any other row, one stored by
   an older version included, goes back the same way, without its picture.
+- **Work a chat hands on keeps its limits.** A chat's turn can hand the
+  rest of its work to one fresh task (#571). Only the person's own turn can,
+  only as the one call of its step (a step that mixes it with another call runs
+  none of them), and the task is admitted in one commit before anything of it
+  runs: a hand-off that is not admitted runs nothing, and a retry finds the same
+  task. The task's request is the person's message; what the chat wrote about
+  the work and what its calls returned reach it framed as data, never as the
+  person's words, so they add no file, site or post the person did not ask for.
+  It has its chat's mode, folder and grants, and the same reviews. No sign-in
+  moves: the request's password handles do not work in the task. While the chat
+  holds a browser page, a take-over card or an approval waiting, the work stays
+  in the chat; a page is never closed and opened again to move it. A task a chat
+  started runs once: more work on its job is a fresh task that keeps the job's
+  follow-up count and refuses every step blocked earlier in the job after the
+  chat's own continue, so a fresh context resets no limit, and Stop stays final
+  for the task it stopped.
 - **A chat's mode decides for the tasks it started.** A task you started
   follows the Ask or Auto of its chat while it runs, so a switch you make in
   the chat is not ignored by work that began earlier. Auto to Ask applies at
