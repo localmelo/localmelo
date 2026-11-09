@@ -1382,6 +1382,17 @@ async def test_a_reply_is_cached_by_the_judge_version_and_a_second_ask_makes_no_
     assert hippo_encode.window_key("stub-encoder", "a window") == window_key
     await judge_once(router, provider, cache=cache, stats=stats)
     assert len(provider.prompts) == 2
+    # A reply kept under the previous judge version is not reused.
+    assert hippo_judge.JUDGE_VERSION != "judge-1"
+    stale = Cache("")
+    stale.put(
+        hippo_encode.window_key("stub-encoder", provider.prompts[0], "judge-1"),
+        json.loads(verdict("same")),
+    )
+    fresh = StubEncoder(lambda _: verdict())
+    monkeypatch.undo()
+    assert await judge_once(router, fresh, cache=stale) is None
+    assert len(fresh.prompts) == 1
 
 
 async def test_no_request_is_made_for_an_item_with_no_close_item(
@@ -1440,10 +1451,28 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
             ["I live in Utrecht"],
             False,
         ),
-        (  # a plain lowercase word is not distinctive
-            "The user now uses a standing desk.",
-            "The user uses a regular desk.",
-            ["I got a standing desk"],
+        (  # a plain lowercase word is a value
+            "The user now drinks green tea.",
+            "The user drinks black coffee.",
+            ["I drink green tea now"],
+            True,
+        ),
+        (  # a number word is a value
+            "The user has five cousins.",
+            "The user has two cousins.",
+            ["actually five"],
+            True,
+        ),
+        (  # the new words are melo's, not the person's
+            "The user now drinks green tea.",
+            "The user drinks black coffee.",
+            ["what do I drink?"],
+            False,
+        ),
+        (  # "now" says something changed, not what the value is
+            "The user now lives in Utrecht.",
+            "The user lives in Utrecht.",
+            ["since now"],
             False,
         ),
         (  # a weekday is one, however it is written
@@ -1501,7 +1530,10 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
         "not typed",
         "nothing typed",
         "old has it",
-        "plain",
+        "plain word",
+        "number word",
+        "not typed, only asked",
+        "change word now",
         "weekday plural",
         "weekday short form",
         "weekday 星期",
@@ -1521,7 +1553,7 @@ async def test_the_request_holds_only_the_typed_words_cleaned_of_secrets_and_bou
         "change word and a number",
     ],
 )
-def test_a_change_needs_a_distinctive_new_word_in_the_typed_words(
+def test_a_change_needs_a_new_value_word_in_the_typed_words(
     new: str, old: str, said: list[str], wanted: bool
 ) -> None:
     assert hippo_judge.supported(new, old, said) is wanted
