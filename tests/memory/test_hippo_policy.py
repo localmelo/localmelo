@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from localmelo.melo.memory.hippo import (
     CHANGE_MARKERS,
     REMEMBER_MARKERS,
@@ -186,6 +188,17 @@ def test_the_marker_constants_are_public_and_hold_english_and_chinese() -> None:
     assert "地址" in SEMANTIC_ATTRIBUTES
     assert "moved" in CHANGE_MARKERS
     assert "搬到" in CHANGE_MARKERS
+
+
+@pytest.mark.parametrize("marker", ["改到", "改成", "调到", "换到"])
+def test_a_chinese_word_that_moves_a_value_is_a_change_marker(marker: str) -> None:
+    assert marker in CHANGE_MARKERS
+    active = [_entry(1, "I live in Berlin in a small flat", kind="profile")]
+    decision = _decision(
+        f"I live in Paris in a large house {marker}", kind="profile", active=active
+    )
+    # With a change marker the different value is an update, not a contradiction.
+    assert (decision.action, decision.target_id) == ("UPDATE", 1)
 
 
 def test_a_candidate_carries_its_items_and_remember_bool() -> None:

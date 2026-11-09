@@ -39,7 +39,12 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.memory.hippo.policy import _is_distinctive, content_tokens
+from localmelo.melo.memory.hippo.policy import (
+    CHANGE_MARKERS,
+    _is_distinctive,
+    content_tokens,
+    value_tokens,
+)
 from localmelo.melo.memory.retrieval.llm import send_from_provider
 from localmelo.melo.schema import split_thinking
 from localmelo.support.memory import hippo_encode, note_judge
@@ -153,18 +158,29 @@ def _weekdays(text: str) -> str:
     return _ENGLISH_WORD.sub(_weekday, text)
 
 
+def _unmarked(text: str) -> str:
+    """*text* with the Chinese words that say something changed ("改到", "搬到") taken
+    out: they say a change happened, not what the new value is, and a run of two
+    characters that spans one and the next word ("到周") is no more a value."""
+    for marker in CHANGE_MARKERS:
+        if not marker.isascii():
+            text = text.replace(marker, " ")
+    return text
+
+
 def supported(new: str, old: str, said: Sequence[str]) -> bool:
     """Whether the typed words *said* back a change from *old* to *new*: at least one
     distinctive word of *new* that *old* lacks (a number, a capitalised word, a run
     of CJK) is among them. Not every such word: the encoder writes "next week" as a
-    date the person never typed. Words are matched as written, except that the forms
-    of a weekday are one (:func:`_weekdays`): "Fridays" in an item is what "friday"
-    typed says."""
+    date the person never typed, and a word that only says a change happened
+    (:data:`~.policy.CHANGE_MARKERS`) is no value. Words are matched as written,
+    except that the forms of a weekday are one (:func:`_weekdays`): "Fridays" in an
+    item is what "friday" typed says."""
     new, old = _weekdays(new), _weekdays(old)
     typed = content_tokens(_weekdays(" ".join(said)))
     return any(
         token in typed and _is_distinctive(token, new)
-        for token in content_tokens(new) - content_tokens(old)
+        for token in value_tokens(_unmarked(new)) - content_tokens(old)
     )
 
 
