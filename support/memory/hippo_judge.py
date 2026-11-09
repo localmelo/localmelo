@@ -17,9 +17,9 @@ answer acts, as in :mod:`.note_judge`:
   and the newer fact stays current whichever was encoded first
   (:meth:`~.hippo_route.Router.route`). Two texts cannot show the new one is true (it
   may come from a page or a misread recap), so code checks the answer before it acts
-  (:func:`supported`): a word of the new item that the old one lacks must be among the
-  typed words of the turns the new item cites (the forms of a weekday count as one
-  word).
+  (:func:`supported`): a word of the new item that the old one lacks must be stated
+  in the typed words of the turns the new item cites (the forms of a weekday count as
+  one word).
 - ``other``: anything else. The item is routed by the rules alone.
 
 Every failure counts as ``other``: a timeout, an error, a reply that is not strict
@@ -44,6 +44,7 @@ from typing import Any, Final
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.hippo.policy import (
     CHANGE_MARKERS,
+    _is_distinctive,
     content_tokens,
     value_tokens,
 )
@@ -176,19 +177,60 @@ def _unmarked(text: str) -> str:
     return text
 
 
+# Words that carry no value, so a typed one is no support for a plain word of an item:
+# what a question is built from, and the filler around what a person says about a page.
+_NO_VALUE: Final = frozenset(
+    {
+        *("what", "when", "where", "which", "who", "why", "how"),
+        *("do", "does", "did", "will", "would", "can", "could", "should", "may"),
+        *("might", "must", "shall", "is", "are", "was", "were", "be", "been"),
+        *("have", "has", "had"),
+        *("about", "say", "says", "said", "again", "also", "page", "not"),
+    }
+)
+# A typed sentence with its end marks; a text with no end mark is one sentence.
+_SENTENCE: Final = re.compile(r"[^.!?。！？\r\n]+[.!?。！？]*")
+
+
+def _statements(text: str) -> str:
+    """The sentences of *text* that are not questions (they do not end in "?" or "？",
+    nor in "?!"): a question names a topic and states no value."""
+    return " ".join(
+        sentence.group(0)
+        for sentence in _SENTENCE.finditer(text)
+        if "?" not in sentence.group(0) and "？" not in sentence.group(0)
+    )
+
+
 def supported(new: str, old: str, said: Sequence[str]) -> bool:
-    """Whether the typed words *said* back a change from *old* to *new*: at least one
-    value word of *new* that *old* lacks is among them. One word, not every one: the
-    encoder writes "next week" as a date the person never typed, and a word that only
-    says a change happened (:data:`~.policy.CHANGE_MARKERS`) is no value. Any value
-    word counts, not only a number, a capitalised word or a run of CJK: an English
-    value is often a plain lowercase word ("green tea", "five"), and a word that is
-    new to the old item and typed by the person is what a typed change looks like.
+    """Whether the typed words *said* back a change from *old* to *new*: the person
+    stated at least one value word of *new* that *old* lacks. One word, not every one:
+    the encoder writes "next week" as a date the person never typed, and a word that
+    only says a change happened (:data:`~.policy.CHANGE_MARKERS`) is no value. The
+    rules, as the check is the backstop that keeps a value the person never said from
+    replacing a fact:
+
+    - A word of one character counts only if it is a digit: a fragment ("s" of
+      "what's", one CJK character) is not a value.
+    - A distinctive word (:func:`~.policy._is_distinctive`: a number, a word
+      capitalised in *new*, a CJK run of two) counts anywhere in the typed words, a
+      question too: "can you move it to Friday?" names the new day.
+    - A plain word ("oat", "green", "five") counts only in a typed sentence that is
+      not a question, and when it is not in :data:`_NO_VALUE`: a question names a
+      topic and states no value, so "when is my dentist visit?" backs no new
+      "visit".
+
     Words are matched as written, except that the forms of a weekday are one
     (:func:`_weekdays`): "Fridays" in an item is what "friday" typed says."""
     new, old = _weekdays(new), _weekdays(old)
-    typed = content_tokens(_weekdays(" ".join(said)))
-    return bool(typed & (value_tokens(_unmarked(new)) - content_tokens(old)))
+    text = _weekdays("\n".join(said))
+    typed, stated = content_tokens(text), content_tokens(_statements(text)) - _NO_VALUE
+    candidates = value_tokens(_unmarked(new)) - content_tokens(old)
+    return any(
+        token in (typed if _is_distinctive(token, new) else stated)
+        for token in candidates
+        if len(token) > 1 or token.isdigit()
+    )
 
 
 def _valid(value: object, shown: int) -> bool:
