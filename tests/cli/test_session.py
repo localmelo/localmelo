@@ -24,6 +24,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.schema import Message
 from localmelo.support.backends import discovery
 from localmelo.support.backends.discovery import DiscoveryError
+from localmelo.support.backends.model_offer import offer
 from localmelo.support.cli import commands
 from localmelo.support.cli.agents import AgentFactory, url_backend
 from localmelo.support.cli.app import StatusBar
@@ -481,6 +482,22 @@ async def test_model_offers_chat_models_and_marks_the_loaded_one(
         ("m2", True, "chat"),
     ]
     assert setup.session.models == ["embed-x", "m1", "m2", "rerank-y"]
+
+
+async def test_model_lists_what_settings_lists_and_numbers_the_same_way(
+    setup: Setup,
+) -> None:
+    listed = ["embed-x", "m1", "m2", "rerank-y"]
+    setup.factory.listed = listed
+    setup.app.picks = [None]
+    await setup.session.model("")
+    [(rows, _, _)] = setup.app.offered
+    assert [row.id for row in rows] == list(offer(listed).chat)
+    # /model 2 is the second row it shows, not the second model of the listing.
+    await setup.session.model("2")
+    assert setup.session.factory.backend.model == "m2"
+    await setup.session.model("3")
+    assert "✗ Type a number from 1 to 2, or a model id." in setup.out.text()
 
 
 async def test_model_asks_which_models_are_loaded_only_between_several(

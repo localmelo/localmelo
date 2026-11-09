@@ -639,6 +639,11 @@ def has_negative_assertion(text: str) -> bool:
     return bool(_NEGATION_MARKERS.search(text) or _CJK_NEGATION.search(text))
 
 
+def without_negation(text: str) -> str:
+    """*text* with the words :func:`has_negative_assertion` matches taken out."""
+    return _CJK_NEGATION.sub("", _NEGATION_MARKERS.sub(" ", text))
+
+
 _CJK_ASSERTION = re.compile(
     r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12}|"
     r"(?:不在|未在)[^?？!！。]{1,80}举行(?:，[^?？!！。]{0,80})?)[。.!！]?$"

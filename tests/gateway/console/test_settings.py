@@ -537,9 +537,14 @@ def test_models_endpoint_with_mock_transport(
     # A listed embedding model is the offer "Remember across chats with <model>?".
     assert ok.json() == {
         "models": ["qwen3-8b", "nomic-embed"],
+        "chat_models": ["qwen3-8b"],
         "embedding_models": ["nomic-embed"],
         "suggested_embedding": "nomic-embed",
+        "check": ok.json()["check"],
     }
+    # The saved model is the one it is checked against (the fixture's is not on the list).
+    assert ok.json()["check"]["state"] == "switch"
+    assert ok.json()["check"]["use"] == "qwen3-8b"
 
     # Without parameters, GET /api/models uses the saved chat backend and URL,
     # and patching discovery.list_models directly is honored too.
@@ -582,6 +587,71 @@ def test_models_endpoint_with_mock_transport(
         "message": "Listing models works for local backends only; type the model name.",
         "details": {},
     }
+
+
+_LIST_MODELS = routes_settings.discovery.list_models
+
+
+def _serving(monkeypatch: pytest.MonkeyPatch, *ids: str) -> None:
+    """Make the models route list *ids*, as a server on a fake transport."""
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": [{"id": i} for i in ids]})
+    )
+
+    async def listing(
+        backend_key: str, url: str, *, timeout_s: float = 5.0
+    ) -> list[str]:
+        return await _LIST_MODELS(
+            backend_key, url, timeout_s=timeout_s, transport=transport
+        )
+
+    monkeypatch.setattr(routes_settings.discovery, "list_models", listing)
+
+
+def test_models_endpoint_says_what_to_do_about_a_chat_model_the_server_lacks(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    query = {"backend": "mlc", "url": "http://ok.test:8000/v1"}
+    _serving(monkeypatch, "new", "nomic-embed")
+    switch = client.get("/api/models", params={**query, "model": "old"}).json()
+    assert switch["chat_models"] == ["new"]
+    assert switch["check"] == {
+        "state": "switch",
+        "model": "old",
+        "use": "new",
+        "line": "“old” is not on the server, so melo uses “new”, "
+        "the only chat model it offers.",
+    }
+    listed = client.get("/api/models", params={**query, "model": "new"}).json()
+    assert listed["check"]["state"] == "ok"
+
+    _serving(monkeypatch, "a", "b", "nomic-embed")
+    several = client.get("/api/models", params={**query, "model": "old"}).json()
+    assert several["chat_models"] == ["a", "b"]
+    assert several["check"]["state"] == "missing"
+    assert several["check"]["use"] == ""
+    assert "2 chat models" in several["check"]["line"]
+    chinese = client.get(
+        "/api/models",
+        params={**query, "model": "old"},
+        headers={"X-LocalMelo-Language": "zh-Hans"},
+    ).json()
+    assert chinese["check"]["line"] != several["check"]["line"]
+
+
+def test_models_endpoint_checks_the_saved_model_when_none_is_given(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config.save(
+        Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(chat_url="http://ok.test:8000/v1", chat_model="old"),
+        )
+    )
+    _serving(monkeypatch, "new")
+    check = client.get("/api/models").json()["check"]
+    assert (check["state"], check["model"], check["use"]) == ("switch", "old", "new")
 
 
 @pytest.mark.parametrize(

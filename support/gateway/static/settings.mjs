@@ -122,7 +122,7 @@ export function setupSettings({
   applyTheme(theme);
 
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-key-input", "s-key-save", "s-key-replace", "s-key-remove", "s-base-url",
-    "s-chat-model", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
+    "s-chat-model", "s-model-pick", "s-thinking", "s-embed-backend", "s-embed-url", "s-embed-model", "s-embed-use"];
   // Each saves on its own; they wait while a change is being saved.
   const switchIds = ["s-across-chats", "s-web-fetch", "s-web-search", "s-app-windows", "s-follow-up", "s-reflection", "s-developer", ...RECALL.map((name) => `s-recall-${name}`),
     ...LANGUAGE_SETTINGS.map((name) => `s-language-${name}`), ...APPROVAL_MODES.map((name) => `s-approvals-${name}`),
@@ -139,8 +139,10 @@ export function setupSettings({
   let words = wordsOf("plain");
   let isDeveloper = false;
   let current = "model";
-  // The embedding model the last "Discover models" listed on the chat server; "" before one did.
+  // The embedding model the last listing of the chat server offered; "" before one did.
   let offered = "";
+  // The chat models that listing offered (`chat_models` of `GET /models`); empty before one answered or when it failed.
+  let offeredChat = [];
   // The hosted services (`choices.hosted`) and what the keychain holds for each, as last asked or changed.
   let presets = [];
   const keychain = new Map();
@@ -240,7 +242,7 @@ export function setupSettings({
   function enable(ready) {
     const chosen = !!chat.value; // Nothing is saved until the user chooses a server.
     for (const id of inputIds) $(id).disabled = !ready;
-    for (const id of ["s-chat-url", "s-chat-model"]) $(id).disabled = !ready || !chosen;
+    for (const id of ["s-chat-url", "s-chat-model", "s-model-pick"]) $(id).disabled = !ready || !chosen;
     for (const id of switchIds) $(id).disabled = !ready || saving;
     $("s-checkin").disabled = !ready || saving || !checkin;
     save.disabled = !ready || !chosen;
@@ -316,6 +318,7 @@ export function setupSettings({
     ]);
     options(embedding, loaded.choices.embedding_backends, loaded.embedding_backend || "none");
     offered = "";
+    offeredChat = [];
   }
 
   // The saved section of the preset's backend.
@@ -324,6 +327,29 @@ export function setupSettings({
   function fillModels(...lists) {
     const names = [...new Set(lists.flat().filter(Boolean))];
     $("s-model-options").replaceChildren(...names.map((name) => Object.assign(document.createElement("option"), {value: name})));
+  }
+
+  // The chat model is picked from the list the server offers; "Other" (the empty choice) brings back the field to type in.
+  const OTHER = "";
+  function renderModelPick() {
+    const pick = $("s-model-pick");
+    const listed = !isCloud() && offeredChat.length > 0;
+    pick.hidden = !listed;
+    if (listed) {
+      const model = $("s-chat-model").value;
+      options(pick, [...offeredChat.map((name) => ({key: name, label: name})), {key: OTHER, label: t("settings.otherModel")}],
+        offeredChat.includes(model) ? model : OTHER);
+    } else {
+      pick.replaceChildren();
+    }
+    showModelField();
+  }
+
+  // The typing field shows while there is no list, or while the list's choice is Other.
+  function showModelField() {
+    const typing = $("s-model-pick").hidden || $("s-model-pick").value === OTHER;
+    $("s-chat-model").hidden = !typing;
+    $("s-chat-model-label").htmlFor = typing ? "s-chat-model" : "s-model-pick";
   }
 
   function renderChat() {
@@ -338,6 +364,8 @@ export function setupSettings({
     $("s-key-env").value = data.api_key_env || "";
     $("s-base-url").value = data.base_url || "";
     fillModels(cloud ? item.models : []);
+    offeredChat = [];
+    renderModelPick();
     modelStatus.textContent = cloud ? t(item.models.length ? "settings.hosted.modelHint" : "settings.typeModel") : words.discover;
     discover.hidden = cloud;
     discover.disabled = busy || cloud || !chat.value;
@@ -1110,6 +1138,7 @@ export function setupSettings({
     if (open) {
       $("s-editor").scrollIntoView?.({block: "nearest"});
       $("s-adapter").focus?.({preventScroll: true});
+      discoverModels();
     }
   });
   $("s-editor-cancel").addEventListener("click", () => {
@@ -1193,6 +1222,7 @@ export function setupSettings({
       showError(errors.join("\n"));
       dialog.dataset.ready = "true";
       loadCheckin();
+      discoverModels();
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       busy = false;
@@ -1211,7 +1241,7 @@ export function setupSettings({
     invalidateTest();
   });
   reload.addEventListener("click", () => open(current));
-  chat.addEventListener("change", () => { invalidateTest(); renderChat(); enable(!busy); });
+  chat.addEventListener("change", () => { invalidateTest(); renderChat(); enable(!busy); discoverModels(); });
   embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); renderOffer(); });
   $("s-embed-use").addEventListener("change", () => {
     invalidateTest();
@@ -1235,13 +1265,26 @@ export function setupSettings({
       if (id === "s-chat-model" && isCloud()) $("s-thinking").checked = thinks(preset(), section(chat.value));
       if (id === "s-base-url") $("s-address-text").textContent = t("settings.hosted.addressIs", {address: $(id).value});
       if (id === "s-chat-url") {
+        // The list belongs to the address it was asked at: drop it until the new address is entered.
         discoveryVersion += 1;
-        $("s-model-options").replaceChildren();
+        offeredChat = [];
+        renderModelPick();
         modelStatus.textContent = words.discover;
         discover.disabled = busy || isCloud();
       }
     });
   }
+  $("s-chat-url").addEventListener("change", () => discoverModels());
+  $("s-model-pick").addEventListener("change", () => {
+    const name = $("s-model-pick").value;
+    if (name !== OTHER) {
+      section(chat.value).chat_model = name;
+      $("s-chat-model").value = name;
+      invalidateTest();
+    }
+    showModelField();
+    if (name === OTHER) $("s-chat-model").focus?.();
+  });
   $("s-thinking").addEventListener("change", (event) => {
     if (!isCloud()) return;
     section(chat.value).thinking = event.target.checked ? "on" : "off";
@@ -1324,36 +1367,43 @@ export function setupSettings({
     $(id).addEventListener("input", () => { section(embedding.value)[field] = $(id).value; invalidateTest(); });
   }
 
-  discover.addEventListener("click", async () => {
-    if (busy || !settings || isCloud()) return;
+  // Ask the server which models it offers, on its own whenever Settings opens or the address changes; the button asks again.
+  async function discoverModels() {
+    if (busy || !settings || isCloud() || !chat.value) return;
     const version = ++discoveryVersion;
     const currentGeneration = generation;
-    const params = new URLSearchParams({backend: chat.value, url: $("s-chat-url").value});
     if (!$("s-chat-url").value) {
       modelStatus.textContent = words.needUrl;
       return;
     }
+    const params = new URLSearchParams({backend: chat.value, url: $("s-chat-url").value, model: $("s-chat-model").value});
     discover.disabled = true;
     modelStatus.textContent = t("settings.discovering");
     try {
       const result = await api(`/models?${params}`);
       if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
-      $("s-model-options").replaceChildren();
-      for (const name of result.models) {
-        const option = document.createElement("option");
-        option.value = name;
-        $("s-model-options").append(option);
+      offeredChat = result.chat_models;
+      const {check} = result;
+      // Exactly one chat model on offer and the saved one gone: melo uses that one, and Save keeps it.
+      if (check.state === "switch") {
+        section(chat.value).chat_model = check.use;
+        $("s-chat-model").value = check.use;
+        invalidateTest();
       }
-      modelStatus.textContent = t(result.models.length ? "settings.discovered" : "settings.noModels");
+      renderModelPick();
+      modelStatus.textContent = check.line || t(offeredChat.length ? "settings.discovered" : "settings.noModels");
       offered = result.suggested_embedding || "";
       renderOffer();
     } catch (err) {
       if (version !== discoveryVersion || currentGeneration !== generation || !dialog.open) return;
+      offeredChat = [];
+      renderModelPick();
       modelStatus.textContent = err.message || t("settings.discoverFailed");
     } finally {
       if (version === discoveryVersion && currentGeneration === generation && dialog.open) discover.disabled = busy || isCloud();
     }
-  });
+  }
+  discover.addEventListener("click", () => discoverModels());
 
   testButton.addEventListener("click", async () => {
     if (busy || !settings || testButton.disabled) return;

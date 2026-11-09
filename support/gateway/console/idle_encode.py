@@ -1,6 +1,7 @@
 """Encode chats into memory items on their own, while the computer is idle (#428).
 
-With ``[memory] recall_source = "items"`` recall reads memory items and the turns no item
+With ``[memory] recall_source = "items"`` (or ``"auto"``, which reads items only once
+the encoder has caught up) recall reads memory items and the turns no item
 holds yet (:meth:`ChatMemory.waiting_turns
 <localmelo.support.memory.ChatMemory.waiting_turns>`). Items come from the chat model,
 which reads a chat's turns window by window (:meth:`ChatMemory.compress_chat
@@ -8,8 +9,12 @@ which reads a chat's turns window by window (:meth:`ChatMemory.compress_chat
 the gateway and, about every :data:`~.idle_gates.POLL_S` seconds, encodes while all of
 this holds, and reads nothing otherwise:
 
-- ``recall_source`` is ``items`` and memory across chats is on (with ``turns``, the
-  default, the loop reads nothing);
+- ``recall_source`` is ``items`` or ``auto`` and memory across chats is on (with
+  ``turns``, the default, the loop reads nothing);
+- with ``auto``, the chat model is one we have checked
+  (:meth:`ChatMemory.chat_model_checked
+  <localmelo.support.memory.ChatMemory.chat_model_checked>`): a person who reads
+  turns while the encoder catches up is encoded only by a model whose items may be read;
 - the chat model is a local one (the chat backend is in ``LOCAL_BACKENDS``): a hosted
   model costs money and would send every chat out again, so those chats stay turns;
 - the computer is idle (:func:`~.idle_gates.idle_reason`), and a chat model is set up.
@@ -35,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from localmelo.support.backends.openai_family import LOCAL_BACKENDS
+from localmelo.support.memory.index import ENCODED_KINDS
 
 from .idle_gates import IdleOptions, IdleStep, idle_reason
 
@@ -56,8 +62,8 @@ class EncodeRun:
     """What one run did. *stopped* says why it ended: ``empty`` (nothing waits),
     ``failed`` (a window failed), ``forgotten`` (the user forgot, or deleted the
     chat, while a window was with the model: nothing from it was kept) or the gate
-    that said no (``off``, ``hosted``, ``store``, ``lock``, ``active``, ``tasks``,
-    ``battery``, ``model``)."""
+    that said no (``off``, ``unchecked``, ``hosted``, ``store``, ``lock``, ``active``,
+    ``tasks``, ``battery``, ``model``)."""
 
     chats: set[str] = field(default_factory=set)
     windows: int = 0
@@ -97,8 +103,11 @@ class IdleEncode(IdleStep):
         """Why nothing is encoded now (the first gate that says no, cheapest first), or ``""``."""
         console = self.console
         cfg = console.cfg
-        if cfg.memory.recall_source != "items" or not console.memory.enabled:
+        source = cfg.memory.recall_source
+        if source not in ("items", "auto") or not console.memory.enabled:
             return "off"
+        if source == "auto" and not console.memory.chat_model_checked():
+            return "unchecked"
         if cfg.chat_backend not in LOCAL_BACKENDS:
             return "hosted"
         if console.store_state() != "ok" or console.main_id is None:
@@ -171,7 +180,7 @@ class IdleEncode(IdleStep):
         console = self.console
         found: list[tuple[SessionInfo, list[TurnInfo]]] = []
         for session in await console.store.list_sessions(
-            limit=CHATS_SEEN, kinds=("chat", "front")
+            limit=CHATS_SEEN, kinds=ENCODED_KINDS
         ):
             if self.failures.get(session.id, 0) >= MAX_FAILURES:
                 continue

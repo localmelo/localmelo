@@ -20,6 +20,7 @@ from localmelo.melo.memory.notes import (
     has_negative_assertion,
     is_meta_claim,
     path_spans,
+    without_negation,
 )
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
@@ -29,6 +30,11 @@ EXACT_DUPLICATE_REASON = "exact duplicate"
 
 # A short fact is noise: fewer than this many normalised characters.
 MIN_FACT_CHARS = 20
+
+# Two items are close enough to link when this share of the shorter one's content
+# words is in the other, or the cosine of their vectors reaches the second number.
+LINK_OVERLAP = 0.35
+LINK_COSINE = 0.75
 
 # The source a candidate comes from names where it may be written.
 PROFILE_PREDICATES: tuple[str, ...] = (
@@ -127,6 +133,10 @@ CHANGE_MARKERS: tuple[str, ...] = (
     "换成",
     "改了",
     "改为",
+    "改到",
+    "改成",
+    "调到",
+    "换到",
     "更新",
     "更正",
 )
@@ -231,7 +241,11 @@ _PUNCTUATION = ".,!?;:，。！？；：、…"
 
 @dataclass(frozen=True)
 class PolicyDecision:
-    """One action for one item, and the target it compared against."""
+    """One action for one item, and the target it compared against.
+
+    *settled* says the rules were certain: a meta claim, a short fact, a file-only
+    fact, an opposite polarity of the same text or an identical text, which no judge
+    may overrule."""
 
     action: str
     kind: str
@@ -240,6 +254,7 @@ class PolicyDecision:
     reason: str = ""
     overlap: float = 0.0
     cosine: float = 0.0
+    settled: bool = False
 
 
 @dataclass(frozen=True)
@@ -263,6 +278,28 @@ def normalise(text: str) -> str:
 def content_tokens(text: str) -> set[str]:
     """The text's BM25 terms without the stopwords."""
     return {token for token in tokenize(normalise(text)) if token not in STOPWORDS}
+
+
+# The auxiliaries a negation rides on in English: "does not like" says "likes".
+_DO_SUPPORT = frozenset({"do", "does", "did"})
+
+
+def _positive_form(text: str) -> list[str]:
+    """The content words of *text*, in order, with its negation taken out: the
+    negation words, the do-support they ride on and a closing ``s`` are folded away,
+    so "likes olives" and "does not like olives" read alike."""
+    words = tokenize(normalise(without_negation(text)))
+    return [
+        word[:-1] if len(word) > 3 and word.endswith("s") else word
+        for word in words
+        if word not in STOPWORDS and word not in _DO_SUPPORT
+    ]
+
+
+def _same_but_for_negation(text: str, other: str) -> bool:
+    """Whether the two texts say one thing, one of them denying it."""
+    words = _positive_form(text)
+    return bool(words) and words == _positive_form(other)
 
 
 def _has_phrase(text: str, phrase: str) -> bool:
@@ -448,6 +485,14 @@ def _item_key(provenance: Mapping[str, Any]) -> str:
     return ""
 
 
+def _entry_kind(entry: Any, default: str) -> str:
+    """The kind an entry has, *default* for one that names none."""
+    value = (
+        entry.get("kind") if isinstance(entry, Mapping) else getattr(entry, "kind", "")
+    )
+    return str(value) if value else default
+
+
 def _entry_subject(entry: Any, kind: str) -> tuple[str, ...]:
     provenance = (
         entry.get("provenance")
@@ -496,8 +541,21 @@ def decide(
     provenance: Mapping[str, Any],
     active: Sequence[Any],
     embedding: Sequence[float] | None = None,
+    certain_only: bool = False,
 ) -> PolicyDecision:
-    """Compare one item with the active entries of *kind* and pick an action."""
+    """Compare one item with the active entries and pick an action.
+
+    A subject is compared only between two entries of one kind, each read with its
+    own kind (an entry that names none has *kind*). With *certain_only*, for a
+    caller that has a judge for repeats and changes, the rules settle only what is
+    certain: a near-duplicate is no longer ignored, and a same-subject item is
+    ``RELATED`` to the entry, never an ``UPDATE`` (the decision of a judge, not of a
+    word shared with it) and never a ``CONFLICT`` of values (a different value may be
+    a change: only an opposite polarity of the same text is a certain conflict; two
+    texts that differ by more than their negation may be about different things,
+    so the pair goes on as any other). The ``settled`` decisions are the certain
+    ones.
+    """
     folded = normalise(text)
     task_text = str(provenance.get("task_text") or "")
     item_key = _item_key(provenance)
@@ -509,6 +567,7 @@ def decide(
             kind=kind,
             subject=subject,
             reason="meta claim about the agent's own work",
+            settled=True,
         )
     if len(folded) < MIN_FACT_CHARS:
         return PolicyDecision(
@@ -516,6 +575,7 @@ def decide(
             kind=kind,
             subject=subject,
             reason="short fact",
+            settled=True,
         )
     if _file_only(text):
         return PolicyDecision(
@@ -523,14 +583,16 @@ def decide(
             kind=kind,
             subject=subject,
             reason="task-file-only fact",
+            settled=True,
         )
     values = value_tokens(text, subject=subject)
 
     compared: list[_Compared] = []
     for entry in active:
         other_text = _entry_text(entry)
-        other_subject = _entry_subject(entry, kind)
-        same = other_subject == subject
+        other_kind = _entry_kind(entry, kind)
+        other_subject = _entry_subject(entry, other_kind)
+        same = other_kind == kind and other_subject == subject
         ratio = overlap(content, content_tokens(other_text))
         cosine = _cosine(embedding, _entry_vector(entry))
         other_folded = normalise(other_text)
@@ -570,8 +632,14 @@ def decide(
     if target is not None:
         other_text = _entry_text(target.entry)
         opposite = has_negative_assertion(text) != has_negative_assertion(other_text)
-        if opposite and (
-            target.same_subject or target.overlap >= 0.35 or target.cosine >= 0.75
+        if (
+            opposite
+            and (
+                target.same_subject
+                or target.overlap >= LINK_OVERLAP
+                or target.cosine >= LINK_COSINE
+            )
+            and (not certain_only or _same_but_for_negation(text, other_text))
         ):
             return PolicyDecision(
                 action="CONFLICT",
@@ -581,11 +649,12 @@ def decide(
                 reason=f"opposite polarity to entry {target_id}",
                 overlap=target.overlap,
                 cosine=target.cosine,
+                settled=True,
             )
+        exact = normalise(other_text) == folded
         if not opposite and (
-            normalise(other_text) == folded
-            or target.overlap >= 0.9
-            or target.cosine >= 0.95
+            exact
+            or (not certain_only and (target.overlap >= 0.9 or target.cosine >= 0.95))
         ):
             return PolicyDecision(
                 action="IGNORE",
@@ -594,14 +663,15 @@ def decide(
                 target_id=target_id,
                 reason=(
                     EXACT_DUPLICATE_REASON
-                    if normalise(other_text) == folded
+                    if exact
                     else f"overlap {target.overlap:.2f}; near-duplicate"
                 ),
                 overlap=target.overlap,
                 cosine=target.cosine,
+                settled=exact,
             )
         if target.same_subject:
-            if target.contradicts:
+            if target.contradicts and not certain_only:
                 return PolicyDecision(
                     action="CONFLICT",
                     kind=kind,
@@ -612,15 +682,19 @@ def decide(
                     cosine=target.cosine,
                 )
             return PolicyDecision(
-                action="UPDATE",
+                action="RELATED" if certain_only else "UPDATE",
                 kind=kind,
                 subject=subject,
                 target_id=target_id,
-                reason=f"same subject; update of entry {target_id}",
+                reason=(
+                    f"same subject; related to entry {target_id}"
+                    if certain_only
+                    else f"same subject; update of entry {target_id}"
+                ),
                 overlap=target.overlap,
                 cosine=target.cosine,
             )
-        if target.overlap >= 0.35 or target.cosine >= 0.75:
+        if target.overlap >= LINK_OVERLAP or target.cosine >= LINK_COSINE:
             return PolicyDecision(
                 action="RELATED",
                 kind=kind,
@@ -665,6 +739,8 @@ __all__ = [
     "CHANGE_MARKERS",
     "FILE_ONLY_WORDS",
     "HippoPolicy",
+    "LINK_COSINE",
+    "LINK_OVERLAP",
     "MIN_FACT_CHARS",
     "PROFILE_PREDICATES",
     "PolicyDecision",

@@ -10,6 +10,7 @@ stub chat model and temporary stores: no model server.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -23,7 +24,7 @@ from localmelo.support.config import (
     LocalBackendConfig,
     MemoryConfig,
 )
-from localmelo.support.memory import ChatMemory, hippo_encode, ingest
+from localmelo.support.memory import ChatMemory, hippo_encode, ingest, note_judge
 from localmelo.support.memory.index import cleaned
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
@@ -31,12 +32,17 @@ from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 from localmelo.tests.memory.hippo_helpers import (
     CAP,
     CUT_OFF,
+    Held,
     StubEncoder,
+    at,
     by_label,
+    is_judge,
     item,
+    judging,
     labels,
     says,
     turn,
+    verdict,
 )
 
 MAY = {
@@ -95,6 +101,12 @@ def reply(prompt: str) -> str:
     return says()
 
 
+def judge(request: dict[str, Any]) -> str:
+    """The judge says the June item changes the old item it is shown, and no other
+    item changes or repeats anything."""
+    return verdict("changes" if "Utrecht" in request["new"]["text"] else "other", 1)
+
+
 def settings(tmp_path: Path, **memory: Any) -> Config:
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(
@@ -149,7 +161,7 @@ async def close(chats: SessionStore, memory: ChatMemory) -> None:
 async def test_the_turns_are_written_as_ever_and_the_items_follow(
     tmp_path: Path,
 ) -> None:
-    stub = StubEncoder(reply)
+    stub = StubEncoder(judging(reply, judge))
     report, chats, memory = await compress(tmp_path, {"sessions": [JUNE, MAY]}, stub)
     try:
         assert (report.sessions, report.turns, report.docs) == (2, 3, 3)
@@ -186,12 +198,13 @@ async def test_the_turns_are_written_as_ever_and_the_items_follow(
 async def test_the_report_names_windows_gate_items_and_routes_by_file_id(
     tmp_path: Path,
 ) -> None:
-    stub = StubEncoder(reply)
+    stub = StubEncoder(judging(reply, judge))
     report, chats, memory = await compress(tmp_path, {"sessions": [JUNE, MAY]}, stub)
     try:
         data = report.to_json()
         assert data["ingest"] == "compress"
-        assert (data["model_calls"], data["cache_hits"]) == (2, 0)
+        # Two windows and one judge request: only the June item has a close one.
+        assert (data["model_calls"], data["cache_hits"]) == (3, 0)
         assert "input_tokens" not in data and "output_tokens" not in data
         assert set(data["compress"]) == {"may", "june"}
         may = data["compress"]["may"]
@@ -236,11 +249,11 @@ async def test_the_report_names_windows_gate_items_and_routes_by_file_id(
         assert [r["title"] for r in may["routes"]] == ["Home city", "Train book"]
         (route,) = data["compress"]["june"]["routes"]
         assert (route["action"], route["item"], route["target"]) == ("UPDATE", 3, 1)
-        assert route["reason"] == "same subject; update of entry 1"
+        assert route["reason"] == "judged a change of entry 1"
         assert data["compress"]["june"]["items"][0]["sources"] == [["june", 0]]
         json.dumps(data)  # all of it is plain JSON
         assert report.summary().endswith(
-            "Encoded 3 items from 2 chats (2 model calls, 0 from the cache)."
+            "Encoded 3 items from 2 chats (3 model calls, 0 from the cache)."
         )
     finally:
         await close(chats, memory)
@@ -267,12 +280,13 @@ async def test_a_run_of_turns_is_as_it_was_and_asks_the_model_nothing(
 async def test_a_model_that_reports_tokens_has_them_in_the_report(
     tmp_path: Path,
 ) -> None:
-    stub = StubEncoder(reply, usage=(120, 30))
+    stub = StubEncoder(judging(reply, judge), usage=(120, 30))
     report, chats, memory = await compress(tmp_path, {"sessions": [JUNE, MAY]}, stub)
     try:
         data = report.to_json()
-        assert (data["input_tokens"], data["output_tokens"]) == (240, 60)
-        assert data["model_calls"] == 2
+        # The judge's request is one of the three, and its tokens are counted too.
+        assert (data["input_tokens"], data["output_tokens"]) == (360, 90)
+        assert data["model_calls"] == 3
     finally:
         await close(chats, memory)
 
@@ -584,18 +598,19 @@ async def test_a_second_run_over_the_same_chats_asks_the_model_nothing(
     tmp_path: Path,
 ) -> None:
     data = {"sessions": [JUNE, MAY]}
-    first = StubEncoder(reply)
+    first = StubEncoder(judging(reply, judge))
     one, chats, memory = await compress(tmp_path, data, first, sub="a")
     await close(chats, memory)
-    assert one.stats.calls == 2 and len(first.prompts) == 2
-    second = StubEncoder(reply)
+    assert one.stats.calls == 3 and len(first.prompts) == 3  # two windows, one judge
+    second = StubEncoder(judging(reply, judge))
     two, chats, memory = await compress(tmp_path, data, second, sub="b")
     try:
-        assert second.prompts == []
-        assert (two.stats.calls, two.stats.cache_hits) == (0, 2)
+        assert second.prompts == []  # neither a window nor the judge is asked again
+        assert (two.stats.calls, two.stats.cache_hits) == (0, 3)
+        assert two.judge == one.judge and two.judge.changes == 1
         assert two.items == one.items == 3
         assert two.to_json()["compress"]["may"]["windows"][0]["cached"] is True
-        assert two.summary().endswith("(0 model calls, 2 from the cache).")
+        assert two.summary().endswith("(0 model calls, 3 from the cache).")
         titles = [i.text for i in await memory.stores()[1].fetch_items([1, 2, 3])]
         assert titles == [PITTSBURGH, BOOK, UTRECHT]
     finally:
@@ -708,7 +723,7 @@ async def test_a_very_long_exchange_is_read_in_parts_and_a_stretch_that_runs_out
     # is the second of the chat, so its parts name exchange 1. A part that is more
     # than 8000 characters runs out of room, so it is split in two and read in halves.
     stub = StubEncoder(
-        lambda p: CUT_OFF if len(p) > 8000 else by_label(p),
+        judging(lambda p: CUT_OFF if len(p) > 8000 else by_label(p)),
         usage=lambda p: (len(p) // 4, CAP if len(p) > 8000 else 100),
     )
     report, chats, memory = await compress(tmp_path, {"sessions": [long_chat]}, stub)
@@ -722,7 +737,11 @@ async def test_a_very_long_exchange_is_read_in_parts_and_a_stretch_that_runs_out
         # in halves; the last is the rest of the exchange and is read whole.
         assert [w["split"] for w in rows] == [0, 2, 2, 0]
         assert (data["split"], data["failed_parts"]) == (4, 0)
-        assert data["model_calls"] == 1 + (1 + 2) + (1 + 2) + 1
+        # The windows' requests, and one more for each item the judge was asked about.
+        assert data["judge"]["judged"] == 2
+        assert (
+            data["model_calls"] == 1 + (1 + 2) + (1 + 2) + 1 + data["judge"]["judged"]
+        )
         assert data["compress"]["long"]["gate"]["unmentioned"] == []
         json.dumps(data)
     finally:
@@ -789,3 +808,373 @@ async def test_the_backend_of_the_chat_model_is_what_the_encoder_is_told(
         assert [kwargs["backend"] for kwargs in seen] == [expected]
     finally:
         await memory.aclose()
+
+
+# ── The judge: repeats join, changes replace ──
+
+CHOIR = "The user's choir rehearsal is on Mondays at 19:00."
+CHOIR_AGAIN = "The user said their choir rehearsal is on Mondays at 19:00."
+CHOIR_MOVED = "The user said the choir rehearsal moved to Wednesdays."
+CHOIR_MOVED_AGAIN = "The user said the choir rehearses on Wednesdays now."
+# What the person typed in each chat, and the item the encoder writes from it, under a
+# different kind each time.
+CHOIR_CHATS = [
+    ("A", "2023-03-01", "My choir rehearses on Mondays at 19:00.", "profile", CHOIR),
+    ("B", "2023-03-08", "Our choir meets every Monday night at 19:00.", "semantic", CHOIR_AGAIN),
+    ("C", "2023-03-15", "Update: the choir now rehearses on Wednesdays.", "episodic", CHOIR_MOVED),
+    ("D", "2023-03-22", "Reminder, choir practice is on Wednesdays.", "profile", CHOIR_MOVED_AGAIN),
+]  # fmt: skip
+
+
+def choir_data() -> dict[str, Any]:
+    return {
+        "sessions": [
+            {
+                "id": label,
+                "title": f"Choir {label}",
+                "date": date,
+                "turns": [
+                    {"role": "user", "text": typed},
+                    {"role": "assistant", "text": "Noted."},
+                ],
+            }
+            for label, date, typed, _, _ in CHOIR_CHATS
+        ]
+    }
+
+
+def choir_items(prompt: str) -> str:
+    """The item each chat gives, found by what the person typed."""
+    for _, _, typed, kind, text in CHOIR_CHATS:
+        if typed in prompt:
+            return says([item("Choir", text, kind, [0])])
+    return says()
+
+
+def choir_judge(request: dict[str, Any]) -> str:
+    """A model that follows the prompt: the second chat repeats the first, the third
+    changes it, the fourth repeats the third; nothing else is related."""
+    table = {
+        CHOIR_AGAIN: ("same", CHOIR),
+        CHOIR_MOVED: ("changes", CHOIR),
+        CHOIR_MOVED_AGAIN: ("same", CHOIR_MOVED),
+    }
+    kind, old = table.get(request["new"]["text"], ("other", ""))
+    numbers = {o["text"]: o["item"] for o in request["old"]}
+    return verdict(kind, numbers[old]) if old in numbers else verdict()
+
+
+async def test_a_repeat_joins_its_item_a_change_replaces_it_and_a_third_chat_joins_the_change(
+    tmp_path: Path,
+) -> None:
+    stub = StubEncoder(judging(choir_items, choir_judge))
+    report, chats, memory = await compress(tmp_path, choir_data(), stub)
+    try:
+        _, index = memory.stores()
+        first, moved = await index.fetch_items([1, 2])
+        assert [first.text, moved.text] == [CHOIR, CHOIR_MOVED]
+        assert (first.status, first.replaced_by) == ("replaced", 2)
+        assert (moved.status, moved.kind) == ("active", "episodic")
+        # The old item cites the turn of the chat that repeated it, the new one the
+        # turn of the chat that repeated the change: no fact is shown twice.
+        a, b, c, d = (report.ids[label] for label in "ABCD")
+        assert first.sources == ((a, 1), (b, 1)) and moved.sources == ((c, 1), (d, 1))
+        assert await index.count_items() == 2
+        data = report.to_json()
+        actions = [
+            r["action"] for label in "ABCD" for r in data["compress"][label]["routes"]
+        ]
+        assert actions == ["NEW", "IGNORE", "UPDATE", "IGNORE"]
+        wanted = {"judged": 3, "same": 2, "changes": 1, "unsupported": 0}
+        assert data["judge"] == {**wanted, "other": 0, "failed": 0, "fallbacks": 0}
+        # Each chat reports its own counts, and the report holds their sum.
+        assert [data["compress"][label]["judge"]["judged"] for label in "ABCD"] == [
+            0,
+            1,
+            1,
+            1,
+        ]
+        assert report.stats.calls == 4 + 3  # four windows, three judge requests
+    finally:
+        await close(chats, memory)
+
+
+@pytest.mark.parametrize("reply", [verdict(), "RAISE"], ids=["other", "no answer"])
+async def test_a_model_that_says_other_or_fails_links_two_facts_that_share_a_verb(
+    tmp_path: Path, reply: str
+) -> None:
+    data = {
+        "sessions": [
+            {
+                "id": label,
+                "title": label,
+                "date": date,
+                "turns": [
+                    {"role": "user", "text": typed},
+                    {"role": "assistant", "text": "Noted."},
+                ],
+            }
+            for label, date, typed in (
+                ("rabbits", "2023-03-01", "I live with three rabbits."),
+                ("harbour", "2023-03-08", "I live in a small harbour town."),
+            )
+        ]
+    }
+
+    def encoder(prompt: str) -> str:
+        found = "three rabbits" in prompt
+        text = (
+            "The user lives with three rabbits."
+            if found
+            else "The user lives in a small harbour town."
+        )
+        return says([item("Home", text, "profile", [0])])
+
+    stub = StubEncoder(lambda p: reply if is_judge(p) else encoder(p))
+    report, chats, memory = await compress(tmp_path, data, stub)
+    try:
+        _, index = memory.stores()
+        first, second = await index.fetch_items([1, 2])
+        # Linked, and neither replaced: a shared verb is not a change.
+        assert (first.status, second.status) == ("active", "active")
+        assert (first.related, second.related) == ((2,), (1,))
+        routes = report.to_json()["compress"]["harbour"]["routes"]
+        assert [(r["action"], r["target"]) for r in routes] == [("RELATED", 1)]
+        assert report.judge.judged == 1 and report.judge.changes == 0
+    finally:
+        await close(chats, memory)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "You live in Utrecht now, as you told me.",
+        "From the page: Utrecht is a canal city.",
+    ],
+    ids=["melo's reply", "a fetched page"],
+)
+async def test_a_change_whose_new_value_the_person_never_typed_links_and_does_not_replace(
+    tmp_path: Path, answer: str
+) -> None:
+    june = {
+        "id": "june",
+        "title": "Later",
+        "date": "2023-06-01T09:00:00",
+        "turns": [
+            {"role": "user", "text": "Where is that again?"},
+            {"role": "assistant", "text": answer},
+        ],
+    }
+    stub = StubEncoder(
+        judging(
+            lambda p: (
+                says([item("Home", UTRECHT, "profile", [0])])
+                if "Where is that again" in p
+                else reply(p)
+            ),
+            lambda request: verdict("changes", 1),
+        )
+    )
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY, june]}, stub)
+    try:
+        first, *_, last = await memory.stores()[1].fetch_items([1, 2, 3])
+        assert (first.status, last.status) == ("active", "active")
+        (route,) = report.to_json()["compress"]["june"]["routes"]
+        assert (route["action"], route["target"]) == ("RELATED", 1)
+        assert report.judge.changes == 1 and report.judge.unsupported == 1
+        # The request carried what the person typed, never melo's reply or the page.
+        (request,) = [json.loads(p) for p in stub.prompts if is_judge(p)]
+        assert request["typed"] == ["Where is that again?"]
+        assert "canal" not in json.dumps(request) and "told me" not in json.dumps(
+            request
+        )
+    finally:
+        await close(chats, memory)
+
+
+async def test_the_request_holds_no_secret_and_the_log_holds_no_item_text(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    june = {
+        "id": "june",
+        "title": "Later",
+        "date": "2023-06-01T09:00:00",
+        "turns": [
+            {
+                "role": "user",
+                "text": "I live in Utrecht now. My password is hunter2. "
+                "My card is 4242 4242 4242 4242.",
+            },
+            {"role": "assistant", "text": "Noted."},
+        ],
+    }
+    caplog.set_level(logging.DEBUG)
+    stub = StubEncoder(
+        judging(
+            lambda p: (
+                says([item("Home", UTRECHT, "profile", [0])])
+                if "Utrecht" in p
+                else reply(p)
+            ),
+            lambda request: verdict("changes", 1),
+        )
+    )
+    report, chats, memory = await compress(tmp_path, {"sessions": [MAY, june]}, stub)
+    try:
+        (request,) = [p for p in stub.prompts if is_judge(p)]
+        assert "hunter2" not in request and "4242" not in request
+        assert report.judge.changes == 1 and report.judge.unsupported == 0
+        # What memory logs (not the database driver's own lines): the counts only.
+        logged = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name.startswith("localmelo.support.memory")
+        ]
+        assert any("judged" in line for line in logged)
+        for word in ("Utrecht", "Pittsburgh", "hunter2", "4242", "live in"):
+            assert not any(word in line for line in logged), word
+    finally:
+        await close(chats, memory)
+
+
+# Two chats of one person, a place and the day each was said; compress_chat is called
+# on them directly (the way the idle encoder does), a chat at a time.
+OLD_TURNS = [turn(0, "I live in Pittsburgh.", "Noted.", at("2023-05-20"))]
+NEW_TURNS = [turn(0, "I live in Utrecht now.", "Noted.", at("2023-06-01"))]
+
+
+def home(prompt: str) -> str:
+    return says(
+        [item("Home", UTRECHT if "Utrecht" in prompt else PITTSBURGH, "profile")]
+    )
+
+
+@pytest.mark.parametrize("says_", ["same", "changes"])
+async def test_a_forget_and_a_delete_do_not_wait_for_the_judge_and_a_deleted_target_loses_nothing(
+    tmp_path: Path, says_: str
+) -> None:
+    held = Held(judging(home, lambda request: verdict(says_, 1)))
+    _, chats, memory = await bare(tmp_path, "held", held)
+    try:
+        _, index = memory.stores()
+        await memory.compress_chat("old", "Old", OLD_TURNS)
+        assert await index.count_items() == 1 and not held.asked.is_set()
+        task = asyncio.create_task(memory.compress_chat("new", "New", NEW_TURNS))
+        await asyncio.wait_for(held.asked.wait(), 5)  # the judge is with the model
+        # The lock is free: the target is deleted, and the call returns at once.
+        assert await asyncio.wait_for(memory.delete_item(1), 2) is True
+        held.release.set()
+        out = await asyncio.wait_for(task, 5)
+        # The answer rested on an item that is gone: the rules route the item, and it
+        # is stored, not lost as a repeat of nothing.
+        (route,) = [r for _, r in out.routed]
+        assert (route.action, route.item) == ("NEW", 2)
+        assert out.judge.fallbacks == 1 and out.judge.judged == 1
+        assert [i.id for i in await index.active_items()] == [2]
+        assert await index.encoded_turn("new") == 1
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_forget_while_the_judge_is_asked_keeps_the_chat_out(
+    tmp_path: Path,
+) -> None:
+    held = Held(judging(home, lambda request: verdict("same", 1)))
+    _, chats, memory = await bare(tmp_path, "forget", held)
+    try:
+        _, index = memory.stores()
+        await memory.compress_chat("old", "Old", OLD_TURNS)
+        since = await index.forgotten_at()
+
+        async def unchanged() -> bool:
+            return await index.forgotten_at() == since
+
+        task = asyncio.create_task(
+            memory.compress_chat("new", "New", NEW_TURNS, guard=unchanged)
+        )
+        await asyncio.wait_for(held.asked.wait(), 5)
+        await asyncio.wait_for(memory.forget_all(), 2)  # not held up by the request
+        held.release.set()
+        out = await asyncio.wait_for(task, 5)
+        assert out.forgotten and out.routed == []
+        assert await index.count_items() == 0
+        assert await index.encoded_turn("new") is None
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_repeat_a_change_and_a_repeat_in_one_call_end_with_one_current_item(
+    tmp_path: Path,
+) -> None:
+    pieces = [
+        ("My choir rehearses on Mondays at 19:00.", "profile", CHOIR),
+        ("Our choir meets every Monday night at 19:00.", "semantic", CHOIR_AGAIN),
+        ("Update: the choir now rehearses on Wednesdays.", "episodic", CHOIR_MOVED),
+        ("Reminder, choir practice is on Wednesdays.", "profile", CHOIR_MOVED_AGAIN),
+    ]
+    stub = StubEncoder(
+        judging(
+            says([item("Choir", t, k, [n]) for n, (_, k, t) in enumerate(pieces)]),
+            choir_judge,
+        )
+    )
+    _, chats, memory = await bare(tmp_path, "one", stub)
+    try:
+        _, index = memory.stores()
+        turns = [turn(n, typed, "Noted.") for n, (typed, _, _) in enumerate(pieces)]
+        out = await memory.compress_chat("choir", "Choir", turns)
+        assert [r.action for _, r in out.routed] == [
+            "NEW",
+            "IGNORE",
+            "UPDATE",
+            "IGNORE",
+        ]
+        (current,) = await index.active_items()
+        assert current.text == CHOIR_MOVED
+        assert current.sources == (("choir", 3), ("choir", 4))
+        (old,) = await index.fetch_items([1])
+        assert (old.status, old.sources) == ("replaced", (("choir", 1), ("choir", 2)))
+        # The last request was made against what the earlier items had become: the
+        # old fact, already replaced, is not among the items it is shown.
+        last = [json.loads(p) for p in stub.prompts if is_judge(p)][-1]
+        assert [o["text"] for o in last["old"]] == [CHOIR_MOVED]
+        assert out.judge.to_json()["judged"] == 3
+    finally:
+        await close(chats, memory)
+
+
+async def test_the_newer_fact_stays_current_when_the_older_chat_is_encoded_last(
+    tmp_path: Path,
+) -> None:
+    stub = StubEncoder(judging(home, lambda request: verdict("changes", 1)))
+    _, chats, memory = await bare(tmp_path, "late", stub)
+    try:
+        _, index = memory.stores()
+        await memory.compress_chat("new", "New", NEW_TURNS)
+        out = await memory.compress_chat("old", "Old", OLD_TURNS)
+        (route,) = [r for _, r in out.routed]
+        assert (route.action, route.target) == ("UPDATE", 1)
+        assert "older than entry 1, kept as replaced" in route.reason
+        utrecht, pittsburgh = await index.fetch_items([1, 2])
+        assert (utrecht.text, utrecht.status) == (UTRECHT, "active")
+        assert (pittsburgh.status, pittsburgh.replaced_by) == ("replaced", 1)
+    finally:
+        await close(chats, memory)
+
+
+async def test_a_judge_request_that_never_answers_routes_by_the_rules_and_the_chat_goes_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(note_judge, "JUDGE_TIMEOUT_S", 0.05)
+    held = Held(home)  # no release: the judge request is never answered
+    _, chats, memory = await bare(tmp_path, "slow", held)
+    try:
+        _, index = memory.stores()
+        await memory.compress_chat("old", "Old", OLD_TURNS)
+        out = await asyncio.wait_for(memory.compress_chat("new", "New", NEW_TURNS), 5)
+        (route,) = [r for _, r in out.routed]
+        assert route.action == "RELATED" and out.judge.failed == 1
+        assert [i.id for i in await index.active_items()] == [1, 2]
+        assert await index.encoded_turn("new") == 1
+    finally:
+        await close(chats, memory)

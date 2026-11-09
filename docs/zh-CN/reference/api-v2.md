@@ -313,10 +313,12 @@ JSON 请求体和 JSON 响应使用 UTF-8。事件流使用 `text/event-stream`�
 ```
 
 ```json
-{"models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null}
+{"models": ["qwen3:8b"], "chat_models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null,
+ "check": {"state": "ok", "model": "qwen3:8b", "use": "", "line": ""}}
 ```
 
-- `embedding_models` 是名称表明为嵌入模型的列出项，`suggested_embedding` 是优先提供的那个（Qwen3-Embedding 优先），否则为 `null`；设置对话框据此询问 `Remember across chats with <model>?`。
+- `chat_models` 是名称表明为对话模型的列出项，按列出顺序：设置和 `/model` 从这个列表里选对话模型。`embedding_models` 是名称表明为嵌入模型的列出项，`suggested_embedding` 是优先提供的那个（Qwen3-Embedding 优先），否则为 `null`；设置对话框据此询问 `Remember across chats with <model>?`。
+- `check` 把对话模型与列表比较：用可选的查询参数 `model`，否则用该后端已保存的模型。`state` 为 `ok`（它在列表里，或没有可比较的内容）、`switch`（不在列表里，而服务器恰好提供一个对话模型 `use`）或 `missing`（不在列表里，且有好几个对话模型）。`line` 是用请求的语言写的那句话，`ok` 时为空。
 
 - 不带 `backend` 或 `url` 时，使用已保存的对话后端及其 `chat_url`。
 - 云端后端返回 400 `invalid_request`：`Listing models works for local backends only; type the model name.`

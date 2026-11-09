@@ -59,6 +59,9 @@ _BREAK_REACH: Final = 400
 # A side chat's summary is the one document at this turn of its session; a
 # task's exchanges take the turns below it.
 SUMMARY_TURN: Final = -1
+# The kinds of session (``documents.kind`` holds the session's) whose turns the
+# encoder reads into items; a task's turns are indexed and never encoded.
+ENCODED_KINDS: Final = ("chat", "front")
 
 _SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -184,6 +187,16 @@ class ItemState(NamedTuple):
     replaced_by: int | None
     conflicts: tuple[int, ...]
     sources: tuple[tuple[str, int], ...]
+
+
+class TurnHead(NamedTuple):
+    """A turn's head document without its text: its id (the one ``open_memory`` takes
+    as ``t<id>``), the session and turn it belongs to, and its time."""
+
+    id: int
+    session_id: str
+    turn: int
+    created_at: float
 
 
 def _ids(raw: object) -> tuple[int, ...]:
@@ -616,6 +629,23 @@ class ConversationIndex:
                 (session_id, turn),
             ) as cur:
                 out.extend(_document(row) for row in await cur.fetchall())
+        return out
+
+    async def turn_heads(self, turns: Iterable[tuple[str, int]]) -> list[TurnHead]:
+        """The head (chunk 0) of each ``(session id, turn)`` of *turns*, in the order
+        given, with no text or vector read; a turn that is not indexed has none."""
+        conn = await self._ready()
+        out: list[TurnHead] = []
+        for session_id, turn in dict.fromkeys(turns):
+            async with conn.execute(
+                "SELECT id, created_at FROM documents "
+                "WHERE session_id = ? AND turn = ? AND chunk = 0",
+                (session_id, turn),
+            ) as cur:
+                out.extend(
+                    TurnHead(int(row[0]), session_id, turn, float(row[1]))
+                    for row in await cur.fetchall()
+                )
         return out
 
     async def recent(
@@ -1081,6 +1111,32 @@ class ConversationIndex:
         ) as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else None
+
+    async def encoded_share(self) -> float:
+        """Of the turns the encoder would visit, the share at or below their chat's
+        mark (:meth:`encoded_turn`): a turn at 1 or above of a session of
+        :data:`ENCODED_KINDS`, counted once however many chunks it has. A task's turns
+        are no part of it. It counts what the encoder has read, not what an item
+        cites. ``0.0`` when there are no such turns."""
+        conn = await self._ready()
+        marks = ", ".join("?" * len(ENCODED_KINDS))
+        async with conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(done), 0) FROM ("
+            "SELECT d.turn <= COALESCE(e.turn, 0) AS done FROM documents d "
+            "LEFT JOIN encoded e ON e.session_id = d.session_id "
+            f"WHERE d.turn >= 1 AND d.kind IN ({marks}) "
+            "GROUP BY d.session_id, d.turn)",
+            ENCODED_KINDS,
+        ) as cur:
+            row = await cur.fetchone()
+        total, read = (int(row[0]), int(row[1])) if row else (0, 0)
+        return read / total if total else 0.0
+
+    async def item_encoders(self) -> set[str]:
+        """The ``encoder`` of every stored item, of any status, once each."""
+        conn = await self._ready()
+        async with conn.execute("SELECT DISTINCT encoder FROM items") as cur:
+            return {str(row[0]) for row in await cur.fetchall()}
 
     async def count_items(self) -> int:
         conn = await self._ready()

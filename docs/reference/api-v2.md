@@ -570,12 +570,18 @@ can be contacted.
 ```
 
 ```json
-{"models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null}
+{"models": ["qwen3:8b"], "chat_models": ["qwen3:8b"], "embedding_models": [], "suggested_embedding": null,
+ "check": {"state": "ok", "model": "qwen3:8b", "use": "", "line": ""}}
 ```
 
-- `embedding_models` are the listed ids that name embedding models and
+- `chat_models` are the listed ids that name chat models, in listing order: the list Settings and `/model` pick the
+  chat model from. `embedding_models` are the listed ids that name embedding models and
   `suggested_embedding` the one to offer first (Qwen3-Embedding first), or
   `null`: the Settings dialog asks `Remember across chats with <model>?` from them.
+- `check` compares the chat model with the list: the optional query `model`, else the saved model of that backend.
+  `state` is `ok` (it is listed, or there is nothing to compare), `switch` (it is not listed and the server offers
+  exactly one chat model, `use`) or `missing` (not listed, several chat models). `line` is the one sentence that says
+  so in the request's language, empty for `ok`.
 - Without `backend` or `url`, the saved chat backend and its `chat_url` are
   used.
 - A cloud backend returns 400 `invalid_request`:
