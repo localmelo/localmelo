@@ -1297,10 +1297,11 @@ with the echo.
 - `echo` is `started`, `control` (with `action` and `undo`), `level` (with
   `undo`), `suggest` (a change the person's own words did not ask for, with
   `action` and maybe `level`; `action` `send` carries the message as `text`),
-  `ask` (`Start this as a task?`, only on a card already stored: nothing writes
-  new ones; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
-  `queued` for its next step or `continued` as a new turn of a task that stopped before finishing;
-  `line` `Sent to: <title>` or `Continued: <title>`), `chore` (a message that named a
+  `ask` (`Start this as a task?`, only on a card already stored, which takes no tap
+  now: a chat hands its own work on; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
+  `queued` for its next step or `continued` as a new turn of a task from the tasks page that stopped before finishing;
+  `line` `Sent to: <title>` or `Continued: <title>`; a chat's ended task gives a `started` echo with
+  `follows`, the ended task, for the fresh task that goes on with its job), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
   (the whole message), `schedule`, `when` and `level`, `receipt` (the message's key:
   what it starts or saves, it does once) and, when the message started its work
@@ -1349,11 +1350,11 @@ with the echo.
   task of another chat carries `from_main: true` or `from_chat`, that chat's
   title.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
-- `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" | "start" |
+- `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" |
   "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}` answers
   200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
-  `suggest`, start an `ask`, set a `started` or `level` echo's task to the
+  `suggest`, set a `started` or `level` echo's task to the
   person's level, revoke the approval an `earlier` echo used (a `revoked`
   echo answers), or Undo a `sleep` echo (the whole run is put back; an `undone`
   echo answers with `of` and `run_id`, and says how many notes came back; a run

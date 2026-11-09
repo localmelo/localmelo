@@ -137,7 +137,6 @@ from localmelo.support.gateway.handover import (
     ACCOUNT_CHARS,
     Handover,
     done_calls,
-    from_snapshot,
     handover_of,
     task_line,
 )
@@ -1963,19 +1962,15 @@ class Front:
         turn: TurnInfo | None = None,
         of: int | None = None,
         create_key: str | None = None,
-        asked_in: int | None = None,
         asked_at: float | None = None,
-        kept: object = None,
         earlier: TaskRecord | None = None,
         handoff: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start *work* as a task this chat owns, at the level the person's words give.
 
-        A task started from a card the chat showed earlier names the turn that
-        offered it (*asked_in*), or the card's time (*asked_at*): it starts with
-        the chat's turns before that, not with what was said since, and with what
-        that turn picked as the card kept it (*kept*, :func:`~.handover.snapshot`),
-        checked again when the task is made.
+        A task started from a card the chat showed earlier names the card's time
+        (*asked_at*): it starts with the chat's turns before that, not with what
+        was said since.
 
         Work a running *turn* starts is admitted once, under this chat and the
         turn the person's words were accepted in (:meth:`receipt`): never under
@@ -2009,12 +2004,8 @@ class Front:
             self.chat_id,
             turn,
             CHAT_TURN.get(),
-            before=asked_in,
-            until=asked_at if asked_in is None else None,
+            until=asked_at,
         )
-        lines, over = from_snapshot(kept)
-        if lines:
-            handover = dataclasses.replace(handover, kept=lines, kept_over=over)
         if earlier is not None:
             text, _, files = await self.result(earlier)
             line = task_line(earlier.title, text, files)
@@ -2521,7 +2512,7 @@ class Front:
     async def act(
         self, echo_id: int, do: str, level: object = None, text: str = ""
     ) -> dict[str, Any]:
-        """The person's tap on an echo: Undo, Apply, Start as a task, a level, a chore's Save, Just once and Cancel, or a reply to a task."""
+        """The person's tap on an echo: Undo, Apply, a level, a chore's Save, Just once and Cancel, or a reply to a task."""
         async with self._acting:
             return await self._act(echo_id, do, level, text)
 
@@ -2565,18 +2556,11 @@ class Front:
                  "title": echo.get("title", ""), "line": t_in("en", "approvals.revoked"),
                  "said": said("approvals.revoked")}
             )  # fmt: skip
-        if do == "start" and kind == "ask":
-            words = str(echo.get("words", ""))
-            asked = echo.get("turn")
-            return await self.delegate(
-                str(echo.get("text", "")),
-                typed=words,
-                of=echo_id,
-                asked_in=asked if isinstance(asked, int) else None,
-                asked_at=shown_at,
-                kept=echo.get("handed"),
-            )
-        record = await self.record(str(echo.get("task_id", "")))
+        if not echo.get("task_id"):
+            # A line about no task (a "Start this as a task?" card kept from an
+            # older version included) takes no tap here.
+            raise ApiError(400, "invalid_request", f"{do} does not apply to this line.")
+        record = await self.record(str(echo["task_id"]))
         if record is None:
             raise ApiError(404, "not_found", t("front.echo.gone"))
         if do == "stop" and kind == "started":

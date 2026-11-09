@@ -251,17 +251,17 @@ async def test_a_task_started_again_keeps_the_person_s_words(tmp_path: Path) -> 
         assert restarted.spec["user_words"] == "/task make slides from notes.md"
 
 
-async def test_two_taps_at_once_start_one_task(tmp_path: Path) -> None:
+async def test_two_taps_at_once_act_once(tmp_path: Path) -> None:
     async with front_console(tmp_path) as (console, client, _):
-        ask = {"echo": "ask", "text": "which laptop?", "turn_id": "t", "line": "Start?"}
-        echo = await console.front.echo(ask)
+        task_id = await _start(console, "Slides for the 15:00 meeting")
+        echo = await console.front.suggest(await _task(console, task_id), "pause")
         url = f"/api/front/echoes/{echo['id']}"
         answers = await asyncio.gather(
-            client.post(url, json={"do": "start"}),
-            client.post(url, json={"do": "start"}),
+            client.post(url, json={"do": "apply"}),
+            client.post(url, json={"do": "apply"}),
         )
         assert sorted(a.status_code for a in answers) == [200, 409]
-        assert len(await console.workers.tasks.list_tasks()) == 1
+        assert [e["echo"] for e in await _echoes(console)].count("control") == 1
 
 
 async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -> None:
@@ -305,23 +305,6 @@ async def test_the_models_task_create_starts_a_task_on_the_persons_words(
         assert (record.level, record.front_id) == (1, console.main_id)
         assert record.spec["user_words"] == typed
         assert record.spec["objective"] == typed, "the person's words alone"
-
-
-async def test_a_start_card_already_in_a_chat_still_starts_on_a_tap(
-    tmp_path: Path,
-) -> None:
-    typed = "make slides from my notes"
-    async with front_console(tmp_path) as (console, client, _):
-        offer = await console.front.echo(
-            {"echo": "ask", "text": typed, "words": typed, "turn": 0,
-             "line": "Start this as a task?"}
-        )  # fmt: skip
-        tapped = await client.post(
-            f"/api/front/echoes/{offer['id']}", json={"do": "start"}
-        )
-        assert tapped.status_code == 200, tapped.text
-        record = await _task(console, tapped.json()["echo"]["task_id"])
-        assert record.spec["objective"] == typed
 
 
 def llm_tools(console: Console) -> list[Any]:

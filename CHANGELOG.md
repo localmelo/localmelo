@@ -18,7 +18,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   approval waiting. No sign-in moves with the work. A task a chat started now runs once: when it has ended it never runs
   again, and more work on its job (your message, the chat's follow-up, **Continue**, **Finish it**, **Allow once**) goes on
   in a fresh task with its record as background, keeping the follow-up count and the steps blocked earlier. Tasks from
-  the task page and the API keep going on in their own session. (#571)
+  the task page and the API keep going on in their own session. A "Start this as a task?" card kept from an older
+  version no longer starts the whole request again; it can only be put away. (#571)
 - A chat does the work itself. Ask in any chat and melo works right there: it reads and changes files in its folder, runs
   Python, looks things up and uses the browser when browsing is on, with its steps, its live browser card and the same
   approvals in the chat. It becomes a task only when you ask for one or for background work, or when long work should

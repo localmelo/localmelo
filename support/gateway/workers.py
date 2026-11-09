@@ -76,7 +76,6 @@ from localmelo.support.gateway.handover import (
     done_calls,
     handoff_block,
     inert,
-    kept_lines,
     own_words,
     picked_block,
     picked_lines,
@@ -1013,9 +1012,8 @@ class TaskWorkers:
         Nothing without a handover. The turns are the chat's own conversation,
         which its run carries with memory on or off, and so is the record of a
         finished task the work follows on, the first picked line and in the same
-        room; with memory off nothing else is picked. A task started from a card
-        gets what the offering turn kept (``handover.kept``), checked again now.
-        A failed read of the picked items keeps the rest, and is logged.
+        room; with memory off nothing else is picked. A failed read of the
+        picked items keeps the rest, and is logged.
         """
         if handover is None:
             return "", "", frozenset()
@@ -1024,12 +1022,8 @@ class TaskWorkers:
         if self.memory is None or not self._memory_on():
             return turns, task, frozenset()
         try:
-            picked = await (
-                kept_lines(self.memory, handover)
-                if handover.kept
-                else picked_lines(
-                    self.memory, handover, shown=shown, chars=PICKED_CHARS - len(task)
-                )
+            picked = await picked_lines(
+                self.memory, handover, shown=shown, chars=PICKED_CHARS - len(task)
             )
         except Exception:
             log.warning(
