@@ -20,6 +20,7 @@ import pytest
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import (
+    SELF_ASKING_TOOLS,
     AllowAllPolicy,
     ApprovalDecision,
     ApprovalPolicy,
@@ -38,8 +39,10 @@ from localmelo.melo.contracts.review import (
     reaches_unread_site,
     site_keys,
 )
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.browser import sites
+from localmelo.support.browser.provider import TOOLS as BROWSER_TOOLS
 from localmelo.support.sessions.approvals import (
     ApprovalLedger,
     ChatPolicy,
@@ -58,7 +61,8 @@ from .test_approvals import (
     _calls,
     _deploy,
 )
-from .test_auto_mode import FakeModel, verdict
+from .test_auto_mode import FakeModel, _plans, verdict
+from .test_auto_mode import _agent as auto_agent
 
 
 @pytest.mark.asyncio
@@ -1590,3 +1594,108 @@ async def test_a_take_back_the_file_refused_lands_once_it_can(
     else:
         await chat.book.flush()
     assert await chat.keys_after_a_restart() == expected
+
+
+# ── #571: a call whose effect is unknown needs a fresh decision ──
+
+
+class _Browser(BaseToolProvider):
+    """melo's browser tool definitions, each recording that it ran."""
+
+    def __init__(self) -> None:
+        self.ran: list[str] = []
+
+    async def start(self) -> list[ProvidedTool]:
+        def run(name: str) -> Any:
+            async def call(**_: Any) -> str:
+                self.ran.append(name)
+                return "ok"
+
+            return call
+
+        return [
+            ProvidedTool(
+                definition=d,
+                function=run(d.name),
+                asks_itself=d.name in SELF_ASKING_TOOLS,
+            )
+            for d in BROWSER_TOOLS
+        ]
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["browser_follow", "browser_open", "browser_click"])
+async def test_a_page_call_cut_off_is_asked_again_by_the_key_it_started_with(
+    name: str,
+) -> None:
+    """Every call keeps its live key from its start, a page call that asks its own
+    questions too; a later run fenced by that key asks the person first, whatever
+    the tool's tier, and their refusal does not run it."""
+    args = {"url": "https://a.example"} if name == "browser_open" else {"ref": "e12"}
+    browser = _Browser()
+    first, _ = _agent(
+        ScriptedLLM([_calls((name, args, "c1")), _answer("Done.")]), providers=[browser]
+    )
+    await first.start()
+    recorder = Recorder()
+    await first.run_task("go", on_event=recorder, approval=AllowAllPolicy())
+    [started] = recorder.of("tool.started")
+    again, _ = _agent(
+        ScriptedLLM([_calls((name, args, "c1")), _answer("Done.")]), providers=[browser]
+    )
+    await again.start()
+    person = Policy(ApprovalDecision(False, origin="user"))
+    fenced = EarlierBlocks(person, {}, fresh=[started.data["run_key"]])
+    await again.run_task("go on", approval=fenced)
+    assert browser.ran == [name], "it ran again unasked"
+    [asked] = person.requests
+    assert asked.review is not None and asked.review.verdict == "high"
+
+
+@pytest.mark.asyncio
+async def test_a_grant_never_runs_a_call_of_unknown_effect_unasked() -> None:
+    llm = ScriptedLLM(
+        [_deploy("c1", "staging"), _deploy("c2"), _deploy("c3", "staging")]
+        + [_answer("Done.")]
+    )
+    agent, tools = _agent(llm)
+    answers = iter(
+        [
+            ApprovalDecision(True, origin="user", remember=True),  # for the chat
+            ApprovalDecision(False, origin="user"),
+        ]
+    )
+    person = Policy(lambda: next(answers))
+    unknown = call_key("deploy", {"target": "prod"}, agent.executor.workspace_root)
+    policy = EarlierBlocks(RememberingPolicy(person.decide), {}, fresh=[unknown])
+    await agent.run_task("deploy", approval=policy)
+    staging = ("deploy", {"target": "staging"})
+    assert tools.ran == [staging, staging]  # the grant runs the other, unasked
+    assert [r.arguments for r in person.requests] == [
+        {"target": "staging"},
+        {"target": "prod"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_asks_the_person_about_a_call_of_unknown_effect_each_time(
+    tmp_path: Path,
+) -> None:
+    """Auto would run the routine step; fenced, it is the person's card each time,
+    Auto's own review is never asked, and Allow once runs it that one time."""
+    code = "print('deploy')"
+    llm = FakeModel(_plans([code, code]))
+    agent, python = auto_agent(llm, tmp_path / "work")
+    answers = iter(
+        [ApprovalDecision(True, origin="user"), ApprovalDecision(False, origin="user")]
+    )
+    person = Policy(lambda: next(answers))
+    unknown = call_key("python_exec", {"code": code}, agent.executor.workspace_root)
+    policy = EarlierBlocks(AutoPolicy(asking=person), {}, fresh=[unknown])
+    await agent.run_task("deploy", approval=policy)
+    assert python.ran == [code]
+    assert [r.review.verdict for r in person.requests if r.review] == ["high", "high"]
+    assert llm.review_requests == []

@@ -62,6 +62,7 @@ DATACLASS_FIELDS = [
     "answered_on_stop",
     "format_fixed",
     "empty_reply",
+    "handed_off",
 ]
 
 

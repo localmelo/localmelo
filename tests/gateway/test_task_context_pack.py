@@ -32,6 +32,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.handoff import HANDOFF_HEADER
 from localmelo.support.gateway.handover import (
     PICKED_HEADER,
     WORDS_HEADER,
@@ -593,7 +594,9 @@ async def test_no_words_when_the_request_holds_them_or_there_are_none(
     assert not {"own_words", "chat_turns", "chat_picked"} & set(spec)
 
 
-async def test_a_continue_reuses_the_words_and_the_handover(rig: Rig) -> None:
+async def test_a_fresh_task_on_the_same_job_reuses_the_words_and_the_handover(
+    rig: Rig,
+) -> None:
     rig.llm.replies = [says("Done."), says("Finished.")]
     handover = Handover(turns=TURNS, used=(RECALLED,))
     task, _ = await rig.workers.create_spec(
@@ -601,11 +604,12 @@ async def test_a_continue_reuses_the_words_and_the_handover(rig: Rig) -> None:
     )
     task_id = task["task_id"]
     await _ended(rig.workers, task_id, 1)
-    _, how = await rig.workers.message(task_id, "finish it")
-    assert how == "continued"
-    await _ended(rig.workers, task_id, 2)
+    record = await rig.workers.tasks.get_task(task_id)
+    fresh, how = await rig.workers.successor(record, "finish it", by="person")
+    assert how == "successor"
+    await _ended(rig.workers, fresh["task_id"], 1)
     second = _texts(rig.llm.requests[1])
-    for block in (WORDS_HEADER, EARLIER_HEAD, PICKED_HEADER):
+    for block in (WORDS_HEADER, EARLIER_HEAD, PICKED_HEADER, HANDOFF_HEADER):
         assert second.count(block) == 1, block
 
 

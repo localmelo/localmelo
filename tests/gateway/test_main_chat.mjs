@@ -335,7 +335,8 @@ test('a reminder proposal names the time and the words, offers Remind me and Can
   assert.deepEqual(acted, [['save'], ['cancel']]);
   const ask = mainChat.readEcho({id: 3, ts: NOON, data: {echo: 'ask', ask: 'when', work: 'send the report', line: 'When should I remind you?'}});
   assert.deepEqual(mainChat.echoActions(ask, false), [], 'it is answered by typing a time');
-  assert.deepEqual(mainChat.echoActions({kind: 'ask', text: 'x'}, false), [['Start as a task', 'start'], ['Not now', 'dismiss']]);
+  // A stored "Start this as a task?" card only goes away (#571).
+  assert.deepEqual(mainChat.echoActions({kind: 'ask', text: 'x'}, false), [['Not now', 'dismiss']]);
 });
 
 // A tidy-up of the notes while the person was away: one line, what changed, and one Undo.

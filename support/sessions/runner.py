@@ -222,7 +222,7 @@ def _exception_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
-async def _settle(future: asyncio.Future[Any]) -> None:
+async def settle(future: asyncio.Future[Any]) -> None:
     """Wait until *future* is done, through cancellations of this task.
 
     The caller re-raises the cancellation once it returns: the work in
@@ -670,14 +670,14 @@ class SessionRunner:
         try:
             return await asyncio.shield(begin)
         except asyncio.CancelledError as exc:
-            await _settle(begin)
+            await settle(begin)
             if begin.cancelled() or begin.exception() is not None or own_task:
                 raise
             # This task was to run the turn, and it is being cancelled: by
             # the runner (a Stop, a close) or from outside. The turn ends at
             # once, without a run.
             turn = begin.result()
-            await _settle(self._start_finish(turn, exc, cancelled=True))
+            await settle(self._start_finish(turn, exc, cancelled=True))
             if task.cancelling() > turn.runner_cancels:
                 _uncancel(task, turn.runner_cancels)
                 raise
@@ -1887,7 +1887,7 @@ class SessionRunner:
             try:
                 return await asyncio.shield(work)
             except asyncio.CancelledError:
-                await _settle(work)
+                await settle(work)
                 if not work.cancelled():
                     work.exception()  # retrieved: the cancellation propagates
                 raise

@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A chat hands the rest of its work to a fresh task when it grows. A chat finishes your work in its own turn when it can;
+  when what is left would fill its context with large tool or page output, it hands that to one fresh task and its turn
+  ends with a line that names the task. The task starts from your message, from what the chat did as melo's records show
+  it (which calls worked, which failed, and which may have done part of their work and are checked, never repeated
+  blindly) and from what the chat says is left, which it reads as data, with secrets in it redacted. A retry ends on the
+  same task, a hand-off that cannot be admitted moves nothing, and one that may have been admitted is looked up before
+  the chat goes on. The chat keeps the work while it has a browser page open, a take-over card or an approval waiting,
+  holds a password you gave in that message, or sits in a folder no task may use. A task a chat started now runs once:
+  when it has ended it never runs again, and more work on its job (your message, the chat's follow-up, **Continue**,
+  **Finish it**, **Allow once**, a message that arrived as it ended) goes on in one fresh task with its record as
+  background, with a step you allowed once that did not run yet; a second tap or message reaches that task instead of
+  starting another, and when it cannot start the chat says so. The job keeps its follow-up count, the steps refused in
+  it (in the chat's turn too), which stay refused until your own message moves it on, and the calls cut off with an
+  unknown effect: unless they only read (a page action or a navigation does not), each asks you on a card before it runs
+  again as it was, in Ask and in Auto, whatever a grant or melo's review says, and your Allow runs it once. A Stop as the
+  task is admitted shows the task, which runs. Tasks from the task page and the API keep going on in their own session. A "Start this as a task?" card kept from an older version no longer starts the whole
+  request again; it can only be put away. (#571)
 - The chat model is picked from what the server offers. Settings asks the model server which models it has by itself,
   when it opens, when the form opens and when you enter the address, and the chat model is a list of its chat models
   (embedding models are kept apart; **Other** types a name); **Refresh** asks again. `/model` lists the same models and its
@@ -1527,6 +1544,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- A call's one-line preview, on its card and in its events, has its secrets redacted before it is shortened, so a cut
+  never leaves part of a key in it. Each call's start event keeps the key of the live call (`run_key`), so a call cut
+  off with no result kept is known by it later (#571).
+
 - A chat's mode decides for the tasks it started (#576). A task you started follows its chat's Ask or Auto while it runs, so a switch you made is not ignored by work that began earlier; a card already waiting stays for you. The mode only chooses between policies the task already had, a chore and a task another program or melo made keep their own mode, and Auto's limits are unchanged (see SECURITY.md).
 
 - A saved chore's run now has a browser with nobody at its side (#570). Its approvals, Auto and posting rules are those of a task you started, it uses and records no earlier approval, and, as for a task you started, melo works through a picture check on a page itself, within the same limits (a model that reads pictures, its own model only, 3 tries and then the take-over card, no outside service), so a daily run can solve a check with nobody at its side. What a repeating chore posts in your name asks each time, whatever its request says, because the schedule now reaches the posting review from code. A password you gave in the message that saved the chore is typed by the run that message started only. Each chore has one work folder that deleting the chore removes without following a link; its files are never read as project instructions. See SECURITY.md.
@@ -1770,6 +1791,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - A chat no longer sends each tool call's summary to the embedding model. With an embedding model set up, that added one request per tool call, a failed request ended the turn, and the text it put at the start of the conversation made a local model server read the whole conversation again on most turns. Memory across chats (notes, recall, search) is unchanged. Part of #591.
+- A task's card in the chat names the file it was asked to write and did not. The card's line ended at
+  "is missing:" with no name; the task's own page already had it.
+
 - The live browser card docked at the top of the chat no longer shows lines of the chat cut off around it: above the card, through its rounded corners and at its bottom edge, whatever scrolls under it is hidden behind a band in the chat's colour that fades out below the card (#576).
 - Japanese particles no longer count as words a question shares with a memory. Part of #428.
 - melo keeps a note you said in Chinese or Japanese when it words it differently, after the chat's model checks that no name, place, number or date changed. Part of #442.

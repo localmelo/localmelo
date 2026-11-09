@@ -1077,6 +1077,11 @@ class RunResult:
     that the task's text asks for, from one more request of the same option.
     :meth:`to_dict` leaves each out when it is false.
 
+    ``handed_off`` is true only for a run whose last step handed the rest of its
+    work on (``melo.contracts.tools.hand_off``): it ended ``completed`` with that
+    call's receipt as its ``result``, and took no step after it. :meth:`to_dict`
+    leaves it out when it is false.
+
     ``empty_reply`` is set only for a run in which a model that did think ended
     a turn with no answer and ``AgentOptions.empty_reply_fallback`` stepped in:
     ``{"thinking_off_retry": bool, "from_thinking": bool}``. The first is true
@@ -1106,6 +1111,7 @@ class RunResult:
     answered_on_stop: bool = False
     format_fixed: bool = False
     empty_reply: dict[str, bool] | None = None
+    handed_off: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -1128,6 +1134,8 @@ class RunResult:
             del data["format_fixed"]
         if data.get("empty_reply") is None:
             del data["empty_reply"]
+        if not data["handed_off"]:
+            del data["handed_off"]
         return data
 
 

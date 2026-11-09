@@ -584,7 +584,13 @@ async def test_a_task_card_keeps_how_code_found_it_ended(tmp_path: Path) -> None
             result=run_result(),
             answer="Fixed the report.\nEnding: ready",
         )
-        draft = {"state": "draft", "reasons": ["tests_missing"], "question": ""}
+        # The names of the files it did not write travel with the reason that needs them.
+        draft = {
+            "state": "draft",
+            "reasons": ["tests_missing", "file_missing"],
+            "question": "",
+            "missing": ["report.txt"],
+        }
         await console.workers.tasks.change(
             task_id, state="done", actor="scheduler", ending={**draft, "tests": []}
         )
