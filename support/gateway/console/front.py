@@ -793,11 +793,13 @@ class TaskTools(BaseToolProvider):
         objective and progress ride in its packet as data, beside the turn's
         calls and refusals as melo's records show them (``handoff.from_chat``).
         Work stays here while this chat holds a browser page, its take-over
-        card or an approval, or a password the person gave in this turn: browser
-        work and sign-ins do not move yet.
+        card or an approval, or a password the person gave in this turn (browser
+        work and sign-ins do not move yet), or when no task may work in the
+        folder this chat's tasks inherit.
 
-        Admitting is the one commit that makes the task runnable, and the
-        call's time limit does not cut it. Whatever happens after it, the task
+        Admitting is the one commit that makes the task runnable, and from
+        there to its lookup the call's time limit does not cut it; a Stop then
+        shows the task it admitted, with its own Stop. Whatever happens after it, the task
         is looked up by its key before the chat reads anything: admitted, the
         turn ends on it; not found, the work is still the chat's and it reads
         why; unknown, the turn ends saying so, never going on beside a task
@@ -816,12 +818,13 @@ class TaskTools(BaseToolProvider):
             if Handoff.read(started.spec).origin == "chat":
                 return hand_off(_receipt(turn.typed_text, started.title))
             return _already(started, turn)
-        if why := front.holds_browser() or _holds_sign_in():
+        why = front.holds_browser() or _holds_sign_in() or await front.no_task_folder()
+        if why:
             return f"Not done: {why} The work stays here: finish it in this chat."
-        _no_time_limit()
         echo: dict[str, Any] = {}
         try:
             packet = await front.handoff_of(turn, account=progress, remaining=objective)
+            _no_time_limit()
             echo = await front.delegate(
                 turn.user_text,
                 typed=front.typed(),
@@ -829,6 +832,12 @@ class TaskTools(BaseToolProvider):
                 turn=turn,
                 handoff=packet,
             )
+        except asyncio.CancelledError:
+            # A Stop while it was admitted: a task that was shows, with its own Stop.
+            with contextlib.suppress(Exception):
+                if (moved := await front.admitted(turn)) is not None:
+                    await front.restore_started(moved)
+            raise
         except Exception:
             logger.warning("A hand-off failed; looking for its task", exc_info=True)
         try:
@@ -1174,8 +1183,9 @@ def _holds_sign_in() -> str:
 
 
 def _no_time_limit() -> None:
-    """Admitting a task is one commit: the running call's time limit does not cut
-    it in two (#571). A Stop still goes through, as through any await."""
+    """Admitting a task is one commit, read back by its key: from here the running
+    call's time limit does not cut that in two (#571). A Stop still goes through,
+    as through any await."""
     deadline = TOOL_DEADLINE.get()
     if deadline is not None:
         with contextlib.suppress(RuntimeError):
@@ -1953,6 +1963,17 @@ class Front:
             self._told_browsing = True
             await self.notice("front.echo.browsingOff")
         return True
+
+    async def no_task_folder(self) -> str:
+        """Why no task may work in the folder this chat's tasks inherit, or ``""`` (#571).
+
+        The chat itself opens there, reading only (``registry.chat_options``);
+        a task would be made failed before it starts, so no work moves to one.
+        """
+        workers = self.console.workers
+        folder = await workers.chat_folder(self.chat_id)
+        problem = folder_problem(folder, workers.settings())
+        return f"no task may work in this chat's folder ({problem})." if problem else ""
 
     def holds_browser(self) -> str:
         """Why this chat's work cannot leave it for its browser now, or ``""`` (#571).

@@ -725,14 +725,19 @@ def _python_writes(code: str) -> bool:
     return False
 
 
+# The start of a call's output (or error) a turn's calls keep beside its end.
+HEAD_CHARS: Final = 1000
+
+
 @dataclass
 class TurnCall:
     """One tool call of a run, as its stored events show it (:func:`turn_calls`).
 
     *start* and *finish* are the ids of its ``tool.started`` and
-    ``tool.finished`` events (``None`` while no finish is kept); *asked*
-    says the approval policy was asked about it, as for a call that can
-    change something.
+    ``tool.finished`` events (``None`` while no finish is kept). *output* is
+    the end of what it returned and *head* the start of that, or of its
+    error (:data:`HEAD_CHARS`), as stored. *key* is the live call's key the
+    approval record kept for an allowed call (``run_key``), ``""`` without one.
     """
 
     start: int
@@ -745,7 +750,8 @@ class TurnCall:
     step: int = 0
     preview: str = ""
     error: str = ""
-    asked: bool = False
+    head: str = ""
+    key: str = ""
 
     def _command(self) -> tuple[str, bool]:
         """``(command, passed on)`` of the test runner this call starts, or ``""``."""
@@ -1089,9 +1095,13 @@ async def turn_calls(store: SessionStore, session_id: str, turn: Any) -> list[Tu
                 code = data.get("exit_code")
                 call.finish, call.status = stored.id, str(data.get("status") or "")
                 call.exit_code = code if type(code) is int else None
-                call.output = str(data.get("output") or "")[-4000:]
+                output = str(data.get("output") or "")
+                call.output = output[-4000:]
                 call.error = str(data.get("error") or "")
-                call.asked = isinstance(data.get("approval"), dict)
+                call.head = (call.error or output)[:HEAD_CHARS]
+                approval = data.get("approval")
+                if isinstance(approval, dict):
+                    call.key = str(approval.get("run_key") or "")
         if len(page) < 1000:
             return calls
         after = page[-1].id or after

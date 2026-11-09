@@ -19,6 +19,7 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
@@ -26,7 +27,7 @@ from localmelo.melo.contracts.approvals import (
     find_earlier,
 )
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.melo.schema import INTERRUPT_LABEL, Message
+from localmelo.melo.schema import INTERRUPT_LABEL, Message, ToolDef
 from localmelo.support.gateway.chat_gate import GatedLLM
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.followups import (
@@ -39,12 +40,19 @@ from localmelo.support.gateway.console.front import (
 )
 from localmelo.support.gateway.console.registry import chat_options
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
-from localmelo.support.gateway.handoff import HANDOFF_HEADER
+from localmelo.support.gateway.handoff import (
+    HANDOFF_HEADER,
+    UNKNOWN_EFFECT,
+    Handoff,
+    handoff_block,
+)
 from localmelo.support.gateway.task_policy import TaskSpec, chore_workspace
+from localmelo.support.gateway.task_store import TaskRecord
 from localmelo.support.gateway.workers import _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionBusyError
+from localmelo.tests.checker.test_redaction import GITHUB
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import (
@@ -1030,20 +1038,8 @@ async def test_a_long_chain_keeps_one_head_its_request_and_its_refusals(
 async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cut = "import shutil\nshutil.rmtree('build')"
-    allowed = {"request_id": "r1", "allowed": True, "reason": "",
-               "remember": False, "origin": "user"}  # fmt: skip
-    events = [
-        core_event("tool.started", seq=1, call_id="p-0", name="python_exec",
-                   arguments={"code": cut}, preview="python"),
-        core_event("tool.finished", seq=2, call_id="p-0", name="python_exec",
-                   status="timeout", error="Execution timed out", approval=allowed),
-    ]  # fmt: skip
-    for n in range(25):  # more calls after it than the packet lists
-        events += [
-            core_event("tool.started", seq=3 + 2 * n, step=2 + n, call_id=f"r-{n}"),
-            core_event("tool.finished", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"),
-        ]
+    # The store keeps its arguments redacted; the gate's key is of the live call.
+    cut = f"import os\nos.environ['TOKEN'] = '{GITHUB}'\nos.system('deploy')"
     worker: list[Reply] = [
         tool_call("python_exec", {"code": cut}, "p-1"),
         answer("Done.\nEnding: ready"),
@@ -1054,6 +1050,25 @@ async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
     ) as (console, client, _, ran):
         await say(client, console, REPORT)
         task_id = await started_task(console)
+        info = await console.store.get_session(task_id)
+        assert info is not None
+        allowed = {"request_id": "r1", "allowed": True, "reason": "",
+                   "remember": False, "origin": "user",
+                   "run_key": call_key("python_exec", {"code": cut}, info.workspace)}  # fmt: skip
+        stored = {"code": redact_secrets(cut)[0]}
+        events = [
+            core_event("tool.started", seq=1, call_id="p-0", name="python_exec",
+                       arguments=stored, preview="python"),
+            core_event("tool.finished", seq=2, call_id="p-0", name="python_exec",
+                       status="timeout", error="Execution timed out", approval=allowed),
+        ]  # fmt: skip
+        for n in range(25):  # more calls after it than the packet lists
+            events += [
+                core_event("tool.started", seq=3 + 2 * n, step=2 + n, call_id=f"r-{n}"),
+                core_event(
+                    "tool.finished", seq=4 + 2 * n, step=2 + n, call_id=f"r-{n}"
+                ),
+            ]
         await stop_run(console, task_id, INTERRUPT_LABEL, events=events)
         del console.workers._schedule  # tasks run from here on
         body, how = await console.workers.continue_stopped(task_id)
@@ -1074,3 +1089,157 @@ async def test_a_call_whose_effect_is_unknown_never_runs_again_down_the_chain(
         assert ran.codes == []
         [approval] = await calls_of(console, fresh)
         assert approval["allowed"] is False and approval["earlier"]
+
+
+async def test_a_message_that_reaches_a_worker_as_it_ends_goes_on_in_a_successor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    worker: list[Reply] = [held(release, answer("Done.\nEnding: ready"))]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[worker], follow_up=False
+    ) as (console, client, models, _):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        _, how = await console.workers.message(task_id, "also add a short summary")
+        assert how == "queued"
+        release.set()  # its last step ends with the message unread
+        fresh = await _went_on(console, task_id)
+        assert len(await console.store.list_turns(task_id)) == 1, "never reopened"
+        assert "also add a short summary" in fresh.spec["objective"]
+
+
+async def test_a_second_message_for_an_ended_job_never_reopens_its_successor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    worker: list[Reply] = [held(release, answer("Done.\nEnding: ready"))]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[worker], run=False, follow_up=False
+    ) as (console, client, models, _):
+        await say(client, console, REPORT)
+        first = await started_task(console)
+        await stop_run(console, first)
+        del console.workers._schedule  # tasks run from here on
+        body, _ = await console.workers.continue_stopped(first)
+        fresh = str(body["task_id"])
+        await until(lambda: models["workers"] and models["workers"][0].requests)
+        ended = await console.workers.tasks.get_task(first)
+        note = "also add a short summary"
+        echo = await console.front.follow(ended, note, typed=note)
+        assert (echo["echo"], echo["task_id"]) == ("sent", fresh)
+        release.set()
+        newer = await _went_on(console, fresh)
+        assert len(await console.store.list_turns(fresh)) == 1, "never reopened"
+        assert note in newer.spec["objective"]
+
+
+async def _went_on(console: Console, task_id: str) -> TaskRecord:
+    """The task that went on with *task_id*'s job once it ended."""
+    workers = console.workers
+    heads: list[TaskRecord] = []
+
+    async def moved() -> bool:
+        heads.append(await workers.newest(await workers.tasks.get_task(task_id)))
+        return heads[-1].task_id != task_id
+
+    await until(moved, timeout=10.0)
+    return heads[-1]
+
+
+async def test_every_turn_of_an_ended_task_keeps_its_unknown_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A one-time task holds more than one turn after a resume: a call cut off in
+    its first turn stays fenced in its successor."""
+    main: list[Reply] = [creates("Long report"), answer("Started it as a task.")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, run=False, follow_up=False
+    ) as (console, client, _, _):
+        await say(client, console, REPORT)
+        task_id = await started_task(console)
+        cut = core_event("tool.started", call_id="w-0", name="file_write",
+                         arguments={"path": "out.txt", "content": "part one"},
+                         preview="out.txt")  # fmt: skip
+        record = await console.workers.tasks.get_task(task_id)
+        turn = await console.store.begin_turn(
+            task_id, record.spec["objective"], holder=HOLDER
+        )
+        await console.store.append_events(
+            task_id, turn.turn, [{**cut, "run_id": turn.run_id}], holder=HOLDER
+        )
+        await console.store.finish_turn(
+            task_id, turn.turn, holder=HOLDER, status="failed", cause="run",
+            result=run_result(status="failed"), answer="It stopped.",
+        )  # fmt: skip
+        await stop_run(console, task_id)  # the resumed turn, which ran out of steps
+        body, _ = await console.workers.continue_stopped(task_id)
+        fresh = await console.workers.tasks.get_task(str(body["task_id"]))
+        blocks = fresh.spec["handoff"]["blocks"]
+        assert [b["tool"] for b in blocks if b["who"] == UNKNOWN_EFFECT] == [
+            "file_write"
+        ]
+
+
+def _tool(name: str, read: bool, tags: tuple[str, ...] = ()) -> ToolDef:
+    return ToolDef(
+        name=name,
+        description=name,
+        parameters={"type": "object", "properties": {}},
+        annotations={"readOnlyHint": read},
+        semantic_tags=list(tags),
+    )
+
+
+async def test_only_a_read_cut_off_may_run_again_whoever_moved_the_job_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tool's own tier decides: a cut-off read may run again, a cut-off page
+    action or write may not, in a successor the person's message started too;
+    a step the person refused gets a fresh decision there, and the packet says so."""
+    tools = {
+        "web_fetch": _tool("web_fetch", read=True),
+        "browser_click": _tool("browser_click", read=False, tags=("browser",)),
+    }
+
+    def block(name: str, who: str) -> dict[str, Any]:
+        return {"call_key": call_key(name, {"n": 1}, None), "loose_keys": [],
+                "who": who, "step_key": "", "what": name, "tool": name}  # fmt: skip
+
+    blocks = (
+        block("web_fetch", UNKNOWN_EFFECT),
+        block("browser_click", UNKNOWN_EFFECT),
+        block("python_exec", "the user"),
+    )
+    async with owner_console(tmp_path, monkeypatch, run=False, follow_up=False) as (
+        console,
+        _,
+        _,
+        _,
+    ):
+        for by in ("person", "melo"):
+            packet = Handoff(origin="task", source="t1", by=by, blocks=blocks)
+            spec = packet.onto(TaskSpec(title="Report", objective=REPORT))
+            body, _ = await console.workers.create_spec(
+                spec, front_id=console.main_id, chat_started=True, handoff=packet
+            )
+            record = await console.workers.tasks.get_task(str(body["task_id"]))
+            info = await console.store.get_session(record.task_id)
+            assert info is not None
+            policy = await console.workers._guard(
+                record, info.meta, AllowAllPolicy(), tools.get
+            )
+            earlier = find_earlier(policy)
+            assert earlier is not None
+
+            def refused(name: str, guard: Any = earlier) -> bool:
+                return guard.match(name, {"n": 1}, None) is not None
+
+            assert not refused("web_fetch") and refused("browser_click")
+            assert refused("python_exec") is (by != "person")
+            said = handoff_block(record.spec["handoff"])
+            assert "browser_click" in said and "web_fetch" in said
+            assert "melo refuses" in said

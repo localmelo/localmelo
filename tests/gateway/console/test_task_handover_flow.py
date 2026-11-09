@@ -414,3 +414,49 @@ async def test_a_turn_given_a_password_keeps_its_work_here(
         assert await _handed(console, str(console.main_id)) == []
         told = tool_results(models["main"], 1)[-1]
         assert told.startswith("Not done:") and "password" in told
+
+
+async def test_a_long_output_shows_its_start_and_leaves_no_part_of_a_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Redacted whole before it is cut: wherever a cut falls, no piece of a key
+    reaches the packet, and a call's entry starts where its output starts."""
+    main: list[Reply] = [
+        tool_call("file_read", {"path": "keys.txt"}, "read-1"),
+        hands_off(),
+    ]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        _,
+        _,
+    ):
+        lines = "".join(f"key {n}: {GITHUB}\n" for n in range(300))
+        (tmp_path / "work" / "keys.txt").write_text(f"START of the keys\n{lines}")
+        await say(client, console, TYPED)
+        [record] = await console.workers.tasks.list_tasks()
+        kept = json.dumps(record.spec["handoff"])
+        pieces = {GITHUB[at : at + 8] for at in range(len(GITHUB) - 7)}
+        assert not [piece for piece in pieces if piece in kept]
+        [read] = [d for d in record.spec["handoff"]["done"] if d["tool"] == "file_read"]
+        assert "START of the keys" in read["said"]
+
+
+async def test_a_chat_whose_folder_no_task_may_use_keeps_its_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main: list[Reply] = [hands_off(), answer("I go on here.")]
+    async with owner_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+        _,
+    ):
+        hidden = tmp_path / ".work"
+        hidden.mkdir()
+        console.workers.settings().gateway.workspace = str(hidden)
+        await say(client, console, TYPED)
+        assert await console.workers.tasks.list_tasks() == []
+        assert await _handed(console, str(console.main_id)) == []
+        told = tool_results(models["main"], 1)[-1]
+        assert told.startswith("Not done:") and "folder" in told

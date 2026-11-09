@@ -540,7 +540,10 @@ class _ApprovalGate:
         *denial*: the step itself was denied (a person's Deny, an auto block,
         a policy's refusal of the step); the record then keeps its
         ``call_key`` and ``loose_keys``, so a task its chat continues does not
-        run it, or a step alike, again (#411).
+        run it, or a step alike, again (#411). An allowed call keeps the same
+        key of the live call as ``run_key``: when its result is unknown, a task
+        that goes on with the job refuses it again by that key, whatever its
+        stored arguments kept (#571).
         """
         self.asked = {
             "request_id": asking.request_id,
@@ -567,6 +570,10 @@ class _ApprovalGate:
                 self.asked["step_key"] = self._key
         if self._allowance:
             self.asked["allowance"] = "once"
+        if allowed:
+            self.asked["run_key"] = call_key(
+                asking.tool_name, asking.arguments, self._workspace_root
+            )
         if denial and not allowed:
             # What makes a later call the same step, or one alike: a task the
             # chat continues on its own never runs it again (#411).

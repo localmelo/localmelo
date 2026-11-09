@@ -525,8 +525,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const outcome = await act('continue', (id) => api(`${path(id)}/continue`, {method: 'POST'}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
-      Object.assign(state, {task: outcome.data.task, notice: t('tasks.continueAccepted'), pausing: false});
-      live?.sync(outcome.data.task);
+      // Its work went on already (#571): say where, not that it continues here.
+      const going = outcome.data.message === 'running';
+      const notice = going ? t('tasks.goesOn', {title: outcome.data.task.title}) : t('tasks.continueAccepted');
+      Object.assign(state, {task: going ? state.task : outcome.data.task, notice, pausing: false});
+      if (!going) live?.sync(outcome.data.task);
     } else state.error = errorText(outcome.error);
     render();
   }

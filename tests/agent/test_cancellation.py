@@ -691,6 +691,8 @@ class TestStop:
         )
         approval = dict(finished.data["approval"])
         assert len(approval.pop("request_id")) == 32
+        # The live call's key: a cut-off call is refused by it later (#571).
+        assert len(approval.pop("run_key")) == 32
         assert approval == {
             "allowed": True,
             "reason": "",
