@@ -235,7 +235,7 @@ async def test_text_a_whole_reply_check_hides_is_never_shown(
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await _scoped_chat(llm).plan_step([], [], [], "hi")
+        await _scoped_chat(llm).plan_step([], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert display.text().strip() == ""
@@ -252,11 +252,21 @@ ECHO = ToolDef(
     ("lines", "shown", "call"),
     [
         # A call written as JSON over several lines: held until it is known.
-        (["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], "", True),
+        (
+            ["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"],
+            "",
+            True,
+        ),
         (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], "", True),
         # The same after prose: the prose has shown, the call never does.
         (
-            ["Let me check.\n", "{\n", '  "name": "echo",\n', '  "arguments": {}\n', "}\n"],
+            [
+                "Let me check.\n",
+                "{\n",
+                '  "name": "echo",\n',
+                '  "arguments": {}\n',
+                "}\n",
+            ],
             "Let me check.\n",
             True,
         ),
@@ -264,6 +274,12 @@ ECHO = ToolDef(
         (["```tool_code\n", 'echo(text="x")\n', "```\n"], "", True),
         # A line that opens with a brace waits for the end, then shows.
         (["Sure.\n", "{ is a brace.\n"], "Sure.\n", False),
+        # A bracket JSON cannot follow streams: a link, a redaction mark.
+        (
+            ["[The docs](https://x) say so.\n", "[redacted] was cut.\n"],
+            "[The docs](https://x) say so.\n[redacted] was cut.\n",
+            False,
+        ),
         # A code block of a language streams, braces and all.
         (
             ["```python\n", "x = 1\n", "{1: 2}\n", "```\n"],
@@ -271,7 +287,15 @@ ECHO = ToolDef(
             False,
         ),
     ],
-    ids=["json-lines", "json-fence", "later-call", "tool-code-fence", "prose", "code-block"],
+    ids=[
+        "json-lines",
+        "json-fence",
+        "later-call",
+        "tool-code-fence",
+        "prose",
+        "link",
+        "code-block",
+    ],
 )
 async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
     lines: list[str], shown: str, call: bool
@@ -290,7 +314,7 @@ async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
     )
     token = STREAM_DISPLAY.set(display)
     try:
-        await _scoped_chat(llm).plan_step([], [], [ECHO], "hi")
+        await _scoped_chat(llm).plan_step([], [ECHO], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
     assert seen == [shown]  # what showed before the reply came
@@ -304,7 +328,7 @@ async def test_a_whole_reply_is_not_judged_as_streamed() -> None:
     chat = _scoped_chat(llm)
     token = STREAM_DISPLAY.set(display)
     try:
-        await chat.plan_step([], [], [], "hi")
+        await chat.plan_step([], [], "hi")
         # A streamed reply that repeats its reasoning is unfinished thinking; a
         # whole one is an answer, as without a display.
         assert not chat.unfinished(sent)

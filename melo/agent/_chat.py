@@ -618,7 +618,11 @@ def _quote_data_delimiter(text: str, delimiter: str) -> str:
 _THINK_MARK = re.compile(r"</?think\b|\A\s*<thinking\b", re.IGNORECASE)
 # A fence line: its marker and its label.
 _FENCE_LINE = re.compile(r"[ \t]*(`{3,}|~{3,})[ \t]*([^\s`~]*)")
-_OPENS_JSON: Final = ("{", "[")
+# A line that may open JSON: ``{``, or ``[`` that JSON can follow (not
+# ``[redacted]`` or a link's ``[text]``).
+_OPENS_JSON: Final = re.compile(
+    r'[ \t]*(?:\{|\[[ \t]*(?:$|[\[{"\]\d-]|(?:true|false|null)\b))'
+)
 
 
 def _call_opening(lines: str, fence: str | None) -> tuple[str, str | None]:
@@ -626,7 +630,8 @@ def _call_opening(lines: str, fence: str | None) -> tuple[str, str | None]:
 
     *fence* is the marker of the block of ordinary code the text before
     *lines* is in, or ``None``. Returns ``"hold"`` when a line outside such a
-    block starts, after whitespace, with ``{`` or ``[``, or opens a fence
+    block starts, after whitespace, with ``{`` or with ``[`` that JSON can
+    follow (:data:`_OPENS_JSON`), or opens a fence
     labelled as a call's (:data:`~localmelo.melo.schema.CALL_FENCE_LABELS`) or
     one whose first content line starts so; ``"wait"`` when a fence's first
     content line has not come yet; else ``""``; with the fence state after
@@ -650,11 +655,11 @@ def _call_opening(lines: str, fence: str | None) -> tuple[str, str | None]:
             following = next((row for row in rows[number + 1 :] if row.strip()), None)
             if following is None:
                 return "wait", fence
-            if following.lstrip().startswith(_OPENS_JSON):
+            if _OPENS_JSON.match(following):
                 return "hold", fence
             fence = found.group(1)
             continue
-        if line.lstrip().startswith(_OPENS_JSON):
+        if _OPENS_JSON.match(line):
             return "hold", fence
     return "", fence
 

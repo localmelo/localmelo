@@ -182,7 +182,9 @@ async def test_a_stream_that_ends_cleanly_with_either_signal_is_complete(
     provider = OpenAICompatLLM(
         "http://example.test/v1",
         "test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw]))
+        ),
     )
     try:
         events = [event async for event in provider.stream_chat([])]
@@ -335,7 +337,12 @@ async def test_transport_failure_closes_stream(error: httpx.TransportError) -> N
     [
         # Refused twice: the whole call's error, classified as it classifies it.
         (b'{"error":{"message":"image input is not supported"}}', None, 2, False),
-        (b'{"error":{"message":"bad option"}}', b'{"error":{"code":"context_length_exceeded"}}', 2, True),
+        (
+            b'{"error":{"message":"bad option"}}',
+            b'{"error":{"code":"context_length_exceeded"}}',
+            2,
+            True,
+        ),
         # A refusal that is already a context overflow is raised at once.
         (b'{"error":{"code":"context_length_exceeded"}}', None, 1, True),
     ],
