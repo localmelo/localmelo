@@ -197,6 +197,19 @@ class TestRestoredLine:
         assert len(llm.calls) == 1
 
     @pytest.mark.asyncio
+    async def test_a_format_only_a_models_reading_asks_for_is_not_the_persons(
+        self,
+    ) -> None:
+        llm = FakeLLM([_answer("Ada")])
+        request = f"{PLAIN}\n\n[melo's reading of the request · data]\n{TASK}"
+        result = await _agent(llm, answer_on_stop=True).run_task(
+            request, user_words=PLAIN
+        )
+        assert (result.status, result.result) == ("completed", "Ada")
+        assert result.format_fixed is False
+        assert len(llm.calls) == 1
+
+    @pytest.mark.asyncio
     async def test_an_empty_answer_is_not_asked_about(self) -> None:
         llm = FakeLLM([_answer("   ")])
         result = await _agent(llm, answer_on_stop=True).run_task(TASK)

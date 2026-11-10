@@ -24,6 +24,7 @@ from localmelo.support.gateway.console.front import (
     clean_title,
 )
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
+from localmelo.support.gateway.handover import with_reading
 from localmelo.support.sessions.display import short_title
 from localmelo.tests.sessions.helpers import answer, tool_call
 
@@ -713,9 +714,12 @@ async def test_the_model_names_its_own_tasks_without_a_second_request(
         [echo] = [e for e in await _echoes(console) if e["echo"] == "started"]
         assert echo["title"] == "Improve Activity row Done text"
         assert titles.asked == []
-        # The person's message is the objective; the model's reading is not sent.
+        # The person's message is the request; the model's reading follows it.
         record = await _task(console, echo["task_id"])
-        assert record.spec["objective"] == typed
+        assert record.spec["objective"] == with_reading(
+            typed, FIX, name="Improve Activity row Done text"
+        )
+        assert record.spec["user_words"] == typed
 
 
 @pytest.mark.parametrize(

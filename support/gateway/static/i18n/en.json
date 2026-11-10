@@ -403,7 +403,7 @@
   "auto.reason.download": "This step downloads files to this Mac.",
   "auto.reason.env": "This step creates a programming environment.",
   "auto.reason.install": "This step installs software.",
-  "auto.reason.model": "Your model's review says it {what}.",
+  "auto.reason.model": "Your model's review stopped it.",
   "auto.reason.money": "This step spends money.",
   "auto.reason.opaque": "This step runs code melo cannot check.",
   "auto.reason.open_app": "A page asked to open another app on this Mac.",

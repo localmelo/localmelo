@@ -628,7 +628,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const now = Date.now() / 1000;
     for (const block of blockedOf(task)) {
       const read = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
-        review: block.review, reason: block.reason}, name: block.name, preview: block.preview});
+        review: block.review, reason: block.reason, tool: block.question ?? undefined, arguments: block.arguments}, name: block.name, preview: block.preview});
       if (!read || !read.category) continue;
       // A job that finished has no step left to allow: it is new work for the chat.
       const facts = block.finished ? {...read, allow: false, finished: true} : read;

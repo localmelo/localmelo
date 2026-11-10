@@ -16,7 +16,8 @@ is asked on a waiting one. A task's card also keeps its ``ending`` (``state``,
 ``proposed``, ``reasons``, ``question``): how code found that end ended, as its
 ``sched.finished`` event carries it (:mod:`..task_endings`), which the page reads
 as Ready, Done, not finished or Needs you. A Needs you card also has ``block``
-(``request_id``, ``step_key``, ``name``, ``preview``, ``review``) when exactly
+(``request_id``, ``step_key``, ``name``, ``preview``, ``review``, and for a
+question its tool asked itself its ``question`` and ``arguments``) when exactly
 one step Auto blocked in its task can still be allowed once
 (``TaskWorkers.open_blocks``) and it is a step of the run that end closed: its
 Allow this step.
@@ -62,7 +63,7 @@ from localmelo.support.sessions.display import (
 )
 from localmelo.support.sessions.store import SessionInfo, StoredEvent, TurnInfo
 
-from ..auto_blocks import blocked_steps
+from ..auto_blocks import blocked_steps, blocks_in
 from ..chore_store import REMINDER_PREFIX, REMINDER_REASON
 from ..finishing import NOT_CONTINUED, OUT_OF_STEPS, is_out_of_steps, not_committed
 from ..front_rules import FINISHED
@@ -178,22 +179,19 @@ class MainChatCards:
                 self._last = stored
             return
         if kind == "tool.finished":
-            # A step auto mode blocked in a task: its chat shows it, with Allow once (#369).
-            approval = (stored.event.get("data") or {}).get("approval")
-            if not (
-                isinstance(approval, dict)
-                and approval.get("origin") == "auto"
-                and approval.get("allowed") is False
-            ):
-                return
-            event = {
-                "type": kind,
-                "ts": stored.event.get("ts"),
-                "data": {"request_id": approval.get("request_id")},
-            }
-            self._heard_events.append(
-                StoredEvent(stored.id, stored.session_id, stored.turn, event)
-            )
+            # A step auto mode blocked in a task (the call, or a question its
+            # tool asked itself): its chat shows it, with Allow once (#369).
+            for block in blocks_in(stored.event):
+                if block.get("allowed") is not False:
+                    continue
+                event = {
+                    "type": kind,
+                    "ts": stored.event.get("ts"),
+                    "data": {"request_id": block.get("request_id")},
+                }
+                self._heard_events.append(
+                    StoredEvent(stored.id, stored.session_id, stored.turn, event)
+                )
             del self._heard_events[:-_HEARD_MAX]
         elif kind in (
             "turn.finished",
@@ -479,7 +477,17 @@ class MainChatCards:
             "state": "blocked",
             "line": said_in("en", words),
             "said": words,
-            **{k: block[k] for k in ("request_id", "step_key", "name", "preview")},
+            **{
+                k: block[k]
+                for k in (
+                    "request_id",
+                    "step_key",
+                    "name",
+                    "preview",
+                    "question",
+                    "arguments",
+                )
+            },
             "review": review,
             "can_allow": block["can_allow"] and not job_finished(record),
             "finished": job_finished(record),
@@ -499,7 +507,11 @@ class MainChatCards:
         if len(found) != 1 or not _same_turn(found[0].get("turn"), turn):
             return {}
         keys = ("request_id", "step_key", "name", "preview", "review")
-        return {"block": {k: found[0][k] for k in keys}}
+        block = {k: found[0][k] for k in keys}
+        if found[0].get("question"):
+            # A text typed or a form sent: the card shows where and all of it.
+            block.update(question=found[0]["question"], arguments=found[0]["arguments"])
+        return {"block": block}
 
     async def _reminder_words(self, task_id: str) -> str | None:
         """The person's words of a reminder's task, or ``None`` for any other task."""

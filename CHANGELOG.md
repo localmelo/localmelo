@@ -34,12 +34,14 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 ### Tasks
 
 - When one task needs you and asked last, your next message goes to it with Undo; a plain yes allows its one blocked step once, and its card has Allow this step.
+- A typing or form step Auto blocked in a task shows on its page and in its chat with the site and the whole text, and Allow once runs that exact text once.
 - A task says where it is in the same words on its page, in the side panel and in the terminal, and the reason it waits after a restart reads in your language.
 - A task says honestly how it ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.
 - Ready means done: a task asked to write a named file that is missing says so on its card.
 - A task that runs out of steps reads Stopped, and Continue picks it up where it left off.
 - A task that is stuck asks the chat that started it instead of stopping.
 - A task starts with what its chat knows about you and the project, and reads the project's own instruction file.
+- A task a chat starts reads what the chat understood of your message, so "retry today's task" names the right work; only your own words decide what is allowed.
 - A task works in its chat's folder and asks before it reads or writes outside it.
 - A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.

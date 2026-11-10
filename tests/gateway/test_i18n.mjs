@@ -243,11 +243,13 @@ test('a blocked step gives its reasons in the page\'s language, and keeps the ru
   const unclear = {verdict: 'high', categories: ['opaque'], reasons: ['Does something melo could not check.'], by: 'model'};
   const bare = {verdict: 'high', categories: ['install'], reasons: [], by: 'rules'};
   assert.deepEqual(blockFacts(BLOCK(rules)).reasons, rules.reasons);
+  // What the model found is the title already: said once.
+  assert.deepEqual(blockFacts(BLOCK(model)).reasons, ['Your model\'s review stopped it.']);
   assert.deepEqual(blockFacts(BLOCK(bare)).reasons, ['This step installs software.']);
   await useLanguage('zh-Hans');
   try {
     assert.deepEqual(blockFacts(BLOCK(rules)).reasons, ['这一步会安装软件。', '这一步会创建编程环境。']);
-    assert.deepEqual(blockFacts(BLOCK(model)).reasons, ['你的模型审查后认为，这一步会下载文件。']);
+    assert.deepEqual(blockFacts(BLOCK(model)).reasons, ['你的模型审查后拦下了它。']);
     assert.deepEqual(blockFacts(BLOCK(unclear)).reasons, ['这一步运行的代码 melo 无法检查。']);
     assert.equal(blockFacts(BLOCK(rules)).title, '已拦下：安装软件');
   } finally {

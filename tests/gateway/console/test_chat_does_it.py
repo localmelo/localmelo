@@ -20,6 +20,7 @@ import pytest
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.chores import CHECKIN_S
 from localmelo.support.gateway.console.front import FRONT_TEXT, TASK_TOOLS
+from localmelo.support.gateway.handover import with_reading
 from localmelo.support.gateway.task_policy import configured_root
 from localmelo.support.gateway.workers import NO_BROWSER_NOTE
 from localmelo.support.sessions.identity import ACTING_NOTE
@@ -75,8 +76,12 @@ async def test_the_models_call_on_a_persons_turn_starts_the_task(
         await say(client, console, typed)
         assert tool_results(models["main"])[-1].startswith("Started task ")
         record = await console.workers.tasks.get_task(await started_task(console))
-        # The person's words are the task's request, never the model's reading.
-        assert record.spec["objective"] == typed
+        # The person's words head the task's request; the model's reading follows
+        # as data, and only the words are what judges a step.
+        assert record.spec["objective"] == with_reading(
+            typed, "The work", name="The work"
+        )
+        assert record.spec["user_words"] == typed
         assert not [
             r for r in await rows(console, console.main_id) if r["echo"] == "ask"
         ]
@@ -264,7 +269,8 @@ async def test_continue_on_a_finished_worker_goes_to_the_model_with_all_its_word
         await _finished(console, old, REPORT)
         await say(client, console, typed)
         [new] = await others(console, old)
-        assert new.spec["objective"] == typed
+        assert new.spec["objective"] == with_reading(typed, "Prices", name="Prices")
+        assert new.spec["user_words"] == typed
         assert await state(console, old) == "done"
 
 

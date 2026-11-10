@@ -945,12 +945,13 @@ class StepReviewer:
         task: bool = False,
         workspace: str | None = None,
         changed: bool = False,
+        allowable: bool = True,
     ) -> str:
         """Keep a block of auto mode and return the note the model reads.
 
         A second block of the same step or category in this run, or the
         :data:`BLOCKS_PER_TURN`-th, sets ``run.stop``: the note then says to
-        stop and answer.
+        stop and answer. *allowable*: the person can allow the step once.
         """
         reviewed = review if review is not None else ActionReview("high")
         first = reviewed.categories[0] if reviewed.categories else "beyond_request"
@@ -969,6 +970,7 @@ class StepReviewer:
             folder=folder or "the folder",
             second=run.stop,
             changed=changed,
+            allowable=allowable,
         )
 
 
