@@ -933,7 +933,7 @@ async def test_a_click_that_lands_on_another_element_twice_is_stopped_and_names_
             None, Act("click", raw.url, named(raw, "Always slips"), doc=raw.doc)
         )
     said = str(stopped.value)
-    assert said.startswith("An ad (iframe from ads.example.net) covers that button")
+    assert said.startswith("An ad (a frame from another site) covers that button")
     assert "Nothing was clicked or typed" in said
     assert len(clicks(peer)) == 2
     assert await driver.location(None) == COVER

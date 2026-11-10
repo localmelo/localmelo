@@ -1,13 +1,14 @@
-"""``[tools] web_fetch_allow_local``: the test servers on this computer ``web_fetch`` may read.
+"""``[tools] web_fetch_allow_local``: the test servers on this computer ``web_fetch`` and the browser may reach.
 
 This module is outside :mod:`localmelo.support.web` on purpose: the config reads
 the rules below to validate the key, and importing that package loads the whole
 tool. Only :func:`fetcher` imports the fetcher, when it is called.
 
 A developer setting, empty (off) by default, for a test that needs
-``web_fetch`` to read a fixture page served on this computer. It loosens the
-rule that ``web_fetch`` never reaches this computer (see
-:mod:`localmelo.support.web.guard`), so the rules around it are strict:
+``web_fetch`` to read, or the browser to open and act on, a fixture page
+served on this computer. It loosens the rule that neither tool reaches this
+computer (see :mod:`localmelo.support.web.guard`), so the rules around it
+are strict. The key keeps its first name, which says ``web_fetch`` only:
 
 - An entry is exactly ``127.0.0.1:PORT`` or ``[::1]:PORT``: one of those two
   addresses and one port from 1 to 65535. No host name (``localhost``), no
@@ -21,18 +22,25 @@ rule that ``web_fetch`` never reaches this computer (see
   passes its own live config: ``melo serve --port N`` sets the gateway port
   in memory only, so the saved file does not know it. A model server that is
   in neither the config nor the run's URLs is not protected.
-- The list is read when a session's ``web_fetch`` is made. A chat with a
-  person asks about a site on it (see ``WebFetchProvider._admit``; in auto
-  mode each URL is reviewed by itself), an unattended run reads it, and a call
-  of the shell or Python cannot set it (the shell review keeps :data:`KEY`'s full
-  name, ``tools.web_fetch_allow_local``, among the settings it guards).
-- The list reaches only ``web_fetch``'s fetcher, as its ``allow`` hook
-  (:class:`~localmelo.support.web.guard.LocalAllow`); the browser tools use
-  the guard's own checks with no hook. A redirect meets the same list.
+- The list is read when a session's tools are made, from the session's live
+  config (:func:`allow_of`). A chat with a person asks about a site on it as
+  about any site (see ``WebFetchProvider._admit`` and the browser's site
+  question; in auto mode each address is reviewed by itself), an unattended
+  run reads it, and a call of the shell or Python cannot set it (the shell
+  review keeps :data:`KEY`'s full name, ``tools.web_fetch_allow_local``, among
+  the settings it guards).
+- The session builds the list once and hands that one object to
+  ``web_fetch``'s fetcher, as its ``allow`` hook
+  (:class:`~localmelo.support.web.guard.LocalAllow`; a redirect meets the
+  same list), and to the browser tools. The browser
+  passes it only for melo's own navigation and for a page already on a
+  listed server, never for a request of any other page (see
+  :mod:`localmelo.support.browser.addresses`).
 - It is config only: the file, or ``-X`` for one run. No tool argument,
   console setting or message sets it.
-- A fetch it allows is marked: ``allowed_local`` in the call's
-  ``tool.finished`` event, and :data:`NOTE` in what the call shows.
+- A fetch, a page or an act it allows is marked: ``allowed_local`` in the
+  call's ``tool.finished`` event (:func:`mark`), and :data:`NOTE` in what the
+  call shows.
 """
 
 from __future__ import annotations
@@ -41,12 +49,14 @@ import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
+from localmelo.melo.contracts.tools import TOOL_MARKS
 from localmelo.support import config
 from localmelo.support.local_ports import GATEWAY, MODEL, own_ports, urls_of
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
     from localmelo.support.web.fetch import WebFetcher
+    from localmelo.support.web.guard import LocalAllow
 
 KEY = "web_fetch_allow_local"
 # The only hosts an entry may have, as written in the entry and as the guard reads them.
@@ -143,33 +153,45 @@ def problems(cfg: Config) -> list[str]:
     return errors
 
 
-def fetcher(
+def allow_of(
     cfg: Config | None = None, *, protect: Iterable[str | None] = ()
-) -> WebFetcher:
-    """The :class:`WebFetcher` for *cfg* (the saved config with this run's ``-X``, if None).
+) -> LocalAllow | None:
+    """The :class:`~localmelo.support.web.guard.LocalAllow` of the list in *cfg* (the saved config with this run's ``-X``, if None).
 
-    It has a :class:`~localmelo.support.web.guard.LocalAllow` when the list
-    holds a valid entry, and no hook at all otherwise. *protect* are the
-    model server URLs of this run that are not in the config (``-u``); their
-    ports are refused too, as are the config's and a running gateway's, each
-    time an address is checked.
+    ``None`` when the list holds no valid entry or the config cannot be read.
+    *protect* are the model server URLs of this run that are not in the
+    config (``-u``); their ports are refused too, as are *cfg*'s and a running
+    gateway's, each time an address is checked.
     """
-    from localmelo.support.web.fetch import WebFetcher
     from localmelo.support.web.guard import LocalAllow
 
     if cfg is None:
         try:
             cfg = config.load()
         except Exception:  # an unreadable config gives no list, never a wider one
-            return WebFetcher()
+            return None
     sites = sites_of(cfg.tools.web_fetch_allow_local)
     if not sites:
-        return WebFetcher()
+        return None
     urls = tuple(protect)
     loaded = cfg
-    return WebFetcher(
-        allow=LocalAllow(sites, lambda: own_ports(loaded, urls, running=True))
-    )
+    return LocalAllow(sites, lambda: own_ports(loaded, urls, running=True))
+
+
+def fetcher(
+    cfg: Config | None = None, *, protect: Iterable[str | None] = ()
+) -> WebFetcher:
+    """The :class:`WebFetcher` for *cfg*: with :func:`allow_of` as its hook, or no hook at all."""
+    from localmelo.support.web.fetch import WebFetcher
+
+    return WebFetcher(allow=allow_of(cfg, protect=protect))
+
+
+def mark() -> None:
+    """Mark the running call's ``tool.finished`` event ``allowed_local``: it reached a listed test server."""
+    marks = TOOL_MARKS.get()
+    if marks is not None:
+        marks["allowed_local"] = True
 
 
 __all__ = [
@@ -180,7 +202,9 @@ __all__ = [
     "MODEL",
     "MODEL_NOTE",
     "NOTE",
+    "allow_of",
     "fetcher",
+    "mark",
     "own_ports",
     "parse",
     "problems",

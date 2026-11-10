@@ -402,8 +402,9 @@ The number of `tool.started` events is `RunResult.n_tool`.
   `origin` is `error` when the policy failed (`reason` is the failure) or
   `withdrawn` when the run was cancelled while it decided. Every other call,
   and an event stored before this key, has no `tool_asks`.
-- `allowed_local`: `true`, and only for a `web_fetch` call that read a test server on this
-  computer which the developer setting `[tools] web_fetch_allow_local` lists (see
+- `allowed_local`: `true`, and only for a `web_fetch` call that read, or a browser call
+  that opened, read or acted on, a test server on this computer which the developer
+  setting `[tools] web_fetch_allow_local` lists (see
   [Tools](tools.md#test-servers-on-this-computer)); it is there even when the page then
   answered with an error. Every other call, and an event stored before this key, has no
   `allowed_local`.

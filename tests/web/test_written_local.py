@@ -191,7 +191,7 @@ class Recording(Anywhere):
         super().__init__(*args, **kwargs)
         self.allowed: list[frozenset[tuple[str, int]]] = []
 
-    def allow_local(self, grant: Any) -> None:
+    def allow_local(self, grant: Any, listed: Any = None) -> None:
         """Keeps what the reader says when told (``None``: nothing is allowed)."""
         self.allowed.append(frozenset() if grant is None else frozenset(grant()))
 
