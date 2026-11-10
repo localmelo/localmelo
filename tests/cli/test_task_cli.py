@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -580,7 +581,11 @@ def test_a_task_that_ran_out_of_steps_reads_stopped_for_a_person() -> None:
         "  Left: run the tests and commit.",
     ]
     listed = _run(["list"], {"tasks": [_STOPPED, {**_STOPPED, "out_of_steps": False}]})
-    assert [row.split()[2] for row in listed.splitlines()[1:]] == ["stopped", "failed"]
+    # Columns are two spaces or more apart; a stage may be several words.
+    assert [re.split(r"\s{2,}", row)[2] for row in listed.splitlines()[1:]] == [
+        "stopped",
+        "did not finish",
+    ]
 
 
 def test_json_keeps_the_stored_state_of_a_task_that_ran_out_of_steps() -> None:

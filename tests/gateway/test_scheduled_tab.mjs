@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CHECKIN, EMPTY, lateWords, rowLines, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
+import {CHECKIN, EMPTY, lastLine, lateWords, rowLines, setupScheduledTab, whenWords} from '../../support/gateway/static/scheduled-tab.mjs';
 
 class Element {
   constructor(tag) {
@@ -71,9 +71,18 @@ test('the words: when something runs, and how the last run went', () => {
   assert.deepEqual(rowLines(chore('a', {enabled: false}), now), ['Off']);
   // The time the schedule names is shown, not the few seconds the start is spread by.
   assert.match(rowLines(chore('a', {next_at: at(28, 8, 30), next_run: at(28, 8, 30) + 71}), now)[0], /^Next today at 8:30\s?AM$/i);
-  assert.deepEqual(rowLines(chore('a', {last: {state: 'done', line: 'Three meetings today.'}}), now).slice(1), ['Last: Done · Three meetings today.']);
-  assert.deepEqual(rowLines(chore('a', {last: {state: 'failed', line: 'Stopped before it finished'}}), now).slice(1), ['Last: Did not finish · Stopped before it finished']);
-  assert.deepEqual(rowLines(chore('a', {last: {state: 'running', line: ''}}), now).slice(1), ['Last: Running now']);
+  // How the last run ended, from its task's stored ending, in the words every screen uses; one still going says where.
+  const ended = (state, ending, line = '') => lastLine(chore('a', {last: {state, ending, line, task_id: 't1'}}));
+  assert.equal(ended('done', {state: 'blocked', reasons: ['question'], question: 'Type the note'}, 'Opened the page; typing was blocked.'),
+    'Last: Needs you · Opened the page; typing was blocked.');
+  assert.equal(ended('done', {state: 'ready', reasons: []}, 'Three meetings today.'), 'Last: Ready · Three meetings today.');
+  assert.equal(ended('failed', {state: 'failed', reasons: ['run_failed']}, 'Stopped before it finished'), 'Last: Did not finish · Stopped before it finished');
+  assert.equal(ended('cancelled', {state: 'dropped', reasons: ['stopped']}), 'Last: Stopped');
+  assert.equal(ended('failed', {state: 'draft', reasons: ['out_of_steps']}, 'Ran out of steps'), 'Last: Stopped · Ran out of steps');
+  assert.equal(ended('done', null, 'Three meetings today.'), 'Last: Done · Three meetings today.');
+  assert.equal(ended('running', null), 'Last: Running now');
+  assert.equal(ended('waiting', null), 'Last: Waiting for you');
+  assert.equal(lastLine(chore('a')), '');
 });
 
 test('with no chores the tab says how to add one, under the check-in with its switch and next time', async () => {
@@ -103,11 +112,15 @@ test('the check-in switch turns it off and on, and says so in words', async () =
 });
 
 test('each chore shows its title, when it runs, its next run and its last result', async () => {
-  const h = harness({chores: [chore('a', {title: 'Calendar brief', last: {state: 'done', line: 'Three meetings today.'}}),
+  const h = harness({chores: [chore('a', {title: 'Calendar brief', last: {state: 'done', line: 'Three meetings today.', task_id: 't1',
+    ending: {state: 'ready', reasons: []}}}),
     chore('b', {title: 'Check disk', when: 'every 2 hours', enabled: false, next_run: null})]});
   await h.tab.show();
   const [first, second] = h.rows();
-  assert.match(first.text(), /^Calendar brief every weekday at 8:30 Next today at 8:30\s?AM Last: Done · Three meetings today\./i);
+  assert.match(first.text(), /^Calendar brief every weekday at 8:30 Next today at 8:30\s?AM Last: Ready · Three meetings today\./i);
+  // The last run's line opens that run's page.
+  const [last] = first.findAll((node) => node.className === 'sched-last');
+  assert.deepEqual([last.tagName, last.href, last.dataset.ending], ['A', '#/tasks/t1', 'ready']);
   assert.equal(second.text(), 'Check disk every 2 hours Off');
   assert.deepEqual(h.switches().map((item) => item.attributes['aria-checked']), ['true', 'true', 'false']);
   assert.equal(second.dataset.enabled, 'false');
@@ -330,10 +343,10 @@ test('a one-time chore lists its time, and when it has run it is done, with how 
   const ran = reminder('r', {enabled: false, next_run: null, last_run: at(30, 9, 1), last: {state: 'done', line: 'Time to send the report.'}});
   const lines = rowLines(ran, at(30, 12, 0));
   assert.match(lines[0], /^Reminded today at 9:01\s?AM$/i);
-  assert.deepEqual(lines.slice(1), ['Last: Done · Time to send the report.']);
+  assert.equal(lastLine(ran), 'Last: Done · Time to send the report.');
   // A reminder that ran after the computer slept says so.
   const late = rowLines({...ran, last_run: at(30, 11, 0), late_min: 120}, at(30, 12, 0));
-  assert.deepEqual(late.slice(1), ['ran 2 h late', 'Last: Done · Time to send the report.']);
+  assert.deepEqual(late.slice(1), ['ran 2 h late']);
   assert.deepEqual([35, 60, 90, 120, 47 * 60, 48 * 60, 3 * 24 * 60].map(lateWords),
     ['ran 35 min late', 'ran 1 h late', 'ran 2 h late', 'ran 2 h late', 'ran 47 h late', 'ran 2 days late', 'ran 3 days late']);
   // A one-time chore the person switched off before it ran is just off.

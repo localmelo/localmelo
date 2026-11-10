@@ -25,6 +25,7 @@ from localmelo.support.gateway.console.activity import (
 )
 from localmelo.support.gateway.console.worker_reader import WorkerReader
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
+from localmelo.support.gateway.handoff import successor_key
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -499,9 +500,24 @@ def test_a_task_code_found_not_finished_says_so_and_can_finish(
         Task(
             "t-old", "done", "Old", finished_at=now - 2, ending={**draft, "at": now - 9}
         ),
+        Task("t-went", "done", "Went on", finished_at=now - 3, ending=draft),
     )
+    real = console.workers.tasks.by_create_key
+
+    async def newer(key: str) -> Any:
+        return object() if key == successor_key("t-went") else await real(key)
+
+    monkeypatch.setattr(console.workers.tasks, "by_create_key", newer)
     rows = {row["title"]: row for row in activity(client)["rows"]}
     assert rows["Fix"]["ending"] == draft and rows["Fix"]["can_continue"] is True
+    # A task whose work went on in a newer task says so, with no ending and no Continue.
+    went = rows["Went on"]
+    assert (went["state"], went["result"], went["ending"]) == (
+        "done",
+        "Continued in a newer task",
+        None,
+    )
+    assert "can_continue" not in went
     assert rows["Notes"]["ending"]["state"] == "ready"
     assert "can_continue" not in rows["Notes"]
     # An ending decided at another transition is not this one's.
