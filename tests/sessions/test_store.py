@@ -2677,6 +2677,18 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
             "",
         ),
         ({"user_text": "[2 pictures]"}, ""),
+        # Real words beside a stand-in shape, before or after it, are kept as words.
+        (
+            {"user_text": "sign in [1 file]", "typed_text": "sign in [1 file]"},
+            "sign in [1 file]",
+        ),
+        (
+            {
+                "user_text": "[2 pictures] what is this?",
+                "typed_text": "[2 pictures] what is this?",
+            },
+            "[2 pictures] what is this?",
+        ),
         (
             {
                 "user_text": "[attached: a.example.txt]",
@@ -2693,6 +2705,8 @@ FILE = TextAttachment("notes.txt", "my password is hunter2")
         "legacy blocks",
         "stand-in",
         "pictures only",
+        "words before a stand-in shape",
+        "words after a stand-in shape",
         "older stand-in",
     ],
 )

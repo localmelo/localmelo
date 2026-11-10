@@ -1636,8 +1636,16 @@ class CliSession:
             for a in (turn.attachments or ())
         )
         # An older turn has its files in its text: the words are what comes before
-        # them, never a file's text (#626).
+        # them, never a file's text (#626); the person is told the file is left out.
         message = turn.typed_text if staged else words_before_files(turn.user_text)
+        if not staged and message != turn.user_text:
+            self.out.print(
+                self._text(
+                    "⚠ The file of this older message is not sent again: "
+                    "attach it again with /attach.",
+                    "warn",
+                )
+            )
         self.renderer.begin_turn(message, first_turn=False)
         self._work = self.spawn(
             self._turn(message, typed_text=turn.typed_text, attachments=staged)

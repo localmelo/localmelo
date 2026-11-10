@@ -84,6 +84,7 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
     # never the file's text as words (#626).
     assert rows[-1].user_text == "typed question"
     assert rows[-1].typed_text == "typed question"
+    assert "attach it again with /attach" in setup.out.text()
     setup.out.console.export_text()
     session.enter("/new")
     await setup.idle()
