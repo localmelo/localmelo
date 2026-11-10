@@ -155,7 +155,9 @@ call itself asks nothing; each site passes the site gate below first.
 
 A developer setting for a test that needs `web_fetch` to read, or melo's browser to open and act
 on, a fixture page served on this computer. `[tools] web_fetch_allow_local` is empty, so off, by
-default; it keeps the name it had when it was `web_fetch`'s alone.
+default; it keeps the name it had when it was `web_fetch`'s alone. List only servers whose pages you
+wrote: a page on a listed server is trusted like your own app, and [SECURITY.md](../../SECURITY.md)
+says what such a page can still reach.
 
 - **Set it** in the config file, `web_fetch_allow_local = ["127.0.0.1:8123"]`, or for one run with
   `-X tools.web_fetch_allow_local=127.0.0.1:8123` (several entries are separated by commas).

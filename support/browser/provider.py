@@ -3776,9 +3776,8 @@ class BrowserToolProvider(BaseToolProvider):
             raw = self._raw[tab_id]
             await self._public_now(raw, tab_id)
             shot = await self._driver.screenshot(raw)
-            await self._public_now(
-                raw, tab_id
-            )  # a page that moved while it was pictured
+            # A page that moved while it was pictured.
+            await self._public_now(raw, tab_id)
             return shot
 
     async def _public_now(self, raw: str, tab: str) -> None:
