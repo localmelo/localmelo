@@ -85,8 +85,11 @@ async def console_with(
         await console.aclose()
 
 
-async def scheduled_task(console: Console, tmp_path: Path) -> str:
-    """A task in Auto that nobody can be asked for (a chore's origin), run to its end."""
+async def scheduled_task(
+    console: Console, tmp_path: Path, chat_started: bool = False
+) -> str:
+    """A task in Auto, run to its end: one nobody can be asked for (a chore's
+    origin), or with *chat_started* a worker a chat started, nobody watching."""
     folder = tmp_path / "localmelo-workspace" / "ws"
     folder.mkdir(parents=True, exist_ok=True)
     assert console.main_id is not None
@@ -95,7 +98,8 @@ async def scheduled_task(console: Console, tmp_path: Path) -> str:
     )
     spec = TaskSpec.from_payload({"objective": "do the daily check-in"})
     task, _ = await console.workers.create_spec(
-        dataclasses.replace(spec, workspace=str(folder)), origin="user_rule"
+        dataclasses.replace(spec, workspace=str(folder)),
+        **({"chat_started": True} if chat_started else {"origin": "user_rule"}),
     )
     task_id = str(task["task_id"])
     await settled(console, task_id)
@@ -204,3 +208,36 @@ async def test_a_blocked_typing_step_is_listed_carded_and_allowed_once(
             409,
             "already_allowed",
         )
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_task_its_job_goes_on_in_reads_the_allowed_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker a chat started runs once (#571): Allow once goes on in a fresh task,
+    which reads the step from the ended task's block and runs it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plans = [
+        typing(),
+        _answer("It needs the note.\nEnding: blocked: may it type the note?"),
+        typing(NOTE, "call_2"),
+        _answer("Typed the note."),
+    ]
+    async with console_with(tmp_path, monkeypatch, plans, [SENDS]) as (
+        console,
+        client,
+        types,
+        llm,
+    ):
+        task_id = await scheduled_task(console, tmp_path, chat_started=True)
+        [blocked] = (await console.workers.get(task_id))["blocked"]
+        allowed = await client.post(
+            f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"
+        )
+        assert allowed.status_code == 202, allowed.text
+        assert allowed.json()["message"] == "successor"
+        await settled(console, allowed.json()["task"]["task_id"])
+
+        went_on = told(llm.requests[2])
+        assert f"text:\n{NOTE}" in went_on.split(ALLOWED_HEAD, 1)[1]
+        assert types.typed == [NOTE]

@@ -1698,7 +1698,7 @@ class Front:
             stopping=console.workers.stopping(task_id),
         )
 
-    async def _shown(self) -> list[Shown]:
+    async def _shown(self, seen: int | None) -> list[Shown]:
         """What this chat showed the person last, oldest first, as :func:`answered_task` reads it.
 
         Its newest cards and lines and the person's own messages, by when they
@@ -1706,15 +1706,24 @@ class Front:
         the page draws nothing for, and answers that fold into their card, are
         left out; a turn melo began itself is stood for by its row. A message
         of the person's counts at the end of its turn (now while it runs).
+
+        *seen* is the stored id of the newest card or line the person's client
+        had drawn when the person sent (the send's ``seen``): a card or line
+        stored after it was not on the page, so it is no request of a task's.
+        With none, no card or line counts. Cards are not written here: a
+        task's end that no client read yet was shown to no one.
         """
         chat, store = self.chat_id, self.console.store
         if chat is None:
             return []
-        await self.console.cards.flush()
+
+        def drawn(event: StoredEvent) -> bool:
+            return seen is not None and event.id is not None and event.id <= seen
+
         found: list[tuple[float, Shown]] = []
         for event in await store.events_of_type(chat, CARD_EVENT, limit=SHOWN_ROWS):
             data = event.event.get("data") or {}
-            if data.get("state") == "answered":
+            if data.get("state") == "answered" or not drawn(event):
                 continue
             task = str(data.get("source_id") or "")
             if data.get("source_kind") != "task":
@@ -1733,9 +1742,11 @@ class Front:
                 continue
             at = float(event.event.get("ts") or 0)
             if data.get("typed"):
-                found.append((at, Shown(person=True)))  # the person's words above it
-            asks = kind == FOLLOWUP_ECHO
-            found.append((at, Shown(str(data.get("task_id") or ""), asks=asks)))
+                # The person's words above it: theirs, drawn yet or not.
+                found.append((at, Shown(person=True)))
+            if drawn(event):
+                asks = kind == FOLLOWUP_ECHO
+                found.append((at, Shown(str(data.get("task_id") or ""), asks=asks)))
         now = time.time()
         for turn in await store.list_turns(chat, limit=SHOWN_ROWS):
             if not turn.origin:
@@ -1746,9 +1757,12 @@ class Front:
         found.sort(key=lambda item: item[0])
         return [item for _, item in found]
 
-    async def _answered(self, typed: str) -> tuple[TaskRecord, str] | None:
+    async def _answered(
+        self, typed: str, seen: int | None
+    ) -> tuple[TaskRecord, str] | None:
         """The task of this chat *typed* answers without naming it (:func:`answered_task`)
         and the step its newest card offers to allow (``""`` for none), or None.
+        *seen* is the newest card or line the person's client drew (:meth:`_shown`).
 
         Waiting: the stage table has it waiting for the person, and its job
         did not go on in a newer task. A message continues it only when it
@@ -1774,7 +1788,7 @@ class Front:
                 takes.add(record.task_id)
         if len(waiting) != 1 or not takes:
             return None  # what the rule refuses anyway: nothing more to read
-        shown = await self._shown()
+        shown = await self._shown(seen)
         found = answered_task(
             typed,
             [_ref(record) for record in waiting],
@@ -1788,7 +1802,9 @@ class Front:
         offered = next((b for b in reversed(cards) if b is not None), "")
         return waiting[0], offered
 
-    async def answer_waiting(self, typed: str) -> dict[str, Any] | None:
+    async def answer_waiting(
+        self, typed: str, seen: int | None = None
+    ) -> dict[str, Any] | None:
         """The person's plain reply to the one task of this chat that asked for them last (#617).
 
         Code decides it from the typed words and stored facts
@@ -1802,7 +1818,7 @@ class Front:
         """
         chat = self.chat_id
         try:
-            found = await self._answered(typed)
+            found = await self._answered(typed, seen)
             blocks = (
                 await self.console.workers.open_blocks(found[0].task_id)
                 if found is not None and plain_yes(typed)
@@ -1866,10 +1882,12 @@ class Front:
         as_task: bool,
         key: str | None,
         create_key: str | None = None,
+        seen: int | None = None,
     ) -> dict[str, Any] | None:
         """The echo of a message that code handled, or ``None`` for the model.
 
-        *create_key* is the key of the create that made this chat for a task.
+        *create_key* is the key of the create that made this chat for a task;
+        *seen* the send's ``seen``, the newest card or line its client drew.
         """
         asks, chat = self.console.asks, self.chat_id
         command = _ANSWER_COMMAND.match(typed.strip())
@@ -1930,7 +1948,7 @@ class Front:
         # One task waits for the person here: a plain message answers it, its
         # open question first, else the task that asked for the person last.
         echo = await asks.answer_from_chat(chat, typed) if plain_reply(typed) else None
-        return echo or await self.answer_waiting(typed)
+        return echo or await self.answer_waiting(typed, seen)
 
     async def _take_back(self, echo_id: int, echo: dict[str, Any]) -> dict[str, Any]:
         """Undo of a message sent as a task's answer: the task still waits, the message is the chat's."""

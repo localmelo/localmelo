@@ -566,3 +566,17 @@ test('a card that needs the person shows the whole text of a typing step before 
     question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}});
   assert.equal(mainChat.cardBlock(blocked).step, text);
 });
+
+test('a send says the newest card or line drawn, never one held back while the person types', () => {
+  const card = (id, at) => ({id, ts: at, data: {state: 'done', source_id: `t${id}`, source_kind: 'task', title: 'Check-in', at}});
+  const drawn = mainChat.mergeCards([], [card(5, NOON)]);
+  const echoes = mainChat.mergeEchoes([], [{id: 7, ts: NOON + 2, data: {echo: 'started', task_id: 't9', title: 'Other'}}]);
+  const items = timeline([], drawn, NOON + 10, echoes);
+  // Card 6 came on the stream and waits while the person types: the line after it does not take the send past it.
+  const held = {id: 6, type: 'attention.card', ts: NOON + 1, data: card(6, NOON + 1).data};
+  assert.equal(mainChat.drawnUpTo(items, [held]), 5);
+  // Drawn, it counts.
+  const shown = timeline([], mainChat.mergeCards(drawn, [held]), NOON + 10, echoes);
+  assert.equal(mainChat.drawnUpTo(shown, []), 7);
+  assert.equal(mainChat.drawnUpTo([], []), 0, 'nothing drawn: nothing counts');
+});
