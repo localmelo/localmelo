@@ -1875,8 +1875,8 @@ Create a session, usually with its first turn.
   `submission_withdrawn`. Two creates racing on one key make one session.
 - `attachments` are the text files the person added: `[{"name": "notes.md", "text": "…", "chars": 1234}]`,
   at most 8, 256 KiB each and 512 KiB together. A file that is binary or too large is 400
-  `invalid_request` with the file named. The gateway cleans each file, redacts secrets in it and
-  adds it to the message as an `<attachment>` block, so the turn's `user_text` holds the words and
+  `invalid_request` with the file named. The gateway cleans each file, redacts secrets in it, cuts a password it gives out as it does in the words (a handle such as
+  `[password-1]` stays) and adds it to the message as an `<attachment>` block, so the turn's `user_text` holds the words and
   the files.
 - `images` are the pictures the person added: ids from [`POST /api/uploads`](#post-apiuploads),
   at most 4, none twice. An id that is gone is 400 `picture_gone`; more than 4 is 400 `invalid_request`;

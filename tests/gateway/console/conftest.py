@@ -86,9 +86,6 @@ class FakeAgent:
     def begin_exit(self, reason: str, *, within_s: float) -> None:
         self.exited = (reason, within_s)
 
-    def hide_passwords(self, text: str) -> str:
-        return text
-
     async def close(self) -> None:
         self.closed = True
         if self.close_fails:

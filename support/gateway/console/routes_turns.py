@@ -37,6 +37,7 @@ from localmelo.support.sessions.attachments import (
     MAX_TOTAL_BYTES,
     TextAttachment,
     compose_user_text,
+    hide_message,
     snapshot,
 )
 from localmelo.support.sessions.display import short_title
@@ -199,7 +200,8 @@ def _compose(request: CancelRequest) -> str:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
         )
-    words = hide_passwords(request.text).strip()
+    hidden = hide_message(request.text, attached)
+    words, attached = hidden.text.strip(), list(hidden.attachments)
     if not words:
         if not request.images and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
@@ -245,7 +247,8 @@ class _Sent:
 
     ``typed`` is the person's text as it is kept and shown (the chat's title,
     the message, a queued message, a routed echo, a task's words): a password
-    in it is already cut out, once, where it came in (:func:`_sent`).
+    in it, or in a file it carries, is already cut out, once, where it came in
+    (:func:`_sent`).
     """
 
     def __init__(
@@ -289,9 +292,11 @@ async def _sent(
     """
     attached = _files(request.attachments)
     staged = await _staged(console, request.images)
-    # The one place a message's password is cut out: before it is checked,
-    # routed, queued, titled or stored, so no copy of it exists below (#547).
-    typed = hide_passwords(request.text)
+    # The one place a message's password is cut out, in its words and in its
+    # files: before it is checked, routed, queued, titled, keyed or stored, so
+    # no copy of it exists below (#547, #626).
+    hidden = hide_message(request.text, attached)
+    typed, attached = hidden.text, list(hidden.attachments)
     words = typed.strip()
     if not words:
         if not staged and not attached:

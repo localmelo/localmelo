@@ -21,6 +21,11 @@ from localmelo.melo.contracts.sign_in import HANDLE, hide_passwords
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    hide_message,
+)
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
 
@@ -221,6 +226,40 @@ async def test_a_password_after_a_line_like_the_memory_heading_is_hidden(
     sent = _sent(llm)
     assert LIKE_HEADING in sent and PASSWORD not in sent
     assert "my password is [password-" in sent
+
+
+@pytest.mark.asyncio
+async def test_a_password_in_an_attached_file_gets_a_handle_and_the_same_checks_apply(
+    tmp_path: Path,
+) -> None:
+    """A file's handle is made in reading order after the typed one; the person's words are what they typed (#339), so it is not typed."""
+    box = PasswordBox()
+    file = TextAttachment("login.txt", "second account, password: file-Secret7\n")
+    hidden = hide_message(TASK, (file,))
+    composed = compose_user_text(hidden.text, hidden.attachments)
+    llm = FakeModel(
+        [
+            _type_call("forum.example", "[password-1]"),
+            _type_call("forum.example", "[password-2]", 2),
+            _answer("done"),
+        ],
+        [verdict()] * 4,
+    )
+    agent = _agent(tmp_path, llm, box)
+
+    # What the session runner passes: the stored text, where it ends, the typed words.
+    await agent.run_task(
+        composed,
+        own_chars=len(composed),
+        user_words=hidden.text,
+        approval=AutoPolicy(),
+    )
+
+    sent = _sent(llm)
+    assert sent == composed, "the run's own hiding found nothing left to cut"
+    assert PASSWORD not in sent and "file-Secret7" not in sent
+    assert HANDLE.findall(sent) == ["[password-1]", "[password-2]"]
+    assert box.typed == [PASSWORD, None]
 
 
 # What a caller appends after the person's text (a task's context block, a note): melo's.

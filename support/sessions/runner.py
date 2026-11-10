@@ -56,7 +56,11 @@ from localmelo.melo.schema import (
 )
 from localmelo.support.sessions import pictures as turn_pictures
 from localmelo.support.sessions.approvals import AskFunction
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    hide_message,
+)
 from localmelo.support.sessions.live import LiveReply
 from localmelo.support.sessions.store import (
     APPROVAL_EVENT_TYPES,
@@ -626,14 +630,16 @@ class SessionRunner:
         self._check_open()
         if images and self._worker:
             raise ValueError("worker sessions do not support pictures")
-        if isinstance(text, str) and not self._worker and not origin:
-            # A password the person wrote is cut out here, before the turn is
-            # stored, shown again or read by a model: its handle stays (#547).
-            text = self._agent.hide_passwords(text)
-            if isinstance(words, str):
-                words = self._agent.hide_passwords(words)
-            if isinstance(title, str):
-                title = self._agent.hide_passwords(title)
+        if attachments and origin:
+            raise ValueError("a turn the person did not begin carries no attachments")
+        if not self._worker and not origin:
+            # A password the person wrote, in the words or in a file, is cut out
+            # here, before the turn is stored, shown again or read by a model:
+            # its handle stays (#547, #626). A message that came through the
+            # console was hidden at its route already: this changes nothing.
+            hidden = hide_message(text, attachments, words=words, title=title)
+            text, attachments = hidden.text, hidden.attachments
+            words, title = hidden.words, hidden.title
         typed_text = text
         if attachments:
             if self._worker:
