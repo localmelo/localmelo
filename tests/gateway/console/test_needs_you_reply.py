@@ -44,9 +44,27 @@ BLOCKED: list[Reply] = [
 OTHER = INSTALL.replace("requests", "httpx")
 
 
-async def typed(client: httpx.AsyncClient, console: Console, text: str) -> Any:
-    """The person types *text* in the main chat: what the gateway answered."""
-    response = await _post_turn(client, str(console.main_id), text)
+async def drawn(client: httpx.AsyncClient, console: Console) -> int:
+    """The person's page reads the main chat: the newest card or line it got."""
+    response = await client.get(f"/api/sessions/{console.main_id}/turns")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    return max(
+        (row["id"] for row in body.get("cards", []) + body.get("echoes", [])), default=0
+    )
+
+
+async def typed(
+    client: httpx.AsyncClient, console: Console, text: str, **seen: Any
+) -> Any:
+    """The person types *text* in the main chat: what the gateway answered.
+
+    The send carries ``seen``, what the page drew: by default what a read of the
+    chat right before it returned, as the person's page does.
+    """
+    if not seen:
+        seen = {"seen": await drawn(client, console)}
+    response = await _post_turn(client, str(console.main_id), text, **seen)
     assert response.status_code in (200, 202), response.text
     return response.json()
 
@@ -288,7 +306,7 @@ async def test_a_lookup_that_fails_leaves_the_message_to_the_model(
     ) as (console, client, _, ran):
         task_id = await needs_you(client, console)
 
-        async def broken() -> list[Any]:
+        async def broken(seen: int | None) -> list[Any]:
             raise RuntimeError("the store is gone")
 
         monkeypatch.setattr(console.front, "_shown", broken)
@@ -328,3 +346,40 @@ async def test_a_yes_with_no_single_open_step_is_an_ordinary_answer(
             "允许",
         )
         assert ran.codes == []
+
+
+@pytest.mark.parametrize(
+    "seen", [None, "below"], ids=["no seen", "seen below the cards"]
+)
+async def test_a_card_no_page_drew_is_no_request_a_reply_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seen: str | None
+) -> None:
+    main: list[Reply] = [
+        creates("Daily check-in"),
+        answer("Started it as a task. Shall I also check the logs?"),
+        answer("I will check the logs."),
+    ]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[BLOCKED], approvals="auto",
+        follow_up=False,
+    ) as (console, client, _, ran):  # fmt: skip
+        await say(client, console, "check in on the site and write a note")
+        task_id = await started_task(console)
+        await until(lambda: _is(console, task_id, "done"))
+        await console.cards.flush()  # stored, and no page read it
+        cards = await console.store.events_of_type(
+            str(console.main_id), "attention.card", limit=10
+        )
+        assert cards[-1].event["data"]["block"], "the end card offers the step"
+        # Below the task's first card (its blocked step's, then its end's): the
+        # page drew none of them.
+        first = min(int(card.id or 0) for card in cards)
+        sent = {} if seen is None else {"seen": first - 1}
+        response = await _post_turn(client, str(console.main_id), "ok", **sent)
+        assert response.status_code == 202, response.text
+        assert "echo" not in response.json(), "a turn of the chat, not code's answer"
+        await settled(console)
+        assert (await typed_turns(console))[-1] == "ok"
+        await nothing_allowed(console, task_id, ran)
+        kinds = [r["echo"] for r in await rows(console, console.main_id)]
+        assert "answer_sent" not in kinds
