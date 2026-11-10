@@ -493,7 +493,11 @@ async def test_the_relay_offers_a_kept_answer_only_where_the_gateway_says_so(
     )
     again = session.approver.pending
     assert again is not None and not again.offer_session
-    session.approver.answer("once")
+    # Answered in the console: the panel asked again goes away too.
+    await GatewayClient(
+        "http://127.0.0.1:1", transport=httpx.MockTransport(gateway.handle), headers={}
+    ).answer("r1", "once")
+    await _until(lambda: session.approver.pending is None)
     await _until(lambda: setup.out.text().count("Ran it.") == 2)
     answered = [r[2]["choice"] for r in gateway.requests if r[1] == "/api/approvals/r1"]
     assert answered == ["deny", "session", "once"]

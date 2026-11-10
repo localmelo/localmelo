@@ -1236,6 +1236,9 @@ class MainChat:
                         raise
                     self._say(str(exc), "warn")
                     offered = False
+                    # Still waiting: its panel is withdrawn when answered elsewhere.
+                    if (asking := asyncio.current_task()) is not None:
+                        self._asks[request_id] = asking
                     continue
                 return
         except GatewayError as exc:
