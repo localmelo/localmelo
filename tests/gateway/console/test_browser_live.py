@@ -428,6 +428,39 @@ async def test_a_picture_waits_for_the_step_that_is_running(
     assert agent.pictured == ["t2"], "the page the step ended on"
 
 
+async def test_a_picture_is_refused_at_once_while_the_person_has_the_page(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME)
+    tools = {t.definition.name: t for t in await agent.provider.start()}
+    release = asyncio.Event()
+    real = agent.driver.open
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        await release.wait()
+        return await real(*args, **kwargs)
+
+    agent.driver.open = slow  # type: ignore[method-assign,assignment]
+    step = asyncio.create_task(run(tools, "browser_open", url=HOME + "news", tab="new"))
+    await until(agent.provider.live_busy)  # a step holds the lock
+    agent.provider.owners.take("t1")
+    url = picture_url(served, session_id)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        async with asyncio.timeout(
+            2
+        ):  # it does not wait for the step, nor for the person
+            held = await client.get(url)
+        assert (held.status_code, held.json()["error"]["code"]) == (409, "no_picture")
+        assert agent.pictured == []
+        release.set()
+        await step
+        done = await client.post(url.removesuffix("/picture") + "/done")
+        assert done.json() == {"ok": True}
+        after = await client.get(url)
+    assert (after.status_code, after.content) == (200, MARKER)
+
+
 async def test_a_page_at_a_private_address_is_not_pictured_and_is_left_as_it_is(
     console: Console, builder: Builder, workspace: Path, served: Served
 ) -> None:

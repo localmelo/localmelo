@@ -34,7 +34,8 @@ refused (403 ``not_available``) while the live view is off, and it needs no driv
 that streams. It starts nothing and changes nothing the run sees or does (see
 :meth:`BrowserToolProvider.watcher_picture`): no browser or page open is a 404
 ``no_page``, and a page that must not be pictured now (it moved to a local or
-private address, a secret field has focus, the browser stopped) a 409
+private address, a secret field has focus, the browser stopped, or the person has
+a page of the chat: that is answered at once, never waited for) a 409
 ``no_picture``.
 
 ``POST /browser/done`` is the person's Done from anywhere (the app's pill, the

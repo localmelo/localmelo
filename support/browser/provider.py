@@ -3663,14 +3663,19 @@ class BrowserToolProvider(BaseToolProvider):
         """A picture of *tab* (default the current one) for somebody who watches, not for the model.
 
         None when the chat has no page there; :class:`BrowserError` when the page
-        must not be pictured now. It runs under the steps' own lock, so it never
-        interleaves with one, and it changes nothing a step sees or does: it
+        must not be pictured now, also at once while the person has a page of the
+        chat (a take-over: the pages are theirs, and a step waits for them under
+        the lock, which a watcher must not do). A step that is running is waited
+        for: it runs under the steps' own lock, so a picture never interleaves
+        with one, and it changes nothing a step sees or does: it
         keeps no view or point (``_views``, ``_points``), draws no mark, asks no
         question, shows no step on the chat's card and adds nothing to the chat.
         The address is checked before and after, as a step checks it
         (:meth:`_recheck`), but a page found at a private address is only not
         pictured: it is not blanked, and no site is approved or refused here.
         """
+        if self._owners.held:
+            raise BrowserError("The person has the page.")
         async with self._lock:
             tab_id = tab or self._tab
             if tab_id is None or tab_id not in self._origins or tab_id not in self._raw:
