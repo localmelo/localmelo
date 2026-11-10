@@ -58,7 +58,7 @@ def test_the_card_is_where_the_work_stands_and_claims_no_more_than_the_record() 
 
 def test_the_card_fits_the_store_and_reads_no_malformed_evidence() -> None:
     huge = "x" * 5000
-    full = {"state": huge, "results": huge, "failed": [huge], "next": [huge]}
+    full = {"state": huge, "failed": ["the build folder is locked"]}
     events = [event("notice", {"kind": "checkpoint", "detail": {"checkpoint": full}})]
     for n in range(80):
         events += [
@@ -75,7 +75,8 @@ def test_the_card_fits_the_store_and_reads_no_malformed_evidence() -> None:
     ]  # fmt: skip
     card = build_park_card({"objective": huge}, events)
     assert len(card) <= MAX_CARD_CHARS and "side effects" in card
-    # The newest call, cut off, is kept: the notes and the oldest calls give way.
+    # The old calls give way before the notes; the newest call, cut off, stays.
+    assert "Did not work: the build folder is locked" in card
     assert "- shell `make build` (effect unknown)" in card
     assert card.endswith(">>")
     assert build_park_card(None, None).startswith(CARD_START)  # type: ignore[arg-type]

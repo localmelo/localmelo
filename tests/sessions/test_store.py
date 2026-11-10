@@ -814,6 +814,7 @@ def test_the_session_event_keys_are_pinned() -> None:
             "client_request_id",
             "origin",
             "images",
+            "composed",
         },
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
@@ -853,7 +854,7 @@ def test_the_session_event_keys_are_pinned() -> None:
         },
     }
     assert dict(OPTIONAL_SESSION_EVENT_FIELDS) == {
-        "turn.started": {"origin", "images"},
+        "turn.started": {"origin", "images", "composed"},
         "turn.note": {"images"},
         "turn.memory": {"searched", "opened", "search_hint", "digest"},
     }

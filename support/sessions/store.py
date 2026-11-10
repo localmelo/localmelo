@@ -174,7 +174,15 @@ RUN_STATUSES: Final = frozenset(
 SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "turn.started": frozenset(
-            {"turn", "turn_id", "user_text", "client_request_id", "origin", "images"}
+            {
+                "turn",
+                "turn_id",
+                "user_text",
+                "client_request_id",
+                "origin",
+                "images",
+                "composed",
+            }
         ),
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
@@ -228,7 +236,8 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         # images: the pictures the person added, as references into blobs.
-        "turn.started": frozenset({"origin", "images"}),
+        # composed: only on a turn whose text is not what a person typed.
+        "turn.started": frozenset({"origin", "images", "composed"}),
         # Only on a note that carried pictures.
         "turn.note": frozenset({"images"}),
         # searched and opened: only once a memory search found something, or the
@@ -2582,6 +2591,7 @@ class SessionStore:
                             "client_request_id": client_request_id,
                             # Only on a turn the person did not begin (#369).
                             **({"origin": origin} if origin else {}),
+                            **({"composed": True} if composed else {}),
                             **(
                                 {
                                     "images": [

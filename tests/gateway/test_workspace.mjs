@@ -88,6 +88,12 @@ test('a page the person has pauses the turn, and how it came back is one line of
   ]);
 });
 
+test('a frame\'s marker lines are left out of what a person reads, and only those', () => {
+  const text = 'Goal: x\n<<standing nonce=ab12cd34>>\n- file_read a.md\n<<end standing nonce=ab12cd34>>\n<<not a marker>>';
+  assert.equal(turns.withoutFrame(text), 'Goal: x\n- file_read a.md\n<<not a marker>>');
+  assert.equal(turns.withoutFrame('plain'), 'plain');
+});
+
 test('a frame at or below the cursor is not applied twice', () => {
   const {view, turn} = started();
   const frame = {id: 7, turn: 1, ts: 110, type: 'turn.finished', data: {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''}};
@@ -6127,6 +6133,20 @@ test('the person\'s bubble shows the picture and the files, hides the words the 
   const loaded = newTurn(row);
   assert.equal(loaded.images.length, 1);
   assert.deepEqual(newTurn(turnRow({images: [{sha256: 'nope'}, 'x']})).images, [], 'a reference that names no blob is ignored');
+});
+
+test('a turn the person did not type has no bubble of theirs: one folded line that opens on its text', async () => {
+  const card = 'Where stopped: the task stopped.\n[where the work stands · data]\n<<standing nonce=ab12cd34>>\nState: a draft\n<<end standing nonce=ab12cd34>>';
+  const row = turnRow({id: 'turn-2', turn: 2, user_text: card, composed: true});
+  const h = harness(baseRoutes({'GET /sessions/a/turns?limit=10': {turns: [turnRow(), row], has_earlier: false, replay_from: 0}}));
+  await h.run('init()');
+  const bubbles = findNodes(h.element('messages'), (node) => node.className.startsWith('user-bubble'));
+  assert.equal(bubbles.length, 1, 'only the turn the person typed');
+  assert.match(flatten(bubbles[0]), /Do the thing/);
+  const [fold] = findNodes(h.element('messages'), (node) => node.tag === 'details' && /Not typed by you/.test(flatten(node)));
+  assert.equal(fold.open, false);
+  assert.equal(findNode(fold, (node) => node.className === 'thinking-body').textContent,
+    'Where stopped: the task stopped.\n[where the work stands · data]\nState: a draft');
 });
 
 test('a words-and-picture message keeps the words under the picture', async () => {

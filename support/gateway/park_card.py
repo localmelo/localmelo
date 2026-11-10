@@ -26,6 +26,9 @@ CAUTIONS = (
     "Cautions: Work may have been interrupted; check for side effects before "
     "repeating any action. Recorded reports are not proof of completion."
 )
+# The call lines a card over the size keeps before the model's notes give way:
+# the line that counts the older calls, then the newest nine.
+FEW_LINES = 10
 # The heading of the card's frame around the calls and a model's notes.
 STANDING_HEADER = (
     "[where the work stands · melo's records of its calls, and notes a model "
@@ -46,8 +49,8 @@ def build_park_card(
     failure or an unknown effect named as such, the files written, the last
     work checkpoint's notes and the model's newest words after it), fenced as
     data. Within :data:`MAX_CARD_CHARS`: a card over it is measured and built
-    again with the model's notes cut by the excess, then, when they cannot give
-    enough, with the oldest calls counted on one line, so the newest calls stay;
+    again, the older calls counted on one line down to :data:`FEW_LINES`, then
+    the model's notes cut by the excess, then the calls down to the newest one;
     a hard cut is the last resort. No model call; only events the store kept count,
     and a credential is masked wherever it shows.
     """
@@ -81,13 +84,17 @@ def build_park_card(
 
     chars, lines = CHECKPOINT_CHARS, COVERED_LINES
     standing, card = build(chars, lines)
-    for _ in range(3):  # measured each time: the notes, then the calls, then again
+    # Measured each time: the old calls give way first, then the model's notes,
+    # then the calls down to the newest one.
+    for step in ("calls", "notes", "floor"):
         over = len(card) - MAX_CARD_CHARS
         if over <= 0:
             break
-        if chars:  # the model's notes give way first
+        if step == "calls":
+            lines = min(lines, FEW_LINES)
+        elif step == "notes":
             chars = max(min(chars, _model_size(standing)) - over, 0)
-        else:  # then the oldest calls, counted on one line; the newest stay
+        else:
             shown = standing.covered
             each = max(sum(map(len, shown)) // max(len(shown), 1), 1)
             lines = max(len(shown) - over // each - 1, 2)

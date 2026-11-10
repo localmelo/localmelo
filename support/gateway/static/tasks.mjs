@@ -4,6 +4,7 @@ import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts} from './blocked.mjs';
 import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
+import {withoutFrame} from './turns.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -259,7 +260,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (live) nodes.push(liveBox);
     if (showsCard(task, developer())) {
       nodes.push(node(sectionTag, '', t('tasks.recoveryCard')));
-      nodes.push(hasCard(task) ? node('pre', 'worker-brief task-card-text', task.card) : node('p', 'muted', t('tasks.noCard')));
+      nodes.push(hasCard(task) ? node('pre', 'worker-brief task-card-text', withoutFrame(task.card)) : node('p', 'muted', t('tasks.noCard')));
     }
     const actions = node('div', 'task-actions');
     if (RESUMABLE.has(task.state) && !cardMissing(task)) {

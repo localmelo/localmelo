@@ -571,6 +571,7 @@
   "chat.noChats": "你的对话会出现在这里。",
   "chat.noMatch": "没有匹配的对话。",
   "chat.noSideChats": "你开始的旁支对话会出现在这里。",
+  "chat.notTyped": "不是你输入的",
   "chat.reconnecting": "实时更新已暂停。{n} 秒后重新连接…",
   "chat.requestFailed": "请求失败（{status}）",
   "chat.retriedBelow": "已在下面重试 · 不在 melo 的记忆中 · 它的文件改动保留",

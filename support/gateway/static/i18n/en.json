@@ -583,6 +583,7 @@
   "chat.noChats": "Your conversations will appear here.",
   "chat.noMatch": "No matching chats.",
   "chat.noSideChats": "Side chats you start appear here.",
+  "chat.notTyped": "Not typed by you",
   "chat.reconnecting": "Live updates paused. Reconnecting in {n}s…",
   "chat.requestFailed": "Request failed ({status})",
   "chat.retriedBelow": "Retried below · not in melo's memory · its file changes stay",

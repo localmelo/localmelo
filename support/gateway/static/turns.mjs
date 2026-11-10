@@ -644,6 +644,14 @@ function pictureRefs(list) {
     .map((image) => ({sha256: String(image.sha256), mime_type: String(image.mime_type ?? ""), size_bytes: num(image.size_bytes) ?? 0}));
 }
 
+// A line that is exactly a frame's marker (`<<name nonce=…>>` or `<<end name nonce=…>>`).
+const FRAME_MARKER = /^<<(?:end )?[a-z][\w-]* nonce=[0-9a-f]+>>$/;
+
+/** *text* as a person reads it: the lines that only mark a frame for the model left out. */
+export function withoutFrame(text) {
+  return String(text ?? "").split("\n").filter((line) => !FRAME_MARKER.test(line)).join("\n");
+}
+
 /** One turn from a `turn_json` row (`GET /api/sessions/{id}/turns`). */
 export function newTurn(row) {
   const source = objectOf(row);
@@ -658,6 +666,8 @@ export function newTurn(row) {
     images: pictureRefs(source.images),
     // "ask_owner": the chat's internal turn on a task's question (#369); "" the person's.
     origin: String(source.origin ?? ""),
+    // Its text is not what the person typed (a stopped task going on, a task another made).
+    composed: source.composed === true,
     status: String(source.status ?? ""),
     cause: String(source.cause ?? ""),
     answer,
@@ -686,6 +696,8 @@ export function newTurn(row) {
     memoryOpen: false,
     // Whether the other chats' digest under the message is open (`turn.memory`'s digest).
     digestOpen: false,
+    // Whether the fold of a composed turn's text is open.
+    composedOpen: false,
     // The person has the run (`run.paused`: a page they took over), until `run.resumed`: where, or null.
     control: null,
     error: "",
@@ -718,6 +730,7 @@ function ensureTurn(view, number, fields = {}) {
       images: fields.images,
       client_request_id: fields.clientRequestId ?? "",
       origin: fields.origin ?? "",
+      composed: fields.composed === true,
       status: "running",
       running_here: true,
     });
@@ -725,6 +738,7 @@ function ensureTurn(view, number, fields = {}) {
   }
   if (fields.id && !turn.id) turn.id = fields.id;
   if (fields.origin && !turn.origin) turn.origin = fields.origin;
+  if (fields.composed === true) turn.composed = true;
   if (fields.userText && !turn.userText) turn.userText = fields.userText;
   if (turn.images.length === 0) turn.images = pictureRefs(fields.images);
   if (fields.clientRequestId && !turn.clientRequestId) {
@@ -843,6 +857,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       images: data.images,
       clientRequestId: data.client_request_id,
       origin: data.origin,
+      composed: data.composed,
     }) : findTurn(view, number);
 
   if (type === "turn.started") {
