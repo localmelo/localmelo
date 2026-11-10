@@ -99,6 +99,7 @@ from localmelo.melo.agent._tool_images import (
     withheld_note,
 )
 from localmelo.melo.agent.options import (
+    NOTE_MODES,
     REPLAY_TURN_CAP,
     AgentOptions,
     reasoning_refusal,
@@ -1301,7 +1302,7 @@ class Agent(_RecallLoop, _NotesLoop):
         if self._plan.enabled() and self.options.reasoning != "legacy":
             notes.append(RECALL_DATA_NOTE)
         instruction = ""
-        if self.options.reasoning in ("compress", "compress+replay"):
+        if self.options.reasoning in NOTE_MODES:
             instruction = NOTE_INSTRUCTION
             if self.options.reasoning == "compress+replay":
                 kept = self.options.replay_turns
