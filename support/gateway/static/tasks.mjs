@@ -75,6 +75,18 @@ function turnEntries(text) {
 // request did not hold them (own_words), its chat's earlier turns (chat_turns), what the chat's
 // turn recalled (chat_picked) and the notes (context_pack). A folded list for each part it got,
 // under its label, and nothing when it got none.
+/**
+ * Whether a task's page shows its recovery card: a developer's note, so default mode shows it only
+ * while the task can be resumed from it and there is one to read; developer mode always does.
+ */
+export function showsCard(task, developerMode) {
+  return developerMode || (hasCard(task) && RESUMABLE.has(task.state));
+}
+
+function hasCard(task) {
+  return typeof task.card === 'string' && task.card.trim() !== '';
+}
+
 export function packFold(doc, task) {
   const spec = task?.spec ?? {};
   const parts = [
@@ -149,7 +161,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     return date && !Number.isNaN(date.getTime()) ? formatTime(date, 'full') : '—';
   };
   const errorText = (error) => error?.message || t('tasks.requestFailed');
-  const hasCard = (task) => typeof task.card === 'string' && task.card.trim() !== '';
   // A started task without a card cannot resume; the server refuses it too.
   const cardMissing = (task) => state.evidence === 'missing_card' || (task.started_at != null && !hasCard(task));
 
@@ -242,8 +253,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const project = projectLine(doc, task);
     if (project) nodes.push(project);
     if (live) nodes.push(liveBox);
-    // The card is a developer's recovery note: default mode shows it only when there is one to read.
-    if (hasCard(task) || developer()) {
+    if (showsCard(task, developer())) {
       nodes.push(node(sectionTag, '', t('tasks.recoveryCard')));
       nodes.push(hasCard(task) ? node('pre', 'worker-brief task-card-text', task.card) : node('p', 'muted', t('tasks.noCard')));
     }

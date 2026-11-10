@@ -979,13 +979,15 @@ async def test_a_turn_closed_before_run_started_keeps_its_reason(
 
     monkeypatch.setattr(Agent, "run_task", held_run)
     await s.runner.start_turn("wait")
-    assert s.runner.cancel("Cancelled by SIGHUP", cause="shutdown")
+    # A shutdown that names no reason says localmelo stopped, never "by the user".
+    stopped = "Stopped when localmelo closed"
+    assert s.runner.cancel(cause="shutdown")
     result = await s.runner.wait()
-    assert result is not None and result.error == "Cancelled by SIGHUP"
+    assert result is not None and result.error == stopped
     turn = await last_turn(s)
     assert (turn.status, turn.cause) == ("cancelled", "shutdown")
     assert turn.result is not None
-    assert turn.result["error"] == "Cancelled by SIGHUP"
+    assert turn.result["error"] == stopped
     gate.set()
     await s.aclose()
 

@@ -1549,13 +1549,7 @@ class TaskWorkers:
             self._pause_requested.add(task_id)
             self._ready[task_id].clear()
         if state == "stop" and task_id in self._runs:
-            self._stopping.add(task_id)
-            # The person's Stop wins over a gateway stop that cut the run off.
-            self._cut.discard(task_id)
-            self._ready[task_id].clear()
-            runner = self._runners.get(task_id)
-            if runner is not None:
-                runner.cancel(cause="user_stop")
+            self._stop_run(task_id)
         if state == "resume" and task_id in self._park_winners:
             cleanup = self._runs.get(task_id)
             if cleanup is not None:
@@ -1619,14 +1613,10 @@ class TaskWorkers:
                 if not pending_resume:
                     raise TaskNotPausedError("task is not paused")
             if state == "stop" and task_id in self._runs:
-                # Set the stop flag under the same lock Resume holds, so a
-                # worker admitted by a Resume that finished committing just
-                # before this Stop cannot start its turn.
-                self._stopping.add(task_id)
-                self._ready[task_id].clear()
-                runner = self._runners.get(task_id)
-                if runner is not None:
-                    runner.cancel(cause="user_stop")
+                # Again under the same lock Resume holds, so a worker admitted
+                # by a Resume that finished committing just before this Stop
+                # cannot start its turn.
+                self._stop_run(task_id)
             if state == "resume" or (
                 current.level == 5
                 and level is not None
@@ -2297,6 +2287,19 @@ class TaskWorkers:
                     await asyncio.wait_for(self._shutdown.wait(), timeout=delay)
                 delay = min(delay * 2, 5.0)
 
+    def _stop_run(self, task_id: str) -> None:
+        """The person's Stop of *task_id*'s run: it ends ``cancelled``.
+
+        It wins over a gateway stop that cut the run off, so it never continues.
+        Nothing is awaited: what the caller checked is what is stopped.
+        """
+        self._stopping.add(task_id)
+        self._cut.discard(task_id)
+        self._ready[task_id].clear()
+        runner = self._runners.get(task_id)
+        if runner is not None:
+            runner.cancel(cause="user_stop")
+
     async def _close_worker(
         self, runner: SessionRunner | None, agent: Agent | None
     ) -> None:
@@ -2635,6 +2638,8 @@ class TaskWorkers:
         # How the run ended, decided by code for the phase it was decided at.
         ending: dict[str, Any] | None = None
         ending_phase = ""
+        # The stop's interrupted write was made for this run (see the finally).
+        cut_written = False
         base = Baseline(None, git=True, error=True)  # until read: never ready
         # The policy that follows the chat's mode, once a person's task has one (#576).
         followed: ModePolicy | None = None
@@ -3095,6 +3100,17 @@ class TaskWorkers:
                 if cleaned and not self._closed:
                     await self._retry_finalization(task_id, cleanup_failed=False)
             else:
+                if task_id in self._cut and not ending_phase:
+                    # The stop's write first: a slow close of the worker must
+                    # not push it past the end of the process.
+                    try:
+                        async with self._lock:
+                            await self._cut_off(task_id)
+                        cut_written = True
+                    except TaskNotFoundError:
+                        pass
+                    except TaskStoreError:
+                        log.exception("Could not write task %s down", task_id)
                 try:
                     await self._close_worker(runner, agent)
                 except Exception:
@@ -3175,8 +3191,8 @@ class TaskWorkers:
                         # Finished: its allowances go, used or not (#339).
                         self._auto.pop(task_id, None)
                     try:
-                        if task_id in self._cut and not ending_phase:
-                            await self._cut_off(task_id)
+                        if cut_written and task_id in self._cut:
+                            pass  # written down before the close, above
                         elif (
                             task_id not in self._invalid_workspace
                             and (await self.tasks.get_task(task_id)).state

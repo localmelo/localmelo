@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {packFold, projectLine} from '../../support/gateway/static/tasks.mjs';
+import {packFold, projectLine, showsCard} from '../../support/gateway/static/tasks.mjs';
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 /** A small DOM double: elements with a tag, a class, text and children. */
@@ -125,4 +125,15 @@ test('the project line reads in Chinese when the page does', async () => {
   } finally {
     await useLanguage('en');
   }
+});
+
+test('the recovery card shows while the task can be resumed from it, and always in developer mode', () => {
+  const card = 'Where stopped: the plan';
+  assert.equal(showsCard({state: 'interrupted', card}, false), true);
+  assert.equal(showsCard({state: 'parked', card}, false), true);
+  // A task that continued and ended keeps its card, but it is no note to act on any more.
+  assert.equal(showsCard({state: 'done', card}, false), false);
+  assert.equal(showsCard({state: 'interrupted', card: ' '}, false), false);
+  assert.equal(showsCard({state: 'done', card}, true), true);
+  assert.equal(showsCard({state: 'done', card: ''}, true), true);
 });

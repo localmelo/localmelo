@@ -396,6 +396,32 @@ async def test_a_clean_stop_then_a_start_continues_the_task(
     assert (await again.get(task_id))["continued_at"] is not None
 
 
+async def test_the_stop_writes_a_cut_task_down_before_its_worker_closes(
+    gateway: tuple[Callable[[], TaskWorkers], Path, _Runs],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start, workspace, runs = gateway
+    first = start()
+    task_id = await _a_running_task(first, workspace, runs)
+    closing, release = asyncio.Event(), asyncio.Event()
+    close = TaskWorkers._close_worker
+
+    async def slow_close(self: TaskWorkers, *args: Any) -> None:
+        closing.set()
+        await release.wait()  # a worker's tools that take long to close
+        await close(self, *args)
+
+    monkeypatch.setattr(TaskWorkers, "_close_worker", slow_close)
+    stopping = asyncio.ensure_future(first.aclose())
+    await asyncio.wait_for(closing.wait(), 5)
+    # Written down already: a kill now still finds a clean stop.
+    record = await first.tasks.get_task(task_id)
+    assert record.state == "interrupted" and record.wait_reason == STOPPED_REASON
+    release.set()
+    await stopping
+    assert (await first.tasks.get_task(task_id)).state == "interrupted"
+
+
 async def test_a_stop_in_the_middle_of_a_changing_call_waits_as_a_kill_does(
     gateway: tuple[Callable[[], TaskWorkers], Path, _Runs],
 ) -> None:
