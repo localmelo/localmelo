@@ -35,6 +35,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 - When one task needs you and asked last, your next message goes to it with Undo; a plain yes allows its one blocked step once, and its card has Allow this step.
 - A typing or form step Auto blocked in a task shows on its page and in its chat with the site and the whole text, and Allow once runs that exact text once.
+- A scheduled task can keep your answer to a blocked typing or sending step for its site: later runs type and send there without asking; listed with Remove on the Scheduled tab.
 - A task says where it is in the same words on its page, in the side panel and in the terminal, and the reason it waits after a restart reads in your language.
 - A task says honestly how it ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.
 - Ready means done: a task asked to write a named file that is missing says so on its card.
