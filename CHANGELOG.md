@@ -91,6 +91,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The app's window has no title band, and the menu-bar item is Melo's head drawn in the bar's own colour.
 - The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 - The app at rest no longer uses a full CPU core: the menu-bar item stops redrawing itself without pause.
+- A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
 
 ### Terminal
 

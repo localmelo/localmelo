@@ -77,6 +77,7 @@ import {
   statusLine,
   statusMark,
   statusText,
+  summaryTimed,
   TOOL_CALL_TEXT,
   toolState,
   turnDuration,
@@ -1805,28 +1806,58 @@ function liveFrame() {
   }, LIVE_DRAW_MS);
 }
 
+// The copy button's icon, drawn as the panel draws its icons: a glyph its words name for a screen reader.
+const COPY_GLYPHS = { copy: "⧉", copied: "✓" };
+const COPIED_MS = 1500;
+
+/**
+ * Under an answer: the copy button, then the facts no other line gives. The time shows here only when the work
+ * line above the answer does not give it (`summaryTimed`); the developer mode adds the steps and the tokens.
+ */
 function actionsNode(turn) {
   const actions = el("div", "message-actions");
   const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
-  // A person reads how long it took; the steps and the tokens are for the developer mode.
-  const parts = developerMode
-    ? [
-        formatDuration(turnDuration(turn)),
-        t("turns.steps", { n: steps }),
-        turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : "",
-      ].filter(Boolean)
-    : [formatDuration(turnDuration(turn))];
-  actions.append(el("span", "", parts.join(" · ")));
-  actions.append(
-    button("copy-button", t("chat.copyResponse"), async () => {
-      try {
-        await navigator.clipboard.writeText(turn.answer);
-      } catch {
-        notify(t("chat.copyResponseFailed"));
-      }
-    }),
-  );
+  const timed = summaryTimed(turn) && shownItems(turn).length > 0;
+  const facts = [
+    timed ? "" : formatDuration(turnDuration(turn)),
+    ...(developerMode ? [t("turns.steps", { n: steps }), turn.outputTokens > 0 ? t("chat.tokens", { n: formatTokens(turn.outputTokens) }) : ""] : []),
+  ].filter(Boolean);
+  actions.append(...copyNodes(turn.answer));
+  if (facts.length) actions.append(el("span", "message-facts", facts.join(" · ")));
   return actions;
+}
+
+/** An icon button that copies *text*, its name and tooltip in words, and beside it the "Copied" a screen reader hears. */
+function copyNodes(text) {
+  const label = t("chat.copyResponse");
+  const said = el("span", "sr-only");
+  said.setAttribute("role", "status");
+  const glyph = el("span", "", COPY_GLYPHS.copy);
+  glyph.setAttribute("aria-hidden", "true");
+  let back = null;
+  const show = (copied) => {
+    const words = copied ? t("chat.copied") : label;
+    glyph.textContent = COPY_GLYPHS[copied ? "copied" : "copy"];
+    copy.setAttribute("aria-label", words);
+    copy.title = words;
+    said.textContent = copied ? words : "";
+    if (copied) copy.dataset.copied = "true";
+    else delete copy.dataset.copied;
+  };
+  const copy = button("copy-button", "", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      notify(t("chat.copyResponseFailed"));
+      return;
+    }
+    show(true);
+    clearTimeout(back);
+    back = setTimeout(() => show(false), COPIED_MS);
+  });
+  copy.append(glyph);
+  show(false);
+  return [copy, said];
 }
 
 // The glyph a status line starts with: the terminal's, in the status's colour. It is

@@ -1430,9 +1430,9 @@ export function holdText(held, switching = "") {
  * scheduler hold, when the gate is keeping a model call waiting.
  *
  * A finished chat turn without tool calls has no line of its own, because the
- * footer under its answer already gives the turn's time: it reads `Thought`
- * when it has reasoning to open (the events carry the step's time, not the
- * reasoning's own, so no time is shown) and is empty when it has none.
+ * footer under its answer gives the turn's time (`summaryTimed`): it reads
+ * `Thought` when it has reasoning to open (the events carry the step's time,
+ * not the reasoning's own, so no time is shown) and is empty when it has none.
  *
  * *plain* is the default mode's line: the same, without the count of tool
  * calls (`Working`, `Worked for 14s · 1 failed`).
@@ -1444,7 +1444,7 @@ export function workSummary(turn, {held = "", plain = false} = {}) {
     const activity = held ? holdText(held) : turn.control ? t("browser.inControl") : t("turns.summary.working");
     return calls > 0 ? `${activity}${SEPARATOR}${callWord}` : activity;
   }
-  if (turn.status === "completed" && toolCount(turn) === 0) {
+  if (!summaryTimed(turn)) {
     return turn.items.some((item) => item.kind === "thinking") ? t("turns.summary.thought") : "";
   }
   const duration = formatDuration(turnDuration(turn));
@@ -1461,6 +1461,14 @@ export function workSummary(turn, {held = "", plain = false} = {}) {
   const parts = [t("turns.summary.endedAfter", {word, duration})];
   if (calls > 0) parts.push(callWord);
   return parts.join(SEPARATOR);
+}
+
+/**
+ * Whether a finished turn's work line gives its time (`Worked for 14s`, `Stopped after 6s`). A reply shows its
+ * time once: on that line when it has one, else in the footer under its answer.
+ */
+export function summaryTimed(turn) {
+  return Boolean(turn.finishedAt) && !(turn.status === "completed" && toolCount(turn) === 0);
 }
 
 /**

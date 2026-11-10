@@ -402,8 +402,7 @@ it with **Use this model**, without opening settings (with none running, a suppo
 sets one up from the card after one OK, as the terminal does). It lists your chats newest first, with
 search and a draft for each, and draws a turn as the terminal does: your
 message, a work card for each tool call, folded reasoning and reflections,
-notices, the live progress row and the answer with its facts and
-`Copy response`. Stop cancels the turn, a waiting approval shows as
+notices, the live progress row and the answer with its copy button. Stop cancels the turn, a waiting approval shows as
 `Needs approval`, and the chats are saved in the gateway's `sessions.db`, so
 a restart keeps them. Other browser tabs on the same gateway see the same
 chats. Approval cards, settings and the session details drawer are
