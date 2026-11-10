@@ -138,17 +138,14 @@ it; the option shown still works. A comparison names the issue that decides it.
   agent.output_reserve         unset       --output-reserve
   agent.safety_margin          unset       --safety-margin
   agent.captured_history       false       --captured-history (#4)
-  agent.brief_items            false       --brief-items (#185)
-  agent.lean_output            false        (#183)
   agent.confine_writes         true
-  agent.confine_direct_runs    false        (#183)
+  agent.confine_direct_runs    false
   agent.answer_on_stop         true         (#185)
-  agent.max_calls              unset        (#185)
-  agent.tool_images            auto         (#280)
+  agent.max_calls              unset
+  agent.tool_images            auto
   agent.tool_images_keep       3            (#280)
   agent.tool_images_retire     2            (#280)
   agent.empty_reply_fallback   on
-  agent.thinking_steps         all          (#551)
   agent.reflection             true
   agent.steps_per_attempt      unset        (#185)
   agent.attempt_policy         reflect     --attempt-policy (#185)
