@@ -3813,10 +3813,10 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             # person's words only.
             rest = query[len(own) :]
             kept = recalled if rest.startswith(recalled) else ""
-            if not kept:
-                recalled = self.hide_passwords(recalled)  # the notes follow suit
             own = self.hide_passwords(own)
             query = own + kept + self.hide_passwords(rest[len(kept) :])
+            if not kept:
+                recalled = self.hide_passwords(recalled)  # the notes follow suit
             if isinstance(user_words, str):
                 user_words = self.hide_passwords(user_words)
         person_words = own if user_words is None else user_words

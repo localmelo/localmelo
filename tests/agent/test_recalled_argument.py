@@ -121,18 +121,18 @@ def test_the_earlier_words_are_not_cut() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("kwargs", "error"),
+    ("kwargs", "error", "says"),
     [
-        ({"query": 7}, TypeError),
-        ({"own_chars": "3"}, TypeError),
-        ({"own_chars": True}, TypeError),
-        ({"own_chars": -1}, ValueError),
-        ({"recalled": None}, TypeError),
+        ({"query": 7}, TypeError, "query must be a str"),
+        ({"own_chars": "3"}, TypeError, "own_chars must be an int"),
+        ({"own_chars": True}, TypeError, "own_chars must be an int"),
+        ({"own_chars": -1}, ValueError, "own_chars must not be negative"),
+        ({"recalled": None}, TypeError, "recalled must be a str"),
     ],
     ids=["query", "own_chars str", "own_chars bool", "own_chars negative", "recalled"],
 )
 async def test_a_wrong_argument_is_refused_before_the_run(
-    tmp_path: Path, kwargs: dict[str, Any], error: type[Exception]
+    tmp_path: Path, kwargs: dict[str, Any], error: type[Exception], says: str
 ) -> None:
     (tmp_path / "ws").mkdir()
     llm = FakeModel([_answer("done")])
@@ -140,6 +140,7 @@ async def test_a_wrong_argument_is_refused_before_the_run(
         llm=llm,
         options=AgentOptions(builtins=frozenset(), workspace_root=str(tmp_path / "ws")),
     )
-    with pytest.raises(error):
+    # By name: an error some later line would raise by accident does not count.
+    with pytest.raises(error, match=says):
         await agent.run_task(**{"query": "read this", **kwargs})
     assert llm.requests == []
