@@ -45,6 +45,7 @@ from localmelo.melo.contracts.approvals import (
     find_folder_asker,
     grant_offered,
     holds_grant,
+    never_kept,
     review_mode,
     revoke_site,
     site_grant,
@@ -99,8 +100,12 @@ def kept_answer(
     site Auto stopped only as not asked for, and an app's window. A site Auto
     let the chat read covers its plain reads only, never a click, an address
     that can carry data, a card-only kind or a step Auto stopped
-    (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`).
+    (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`). Nothing
+    covers what may never be kept (:func:`~localmelo.melo.contracts.approvals.never_kept`),
+    whatever the review says.
     """
+    if never_kept(request):
+        return None
     if grants.covers(request.tool_name) and (
         covered_by_grant(request.review) or site_grant(request) or window_grant(request)
     ):

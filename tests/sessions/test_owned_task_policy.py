@@ -157,9 +157,11 @@ async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(
     # The gate lets the user's model review an undecided call first, as under a grant.
     assert review_mode(policy, request(folder, review=UNDECIDED)) == "silent"
     assert review_mode(policy, request(folder, tool="file_write")) == "ask"
-    # A high-impact call asks every time.
+    # A high-impact call asks every time, and so does a card-only kind.
     assert (await policy.decide(request(folder, review=HIGH))).origin == "user"
-    assert len(person.asked) == 1
+    money = ActionReview("routine", ("money",))
+    assert (await policy.decide(request(folder, review=money))).origin == "user"
+    assert len(person.asked) == 2
     # Another chat's grant covers nothing here; in Auto the chat's grants are not used.
     other = await owned(book, RememberingPolicy(person), chat="chat-2")
     assert (await other.decide(request(folder, code="print(4)"))).origin == "user"
