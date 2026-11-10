@@ -57,7 +57,9 @@ class TestConfig:
         row = capsys.readouterr().out.splitlines()[1].split()
         assert row == [KEY, "true", "false", "-X"]
         text = cli._build_parser(developer=True).format_help()
-        listed = next(line for line in text.splitlines() if line.startswith(f"  {KEY} "))
+        listed = next(
+            line for line in text.splitlines() if line.startswith(f"  {KEY} ")
+        )
         assert "(#" not in listed, "an advanced setting: no issue decides it"
 
 

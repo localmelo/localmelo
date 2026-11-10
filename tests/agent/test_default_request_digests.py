@@ -26,7 +26,7 @@ from localmelo.tests.agent.wire_runs import record_run, reflection_continues
 # shell_exec and python_exec gained the optional ``why`` (and a last sentence in their
 # descriptions): with the earlier tool definitions put back, the digests before this
 # change come out. Re-recorded again when the reflection prompt lost the seven keys
-# nothing read (UNREAD): with them put back, the digests before this change come out.
+# nothing read: with them put back, the digests before this change come out.
 OFF = (
     "5ccaf2488d634fd83628cf6db020d3b930be27752f8d97733af26ea4b154939f",
     "eb0e359a146cfc949ce6ca9c4798cb2bedd78c41b10c1d09e331011d6e4dd708",
