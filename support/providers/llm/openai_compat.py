@@ -30,6 +30,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support import melo_serve
 from localmelo.support.providers._http import (
+    CHAT_TIMEOUT_S,
     RETRYABLE_STATUS_CODES,
     _body_preview,
     _context_overflow,
@@ -442,7 +443,7 @@ class OpenAICompatLLM(BaseLLMProvider):
     api_key : str | None
         Bearer token for authenticated endpoints.
     timeout : float
-        HTTP timeout in seconds (default 120).
+        HTTP timeout in seconds (default :data:`CHAT_TIMEOUT_S`, 300).
     extra_body : Mapping[str, Any] | None
         Extra top-level fields merged into every request body, e.g.
         ``{"chat_template_kwargs": {"enable_thinking": False}}``. Fields
@@ -484,7 +485,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         base_url: str,
         model: str,
         api_key: str | None = None,
-        timeout: float = 120.0,
+        timeout: float = CHAT_TIMEOUT_S,
         *,
         extra_body: Mapping[str, Any] | None = None,
         extra_body_by_kind: Mapping[str, Mapping[str, Any]] | None = None,

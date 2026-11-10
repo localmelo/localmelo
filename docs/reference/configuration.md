@@ -605,9 +605,9 @@ one run. Direct mode never reads it.
 
 ## Chat request timeout
 
-A chat request waits up to 120 seconds for the server (300 seconds with the
-`ollama` backend). To change this for every run, set `request_timeout_s` at
-the top of the config file, before the first table:
+A chat request waits up to 300 seconds for the server. To change this for
+every run, set `request_timeout_s` at the top of the config file, before the
+first table:
 
 ```toml
 chat_backend = "vllm"
@@ -628,7 +628,7 @@ chat_model = "Qwen/Qwen3-8B"
 - `--request-timeout SECONDS` overrides it for one direct run and does not
   change the file.
 - A server that loads a model when the first request for it arrives, as
-  oMLX does, can need more than 120 seconds for that request; `600` above
+  oMLX does, can need more than 300 seconds for that request; `600` above
   gives it room.
 - It applies to chat requests only. Embedding requests always wait up to
   120 seconds.

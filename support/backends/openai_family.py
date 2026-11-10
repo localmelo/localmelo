@@ -146,7 +146,7 @@ class OllamaBackend(LocalBackend):
         section = getattr(cfg, self.key)
         url = section.chat_url.rstrip("/").removesuffix("/v1")
         # Unless request_timeout_s is set, the provider keeps its default
-        # (300 s); httpx would read timeout=None as no timeout at all.
+        # (CHAT_TIMEOUT_S); httpx would read timeout=None as no timeout at all.
         options: dict[str, Any] = (
             {} if cfg.request_timeout_s is None else {"timeout": cfg.request_timeout_s}
         )

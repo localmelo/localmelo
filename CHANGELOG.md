@@ -27,6 +27,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
 - Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
 - A chat's reply appears line by line as it is written, in the console, the app and the terminal; Stop ends it at once and keeps what was shown.
+- A slow reply from a local model is no longer cut at two minutes: a chat request waits up to five minutes for the server.
 
 ### Tasks
 

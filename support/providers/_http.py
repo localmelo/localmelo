@@ -26,6 +26,11 @@ from localmelo.support.melo_serve import as_number
 # Every other error status is final.
 RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
 
+# Seconds a chat request waits for data from the model server, by default: a
+# local server can read a long prompt again for well over a minute before it
+# sends anything. Every chat provider's default, unless request_timeout_s is set.
+CHAT_TIMEOUT_S = 300.0
+
 # Characters of a response body that an error message quotes.
 BODY_PREVIEW_CHARS = 500
 

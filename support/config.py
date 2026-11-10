@@ -700,8 +700,8 @@ class Config:
     mcp_config: str = ""
 
     # HTTP timeout of each chat request, in seconds, for every chat backend.
-    # None keeps each chat provider's own default (120 s; 300 s for the
-    # ollama backend). Embedding requests keep their own timeout.
+    # None keeps the chat providers' default (300 s). Embedding requests keep
+    # their own timeout.
     request_timeout_s: float | None = None
 
     # Local backends

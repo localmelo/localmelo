@@ -277,8 +277,8 @@ second try may succeed:
   `POST /chat/completions failed with HTTP 500: <html> …`.
 - Each attempt waits the full [chat request timeout](configuration.md#chat-request-timeout).
   A server that sends nothing therefore ends the run after about
-  3 × the timeout + 5 seconds: about 365 seconds with the default of
-  120 seconds.
+  3 × the timeout + 5 seconds: about 905 seconds with the default of
+  300 seconds.
 - Every chat request carries its attempt number (1, 2 or 3) in the
   `X-Localmelo-Attempt` HTTP header, so a proxy's request log can be matched
   with `n_llm` and `llm_errors`. `X-Localmelo-Call-Kind` says `plan` for a

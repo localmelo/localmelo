@@ -449,7 +449,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
 | `--memory-dir DIR` | not set | Save history, long-term and procedural memory as SQLite files in `DIR`: `history.db`, `long_term.db` and `procedures.db`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
-| `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
+| `--request-timeout SECONDS` | `300` | How long each chat request may wait for the server. |
 | `--output-format text\|json\|stream-json` | `text` (`json` with `--brief`) | Text, one JSON result, or newline-delimited events and result (`stream-json` requires `--brief`). |
 | `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory; see [Set up an embedding model](../guides/embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
@@ -502,8 +502,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
   variables say. `~` is expanded. See
   [Memory](../guides/memory.md#keep-memory-between-runs).
 - `--request-timeout`: the default is `request_timeout_s` from the config
-  file, else 120 seconds (300 seconds for the `ollama` backend). With
-  `--base-url` it is 120 seconds, also for an Ollama `/v1` URL. It does not
+  file, else 300 seconds, also with `--base-url`. It does not
   change the config file. See
   [Chat request timeout](configuration.md#chat-request-timeout).
 - `--embedding-base-url` is also used exactly as given: include `/v1`, as in
