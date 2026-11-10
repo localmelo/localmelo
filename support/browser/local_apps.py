@@ -47,7 +47,18 @@ itself:
   else the ``Referer``, which Chrome sets and a page can only shorten or
   drop). A request of any other page, a public one's, a frame's of a public
   page, or one with neither header, is blocked and told, as before. melo's
-  own ports stay blocked even when listed.
+  own ports stay blocked even when listed, as an address a page or melo
+  names; not for what a listed page's own script reaches by other means.
+  Three limits:
+
+  - A page on a listed server is trusted like the developer's own app:
+    Chrome's own check does not stop its WebSockets or its requests to names
+    that lead to this computer, and melo's rule sees only addresses written
+    as such. List only servers whose pages you wrote.
+  - A page's own requests are judged by its origin only. A server that is
+    both written by the person in this run and listed is treated as listed.
+  - Safari tells only where a page landed, so a public page passed through
+    inside one step is not seen.
 - Anything else goes on unchanged.
 
 There is no setting for the list: it is :data:`SIGNIN_HELPERS`, in code.

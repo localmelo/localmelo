@@ -3035,7 +3035,9 @@ class BrowserToolProvider(BaseToolProvider):
         :func:`addresses.require_public`; for any other asker (a tab that
         appeared by itself, a page on the public web, its frames) the address
         meets the checks with no list, as when nothing is listed. A listed
-        server reached is marked for the step.
+        server reached is marked for the step. Limit: Safari tells only where
+        a page landed, so a public page passed through inside one step is not
+        seen.
         """
         allow = self._listed if reach else None
         await addresses.require_public(url, allow)

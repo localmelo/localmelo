@@ -86,6 +86,13 @@ another local address and never one of melo's own ports. So are the test
 servers the developer setting ``[tools] web_fetch_allow_local`` lists, for
 melo's own navigation to one and for the requests of a page on one only
 (:meth:`LocalRule.decide <localmelo.support.browser.local_apps.LocalRule.decide>`).
+A page on a listed server is trusted like the developer's own app: Chrome's
+own check does not stop its WebSockets or its requests to names that lead to
+this computer, and melo's rule sees only addresses written as such. List only
+servers whose pages you wrote. melo's own ports stay blocked as an address a
+page or melo names, not for what a listed page's own script reaches by other
+means. A page's own requests are judged by its origin only, so a server both
+written by the person in this run and listed is treated as listed.
 
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through

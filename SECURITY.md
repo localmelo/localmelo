@@ -257,8 +257,16 @@ those tools can do.
   from it. Safari's automation windows have no such check. The developer
   setting `[tools] web_fetch_allow_local`, empty by default, lets melo's own
   navigation and the pages already on a listed `127.0.0.1:PORT` server reach
-  the listed servers (never melo's own ports); a request of any other page
-  to them stays blocked, judged by the `Origin` or `Referer` Chrome sets.
+  the listed servers (never melo's own ports, as an address a page or melo
+  names); a request of any other page to them stays blocked, judged by the
+  `Origin` or `Referer` Chrome sets. Limits: a page on a listed server is
+  trusted like the developer's own app, because Chrome's own check does not
+  stop its WebSockets or its requests to names that lead to this computer,
+  and melo's rule sees only addresses written as such, so list only servers
+  whose pages you wrote; a page's own requests are judged by its origin only,
+  so a server both written by the person and listed is treated as listed;
+  and Safari tells only where a page landed, so a public page passed through
+  inside one step is not seen.
 - **The hosts of one site share a kept answer.** What the person keeps for
   opening a site, or for clicking and choosing on it, covers the site's other
   hosts where that answer holds, because a sign-in moves between them. One site
