@@ -50,6 +50,7 @@ class FakeWorkers:
         level: object = None,
         state: str | None = None,
         check: Any = None,
+        confirmation_token: str | None = None,
     ) -> dict[str, Any]:
         self.changes.append((task_id, level, state))
         return {"task_id": task_id, "level": level, "state": state}

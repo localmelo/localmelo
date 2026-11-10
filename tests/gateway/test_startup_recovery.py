@@ -610,7 +610,8 @@ async def test_worker_open_fences_recovered_tasks_but_allows_stop(
         )
         await workers.open()
         assert (await workers.get(task.task_id))["state"] == "interrupted"
-        with pytest.raises(TaskStoreError):
+        # Its resume is the page's, which refuses a task in the home folder.
+        with pytest.raises(TaskStoreError, match="workspace is invalid"):
             await workers.update(task.task_id, state="resume")
         with pytest.raises(TaskStoreError):
             await workers.update(task.task_id, level=1)

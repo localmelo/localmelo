@@ -1,12 +1,12 @@
-"""Classify a recovered task for an explicit Resume, without launching it.
+"""Classify a recovered task for Resume, without launching it.
 
 The decision table is conservative: only a task the store proves never
-started, or a started task whose trusted, complete capture covers the whole
-execution and whose every recorded process group is now verifiably gone, may
-Resume without a confirmation. Everything else may Resume only after the user
-accepts the recorded risk. An unreadable or unsupported check is unknown, not
-evidence that a process stopped, and a missing card blocks rather than
-falling back to the original objective.
+started, or a started task with nothing in flight (see :func:`in_flight`),
+may Resume without a confirmation; the start continues such a task by
+itself. Everything else may Resume only after the user accepts the recorded
+risk. An unreadable or unsupported check is unknown, not evidence that a
+process stopped, and a missing card blocks rather than falling back to the
+original objective, unless no turn of the task ever began.
 """
 
 from __future__ import annotations
@@ -94,8 +94,10 @@ class ResumeEvidence:
     pending_operation_id: str | None
     card: str
     capture_complete: bool
+    open_calls: tuple[str, ...]
     groups: tuple[Process, ...]
     groups_gone: bool
+    turn_began: bool
     evidence_key: str
 
 
@@ -113,6 +115,7 @@ def _key(evidence: ResumeEvidence) -> str:
             "first_start": evidence.first_start,
             "execution": evidence.execution_id,
             "capture": evidence.capture_complete,
+            "calls": list(evidence.open_calls),
             "groups": [list(group) for group in evidence.groups],
             "gone": evidence.groups_gone,
             "card": evidence.card,
@@ -144,6 +147,11 @@ async def collect_evidence(
         execution_id
         and await recovery.capture_complete(task_id, execution_id=execution_id)
     )
+    calls = (
+        tuple(await recovery.open_calls(task_id, execution_id=execution_id))
+        if execution_id
+        else ()
+    )
     groups = (
         tuple(await recovery.processes(task_id, execution_id=execution_id))
         if execution_id
@@ -168,11 +176,28 @@ async def collect_evidence(
         pending_operation_id=pending,
         card=record.card,
         capture_complete=complete,
+        open_calls=calls,
         groups=groups,
         groups_gone=groups_gone,
+        turn_began=await tasks.turn_started(task_id, turn=1),
         evidence_key="",
     )
     return replace(preliminary, evidence_key=_key(preliminary))
+
+
+def in_flight(evidence: ResumeEvidence) -> bool:
+    """Whether something of the last execution may be half done or still running.
+
+    Nothing is in flight only when the execution is known, its capture is
+    complete (every process it started has a record), no call that can change
+    something was open, and every recorded process group is verified gone.
+    """
+    return not (
+        evidence.execution_id
+        and evidence.capture_complete
+        and not evidence.open_calls
+        and evidence.groups_gone
+    )
 
 
 def decide(evidence: ResumeEvidence, *, workspace_valid: bool) -> ResumeDecision:
@@ -181,8 +206,8 @@ def decide(evidence: ResumeEvidence, *, workspace_valid: bool) -> ResumeDecision
         raise ResumeRefusedError(INVALID_WORKSPACE_MESSAGE, reason="invalid_workspace")
     if evidence.first_start == "never_started":
         return ResumeDecision("first_start", evidence)
-    if not evidence.card.strip():
+    if not evidence.card.strip() and evidence.turn_began:
         raise ResumeRefusedError(MISSING_CARD_MESSAGE, reason="missing_card")
-    if evidence.capture_complete and evidence.groups_gone:
+    if not in_flight(evidence):
         return ResumeDecision("free", evidence)
     return ResumeDecision("confirm", evidence)

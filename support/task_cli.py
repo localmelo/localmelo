@@ -58,6 +58,14 @@ class ClientError(Exception):
     """An operation failed without exposing the server response or credential."""
 
 
+class ConfirmationNeededError(ClientError):
+    """A Resume asks first, as the task's page does: *warning* says why."""
+
+    def __init__(self, task_id: str, warning: str) -> None:
+        super().__init__(f"{warning} To continue anyway: melo task resume {task_id} -y")
+        self.warning = warning
+
+
 def address(url: str) -> str:
     """Validate an explicit local gateway URL without DNS or proxy discovery."""
     try:
@@ -134,6 +142,20 @@ def read_token(path: Path) -> str:
         os.close(fd)
 
 
+def _error(response: httpx.Response) -> tuple[str, dict[str, Any]]:
+    """An error answer's code and details; empty for a success or another body."""
+    if response.status_code < 400:
+        return "", {}
+    try:
+        error = response.json().get("error", {})
+        code, details = error.get("code", ""), error.get("details") or {}
+    except (ValueError, AttributeError):
+        return "", {}
+    return (code if isinstance(code, str) else ""), (
+        details if isinstance(details, dict) else {}
+    )
+
+
 def parser(prog: str = "melo-task") -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     common.add_argument("--gateway", help="Loopback gateway URL")
@@ -159,6 +181,8 @@ def parser(prog: str = "melo-task") -> argparse.ArgumentParser:
         sub.add_argument("id")
         if name == "resume":
             sub.add_argument("--level", choices=LEVELS[:-1], type=_level_arg)
+            # Yes to the question a Resume after a restart may ask.
+            sub.add_argument("-y", "--yes", action="store_true")
         if name == "level":
             sub.add_argument("level", choices=(*LEVELS, "auto"), type=_level_arg)
         if name == "follow":
@@ -304,26 +328,36 @@ def execute(
                 payload["level"] = args.level
         elif cmd == "level":
             payload["level"] = args.level
-    try:
-        response = client.request(
-            method, path, params=params, json=payload if method != "GET" else None
-        )
-    except httpx.RequestError as exc:
-        suffix = f"; retry with --request-key {request_key}" if request_key else ""
-        raise ClientError(
-            f"gateway connection failed at {client.base_url}; "
-            "start melo serve or check --gateway" + suffix
-        ) from exc
+
+    def send() -> httpx.Response:
+        try:
+            return client.request(
+                method, path, params=params, json=payload if method != "GET" else None
+            )
+        except httpx.RequestError as exc:
+            suffix = f"; retry with --request-key {request_key}" if request_key else ""
+            raise ClientError(
+                f"gateway connection failed at {client.base_url}; "
+                "start melo serve or check --gateway" + suffix
+            ) from exc
+
+    response = send()
+    code, details = _error(response)
+    if cmd == "resume" and code == "confirmation_required":
+        token, warning = details.get("confirmation_token"), details.get("warning")
+        if not isinstance(token, str) or not isinstance(warning, str):
+            raise ClientError("gateway returned an invalid confirmation")
+        if not getattr(args, "yes", False):
+            raise ConfirmationNeededError(_identifier(args.id), _safe(warning))
+        payload["confirmation_token"] = token
+        response = send()
+        code, details = _error(response)
     if response.is_redirect or response.status_code >= 400:
         suffix = (
             f"; retry with --request-key {request_key}"
             if request_key and response.status_code >= 500
             else ""
         )
-        try:
-            code = response.json().get("error", {}).get("code", "")
-        except (ValueError, AttributeError):
-            code = ""
         known = {
             "invalid_task",
             "invalid_request",
@@ -332,6 +366,8 @@ def execute(
             "not_found",
             "not_paused",
             "invalid_transition",
+            "recovery_unknown",
+            "stale_confirmation",
             "unauthorized",
         }
         label = f" ({code})" if isinstance(code, str) and code in known else ""

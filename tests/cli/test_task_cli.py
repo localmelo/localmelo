@@ -165,6 +165,44 @@ def test_show_resume_stop_requests(args: list[str], method: str, body: object) -
     assert (json.loads(calls[0].content) if calls[0].content else None) == body
 
 
+@pytest.mark.parametrize("yes", [False, True])
+def test_resume_of_an_interrupted_task_asks_what_its_page_asks(yes: bool) -> None:
+    bodies: list[object] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "confirmation_token" not in body:
+            warning = "A process from before the restart may still be running."
+            return httpx.Response(
+                409,
+                json={
+                    "error": {
+                        "code": "confirmation_required",
+                        "message": warning,
+                        "details": {"confirmation_token": "t1", "warning": warning},
+                    }
+                },
+            )
+        return httpx.Response(200, json={"task": {"task_id": "abc", "state": "queued"}})
+
+    out = io.StringIO()
+    args = parser().parse_args(["resume", "abc", *(["-y"] if yes else [])])
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901", transport=httpx.MockTransport(reply)
+    ) as client:
+        if yes:
+            assert execute(args, client, out=out, stdin=io.StringIO()) == 0
+            assert out.getvalue().startswith("abc")
+        else:
+            with pytest.raises(ClientError, match="may still be running.*-y$"):
+                execute(args, client, out=out, stdin=io.StringIO())
+    assert bodies == [
+        {"state": "resume"},
+        *([{"state": "resume", "confirmation_token": "t1"}] if yes else []),
+    ]
+
+
 def test_invalid_mode_and_non_utf8_brief(tmp_path: Path) -> None:
     brief = tmp_path / "brief"
     brief.write_bytes(b"\xff")

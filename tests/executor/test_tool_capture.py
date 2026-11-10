@@ -1,4 +1,4 @@
-"""Capture is marked incomplete only when an untracked tool actually runs."""
+"""A call that can change something is recorded for its whole length; a read is not."""
 
 import asyncio
 import contextlib
@@ -26,7 +26,23 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef
 
 
-async def test_capture_hook_follows_approval_and_trusted_file_registration(
+def _entry(events: list[str], *, fail: bool = False) -> Any:
+    """A TOOL_ENTRY that notes when a call's record opens and closes."""
+
+    @contextlib.asynccontextmanager
+    async def entry(tool: str) -> Any:
+        events.append("entry")
+        if fail:
+            raise RuntimeError("capture unavailable")
+        try:
+            yield
+        finally:
+            events.append("exit")
+
+    return entry
+
+
+async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
     tmp_path: Path,
 ) -> None:
     hippo = Hippo()
@@ -36,48 +52,68 @@ async def test_capture_hook_follows_approval_and_trusted_file_registration(
     register_builtins(
         executor,
         hippo,
-        names={"file_read", "python_exec"},
+        names={"file_read", "file_write", "python_exec"},
         workspace_root=str(tmp_path),
     )
     (tmp_path / "a").write_text("safe")
     calls: list[str] = []
 
-    async def capture() -> None:
-        calls.append("capture")
-
     async def denied(request: ExecutionRequest) -> ApprovalDecision:
         return ApprovalDecision(False)
 
-    async def custom(path: str) -> str:
-        calls.append("tool")
-        return "custom"
-
-    token = TOOL_ENTRY.set(capture)
+    token = TOOL_ENTRY.set(_entry(calls))
     try:
+        # A read changes nothing: no record.
         result = await executor.execute_structured(
             ExecutionRequest(tool_name="file_read", arguments={"path": "a"})
         )
         assert result.status == ExecutionStatus.SUCCESS and calls == []
+        # A denied call never starts: no record either.
         result = await executor.execute_structured(
             ExecutionRequest(tool_name="python_exec", arguments={"code": "pass"}),
             approve=denied,
         )
         assert result.status == ExecutionStatus.BLOCKED and calls == []
-        executor.register("file_read", custom)
         result = await executor.execute_structured(
-            ExecutionRequest(tool_name="file_read", arguments={"path": "a"})
+            ExecutionRequest(
+                tool_name="file_write", arguments={"path": "b", "content": "x"}
+            )
         )
-        assert result.status == ExecutionStatus.SUCCESS and calls == ["capture", "tool"]
+        assert result.status == ExecutionStatus.SUCCESS and calls == ["entry", "exit"]
 
-        async def fail() -> None:
-            raise RuntimeError("capture unavailable")
+        # A call cancelled while it runs closes its record too.
+        started = asyncio.Event()
 
-        TOOL_ENTRY.set(fail)
+        async def slow(**kwargs: Any) -> str:
+            started.set()
+            await asyncio.Event().wait()
+            return ""
+
+        executor.register("file_write", slow)
+        calls.clear()
+        task = asyncio.create_task(
+            executor.execute_structured(
+                ExecutionRequest(
+                    tool_name="file_write", arguments={"path": "b", "content": "x"}
+                )
+            )
+        )
+        await asyncio.wait_for(started.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert calls == ["entry", "exit"]
+
+        # A record that cannot be written: the call does not run.
+        TOOL_ENTRY.set(_entry(calls, fail=True))
         calls.clear()
         result = await executor.execute_structured(
-            ExecutionRequest(tool_name="file_read", arguments={"path": "a"})
+            ExecutionRequest(
+                tool_name="file_write", arguments={"path": "c", "content": "x"}
+            )
         )
-        assert result.status == ExecutionStatus.ERROR and calls == []
+        assert result.status == ExecutionStatus.ERROR and calls == ["entry"]
+        assert not (tmp_path / "c").exists()
     finally:
         TOOL_ENTRY.reset(token)
 
@@ -92,15 +128,12 @@ async def test_custom_tool_entry_after_validation_and_approval() -> None:
         events.append("tool")
         return query
 
-    async def capture() -> None:
-        events.append("entry")
-
     async def approve(request: ExecutionRequest) -> ApprovalDecision:
         events.append("approval")
         return ApprovalDecision(True)
 
     executor.register("mcp_search", tool, requires_approval=True)
-    token = TOOL_ENTRY.set(capture)
+    token = TOOL_ENTRY.set(_entry(events))
     try:
         bad = await executor.execute_structured(
             ExecutionRequest(tool_name="mcp_search", arguments={}), approve=approve
@@ -115,7 +148,7 @@ async def test_custom_tool_entry_after_validation_and_approval() -> None:
             approve=approve,
         )
         assert good.status == ExecutionStatus.SUCCESS
-        assert events == ["approval", "entry", "tool"]
+        assert events == ["approval", "entry", "tool", "exit"]
     finally:
         TOOL_ENTRY.reset(token)
 
@@ -134,11 +167,8 @@ async def test_wrapped_callable_mismatch_cannot_run_without_entry() -> None:
         calls.append("wrapper")
         return "executed"
 
-    async def capture() -> None:
-        calls.append("entry")
-
     executor.register("wrapped", wrapper)
-    token = TOOL_ENTRY.set(capture)
+    token = TOOL_ENTRY.set(_entry(calls))
     try:
         outcome = await executor.execute_structured(
             ExecutionRequest(tool_name="wrapped", arguments={})
@@ -151,7 +181,7 @@ async def test_wrapped_callable_mismatch_cannot_run_without_entry() -> None:
             ExecutionRequest(tool_name="wrapped", arguments={"required": "ok"})
         )
         assert outcome.status == ExecutionStatus.SUCCESS
-        assert calls == ["entry", "wrapper"]
+        assert calls == ["entry", "wrapper", "exit"]
     finally:
         TOOL_ENTRY.reset(token)
 
@@ -195,11 +225,6 @@ async def test_unsupported_gate_falls_back_only_after_marker(
     events: list[str] = []
     marker = tmp_path / "marker"
 
-    async def capture() -> None:
-        events.append("entry")
-        if entry_fails:
-            raise RuntimeError("store unavailable")
-
     async def record(pid: int) -> None:
         events.append("record")
 
@@ -208,7 +233,7 @@ async def test_unsupported_gate_falls_back_only_after_marker(
         raise UnsupportedProcessGateError("subprocess gate unsupported")
 
     monkeypatch.setattr("localmelo.melo.executor.builtins.gated_exec", unsupported)
-    entry_token = TOOL_ENTRY.set(capture)
+    entry_token = TOOL_ENTRY.set(_entry(events, fail=entry_fails))
     process_token = PROCESS_RECORD.set(record)
     try:
         outcome = await executor.execute_structured(
@@ -220,7 +245,10 @@ async def test_unsupported_gate_falls_back_only_after_marker(
         assert outcome.status == (
             ExecutionStatus.ERROR if entry_fails else ExecutionStatus.SUCCESS
         )
-        assert events == (["entry"] if entry_fails else ["entry", "spawn"])
+        # The child the gate could not hold is recorded once it runs.
+        assert events == (
+            ["entry"] if entry_fails else ["entry", "spawn", "record", "exit"]
+        )
         assert marker.exists() is not entry_fails
     finally:
         PROCESS_RECORD.reset(process_token)
@@ -239,14 +267,11 @@ async def test_executor_entry_and_process_record_order(
     events: list[str] = []
     marker = tmp_path / "marker"
 
-    async def capture() -> None:
-        events.append("entry")
-
     async def record(pid: int) -> None:
         assert pid > 0 and not marker.exists()
         events.append("record")
 
-    entry_token = TOOL_ENTRY.set(capture)
+    entry_token = TOOL_ENTRY.set(_entry(events))
     process_token = PROCESS_RECORD.set(record)
     try:
         args = (
@@ -258,7 +283,7 @@ async def test_executor_entry_and_process_record_order(
             ExecutionRequest(tool_name=name, arguments=args)
         )
         assert result.status == ExecutionStatus.SUCCESS
-        assert events == ["entry", "record"] and marker.exists()
+        assert events == ["entry", "record", "exit"] and marker.exists()
     finally:
         PROCESS_RECORD.reset(process_token)
         TOOL_ENTRY.reset(entry_token)
@@ -275,10 +300,12 @@ async def test_entry_callback_suppressed_cancellation_never_invokes_tool() -> No
         calls.append("tool")
         return "ok"
 
-    async def capture() -> None:
+    @contextlib.asynccontextmanager
+    async def capture(name: str) -> Any:
         entered.set()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.Event().wait()
+        yield
 
     executor.register("custom", tool)
     token = TOOL_ENTRY.set(capture)
@@ -315,17 +342,15 @@ async def test_unsupported_platform_fallback_needs_incomplete_entry(
     marker = tmp_path / "marker"
     events: list[str] = []
 
-    async def capture() -> None:
-        events.append("entry")
-
     async def record(pid: int) -> None:
-        raise AssertionError("must not record")
+        # No gate to hold it: the child is recorded once it runs.
+        events.append("record")
 
     monkeypatch.setattr(
         "localmelo.melo.executor.builtins.gate_supported", lambda: False
     )
     process_token = PROCESS_RECORD.set(record)
-    entry_token = TOOL_ENTRY.set(capture) if marked else None
+    entry_token = TOOL_ENTRY.set(_entry(events)) if marked else None
     try:
         if marked:
             hippo = Hippo()
@@ -339,7 +364,7 @@ async def test_unsupported_platform_fallback_needs_incomplete_entry(
                 ExecutionRequest(tool_name=name, arguments=arguments)
             )
             assert result.status == ExecutionStatus.SUCCESS
-            assert events == ["entry"] and marker.exists()
+            assert events == ["entry", "record", "exit"] and marker.exists()
         else:
             with pytest.raises(RuntimeError, match="the call was not run"):
                 if name == "python_exec":

@@ -42,8 +42,10 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   run ran out of steps prints `stopped` as its state (`show` adds `Ran out of
   steps: continue it from the console.` and `Left: …`); `--json` keeps the
   stored `failed` and adds `out_of_steps`, and `follow --wait` still exits 1.
-  `pause ID`, `resume ID [--level Pn]`,
-  `stop ID` and `level ID Pn|auto` control tasks. `list` and `show` print
+  `pause ID`, `resume ID [--level Pn] [-y]`,
+  `stop ID` and `level ID Pn|auto` control tasks. Resuming a task a restart
+  left waiting asks what its page asks: without `-y` it prints the warning and
+  exits 1, with `-y` it continues anyway. `list` and `show` print
   levels as words (`Normal`) unless `[ui] mode = "developer"`, which prints `P2`. `first` and deadlines are
   not supported. Pause does not interrupt a running tool. `stop ID` prints
   the task's state; when the task is not yet `cancelled` it adds `stop
@@ -58,7 +60,9 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   finalization races still mean a quiet follow is not proof of complete replay.
   Repeated disconnects or invalid events are errors; Ctrl-C exits 130 without
   stopping the task. Without `--wait`, a terminal observation exits 0; with
-  `--wait`, done exits 0, failed 1, and cancelled or expired 2. Other successful
+  `--wait`, done exits 0, failed 1, and cancelled or expired 2. A gateway stop
+  ends no task: the follow loses its gateway and exits 1 (`follow incomplete`),
+  and the task continues when the gateway starts again. Other successful
   operations exit 0; usage errors exit 2 and network, authentication or output
   failures exit 1.
 - `--json` emits one versioned JSON object per non-stream command, or NDJSON
@@ -131,13 +135,18 @@ resume or a terminal outcome. Missing provenance and missing process records
 are unknown, not proof that a task never ran or that its processes are gone.
 Version 4 adds per-execution
 capture state, process identity checks and a gated subprocess primitive. Workers
-record a launch's process group through that gate before releasing the child and
-mark capture incomplete before the first tool provider starts (an MCP provider
-can spawn a server itself) and at each arbitrary-code tool entry; a store outage
-retries the marker for up to 10 seconds, then refuses that one call. An unsupported
-platform, or an identity/record failure, releases the child only after the marker
-commits. Explicit Resume reads this evidence without launching a worker; see
-[Controlled Resume](#controlled-resume-s3b2-pr3b-1).
+record a launch's process group through that gate before releasing the child.
+Each call that can change something (`changes_nothing` says no; a tool the run
+does not know counts as changing) writes a `recovery_calls` row naming the
+execution, the call and the tool before it starts, and deletes it when the call
+returns, however it returns, a stop's cancel included; a read writes none. A
+store outage retries the row for up to 10 seconds, then refuses that one call. A
+capture is complete while every process the execution started has a record: an
+identity or record failure marks it incomplete before the child is released,
+and where the gate cannot run, a child starts only inside a recorded call and
+is recorded (or the capture marked incomplete) once it runs. Startup and Resume read this
+evidence without launching a worker; see [Controlled
+Resume](#controlled-resume-s3b2-pr3b-1).
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in
@@ -240,20 +249,39 @@ A retention sweep discards terminal gate identities whose task rows have
 passed the retention cutoff, even though the rows remain available for
 inspection; forgetting alone does not discard an identity.
 
-Rows survive gateway restart. Startup preserves terminal tasks and proved
-never-started queued or parked tasks, and interrupts uncertain tasks without
-replaying them. An already-started parked task retains its recorded card; an
-uncertain task without usable evidence stays without a card. An execution-linked
-committed run outcome can be reconciled without rerunning it. Pending pause intent
-and its priority snapshot survive interruption. Recovered tasks are fenced from
-`PATCH` resume and priority changes until an explicit
+Rows survive gateway restart. A gateway stop (`melo serve stop`, the app's
+Quit, a SIGTERM) is an involuntary pause, not the person's Stop: a run it cuts off
+is written `interrupted` with the reason "localmelo stopped; this task continues
+when it opens again" (no model call, no new wait), and a run killed before that
+write is found `running` or `held`, which counts as a crash. At the next start
+`StartupRecovery` decides each unfinished task once, by one function
+(`restart_outcome`) over its recorded facts:
+
+| What the record shows | Outcome |
+|---|---|
+| Stopped by the person, or ended | Stays as it is |
+| Never started | Starts (queued) or stays paused (parked), as before |
+| Paused by the person (parked, or the pause still pending) | Stays parked; an unsettled park waits as `interrupted` |
+| Its last run finished completely for this execution | Reconciled to `done`, `cancelled` or `failed` |
+| Cut off, nothing in flight: no `recovery_calls` row, the capture complete, every recorded group verified gone | Continues by itself: the same store operation as Resume (`resume_recovered`, actor `restart`), back to `queued` with a resumed turn, same id, level and rank; `sched.resumed` carries `reason: "restart"` |
+| Cut off with something in flight, or an unknown or contradictory record | Waits as `interrupted` ("gateway restarted; earlier effects or processes may still be active") |
+| Cut off by a crash twice in a row with no finished turn between (the `crashes` count, reset when a task ends `done` or `failed`) | Waits as `interrupted`, whatever was in flight |
+| A record that cannot be read | That task alone is fenced as `interrupted` with its reason |
+
+A cut-off task means running, held, waiting for an approval or an answer, parked
+by the scheduler to make room (its pause request's actor is `scheduler`), or
+queued after an earlier start. The resume receipt makes the decision happen once:
+a second start, or the open's retry loop, sees the queued task whose resumed turn
+waits and only admits it. Budgets start fresh, an unanswered approval was
+withdrawn and is asked again, an Allow once does not survive; grants in the store
+apply as always. Only tasks that wait for the person are fenced in memory: their
+priority changes are refused, and `PATCH` resume is the
 [controlled Resume](#controlled-resume-s3b2-pr3b-1); Stop remains available.
 Proved-never-started runnable queued tasks can start after a durable launch fence
 and workspace validation; every create writes that proof inside its own
 transaction, before any launch, so the proof covers ordinary tasks too. A
 committed Resume whose turn never started is re-admitted across a restart
-without another review, whether the task was still queued or had already reached
-running when the gateway died.
+without another review.
 A missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
@@ -332,9 +360,11 @@ files after the last test is not seen.
 ## Controlled Resume (S3b.2 PR3b-1)
 
 `POST /api/tasks/{task_id}/resume` (also `/api/v2/tasks/{task_id}/resume`)
-takes `{"operation_id": str, "confirmation_token"?: str}`. It is the only route
-that resumes a task recovered by startup; the PATCH route stays fenced for that
-work. An accepted transition is 202 `{"task", "operation_id"}`. An
+takes `{"operation_id": str, "confirmation_token"?: str}`. `PATCH` with
+`{"state": "resume", "confirmation_token"?: str}` on a task that waits after a
+restart runs the same operation with a fresh operation id, and answers with the
+same errors; `melo task resume ID [-y]` and the terminal's task list use it.
+An accepted transition is 202 `{"task", "operation_id"}`. An
 `operation_id` names one operation: a retry with it returns the current row,
 whatever payload it carries, and never starts a second turn or re-authorizes a
 transition.
@@ -342,9 +372,9 @@ transition.
 Every create records the never-started proof inside its create transaction,
 before any launch, so a task that dies before its first launch is proved
 never-started rather than unknown. A Resume committed before a restart reserves
-the turn number it will use; on startup the task is queued again and re-admitted
-when no such turn exists yet (also when startup had interrupted it after it
-reached running), and a retry after that turn started returns 409
+the turn number it will use; on startup the task is re-admitted when no such
+turn exists yet, a retry of the operation re-queues a task the restart left
+waiting before that turn began, and a retry after that turn started returns 409
 `invalid_transition` instead of replaying the operation.
 
 Before acting, the route reads the persisted task, card, provenance, active
@@ -354,10 +384,10 @@ unsupported check is unknown, not proof that a process stopped.
 
 | Evidence | Action |
 |---|---|
-| Terminal task, invalid workspace, missing card on a started task, stale execution identity, unresolved recovery operation or unsettled worker cleanup | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
+| Terminal task, invalid workspace, missing card on a task whose turn began, stale execution identity, unresolved recovery operation or unsettled worker cleanup | Block Resume (`409 invalid_transition` or `409 recovery_unknown`); Stop and a new task stay available |
 | Proven never-started parked or interrupted task | Queue through the durable launch fence, first start, no card or confirmation. A queued never-started create is admitted by startup, not this route |
-| Started task with a valid card, trusted complete capture for the whole execution, and every recorded group verifiably gone | Queue without confirmation |
-| Anything else, including missing, untrusted, partial or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
+| Started task with nothing in flight: no open changing call, a trusted complete capture, every recorded group verifiably gone | Queue without confirmation |
+| Anything else, including an open changing call, missing, untrusted or malformed capture, a live group, or a group whose liveness cannot be checked | Queue only after an explicit risk confirmation |
 
 A verified boot change (both boot ids read, well formed and different) counts as
 gone only on the host that recorded the group: no process survives a reboot of

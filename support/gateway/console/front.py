@@ -142,6 +142,10 @@ from localmelo.support.gateway.handover import (
 )
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
+from localmelo.support.gateway.resume_evidence import (
+    ConfirmationRequiredError,
+    StaleConfirmationError,
+)
 from localmelo.support.gateway.task_endings import job_finished, report_text, shown
 from localmelo.support.gateway.task_files import files_line, written_files
 from localmelo.support.gateway.task_policy import (
@@ -2527,7 +2531,14 @@ class Front:
         """Change *record* as the person asked; what stopped it, or ``""``."""
         try:
             await self.console.workers.update(record.task_id, **change)
-        except (TaskStoreError, TaskPolicyError, ValueError) as exc:
+        except (
+            TaskStoreError,
+            TaskPolicyError,
+            ValueError,
+            # A task the restart left waiting may ask its page's question.
+            ConfirmationRequiredError,
+            StaleConfirmationError,
+        ) as exc:
             return _plain(exc)
         return ""
 
