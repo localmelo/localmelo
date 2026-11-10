@@ -89,6 +89,31 @@ def _covered(folders: Iterable[str], path: str) -> bool:
     return any(covers(folder, path) for folder in folders)
 
 
+def kept_answer(
+    grants: SessionGrants, request: ApprovalRequest
+) -> ApprovalDecision | None:
+    """What a chat's kept answers decide about *request*: an allow, or ``None`` (ask).
+
+    The one rule for a chat and for the tasks it owns. The person's grant of
+    the question (or of another host of its site) covers a routine call, a
+    site Auto stopped only as not asked for, and an app's window. A site Auto
+    let the chat read covers its plain reads only, never a click, an address
+    that can carry data, a card-only kind or a step Auto stopped
+    (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`).
+    """
+    if grants.covers(request.tool_name) and (
+        covered_by_grant(request.review) or site_grant(request) or window_grant(request)
+    ):
+        return ApprovalDecision(True, origin="session")
+    if (
+        request.tool_name in grants.passed()
+        and covered_by_grant(request.review)
+        and stays_for_chat(request)
+    ):
+        return ApprovalDecision(True, PASSED_IN_AUTO, origin="session")
+    return None
+
+
 class RememberingPolicy:
     """An approval policy that asks through *ask* and keeps session grants.
 
@@ -142,7 +167,7 @@ class RememberingPolicy:
     @property
     def allowed_tools(self) -> frozenset[str]:
         """The names granted for the chat, and the sites Auto let it use."""
-        return self.grants.names() | self.grants.passed()
+        return self.grants.held()
 
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed for this chat (``window-read:<app>``, a site, a tool)."""
@@ -253,20 +278,9 @@ class RememberingPolicy:
                 "a folder outside the workspace needs its own question",
                 origin="policy",
             )
-        if self.grants.covers(request.tool_name) and (
-            covered_by_grant(request.review)
-            or site_grant(request)
-            or window_grant(request)
-        ):
-            return ApprovalDecision(True, origin="session")
-        if (
-            request.tool_name in self.grants.passed()
-            and covered_by_grant(request.review)
-            and stays_for_chat(request)
-        ):
-            # A site Auto let this chat read (#465): its plain reads only, never
-            # a click, a card-only kind or a step Auto stopped.
-            return ApprovalDecision(True, PASSED_IN_AUTO, origin="session")
+        kept = kept_answer(self.grants, request)
+        if kept is not None:
+            return kept
         decision = await self._ask(request)
         if isinstance(decision, ApprovalDecision) and not grant_offered(request):
             decision = dataclasses.replace(decision, remember=False)
@@ -713,24 +727,29 @@ class OwnedTaskPolicy:
         """Whether the steps were reviewed from *chat*'s start."""
         return bool(chat) and self._window is not None and chat == self._window_chat
 
-    def _granted(self, tool_name: str) -> bool:
+    def _chat_grants(self) -> SessionGrants | None:
+        """The grants of the chat that owns the task, read as that chat reads them.
+
+        ``None`` in Auto, and unless the steps were reviewed from that chat's start.
+        """
         chat = self._chat or ""
-        return (
-            self._reviewed_since(chat)
-            and not self._auto()
-            and (
-                tool_name in self._book.allowed_for(chat)
-                or self._book.site_kept(chat, tool_name)
-            )
-        )
+        if self._auto() or not self._reviewed_since(chat):
+            return None
+        return self._book.view(chat, "side")
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         mode = review_mode(self.inner, request)
-        return "silent" if mode == "ask" and self._granted(request.tool_name) else mode
+        grants = self._chat_grants()
+        # As in the chat (RememberingPolicy.silent_for): the person's grant only.
+        silent = grants is not None and grants.covers(request.tool_name)
+        return "silent" if mode == "ask" and silent else mode
 
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
-        return self._granted(name) or holds_grant(self.inner, name)
+        grants = self._chat_grants()
+        return (grants is not None and name in grants.held()) or holds_grant(
+            self.inner, name
+        )
 
     async def take_back_site(self, key: str, by: str | None = None) -> bool:
         """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
@@ -745,6 +764,6 @@ class OwnedTaskPolicy:
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         self._chat = await self._owner()
-        if self._granted(request.tool_name) and covered_by_grant(request.review):
-            return ApprovalDecision(True, origin="session")
-        return await self.inner.decide(request)
+        grants = self._chat_grants()
+        kept = None if grants is None else kept_answer(grants, request)
+        return kept if kept is not None else await self.inner.decide(request)

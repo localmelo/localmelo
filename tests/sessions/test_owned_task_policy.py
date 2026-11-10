@@ -120,6 +120,29 @@ async def test_auto_allow_once_stays_one_step_once(folder: str) -> None:
     assert review_mode(policy, blocked) == "auto"
 
 
+async def test_a_task_gets_no_more_from_autos_site_read_than_its_chat(
+    folder: str,
+) -> None:
+    site = "browser:https://news.example"
+    book = GrantBook()
+    book.view("chat-1", "side").grant_now(site, by="auto")
+    person = Asker(ApprovalDecision(False, "no"))
+    policy = await owned(book, RememberingPolicy(person))
+
+    def read(url: str) -> ApprovalRequest:
+        return request(
+            folder,
+            tool=site,
+            review=None,
+            arguments={"site": "news.example", "url": url, "via": "web_fetch"},
+        )
+
+    # Its plain read runs, as in the chat; an address that can carry data asks.
+    assert (await policy.decide(read("https://news.example/today"))).allow
+    assert (await policy.decide(read("https://news.example/a?q=1"))).origin == "user"
+    assert len(person.asked) == 1
+
+
 async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(
     folder: str,
 ) -> None:
