@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
+from localmelo.melo.contracts.approvals import ApprovalDecision, kept_offered
 from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.auto_blocks import (
@@ -811,22 +811,26 @@ def add_routes(app: FastAPI, console: Console) -> None:
             )
         asked = console.broker.request(request_id)
         outside = None if asked is None else asked.outside
+        if body.choice == "always" and asked is not None and outside is None:
+            raise ApiError(400, "invalid_request", t("errors.alwaysNotFolder"))
+        # The card offers a kept answer only where the server says so
+        # (``offers_chat``, ``outside.grantable``); one sent anyway is
+        # refused, not turned into another answer: the card still asks.
+        # A folder outside the workspace (#405) is kept by its own rule.
+        # (With no request read, nothing waits: the broker refuses the
+        # answer below with no await between, so nothing is kept.)
+        if (
+            body.choice in ("session", "always")
+            and asked is not None
+            and not kept_offered(asked)
+        ):
+            raise ApiError(409, "not_offered", t("errors.notOffered"))
         if body.choice == "once":
             decision = ApprovalDecision(True)
-        elif body.choice in ("session", "always") and outside is not None:
-            # A folder outside the workspace (#405): a write, or a folder that
-            # may not be granted, is allowed once and granted nothing.
-            grant = outside.grantable
-            always = grant and body.choice == "always"
-            decision = ApprovalDecision(True, remember=grant, always=always)
-        elif body.choice == "always":
-            raise ApiError(400, "invalid_request", t("errors.alwaysNotFolder"))
-        elif body.choice == "session":
-            # A high-impact call is never granted for the chat: this answer
-            # allows the one call, and the reply says so. A site Auto stopped
-            # only as not asked for may be (#465).
-            grant = asked is None or grant_offered(asked)
-            decision = ApprovalDecision(True, remember=grant)
+        elif body.choice in ("session", "always"):
+            decision = ApprovalDecision(
+                True, remember=True, always=body.choice == "always"
+            )
         else:
             decision = ApprovalDecision(False, body.reason)
         outcome = console.broker.answer(request_id, decision)

@@ -25,6 +25,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A thinking model's answer is no longer lost, and a reply that is only unfinished thinking or a broken tool call is never shown as the answer.
 - A question that asks for a short answer gets one in at most two steps.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
+- Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
 
 ### Tasks
 
@@ -34,7 +35,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task that is stuck asks the chat that started it instead of stopping.
 - A task starts with what its chat knows about you and the project, and reads the project's own instruction file.
 - A task works in its chat's folder and asks before it reads or writes outside it.
-- A task's approvals go through the chat that started it, and the same approved step is not asked twice.
+- A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
@@ -108,6 +109,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Direct runs and console chats offer no shell by default.
 - A worker's shell and Python write only inside its workspace on macOS.
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
+- Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.

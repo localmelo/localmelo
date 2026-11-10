@@ -14,9 +14,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 
 from localmelo.melo.schema import Message, ToolInfo
+from localmelo.support import config
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import display
 from localmelo.support.sessions.store import TurnInfo
@@ -67,7 +68,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
         assert entry.agent is not None
         granted = entry.policy.allowed_tools
         tools: list[ToolInfo] = entry.agent.list_tools()
-        recorded = console.approvals.entries(session_id)
         return JSONResponse(
             content={
                 "tools": [tool_json(tool, tool.name in granted) for tool in tools],
@@ -76,8 +76,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     {"path": folder, "label": display.home_label(folder)}
                     for folder in entry.policy.allowed_folders
                 ],
-                # The steps the person allowed here, which this chat's tasks may run again.
-                "approvals": [approval.to_json() for approval in recorded],
                 "mcp_config_label": "",
                 "mcp_error": MCP_DEFERRED,
             }
@@ -145,15 +143,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
             }
         )
 
-    @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
-    async def revoke_approval(session_id: str, entry_id: str) -> Response:
-        """Take back one recorded approval: the step asks again; what ran stays run."""
-        console.require_store()
-        await console.require_session(session_id)
-        if not console.approvals.revoke(session_id, entry_id):
-            raise ApiError(404, "not_found", t("errors.noApproval"))
-        return Response(status_code=204)
-
     @app.get("/api/sessions/{session_id}/memory")
     async def session_memory(session_id: str) -> JSONResponse:
         console.require_store()
@@ -161,11 +150,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
         # Open sessions show their agent's cap; closed ones, the setting's cap.
-        window_max = console.cfg.agent.window_for(console.cfg.chat_backend)
+        chat_backend = console.cfg.chat_backend
+        window_max = console.cfg.agent.window_for(chat_backend) or (
+            config.default_window_messages(chat_backend)
+        )
         if entry is not None:
             if entry.agent is not None:
                 messages = entry.agent.conversation()
-                window_max = entry.agent.options.window_messages
+                window_max = entry.agent.window_messages
             elif entry.kept is not None:
                 messages = entry.kept
         backend = getattr(console.cfg, "embedding_backend", "") or "none"

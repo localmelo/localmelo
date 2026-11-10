@@ -140,7 +140,7 @@ async def test_always_is_refused_for_an_ordinary_call(tmp_path: Path) -> None:
         await _wait_turn(client, session_id)
 
 
-async def test_a_write_outside_is_allowed_once_whatever_the_answer(
+async def test_a_write_outside_is_allowed_once_only(
     tmp_path: Path, letters: Path
 ) -> None:
     async with console_with(
@@ -152,8 +152,14 @@ async def test_a_write_outside_is_allowed_once_whatever_the_answer(
         assert pending["outside"]["access"] == "write"
         assert pending["outside"]["grantable"] is False
 
+        for kept in ("always", "session"):
+            refused = await client.post(
+                f"/api/approvals/{pending['request_id']}", json={"choice": kept}
+            )
+            assert refused.status_code == 409, refused.text
+            assert refused.json()["error"]["code"] == "not_offered"
         answered = await client.post(
-            f"/api/approvals/{pending['request_id']}", json={"choice": "always"}
+            f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
         )
         await _wait_turn(client, session_id)
 

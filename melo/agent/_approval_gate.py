@@ -28,7 +28,6 @@ from localmelo.melo.checker.payloads import ActionReviewPayload
 from localmelo.melo.checker.review.gist import step_gist
 from localmelo.melo.checker.review.posting import is_message, personal_data, sent_texts
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
     DESKTOP_ACT,
@@ -39,6 +38,7 @@ from localmelo.melo.contracts.approvals import (
     TAKEOVER,
     UNKNOWN_RESULT,
     WINDOW_READ,
+    Allowance,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -318,7 +318,7 @@ class _ApprovalGate:
         # Who decided, not the mode the call began in: a chat may switch
         # while the call is reviewed. Auto's card nobody answered is auto
         # mode's decision (#465).
-        allowance = decided.origin == "user" and decided.reason == ALLOWED_ONCE
+        allowance = isinstance(decided, Allowance)
         unanswered = isinstance(decided, Chosen) and decided.origin == "timeout"
         if decided.origin == "auto" or allowance or unanswered:
             self._mode = "auto"
@@ -446,7 +446,7 @@ class _ApprovalGate:
             )
         else:
             decided = await self._ask(asker.decide_folder, asking)
-        if decided.allow and decided.origin in ("auto", "earlier"):
+        if decided.allow and decided.origin == "auto":
             # Only a person, a grant of the folder or the settings allow it.
             refused = ApprovalDecision(False, NO_FOLDER_ASKER, origin="policy")
             self._record(asking, origin="policy", reason=NO_FOLDER_ASKER)

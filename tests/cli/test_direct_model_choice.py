@@ -32,6 +32,9 @@ BIG, SMALL = "big-27B", "small-8B"
 HINT = "Pass --chat-model <id>."
 KEY_NOTE = "The server did not say which models are loaded (it needs a key for that)."
 OMLX_ALL = {"models": [{"id": BIG, "loaded": False}, {"id": SMALL, "loaded": False}]}
+# What the agent asks once before its first run: the context the server runs the
+# model with (the listing, oMLX's status, Ollama's running models).
+CONTEXT_QUESTIONS = ["/v1/models", "/v1/models/status", "/api/ps"]
 
 
 class FakeServer:
@@ -156,7 +159,8 @@ def test_the_only_chat_model_is_requested(melo: Melo) -> None:
     run = melo(server, "--base-url", URL, "--", "task")
     assert (run.code, run.err) == (0, "")
     assert server.models_sent == {"Qwen3-8B"}
-    assert server.gets == ["/v1/models"]  # one chat model: no status lookup
+    # One chat model: no status lookup for the choice, then the context questions.
+    assert server.gets == ["/v1/models", *CONTEXT_QUESTIONS]
 
 
 def test_the_loaded_model_of_several_is_requested(melo: Melo) -> None:
@@ -260,9 +264,10 @@ def test_a_named_model_sends_no_listing_request(
     }[mode]
     run = melo(server, "--base-url", URL, "--chat-model", "M", *task)
     assert run.code == 0, run.err
-    assert server.gets == []  # nothing but chat requests
+    assert server.gets == CONTEXT_QUESTIONS  # no listing for a model choice
     assert server.bodies and server.models_sent == {"M"}
-    assert {path for _, path in server.seen} == {"/v1/chat/completions"}
+    posts = {path for method, path in server.seen if method == "POST"}
+    assert posts == {"/v1/chat/completions"}
 
 
 # ── The worker contract: --brief ──

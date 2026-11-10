@@ -1694,6 +1694,13 @@ class GatedLLM(BaseLLMProvider):
         """The inner provider's answer: a question about the model, not a chat call."""
         return await self.inner.takes_images()
 
+    async def context_length(self) -> int | None:
+        """The inner provider's answer, as for :meth:`takes_images`."""
+        return await self.inner.context_length()
+
+    def output_limit(self) -> int | None:
+        return self.inner.output_limit()
+
     async def close(self) -> None:
         await self.inner.close()
 

@@ -343,7 +343,7 @@ def test_keys_lists_every_key_once_and_marks_one_run_only(
 @pytest.mark.parametrize(
     ("backend", "window", "said"),
     [
-        ("vllm", None, "64 (local server)"),
+        ("vllm", None, "64, 256 with a token budget (local server)"),
         ("openai", None, "20 (cloud)"),
         ("vllm", 32, "32"),
     ],
@@ -354,7 +354,8 @@ def test_keys_and_get_show_the_window_with_its_reason(
     cfg = config.Config(chat_backend=backend)
     cfg.agent.window_messages = window
     config.save(cfg)
-    default = "20 (cloud)" if backend == "openai" else "64 (local server)"
+    local = "64, 256 with a token budget (local server)"
+    default = "20 (cloud)" if backend == "openai" else local
     row = _config(["keys", "window_messages"], capsys)[1].splitlines()[1]
     source = "file" if window else "default"
     assert " ".join(row.split()) == f"agent.window_messages {said} {default} {source}"
