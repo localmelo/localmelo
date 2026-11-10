@@ -374,38 +374,21 @@ def _pin_earlier(messages: list[Message], query: str, earlier: str) -> list[Mess
 
 
 def _build_system_prompt(
-    context: list[Message],
-    short: list[Message],
     reflections: list[ReflectionEntry] | None = None,
     notes: Sequence[str] = (),
     instruction: str = "",
-) -> tuple[str, list[Message]]:
-    """Merge all system messages into a single system prompt.
+) -> str:
+    """Build the system prompt.
 
     *instruction*, the compress modes' static note instruction, comes after
     ``SYSTEM_PROMPT``; then *notes*, such as the agent's workspace note, each as
     a paragraph of its own. Reflection entries are rendered under a
     ``[REFLECTION]`` section.
-    Other system messages are appended verbatim, after the notes.
-    Non-system messages are returned unchanged.
-
-    Returns ``(merged_system_prompt, non_system_messages)``.
     """
-    extra_system: list[str] = []
-    non_system: list[Message] = []
-
-    for msg in (*context, *short):
-        if msg.role == "system":
-            extra_system.append(msg.content)
-        else:
-            non_system.append(msg)
-
     parts: list[str] = [SYSTEM_PROMPT]
     if instruction:
         parts.append(instruction)
     parts.extend(notes)
-    for extra in extra_system:
-        parts.append(extra)
     if reflections:
         reflection_lines = ["[REFLECTION]"]
         for r in reflections:
@@ -421,7 +404,7 @@ def _build_system_prompt(
             reflection_lines.append("\n".join(lines))
         parts.append("\n".join(reflection_lines))
 
-    return "\n\n".join(parts), non_system
+    return "\n\n".join(parts)
 
 
 @dataclass(frozen=True)
@@ -1536,8 +1519,8 @@ class Chat:
     def reflection_block(self, reflections: list[ReflectionEntry] | None) -> str:
         """The text of the reflection block for *reflections*; empty without any."""
         args = (self.system_notes, self.note_instruction)
-        static, _ = _build_system_prompt([], [], None, *args)
-        with_reflections, _ = _build_system_prompt([], [], reflections, *args)
+        static = _build_system_prompt(None, *args)
+        with_reflections = _build_system_prompt(reflections, *args)
         return _quote_data_delimiter(
             with_reflections[len(static) :].strip(), "[end of reflections]"
         )

@@ -385,7 +385,7 @@ class _ExitSignals:
     :meth:`Agent.begin_exit` has bounded the clean-up: a shell command is
     killed with its process group as the cancellation lands, the tool
     providers are closed (killed if they do not close in time), then the
-    task record is saved, and reflections are not promoted. main() then
+    task record is saved, and the reflections are cleared. main() then
     re-raises the signal with its default handler, so the process exits by
     it, and prints no result. Should the clean-up still be running after
     :data:`SIGNAL_CLEANUP_S`, the tool providers are killed and the signal

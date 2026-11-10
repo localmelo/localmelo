@@ -386,11 +386,11 @@ class TestReflectionsAtTheEnd:
         # Reflections cleared from working memory
         assert len(agent.hippo.working.get_reflections()) == 0
 
-        # Nothing was promoted to long-term memory
+        # Nothing reached long-term memory
         assert len(agent.hippo.long._entries) == 0
 
     @pytest.mark.asyncio
-    async def test_no_promotion_without_embedding(self) -> None:
+    async def test_reflections_are_cleared_without_embedding(self) -> None:
         options = AgentOptions(steps_per_attempt=1, max_attempts=2)
 
         llm = FakeLLM()
