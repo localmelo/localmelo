@@ -13,7 +13,7 @@
 
 ## Guides
 
-- [Set up an embedding model](https://localmelo.github.io/localmelo/guides/embedding.md): set up the embedding model that long-term memory needs.
+- [Set up an embedding model](https://localmelo.github.io/localmelo/guides/embedding.md): set up the embedding model that gives search by meaning.
 - [Gateway and HTTP API](https://localmelo.github.io/localmelo/guides/gateway.md): start the gateway, keep it private and run it at login on macOS.
 - [Guide: API client](https://localmelo.github.io/localmelo/guides/api-client.md): drive localmelo from a script over its HTTP API.
 - [Guide: Terminal](https://localmelo.github.io/localmelo/guides/terminal.md): chat in the terminal: keys, commands, approvals and workspace.

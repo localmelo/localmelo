@@ -257,27 +257,6 @@ class LongTerm:
         self._index: BM25Index | None = None
         self._indexed: dict[str, _Entry] = {}
 
-    async def add(
-        self,
-        text: str,
-        embedding: list[float],
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        meta = dict(metadata or {})
-        entry = _Entry(
-            id=self._next_id,
-            text=text,
-            vector=np.asarray(embedding, dtype=np.float32),
-            metadata=meta,
-            task_id=str(meta.get("task_id") or ""),
-            session_id=str(meta.get("session_id") or ""),
-            created_at=time.time(),
-            embed_dim=len(embedding),
-        )
-        self._next_id += 1
-        self._entries.append(entry)
-        self._index = None
-
     async def apply(
         self,
         *,

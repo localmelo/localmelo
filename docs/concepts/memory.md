@@ -14,7 +14,7 @@ In the web console and the app, today:
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 64 messages (20 on a cloud vendor's backend). | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
-| Long-term memory | In `legacy`, short summaries of steps and the reflections of past runs; each step recalls the 5 entries closest to the task, and it needs an [embedding backend](../guides/embedding.md). Outside `legacy`, typed entries (semantic, episodic, profile, reflection) admitted by a signal, recalled at `start` even without an embedding. | RAM, or `long_term.db` (in `legacy` only with an embedding backend). |
+| Long-term memory | Outside `legacy`, typed entries (semantic, episodic, profile, reflection) admitted by a signal, recalled at `start` even without an [embedding backend](../guides/embedding.md). A `legacy` run has none. | RAM, or `long_term.db` (never in `legacy`). |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 | Reasoning notes | In the compress modes only, what each reply planned, found, decided and left open, its code drafts, and one digest per attempt. Recall reads them back at `start`, `attempt` and `step`. See [Reasoning notes](#reasoning-notes). | RAM only. |
 
@@ -434,7 +434,7 @@ An attempt's **digest** is at most 1,500 characters:
 What is written where:
 
 - Nothing here is written to `history.db` or `sessions.db` as a note. `history.db` keeps no notes table; it still keeps the model's raw reply in `steps` and in `llm_calls`. The only new session field is the turn's `note` column, which gets the last attempt digest of the turn.
-- In every explicit reasoning mode (`drop`, `replay`, `compress`, `compress+replay`) the raw per-step summary is no longer written to long-term memory, a run no longer promotes its final reflection there, and long-term recall of a run's own new summaries is off. `legacy` is unchanged.
+- No reasoning mode writes the raw per-step summary to long-term memory or promotes a run's final reflection there, and none recalls a run's own new summaries; `legacy` has no long-term memory at all.
 - The Python API's `Agent.notes()` and `Agent.load_notes()` read and replace the store in RAM; they are internal and experimental.
 - On session resume the current process's reasoning mode wins, not the mode stored on old outcomes. `pairs` restores user/answer pairs with no old thinking; `window` restores the checkpoint's retained, redacted thinking and can replay it in replay modes. `drop` and `compress` remove both its thinking field and any legacy inline copy from request copies; the stored window is not destroyed.
 - Neither resume path rebuilds the RAM-only note store from `turns.note`; a window can still contain the model's original `<note>` text. See [Resume](../guides/sessions.md#resume).
@@ -483,7 +483,7 @@ plan: …
 | The counters | `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`. |
 | The record | Every block that is first sent is recorded in `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases, the kinds, each hit's `stage` (`fresh`, `rehearsed` or `superseded`), scores, the checked text, `ms` and the fallback. It is recorded once, on the first request that carries it; a later request carries it as sticky window text and does not repeat it. A hit's `origin_task_ids` names the task that produced it, so the bench can split same-exercise from cross-exercise hits. |
 | The schema | `history.db` is schema version 2; `recall_json` is `NULL` in `legacy`, in a non-planning call, and on a planning call that carried no new block. The `recall` event carries the same trigger, placement, retriever, query, hits, `chars`, `ms` and `fallback`, and no item text; `memory_stats.recall_log` is the compact record, which also has `v`, `k`, `candidates` and `boundary`. |
-| Legacy keeps its path | In `legacy` there is no plan, no retriever, no block, no data note and no `recall` tool; the planning and reflection requests, the JSON line, the window and the `tasks`/`steps` rows are byte-identical, and `llm_calls.recall_json` is `NULL`. `drop` and `replay` recall nothing by default and only turn recall on when the user names a retriever there. |
+| Legacy keeps its path | In `legacy` there is no plan, no retriever, no block, no data note and no `recall` tool; the planning and reflection requests, the JSON line, the window and the `tasks`/`steps` rows are the same as in a run without recall, and `llm_calls.recall_json` is `NULL`. `drop` and `replay` recall nothing by default and only turn recall on when the user names a retriever there. |
 
 ## How memory works
 
@@ -495,14 +495,9 @@ plan: …
 | The prompt | A planning prompt may hold up to 100,000 characters; when it would hold more, it is cut to 70% of that: old tool results are shortened first, then old thinking, old recall and the oldest turns go. The task always stays: when its own message has been dropped, localmelo puts it back in front. A task too long to fit ends the run as `failed`, with the error `Plan check failed: Prompt too large: <n> chars`. |
 | One turn of tools | One turn of tool calls and results may use up to 50,000 characters. A longer result is cut and ends with `... [truncated: <n> more characters]`; a result left less than 200 characters is replaced by a short notice. History keeps the result as the tool returned it, up to 50,000 characters. |
 
-**Long-term memory** behaves differently by reasoning mode. With memory on, `legacy` needs an [embedding backend](../guides/embedding.md) and follows these rules:
+**Long-term memory** depends on the reasoning mode. A `legacy` run has none: it writes no step summaries or reflections to a store, recalls nothing from one and opens no `long_term.db`; a file an earlier version wrote there is left as it is. With memory on, the explicit reasoning modes use a text-only store that works without an [embedding backend](../guides/embedding.md). Candidates are admitted by signals; see [Reasoning notes](#reasoning-notes) and [Recall in the loop](#recall-in-the-loop).
 
-- After each tool call, a summary of the step is written to it: the model's text, the tool's name and the start of the tool's output.
-- When a run ends, its latest reflection is written to it, with the task's id; this may take at most 10 seconds.
-- On each step, the 5 entries closest to the task are recalled into the prompt.
 - Stored vectors carry no model id. A vector whose dimension differs from the query's is skipped, so changing the embedding model stops old entries ranking instead of raising an error; see [Set up an embedding model](../guides/embedding.md#what-changes).
-
-In explicit reasoning modes, memory can use a text-only store without an embedding backend. Candidates are admitted by signals instead of writing raw step summaries or promoting the final reflection as in `legacy`; see [Reasoning notes](#reasoning-notes) and [Recall in the loop](#recall-in-the-loop).
 
 **History** is a record. localmelo writes every task and step to it, and, with persistence on, every model call, but never reads it back.
 

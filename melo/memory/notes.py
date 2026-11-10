@@ -2486,8 +2486,7 @@ def reflection_candidate_text(entry: ReflectionEntry) -> str:
     """The explicit reflection candidate's text, cut to 2,000 characters.
 
     ``Attempt <n>: <summary>``, then the failed hypotheses, evidence,
-    avoids, next directions and unresolved questions. This is the plan's
-    fix for ``promote_reflections``; the legacy form stays frozen.
+    avoids, next directions and unresolved questions.
     """
     parts = [f"Attempt {entry.attempt_id}: {entry.summary}"]
     if entry.failed_hypotheses:

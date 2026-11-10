@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions, _chat
+from localmelo.melo.agent._checkpoint import _CheckpointLoop
 from localmelo.melo.agent._context_fit import FitCut, fit_request
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
@@ -483,6 +484,21 @@ TIGHT: dict[str, Any] = {
 }
 
 
+@pytest.fixture
+def fit_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The request fit on its own: no work checkpoint comes before it.
+
+    With a budget, a checkpoint makes room before the fit must act; these tests
+    hold the fit to what it does as the net under it (a step too large, an
+    overflow). The two together: tests/agent/test_work_checkpoint.py.
+    """
+
+    async def none(*args: Any, **kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(_CheckpointLoop, "_checkpoint_step", none)
+
+
 def _without_hold(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run the context fit as it was before it held a cut."""
     real = _chat.fit_request
@@ -492,7 +508,7 @@ def _without_hold(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_the_context_fit_collapses_the_history_once_per_several_steps(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fit_only: None
 ) -> None:
     with monkeypatch.context() as before:
         _without_hold(before)
@@ -512,7 +528,7 @@ async def test_the_context_fit_collapses_the_history_once_per_several_steps(
     assert all(len(b["messages"]) <= SHORT_TERM_MAX + 2 for b in plans)
 
 
-async def test_the_cut_resets_after_a_boundary_drop() -> None:
+async def test_the_cut_resets_after_a_boundary_drop(fit_only: None) -> None:
     # Roomier than TIGHT: the reflection request must fit too.
     # The window is wide, so only the context fit drops within an attempt.
     events, server, agent = await _stub_run(
@@ -574,7 +590,7 @@ class _Overflowing(BaseLLMProvider):
         pass
 
 
-async def test_an_overflow_retry_moves_the_held_cut_on() -> None:
+async def test_an_overflow_retry_moves_the_held_cut_on(fit_only: None) -> None:
     llm = _Overflowing(overflow_at=9, steps=14)
     agent = Agent(
         llm=llm,

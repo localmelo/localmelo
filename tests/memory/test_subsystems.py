@@ -12,6 +12,8 @@ from localmelo.melo.schema import (
     ToolDef,
 )
 
+from .test_long_store import _apply
+
 
 class TestShortTerm:
     def test_append_and_window(self) -> None:
@@ -68,10 +70,10 @@ class TestWorkingMemory:
 
 class TestLongTerm:
     @pytest.mark.asyncio
-    async def test_add_and_search(self) -> None:
+    async def test_apply_and_search(self) -> None:
         lt = LongTerm()
-        await lt.add("hello world", [1.0, 0.0, 0.0])
-        await lt.add("goodbye world", [0.0, 1.0, 0.0])
+        await _apply(lt, "hello world", embedding=[1.0, 0.0, 0.0])
+        await _apply(lt, "goodbye world", embedding=[0.0, 1.0, 0.0])
         results = await lt.search([1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0][0] == "hello world"

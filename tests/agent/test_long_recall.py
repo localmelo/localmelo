@@ -12,6 +12,7 @@ from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.recall_gate import digest_task_key
 
+from ..memory.test_long_store import _apply
 from .test_compress import (
     FakeLLM,
     _agent,
@@ -21,28 +22,7 @@ from .test_compress import (
     _reflection,
     _write_reply,
 )
-from .test_recall_loop import _entry
-
-
-async def _seed(agent: Any, rows: list[tuple[str, str, str, str]]) -> None:
-    for index, (text, kind, source, task_id) in enumerate(rows, start=1):
-        await agent.hippo.long.apply(
-            text=text,
-            kind=kind,
-            source=source,
-            admitted_by="rehearsal",
-            provenance={"task_text": "an earlier task", "source_ids": []},
-            task_id=task_id,
-            session_id="",
-            created_at=float(index),
-            embedding=None,
-            action="NEW",
-            target_id=None,
-            reason="seed",
-            source_ids=[],
-            keep_text=False,
-            candidate_id=f"seed-{index}",
-        )
+from .test_recall_loop import _entry, _seed
 
 
 def _prompt(server: FakeLLM) -> str:
@@ -419,7 +399,12 @@ def test_docs_from_entries_drops_a_non_active_row() -> None:
 @pytest.mark.asyncio
 async def test_the_in_memory_long_term_searches_text() -> None:
     store = LongTerm()
-    await store.add("the deployment checklist is owned by Alice", [1.0, 0.0])
+    await _apply(
+        store,
+        "the deployment checklist is owned by Alice",
+        kind="semantic",
+        embedding=[1.0, 0.0],
+    )
     rows = await store.search_text("checklist")
     assert [text for text, _score, _meta in rows] == [
         "the deployment checklist is owned by Alice"
@@ -543,11 +528,11 @@ async def test_an_embedding_agent_recalls_a_text_only_entry_at_start(
 
 
 @pytest.mark.asyncio
-async def test_a_legacy_run_continues_without_a_newer_long_store(
+async def test_a_run_continues_without_a_newer_long_store(
     tmp_path: Path, caplog: Any
 ) -> None:
-    # Review finding 5: a newer localmelo wrote the file. The Agent logs one
-    # WARNING and runs without long-term memory instead of crashing.
+    # A newer localmelo wrote the file. The Agent logs one WARNING and runs
+    # without long-term memory instead of crashing.
     import logging
     import sqlite3
 
@@ -573,7 +558,12 @@ async def test_a_legacy_run_continues_without_a_newer_long_store(
     server = FakeLLM(_answer("done"))
     agent = _agent(
         server,
-        _options(reasoning="legacy", memory_dir=str(memory), max_steps=1),
+        _options(
+            reasoning="compress",
+            retriever="bm25",
+            memory_dir=str(memory),
+            max_steps=1,
+        ),
         embedding=FakeEmbedding(),
     )
     with caplog.at_level(logging.WARNING, logger="localmelo.melo.memory.coordinator"):

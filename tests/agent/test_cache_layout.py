@@ -242,7 +242,7 @@ async def test_a_retry_without_tools_says_that_tools_are_unavailable() -> None:
     token = chat.begin_prefix()
     try:
         short = [Message(role="user", content="q")]
-        await chat.plan_step([], short, [], "q")
+        await chat.plan_step(short, [], "q")
         await chat.reflect(short, "q", 0)
         await chat.reflect(short, "q", 0, retry=True)
     finally:
@@ -272,7 +272,7 @@ async def test_an_empty_reply_is_kept_as_the_agents_label_not_as_empty_text() ->
     token = chat.begin_prefix()
     try:
         short = [Message(role="user", content="q")]
-        await chat.plan_step([], short, [], "q")
+        await chat.plan_step(short, [], "q")
         await chat.reflect(short, "q", 0)
     finally:
         PREFIX_RUN.reset(token)

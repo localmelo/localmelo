@@ -212,7 +212,7 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
     if setup.saved:
         chosen = _configured(config.load(), args.chat_model, args)
         if isinstance(chosen, Choice):
-            # The first run just said how long-term memory is added, if it is off.
+            # The first run just said how to add an embedding model, if none is set.
             backend = replace(chosen.backend, source="saved", memory_told=True)
             return replace(chosen, backend=backend, checked=True)
         return chosen

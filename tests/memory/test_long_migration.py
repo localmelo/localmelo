@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -13,10 +14,8 @@ from localmelo.melo.memory.long import LongTermSchemaError
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm, read_export_entries
 
 
-def _write_v0(path: Path) -> tuple[bytes, bytes]:
-    """A v0 file: a step summary and a reflection; returns their bytes."""
-    summary = "read list_ops.py and fixed the import"
-    reflection = "Attempt 1: the test was wrong"
+def _create_v0(path: Path, rows: list[tuple[str, list[float], dict[str, Any]]]) -> None:
+    """A v0 file, the shape the earlier store wrote, holding *rows*."""
     conn = sqlite3.connect(path)
     try:
         conn.execute(
@@ -24,32 +23,30 @@ def _write_v0(path: Path) -> tuple[bytes, bytes]:
             "text TEXT NOT NULL, vector BLOB NOT NULL, "
             "metadata TEXT NOT NULL DEFAULT '{}')"
         )
-        summary_meta = json.dumps({"step_id": "s1"})
-        reflection_meta = json.dumps({"task_id": "t1", "type": "reflection"})
-        conn.execute(
+        conn.executemany(
             "INSERT INTO long_term (text, vector, metadata) VALUES (?, ?, ?)",
-            (
-                summary,
-                np.asarray([0.0, 1.0], dtype=np.float32).tobytes(),
-                summary_meta,
-            ),
-        )
-        conn.execute(
-            "INSERT INTO long_term (text, vector, metadata) VALUES (?, ?, ?)",
-            (
-                reflection,
-                np.asarray([1.0, 0.0], dtype=np.float32).tobytes(),
-                reflection_meta,
-            ),
+            [
+                (text, np.asarray(vector, dtype=np.float32).tobytes(), json.dumps(meta))
+                for text, vector, meta in rows
+            ],
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT metadata FROM long_term WHERE text = ?", (summary,)
-        ).fetchone()
-        assert row is not None
-        return row[0].encode(), reflection_meta.encode()
     finally:
         conn.close()
+
+
+def _write_v0(path: Path) -> tuple[bytes, bytes]:
+    """A v0 file: a step summary and a reflection; returns their bytes."""
+    summary_meta = {"step_id": "s1"}
+    reflection_meta = {"task_id": "t1", "type": "reflection"}
+    _create_v0(
+        path,
+        [
+            ("read list_ops.py and fixed the import", [0.0, 1.0], summary_meta),
+            ("Attempt 1: the test was wrong", [1.0, 0.0], reflection_meta),
+        ],
+    )
+    return json.dumps(summary_meta).encode(), json.dumps(reflection_meta).encode()
 
 
 def _user_version(path: Path) -> int:

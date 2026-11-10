@@ -192,9 +192,8 @@ reply's note and drafts in working memory; `compress+replay` does both. A
 backend with `requires_reasoning_replay = true` runs `compress` as
 `compress+replay`.
 
-Every explicit mode also stops reading `[RECALL]` and
-removes an inline `<think>` block from the answer, and stops writing the
-raw step summary to long-term memory. The compress modes recall notes,
+Every explicit mode also
+removes an inline `<think>` block from the answer. The compress modes recall notes,
 drafts and earlier thinking by default; see
 [Recall in the loop](../concepts/memory.md#recall-in-the-loop).
 
@@ -341,9 +340,36 @@ calibration. The proxy is an estimate, not a bound: templates and vision models 
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
-down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs and the latest
-reflection; images, failed checks and older reflections go only when nothing else is left. It leaves
-history and the retained conversation unchanged.
+down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs, the latest
+reflection and the latest work checkpoint; images, failed checks and older reflections go only
+when nothing else is left. It leaves history and the retained conversation unchanged.
+
+With a token budget, long work does not wait for the fit. Before a planning request that would pass
+85% of the input limit, the run writes a work checkpoint: one extra request (of kind `reflect`, on
+the same prefix as the planning request, with the same tools) asks the model for short notes, each
+with its size in words (about 650 words in all): where its results are, the next steps, what failed,
+what works, and where the work stands, with only the findings the next steps need. Notes over their
+size keep where the results are and the next steps whole; the state is cut first. Then the oldest
+units leave the working window for good, oldest first, down to 50% of the limit, keeping the fit's
+pins, and the checkpoint stands right after the task's message in their place: `[Work checkpoint:
+...]` with the task's words, the model's notes, the files the run wrote, and the results that left
+the context (one line per source, such as a page and the parts read; every other result is still in
+the context). The next request extends that one until the window fills again; a later checkpoint
+replaces the block. Notes that cannot be read are asked for once more. When none come (a reply still
+unreadable, a request that failed or timed out after its retries, or no request left, `max_calls`),
+the block keeps the last checkpoint's notes, or, with none, the units stay while the request fits
+and go with the computed lines alone once it does not. The request's output limit (4,096 tokens)
+keeps it well inside a client's read timeout on a slow local model. A checkpoint comes only when
+what can leave, less the most the block puts back, frees at least half the room between 85% and 50%;
+otherwise (a single step too large) the fit acts as before, and the units it drops, like those the
+window's message cap drops, are added to the block's list at the next request, so no drop goes
+unsaid. In a chat, earlier turns that leave the context are listed there too. Each checkpoint is a
+`checkpoint` notice (see [Events](events.md)) and counts in the result's `checkpoints`. Earlier,
+once in each fill, the first planning request past 60% of the limit (after a checkpoint: halfway
+from where the window was left to 85%) in work whose result goes into a file (your words ask for a
+file, or a file was written) ends with one line that asks the model to write what it has to that
+file now, while the results are still in context; the line is on that request only, not in the
+window. Without a token budget nothing of this happens.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
@@ -358,12 +384,6 @@ run without a token budget.
 Every direct, interactive and API v2 console run sends a fixed system prefix
 (`fixed-prefix-v2`). It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
-
-Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
-step and kept for its later steps, so each planning request extends the one before it. It is read
-again only at a step after the window dropped its oldest messages, where the request has changed
-already, and at the next run. Read on every step, it changed whenever the run's own step summaries
-entered it, and the server prefilled every later message again.
 
 The latest reflection joins the window once, at the attempt boundary (see below), so a new
 attempt changes only what follows the shared history.
@@ -505,12 +525,12 @@ standard prompts; on, the start of the requests stays the same on every turn of 
 
 ## Embedding and long-term memory
 
-Long-term memory needs an embedding backend; see
+An embedding backend gives search by meaning to the notes and past chats of a chat
+and to the recall of the reasoning modes other than `legacy`; see
 [Set up an embedding model](../guides/embedding.md). With
 `embedding_backend = "none"`:
 
-- nothing is recalled from long-term memory, and nothing is written to it;
-- reflections are not promoted to long-term memory;
+- those searches go by words only;
 - the run loop, tools, working memory and history work as usual.
 
 `GET /v1/health` on the gateway then shows `"embedding_backend": "none"`.
@@ -643,7 +663,7 @@ chat_model = "Qwen/Qwen3-8B"
 
 | Variable | Effect |
 |---|---|
-| `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and long-term memory in SQLite files. |
+| `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and procedural memory in SQLite files, and long-term memory in the reasoning modes other than `legacy`. |
 | `LOCALMELO_MEMORY_DIR` | The directory for those files (default `~/.cache/localmelo/memory`). It is used exactly as given: `~` is not expanded. |
 | `LOCALMELO_DETECT_URLS` | The URLs that the [first run](../guides/configure.md#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
@@ -672,7 +692,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | Path | What it holds | Created |
 |---|---|---|
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
 | `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |

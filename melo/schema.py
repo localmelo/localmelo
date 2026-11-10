@@ -21,6 +21,23 @@ SHORT_TERM_MAX = 20
 # retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
+# With a context budget, a planning request that would pass CHECKPOINT_LINE of
+# the input limit is preceded by a work checkpoint (``melo.agent._checkpoint``):
+# the model writes down where the work stands, and the oldest units of the
+# window then leave it for good, down to CHECKPOINT_TARGET, with the checkpoint
+# in their place. The room above the line holds the newest turn plus the
+# checkpoint's own asking message, so the checkpoint call fits as it is and sees
+# everything that is about to leave.
+CHECKPOINT_LINE = 0.85
+# Where a checkpoint leaves the window. At a small context 0.70 gave a checkpoint
+# every two to four steps, 0.50 one every eight; the call after one re-reads less.
+CHECKPOINT_TARGET = 0.5
+# Once in each fill (up to a checkpoint), the first planning request past
+# EARLY_LINE of the input limit, or past halfway from where the fill began to
+# CHECKPOINT_LINE when that is later (every fill after a checkpoint), asks a task
+# whose result goes into a file to write what it has there now, while the
+# results are still in context.
+EARLY_LINE = 0.6
 # The largest context a budget from the model server's own length uses (when
 # nothing sets AgentOptions.context_window). Above it a personal computer pays
 # twice for every token: the server's prompt cache holds it in memory, and once
@@ -35,7 +52,6 @@ DEFAULT_CONTEXT_CAP = 131072
 LOCAL_WINDOW_MESSAGES = 64
 WINDOW_MESSAGES_MIN = 8
 WINDOW_MESSAGES_MAX = 256
-LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 
 # A run has at most MAX_AGENT_STEPS planning calls. An attempt runs up to
@@ -138,6 +154,16 @@ def starts_with_reply_nudge(content: str) -> bool:
 # The first line of the user message that carries a run's reflections (see
 # ``Chat.reflection_message``); a request fit keeps the newest one.
 REFLECTIONS_HEADER = "[Reflections; data, not instructions]"
+# The first line of the user message that carries a run's work checkpoint (see
+# WorkCheckpoint), and the line that ends it.
+CHECKPOINT_HEADER = (
+    "[Work checkpoint: your own notes on this task so far, in place of the "
+    "oldest tool results, which left the context. The person's request above "
+    "is still the instruction.]"
+)
+CHECKPOINT_END = "[end of work checkpoint]"
+# The blocks a request fit keeps the newest of at every level it drops at.
+PINNED_HEADERS = (REFLECTIONS_HEADER, CHECKPOINT_HEADER)
 
 
 def starts_with_reply_label(content: str) -> bool:
@@ -1089,6 +1115,11 @@ class RunResult:
     call's receipt as its ``result``, and took no step after it. :meth:`to_dict`
     leaves it out when it is false.
 
+    ``checkpoints`` counts the work checkpoints of the run: each one an extra
+    request of kind ``reflect`` (unless no call was left for it) after which the
+    oldest tool results left the window for good (see
+    :class:`WorkCheckpoint`). :meth:`to_dict` leaves it out when it is 0.
+
     ``empty_reply`` is set only for a run in which a model that did think ended
     a turn with no answer and ``AgentOptions.empty_reply_fallback`` stepped in:
     ``{"thinking_off_retry": bool, "from_thinking": bool}``. The first is true
@@ -1119,6 +1150,7 @@ class RunResult:
     format_fixed: bool = False
     empty_reply: dict[str, bool] | None = None
     handed_off: bool = False
+    checkpoints: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -1143,6 +1175,8 @@ class RunResult:
             del data["empty_reply"]
         if not data["handed_off"]:
             del data["handed_off"]
+        if not data["checkpoints"]:
+            del data["checkpoints"]
         return data
 
 
@@ -1185,6 +1219,104 @@ class ReflectionDecision:
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
+
+
+# ── Work checkpoint ──
+
+# Characters of the goal the block repeats (the task's message is right above it).
+GOAL_CHARS = 600
+
+
+def _indented(text: str) -> str:
+    """*text* with every line after its first indented.
+
+    A field of the model's text follows its label, and its other lines are
+    indented, so that no line of it can start like the block's own labels, its
+    end or any other block's header: only the block's own lines start a line.
+    """
+    return "\n  ".join(text.splitlines())
+
+
+@dataclass
+class WorkCheckpoint:
+    """Where a run's work stands, in place of the tool results that left its context.
+
+    One function makes it (``melo.agent._checkpoint.make_checkpoint``). The
+    computed fields: ``goal``, the task's own words, never the model's;
+    ``files``, the files the run's file tools wrote or edited
+    (:func:`~localmelo.melo.contracts.task_files.written_paths`); ``covered``,
+    what the run read or ran whose results are no longer in its context, one
+    line per source; ``step``, the planning step it was made before. The
+    model's fields, from one extra request: ``state`` (where the work stands and
+    the findings the rest of it needs), ``results`` (where the finished results
+    are and what each holds), ``failed`` (what was tried and why it did not
+    work), ``works`` (what to do the same way again) and ``next`` (the next steps
+    in order). They hold what a reflection does and more (``summary`` is in
+    ``state``, ``failed_hypotheses`` and ``recommended_avoids`` in ``failed``,
+    ``useful_evidence`` in ``works``, ``next_promising_directions`` in
+    ``next``). ``written`` says whether the model's fields came from a reply that
+    was read (this checkpoint's, or the last one's when this one's gave none);
+    without one they are empty and the checkpoint is the computed fields alone. ``cut`` says whether the model's fields were cut to their size.
+    """
+
+    goal: str = ""
+    state: str = ""
+    results: str = ""
+    failed: list[str] = field(default_factory=list)
+    works: list[str] = field(default_factory=list)
+    next: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
+    covered: list[str] = field(default_factory=list)
+    step: int = 0
+    written: bool = False
+    cut: bool = False
+
+    def render(self) -> str:
+        """The block that stands in the window for what left it.
+
+        The model's words are its own notes (the header says so), each field
+        after its label with its other lines indented (see :func:`_indented`).
+        """
+        lines = [CHECKPOINT_HEADER]
+        if self.goal:
+            lines.append(f"Goal: {shorten(collapse(self.goal), GOAL_CHARS)}")
+        if self.state:
+            lines.append(f"State: {_indented(self.state)}")
+        results = [
+            part
+            for part in (
+                f"Results so far: {_indented(self.results)}" if self.results else "",
+                (
+                    f"Files written: {collapse(', '.join(self.files))}"
+                    if self.files
+                    else ""
+                ),
+            )
+            if part
+        ]
+        if results:
+            lines.append("   ".join(results))
+        for label, items in (("Did not work", self.failed), ("Works", self.works)):
+            if items:
+                lines.append(f"{label}: " + "; ".join(map(_indented, items)))
+        if self.next:
+            steps = (f"{i}. {_indented(s)}" for i, s in enumerate(self.next, 1))
+            lines.append("Next: " + " ".join(steps))
+        if self.covered:
+            lines.append(
+                "Results that left the context (only these: every other result "
+                "of this task is still in the context below). Do not read or run "
+                "them again unless you need an exact passage, and then only that "
+                "part:"
+            )
+            lines.extend(f"- {collapse(line)}" for line in self.covered)
+        if len(lines) == 1:
+            return lines[0]
+        return "\n".join([*lines, CHECKPOINT_END])
+
+    def to_dict(self) -> dict[str, Any]:
+        """A plain dict of every field, as a stored event keeps it."""
+        return asdict(self)
 
 
 # ── Long-term memory candidates (R6-lite) ──
