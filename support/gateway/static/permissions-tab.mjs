@@ -19,7 +19,7 @@ const DAY_S = 86400;
 // The tools a grant names that have plain words (`permissions.tool.<name>`); any other reads "Use the tool X".
 const TOOLS = new Set(['shell_exec', 'python_exec', 'file_write', 'file_edit']);
 // What each other kind of grant names its target by: `permissions.what.<action>` takes {site}, {folder} or {app}.
-const TARGETS = {open: 'site', act: 'site', read: 'site', folder: 'folder', window: 'app'};
+const TARGETS = {open: 'site', act: 'site', read: 'site', folder: 'folder', window: 'app', check: 'site'};
 
 /** What a grant lets melo do, in words: "Run shell commands", "Open example.com", "Read files in ~/Documents". */
 export function grantWords(grant) {

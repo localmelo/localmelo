@@ -16,9 +16,10 @@ The scope rule:
   counts everywhere.
 
 The person's grant of a site question (opening, clicking and choosing) covers
-the other hosts of its site where it holds (#577): a row keeps the name it was
-given and :meth:`GrantBook.site_kept` matches hosts at lookup. Auto's read
-stays its exact origin.
+the other hosts of its site where it holds (#577), and their grant of a human
+check covers every known provider's check on every site (#583): a row keeps the
+name it was given and :meth:`GrantBook.person_covers` matches at lookup. Auto's read stays its
+exact origin.
 
 Nothing that must ask every time is ever written: the questions of
 :data:`~localmelo.melo.contracts.approvals.NEVER_GRANTED` (typing, sending
@@ -55,15 +56,17 @@ from pathlib import Path
 from typing import Any, Final, Literal, get_args
 
 from localmelo.melo.contracts.approvals import (
+    HUMAN_CHECK,
     SITE_GRANTS,
     STAYS_FOR_CHAT,
     ApprovalDecision,
     ApprovalRequest,
+    check_scope,
     grant_offered,
+    kept_covers,
     never_granted,
     never_kept,
     question_site_key,
-    site_covers,
     stays_for_chat,
     whole_site,
 )
@@ -79,7 +82,7 @@ GRANTS_VERSION: Final = 1
 
 Scope = Literal["global", "session"]
 SessionKind = Literal["main", "side", "terminal", "task"]
-GrantKind = Literal["tool", "site", "folder", "window"]
+GrantKind = Literal["tool", "site", "folder", "window", "check"]
 DecidedBy = Literal["person", "auto"]
 SCOPES: Final = frozenset(get_args(Scope))
 SESSION_KINDS: Final = frozenset(get_args(SessionKind))
@@ -156,7 +159,7 @@ class Grant:
 
     @property
     def action(self) -> str:
-        """What it lets melo do, in one word: ``tool``, ``open``, ``act``, ``read``, ``folder`` or ``window``."""
+        """What it lets melo do, in one word: ``tool``, ``open``, ``act``, ``read``, ``folder``, ``window`` or ``check``."""
         if self.kind == "site":
             if self.key.startswith("browser-act:"):
                 return "act"
@@ -188,11 +191,12 @@ def _plain(text: object, limit: int) -> str:
 
 
 def grant_kind(key: object) -> GrantKind | None:
-    """The kind of a grant of the question *key*: ``tool``, ``site`` or ``window``.
+    """The kind of a grant of the question *key*: ``tool``, ``site``, ``window`` or ``check``.
 
     ``None`` for a key that may never be kept (:func:`never_granted`), an
-    empty one, a prefix with nothing after it, or one with control
-    characters. A folder's grant is a kind of its own, named by its caller.
+    empty one, a prefix with nothing after it, one with control characters,
+    and a human check's whose name :func:`check_scope` does not read. A
+    folder's grant is a kind of its own, named by its caller.
     """
     if (
         not isinstance(key, str)
@@ -203,6 +207,8 @@ def grant_kind(key: object) -> GrantKind | None:
         or never_granted(key)
     ):
         return None
+    if key.startswith(HUMAN_CHECK):
+        return "check" if check_scope(key) is not None else None
     for prefix in (*SITE_GRANTS, WINDOW_PREFIX):
         if key.startswith(prefix):
             if len(key) == len(prefix):
@@ -232,6 +238,8 @@ def describe(
         if key.startswith("browser-act:"):
             return f"Click and choose on {site}", site
         return (f"Read {site}" if by == "auto" else f"Open {site}"), site
+    if kind == "check":
+        return "Press human checks on every site", ""
     if kind == "window":
         app = ""
         if request is not None:
@@ -628,17 +636,19 @@ class GrantBook:
         """The names a session holds a grant of (tools, sites, windows; Auto's site reads too)."""
         return frozenset(g.key for g in self.visible(session_id) if g.kind != "folder")
 
-    def site_kept(
+    def person_covers(
         self, session_id: str | None, name: str, *, inherit: bool = True
     ) -> bool:
-        """Whether the person kept an answer that holds here about another host of the site of the question *name* (#577).
+        """Whether the person kept an answer that holds here and covers the question *name* under another name.
 
+        Another host of its site (#577), another human check its name covers
+        (#583): :func:`~localmelo.melo.contracts.approvals.kept_covers`.
         Matched at lookup, so the rows keep the names they were given. Never
         Auto's: its read is about the host it let the chat read, and nobody
         vouched for the site's others.
         """
         return any(
-            g.decided_by == "person" and site_covers(g.key, name)
+            g.decided_by == "person" and kept_covers(g.key, name)
             for g in self.visible(session_id, inherit=inherit)
         )
 
@@ -1012,8 +1022,8 @@ class SessionGrants:
         )
 
     def covers(self, name: str) -> bool:
-        """Whether the person's kept answers here cover the question *name*: that name, or another host of its site."""
-        return name in self.names() or self.book.site_kept(
+        """Whether the person's kept answers here cover the question *name*: that name, another host of its site, or another human check one covers."""
+        return name in self.names() or self.book.person_covers(
             self.session_id or "", name, inherit=self.inherit
         )
 

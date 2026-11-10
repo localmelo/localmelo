@@ -21,7 +21,9 @@ will be asked anyway. A request that times out, fails or cannot be read is
 sent once more; a review that still has no answer, one past the turn's
 :data:`~localmelo.melo.checker.review.model.REVIEWS_PER_TURN` (counted for the
 steps the rules could not judge only; a high-impact step the model only
-checks against the user's words has a count of its own), and a call too long
+checks against the user's words has a count of its own, which never comes
+back; a step that runs and succeeds gives back the first count's reviews,
+:meth:`RunReviews.refill`), and a call too long
 to review all leave the call high with the category ``unreviewed``. Auto mode
 shows a person that step on a card instead of blocking it without a word
 (``ASKS_IN_AUTO``); with nobody to ask it stays blocked (fail closed).
@@ -280,6 +282,24 @@ class RunReviews:
     def count(self, review: ActionReview | None) -> None:
         if review is not None:
             self.counts[review.verdict] = self.counts.get(review.verdict, 0) + 1
+
+    def spent(self) -> int:
+        """The goal reviews of :data:`REVIEWS_PER_TURN` used so far (of undecided steps)."""
+        return self.used
+
+    def refill(self, before: int) -> None:
+        """A step that ran and succeeded gives back the goal reviews it used since *before* (#583).
+
+        The per-run budget then counts only the goal reviews of steps that were
+        stopped or failed, so a long task whose steps behave keeps being
+        reviewed instead of running out. A review that let a high-impact step
+        run on the person's words (``consent_used``) stays spent whether or not
+        the step succeeded, so that cap holds per run as before. The stop after
+        repeated blocks is a rule of its own (:meth:`StepReviewer.blocked`) and
+        stays, and so does the runners' own cap (:data:`RUNNER_REVIEWS_PER_TURN`),
+        which a test cycle that passes must not lift.
+        """
+        self.used = min(self.used, before)
 
     def summary(self) -> dict[str, Any]:
         return {**self.counts, "blocked": [dict(b) for b in self.blocked]}

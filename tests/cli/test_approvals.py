@@ -406,6 +406,7 @@ def test_a_page_that_asks_for_an_app_shows_the_app_and_the_address() -> None:
         "Yes, and let pages open Chat in every chat"
     )
     assert grant_words("handoff:chat") == "opening chat: addresses in their app"
+    assert grant_words("browser-check:https://shop.example") == "pressing human checks"
 
 
 def test_a_question_the_page_asks_shows_its_words_and_asks_every_time() -> None:
@@ -478,6 +479,34 @@ def test_a_window_another_app_opened_is_asked_with_its_title_and_an_allow_for_th
     again = panel_text(in_auto, width=80)
     assert again.title == "Let melo see another app's window?"
     assert grant_offered(in_auto)
+
+
+def test_a_human_check_panel_names_the_site_and_what_a_kept_answer_covers() -> None:
+    """#583: the same panel in Ask and in Auto, and the kept answer says its reach."""
+    asked = _request(
+        "browser-check:https://shop.example",
+        site="shop.example",
+        access="check",
+        box="newassets.hcaptcha.com",
+        browser="chrome",
+    )
+    in_auto = dataclasses.replace(
+        asked, review=ActionReview("high", ("opaque",), ("A human check.",))
+    )
+    for request in (asked, in_auto):
+        panel = panel_text(request, width=80)
+        assert panel.title == "Press a human check?"
+        assert panel.header == "shop.example · a human check on a web page"
+        words = " ".join(" ".join(line for _, line in panel.body).split())
+        assert "shop.example shows a human check" in words
+        assert "covers human checks on every site" in words
+        assert grant_offered(request)
+    assert session_option(asked) == (
+        "Yes, and press human checks on every site for the rest of this chat"
+    )
+    assert session_option(asked, everywhere=True) == (
+        "Yes, and press human checks on every site in every chat"
+    )
 
 
 def test_a_typing_panel_shows_all_the_text_and_says_the_page_may_send_it() -> None:

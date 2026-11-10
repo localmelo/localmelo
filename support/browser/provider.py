@@ -2165,12 +2165,16 @@ class BrowserToolProvider(BaseToolProvider):
         on: str = "",
         origin: str | None = None,
         search: bool = False,
+        check: str = "",
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
         The tab's address is read again, the person is asked (about the site
         for a click or a choice, about the whole text for typing; *on* names
-        the element in words), and the window's tabs are listed so the ones
+        the element in words; a press inside a known provider's human check,
+        *check* the address of its frame (:func:`_human_check`), by the check's
+        own question instead of the click's, #583), and the window's tabs are
+        listed so the ones
         the action opens are known for what they are. A window that cannot be
         listed is not acted in. Typing is asked about for *origin*, the site
         of the box itself (:func:`_box_origin`), not the page it sits in:
@@ -2181,7 +2185,9 @@ class BrowserToolProvider(BaseToolProvider):
         await self._recheck(
             tab_id
         )  # where the tab is now, before anything is done on it
-        if typed is None:
+        if check:
+            await sites.require_check(snap.origin, check)
+        elif typed is None:
             await sites.require_act(snap.origin, what, on)
         else:
             await sites.require_type(
@@ -3436,6 +3442,8 @@ class BrowserToolProvider(BaseToolProvider):
         if hit.surface == "none" or item is None:
             raise BrowserError(_nothing_there(hit))
         check = hit.surface == "frame" and hit.check
+        # Asked the check's own question (#583) only when that frame is another origin's.
+        found = _human_check(origin, hit)
         what = _point_words(hit.surface, item, hit.site, check)
         if check:
             self._check_spent(tab_id, hit.site, origin)
@@ -3448,10 +3456,11 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_point(
                 origin, f"{what}, which agrees to terms, consent or a sign-in"
             )
-        # A box melo knows by its title, or by what the page loads for a human
-        # check, is clicked like any other control: on the click's own question,
-        # which names it (#465).
-        before = await self._acting(tab_id, snap, "click", on=what)
+        # A box melo knows by its title is clicked like any other control, on the
+        # click's own question, which names it (#465); a press the browser proves
+        # is inside a known provider's human check asks the check's own question
+        # (#583).
+        before = await self._acting(tab_id, snap, "click", on=what, check=found)
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
@@ -3992,6 +4001,20 @@ async def _ask_foreign(origin: str, item: Element, how: str) -> None:
         how,
         known=False,
     )
+
+
+def _human_check(origin: str, hit: PointHit) -> str:
+    """The address of the human check's frame a press at *hit* on *origin*'s page lands in; ``""`` when code cannot prove it is in one (#583).
+
+    Only a frame the browser itself says sits at the point and is a known check
+    provider's (:attr:`PointHit.check`), loaded from another origin than the
+    page's (:func:`~sites.same_origin`). The page's words, a frame address only
+    the page gives, a box whose host only names a check, and a driver that
+    cannot say which frame is there (Safari) never make one.
+    """
+    if hit.surface != "frame" or not hit.check or sites.origin_of(hit.site) is None:
+        return ""
+    return "" if sites.same_origin(hit.site, origin) else hit.site
 
 
 def _box_origin(snap: render.Snapshot, item: Element) -> str:

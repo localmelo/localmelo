@@ -211,6 +211,29 @@ those tools can do.
   "Allow for this chat" only where the server says the answer may be kept,
   and the server refuses a kept answer sent for any other call: the card
   still asks.
+- **A human check asks once per chat.** A press inside a human check asks
+  its own question (`browser-check:<page origin>`), in Ask and in Auto; only
+  the person answers it, never a model. It is raised only where Chrome itself
+  says a frame from a known check provider's address sits at the pressed
+  point, of another origin than the page, never by words on the page; the
+  frame's whole origin (scheme, host and port) is checked again at the pressed
+  pixel right before the press. "Always in this chat" is a grant like the
+  others (kept, listed, revocable): it covers such checks on every site in
+  that chat and its tasks, in Ask and in Auto (also while nobody watches), and
+  in its chores; kept in the main chat, it covers every chat, as every answer
+  kept there does, and the card says so. It never covers a press outside a
+  check, a press melo cannot check, or a password, code or card field, a
+  consent control, a payment or any other high-impact step on the page
+  itself, and it does not lift the limit on presses and tries in one check.
+  melo cannot see inside a check's box: it presses inside one only where
+  Chrome names the frame a known check provider's, which serves checks and
+  nothing else, so a kept answer covers every press in that frame. Don't
+  allow leaves the check to the person. Its limits: a box whose address only
+  names a check, and any box in Safari (which cannot say which frame is at a
+  point), are asked about as before (an untitled box at every press, never
+  kept); a chore in Auto with nothing kept does not run the press; the
+  reviews that let a high-impact step run on your words keep their own cap
+  per run.
 - **A task uses its chat's grants, and nothing else kept.** In the web
   console, a task's approval goes through the chat that started it. A tool
   allowed for that chat (or in the main chat) covers the task's routine calls
@@ -220,7 +243,8 @@ those tools can do.
   when that start cannot be read, no tool or site grant of the chat applies
   and the step asks (a folder the chat allowed for reading still holds, as
   it does for the chat). A chore, or a task another agent, a channel or melo itself started,
-  uses no chat's grant. A task created with your gateway token (`POST
+  uses no chat's grant, except that a chore follows its chat's answer to a
+  human check. A task created with your gateway token (`POST
   /api/tasks`, `melo task new`) counts as yours and belongs to the main
   chat, so it uses the main chat's grants: a token holder acts as you.
 - **No model decides what is allowed.** melo's explanation on an approval

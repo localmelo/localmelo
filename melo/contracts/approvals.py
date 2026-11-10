@@ -33,6 +33,7 @@ module, so the executor can use it without an import cycle.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
@@ -416,6 +417,71 @@ WINDOW_READ: Final = "window-read:"
 # The card that asks the person to take over a page of melo's browser (a sign-in,
 # a code, a QR code, a human check): only the person answers it, never a review.
 TAKEOVER: Final = "takeover:"
+# The question the browser provider asks before it presses inside a human check
+# (#583), only where code proves the press is in one: a frame the browser itself
+# names a known check provider's. In Ask and in Auto only the person answers it,
+# and "Always in this chat" keeps it. Its name is ``browser-check:<page origin>``
+# (:func:`check_scope`), and a kept answer covers such checks on every site.
+HUMAN_CHECK: Final = "browser-check:"
+# An origin in the one spelling ``sites.origin_of`` gives it: an http(s) scheme, a
+# host in lower-case ASCII with no dot at its end (an IPv6 address in brackets),
+# and a port only when it is not the scheme's own.
+_ORIGIN: Final = re.compile(
+    r"(https?)://"
+    r"([a-z0-9](?:[a-z0-9\-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?)*"
+    r"|\[[0-9a-f:.]+\])"
+    r"(?::([1-9][0-9]{0,4}))?"
+)
+# The questions only the person answers whose answer a chat may keep: another app's
+# window, and a human check.
+PERSON_KEPT: Final = (WINDOW_READ, HUMAN_CHECK)
+
+
+def check_question(page: str) -> str:
+    """The name of the human-check question on the page of origin *page*."""
+    return f"{HUMAN_CHECK}{page}"
+
+
+def check_scope(name: str) -> str | None:
+    """The page origin the human-check question *name* is asked on, spelt once.
+
+    ``None`` for any other name, and for one whose origin is not spelt the one
+    way the browser provider writes it (upper case, a dot at the end of the
+    host, the scheme's own port written out, another host form): such a name is
+    no check question, and nothing it keeps covers anything.
+    """
+    if not name.startswith(HUMAN_CHECK):
+        return None
+    page = name[len(HUMAN_CHECK) :]
+    found = _ORIGIN.fullmatch(page)
+    if found is None:
+        return None
+    scheme, host, port = found.groups()
+    bare = host[1:-1] if host.startswith("[") else host
+    if site_host(bare) != bare or (bare != host) != (":" in bare):
+        return None
+    if port is not None and (int(port) > 65535 or int(port) == WEB_PORTS[scheme]):
+        return None
+    return page
+
+
+def check_covers(kept: str, name: str) -> bool:
+    """Whether a kept answer to the human-check question *kept* covers the question *name* (#583).
+
+    Both are human checks of a known provider, on any two sites: a kept
+    answer covers every such check. Nothing else.
+    """
+    return check_scope(kept) is not None and check_scope(name) is not None
+
+
+def kept_check(request: ApprovalRequest) -> bool:
+    """Whether *request* is a human check a kept answer may cover (:func:`person_grant` of :data:`HUMAN_CHECK`).
+
+    The one question an answer the chat kept settles in Auto with nobody
+    watching, and the one a task or a scheduled task takes from its chat
+    without the person's review (#583).
+    """
+    return request.tool_name.startswith(HUMAN_CHECK) and person_grant(request)
 
 
 def window_question(request: ApprovalRequest) -> bool:
@@ -423,15 +489,20 @@ def window_question(request: ApprovalRequest) -> bool:
     return request.tool_name.startswith(WINDOW_READ) and request.outside is None
 
 
-def window_grant(request: ApprovalRequest) -> bool:
-    """Whether a chat's grant of the app's window question lets its later windows through unasked.
+def person_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's kept answer to a question only the person answers covers *request*.
 
-    Only for that question, as asked in Ask (no review) or as Auto shows it to the person
-    (a ``high`` review of the one category ``opaque``): nothing else is covered.
+    Another app's window (``window-read:<app>``) and a human check
+    (:data:`HUMAN_CHECK`, a name :func:`check_scope` reads), as asked in Ask (no
+    review) or as Auto shows them to the person (a ``high`` review of the one
+    category ``opaque``): nothing else is covered.
     """
     review = request.review
-    return window_question(request) and (
-        review is None or review.categories == ("opaque",)
+    return (
+        request.outside is None
+        and request.tool_name.startswith(PERSON_KEPT)
+        and not never_kept(request)
+        and (review is None or review.categories == ("opaque",))
     )
 
 
@@ -445,12 +516,15 @@ def never_kept(request: ApprovalRequest) -> bool:
 
     The one list the offer (:func:`grant_offered`), Auto's keep
     (:func:`stays_for_chat`) and the grants table's check read: a question of
-    :data:`NEVER_GRANTED`, or a step of a card-only kind (:data:`CARD_ONLY`:
-    paying, an account's settings, opening an app).
+    :data:`NEVER_GRANTED`, a human check's whose name :func:`check_scope` does
+    not read, or a step of a card-only kind (:data:`CARD_ONLY`: paying, an
+    account's settings, opening an app).
     """
-    review = request.review
-    return never_granted(request.tool_name) or (
-        review is not None and bool(set(review.categories) & CARD_ONLY)
+    name, review = request.tool_name, request.review
+    return (
+        never_granted(name)
+        or (name.startswith(HUMAN_CHECK) and check_scope(name) is None)
+        or (review is not None and bool(set(review.categories) & CARD_ONLY))
     )
 
 
@@ -489,6 +563,15 @@ def site_covers(kept: str, name: str) -> bool:
         and site == whole_site(kept)
         and name.partition("://")[0] == kept.partition("://")[0]
     )
+
+
+def kept_covers(kept: str, name: str) -> bool:
+    """Whether the person's kept answer to the question *kept* covers the question *name* of another name.
+
+    Another host of its site (:func:`site_covers`, #577) or another human check
+    (:func:`check_covers`, #583); a name of its own is covered by its own row.
+    """
+    return site_covers(kept, name) or check_covers(kept, name)
 
 
 def site_grant(request: ApprovalRequest) -> bool:
@@ -570,7 +653,7 @@ def grant_offered(request: ApprovalRequest) -> bool:
     """
     if request.outside is not None or never_kept(request):
         return False
-    return offers_grant(request.review) or site_grant(request) or window_grant(request)
+    return offers_grant(request.review) or site_grant(request) or person_grant(request)
 
 
 def kept_offered(request: ApprovalRequest) -> bool:
@@ -803,6 +886,9 @@ class AutoPolicy:
     (origin ``auto``). A stopped call that a person may allow
     (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
     (the chat's card, #465), and the answer comes back as :class:`Chosen`.
+    First, for a human check (:func:`kept_check`), *asking*'s optional
+    ``kept(request)`` says what the chat kept: an allow there runs the press
+    whether or not anybody watches (#583). Every other question goes on below.
     With a *watch*, it asks only while a person sees the chat, and a card
     nobody answers did not run its step and is not a no (:data:`AUTO_ASK_WAIT_S`). Without
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
@@ -912,6 +998,13 @@ class AutoPolicy:
                     keep(request.tool_name)
             return ApprovalDecision(True, origin="auto")
         asking, watch = self.asking, self.watch
+        kept = getattr(asking, "kept", None) if kept_check(request) else None
+        found = kept(request) if callable(kept) else None
+        if isinstance(found, ApprovalDecision) and found.allow:
+            # A human check the chat kept is pressed alike whether anybody watches
+            # (#583): the person's answer holds while they are away too. Every
+            # other kept answer waits for somebody watching, as before.
+            return found
         if (
             asking is not None
             and asks_in_auto(review)
@@ -930,6 +1023,11 @@ class AutoPolicy:
             ):
                 return Chosen.of(decided)
             return decided
+        if asking is None and self.task and request.tool_name.startswith(HUMAN_CHECK):
+            # A task nobody can be asked for (a chore, one melo or another agent
+            # started) never shows a card, even with its chat open: the model reads
+            # what is true instead of "keep the chat open" (#583).
+            return ApprovalDecision(False, TASK_ASKS_NOBODY, origin="auto")
         return ApprovalDecision(
             False, block_words(review) or "needs your approval", origin="auto"
         )
@@ -1237,6 +1335,23 @@ NOBODY_TO_ASK: Final = (
     "- what you wanted to do, and that only they can answer it;\n"
     "- that they can keep the chat open so that melo asks them on a card the "
     "next time, or switch the chat to Ask.\n"
+    "That is the only reason. Do not give any other reason (a network problem, a "
+    "fault, a limit) and do not guess one.\n"
+    "Do not try to reach the same result another way."
+)
+
+# The same for a human check in a task nobody can be asked for in Auto (a scheduled
+# task, one melo or another agent started): no card comes, whoever has the chat
+# open, so the model reads what the person can do instead (#583).
+TASK_ASKS_NOBODY: Final = (
+    "Auto mode did not run this step: only the user can answer it, and this task "
+    "runs in Auto with nobody to ask (it runs on a schedule, or melo or another "
+    "agent started it), so no card is shown to them.\n"
+    "In your answer, tell the user in plain words:\n"
+    "- what you wanted to do, and that only they can answer it;\n"
+    "- that a scheduled task follows its chat: they can open that chat and "
+    "choose Always in this chat on a human check's card there, or run this task "
+    "in Ask.\n"
     "That is the only reason. Do not give any other reason (a network problem, a "
     "fault, a limit) and do not guess one.\n"
     "Do not try to reach the same result another way."

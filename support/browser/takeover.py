@@ -584,12 +584,13 @@ _QR_WORDS = re.compile(
 )
 _SCAN_WORDS = re.compile(r"scan|扫|掃|スキャン|스캔|読み取", re.IGNORECASE)
 # The addresses a human check loads its box from: a host here, or under one of
-# these, is a box that checks the visitor is human. melo presses it like any
-# other control, as the person would. Only a row of this table lowers a question
-# (the ordinary click question instead of the card for a box melo cannot check),
-# and only where the browser itself says a frame from such a host sits at the
-# point pressed. A host with a label that starts with "captcha" is only named a
-# check in words (see :func:`names_a_check`); it never lowers a question.
+# these, is a box that checks the visitor is human. melo presses it as the person
+# would, on the check's own question (#583), whose kept answer covers such checks
+# on every site. Only a row of this table makes that question (instead of the
+# card for a box melo cannot check), and only where the browser itself says a
+# frame from such a host sits at the point pressed. A host with a label that
+# starts with "captcha" is only named a check in words (see
+# :func:`names_a_check`); it never changes a question.
 CHECK_HOSTS: Final = (
     "recaptcha.net",
     "hcaptcha.com",

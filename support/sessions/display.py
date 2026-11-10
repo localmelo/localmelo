@@ -682,6 +682,7 @@ _QUESTIONS: Final[Mapping[str, tuple[str, str]]] = {
     "browser": ("open", "site"),
     "browser-act": ("act", "site"),
     "browser-point": ("act", "site"),
+    "browser-check": ("check", "site"),
     "browser-type": ("type", "site"),
     "browser-submit": ("submit", "site"),
     "browser-attach": ("attachTo", "site"),

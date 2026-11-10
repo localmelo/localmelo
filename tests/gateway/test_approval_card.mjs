@@ -309,6 +309,46 @@ test("a window another app opened is a question for the person, with the title f
   }
 });
 
+test('a human check asks the person: Allow once, Always in this chat, Don\'t allow, and says what Always covers', async () => {
+  const c = cards();
+  const labels = (card) => findNodes(card, (node) => 'approvalFocus' in node.dataset && node.dataset.approvalFocus !== 'reason')
+    .map((node) => node.textContent);
+  const rule = (card) => findNode(card, (node) => node.className === 'approval-warning').textContent;
+  const opaque = {verdict: 'high', categories: ['opaque'], reasons: ['A human check on this page: only you decide whether melo presses it.']};
+  const known = {site: 'shop.example', access: 'check', box: 'newassets.hcaptcha.com', browser: 'chrome'};
+  // In Ask and in Auto alike: the card names the site and says it is a human check; no review's words.
+  for (const review of [undefined, opaque]) {
+    const id = `check-${review ? 'auto' : 'ask'}`;
+    const card = c.draw({request_id: id, tool_name: 'browser-check:https://shop.example', arguments: known,
+      workspace_label: '~/w', offers_chat: true, review});
+    assert.equal(findNode(card, (node) => node.className === 'approval-title').textContent, 'Press the human check on shop.example?');
+    assert.match(flatten(card), /a box from newassets\.hcaptcha\.com that asks whether you are human/);
+    assert.deepEqual(labels(card), ['Allow once', 'Always in this chat', "Don't allow"]);
+    assert.match(rule(card), /human checks on every site in this chat/);
+    assert.equal(findNode(card, (node) => node.className === 'approval-reasons'), null);
+    // Don't allow answers at once: the check is left to the person.
+    c.settle(id);
+    quietDeny(card).click();
+    assert.deepEqual(c.answers.at(-1), [id, 'deny']);
+  }
+  // In the main chat, Always counts in every chat, and the card says so.
+  const main = cards({main: true}).draw({request_id: 'check-main', tool_name: 'browser-check:https://shop.example',
+    arguments: known, workspace_label: '~/w', offers_chat: true});
+  assert.deepEqual(labels(main), ['Allow once', 'Always, in every chat', "Don't allow"]);
+  assert.match(rule(main), /human checks on every site, in every chat/);
+  // The answers are the server's word: without offers_chat, no Always.
+  const plain = c.draw({request_id: 'check-none', tool_name: 'browser-check:https://shop.example', arguments: known, workspace_label: '~/w'});
+  assert.deepEqual(labels(plain), ['Allow once', "Don't allow"]);
+  await useLanguage('zh-Hans');
+  try {
+    const zh = c.draw({request_id: 'check-zh', tool_name: 'browser-check:https://shop.example', arguments: known,
+      workspace_label: '~/w', offers_chat: true});
+    assert.deepEqual(labels(zh), ['允许一次', '在这个对话里一直允许', '不允许']);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('a form send and typing show what goes, say when the page decides, and offer no answer that is kept', () => {
   const c = cards();
   let request;
