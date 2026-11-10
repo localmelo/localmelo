@@ -48,6 +48,8 @@ button:disabled {
   --on-primary: var(--surface);
   --scrim: light-dark(rgb(32 37 27 / 31%), rgb(0 0 0 / 55%));
   --shadow-float: 0 12px 32px light-dark(rgb(0 0 0 / 14%), rgb(0 0 0 / 50%));
+  /* The macOS app's title strip and the room its window buttons take; window-bar.mjs sets both in the app. */
+  --window-bar: 0px; --window-buttons: 0px;
   /* Older names for the same values, until the rules that still use them move to the new names. */
   --soft: var(--raised);
   --muted: var(--ink-3);
