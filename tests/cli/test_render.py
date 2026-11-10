@@ -1096,7 +1096,7 @@ def test_the_banner_box() -> None:
     assert lines[1].endswith(" │")
     assert "│ tools      4 built-in (3 ask first)" in lines[3]
     assert (
-        "│ memory     no long-term memory · -X endpoint.embedding_url=URL adds one"
+        "│ memory     no embedding model · -X endpoint.embedding_url=URL adds one"
         in lines[4]
     )
     assert "│ session    new" in lines[5]
@@ -1165,17 +1165,17 @@ def test_the_welcome_keeps_the_warnings_and_cleans_the_model_id(
 
 def test_the_banner_names_the_configured_embedding_model() -> None:
     text = _banner(key="vllm", label="vLLM", embedding="vllm · Qwen3-Embedding-0.6B")
-    assert "│ memory     long-term memory · vllm · Qwen3-Embedding-0.6B" in text
+    assert "│ memory     embedding model · vllm · Qwen3-Embedding-0.6B" in text
 
 
 def test_the_banner_without_an_embedding_names_the_wizard() -> None:
     text = _banner(key="vllm", label="vLLM")
-    assert "│ memory     no long-term memory · melo setup adds one" in text
+    assert "│ memory     no embedding model · melo setup adds one" in text
 
 
 def test_the_banner_after_the_first_run_does_not_repeat_how_to_add_memory() -> None:
     text = _banner(key="vllm", label="vLLM", memory_told=True)
-    assert "│ memory     no long-term memory " in text
+    assert "│ memory     no embedding model " in text
     assert "adds one" not in text
 
 
@@ -1196,7 +1196,7 @@ def test_a_boxed_banner_wraps_the_memory_text_inside_the_box() -> None:
     boxed = [line for line in lines if line.startswith("│")]
     assert boxed and all(cells(line) == 60 for line in boxed)
     box_text = "\n".join(boxed)
-    assert "long-term memory · vllm ·" in box_text
+    assert "embedding model · vllm ·" in box_text
     assert "Qwen3-Embedding-0.6B" in box_text
 
 
@@ -1214,10 +1214,10 @@ def test_a_narrow_banner_keeps_the_memory_text_in_full(
     text = _banner(width=45, **backend)
     assert "╭" not in text
     if backend:
-        assert "long-term memory" in text
+        assert "embedding model" in text
         assert "Qwen3-Embedding-0.6B" in text
     else:
-        assert "no long-term memory" in text
+        assert "no embedding model" in text
         assert "-X endpoint.embedding_url=URL adds one" in " ".join(text.split())
     assert all(cells(line) <= 45 for line in text.split("\n"))
 

@@ -138,7 +138,7 @@ before the run with a plain message (see
 | `live` | `[browser]` | `true` | Whether the web console and the app may show the page melo has open in Chrome in the background, live and view only, in their Browser panel (see [Watching melo's browser](../guides/browsing.md#watching-melos-browser)). `false` refuses the live view. Safari's windows are never streamed. Any value that is not a bool is a configuration error. |
 | `live_fps` | `[browser]` | `15` | The most pictures a second the live view carries, a whole number from 1 to 60. A page that does not change sends one picture and then none; nothing is sent while nobody watches. Any other value is a configuration error. |
 | `web_fetch` | `[tools]` | `true` | Whether chats and tasks may read public web pages with the `web_fetch` tool (read-only; never this computer or its local network; a site your own recent messages do not name asks once per chat, shared with the browser; see [Tools](tools.md#reading-a-public-web-page)). `false` takes the tool away; Settings → Chats and folders → **Read web pages** is the same switch; `-X tools.web_fetch=off` for one run. Direct runs never have it. Any value that is not a bool is a configuration error. |
-| `web_fetch_allow_local` | `[tools]` | `[]` | Developer setting, empty (off) by default, for a test that needs `web_fetch` to read a fixture page served on this computer. A list of exact entries, `"127.0.0.1:PORT"` or `"[::1]:PORT"` (a port from 1 to 65535); `web_fetch` then reads those addresses and no other local one. Any other entry is a configuration error and is never used: a name (`localhost`), another address (a private or local-network range, `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard, no port. The port of melo's own gateway and console (the one it really listens on, `melo serve --port` included, and a running gateway's), and of any model server the config names or the run's `-u` URL names, is refused even when listed; a model server in neither is not protected. A chat or task reads the list when it starts, and a listed server asks the person first (in Auto it is reviewed by itself; it is read where nobody can be asked, such as `--yolo`). Only `web_fetch` reads it; the browser tools never do. Set it in the file or with `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` for one run: the model, the console's Settings and the API cannot, and a shell or Python call that runs `melo config set` or `-X` on it counts as a change to localmelo itself (it asks every time, and Auto mode blocks it). A fetch it allows is marked in its `tool.finished` event and in what the call shows. `melo config keys` lists it with a warning; the rules are in [Tools](tools.md#test-servers-on-this-computer). |
+| `web_fetch_allow_local` | `[tools]` | `[]` | Developer setting, empty (off) by default, for a test that needs `web_fetch` to read, or melo's browser to open and act on, a fixture page served on this computer (the name stays from when it was `web_fetch`'s alone). A list of exact entries, `"127.0.0.1:PORT"` or `"[::1]:PORT"` (a port from 1 to 65535); `web_fetch` then reads those addresses and no other local one. Any other entry is a configuration error and is never used: a name (`localhost`), another address (a private or local-network range, `127.0.0.2`, `0.0.0.0`), a range of ports, a wildcard, no port. The port of melo's own gateway and console (the one it really listens on, `melo serve --port` included, and a running gateway's), and of any model server the config names or the run's `-u` URL names, is refused even when listed; a model server in neither is not protected. A chat or task reads the list when it starts, and a listed server asks the person first (in Auto it is reviewed by itself; it is read where nobody can be asked, such as `--yolo`). The browser tools open a listed server only by their own navigation (`browser_open`) and from a page already on a listed server; a request of any other page to it stays refused. Set it in the file or with `-X tools.web_fetch_allow_local=127.0.0.1:PORT[,…]` for one run: the model, the console's Settings and the API cannot, and a shell or Python call that runs `melo config set` or `-X` on it counts as a change to localmelo itself (it asks every time, and Auto mode blocks it). A fetch or a browser step it allows is marked in its `tool.finished` event and in what the call shows. `melo config keys` lists it with a warning; the rules are in [Tools](tools.md#test-servers-on-this-computer). |
 | `search` | `[web]` | `false` | Whether chats and tasks may search the web with the `web_search` tool (read-only; the words of a search leave this computer; a search whose words look like a secret or like pasted text asks first; see [Tools](tools.md#searching-the-web) and [Searching the web with melo](../guides/web-search.md)). Settings → Chats and folders → **Web search** is the same switch, `-X web.search=true` turns it on for one run, and `melo config set web.search true` saves it. Direct runs never have it. |
 | `search_order` | `[web]` | `[]` | Developer setting. The ways a search tries, in order, until one gives results that fit the words: `bing-rss`, `browser` (Safari's window, only while `[browser] driver` is on), `baidu`. Empty means that order. A name that is not one of the three, or one named twice, is a configuration error. |
 | `search_count` | `[web]` | `6` | Developer setting. How many results one search shows, a whole number from 1 to 8; a call may ask for fewer. |
@@ -192,9 +192,8 @@ reply's note and drafts in working memory; `compress+replay` does both. A
 backend with `requires_reasoning_replay = true` runs `compress` as
 `compress+replay`.
 
-Every explicit mode also stops reading `[RECALL]` and
-removes an inline `<think>` block from the answer, and stops writing the
-raw step summary to long-term memory. The compress modes recall notes,
+Every explicit mode also
+removes an inline `<think>` block from the answer. The compress modes recall notes,
 drafts and earlier thinking by default; see
 [Recall in the loop](../concepts/memory.md#recall-in-the-loop).
 
@@ -386,12 +385,6 @@ Every direct, interactive and API v2 console run sends a fixed system prefix
 (`fixed-prefix-v2`). It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
 
-Recall goes before the task. Long-term recall (`reasoning = "legacy"`) is read at a run's first
-step and kept for its later steps, so each planning request extends the one before it. It is read
-again only at a step after the window dropped its oldest messages, where the request has changed
-already, and at the next run. Read on every step, it changed whenever the run's own step summaries
-entered it, and the server prefilled every later message again.
-
 The latest reflection joins the window once, at the attempt boundary (see below), so a new
 attempt changes only what follows the shared history.
 
@@ -532,12 +525,12 @@ standard prompts; on, the start of the requests stays the same on every turn of 
 
 ## Embedding and long-term memory
 
-Long-term memory needs an embedding backend; see
+An embedding backend gives search by meaning to the notes and past chats of a chat
+and to the recall of the reasoning modes other than `legacy`; see
 [Set up an embedding model](../guides/embedding.md). With
 `embedding_backend = "none"`:
 
-- nothing is recalled from long-term memory, and nothing is written to it;
-- reflections are not promoted to long-term memory;
+- those searches go by words only;
 - the run loop, tools, working memory and history work as usual.
 
 `GET /v1/health` on the gateway then shows `"embedding_backend": "none"`.
@@ -670,7 +663,7 @@ chat_model = "Qwen/Qwen3-8B"
 
 | Variable | Effect |
 |---|---|
-| `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and long-term memory in SQLite files. |
+| `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and procedural memory in SQLite files, and long-term memory in the reasoning modes other than `legacy`. |
 | `LOCALMELO_MEMORY_DIR` | The directory for those files (default `~/.cache/localmelo/memory`). It is used exactly as given: `~` is not expanded. |
 | `LOCALMELO_DETECT_URLS` | The URLs that the [first run](../guides/configure.md#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
@@ -699,7 +692,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | Path | What it holds | Created |
 |---|---|---|
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` in the reasoning modes other than `legacy`. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
 | `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |

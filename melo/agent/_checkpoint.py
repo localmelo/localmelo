@@ -310,7 +310,6 @@ class _CheckpointLoop:
         self,
         run: _RunState,
         query: str,
-        long_context: list[Message],
         tools: list[ToolDef],
         *,
         ask: bool,
@@ -340,9 +339,7 @@ class _CheckpointLoop:
                     break
                 note = f"\n\n{CHECKPOINT_AGAIN_NOTE}" if again else ""
                 try:
-                    answer = await self._ask_notes(
-                        run, query, long_context, tools, asking + note
-                    )
+                    answer = await self._ask_notes(run, query, tools, asking + note)
                 except (CallBudgetError, ContextFitError, ProviderError) as exc:
                     # The request layer has sent it again where that may help
                     # (a timeout, a server error); the same request once more
@@ -374,7 +371,6 @@ class _CheckpointLoop:
         self,
         run: _RunState,
         query: str,
-        long_context: list[Message],
         tools: list[ToolDef],
         asking: str,
     ) -> str | None:
@@ -397,7 +393,6 @@ class _CheckpointLoop:
         token = LLM_REQUEST_EXTRA_BODY.set(body)
         try:
             response = await self.chat.checkpoint(
-                long_context,
                 window,
                 tools,
                 query,
@@ -440,7 +435,6 @@ class _CheckpointLoop:
         self,
         run: _RunState,
         query: str,
-        long_context: list[Message],
         tools: list[ToolDef],
     ) -> bool:
         """Before a planning request: a work checkpoint when the window is full.
@@ -463,13 +457,11 @@ class _CheckpointLoop:
             return self._sent_window(window, run.task_query_msg)[0]
 
         def estimate(candidate: list[Message]) -> int:
-            measured = self.chat.plan_size(
-                long_context, candidate, tools, query, **shape
-            )
+            measured = self.chat.plan_size(candidate, tools, query, **shape)
             return 0 if measured is None else measured[0]
 
         window = working.get_window()
-        sized = self.chat.plan_size(long_context, sent(window), tools, query, **shape)
+        sized = self.chat.plan_size(sent(window), tools, query, **shape)
         if sized is None or run.task_query_msg is None:
             return False
         before, limit = sized
@@ -509,7 +501,7 @@ class _CheckpointLoop:
                 return False
             if run.checkpoint is None:
                 checkpoint = await self._make_checkpoint(
-                    run, query, long_context, tools, ask=False, room=room
+                    run, query, tools, ask=False, room=room
                 )
             else:
                 checkpoint = dataclasses.replace(
@@ -519,9 +511,7 @@ class _CheckpointLoop:
             return True
 
         # (a) the checkpoint, with everything still in context.
-        checkpoint = await self._make_checkpoint(
-            run, query, long_context, tools, ask=True, room=room
-        )
+        checkpoint = await self._make_checkpoint(run, query, tools, ask=True, room=room)
         if not checkpoint.written and before <= limit:
             # No notes to stand in for them: the units stay while the request
             # fits, and the next request asks again.

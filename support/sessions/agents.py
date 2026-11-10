@@ -25,6 +25,7 @@ from localmelo.melo.contracts import work_folder
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import EXTEND_STEPS
+from localmelo.support import local_ports
 from localmelo.support.backends import providers_for
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.thinking import is_local, thinking_off_fields
@@ -442,6 +443,23 @@ async def build_session_agent(
             logging.getLogger(__name__).warning("Could not read notes", exc_info=True)
             notes = ""
         providers.append(memory.tools())
+    # The model servers of this run (the config's, and -u) and the console's live
+    # port (this config's, which --port changes in memory only) are ports that
+    # neither web_fetch nor the browser reaches, even if [tools]
+    # web_fetch_allow_local lists them.
+    protect = (
+        base_url,
+        embedding_base_url,
+        *(local_ports.urls_of(cfg) if cfg is not None else ()),
+    )
+    # The list of test servers is built once and read by both tools.
+    from localmelo.support import web_local
+
+    listed = (
+        web_local.allow_of(cfg, protect=protect)
+        if browser_driver != "off" or web_fetch
+        else None
+    )
     if browser_driver != "off":
         from localmelo.support.browser import provider_for
 
@@ -453,6 +471,7 @@ async def build_session_agent(
             live=cfg is None or cfg.browser.live is True,
             live_fps=cfg.browser.live_fps if cfg is not None else 15,
             chat_id=chat_id,
+            listed=listed,
         )
         if browser is not None:
             providers.append(browser)
@@ -464,23 +483,16 @@ async def build_session_agent(
                 ),
             )
     if web_fetch:
-        from localmelo.support import web_local
         from localmelo.support.web import WebFetchProvider
+        from localmelo.support.web.fetch import WebFetcher
 
-        # The model servers of this run (the config's, and -u) and the console's
-        # live port (this config's, which --port changes in memory only) are
-        # ports that web_fetch never reads, even if [tools] web_fetch_allow_local
-        # lists them.
         providers.append(
             WebFetchProvider(
                 browser=browser_driver != "off",
                 task=web_task,
+                fetcher=WebFetcher(allow=listed),
                 cfg=cfg,
-                protect=(
-                    base_url,
-                    embedding_base_url,
-                    *(web_local.urls_of(cfg) if cfg is not None else ()),
-                ),
+                protect=protect,
             )
         )
     if web_search:
@@ -539,10 +551,10 @@ async def build_session_agent(
     if identify and agent_options.identity is None:
         identity = None
         if base_url:
-            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
+            kept = kept_across_chats(agent_options)
             identity = url_identity(base_url, model, kept, notes)
         elif cfg is not None:
-            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
+            kept = kept_across_chats(agent_options)
             identity = config_identity(cfg, kept, notes)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:

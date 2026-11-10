@@ -289,37 +289,6 @@ class SqliteLongTerm(LongTerm):
                 await conn.rollback()
             raise
 
-    async def add(
-        self,
-        text: str,
-        embedding: list[float],
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """The legacy write: an episodic step summary with the given metadata."""
-        conn = await self._ensure_ready()
-        meta = dict(metadata or {})
-        vec = np.asarray(embedding, dtype=np.float32)
-        task_id = str(meta.get("task_id") or "")
-        session_id = str(meta.get("session_id") or "")
-        async with self._write_lock:
-            await conn.execute(
-                "INSERT INTO long_term (text, vector, metadata, kind, source, "
-                "status, admitted_by, task_id, session_id, created_at, embed_dim) "
-                "VALUES (?, ?, ?, 'episodic', 'step_summary', 'active', '', ?, ?, "
-                "?, ?)",
-                (
-                    text,
-                    vec.tobytes(),
-                    json.dumps(meta, ensure_ascii=False),
-                    task_id,
-                    session_id,
-                    time.time(),
-                    int(vec.size),
-                ),
-            )
-            await conn.commit()
-        self._index = None
-
     async def apply(
         self,
         *,

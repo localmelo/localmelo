@@ -73,13 +73,10 @@ from localmelo.melo.schema import ToolTier
 # session ("session"), a fixed policy ("policy"), no answer in time
 # ("timeout"), auto mode's review ("auto", #339): it runs a routine call
 # and blocks the rest, and a denial's reason is then the whole note the
-# model reads; the person's earlier approval of the exact same step,
-# found by code in the chat that owns a task ("earlier"); or the person's
-# words, sent while the card waited ("words"): they end the wait as a
-# refusal and never allow anything.
-ApprovalOrigin = Literal[
-    "user", "session", "policy", "timeout", "auto", "earlier", "words"
-]
+# model reads; or the person's words, sent while the card waited
+# ("words"): they end the wait as a refusal and never allow anything.
+# The person's Allow once is never kept: no origin means "allowed before".
+ApprovalOrigin = Literal["user", "session", "policy", "timeout", "auto", "words"]
 # How a policy wants a call reviewed before it decides: "ask" (a person
 # will be asked, or nothing runs unasked: the rules alone), "silent" (it
 # would allow the call without a person, as under a session grant: the
@@ -169,10 +166,9 @@ class ApprovalDecision:
 
     A field of the wrong type raises ``TypeError``. ``ValueError`` is
     raised for an unknown origin, and for the pairs no policy may give:
-    ``remember`` or ``always`` on a denial, ``origin="session"`` or
-    ``"earlier"`` on a denial (a grant and an earlier approval only allow),
-    and ``origin="timeout"`` or ``"words"`` on an allow (a timeout and the
-    person's words only deny).
+    ``remember`` or ``always`` on a denial, ``origin="session"`` on a
+    denial (a grant only allows), and ``origin="timeout"`` or ``"words"``
+    on an allow (a timeout and the person's words only deny).
     """
 
     allow: bool
@@ -206,10 +202,10 @@ class ApprovalDecision:
             raise ValueError("ApprovalDecision.remember needs allow=True")
         if self.always and not self.allow:
             raise ValueError("ApprovalDecision.always needs allow=True")
-        if self.origin in ("session", "earlier") and not self.allow:
+        if self.origin == "session" and not self.allow:
             raise ValueError(
-                f"ApprovalDecision.origin {self.origin!r} needs allow=True: "
-                "a grant or an earlier approval only allows"
+                "ApprovalDecision.origin 'session' needs allow=True: "
+                "a grant only allows"
             )
         if self.origin == "timeout" and self.allow:
             raise ValueError(
@@ -444,6 +440,20 @@ def never_granted(tool_name: str) -> bool:
     return tool_name.startswith(NEVER_GRANTED)
 
 
+def never_kept(request: ApprovalRequest) -> bool:
+    """Whether no answer to *request* may ever be kept, by the person or by Auto.
+
+    The one list the offer (:func:`grant_offered`), Auto's keep
+    (:func:`stays_for_chat`) and the grants table's check read: a question of
+    :data:`NEVER_GRANTED`, or a step of a card-only kind (:data:`CARD_ONLY`:
+    paying, an account's settings, opening an app).
+    """
+    review = request.review
+    return never_granted(request.tool_name) or (
+        review is not None and bool(set(review.categories) & CARD_ONLY)
+    )
+
+
 # The site questions whose answer on auto mode's card may be kept for the chat
 # (#465): opening or reading a site, and clicking or choosing on it. Typing and
 # sending a form never (:data:`NEVER_GRANTED`).
@@ -540,14 +550,12 @@ def stays_for_chat(request: ApprovalRequest) -> bool:
     workspace, or a step of a card-only kind (:data:`CARD_ONLY`): nothing
     implicit covers what the person must allow themselves.
     """
-    review = request.review
     return (
         request.outside is None
         and request.tool_name.startswith(STAYS_FOR_CHAT)
-        and not never_granted(request.tool_name)
+        and not never_kept(request)
         and bool(request.arguments.get("site"))
         and ("url" not in request.arguments or plain_address(request.arguments["url"]))
-        and (review is None or not set(review.categories) & CARD_ONLY)
     )
 
 
@@ -557,12 +565,23 @@ def grant_offered(request: ApprovalRequest) -> bool:
     A routine or unreviewed call of a tool whose answers may be kept
     (:func:`~localmelo.melo.contracts.review.offers_grant`), or a site auto
     mode stopped only as not asked for (:func:`site_grant`). Never a
-    high-impact call, typing, a form sent, or a path outside the workspace
-    (whose folder has a grant of its own, #405).
+    high-impact call, anything :func:`never_kept` names, or a path outside the
+    workspace (whose folder has a grant of its own, #405).
     """
-    if request.outside is not None or never_granted(request.tool_name):
+    if request.outside is not None or never_kept(request):
         return False
     return offers_grant(request.review) or site_grant(request) or window_grant(request)
+
+
+def kept_offered(request: ApprovalRequest) -> bool:
+    """Whether a kept answer is offered for *request*: never for what
+    :func:`never_kept` names; a folder outside the workspace by its own rule
+    (``outside.grantable``, #405), else :func:`grant_offered`.
+    """
+    outside = request.outside
+    return not never_kept(request) and (
+        outside.grantable if outside is not None else grant_offered(request)
+    )
 
 
 # Set around each tool call of a run that has a policy: asks that policy about
@@ -686,6 +705,24 @@ def find_auto(policy: object) -> AutoPolicy | None:
 ALLOW_ONCE_S: Final = 30 * 60
 # The reason of the decision that runs a step on its allowance.
 ALLOWED_ONCE: Final = "allowed once"
+
+
+class Allowance(ApprovalDecision):
+    """The decision that runs one step on the person's Allow once of it in auto mode.
+
+    Its type, not its text, says how the call was decided: the gate runs it
+    as auto mode's step (confined), and nothing keeps it. Always the
+    person's allow (origin ``user``), and never ``remember`` or ``always``:
+    an allowance is used once and goes.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not self.allow or self.origin != "user":
+            raise ValueError("an Allowance is the person's allow: origin 'user'")
+        if self.remember or self.always:
+            raise ValueError("an Allowance is used once and never kept")
+
 
 # Auto mode (#465): the categories of a stopped step a person may allow from a
 # card: those the user's words can allow, a step melo could not check, a step
@@ -863,7 +900,7 @@ class AutoPolicy:
             and set(review.categories) <= self._allowed[key][1]
         ):
             del self._allowed[key]
-            return ApprovalDecision(True, ALLOWED_ONCE, origin="user")
+            return Allowance(True, ALLOWED_ONCE, origin="user")
         if review is None:
             return ApprovalDecision(False, CATEGORY_WORDS["unreviewed"], origin="auto")
         if review.verdict == "routine":

@@ -299,8 +299,6 @@ def _with_hint(note: str, hint: str) -> str:
     return f"{note}\n{hint}" if hint else note
 
 
-_MEMORY_PREFIX = "[memory] "
-
 # Most recent working-memory messages shown to the reflection call. The
 # window is cut on turn boundaries, so a tool call keeps its results.
 REFLECTION_WINDOW = 10
@@ -401,25 +399,19 @@ def _build_system_prompt(
 
     *instruction*, the compress modes' static note instruction, comes after
     ``SYSTEM_PROMPT``; then *notes*, such as the agent's workspace note, each as
-    a paragraph of its own. Memory items (prefixed with
-    ``[memory] ``) are collected under a single ``[RECALL]`` section.
-    Reflection entries are rendered under a ``[REFLECTION]`` section.
+    a paragraph of its own. Reflection entries are rendered under a
+    ``[REFLECTION]`` section.
     Other system messages are appended verbatim, after the notes.
     Non-system messages are returned unchanged.
 
     Returns ``(merged_system_prompt, non_system_messages)``.
     """
-    recall_items: list[str] = []
     extra_system: list[str] = []
     non_system: list[Message] = []
 
     for msg in (*context, *short):
         if msg.role == "system":
-            text = msg.content
-            if text.startswith(_MEMORY_PREFIX):
-                recall_items.append(text[len(_MEMORY_PREFIX) :])
-            else:
-                extra_system.append(text)
+            extra_system.append(msg.content)
         else:
             non_system.append(msg)
 
@@ -429,9 +421,6 @@ def _build_system_prompt(
     parts.extend(notes)
     for extra in extra_system:
         parts.append(extra)
-    if recall_items:
-        parts.append("[RECALL]")
-        parts.extend(recall_items)
     if reflections:
         reflection_lines = ["[REFLECTION]"]
         for r in reflections:
@@ -1294,7 +1283,6 @@ class Chat:
 
     def _plan_messages(
         self,
-        context: list[Message],
         short: list[Message],
         query: str,
         *,
@@ -1304,27 +1292,10 @@ class Chat:
     ) -> tuple[list[Message], list[Message]]:
         """The messages of a planning request (see :meth:`plan_step`), and the
         turns among them from before the task (``fit_request``'s *history*)."""
-        all_context = [*context, *short]
-        memory = [
-            m
-            for m in all_context
-            if m.role == "system" and m.content.startswith(_MEMORY_PREFIX)
-        ]
-        extra = [
-            m.content
-            for m in all_context
-            if m.role == "system" and not m.content.startswith(_MEMORY_PREFIX)
-        ]
-        static, _ = _build_system_prompt(
-            [], [], None, self.system_notes, self.note_instruction
+        extra = [m.content for m in short if m.role == "system"]
+        data = _quote_data_delimiter(
+            query_block, "[end of retrieved context and reflections]"
         )
-        dynamic, _ = _build_system_prompt(
-            memory, [], None, self.system_notes, self.note_instruction
-        )
-        data = dynamic[len(static) :].strip()
-        if query_block:
-            data = "\n\n".join(part for part in (data, query_block) if part)
-        data = _quote_data_delimiter(data, "[end of retrieved context and reflections]")
         system_prompt = "\n\n".join([self._fixed_system(), *extra])
         messages = [Message(role="system", content=system_prompt)]
         if data:
@@ -1340,7 +1311,7 @@ class Chat:
         rest: list[Message] = []
         if lacks_task_query(short, query):
             rest.append(Message(role="user", content=query))
-        rest.extend(m for m in all_context if m.role != "system")
+        rest.extend(m for m in short if m.role != "system")
         history = _before_task(rest, query)
         messages.extend(_pin_earlier(rest, query, earlier))
         if coalesce_users:
@@ -1349,7 +1320,6 @@ class Chat:
 
     def plan_size(
         self,
-        context: list[Message],
         short: list[Message],
         tools: list[ToolDef],
         query: str,
@@ -1365,13 +1335,12 @@ class Chat:
         accounting = self._budget_accounting()
         if accounting is None:
             return None
-        messages, _ = self._plan_messages(context, short, query, **shape)
+        messages, _ = self._plan_messages(short, query, **shape)
         size = self._estimator("plan", accounting)(messages, tools)
         return size, accounting.budget.input_limit
 
     async def checkpoint(
         self,
-        context: list[Message],
         short: list[Message],
         tools: list[ToolDef],
         query: str,
@@ -1387,7 +1356,7 @@ class Chat:
         counts as auxiliary and is fitted with the planning requests' held cut.
         ``None`` when the prompt check refused it.
         """
-        messages, history = self._plan_messages(context, short, query, **shape)
+        messages, history = self._plan_messages(short, query, **shape)
         try:
             return await self._request(
                 [*messages, Message(role="user", content=asking)],
@@ -1401,7 +1370,6 @@ class Chat:
 
     async def plan_step(
         self,
-        context: list[Message],
         short: list[Message],
         tools: list[ToolDef],
         query: str,
@@ -1426,7 +1394,6 @@ class Chat:
         )
         self._plan_tools = list(tools)
         messages, history = self._plan_messages(
-            context,
             short,
             query,
             query_block=query_block,

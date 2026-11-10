@@ -22,6 +22,7 @@ from .test_recall_loop import (
     _call,
     _entry,
     _options,
+    _seed,
 )
 
 
@@ -32,10 +33,9 @@ async def test_the_boundary_block_fits_four_thousand_characters() -> None:
         _options(reasoning="compress", retriever="embedding", max_steps=1),
         embedding=FakeEmbedding(),
     )
-    await agent.hippo.long.add(
-        "the old answer " * 600,
-        [1.0, 0.0],
-        {"task_id": "t-old"},
+    await _seed(
+        agent,
+        [("the old answer " * 600, "episodic", "step_summary", "t-old", [1.0, 0.0])],
     )
     try:
         result = await agent.run_task("q")

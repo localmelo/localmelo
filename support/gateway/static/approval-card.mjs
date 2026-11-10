@@ -11,6 +11,10 @@
  * - `reload(id)`: read the request's details again;
  * - `takeOver()`: the chat opens the Browser panel when the person agrees to take over a page.
  *
+ * The answers offered are the server's word: "Allow for this chat" only where the request says
+ * `offers_chat: true`, and for a folder outside the workspace only where `outside.grantable` is true.
+ * A request without that word offers Allow once and Deny.
+ *
  * `states` keeps each request's state (the deny box, the folded code, an answer under way) by request
  * id, so that a redraw of the page does not lose it; the page owns it. `openWorkspace` is the label of
  * the folder of the chat that is open, for a request and a view that name none. `later(fn, ms)` is
@@ -120,7 +124,10 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   let title = t("approval.useTool", { tool });
   let caption = tool;
   let content = JSON.stringify(args, null, 2);
-  let rule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
+  // `keptRule` says what "Allow for this chat" covers, shown only where that answer is offered; `rule` is a
+  // step's own line about this one answer (typing, a form, a file for a page...), shown always.
+  let keptRule = everywhere ? t("approval.rule.toolMain", { tool }) : t("approval.rule.tool", { tool, scope });
+  let rule = "";
   let what = t("approval.arguments");
   let diff = null; // What a file write replaces, when the gateway could compare.
   let why = ""; // Why it could not, in words.
@@ -129,18 +136,20 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.command");
     title = t("approval.runCommand", { folder });
     caption = `${tool} · ${workspace}`;
+    keptRule = everywhere ? t("approval.rule.shellMain", { workspace }) : t("approval.rule.shell", { scope, workspace });
     content = typeof args.command === "string" ? args.command : JSON.stringify(args.command ?? "");
   } else if (tool === "python_exec") {
     what = t("approval.pythonCode");
     title = t("approval.runPython", { folder });
     caption = `${tool} · ${workspace}`;
+    keptRule = everywhere ? t("approval.rule.pythonMain", { workspace }) : t("approval.rule.python", { scope, workspace });
     content = String(args.code ?? "");
   } else if (tool === "file_write") {
     const target = request.target;
     const path = target?.path_label || String(args.path ?? t("approval.theFile"));
     content = String(args.content ?? "");
     what = t("approval.fileContent");
-    rule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
+    keptRule = everywhere ? t("approval.rule.writeMain") : t("approval.rule.write", { scope });
     if (target?.diff?.note) why = target.diff.note;
     else diff = target?.diff ?? null;
     if (diff) what = t("approval.changesTo", { path });
@@ -155,7 +164,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.willDo");
     title = t(reading ? "approval.readSite" : "approval.openSite", { site });
     caption = t(reading ? "approval.readCaption" : "approval.browserCaption");
-    rule = t(siteRule(reading ? "read" : "open", request, everywhere), { site: request.kept_site || site, scope });
+    keptRule = t(siteRule(reading ? "read" : "open", request, everywhere), { site: request.kept_site || site, scope });
     // Chrome in the background (`args.browser`) is worded for itself: no window comes to the front. The
     // sentence is plain text; a read of an address shows the whole address in the box below it.
     why = t(reading ? "approval.readContent" : args.browser === "chrome" ? "approval.siteContentChrome" : "approval.siteContent", { site });
@@ -184,8 +193,8 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     else if (control && choosing) title = control.label ? t("approval.actChoose", { label: control.label, site }) : t("approval.actChooseKind", { site });
     else if (control) title = actionTitle("actClick", control, site);
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
-    rule = sending || typing ? t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce")
-      : t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
+    if (sending || typing) rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce");
+    else keptRule = t(siteRule("act", request, everywhere), { site: request.kept_site || site, scope });
     const chrome = args.browser === "chrome";
     content = t(sending ? "approval.submitContent"
       : typing ? (chrome ? "approval.typeContentChrome" : "approval.typeContent")
@@ -208,6 +217,19 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
       content = String(args.text ?? "");
       what = t("approval.actTyped");
     }
+  } else if (tool.startsWith("browser-attach:")) {
+    // A file from this computer for a page's upload field: asked every time. The sentence names the file and its
+    // folder; the page gets the file as soon as it is attached.
+    const site = String(args.site || tool.slice(tool.indexOf(":") + 1));
+    const name = String(args.name || t("approval.theFile"));
+    const from = String(args.folder || "");
+    what = t("approval.willDo");
+    title = t("approval.attachTitle", { site });
+    caption = t("approval.attachCaption");
+    rule = t("approval.rule.attachOnce");
+    why = t(from ? "approval.attachContent" : "approval.attachContentNoFolder", { name, folder: from, site });
+    content = "";
+    noBox = true;
   } else if (tool.startsWith("handoff:")) {
     // A page asked to open an address of another app's kind, which the browser in the background does not
     // open itself: melo opens it on a yes, and a kept answer covers that kind of address where it is kept
@@ -217,7 +239,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.handoffAddress");
     title = t("approval.handoffTitle", { app });
     caption = t("approval.handoffCaption");
-    rule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
+    keptRule = everywhere ? t("approval.rule.handoffMain", { app }) : t("approval.rule.handoff", { app, scope });
     why = t("approval.handoffContent", { app, site });
     content = String(args.url || "");
   } else if (tool.startsWith("browser-dialog:")) {
@@ -274,7 +296,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     what = t("approval.seeWindow");
     title = t("approval.seeTitle", { app });
     caption = t("approval.seeCaption");
-    rule = everywhere ? t("approval.rule.seeMain", { app })
+    keptRule = everywhere ? t("approval.rule.seeMain", { app })
       : t(view.scope === "task" ? "approval.rule.seeTask" : "approval.rule.see", { app });
     content = String(args.window || "");
   }
@@ -405,36 +427,28 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     actions.hidden = true;
     grant.hidden = true;
     if (wide) wide.hidden = true;
-    if (kept) kept.hidden = true;
     denyView.hidden = false;
     reason.focus();
   });
   deny.dataset.approvalDeny = "";
   deny.dataset.approvalFocus = "deny";
-  // The answers offered: a folder outside the workspace that may be kept has four.
-  // Typing and a form's send ask every time, like a high-impact call: their answers are never kept for the chat.
-  const everyTime = high || takeover || pointing || tool.startsWith("browser-submit:") || tool.startsWith("browser-type:")
-    || tool.startsWith("desktop-act:");
-  const offered = form ? [once, chrome, deny] : everyTime ? [once, deny]
-    : outside ? (grantable ? [once, session, always, deny] : [once, deny]) : [once, session, deny];
+  // The answers offered, as the server says: an answer is kept for the chat only where `offers_chat` is true,
+  // and a folder outside the workspace that may be kept has four. Nothing else decides it.
+  const keeps = outside ? grantable : request.offers_chat === true;
+  const offered = form ? [once, chrome, deny] : !keeps ? [once, deny]
+    : outside ? [once, session, always, deny] : [once, session, deny];
   actions.append(...offered);
   card.append(actions);
-  const command = tool === "shell_exec" || tool === "python_exec";
   if (outside) {
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
       : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
         : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
-  } else if (high) rule = everywhere ? t("approval.rule.highMain", { workspace }) : t("approval.rule.high", { scope, workspace });
-  else if (command) {
-    const shell = tool === "shell_exec";
-    rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
-      : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
-  }
+  } else if (keeps && !rule) rule = keptRule; // only a card that offers a kept answer says what it covers
   const grant = el("p", "approval-warning", rule);
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
   if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
-  card.append(grant);
+  if (rule) card.append(grant);
   // In the main chat a kept answer counts everywhere: one line says so, where, and how to take it back.
   const wide = everywhere && offered.includes(session)
     ? el("p", "approval-warning approval-everywhere", t("approval.everywhere"))
@@ -444,12 +458,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     session.setAttribute("aria-describedby", `${grant.id} ${wide.id}`);
     card.append(wide);
   }
-  // The server says, by code, when the person's Allow is kept for the chat's later tasks (#369).
-  const rememberedKey = view.scope === "task" ? "task" : everywhere ? "everywhere" : "chat";
-  const kept = !high && request.remembered === true
-    ? el("p", "approval-remembered", t(`approval.remembered.${rememberedKey}`))
-    : null;
-  if (kept) card.append(kept);
   if (state.submitting) card.append(el("p", "approval-sending", t("approval.sending")));
   const note = t("approval.instead");
   const label = el("label", "", note);
@@ -477,7 +485,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     actions.hidden = false;
     grant.hidden = false;
     if (wide) wide.hidden = false;
-    if (kept) kept.hidden = false;
     deny.focus();
   });
   reason.addEventListener("keydown", (event) => {
@@ -498,7 +505,6 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   actions.hidden = state.deny;
   grant.hidden = state.deny;
   if (wide) wide.hidden = state.deny;
-  if (kept) kept.hidden = state.deny;
   card.append(denyView);
   if (request.arguments_complete !== true) {
     card.append(el("p", "approval-warning", request.arguments_complete === false

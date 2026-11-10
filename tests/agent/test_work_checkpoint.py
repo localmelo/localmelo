@@ -356,7 +356,7 @@ async def test_the_checkpoint_is_the_models_notes_and_nothing_more(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     written: list[str] = []
-    for name in ("memorize", "propose", "flush"):
+    for name in ("store_step", "propose", "flush"):
         real = getattr(Hippo, name)
 
         async def spy(self: Hippo, *args: Any, _real: Any = real, **kw: Any) -> Any:

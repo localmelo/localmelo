@@ -427,7 +427,7 @@ test('commands that only look answer in a local row', async () => {
   await p.slash.handle('/mcp');
   assert.match(lastRow(p), /MCP servers are not part of the console yet/);
   await p.slash.handle('/memory window');
-  assert.match(lastRow(p), /holds 2 of 20 messages · long-term memory: ollama/);
+  assert.match(lastRow(p), /holds 2 of 20 messages · embedding model: ollama/);
   await p.slash.handle('/exit');
   assert.match(lastRow(p), /Close this tab\. melo keeps running\./);
   assert.deepEqual(p.sent, []);

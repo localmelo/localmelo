@@ -21,6 +21,8 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import LLMCallRecord, Message, StepRecord, TaskRecord
 
+from .test_long_store import _apply
+
 
 def _call(task_id: str, seq: int = 0, *, text: str = "") -> LLMCallRecord:
     return LLMCallRecord(
@@ -95,12 +97,10 @@ async def test_in_memory_history_forget_all_empties_it() -> None:
 
 async def test_in_memory_long_term_forgets_entries_that_name_the_task() -> None:
     long = LongTerm()
-    await long.add(
-        "reflection one", [1.0, 0.0], {"task_id": "t1", "type": "reflection"}
-    )
-    await long.add("reflection two", [0.0, 1.0], {"task_id": "t2"})
-    await long.add("step summary", [1.0, 1.0], {"step_id": "s1"})
-    await long.add("no provenance", [0.5, 0.5])
+    await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
+    await _apply(long, "reflection two", task_id="t2", embedding=[0.0, 1.0])
+    await _apply(long, "step summary", task_id="", embedding=[1.0, 1.0])
+    await _apply(long, "no provenance", task_id="", embedding=[0.5, 0.5])
 
     await long.forget("t1")
 
@@ -258,17 +258,17 @@ async def test_a_busy_checkpoint_is_logged_but_the_forget_succeeds(
 # ── SqliteLongTerm ──
 
 
-async def test_sqlite_long_term_forget_matches_metadata_task_id_only(
+async def test_sqlite_long_term_forget_matches_the_task_id_only(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "long_term.db"
     long = SqliteLongTerm(path)
     try:
-        await long.add("reflection one", [1.0, 0.0], {"task_id": "t1"})
-        await long.add("reflection two", [0.0, 1.0], {"task_id": "t2"})
-        # A step summary names its step, not its task, even when the text
-        # happens to contain the id: the metadata is what counts.
-        await long.add("t1 step summary", [1.0, 1.0], {"step_id": "s1"})
+        await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
+        await _apply(long, "reflection two", task_id="t2", embedding=[0.0, 1.0])
+        # An entry that names no task survives, even when the text happens to
+        # contain the id: the task column is what counts.
+        await _apply(long, "t1 step summary", task_id="", embedding=[1.0, 1.0])
         await long.forget("t1")
 
         results = await long.search([1.0, 0.0], top_k=10)
@@ -285,8 +285,8 @@ async def test_a_reopened_long_term_does_not_see_forgotten_entries(
 ) -> None:
     path = tmp_path / "long_term.db"
     long = SqliteLongTerm(path)
-    await long.add("reflection one", [1.0, 0.0], {"task_id": "t1"})
-    await long.add("reflection two", [0.0, 1.0], {"task_id": "t2"})
+    await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
+    await _apply(long, "reflection two", task_id="t2", embedding=[0.0, 1.0])
     await long.forget("t1")
     await long.aclose()
 
@@ -303,8 +303,8 @@ async def test_sqlite_long_term_forget_all_empties_it(tmp_path: Path) -> None:
     path = tmp_path / "long_term.db"
     long = SqliteLongTerm(path)
     try:
-        await long.add("reflection one", [1.0, 0.0], {"task_id": "t1"})
-        await long.add("no provenance", [0.0, 1.0])
+        await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
+        await _apply(long, "no provenance", task_id="", embedding=[0.0, 1.0])
         await long.forget_all()
         assert await long.count_entries() == 0
         await long.forget("t1")  # still a no-op
@@ -320,7 +320,7 @@ async def test_long_term_forget_all_leaves_no_forgotten_text_on_disk(
     sentinel = "SENTINEL_LONG_TERM_FORGOTTEN_4c1d"
     long = SqliteLongTerm(path)
     try:
-        await long.add(sentinel, [1.0, 0.0], {"task_id": "t1"})
+        await _apply(long, sentinel, task_id="t1", embedding=[1.0, 0.0])
         assert sentinel.encode() in _disk_bytes(path)
 
         await long.forget_all()
@@ -344,8 +344,8 @@ async def test_hippo_forget_forgets_history_and_long_term(tmp_path: Path) -> Non
         await history.save_task(TaskRecord(query="one", task_id="t1"))
         await history.add_step("t1", StepRecord(thought="step"))
         await history.save_task(TaskRecord(query="two", task_id="t2"))
-        await long.add("reflection one", [1.0, 0.0], {"task_id": "t1"})
-        await long.add("reflection two", [0.0, 1.0], {"task_id": "t2"})
+        await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
+        await _apply(long, "reflection two", task_id="t2", embedding=[0.0, 1.0])
         hippo.working.append(Message(role="user", content="keep me"))
 
         await hippo.forget("t1")
@@ -367,7 +367,7 @@ async def test_hippo_forget_all_forgets_both_stores_not_working_memory(
     hippo = Hippo(embedding=None, history=history, long=long)
     try:
         await history.save_task(TaskRecord(query="one", task_id="t1"))
-        await long.add("reflection one", [1.0, 0.0], {"task_id": "t1"})
+        await _apply(long, "reflection one", task_id="t1", embedding=[1.0, 0.0])
         hippo.working.append(Message(role="user", content="keep me"))
 
         await hippo.forget_all()

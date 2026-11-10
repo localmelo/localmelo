@@ -232,18 +232,6 @@ class TestAllExposure:
         ]
 
     @pytest.mark.asyncio
-    async def test_long_term_recall_still_reaches_the_prompt(self) -> None:
-        llm = FakeLLM([_answer("done")])
-        options = AgentOptions(tool_exposure="all")
-        agent, _ = _agent(llm, options, {}, embedding=FakeEmbedding())
-        await agent.hippo.long.add("the user prefers metric units", [1.0, 0, 0, 0])
-
-        assert await agent.run("hello") == "done"
-        messages = llm.calls[0]["messages"]
-        assert messages[0].role == "system"
-        assert any("the user prefers metric units" in m.content for m in messages)
-
-    @pytest.mark.asyncio
     async def test_pre_plan_check_still_runs(self) -> None:
         llm = FakeLLM([_answer("should not reach")])
         agent, _ = _agent(llm, AgentOptions(tool_exposure="all"), {})

@@ -25,11 +25,9 @@ from localmelo.melo.memory.recall_gate import digest_has_evidence
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
 from localmelo.melo.schema import (
-    LONG_TERM_TOP_K,
     SHORT_TERM_MAX,
     TOOL_SEARCH_TOP_K,
     Message,
-    ReflectionEntry,
     StepRecord,
     TaskRecord,
     ToolDef,
@@ -146,8 +144,8 @@ def _redacted_task(task: TaskRecord) -> TaskRecord:
 class Hippo:
     """Memory coordinator: working memory, long-term, history, procedures and tools.
 
-    When ``embedding`` is None, long-term memory operations are silently
-    skipped and the agent runs with working-memory context only.
+    ``embedding`` serves :meth:`recall_long`'s embedding search; without it
+    that recall uses BM25 only.
 
     Optional ``history``, ``long`` and ``procedures`` parameters allow
     injecting persistent backends (e.g. :class:`SqliteHistory`,
@@ -161,7 +159,6 @@ class Hippo:
         self,
         embedding: BaseEmbeddingProvider | None = None,
         short_term_max: int = SHORT_TERM_MAX,
-        long_term_top_k: int = LONG_TERM_TOP_K,
         tool_search_top_k: int = TOOL_SEARCH_TOP_K,
         *,
         history: History | None = None,
@@ -183,7 +180,6 @@ class Hippo:
         self.staged = StagedCandidates()
         self.policy = HippoPolicy()
         self._checker = Checker()
-        self._long_term_top_k = long_term_top_k
         self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
         self.working = WorkingMemory(
@@ -257,12 +253,10 @@ class Hippo:
         History keeps a copy with the secrets of :func:`redact_secrets`
         replaced, in its thought, tool arguments, tool output and error;
         *step* itself is untouched, because working memory and the model
-        still read it. The summary is built from the stored copy, so the
-        text a caller passes to :meth:`memorize` is redacted too.
+        still read it. The summary is built from the stored copy, so it is
+        redacted too.
 
-        Does NOT write to short/long memory.  The caller is responsible
-        for routing the summary through ``Checker.check_memory_write``
-        and then calling ``memorize()`` if allowed.
+        Does NOT write to short/long memory.
         """
         stored = _redacted_step(step)
         await self.history.add_step(task_id, stored)
@@ -275,37 +269,6 @@ class Hippo:
             summary += f" -> {output}"
 
         return summary
-
-    async def memorize(
-        self,
-        text: str,
-        role: str = "assistant",
-        metadata: dict[str, Any] | None = None,
-        *,
-        to_working: bool = True,
-    ) -> None:
-        """Write text to working memory and (if embedding available) long-term memory.
-
-        Pass ``to_working=False`` to write long-term memory only. The agent
-        does this for step summaries, because working memory already holds
-        the real tool-call turn for the current task.
-
-        Long-term memory keeps *text* with the secrets of
-        :func:`redact_secrets` replaced. Working memory keeps it as it is:
-        it is what the model reads.
-        """
-        if to_working:
-            self.working.append(Message(role=role, content=text))
-
-        if self.embedding and not self._store_broken:
-            stored = _redacted_text(text)
-            try:
-                emb = await self.embedding.embed([stored])
-                await self.long.add(
-                    text=stored, embedding=emb[0], metadata=metadata or {}
-                )
-            except LongTermSchemaError as exc:
-                self._disable_store(exc)
 
     # ── R6-lite: admission ──
 
@@ -636,11 +599,11 @@ class Hippo:
         """Forget one task: its history rows and its long-term entries.
 
         History loses the task's ``tasks``, ``steps`` and ``llm_calls``
-        rows; long-term memory loses the entries whose metadata names
-        *task_id* as their task, which today are the reflections of its
-        runs. A step summary names only its step, so it stays in long-term
-        memory until :meth:`forget_all`. Working memory (the current
-        conversation) and procedural memory are untouched.
+        rows; long-term memory loses the entries whose task is *task_id*.
+        A step summary that an older version wrote names only its step, so
+        it stays in long-term memory until :meth:`forget_all`. Working
+        memory (the current conversation) and procedural memory are
+        untouched.
         """
         await self.history.forget(task_id)
         await self.long.forget(task_id)
@@ -656,76 +619,6 @@ class Hippo:
         await self.history.forget_all()
         await self.long.forget_all()
         self.staged.clear()
-
-    # ── Reflection promotion ──
-
-    async def promote_reflections(self, task_id: str) -> None:
-        """Promote reflection entries to long-term memory and clear them.
-
-        Called when a run ends, whatever its status.
-        """
-        reflections = self.working.get_reflections()
-        if not reflections or not self.embedding:
-            self.working.clear_reflections()
-            return
-
-        for entry in reflections:
-            text = _redacted_text(self._format_reflection_for_long(entry))
-            if text.strip() and not self._store_broken:
-                try:
-                    emb = await self.embedding.embed([text])
-                    await self.long.add(
-                        text=text,
-                        embedding=emb[0],
-                        metadata={
-                            "task_id": task_id,
-                            "attempt_id": entry.attempt_id,
-                            "type": "reflection",
-                        },
-                    )
-                except LongTermSchemaError as exc:
-                    self._disable_store(exc)
-        self.working.clear_reflections()
-
-    @staticmethod
-    def _format_reflection_for_long(entry: ReflectionEntry) -> str:
-        parts = [f"Attempt {entry.attempt_id}: {entry.summary}"]
-        if entry.failed_hypotheses:
-            parts.append(f"Failed: {'; '.join(entry.failed_hypotheses)}")
-        if entry.useful_evidence:
-            parts.append(f"Evidence: {'; '.join(entry.useful_evidence)}")
-        if entry.recommended_avoids:
-            parts.append(f"Avoid: {'; '.join(entry.recommended_avoids)}")
-        return " | ".join(parts)
-
-    # ── Level 1: Context Retrieval (embedding search only) ──
-
-    async def retrieve_context(self, query: str) -> list[Message]:
-        """Return long-term memory messages relevant to the query.
-
-        Only searches long-term memory via embedding similarity.
-        Does NOT include the short-term window — the caller assembles
-        the full prompt from retrieval results + short-term separately.
-        Does NOT extract tool hints — that is a separate stage.
-        """
-        if not self.embedding:
-            return []
-
-        query_emb = await self.embedding.embed([query])
-        try:
-            long_results = await self.long.search(
-                query_emb[0], top_k=self._long_term_top_k
-            )
-        except LongTermSchemaError as exc:
-            # A newer localmelo wrote this file: one WARNING, then the run
-            # continues without long-term memory (Requirement 4, review
-            # finding 5). The legacy path had no catch at all.
-            self._disable_store(exc)
-            return []
-        return [
-            Message(role="system", content=f"[memory] {text}")
-            for text, _score, _meta in long_results
-        ]
 
     # ── Tool hint extraction (the model's tool calls only) ──
 

@@ -332,7 +332,7 @@ file's revision.
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (search by words only)"}],
     "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",
@@ -828,8 +828,7 @@ Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, `pending_approvals` (the approvals the task waits for, in
 the shape of a session's; empty when none; answer one with `POST
 /api/approvals/{request_id}`, as for a chat; each also has `explanation`, see
-[a task's approvals](#a-tasks-approvals-go-through-its-chat)), `earlier` (its steps that ran on
-an earlier approval), timestamps, workspace and `priority_events`, along
+[a task's approvals](#a-tasks-approvals-go-through-its-chat)), timestamps, workspace and `priority_events`, along
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
 
@@ -938,7 +937,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 
 ## Chores
 
-Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule`, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat), and works for that chat as a task the person asked for does: it has the browser (`[browser] driver`), and the chat follows up on how it ended. Every run of a chore works in the same folder, `chore-<id>` under the workspace, made at the first run and deleted with the chore; what is in it is plain data for a run to read, never project instructions. A reminder's run has a folder of its own, no browser and no follow-up. Every run of a chore that repeats carries that to the posting review from code (`AgentOptions.repeats`), so what it posts in the person's name asks each time whatever the request says. A password handle in the saved request (`[password-1]`) is alive only in the run of the message that gave it; a later run does not get it. A run's approvals are the same cards as a task's in the owner chat; it neither uses nor records the chat's earlier approvals, and, as in a task the person started, it works through a picture check itself, with nobody at its side. Every chore carries a `revision` that each change bumps.
+Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule`, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat), and works for that chat as a task the person asked for does: it has the browser (`[browser] driver`), and the chat follows up on how it ended. Every run of a chore works in the same folder, `chore-<id>` under the workspace, made at the first run and deleted with the chore; what is in it is plain data for a run to read, never project instructions. A reminder's run has a folder of its own, no browser and no follow-up. Every run of a chore that repeats carries that to the posting review from code (`AgentOptions.repeats`), so what it posts in the person's name asks each time whatever the request says. A password handle in the saved request (`[password-1]`) is alive only in the run of the message that gave it; a later run does not get it. A run's approvals are the same cards as a task's in the owner chat; it does not use the chat's grants, and, as in a task the person started, it works through a picture check itself, with nobody at its side. Every chore carries a `revision` that each change bumps.
 
 ```json
 {"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
@@ -1323,10 +1322,9 @@ with the echo.
   `{change, text}` with `change` one of `merged`, `updated`, `added`, `reworded`,
   `retired`, `changed`, `more` for the changes not listed, `line` `While you were away, melo tidied 3 notes`),
   `undone`, `failed`, `notice` (a plain word about what was done, such as that
-  browsing is off), `earlier`
-  (a task's step ran on the person's earlier approval: `task_id`, `title`,
-  `entry_id`, `approved_at`, `preview`, `line` `Used your approval from 14:02`)
-  or `revoked` (that approval was taken back; `of` is the `earlier` echo). A reminder
+  browsing is off). A stored `earlier` echo (a step that ran on an earlier
+  approval, from before every Allow once was one call) is read as its `line`,
+  with no buttons. A reminder
   cue with no usable time (none, one that has passed, one more than a year
   ahead) gives an `ask` echo with `ask: "when"` and `work` instead (`When should
   I remind you?`); it has no buttons, and the next message, if it is only a
@@ -1360,12 +1358,11 @@ with the echo.
   title.
 - The main chat's turns pages add `echoes`, paged as `cards` are.
 - `POST /api/front/echoes/{id}` with `{"do": "undo" | "apply" |
-  "level" | "save" | "once" | "cancel" | "revoke", "level"?: "P1" | 1 | "Today"}` answers
+  "level" | "save" | "once" | "cancel", "level"?: "P1" | 1 | "Today"}` answers
   200 `{"echo"}`: Undo a `control` or `level` echo (a stop starts the task
   again as a new task) or a `chore_saved` one (the chore is deleted), apply a
   `suggest`, set a `started` or `level` echo's task to the
-  person's level, revoke the approval an `earlier` echo used (a `revoked`
-  echo answers), or Undo a `sleep` echo (the whole run is put back; an `undone`
+  person's level, or Undo a `sleep` echo (the whole run is put back; an `undone`
   echo answers with `of` and `run_id`, and says how many notes came back; a run
   that is unknown or undone already changes nothing and is answered 200 with an
   `undone` echo that says the notes were already put back, so the line is answered
@@ -1627,7 +1624,7 @@ Whether the chat has a page open in melo's browser, and which. It starts nothing
 - `open` is true when the chat's current tab exists; `tab`, `url` and `title` describe it (`tab` is null and the others are empty when `open` is false, as for a chat that has not browsed or is not open in the gateway).
 - `browsing` is true while a browser step of the chat runs, and `yours` while the person has one of its pages (take over), with `place` where they have it: `window` (a real Chrome window; the panel shows a live copy) or `app` (the Browser panel itself); `place` is null otherwise. `viewers` counts the open live views of the chat.
 - `available` says whether the chat's browser can be watched now. `[browser] live` must be on. A chat with an Agent open is watched in the browser that Agent has: a chat whose turn ran when the browser setting changed keeps its browser until its next turn. A chat with no Agent open follows `[browser] driver` (`chrome`). `driver` is the setting. An unknown session is 404 `not_found`. The answer has `Cache-Control: no-store`.
-- **One source.** This route, `POST .../browser/done`, `POST .../browser/window` and the stream below all ask the same resolver which browser a request is for. A client that shows a chat's browser card names its source with the queries `gen` (the card's `browser_session_id`: the generation of the chat's browser tools, which a tab id such as `t1` means something only inside of) and `run` (the card's `run_id`). A source that is not the chat's now is refused with 409 `stale_source` (the stream: a close with 1008 and the reason `stale_source`, before it starts), never served by whatever the chat has now: a card of an old Agent cannot reach a new one, nor an ended run a later one. A client that names neither is served as before. A running task's browser is reached only with `gen`, `run` and `owner`, the card's `owner_chat_id`: anything less, or a chat the task no longer belongs to, is refused the same way. No route starts a browser.
+- **One source.** This route, `GET .../browser/picture`, `POST .../browser/done`, `POST .../browser/window` and the stream below all ask the same resolver which browser a request is for. A client that shows a chat's browser card names its source with the queries `gen` (the card's `browser_session_id`: the generation of the chat's browser tools, which a tab id such as `t1` means something only inside of) and `run` (the card's `run_id`). A source that is not the chat's now is refused with 409 `stale_source` (the stream: a close with 1008 and the reason `stale_source`, before it starts), never served by whatever the chat has now: a card of an old Agent cannot reach a new one, nor an ended run a later one. A client that names neither is served as before. A running task's browser is reached only with `gen`, `run` and `owner`, the card's `owner_chat_id`: anything less, or a chat the task no longer belongs to, is refused the same way. No route starts a browser.
 
 ## WS /api/sessions/{id}/browser/live
 
@@ -1646,6 +1643,20 @@ A live picture of the chat's browser: the page melo works in, as JPEG pictures, 
 - The client sends JSON text messages. `{"type":"take"}` hands the tab it watches to the person and `{"type":"give"}` gives it back to melo. While the person has it in the app (`place` `app`), and melo is not in the middle of a step, these are their input: `{"type":"mouse","action":"move|down|up","x","y","button","buttons","clicks","mods"}` (page CSS pixels: the picture's point divided by `scale`, after `offsetTop`), `{"type":"wheel","x","y","dx","dy","mods"}`, `{"type":"key","action":"down|up","key","code","keyCode","mods","repeat"}`, `{"type":"compose","text","start","end"}` (an input method's text being composed), `{"type":"text","text"}` (its commit) and `{"type":"paste","text"}` (plain text), at most 1,000 characters each; and `{"type":"dialog","accept","text"}` answers the page's box. `mods` is the sum of Alt 1, Control 2, Meta 4 and Shift 8. Input is held to 120 messages a second per viewer. Any other message, and input while melo has the tab, is dropped without an answer. Nothing a message carries is logged, stored or shown to a model.
 - A tab the person has stays theirs, with no time limit, until they give it back (`give`, Done, closing the window) or the run ends. Meanwhile the chat's run is paused (`run.paused`): no model call and no time limit counting.
 - The server closes with 1000 when the view ends, 1008 when it refuses (reason `not_found`, `not_a_tab`, `not_available` for a driver other than `chrome` or `live = false`, `refused` for a stopped browser, another chat's tab or a chat that already has 4 viewers, `stale_source` for a `gen` or `run` that is not the chat's now, or `token_rotated` when the gateway token rotates), 1009 when the client sends more than 4,096 bytes in a message, and 1013 when the session store is down.
+
+## GET /api/sessions/{id}/browser/picture
+
+One picture of the page the chat's browser is on, for a script that has to see where a task ended (the stream above sends frames, not a picture). It is for whoever may watch the browser, so it follows the live view setting, and it starts nothing.
+
+```bash
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -o picture http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/browser/picture
+```
+
+- The optional queries are `tab` (`t1`, a tab of this chat; without it, the tab melo works in) and `gen`, `run` and `owner` (see **One source** above; a task's browser needs all three).
+- The answer is the picture as the browser took it, with its own `Content-Type` (`image/jpeg` from Chrome, `image/png` from Safari's windows) and `Cache-Control: no-store`. It needs no browser that can stream.
+- Refusals: 400 `invalid_request` for a malformed `tab`; 403 `not_available` while `[browser] live` is off; 404 `not_found` for an unknown session; 404 `no_page` when the chat has no browser open, or no page in that tab; 409 `stale_source` for a source that is not the chat's now; 409 `no_picture` when the page must not be pictured now: it is at a local or private address (a server on this computer that the person's own words wrote counts as one, since that permission belongs to the run; a page on a test server that `[tools] web_fetch_allow_local` lists is pictured like a public one, when its tab is on one by a step the setting allows), a password, code or card field has focus, or the browser stopped; and, at once, while the person has a page of the chat (a take-over, from Take over until Done: the route does not wait for them).
+- It changes nothing the run sees or does: it does not scroll, focus a page, switch tab, bring a window forward or draw the click mark; it keeps no view for point numbers and no picture with the chat, stores nothing and sends no event; and it waits for a browser step that is running, so it never interleaves with one.
+- Like every `/api` route it needs the bearer token or the console's cookie (401 without).
 
 ## POST /api/sessions/{id}/browser/done
 
@@ -2026,13 +2037,19 @@ event stream, or from `pending_approvals`.
 ```
 
 ```json
-{"request_id": "386183e1811b4ba68c3768bfb96ac8e6", "outcome": "allowed", "remember": true}
+{"request_id": "386183e1811b4ba68c3768bfb96ac8e6", "outcome": "allowed", "remember": true, "always": false}
 ```
 
-- `choice` is `once` (this call), `session` (this call and every later
-  routine one of that tool in this session) or `deny`. For a `high`
-  call (see `review` under `GET /api/sessions/{id}`), `session` allows this
-  call only: the reply says `"remember": false` and no grant is made.
+- `choice` is `once` (this call only: the same step asks again later, in
+  this chat, its tasks and the terminal), `session` (this call and every
+  later routine one of that tool in this session), `always` (a folder
+  outside the workspace only, kept in Settings) or `deny`.
+- A kept answer (`session`, `always`) is sent only where the request offers
+  one. The one rule for a client: for a request with `outside` (a folder
+  outside the workspace), read `outside.grantable`; for any other, read
+  `offers_chat`. A kept answer the request does not offer is 409
+  `not_offered`, nothing is decided and the request still waits;
+  `always` on a request without `outside` is 400 `invalid_request`.
 - `reason` belongs to a `deny` only, at most 500 characters; a reason with
   another choice is 400 `invalid_request`.
 - 404 `not_found` for an unknown or expired request; 409 `already_answered`
@@ -2047,35 +2064,22 @@ event stream, or from `pending_approvals`.
 ### A task's approvals go through its chat
 
 A task the person started asks through the chat that owns it (its
-`front_id`, else the main chat). Before anyone is asked, code looks up the
-chat's recorded approvals; a model never decides a match.
+`front_id`, else the main chat). Only a kept answer (a grant) carries over:
+an Allow once allows that one call.
 
-- **Recorded.** Each Allow the person gives in a chat, or in one of its
-  tasks' approvals (a task with `origin` `user`), is recorded for that chat
-  when the call is reusable: a tool melo's rules read (`python_exec`,
-  `shell_exec`, `file_write`, `file_edit`) that the rules themselves found
-  `routine`, in no category. Auto's Allow once, a chore's Allow and an Allow
-  answered after the chat was deleted are never recorded. Records live in
-  the gateway's memory only (grants are kept in a table instead); a restart
-  or deleting the chat forgets them. A waiting approval's `remembered` says,
-  by code, whether its Allow will be recorded.
-- **Matched.** A task's step runs without asking, with approval `origin`
-  `earlier`, when a record of its chat has the same tool, the same step
-  (Python by its syntax tree, a command by its exact text, a file write by
-  its path and content, the files the rules read for it unchanged) and the
-  same folder, and the step is reusable too. The chat gets an `earlier` echo
-  and the task's `earlier` lists the step (`live` until the record is
-  revoked). A grant that holds in the chat, its own or the main chat's, covers
-  its tasks' routine calls of that tool; a task's own grant holds in that task
-  only. A task that uses its chat's records or grants is reviewed with
-  every file changed since that chat began, so a file an earlier task wrote
-  is read before a record or grant covers a step; when the chat's start
-  cannot be read, neither applies and the person is asked.
-- **Never.** A high-impact, `undecided`, model-settled or unreviewed step,
-  and every call of a tool the rules do not read (network, MCP and other
-  tools), asks every time; a task with an `origin` other than `user` (a
-  chore's `user_rule` included) neither uses nor records approvals; another
-  chat's records never count; Auto never runs a step it blocked on a record.
+- **Grants.** A grant that holds in the chat, its own or the main chat's,
+  covers its tasks' routine calls of that tool, by the same rule as in the
+  chat; a site Auto let the chat read covers the task's plain reads of it
+  only. A task's own grant holds in that task only. A task that uses its
+  chat's grants is reviewed with every file changed since that chat began,
+  so a file an earlier task wrote is read before a grant covers a step;
+  when the chat's start cannot be read, the chat's grants do not apply and
+  the person is asked.
+- **Never.** A high-impact step, and anything that may never be kept
+  (typing, a form sent, paying, an account's settings), asks every time; a
+  task with an `origin` other than `user` (a chore's `user_rule` included)
+  does not use its chat's grants; another chat's grants never count; in
+  Auto the chat's grants are not used and Auto decides.
   A task made through `POST /api/tasks` is the person's (`origin` `user`) and
   belongs to the main chat unless its `front_id` names another.
 - **Explained.** When a task with `origin` `user` or `user_rule` asks the
@@ -2095,12 +2099,12 @@ session it belongs to.
 ```
 
 ```json
-{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "remembered": true, "session_id": "b79a99d86b50"}}
+{"approval": {"request_id": "00dc8a67e4e8481ab4208074d4685cab", "call_id": "call_1", "tool_name": "python_exec", "arguments": {"code": "print(1)"}, "arguments_complete": true, "preview": "print(1)", "workspace_root": "/home/me/notes", "workspace_label": "~/notes", "target": null, "review": {"verdict": "routine", "title": "", "reasons": [], "categories": []}, "explanation": {"state": "ready", "text": "It prints a number to check the setup. Nothing outside the folder changes."}, "offers_chat": true, "session_id": "b79a99d86b50"}}
 ```
 
 - A task's approval has `explanation`; a chat's has none. Both have
-  `remembered`, also on `pending_approvals` of `GET /api/sessions/{id}` and
-  of a task.
+  `offers_chat` (and `outside` for a folder outside the workspace), as on
+  `pending_approvals`.
 - 404 `not_found` once it was answered, or for an unknown id.
 
 ## PATCH /api/sessions/{id}
@@ -2361,19 +2365,6 @@ Take back one grant that holds in the chat, so the tool asks again next time.
 - A site's grant is named after the question, such as
   `browser-act:https://news.example`; the name may hold slashes, and is sent
   percent-encoded or as it is.
-
-## DELETE /api/sessions/{id}/approvals/{entry_id}
-
-Take back one recorded approval of a chat, so the step asks again next
-time. What ran on it stays done.
-
-```bash
-{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/api/sessions/9b57aff256d5/approvals/763fa9e3c647
-```
-
-- 204 with no body; the task's `earlier` reads `"live": false` for it.
-- 404 `not_found` when the chat has no such record (revoked already, or
-  forgotten by a restart).
 
 ## GET /api/sessions/{id}/memory
 

@@ -101,7 +101,7 @@ Options:
   -y, --yolo           run tools without asking
   -X, --set KEY=VALUE  change a setting for this run (list: melo config keys)
   -V, --version        show the version
-  --memory on|off      long-term memory (default on)
+  --memory on|off      long-term memory outside legacy reasoning (default on)
   --builtins SET       built-in tools: all, none or NAME,... (default: per mode)
   --mcp PATH           MCP servers to use (mcpServers JSON file)
   --mcp-only           only the MCP tools (--mcp PATH --builtins none)
@@ -296,12 +296,12 @@ Every route the gateway serves:
 | `DELETE /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#delete-apisessionsid) |
 | `GET /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#get-apisessionsid) |
 | `PATCH /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#patch-apisessionsid) |
-| `DELETE /api/sessions/{session_id}/approvals/{entry_id}` | [api-v2](reference/api-v2.md#delete-apisessionsidapprovalsentry_id) |
 | `GET /api/sessions/{session_id}/blobs/{sha256}` | [api-v2](reference/api-v2.md#get-apisessionsidblobssha256) |
 | `POST /api/sessions/{session_id}/blocks/{request_id}/allow` | [api-v2](reference/api-v2.md#post-apisessionsidblocksrequest_idallow) |
 | `GET /api/sessions/{session_id}/browser` | [api-v2](reference/api-v2.md#get-apisessionsidbrowser) |
 | `POST /api/sessions/{session_id}/browser/done` | [api-v2](reference/api-v2.md#post-apisessionsidbrowserdone) |
 | `WS /api/sessions/{session_id}/browser/live` | [api-v2](reference/api-v2.md#ws-apisessionsidbrowserlive) |
+| `GET /api/sessions/{session_id}/browser/picture` | [api-v2](reference/api-v2.md#get-apisessionsidbrowserpicture) |
 | `POST /api/sessions/{session_id}/browser/window` | [api-v2](reference/api-v2.md#post-apisessionsidbrowserwindow) |
 | `GET /api/sessions/{session_id}/events` | [api-v2](reference/api-v2.md#get-apisessionsidevents) |
 | `DELETE /api/sessions/{session_id}/folders` | [api-v2](reference/api-v2.md) |
@@ -367,7 +367,7 @@ from localmelo.support.config import Config, load, save
 | Path | What it holds |
 |---|---|
 | `~/.cache/localmelo/config.toml` | The configuration; a missing file means not configured. No flag or variable moves it: set `HOME`. |
-| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, `long_term.db`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. |
+| `~/.cache/localmelo/memory/` | `history.db`, `procedures.db`, and `long_term.db` outside `legacy`, with `LOCALMELO_PERSIST_MEMORY` set; `LOCALMELO_MEMORY_DIR` or `--memory-dir` moves it. |
 | `~/.cache/localmelo/gateway/` | `sessions.db` (console chats, tasks, grants), `auth/token`, `endpoint.json` (the running gateway). |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats. |
 | `~/.cache/localmelo/scheduler/runs/` | The gateway's model-call log. |

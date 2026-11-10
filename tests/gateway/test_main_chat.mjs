@@ -482,31 +482,15 @@ test('a waiting task card holds its approval card, and its own button only opens
   assert.equal(answered.made.find((item) => item.className === 'main-card-text').children.includes(approval), false);
 });
 
-test('a step that ran on an earlier approval is a row with Revoke, which outlives its task', () => {
-  const now = 1_800_000_000;
-  const echoes = mainChat.mergeEchoes([], [
-    {id: 20, ts: now - 30, data: {echo: 'earlier', task_id: 't', title: 'Check the notes', entry_id: 'e1', approved_at: now - 600, preview: 'print(1)\n',
+test('a stored row of a step that ran on an earlier approval is its stored line, with no button', () => {
+  const [used] = mainChat.mergeEchoes([], [
+    {id: 20, ts: 1_800_000_000, data: {echo: 'earlier', task_id: 't', title: 'Check the notes', entry_id: 'e1', approved_at: 1_799_999_400, preview: 'print(1)\n',
       line: 'Used your approval from 14:02', said: {key: 'approvals.used', params: {time: '14:02'}}}},
   ]);
-  const [used] = echoes;
   assert.equal(used.kind, 'earlier');
-  assert.deepEqual(mainChat.echoActions(used, false), [['Revoke', 'revoke']]);
-  // The task ended: its other rows lose their buttons, this one keeps Revoke.
-  const ended = new Set(['t']);
-  assert.equal(mainChat.echoDone(used, new Set(), ended), false);
-  assert.equal(mainChat.echoDone({id: 21, kind: 'control', task_id: 't'}, new Set(), ended), true);
+  assert.deepEqual(mainChat.echoActions(used, false), []);
   const doc = fakeDoc();
-  const acted = [];
-  mainChat.echoNodes({doc, echo: used, act: (echo, does) => acted.push([echo.id, does])});
-  // The time as the page writes one, not the gateway's stored words.
-  const approved = new Date((now - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-  assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, `Used your approval from ${approved}`);
-  assert.equal(doc.made.find((item) => item.className === 'echo-sub').textContent, 'Task “Check the notes” ran print(1)');
-  doc.made.find((item) => item.tag === 'button').listeners.click();
-  assert.deepEqual(acted, [[20, 'revoke']]);
-  // Revoked: the row that answers it takes its button away.
-  const both = mainChat.mergeEchoes(echoes, [{id: 22, ts: now, data: {echo: 'revoked', of: 20, task_id: 't', line: 'Revoked: that step asks you again next time'}}]);
-  const done = mainChat.answered(both);
-  assert.equal(mainChat.echoDone(used, done, new Set()), true);
-  assert.deepEqual(mainChat.echoActions(both[1], false), []);
+  mainChat.echoNodes({doc, echo: used, act: () => assert.fail('a plain line acts on nothing')});
+  assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, 'Used your approval from 14:02');
+  assert.equal(doc.made.some((item) => item.tag === 'button' || item.className === 'echo-sub'), false);
 });

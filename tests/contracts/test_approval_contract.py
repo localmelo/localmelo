@@ -82,6 +82,8 @@ class TestApprovalDecision:
             {"allow": False, "remember": True},
             {"allow": False, "origin": "session"},
             {"allow": False, "origin": "earlier"},
+            # Nothing is allowed for having been allowed before: no such origin.
+            {"allow": True, "origin": "earlier"},
             {"allow": True, "origin": "timeout"},
             {"allow": True, "origin": "words"},
         ],
@@ -96,7 +98,6 @@ class TestApprovalDecision:
             {"allow": True, "remember": True},
             {"allow": True, "origin": "session"},
             {"allow": True, "remember": True, "origin": "session"},
-            {"allow": True, "origin": "earlier"},
             {"allow": False, "origin": "timeout"},
             {"allow": False, "origin": "words"},
             {"allow": False, "reason": "no", "origin": "policy"},

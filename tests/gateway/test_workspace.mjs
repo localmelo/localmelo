@@ -1280,7 +1280,7 @@ test('approval buttons post only their explicit choices and Escape closes denial
   for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow for this chat']]) {
     const h = harness(baseRoutes({'POST /approvals/req': {outcome: 'allowed'}}));
     await h.run('init()');
-    h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+    h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, offers_chat: true};
     h.run('S.view.pending.set("req", request)');
     const card = h.run('approvalCard(request)');
     const target = findNode(card, (node) => node.textContent === label);
@@ -1488,7 +1488,7 @@ test('approval guard survives redraw but resets on navigation', async () => {
 });
 
 test('the chat\'s approval card follows the open chat: its folder when the request names none, and whether an answer counts everywhere', async () => {
-  const request = {request_id: 'wire', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+  const request = {request_id: 'wire', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true, offers_chat: true};
   const title = (card) => findNode(card, (node) => node.className === 'approval-title').textContent;
   const answers = (card) => findNode(card, (node) => node.className === 'approval-actions').children.map((node) => node.textContent);
   const side = harness(baseRoutes());
@@ -1545,7 +1545,8 @@ test('incomplete or unconfirmed arguments cannot be allowed, but can be denied',
   for (const complete of [false, undefined]) {
     const h = harness(baseRoutes({'POST /approvals/unsafe': {outcome: 'denied'}}));
     await h.run('init()');
-    h.context.request = {request_id: 'unsafe', tool_name: 'shell_exec', arguments: {command: 'truncated…'}, arguments_complete: complete};
+    h.context.request = {request_id: 'unsafe', tool_name: 'shell_exec', arguments: {command: 'truncated…'}, arguments_complete: complete,
+      offers_chat: true};
     h.run('S.view.pending.set("unsafe", request)');
     const card = h.run('approvalCard(request)');
     h.run('approvalStates.get("unsafe").mountedAt -= 1000');
@@ -4269,7 +4270,7 @@ test('a task card shows its status row under the facts and bumps it on each poll
 test('a task waiting for approval shows the chat approval card and answers it', async () => {
   const request = {
     request_id: 'req-t', tool_name: 'shell_exec', arguments: {command: 'make test'}, arguments_complete: true,
-    workspace_label: '~/w', target: null,
+    workspace_label: '~/w', target: null, offers_chat: true,
   };
   let reads = 0;
   const h = await openTask({
@@ -5691,7 +5692,7 @@ test('a live turn that answered a task\'s question keeps its origin and offers n
 /** A task's pending approval as `GET /approvals/{id}` returns it, with melo's explanation. */
 const taskApproval = (explanation, extra = {}) => ({approval: {
   request_id: 'r1', tool_name: 'python_exec', arguments: {code: 'print(1)'}, arguments_complete: true,
-  workspace_label: '~/w', session_id: 't', explanation, ...extra,
+  workspace_label: '~/w', session_id: 't', explanation, offers_chat: true, ...extra,
 }});
 const waitingCard = cardRow(5, {at: NOW - 60, state: 'waiting', source_id: 't', source_kind: 'task', title: 'Fix CI', line: 'Wants to run a command', request_id: 'r1'});
 
@@ -5740,40 +5741,6 @@ test('a step Auto blocked in a task shows in its chat, and Allow once there uses
   assert.equal(h.net.callsTo('/tasks/t/blocks/r9/allow')[0].method, 'POST');
   assert.match(flatten(card()), /Allowed once · melo can run it until/);
   assert.equal(findNode(card(), (node) => node.classList?.contains('block-allow')), null);
-});
-
-test('a step that ran on an earlier approval keeps Revoke in its chat after the task ends, and Revoke answers it', async () => {
-  const used = echoRow(20, {echo: 'earlier', task_id: 't', title: 'Check the notes', entry_id: 'e1', approved_at: NOW - 600, preview: 'print(1)',
-    line: 'Used your approval from 14:02', said: {key: 'approvals.used', params: {time: '14:02'}}});
-  const cards = [cardRow(21, {at: NOW, ts: NOW, state: 'done', source_id: 't', source_kind: 'task', title: 'Check the notes', line: 'Done.'})];
-  const h = harness(mainRoutes({
-    'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes: [used]},
-    'POST /front/echoes/20': {status: 200, body: {echo: echoRow(22, {echo: 'revoked', of: 20, task_id: 't', title: 'Check the notes', line: 'Revoked: that step asks you again next time'})}},
-  }));
-  await h.run('init()');
-  const approved = new Date((NOW - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-  assert.ok(h.text('messages').includes(`Used your approval from ${approved} Task “Check the notes” ran print(1) Revoke`));
-  await findNode(h.element('messages'), (node) => node.tag === 'button' && node.textContent === 'Revoke').click();
-  await settle();
-  assert.deepEqual(h.net.callsTo('/front/echoes/20')[0].body, {do: 'revoke'});
-  assert.match(h.text('messages'), /Revoked: that step asks you again next time/);
-  assert.equal(findNode(h.element('messages'), (node) => node.tag === 'button' && node.textContent === 'Revoke'), null);
-});
-
-test('a task\'s page lists the steps that ran on an earlier approval, and Revoke takes the approval back', async () => {
-  let live = true;
-  const earlier = () => [{entry_id: 'e1', chat_id: 'm', request_id: 'q1', preview: 'print(1)', approved_at: 100, at: 160, live}];
-  const h = await openTask({
-    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'done', earlier: earlier()})}),
-    'DELETE /sessions/m/approvals/e1': () => { live = false; return {status: 204, body: {}}; },
-  });
-  const panel = () => h.text('task-panel');
-  assert.match(panel(), /Ran on your earlier approval.*matched one you allowed in this task's chat exactly.*print\(1\).*Approved .* · ran .*Revoke/);
-  await labelled(h, 'Revoke').click();
-  await settle();
-  assert.equal(h.net.callsTo('/sessions/m/approvals/e1')[0].method, 'DELETE');
-  assert.match(panel(), /print\(1\).*Revoked/);
-  assert.equal(labelled(h, 'Revoke'), null);
 });
 
 // ── Slash commands in the composer ──

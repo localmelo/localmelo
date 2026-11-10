@@ -22,7 +22,7 @@ from localmelo.melo.checker.validators import (
     MAX_OUTPUT_LEN,
     TRUNCATION_SUFFIX,
 )
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
@@ -726,33 +726,6 @@ class TestCheckedTurnWrites:
         assert len(assistant) == 1
         assert assistant[0].content == ""
         assert assistant[0].tool_calls[0].id == "call_t"
-
-    @pytest.mark.asyncio
-    async def test_summary_goes_to_long_term_not_working(self) -> None:
-        class Emb(BaseEmbeddingProvider):
-            async def embed(self, texts: list[str]) -> list[list[float]]:
-                return [[1.0, 0.0] for _ in texts]
-
-            async def close(self) -> None:
-                pass
-
-        llm = FakeLLM(
-            [
-                Message(role="assistant", content="go", tool_call=_echo_call("v")),
-                Message(role="assistant", content="done"),
-            ]
-        )
-        agent = Agent(llm=llm, embedding=Emb())
-        agent.hippo.register_tool(_echo_def())
-
-        async def _echo(text: str) -> str:
-            return text
-
-        agent.executor.register("echo", _echo)
-        await agent.run("echo summary")
-        assert any("[called echo]" in e.text for e in agent.hippo.long._entries)
-        window = agent.hippo.working.get_window()
-        assert not any("[called echo]" in m.content for m in window)
 
 
 # ── Tool results with images ───────────────────────────────────────────────

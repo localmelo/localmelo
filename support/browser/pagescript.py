@@ -190,6 +190,9 @@ COVER_KINDS = frozenset(
 
 
 _COVER_HOST = re.compile(r"^iframe(?: from [a-z0-9.-]{1,60})?$", re.IGNORECASE)
+# What melo says of a frame the page script names a host for. The host is the
+# page's own text (a page picks its frames' addresses), so it is never printed.
+FRAME_ELSEWHERE = "a frame from another site"
 
 
 # The page script's pieces, shared by reading a page and by acting on it, so
@@ -1427,8 +1430,9 @@ def _cover_words(info: Any) -> str:
     """What stands over an element, as the page script told it: ``a sticky header (h1)``; ``""`` when it did not say.
 
     Only words from a fixed list pass (see :data:`COVER_KINDS`): the kind, and
-    the tag of a standard element or ``iframe from <host>``. What else the page
-    sent is left out, so a page cannot put its own words into the answer.
+    the tag of a standard element, ``iframe``, or :data:`FRAME_ELSEWHERE` for
+    ``iframe from <host>``: the host is never printed. What else the page sent
+    is left out, so a page cannot put its own words into the answer.
     """
     if not isinstance(info, dict):
         return ""
@@ -1440,6 +1444,8 @@ def _cover_words(info: Any) -> str:
         detail in COVER_TAGS or detail == "element" or _COVER_HOST.match(detail)
     ):
         return what
+    if detail.lower() != "iframe" and _COVER_HOST.match(detail):
+        return FRAME_ELSEWHERE if what == "a frame" else f"{what} ({FRAME_ELSEWHERE})"
     return f"{what} ({detail})"
 
 
@@ -1720,9 +1726,12 @@ class PageScriptActs:
                     # It cannot say: the box that most likely holds a frame the page
                     # loaded, which melo cannot check.
                     return PointHit("frame", held)
+            # The tag is printed in the tool's own sentence: only a standard one
+            # (:data:`COVER_TAGS`) is kept, whatever else the page says is "element".
+            tag = str(data.get("tag") or "")
             return PointHit(
                 "none",
-                tag=str(data.get("tag") or "")[:20],
+                tag=tag if tag in COVER_TAGS else ("element" if tag else ""),
                 words=data.get("hasWords") is True,
             )
         item = _element(data.get("el"))

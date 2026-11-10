@@ -27,7 +27,7 @@ def test_title_memory_usage_copy_and_undo_in_a_real_terminal(
     term.see("Worked for")
     term.type("/memory window\r")
     term.see("Working memory:")
-    term.see("Long-term memory:")
+    term.see("Embedding model:")
     term.type("/usage\r")
     term.see("Totals include undone turns")
     term.type("/copy\r")

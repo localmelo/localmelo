@@ -36,7 +36,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task that is stuck asks the chat that started it instead of stopping.
 - A task starts with what its chat knows about you and the project, and reads the project's own instruction file.
 - A task works in its chat's folder and asks before it reads or writes outside it.
-- A task's approvals go through the chat that started it, and the same approved step is not asked twice.
+- A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
@@ -54,7 +54,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `/browser on` and the Settings switch use Chrome in the background when it is installed, and Safari's automation windows (one tab per chat) otherwise; a browser you chose before is kept.
 - When a click changes nothing on a page, melo is told so and tries another way; after it acts on a page it reads only what changed.
 - The hosts of one site count as one site, so one allow covers them.
-- The browser tools never open this computer, its local network or melo's own console.
+- The browser tools never open this computer, its local network or melo's own console, except the test servers a developer lists in `[tools] web_fetch_allow_local`.
 
 ### Memory
 
@@ -65,7 +65,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
 - A note from a page, a file or a task's result is never shown to the model as your words.
-- Long-term memory can be kept between runs, with an embedding model the first run offers.
+- A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 
 ### App and web console
 
@@ -110,6 +110,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Direct runs and console chats offer no shell by default.
 - A worker's shell and Python write only inside its workspace on macOS.
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
+- Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
@@ -122,4 +123,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every direct run is recorded, so the console's Workers view lists it.
 - `melo-retrieve` and `melo-procedures` compare memory retrievers and replay recorded runs offline.
 - The Python API (experimental) has events, stopping, approvals and sessions.
+- `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
 - The MIT license.

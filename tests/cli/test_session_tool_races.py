@@ -168,7 +168,7 @@ async def test_memory_can_run_during_a_model_turn(
     await asyncio.wait_for(responding.wait(), 3)
     before = setup.session.agent.conversation()
     setup.session.enter("/memory window")
-    await wait_for(lambda: "Long-term memory:" in setup.out.text())
+    await wait_for(lambda: "Embedding model:" in setup.out.text())
     assert setup.session.state == "running"
     assert setup.session.agent.conversation() == before
     # The list of notes opens between turns.

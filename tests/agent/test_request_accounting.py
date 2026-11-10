@@ -84,9 +84,7 @@ async def test_opt_in_calibration_kind_model_and_reset() -> None:
     chat = _scoped_chat(llm, context_budget=ContextBudget(100000, 10, 10))
 
     async def plan() -> None:
-        await chat.plan_step(
-            [], [Message(role="user", content="question")], [], "question"
-        )
+        await chat.plan_step([Message(role="user", content="question")], [], "question")
 
     await plan()
     await plan()
@@ -132,7 +130,7 @@ async def test_a_request_under_the_limit_in_real_tokens_is_not_cut() -> None:
         FakeLLM([None, None]), context_budget=ContextBudget(10**6, 1, 1)
     )
     for window in (small, large):
-        await probe.plan_step([], window, [], "question")
+        await probe.plan_step(window, [], "question")
     assert probe.stats.context_budget is not None
     first, second = (record["estimate"] for record in probe.stats.context_budget)
     # The server counts three tokens for every four the proxy does; the limit lies
@@ -140,8 +138,8 @@ async def test_a_request_under_the_limit_in_real_tokens_is_not_cut() -> None:
     llm = FakeLLM([{"prompt_tokens": first * 3 // 4}, None])
     limit = (second * 3 // 4 + second) // 2
     chat = _scoped_chat(llm, context_budget=ContextBudget(limit + 2, 1, 1))
-    await chat.plan_step([], small, [], "question")
-    await chat.plan_step([], large, [], "question")
+    await chat.plan_step(small, [], "question")
+    await chat.plan_step(large, [], "question")
     assert chat.stats.context_budget is not None
     record = chat.stats.context_budget[1]
     assert record["source"] == "calibrated" and not record["over_limit"]
@@ -169,7 +167,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
     )
     emitted: list[dict[str, Any]] = []
     chat.on_context_budget = emitted.append
-    await chat.plan_step([], [Message(role="user", content="q")], [], "q")
+    await chat.plan_step([Message(role="user", content="q")], [], "q")
     await chat.retrieve([Message(role="user", content="q")])
     records = chat.stats.context_budget
     assert records is not None
@@ -183,7 +181,7 @@ async def test_failed_attempts_and_other_kinds() -> None:
 
 async def test_default_disabled() -> None:
     chat = _scoped_chat(FakeLLM([None]))
-    await chat.plan_step([], [Message(role="user", content="q")], [], "q")
+    await chat.plan_step([Message(role="user", content="q")], [], "q")
     assert chat.stats.context_budget is None
 
 
@@ -217,7 +215,7 @@ async def test_nested_chat_does_not_use_outer_accounting_or_sink() -> None:
     token = BUDGET_ACCOUNTING.set((outer, outer._accounting))
     hook = BUDGET_HOOK.set((outer, emitted.append))
     try:
-        await inner.plan_step([], [Message(role="user", content="q")], [], "q")
+        await inner.plan_step([Message(role="user", content="q")], [], "q")
     finally:
         BUDGET_HOOK.reset(hook)
         BUDGET_ACCOUNTING.reset(token)
