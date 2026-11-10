@@ -53,9 +53,9 @@ SECTIONS = (
 # beside them (on stderr, after the listing). A developer setting each.
 WARNINGS = {
     "tools.web_fetch_allow_local": (
-        "developer only. It lets web_fetch read the test servers listed in it "
-        "on this computer (127.0.0.1:PORT), which web_fetch never reads otherwise. "
-        "Leave it empty unless you run a test server of your own."
+        "developer only. It lets web_fetch read, and melo's browser open, the test "
+        "servers listed in it on this computer (127.0.0.1:PORT), which neither "
+        "reaches otherwise. Leave it empty unless you run a test server of your own."
     ),
 }
 

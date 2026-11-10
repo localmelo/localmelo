@@ -11,7 +11,8 @@ are about its limits:
 - a name is never allowed, even one that resolves to a listed address, and a
   redirect meets the same guard (an unlisted port, a public page sending melo
   to a local one);
-- only web_fetch honours it, and each fetch it allows is marked.
+- each fetch it allows is marked (the browser's side is in
+  ``tests/browser/test_allow_local.py``).
 
 Each refusal test also reads the listed server, so a setting that does
 nothing fails it too. No test reaches the network: the servers are
@@ -651,13 +652,13 @@ def test_the_model_cannot_set_it() -> None:
     }
 
 
-# ── Only web_fetch honours it ──
+# ── The guard reads it only as a hook it is given ──
 
 
 async def test_the_guard_without_a_hook_never_reads_the_setting(
     server: dict[str, Any],
 ) -> None:
-    """The browser tools use the guard's own checks with no hook (#439)."""
+    """With no hook, as the browser checks every asker but melo and a listed page, nothing local passes (#439)."""
     config.save(_cfg(_listed(server)))
     url = _url(server)
     with pytest.raises(AddressError, match="loopback"):
@@ -669,7 +670,7 @@ async def test_the_guard_without_a_hook_never_reads_the_setting(
 
 
 def test_the_guard_has_no_hook_unless_it_is_given_one() -> None:
-    """No default, no module state: the browser's calls carry nothing local."""
+    """No default, no module state: a call carries nothing local unless it is given a hook."""
     for function in (guard.check_url, guard.checked_addresses):
         assert inspect.signature(function).parameters["allow"].default is None
     assert WebFetcher()._allow is None
@@ -683,17 +684,7 @@ def test_a_plain_hook_never_lets_a_written_address_through() -> None:
             guard.check_url(url, allow=lambda host, ip: True)
 
 
-def test_nothing_under_the_browser_reads_the_setting() -> None:
-    root = Path(inspect.getfile(config)).parent / "browser"
-    sources = sorted(root.glob("*.py"))
-    assert sources
-    for path in sources:
-        text = path.read_text("utf-8")
-        for word in ("web_fetch_allow_local", "LocalAllow", "web_local"):
-            assert word not in text, f"{path.name} mentions {word}"
-
-
-def test_only_a_web_fetch_fetcher_gets_a_hook() -> None:
+def test_a_fetcher_gets_a_hook_only_when_the_list_has_an_entry() -> None:
     cfg = _cfg(["127.0.0.1:8000"])
     fetcher = web_local.fetcher(cfg)
     assert isinstance(fetcher._allow, LocalAllow)

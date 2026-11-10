@@ -254,7 +254,11 @@ those tools can do.
   part, `x@127.0.0.1`, included) or is a name of one word, but a name that
   only resolves to this Mac (DNS rebinding, `/etc/hosts`) is checked by
   neither, and melo only blanks that tab after it lands and reads nothing
-  from it. Safari's automation windows have no such check.
+  from it. Safari's automation windows have no such check. The developer
+  setting `[tools] web_fetch_allow_local`, empty by default, lets melo's own
+  navigation and the pages already on a listed `127.0.0.1:PORT` server reach
+  the listed servers (never melo's own ports); a request of any other page
+  to them stays blocked, judged by the `Origin` or `Referer` Chrome sets.
 - **The hosts of one site share a kept answer.** What the person keeps for
   opening a site, or for clicking and choosing on it, covers the site's other
   hosts where that answer holds, because a sign-in moves between them. One site

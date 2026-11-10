@@ -609,9 +609,10 @@ class ToolsConfig:
     off). The chats and the console's tasks offer it; direct runs never do.
 
     ``web_fetch_allow_local`` is a developer setting, empty by default: the
-    test servers on this computer ``web_fetch`` may also read, as exact
-    ``127.0.0.1:PORT`` or ``[::1]:PORT`` entries. Any other entry is an error,
-    and melo's own ports stay refused when listed (see
+    test servers on this computer ``web_fetch`` may also read and the browser
+    tools may open, as exact ``127.0.0.1:PORT`` or ``[::1]:PORT`` entries (the
+    name stays from when it was web_fetch's alone). Any other entry is an
+    error, and melo's own ports stay refused when listed (see
     :mod:`localmelo.support.web_local`). Config and ``-X`` only.
     """
 

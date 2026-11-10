@@ -37,6 +37,17 @@ itself:
   been given that site (``written``, which the browser tool refreshes at each
   step from the run's question policy), the address must have no user part,
   and melo's own ports stay blocked even when written.
+- One more, for a test: a server the developer setting ``[tools]
+  web_fetch_allow_local`` lists (the session's
+  :class:`~localmelo.support.web.guard.LocalAllow`, given to the page as
+  ``listed``). A request to it goes on only when it is melo's own
+  navigation of the page's main frame to exactly that site (``opening``, set
+  by the driver while it loads the address melo opens), or when the page that
+  sends it is itself on a listed server (``sender``: the ``Origin`` header,
+  else the ``Referer``, which Chrome sets and a page can only shorten or
+  drop). A request of any other page, a public one's, a frame's of a public
+  page, or one with neither header, is blocked and told, as before. melo's
+  own ports stay blocked even when listed.
 - Anything else goes on unchanged.
 
 There is no setting for the list: it is :data:`SIGNIN_HELPERS`, in code.
@@ -60,6 +71,7 @@ from localmelo.support.web.guard import (
     LOCAL_NAMES,
     LOCAL_SUFFIXES,
     AddressError,
+    LocalAllow,
     NotPublicError,
     check_url,
 )
@@ -243,17 +255,26 @@ class LocalRule:
         return paused
 
     def decide(
-        self, url: str, origin: str, written: Collection[tuple[str, int]] = ()
+        self,
+        url: str,
+        origin: str,
+        written: Collection[tuple[str, int]] = (),
+        listed: LocalAllow | None = None,
+        *,
+        sender: str = "",
+        opening: tuple[str, int] | None = None,
     ) -> Verdict:
         """What to do with a request to *url* sent by a page of *origin* (``""`` when it had none).
 
         *written* are the servers on this computer, as ``(address, port)``,
         that the person's own words wrote in this run (``localhost`` is
         ``127.0.0.1``): a request to exactly one of them goes on, if the
-        address has no user part and the port is none of melo's own. It is the
-        only local address that does; every other one, a redirect's or a
-        subresource's included, is still blocked. A URL that cannot be read
-        (a port out of range, a broken bracket) is blocked too.
+        address has no user part and the port is none of melo's own. *listed*
+        are the test servers of the developer setting, for the page that sent
+        the request: one goes on only for the asker :meth:`_is_listed` names.
+        These are the only local addresses that do; every other one, a
+        redirect's or a subresource's included, is still blocked. A URL that
+        cannot be read (a port out of range, a broken bracket) is blocked too.
         """
         try:
             parts = urlsplit(url)
@@ -276,6 +297,10 @@ class LocalRule:
         except NotPublicError:
             if self._is_written(parts, host, port, written):
                 return _PASS
+            if self._is_listed(
+                parts, f"{scheme}://{shown}:{port}/", listed, sender, opening
+            ):
+                return _PASS
             return Verdict("block", host, port)
         except AddressError:
             return _PASS
@@ -296,6 +321,27 @@ class LocalRule:
             and site in written
             and not self._is_own(port)
         )
+
+    def _is_listed(
+        self,
+        parts: SplitResult,
+        address: str,
+        listed: LocalAllow | None,
+        sender: str,
+        opening: tuple[str, int] | None,
+    ) -> bool:
+        """Whether the request to *address* goes to a listed test server, from an asker that may reach one.
+
+        The asker is melo's own navigation of the page's main frame to that
+        very site (*opening*), or a page on a listed server (*sender*, the
+        request's own ``Origin`` or ``Referer``). Never one of melo's own ports.
+        """
+        if listed is None or "@" in parts.netloc:
+            return False
+        site = listed.listed(address)
+        if site is None or self._is_own(site[1]):
+            return False
+        return site == opening or listed.listed(sender) is not None
 
     def _is_own(self, port: int) -> bool:
         try:
@@ -432,9 +478,22 @@ def fulfilled(ident: str, answer: Relayed) -> dict[str, Any]:
 
 def origin_of(headers: object) -> str:
     """The ``Origin`` header of a paused request's *headers*, or ``""``."""
+    return _header(headers, "origin")
+
+
+def sender_of(headers: object) -> str:
+    """The page that sent a paused request, as its *headers* say: the ``Origin``, else the ``Referer``; ``""`` when neither.
+
+    Chrome sets both from the sending document: a page can drop or shorten
+    them, never name another page. An ``Origin`` of ``null`` names none.
+    """
+    return _header(headers, "origin") or _header(headers, "referer")
+
+
+def _header(headers: object, wanted: str) -> str:
     if isinstance(headers, dict):
         for name, value in headers.items():
-            if isinstance(name, str) and name.lower() == "origin":
+            if isinstance(name, str) and name.lower() == wanted:
                 return value if isinstance(value, str) else ""
     return ""
 
@@ -454,5 +513,6 @@ __all__ = [
     "fulfilled",
     "origin_of",
     "relay",
+    "sender_of",
     "told",
 ]
