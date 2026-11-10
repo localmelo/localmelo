@@ -33,6 +33,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 ### Tasks
 
+- A task says where it is in the same words on its page, in the side panel and in the terminal, and the reason it waits after a restart reads in your language.
 - A task says honestly how it ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.
 - Ready means done: a task asked to write a named file that is missing says so on its card.
 - A task that runs out of steps reads Stopped, and Continue picks it up where it left off.
@@ -44,6 +45,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
 - One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
+- After a restart, a task cut off in the middle of writing a file in its folder goes on and looks at that file first; any other half-done step waits for you.
 - A task goes on by itself when localmelo starts again after a stop or a crash, and its page says so; only work that may be half done waits for you.
 - Worker runs (`melo worker BRIEF`) run their `Check:` lines when the model is done, and a failed check exits 4.
 

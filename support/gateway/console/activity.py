@@ -41,6 +41,7 @@ from localmelo.support.sessions.store import (
     SessionStoreError,
     StoredEvent,
 )
+from localmelo.support.task_stage import task_stage
 
 from ..finishing import NOT_CONTINUED, is_out_of_steps
 from ..task_endings import can_finish, report_text, shown
@@ -49,7 +50,6 @@ from .followups import FOLLOWED_ECHO, QUIET_DIDS, followed_words
 from .running import (
     TASK_OUTCOMES,
     TITLE_CHARS,
-    WAITS_FOR_YOU,
     _turn_outcome,
     item_activity,
     spoken,
@@ -65,15 +65,20 @@ MAX_APPROVALS: Final = 20
 # How far back `since` may reach: a week.
 MAX_SPAN_S: Final = 7 * 86400
 LIVE: Final = ("running", "waiting", "held", "queued", "paused")
-# A task's state as a row says it; a finished one as `status.recent` does.
-TASK_STATES: Final = {
+# A task's row state by its stage (the stage table decides); a finished one as
+# `status.recent` says it. A task waiting for the person's Resume waits, as one
+# waiting for an approval does.
+ROW_STATES: Final = {
     "running": "running",
-    "held": "held",
+    "stopping": "running",
+    "approval": "waiting",
+    "answer": "waiting",
+    "resume": "waiting",
+    "asked": "held",
+    "model": "held",
+    "slot": "held",
     "queued": "queued",
-    "waiting": "queued",
-    "parked": "paused",
-    "interrupted": "paused",
-    **TASK_OUTCOMES,
+    "paused": "paused",
 }
 # A task that failed because it could not use its folder (it never runs in
 # another one), as its row says it and, in English, its card.
@@ -442,10 +447,19 @@ async def _task_rows(
 ) -> list[dict[str, Any]]:
     rows = []
     for record in await console.workers.tasks.tasks_since(since):
-        state = TASK_STATES.get(record.state, "queued")
         # A run that used all its steps is stopped, not failed, and can continue.
         stopped = is_out_of_steps(record.state, record.wait_reason)
-        state = "stopped" if stopped else state
+        stage = task_stage(
+            {
+                "state": record.state,
+                "wait_reason": console.gate.held(record.task_id) or record.wait_reason,
+                "out_of_steps": stopped,
+            }
+        )
+        if stage.key == "finished":
+            state = "stopped" if stopped else TASK_OUTCOMES[record.state]
+        else:
+            state = ROW_STATES[stage.key]
         at = record.finished_at or record.updated_at
         row = _row("task", record.task_id, record.title, state, at)
         row["level"] = record.level_eff
@@ -457,12 +471,8 @@ async def _task_rows(
         if state == "running":
             await _live(row, console)
         elif state in LIVE:
-            # A task held on an approval waits for the person; any other hold is
-            # the scheduler's, and the gate says why.
-            asks = record.state == "held" and record.wait_reason in WAITS_FOR_YOU
-            reason = "Approval" if asks else console.gate.held(record.task_id)
-            text = activity_text(state=state, reason=reason)
-            row.update(activity=spoken(text), icon=text.icon)
+            # Its stage in words (a hold says why), with the icon of its row state.
+            row.update(activity=t(stage.label), icon=activity_text(state=state).icon)
         else:
             turn = sessions.get(record.task_id)
             ended = _ended(turn) if turn is not None else (state, state, "")

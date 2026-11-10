@@ -3,7 +3,7 @@ import {maker} from './dom.mjs';
 import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts} from './blocked.mjs';
-import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
+import {canFinish, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -168,12 +168,17 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
-  // A task waiting on its question's answer says whose (#369).
-  const askText = (ask) => (ask.on === 'person' ? t('ask.waitingOnYou') : t('ask.waitingOn', {chat: ask.chat_title ?? ''}));
-  // A finished task's state is how code decided it ended: Ready, Done, not finished, Needs you…
+  // A finished task's ending colours its state: Ready, Done, not finished, Needs you…
   const endingOf = (task) => (isStopped(task) ? null : readEnding(task.ending));
-  const stateText = (task) => (pendingOf(task).length ? t('common.waitingApproval') : task.ask ? askText(task.ask) : isStopped(task) ? t('tasks.state.stopped')
-    : endingOf(task) ? endingLabel(endingOf(task)) : stateWord(task.state));
+  // Its stage as the gateway's stage table decided it (#605), in words: whose
+  // answer it waits for names the chat. A developer also sees the stored state.
+  const stateText = (task) => {
+    const words = task.stage ? t(task.stage.label, {chat: task.ask?.chat_title ?? ''}) : stateWord(task.state);
+    return developer() && task.stage ? `${words} (${task.state})` : words;
+  };
+  // The reason a task waits for the person's Resume, in the page's language when
+  // its key is known; the stored sentence otherwise.
+  const whyText = (task) => (task.stage?.why ? t(`tasks.why.${task.stage.why}`) : task.wait_reason);
 
   function evidenceText(task) {
     if (state.evidence === 'unverified_processes') return t('tasks.evidence.unverified');
@@ -212,6 +217,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const stateCell = row(t('tasks.row.state'), stateText(task));
     const ending = readEnding(task.ending);
     if (endingOf(task)) stateCell.dataset.ending = ending.state;
+    else if (task.stage?.awaited === 'person') stateCell.dataset.awaited = 'person';
     // Why it is not ready, and the tests its run ran (from its own calls, never from its report).
     if (ending && endingWhy(ending)) row(t('ending.row'), endingWhy(ending));
     if (ending?.tests.length) {
@@ -229,10 +235,15 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
     if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
     row(t('tasks.row.updated'), when(task.updated_at));
-    // The start continued it by itself after a restart: one quiet line, with the time.
-    if (task.continued_at != null) row(t('tasks.row.continued'), when(task.continued_at));
+    // The start continued it by itself after a restart: one quiet line, with the time,
+    // and a note when its turn was asked to look at a step that may be half done.
+    if (task.continued_at != null) {
+      const continued = row(t('tasks.row.continued'), when(task.continued_at));
+      if (task.continued_check) continued.append(node('p', 'muted', t('tasks.row.continuedCheck')));
+    }
     // A refused folder says why in its own box below, in words.
-    if (task.wait_reason && !task.folder_problem && !isStopped(task)) row(t('tasks.row.waiting'), task.wait_reason);
+    // Why it waits for the person's Resume, or why a stop paused it; any other wait is its stage above.
+    if ((task.stage?.why || task.stage?.need === 'resume') && task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), whyText(task));
     // What the run says is left, from its stop answer.
     if (isStopped(task) && task.left) row(t('tasks.row.left'), task.left);
     if (task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);

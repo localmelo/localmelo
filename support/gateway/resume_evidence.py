@@ -94,7 +94,8 @@ class ResumeEvidence:
     pending_operation_id: str | None
     card: str
     capture_complete: bool
-    open_calls: tuple[str, ...]
+    # Each open call's tool and whether its effect stays local (None: unknown).
+    open_calls: tuple[tuple[str, bool | None], ...]
     groups: tuple[Process, ...]
     groups_gone: bool
     turn_began: bool
@@ -115,7 +116,7 @@ def _key(evidence: ResumeEvidence) -> str:
             "first_start": evidence.first_start,
             "execution": evidence.execution_id,
             "capture": evidence.capture_complete,
-            "calls": list(evidence.open_calls),
+            "calls": [list(call) for call in evidence.open_calls],
             "groups": [list(group) for group in evidence.groups],
             "gone": evidence.groups_gone,
             "card": evidence.card,
@@ -185,19 +186,21 @@ async def collect_evidence(
     return replace(preliminary, evidence_key=_key(preliminary))
 
 
-def in_flight(evidence: ResumeEvidence) -> bool:
-    """Whether something of the last execution may be half done or still running.
+def settled(evidence: ResumeEvidence) -> bool:
+    """Whether nothing of the last execution may still run, its open calls apart.
 
-    Nothing is in flight only when the execution is known, its capture is
-    complete (every process it started has a record), no call that can change
-    something was open, and every recorded process group is verified gone.
+    The execution is known, its capture is complete (every process it started
+    has a record) and every recorded process group is verified gone.
     """
-    return not (
-        evidence.execution_id
-        and evidence.capture_complete
-        and not evidence.open_calls
-        and evidence.groups_gone
+    return bool(
+        evidence.execution_id and evidence.capture_complete and evidence.groups_gone
     )
+
+
+def in_flight(evidence: ResumeEvidence) -> bool:
+    """Whether something of the last execution may be half done or still running:
+    it is not :func:`settled`, or a call that can change something was open."""
+    return not settled(evidence) or bool(evidence.open_calls)
 
 
 def decide(evidence: ResumeEvidence, *, workspace_valid: bool) -> ResumeDecision:

@@ -2569,21 +2569,27 @@ class TaskWorkers:
 
     @contextlib.asynccontextmanager
     async def _call_record(
-        self, task_id: str, execution_id: str, tool: str
+        self, task_id: str, execution_id: str, tool: str, local: bool
     ) -> AsyncIterator[None]:
         """Name a call that can change something for as long as it runs.
 
-        The row is closed however the call returns, except when the gateway's
-        stop cuts the call off: it may be half done, so its row stays and the
-        restart leaves the task waiting, as it does after a kill. A close that
-        fails leaves the row too.
+        The row, written before the call starts, holds whether the executor
+        found its effect *local*. It is closed however the call returns, except
+        when the gateway's stop cuts the call off: it may be half done, so its
+        row stays and the restart decides as after a kill (a local call's task
+        continues and checks it first, any other waits). A close that fails
+        leaves the row too.
         """
         recovery = RecoveryStore(self.store)
         call_id = uuid.uuid4().hex
 
         async def write() -> None:
             await recovery.open_call(
-                task_id, execution_id=execution_id, call_id=call_id, tool=tool
+                task_id,
+                execution_id=execution_id,
+                call_id=call_id,
+                tool=tool,
+                local=local,
             )
 
         cut = False
@@ -2762,8 +2768,10 @@ class TaskWorkers:
                         )
             capture_execution = execution_id
 
-            def call(tool: str) -> contextlib.AbstractAsyncContextManager[None]:
-                return self._call_record(task_id, capture_execution, tool)
+            def call(
+                tool: str, local: bool
+            ) -> contextlib.AbstractAsyncContextManager[None]:
+                return self._call_record(task_id, capture_execution, tool, local)
 
             async def capture(pid: int) -> None:
                 await self._capture_process(task_id, capture_execution, pid)
@@ -2981,6 +2989,17 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
+                            continued = await self.tasks.continued(task_id)
+                            if (
+                                continued is not None
+                                and continued.check
+                                and await self.tasks.resume_waiting_turn(task_id)
+                            ):
+                                # The restart's continue, its turn not begun: the
+                                # step that may be half done is checked first. The
+                                # note is melo's: the person's words stay as they were.
+                                words = text if words is None else words
+                                text = f"{continued.check}\n\n{text}"
                             if (
                                 record.origin == "user_rule"
                                 or _moved(record.spec)
@@ -3336,6 +3355,10 @@ class TaskWorkers:
         session = await self.store.get_session(chat_id)
         return session.created_at if session is not None else None
 
+    def stopping(self, task_id: str) -> bool:
+        """Whether a Stop of *task_id* is in progress (its worker has not ended yet)."""
+        return task_id in self._stopping
+
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
         body.pop("finishing", None)  # the worker's own mark, not part of the body
@@ -3348,8 +3371,11 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
-        # When the start continued it by itself: its page says so, with the time.
-        body["continued_at"] = await self.tasks.continued_at(record.task_id)
+        # When the start continued it by itself: its page says so, with the time,
+        # and whether its turn checked a step that may have been half done first.
+        continued = await self.tasks.continued(record.task_id)
+        body["continued_at"] = continued.at if continued else None
+        body["continued_check"] = bool(continued and continued.check)
         # Ask or Auto, and what Auto blocked (#339): the chat's mode now for a
         # person's task that has not ended (#576), else the mode it ended with.
         body["approvals"] = await self._chat_mode_of(record) or chat_mode(

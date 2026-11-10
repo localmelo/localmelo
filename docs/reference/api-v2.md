@@ -832,6 +832,24 @@ the shape of a session's; empty when none; answer one with `POST
 with reserved accounting fields. Service, wait and tool accounting are not
 implemented yet.
 
+Every task object also has `stage`, where the task is as one table decides it
+for the console, the terminal and the app: `{"key", "awaited", "need",
+"ending", "why", "label"}`. `key` is `running`, `stopping`, `approval`,
+`answer`, `asked` (its chat's answer), `model`, `slot`, `queued`, `paused`,
+`resume` (it waits for the person's Resume after a restart) or `finished`;
+`awaited` is `nobody`, `person`, `model`, `slot` or `time`; `need` is `""`,
+`approval`, `answer`, `resume`, `continue`, `review` or, for a slot, the
+scheduler's reason code; `ending` is how a finished task ended (`""` for a done
+one with no ending); `why` names the reason a task waits after a restart
+(`restart`, `paused`, `unsure`, `call`, `crashed`, `folder`, `record`, or `""`
+when the stored `wait_reason` has no key); `label` is the catalog key of its
+words. The first row that holds decides: finished over everything, then a Stop
+in progress, an open approval, an open question, a hold, queued, paused, a
+task the stop cut off (it continues at the next start, so it reads `paused`,
+`awaited` `nobody`, `why` `restart`), a restart's wait, and running; a
+combination no row matches, an unknown state too, reads as `running`.
+`wait_reason` keeps the stored sentence as it is.
+
 A task you started follows the [mode](#ask-and-auto) of its chat
 (`approvals`, `ask` or `auto`) while it has not ended: it starts with the
 chat's mode, and a later switch of the chat reaches it, Auto to Ask at its
@@ -874,9 +892,12 @@ nothing in flight (no call that can change something open, every recorded
 process group verified gone) continues by itself: it is `queued` again with a
 resumed turn, the same id, level and rank, and one `sched.resumed` event with
 `data.reason` `"restart"`; its task JSON then has `continued_at`, the time of
-that continue (`null` otherwise, or once the person resumes it). A task with
-something in flight (a stop in the middle of a call that can change something
-included), whose folder is missing at start, or cut off by a crash for the
+that continue (`null` otherwise, or once the person resumes it), and
+`continued_check` is `true` when that continue followed a cut-off file write or
+edit inside the task's folder, whose resumed turn starts with a note asking it
+to look at that step first. A task with any other call in flight that can
+change something (a command, a write outside the folder, a browser or provided
+tool, more than one open call), whose folder is missing at start, or cut off by a crash for the
 second time since it last ended `done` or `failed` (`crashes` is reset then),
 stays `interrupted` with its reason and waits for the person; a person's pause
 stays paused. A task's turns carry `client_request_id`, its execution id. The decision

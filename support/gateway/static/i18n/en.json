@@ -119,7 +119,7 @@
     "one": "{n} task",
     "other": "{n} tasks"
   },
-  "app.quit.tasksContinue": " {what} will continue when it opens again; a task stopped in the middle of a step waits for you.",
+  "app.quit.tasksContinue": " {what} will continue when it opens again; a task stopped in the middle of a step melo cannot check by itself waits for you.",
   "app.quit.terminal": {
     "one": "{n} terminal chat",
     "other": "{n} terminal chats"
@@ -666,7 +666,6 @@
   "common.starting": "Starting…",
   "common.stop": "Stop",
   "common.untitled": "Untitled",
-  "common.waitingApproval": "Waiting for your approval",
   "composer.addTitle": "Add this to the work",
   "composer.adding": "Adding…",
   "composer.attach": "Add a picture or file",
@@ -2214,6 +2213,7 @@
   "tasks.resumeTitle": "Resume this task?",
   "tasks.resuming": "Resuming…",
   "tasks.row.continued": "Continued after a restart",
+  "tasks.row.continuedCheck": "It was asked to look at a step that may be half done first.",
   "tasks.row.evidence": "Evidence",
   "tasks.row.left": "What is left",
   "tasks.row.mode": "Mode",
@@ -2241,6 +2241,13 @@
   "tasks.unknownEffects": "Earlier effects of this task are unknown. A new task starts from the original objective alone and does not undo them.",
   "tasks.updated": "updated {when}",
   "tasks.warning": "A process from before the restart may still be running. Resuming may repeat effects. Confirmation does not prove the process stopped or effects happened only once.",
+  "tasks.why.call": "A step melo cannot check by itself, such as a command or one that reaches outside this computer, was running when localmelo stopped: check whether it finished, then resume.",
+  "tasks.why.crashed": "localmelo closed unexpectedly twice while this task was working: check its work, then resume.",
+  "tasks.why.folder": "This task's folder was missing when localmelo started: resume it once the folder is back.",
+  "tasks.why.paused": "You paused this task before localmelo stopped: resume it when you want it to go on.",
+  "tasks.why.record": "localmelo could not read this task's record when it started: check its work, then resume.",
+  "tasks.why.restart": "localmelo stopped; this task continues when it opens again",
+  "tasks.why.unsure": "localmelo stopped before it could tell whether this task's last step finished: check its work, then resume.",
   "time.month.1": "Jan",
   "time.month.10": "Oct",
   "time.month.11": "Nov",
