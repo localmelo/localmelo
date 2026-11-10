@@ -13,6 +13,7 @@ from localmelo.melo.contracts.approvals import (
     LEFT_UNANSWERED,
     NO_ANSWER,
     AllowAllPolicy,
+    Allowance,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
@@ -23,6 +24,8 @@ from localmelo.melo.contracts.approvals import (
     denial_text,
     find_auto,
     grant_offered,
+    kept_offered,
+    never_kept,
     review_mode,
     site_grant,
     wait_words,
@@ -31,6 +34,7 @@ from localmelo.melo.contracts.approvals import (
 )
 from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, ModelAnswer, step_key
+from localmelo.support.sessions.grants import GrantRefusedError, check_grant, grant_kind
 
 KEYS = ActionReview("high", ("credentials",), ("Reads ~/.ssh/id_rsa.",))
 INSTALL = ActionReview(
@@ -120,9 +124,7 @@ async def test_an_allowance_runs_its_step_once_until_it_runs_out() -> None:
     key = step_key("python_exec", {"code": "pip"}, "/ws")
     policy.allow_once(key, INSTALL.categories)
     assert policy.has_allowances()
-    assert await policy.decide(request) == ApprovalDecision(
-        True, "allowed once", origin="user"
-    )
+    assert await policy.decide(request) == Allowance(True, ALLOWED_ONCE, origin="user")
     assert not policy.has_allowances()
     assert (await policy.decide(request)).allow is False
     policy.allow_once(key, INSTALL.categories)
@@ -463,6 +465,19 @@ async def test_an_allowance_still_runs_before_the_card() -> None:
 
     assert (decided.allow, decided.reason) == (True, ALLOWED_ONCE)
     assert asking.asked == []
+    # How it was decided is its type, not its text, and it can keep nothing.
+    assert isinstance(decided, Allowance) and not decided.remember
+    assert not isinstance(
+        ApprovalDecision(True, ALLOWED_ONCE, origin="user"), Allowance
+    )
+    with pytest.raises(ValueError):
+        Allowance(True, ALLOWED_ONCE, remember=True, origin="user")
+    with pytest.raises(ValueError):
+        Allowance(True, ALLOWED_ONCE, origin="user", always=True)
+    with pytest.raises(ValueError):
+        Allowance(False)
+    with pytest.raises(ValueError):
+        Allowance(True, origin="auto")
 
 
 def test_a_chosen_answer_is_the_persons() -> None:
@@ -575,16 +590,52 @@ def _site(
         # Not a site question: a command the review stopped is never kept.
         (_request("print(1)", BEYOND), False, False),
         (_request("x", INSTALL), False, False),
+        # A card-only kind is never kept, whatever its verdict.
+        (_request("print(1)", ActionReview("routine", ("money",))), False, False),
         # Ask's own questions keep their rule: unreviewed and routine may be kept.
         (_site(review=None), False, True),
         (_request("print(1)", ActionReview("routine")), False, True),
+        # A folder outside the workspace by its own rule, and never a card-only kind.
+        (
+            dataclasses.replace(
+                _request(), outside=OutsideAccess("/x/a.txt", "/x", "read", True)
+            ),
+            False,
+            True,
+        ),
+        (
+            dataclasses.replace(
+                _request(review=ActionReview("routine", ("money",))),
+                outside=OutsideAccess("/x/a.txt", "/x", "read", True),
+            ),
+            False,
+            False,
+        ),
     ],
 )
 def test_what_a_chat_may_keep(
     request_: ApprovalRequest, site: bool, offered: bool
 ) -> None:
     assert site_grant(request_) is site
-    assert grant_offered(request_) is offered
+    assert kept_offered(request_) is offered
+    assert grant_offered(request_) is (offered and request_.outside is None)
+    # The grants table keeps what the offer offers and refuses the rest (one list).
+    outside = request_.outside
+    key = request_.tool_name if outside is None else outside.folder
+    kind = "folder" if outside is not None else grant_kind(key) or "tool"
+
+    def keep() -> None:
+        check_grant(kind, key, "person", request=request_)
+
+    if offered:
+        keep()
+    elif outside is None and grant_kind(key) is None:  # the name alone is refused
+        with pytest.raises(GrantRefusedError, match="never kept for a chat"):
+            keep()
+    else:  # past the name, a rule of the request refuses it
+        rule = "ask every time" if never_kept(request_) else "asks every time"
+        with pytest.raises(GrantRefusedError, match=rule):
+            keep()
 
 
 def _window(

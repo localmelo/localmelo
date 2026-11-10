@@ -180,10 +180,11 @@ JSON:
   trusted `task_id` to create a non-symlink child of that root. The root
   defaults to `~/localmelo-workspace` when not configured.
 - `worker_tool_allowlist()` returns the gateway built-ins
-  (`file_read`, `file_write`, `python_exec`; never `shell_exec`) and, for
-  `user` and `user_rule` only, remembered approvals, unmarked MCP tools and
-  session grants. `front`, `harness`, `agent`, `channel` and `sleep` get
-  none of those, so every marked call needs a fresh approval.
+  (`file_read`, `file_write`, `python_exec`; never `shell_exec`) and
+  `chat_approvals`: true for `user` and `user_rule`, whose calls are asked
+  about in the chat that owns the task (only a `user` task uses that chat's
+  grants). `front`, `harness`, `agent`, `channel` and `sleep` get false, so
+  every marked call needs a fresh approval.
 
 `ChatGate.register_task()` gives a worker its task lifecycle. Its calls are
 submitted with `task_id` and `session_kind="task"`, never take the lane, and

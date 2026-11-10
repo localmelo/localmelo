@@ -2,7 +2,7 @@ import {taskLive} from './task-live.mjs';
 import {maker} from './dom.mjs';
 import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
-import {allowState, blockCard, blockFacts, stepLine} from './blocked.mjs';
+import {allowState, blockCard, blockFacts} from './blocked.mjs';
 import {canFinish, endingLabel, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
@@ -157,9 +157,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
   const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
-  // The steps that ran on the person's earlier approval in the task's chat (#369).
-  const earlierOf = (task) => (Array.isArray(task.earlier) ? task.earlier : []);
-  const clock = (value) => formatTime(new Date(value * 1000), 'clock');
   // A task waiting on its question's answer says whose (#369).
   const askText = (ask) => (ask.on === 'person' ? t('ask.waitingOnYou') : t('ask.waitingOn', {chat: ask.chat_title ?? ''}));
   // A finished task's state is how code decided it ended: Ready, Done, not finished, Needs you…
@@ -238,7 +235,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (blockedOf(task).length) nodes.push(blockedBox(task));
-    if (earlierOf(task).length) nodes.push(earlierBox(task));
     const pack = packFold(doc, task);
     if (pack) nodes.push(pack);
     const project = projectLine(doc, task);
@@ -624,44 +620,6 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       live?.sync(outcome.data.task);
     } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
-  }
-
-  // Steps that ran without asking because they matched, exactly, a step the person allowed in the task's
-  // chat. Revoke takes that approval back (the step asks again next time); what ran stays done.
-  function earlierBox(task) {
-    const box = node('section', 'task-earlier');
-    box.append(node(sectionTag, '', t('tasks.earlier.title')), node('p', 'muted', t('tasks.earlier.note')));
-    const list = node('ul', 'task-earlier-list');
-    for (const use of earlierOf(task)) {
-      const row = node('li', 'task-earlier-row');
-      const step = node('code', 'task-earlier-step', stepLine(use.preview));
-      step.title = String(use.preview ?? '');
-      row.append(step, node('span', 'task-earlier-when', t('tasks.earlier.when', {approved: clock(use.approved_at), ran: clock(use.at)})));
-      if (use.live) {
-        const revoke = button('', t('approvals.revoke'), () => revokeEarlier(use), {disabled: Boolean(state.busy)});
-        revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(use.preview, 60)}));
-        row.append(revoke);
-      } else {
-        row.append(node('span', 'task-earlier-revoked', t('tasks.earlier.revoked')));
-      }
-      list.append(row);
-    }
-    box.append(list);
-    return box;
-  }
-
-  async function revokeEarlier(use) {
-    const epoch = state.epoch;
-    const where = `/sessions/${encodeURIComponent(use.chat_id)}/approvals/${encodeURIComponent(use.entry_id)}`;
-    const outcome = await act(`revoke:${use.entry_id}`, () => api(where, {method: 'DELETE'}));
-    if (!outcome || epoch !== state.epoch) return;
-    // Not found: revoked already, from the chat or another page.
-    if (outcome.error && outcome.error.status !== 404) {
-      state.error = errorText(outcome.error);
-      render();
-      return;
-    }
-    await refresh();
   }
 
   // A task refused its folder never ran: it says why and starts again in a folder the person chooses.

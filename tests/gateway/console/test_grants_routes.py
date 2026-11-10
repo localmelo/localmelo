@@ -90,7 +90,7 @@ async def test_a_main_chat_grant_holds_in_a_side_chat_and_its_tasks(
         assert detail["grants"] == ["python_exec"]
         assert detail["granted_at"]["python_exec"] > 0
         # A task the side chat started uses its chat's grants (#369).
-        assert "python_exec" in console.workers.ledger.grants_of(side)
+        assert "python_exec" in console.workers.grants.allowed_for(side)
         # A side chat's own grant stays its own.
         await console.sessions.book.view(side, "side").grant("file_write")
         main_detail = (await client.get(f"/api/sessions/{main}")).json()

@@ -64,14 +64,12 @@ from prompt_toolkit.search import SearchState
 from prompt_toolkit.widgets import SearchToolbar
 from rich.text import Text
 
-from localmelo.melo.contracts.review import offers_grant
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.cli.approvals import (
     BODY_LINES,
     ESCAPED_WARNING,
     EVERYWHERE_RULE,
     FOLDER_RULE,
-    NO_GRANT_RULE,
     REASON_MAX_CHARS,
     PendingApproval,
     TerminalApprover,
@@ -1097,8 +1095,6 @@ class InteractiveApp:
                 where = home_label(pending.request.workspace_root or "")
                 for line in session_warning(pending.request.tool_name, where):
                     options += wrapped("", "  " + line, width, "  ")
-            elif not offers_grant(pending.request.review):
-                options += wrapped("", "  " + NO_GRANT_RULE, width, "  ")
             dot = f" {symbols.dot} "
             line = dot.join(
                 [

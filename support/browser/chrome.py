@@ -82,7 +82,20 @@ sent and tells the step (:meth:`ChromeBackgroundDriver.local_attempts`), and
 lets anything else go on. No permission is ever granted. One server on this
 computer is let through for a page: the exact host and port the person wrote
 in their own words (:meth:`ChromeBackgroundDriver.allow_local`, #547), never
-another local address and never one of melo's own ports.
+another local address and never one of melo's own ports. So are the test
+servers the developer setting ``[tools] web_fetch_allow_local`` lists, for
+melo's own navigation to one and for the requests of a page on one only
+(:meth:`LocalRule.decide <localmelo.support.browser.local_apps.LocalRule.decide>`).
+A page on a listed server is trusted like the developer's own app: Chrome's
+own check does not stop its WebSockets or its requests to names that lead to
+this computer, and melo's rule sees only addresses written as such. List only
+servers whose pages you wrote. melo's own ports stay blocked as an address a
+page or melo names, not for what a listed page's own script reaches by other
+means. A page's own requests are judged by its origin only, so a server both
+written by the person in this run and listed is treated as listed. While
+melo's navigation to a listed site loads, any GET of the main frame to that
+site passes, one the previous page starts or one a redirect chain leads back
+to included.
 
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
@@ -155,6 +168,7 @@ from localmelo.support.browser.pagescript import (
     stopped,
     wait_probe,
 )
+from localmelo.support.web.guard import LocalAllow
 
 # A command line that replaces Chrome's, for tests (a fake peer) and a Chrome
 # installed elsewhere.
@@ -479,8 +493,12 @@ class _Chrome:
         self.attempts: dict[str, list[LocalAttempt]] = {}
         # What says which servers on this computer a page's driver may reach (the
         # person wrote them, in a run that is still going), by page; a page
-        # with none here reaches no local address.
+        # with none here reaches no local address. The listed test servers of
+        # a page's driver, by page, and the listed site melo's own navigation
+        # is loading in a page's main frame now.
         self.written: dict[str, LocalGrant] = {}
+        self.listed: dict[str, LocalAllow] = {}
+        self.opening: dict[str, tuple[str, int]] = {}
         # Downloads in progress or finished and not told yet, by id: the page's
         # suggested name, its frame, the bytes so far, and the state.
         self.saving: dict[str, dict[str, Any]] = {}
@@ -708,12 +726,30 @@ class _Chrome:
             origin = local_apps.origin_of(request.get("headers"))
             url = str(request.get("url") or "")
             verdict = rule.decide(url, origin)
-            if verdict.kind == "block" and verdict.helper is None and self.written:
-                # The person may have written this server: judged for the page
-                # that sent the request (its driver's words), never for another.
+            if (
+                verdict.kind == "block"
+                and verdict.helper is None
+                and (self.written or self.listed)
+            ):
+                # The person may have written this server, or the developer
+                # listed it: judged for the page that sent the request (its
+                # driver's), never for another.
                 page = await self._page_of(frame)
-                if page in self.written:
-                    verdict = rule.decide(url, origin, frozenset(self.written[page]()))
+                if page in self.written or page in self.listed:
+                    # melo's own navigation is a GET of the main frame.
+                    main = (
+                        frame == page
+                        and params.get("resourceType") == "Document"
+                        and request.get("method") == "GET"
+                    )
+                    verdict = rule.decide(
+                        url,
+                        origin,
+                        frozenset(self.written[page]()) if page in self.written else (),
+                        self.listed.get(page),
+                        sender=local_apps.sender_of(request.get("headers")),
+                        opening=self.opening.get(page) if main else None,
+                    )
             if verdict.kind == "pass":
                 method, answer = "Fetch.continueRequest", {"requestId": ident}
             elif verdict.kind == "relay" and verdict.helper is not None:
@@ -1296,6 +1332,7 @@ class ChromeBackgroundDriver(PageScriptActs):
         self._browser: _Chrome | None = None
         self._mine: set[str] = set()
         self._written: LocalGrant | None = None
+        self._listed: LocalAllow | None = None
         # The id each tab was given (its first target id) and its target now: a
         # restart of Chrome changes the target, never the id (see _follow).
         self._ids: dict[str, str] = {}
@@ -1370,6 +1407,8 @@ class ChromeBackgroundDriver(PageScriptActs):
             for target in self._mine:
                 browser.attempts.pop(target, None)
                 browser.written.pop(target, None)
+                browser.listed.pop(target, None)
+                browser.opening.pop(target, None)
         self._mine.clear()
         self._ids.clear()
         self._lost.clear()
@@ -1701,8 +1740,10 @@ class ChromeBackgroundDriver(PageScriptActs):
                 await self._cmd("Target.closeTarget", {"targetId": spare})
         return target
 
-    def allow_local(self, grant: LocalGrant | None) -> None:
-        """Let this driver's pages reach exactly the servers on this computer *grant* says, as ``(address, port)`` (#547).
+    def allow_local(
+        self, grant: LocalGrant | None, listed: LocalAllow | None = None
+    ) -> None:
+        """Let this driver's pages reach exactly the servers on this computer *grant* says, as ``(address, port)`` (#547), and the test servers *listed*.
 
         *grant* says which servers the person wrote in their own words in this
         run (``localhost`` is ``127.0.0.1``), each time a request asks, so it
@@ -1712,9 +1753,11 @@ class ChromeBackgroundDriver(PageScriptActs):
         what a chat that forgets its approvals gives) reaches no local
         address. Only :class:`LocalRule` lets a request go on, and only to
         exactly one of these: melo's own ports and every other local address
-        stay blocked.
+        stay blocked. *listed* (``[tools] web_fetch_allow_local``, the
+        session's) is reached only by melo's own navigation to one and by a
+        page on one (see :meth:`LocalRule.decide`).
         """
-        self._written = grant
+        self._written, self._listed = grant, listed
         if self._browser is not None:
             for target in self._mine:
                 self._grant(self._browser, target)
@@ -1725,6 +1768,10 @@ class ChromeBackgroundDriver(PageScriptActs):
             browser.written[target] = self._written
         else:
             browser.written.pop(target, None)
+        if self._listed is not None:
+            browser.listed[target] = self._listed
+        else:
+            browser.listed.pop(target, None)
 
     def _drop(self, target: str) -> None:
         self._mine.discard(target)
@@ -1738,6 +1785,8 @@ class ChromeBackgroundDriver(PageScriptActs):
             self._browser.claimed.discard(target)
             self._browser.attempts.pop(target, None)
             self._browser.written.pop(target, None)
+            self._browser.listed.pop(target, None)
+            self._browser.opening.pop(target, None)
         if self._current == target:
             self._current = None
 
@@ -1746,9 +1795,19 @@ class ChromeBackgroundDriver(PageScriptActs):
     async def open(self, url: str, *, new_tab: bool, tab: str | None = None) -> TabInfo:
         target = await self._create() if new_tab else await self._target(tab)
         session = await self._focus(target)
-        await self._go(
-            session, lambda: self._cmd("Page.navigate", {"url": url}, session)
-        )
+        # melo opens this address itself: a listed test server it names is
+        # reached by this navigation of the main frame, and by nothing else.
+        site = self._listed.listed(url) if self._listed is not None else None
+        browser = self._browser
+        if site is not None and browser is not None:
+            browser.opening[target] = site
+        try:
+            await self._go(
+                session, lambda: self._cmd("Page.navigate", {"url": url}, session)
+            )
+        finally:
+            if browser is not None:
+                browser.opening.pop(target, None)
         return await self._here(target)
 
     async def back(self, tab: str | None) -> TabInfo:

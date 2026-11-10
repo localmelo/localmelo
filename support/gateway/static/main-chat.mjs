@@ -11,7 +11,7 @@
  */
 
 import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
-import {blockCard, blockFacts, stepLine} from "./blocked.mjs";
+import {blockCard, blockFacts} from "./blocked.mjs";
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
@@ -355,11 +355,10 @@ function later(end, seen) {
 
 /**
  * Whether *echo*'s buttons go: a later echo answered it (ids in *done*), or its task ended (ids in
- * *ended*, see `endedTasks`). A step that ran on the person's earlier approval keeps Revoke after its task ends:
- * the approval is the chat's, and later tasks could use it.
+ * *ended*, see `endedTasks`).
  */
 export function echoDone(echo, done, ended) {
-  return done.has(echo.id) || (echo.kind !== "earlier" && ended.has(echo.task_id));
+  return done.has(echo.id) || ended.has(echo.task_id);
 }
 
 /** A level as a line names it: its P-code for a developer, what it means in words (`today`) in default mode. */
@@ -372,8 +371,6 @@ const levelName = (level, plain) => (plain ? levelMeaning(level) : levelCode(lev
 export function echoActions(echo, done, plain = false) {
   if (done || !echo.task_id && !["ask", "chore", "chore_saved", "sleep"].includes(echo.kind)) return [];
   const undo = [t("mainChat.echo.undo"), "undo"];
-  // A step ran on the person's earlier approval (#369): Revoke takes the approval back.
-  if (echo.kind === "earlier") return [[t("approvals.revoke"), "revoke"]];
   // A reminder runs once, at its time: there is no "just once" for it.
   if (echo.kind === "chore" && echo.reminder) return [[t("mainChat.echo.remind"), "save"], [t("common.cancel"), "cancel"]];
   // The message started its work already: only the schedule is left to save.
@@ -423,10 +420,9 @@ export function echoNodes({doc, echo, done = false, act, plain = false}) {
   mark.setAttribute("aria-hidden", "true");
   const level = Number.isInteger(echo.level) && echo.kind !== "suggest" ? echo.level : null;
   // An echo the gateway worded keeps its words for the page's language; the level is the chip.
-  // A step that ran on an earlier approval says its time as the page writes a time.
-  const approvedAt = echo.kind === "earlier" ? Number(echo.approved_at) : 0;
+  // A step that ran on an earlier approval, a row from before every Allow once was one call, is a plain line.
   const said = plain && echo.said?.params?.level ? {...echo.said, params: {...echo.said.params, level: levelName(echo.level, plain)}} : echo.said;
-  const own = approvedAt ? t("approvals.used", {time: clock(approvedAt)}) : saidText(said);
+  const own = saidText(said);
   const words = level === null || own !== null ? own ?? echo.line : echo.line.replace(/ · [^·]+$/, "").replace(/ → [^→]+$/, " →");
   // The words, the level and the buttons wrap together, under the words.
   const body = el("div", "echo-body");
@@ -445,8 +441,6 @@ export function echoNodes({doc, echo, done = false, act, plain = false}) {
   }
   // A chore's proposal names the work it would repeat (a reminder, its words), under the question.
   if (echo.kind === "chore" && (echo.work || echo.text)) body.append(el("p", "echo-sub", echo.work || echo.text));
-  // The step that ran on an earlier approval, and the task that ran it.
-  if (echo.kind === "earlier" && echo.preview) body.append(el("p", "echo-sub", t("approvals.ran", {title: echo.title ?? "", step: stepLine(echo.preview)})));
   // A follow-up melo began on its own says so, quietly (#411).
   if (echo.kind === "followup") body.append(el("p", "echo-sub", t("followup.marker")));
   // A task of another chat says whose it is (a side chat's title, or the main chat).

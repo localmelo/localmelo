@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 
 from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support import config
@@ -68,7 +68,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
         assert entry.agent is not None
         granted = entry.policy.allowed_tools
         tools: list[ToolInfo] = entry.agent.list_tools()
-        recorded = console.approvals.entries(session_id)
         return JSONResponse(
             content={
                 "tools": [tool_json(tool, tool.name in granted) for tool in tools],
@@ -77,8 +76,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     {"path": folder, "label": display.home_label(folder)}
                     for folder in entry.policy.allowed_folders
                 ],
-                # The steps the person allowed here, which this chat's tasks may run again.
-                "approvals": [approval.to_json() for approval in recorded],
                 "mcp_config_label": "",
                 "mcp_error": MCP_DEFERRED,
             }
@@ -145,15 +142,6 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "everywhere": any(g.scope == "global" for g in gone),
             }
         )
-
-    @app.delete("/api/sessions/{session_id}/approvals/{entry_id}")
-    async def revoke_approval(session_id: str, entry_id: str) -> Response:
-        """Take back one recorded approval: the step asks again; what ran stays run."""
-        console.require_store()
-        await console.require_session(session_id)
-        if not console.approvals.revoke(session_id, entry_id):
-            raise ApiError(404, "not_found", t("errors.noApproval"))
-        return Response(status_code=204)
 
     @app.get("/api/sessions/{session_id}/memory")
     async def session_memory(session_id: str) -> JSONResponse:

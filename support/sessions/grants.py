@@ -55,20 +55,20 @@ from pathlib import Path
 from typing import Any, Final, Literal, get_args
 
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
     SITE_GRANTS,
     STAYS_FOR_CHAT,
     ApprovalDecision,
     ApprovalRequest,
     grant_offered,
     never_granted,
+    never_kept,
     question_site_key,
     site_covers,
     stays_for_chat,
     whole_site,
 )
 from localmelo.melo.contracts.folders import above_home, never_offered
-from localmelo.melo.contracts.review import CARD_ONLY, url_site
+from localmelo.melo.contracts.review import url_site
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
@@ -260,9 +260,10 @@ def check_grant(
     """Raise :class:`GrantRefusedError` unless a grant of *key* may be kept.
 
     Never a question of :data:`NEVER_GRANTED`, a step of a card-only kind,
-    an Allow once (*decision* without ``remember``, or Auto's
-    :data:`ALLOWED_ONCE`), a high-impact step, or a path outside the
-    workspace as a tool's grant. Auto keeps a site read only
+    an Allow once (*decision* without ``remember`` or ``always``; Auto's
+    :class:`~localmelo.melo.contracts.approvals.Allowance` can carry
+    neither), a high-impact step, or a path outside the workspace as a
+    tool's grant. Auto keeps a site read only
     (:func:`stays_for_chat`). A folder must be one a chat may be granted.
     """
     if kind not in GRANT_KINDS or by not in DECIDERS:
@@ -277,15 +278,14 @@ def check_grant(
     elif grant_kind(key) != kind:
         raise GrantRefusedError(f"{key!r} is never kept for a chat")
     if decision is not None and (
-        not decision.allow
-        or decision.reason == ALLOWED_ONCE
-        or not (decision.remember or decision.always)
+        not decision.allow or not (decision.remember or decision.always)
     ):
         raise GrantRefusedError("an Allow once is never kept")
     if request is not None:
-        review = request.review
-        if review is not None and set(review.categories) & CARD_ONLY:
-            raise GrantRefusedError("money and account steps ask every time")
+        if never_kept(request):
+            raise GrantRefusedError(
+                "money, account and app steps, typing and forms ask every time"
+            )
         if kind != "folder" and request.outside is not None:
             raise GrantRefusedError("a folder outside the workspace has its own grant")
         if by == "person" and kind != "folder" and not grant_offered(request):
@@ -509,6 +509,10 @@ class GrantBook:
         self._open_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
         self._pending: set[asyncio.Task[None]] = set()
+        # Queued writes that failed, and the newest failure: a wait reports
+        # those that fail while it waits, whoever dropped them.
+        self._failed = 0
+        self._failure: BaseException | None = None
         # Take-backs the file refused, grant id to when: the next write tries.
         self._owed: dict[str, float] = {}
         # Rows granted before the store opened, written when it does.
@@ -881,9 +885,26 @@ class GrantBook:
         return task
 
     def _settled(self, task: asyncio.Task[None]) -> None:
+        if task not in self._pending:
+            return  # a wait below dropped it already
         self._pending.discard(task)
         if not task.cancelled() and task.exception() is not None:
+            self._failed += 1
+            self._failure = task.exception()
             logger.warning("Could not save a grant change", exc_info=task.exception())
+
+    def _unfinished(self) -> list[asyncio.Task[None]]:
+        """The queued writes still running, after dropping the finished ones here.
+
+        A write that finished in the loop pass in which a wait looks has its
+        done-callback still queued, and ``gather`` of done tasks returns
+        without yielding: a wait that left the drop to the callback spun on
+        it for ever. So each wait drops what is done itself, and waits only
+        on what still runs.
+        """
+        for task in [task for task in self._pending if task.done()]:
+            self._settled(task)
+        return list(self._pending)
 
     async def _ordered(self, write: Awaitable[None], label: str) -> None:
         async with self._write_lock:
@@ -897,23 +918,25 @@ class GrantBook:
                 ) from exc
 
     async def settle(self) -> None:
-        """Wait for every queued write; the first that failed raises :class:`SessionStoreError`."""
-        failed: BaseException | None = None
-        while self._pending:
-            for result in await asyncio.gather(
-                *list(self._pending), return_exceptions=True
-            ):
-                if isinstance(result, BaseException) and failed is None:
-                    failed = result
-        if failed is not None:
+        """Wait for every queued write; one that failed meanwhile raises :class:`SessionStoreError`.
+
+        A write that fails while this waits counts whoever drops it (its own
+        done-callback, or :meth:`_unfinished`), so a failure is never lost
+        to a write that finished between two looks.
+        """
+        before = self._failed
+        while running := self._unfinished():
+            await asyncio.gather(*running, return_exceptions=True)
+        failed = self._failure
+        if self._failed > before and failed is not None:
             raise SessionStoreError(str(failed)) from failed
 
     async def flush(self) -> None:
         """Wait for every queued write (a failed one is logged), and try what is owed."""
-        if self._owed and not self._pending:
+        if self._owed and not self._unfinished():
             self._queue(self._mark_revoked([], 0.0), "grant_revoke")
-        while self._pending:
-            await asyncio.gather(*list(self._pending), return_exceptions=True)
+        while running := self._unfinished():
+            await asyncio.gather(*running, return_exceptions=True)
 
     async def _insert(self, grant: Grant) -> None:
         assert self._store is not None

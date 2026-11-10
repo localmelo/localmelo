@@ -74,10 +74,11 @@ export function t(key, params = {}) {
 /**
  * The words the gateway stored with a record (a card, an echo) as `said: {key, params}`, in the page's
  * language; a parameter may itself be a `said`, or a time of day `{clock: minutes after midnight}`, which
- * is written as this page writes a clock. Null when there is none, so the record's `line` reads.
+ * is written as this page writes a clock. Null when there is none, or its key is no longer in the catalog (a row an
+ * older version stored), so the record's `line` reads.
  */
 export function saidText(said) {
-  if (!said || typeof said !== "object" || typeof said.key !== "string") return null;
+  if (!said || typeof said !== "object" || typeof said.key !== "string" || catalogs.en?.[said.key] === undefined) return null;
   const params = {};
   for (const [name, value] of Object.entries(said.params ?? {})) {
     if (value && typeof value === "object" && typeof value.key === "string") params[name] = saidText(value);
