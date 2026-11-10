@@ -26,7 +26,8 @@ from localmelo.tests.agent.wire_runs import (
 )
 
 GOLDEN = Path(__file__).parent / "goldens" / "cache_defaults"
-DEFAULTS: dict[str, Any] = {"window_eviction": "chunk", "window_messages": 64}
+# An unset window is the agent's: 64 messages, or 256 while a token budget is in force.
+DEFAULTS: dict[str, Any] = {"window_eviction": "chunk", "window_messages": None}
 SENTENCE = "Answer with the JSON object only; do not call any tool."
 
 
@@ -36,10 +37,7 @@ def test_the_defaults_of_the_options_and_of_the_config() -> None:
     config = AgentConfig()
     # The config leaves the window unset: the backend decides it (see
     # tests/cli/test_window_messages_config.py).
-    assert {name: getattr(config, name) for name in DEFAULTS} == {
-        **DEFAULTS,
-        "window_messages": None,
-    }
+    assert {name: getattr(config, name) for name in DEFAULTS} == DEFAULTS
 
 
 async def _run_default_scenario(

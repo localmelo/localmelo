@@ -8,7 +8,9 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import BUDGET_ACCOUNTING, BUDGET_HOOK, Chat
 from localmelo.melo.agent._request_accounting import (
     IMAGE_TOKENS,
+    MIN_RATIO,
     ContextBudget,
+    calibrated,
     request_proxy,
 )
 from localmelo.melo.contracts.events import AgentEvent
@@ -110,6 +112,42 @@ async def test_opt_in_calibration_kind_model_and_reset() -> None:
     await plan()
     assert chat.stats.context_budget is not None
     assert chat.stats.context_budget[0]["source"] == "proxy"
+
+
+def test_a_measured_ratio_scales_the_proxy_both_ways_down_to_a_floor() -> None:
+    assert MIN_RATIO == 0.6
+    assert [calibrated(1000, r) for r in (None, 1.5, 0.75, 0.1)] == [
+        1000,
+        1500,
+        750,
+        600,
+    ]
+
+
+async def test_a_request_under_the_limit_in_real_tokens_is_not_cut() -> None:
+    """The server counts fewer tokens than the proxy: the budget is used up to its count."""
+    small = [Message(role="user", content="question")]
+    large = [Message(role="user", content="question " + "evidence " * 2000)]
+    probe = _scoped_chat(
+        FakeLLM([None, None]), context_budget=ContextBudget(10**6, 1, 1)
+    )
+    for window in (small, large):
+        await probe.plan_step([], window, [], "question")
+    assert probe.stats.context_budget is not None
+    first, second = (record["estimate"] for record in probe.stats.context_budget)
+    # The server counts three tokens for every four the proxy does; the limit lies
+    # between its count of the large request and the proxy's.
+    llm = FakeLLM([{"prompt_tokens": first * 3 // 4}, None])
+    limit = (second * 3 // 4 + second) // 2
+    chat = _scoped_chat(llm, context_budget=ContextBudget(limit + 2, 1, 1))
+    await chat.plan_step([], small, [], "question")
+    await chat.plan_step([], large, [], "question")
+    assert chat.stats.context_budget is not None
+    record = chat.stats.context_budget[1]
+    assert record["source"] == "calibrated" and not record["over_limit"]
+    assert record["estimate"] <= limit < second
+    assert record["pruned"] == {"tool_results": 0, "thinking": 0, "units": 0}
+    assert llm.sent[1][0][-1].content.endswith(large[0].content)
 
 
 async def test_failed_attempts_and_other_kinds() -> None:

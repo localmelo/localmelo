@@ -269,7 +269,7 @@ class AgentConfig:
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
     window_eviction: str = "chunk"  # chunk | boundary
-    # Working window cap, 8-256; None: default_window_messages() of the backend.
+    # Working window cap, 8-256; None: the backend's default (window_for).
     window_messages: int | None = None
     context_window: int | None = None
     output_reserve: int | None = None
@@ -318,11 +318,15 @@ class AgentConfig:
     # (AgentOptions.steps_per_attempt). None: the built-in (STEPS_PER_ATTEMPT, 50).
     steps_per_attempt: int | None = None
 
-    def window_for(self, backend: str) -> int:
-        """The working window's cap: ``window_messages``, else *backend*'s default."""
+    def window_for(self, backend: str) -> int | None:
+        """The working window's cap: ``window_messages``, else *backend*'s default.
+
+        None on a local server: the agent's own default, 64 messages, or 256 while
+        a token budget is in force (``AgentOptions.window_messages``).
+        """
         if self.window_messages is not None:
             return self.window_messages
-        return default_window_messages(backend)
+        return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else None
 
 
 def tool_images_errors(agent: AgentConfig) -> list[str]:
@@ -366,10 +370,11 @@ def default_window_messages(backend: str) -> int:
     A local server (ollama, mlc, vllm or oMLX, sglang, melo_serve) and an
     OpenAI-compatible URL reuse the prompt prefix from their cache, so a long
     window adds few new tokens per request and keeps more of the task in view:
-    64, the cap that two benchmark rounds measured. Without prompt caching a
-    longer window costs input tokens on every request, so a cloud vendor's
-    backend keeps 20 until a longer window is measured there. An explicit
-    ``[agent] window_messages`` or ``--window-messages`` always wins.
+    64, the cap that two benchmark rounds measured, and 256 while a token budget
+    is in force, so that the budget's fit is the limit that acts. Without prompt
+    caching a longer window costs input tokens on every request, so a cloud
+    vendor's backend keeps 20 until a longer window is measured there. An
+    explicit ``[agent] window_messages`` or ``--window-messages`` always wins.
     """
     return SHORT_TERM_MAX if backend in CLOUD_BACKENDS else LOCAL_WINDOW_MESSAGES
 
@@ -380,8 +385,13 @@ def window_reason(backend: str) -> str:
 
 
 def window_default_label(backend: str) -> str:
-    """The default window with its reason: ``64 (local server)`` or ``20 (cloud)``."""
-    return f"{default_window_messages(backend)} ({window_reason(backend)})"
+    """The default window with its reason: ``64, 256 with a token budget (local server)`` or ``20 (cloud)``."""
+    if backend in CLOUD_BACKENDS:
+        return f"{SHORT_TERM_MAX} ({window_reason(backend)})"
+    return (
+        f"{LOCAL_WINDOW_MESSAGES}, {WINDOW_MESSAGES_MAX} with a token budget "
+        f"({window_reason(backend)})"
+    )
 
 
 @dataclass

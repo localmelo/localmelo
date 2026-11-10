@@ -1601,7 +1601,8 @@ def _build_parser(
         metavar="N",
         help=f"The working window's message cap, {WINDOW_MESSAGES_MIN}-"
         f"{WINDOW_MESSAGES_MAX} (default {LOCAL_WINDOW_MESSAGES} on a local "
-        f"server or a URL, {SHORT_TERM_MAX} on a cloud vendor)",
+        f"server or a URL, {WINDOW_MESSAGES_MAX} there with a token budget, "
+        f"{SHORT_TERM_MAX} on a cloud vendor)",
     )
     direct.add_argument(
         "--tool-exposure",
