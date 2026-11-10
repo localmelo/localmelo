@@ -5,8 +5,9 @@ or a dict built from its record) and returns a :class:`Stage`: who is awaited,
 what is needed, how it ended. It is one table of ordered rows, the first that
 matches wins, so which of two true facts a person sees is read in one place.
 A stage names its words by catalog key (:attr:`Stage.label`); the wording
-stays in the catalogs. An unknown combination reads as the plain stage of the
-task's state, never an empty one, and never hides an open approval or question.
+stays in the catalogs. A combination no row matches (an unknown state too)
+reads as the running stage: never an empty one, and an open approval or
+question always wins over it.
 
 The reasons a task waits after a restart live here too: each stored sentence
 (kept as it is for scripts and old rows) has a key the page words in the
@@ -197,6 +198,13 @@ ROWS: Final[tuple[Row, ...]] = (
     (
         lambda task, stopping: task.get("state") == "parked",
         lambda task: Stage("paused", "person", "resume"),
+    ),
+    # Cut off by a stop, it continues by itself at the next start: paused, not
+    # waiting for the person.
+    (
+        lambda task, stopping: task.get("state") == "interrupted"
+        and task.get("wait_reason") == STOPPED_REASON,
+        lambda task: Stage("paused", why="restart"),
     ),
     (
         lambda task, stopping: task.get("state") == "interrupted",

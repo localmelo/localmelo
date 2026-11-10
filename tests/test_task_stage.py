@@ -4,7 +4,15 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.task_stage import CALL_REASON, Stage, task_stage
+from localmelo.support.gateway.console.activity import ROW_STATES
+from localmelo.support.gateway.console.front import _STAGE_WORDS
+from localmelo.support.task_stage import (
+    CALL_REASON,
+    LABELS,
+    STOPPED_REASON,
+    Stage,
+    task_stage,
+)
 
 APPROVAL = {"pending_approvals": [{"request_id": "r1"}]}
 
@@ -69,6 +77,12 @@ APPROVAL = {"pending_approvals": [{"request_id": "r1"}]}
             False,
             Stage("resume", "person", "resume", why="call"),
         ),
+        # A stop's own cut: it continues by itself, so it waits for nobody.
+        (
+            {"state": "interrupted", "wait_reason": STOPPED_REASON},
+            False,
+            Stage("paused", why="restart"),
+        ),
         (
             {"state": "interrupted", "wait_reason": "park not saved"},
             False,
@@ -102,3 +116,9 @@ def test_the_first_row_that_holds_decides_the_stage(
 ) -> None:
     assert task_stage(task, stopping=stopping) == stage
     assert task_stage(task, stopping=stopping).label
+
+
+def test_every_stage_a_task_can_be_at_has_its_row_state_and_its_model_words() -> None:
+    # Indexed by key with no fallback: a stage added to the table needs both.
+    keys = {*LABELS, "slot"}
+    assert keys <= set(ROW_STATES) and keys <= set(_STAGE_WORDS)

@@ -845,7 +845,9 @@ one with no ending); `why` names the reason a task waits after a restart
 when the stored `wait_reason` has no key); `label` is the catalog key of its
 words. The first row that holds decides: finished over everything, then a Stop
 in progress, an open approval, an open question, a hold, queued, paused, a
-restart's wait, and running; an unknown state reads as `running`.
+task the stop cut off (it continues at the next start, so it reads `paused`,
+`awaited` `nobody`, `why` `restart`), a restart's wait, and running; a
+combination no row matches, an unknown state too, reads as `running`.
 `wait_reason` keeps the stored sentence as it is.
 
 A task you started follows the [mode](#ask-and-auto) of its chat

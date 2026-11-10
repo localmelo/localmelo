@@ -242,8 +242,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       if (task.continued_check) continued.append(node('p', 'muted', t('tasks.row.continuedCheck')));
     }
     // A refused folder says why in its own box below, in words.
-    // Why it waits for the person's Resume; any other wait is its stage above.
-    if (task.stage?.need === 'resume' && task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), whyText(task));
+    // Why it waits for the person's Resume, or why a stop paused it; any other wait is its stage above.
+    if ((task.stage?.why || task.stage?.need === 'resume') && task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), whyText(task));
     // What the run says is left, from its stop answer.
     if (isStopped(task) && task.left) row(t('tasks.row.left'), task.left);
     if (task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);
