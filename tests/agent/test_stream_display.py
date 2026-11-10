@@ -249,19 +249,32 @@ ECHO = ToolDef(
 
 
 @pytest.mark.parametrize(
-    ("lines", "shown"),
+    ("lines", "shown", "call"),
     [
         # A call written as JSON over several lines: held until it is known.
-        (["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], ""),
-        (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], ""),
-        # Prose, and a code block of a language, still stream.
-        (["Sure.\n", "{ is a brace.\n"], "Sure.\n{ is a brace.\n"),
-        (["```python\n", "print(1)\n", "```\n"], "```python\nprint(1)\n```\n"),
+        (["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], "", True),
+        (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], "", True),
+        # The same after prose: the prose has shown, the call never does.
+        (
+            ["Let me check.\n", "{\n", '  "name": "echo",\n', '  "arguments": {}\n', "}\n"],
+            "Let me check.\n",
+            True,
+        ),
+        # A call as code in the call's fence.
+        (["```tool_code\n", 'echo(text="x")\n', "```\n"], "", True),
+        # A line that opens with a brace waits for the end, then shows.
+        (["Sure.\n", "{ is a brace.\n"], "Sure.\n", False),
+        # A code block of a language streams, braces and all.
+        (
+            ["```python\n", "x = 1\n", "{1: 2}\n", "```\n"],
+            "```python\nx = 1\n{1: 2}\n```\n",
+            False,
+        ),
     ],
-    ids=["json-lines", "json-fence", "prose", "code-block"],
+    ids=["json-lines", "json-fence", "later-call", "tool-code-fence", "prose", "code-block"],
 )
 async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
-    lines: list[str], shown: str
+    lines: list[str], shown: str, call: bool
 ) -> None:
     display = Display("none")
     seen: list[str] = []
@@ -281,6 +294,7 @@ async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
     finally:
         STREAM_DISPLAY.reset(token)
     assert seen == [shown]  # what showed before the reply came
+    assert display.text() == (shown if call else content)  # and after it
 
 
 async def test_a_whole_reply_is_not_judged_as_streamed() -> None:

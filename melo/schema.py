@@ -10,7 +10,7 @@ import unicodedata
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 # ── Config ──
 
@@ -526,9 +526,12 @@ _CALL_ARGUMENTS = re.compile(r"[ \t]*(?:\w+[ \t]*=|[\"'{\[)])")
 _JSON_LINE = re.compile(r"^[ \t]*[\[{]", re.MULTILINE)
 _CODE_FENCE = re.compile(r"\s{0,3}(`{3,}|~{3,})")
 _INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
+# The labels of a fenced block a model writes a call in: JSON, or a call as code.
+CALL_FENCE_LABELS: Final = ("json", "tool_code")
 # A whole reply that is one fenced block of JSON, or of a call as code.
 _CALL_BLOCK = re.compile(
-    r"```[ \t]*(json|tool_code)[ \t]*\n(.*?)\n?```", re.DOTALL | re.IGNORECASE
+    rf"```[ \t]*({'|'.join(CALL_FENCE_LABELS)})[ \t]*\n(.*?)\n?```",
+    re.DOTALL | re.IGNORECASE,
 )
 # A parameter or tool name shorter than this is too likely a plain word or letter.
 _MIN_CALL_NAME = 3

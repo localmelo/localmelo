@@ -11,7 +11,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
@@ -50,6 +50,7 @@ from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
+    CALL_FENCE_LABELS,
     EMPTY_REPLY_LABEL,
     REFLECTIONS_HEADER,
     UNANSWERED_NOTE,
@@ -600,9 +601,47 @@ def _quote_data_delimiter(text: str, delimiter: str) -> str:
 # A think block's mark anywhere in content, or a spelled-out block at its
 # start: the finished reply's views split these off as thinking.
 _THINK_MARK = re.compile(r"</?think\b|\A\s*<thinking\b", re.IGNORECASE)
-# A reply that opens like a tool call written as JSON, or a fence whose first
-# line is one: it can still turn out to be one (see _Hold).
-_JSON_OPENING = re.compile(r"\A\s*(?:[{\[]|(?:```|~~~)[^\n]*(?:\n\s*(?:[{\[]|\Z)|\Z))")
+# A fence line: its marker and its label.
+_FENCE_LINE = re.compile(r"[ \t]*(`{3,}|~{3,})[ \t]*([^\s`~]*)")
+_OPENS_JSON: Final = ("{", "[")
+
+
+def _call_opening(lines: str, fence: str | None) -> tuple[str, str | None]:
+    """Whether the complete *lines* open what may be a call written as text.
+
+    *fence* is the marker of the block of ordinary code the text before
+    *lines* is in, or ``None``. Returns ``"hold"`` when a line outside such a
+    block starts, after whitespace, with ``{`` or ``[``, or opens a fence
+    labelled as a call's (:data:`~localmelo.melo.schema.CALL_FENCE_LABELS`) or
+    one whose first content line starts so; ``"wait"`` when a fence's first
+    content line has not come yet; else ``""``; with the fence state after
+    *lines*.
+    """
+    rows = lines.splitlines()
+    for number, line in enumerate(rows):
+        found = _FENCE_LINE.match(line)
+        if fence is not None:
+            closes = (
+                found is not None
+                and found.group(1)[0] == fence[0]
+                and len(found.group(1)) >= len(fence)
+                and not found.group(2)
+            )
+            fence = None if closes else fence
+            continue
+        if found:
+            if found.group(2).lower() in CALL_FENCE_LABELS:
+                return "hold", fence
+            following = next((row for row in rows[number + 1 :] if row.strip()), None)
+            if following is None:
+                return "wait", fence
+            if following.lstrip().startswith(_OPENS_JSON):
+                return "hold", fence
+            fence = found.group(1)
+            continue
+        if line.lstrip().startswith(_OPENS_JSON):
+            return "hold", fence
+    return "", fence
 
 
 class _Hold:
@@ -613,13 +652,14 @@ class _Hold:
     the server sends reasoning in a field of its own); a tool call written as
     text (:func:`~localmelo.melo.schema.broken_tool_call`, judged on the text
     so far, so markup on a line is caught before the line shows); while tools
-    are offered, a reply that opens with ``{`` or ``[``, or with a fence whose
-    first line does (:data:`_JSON_OPENING`), as a call written as JSON is only
-    known when it closes; and content that so far repeats the *reasoning*
-    word for word (unfinished thinking a server sends again as content,
-    :func:`~localmelo.melo.schema.unfinished_thinking`). Held text shows when
-    the text that follows clears it, else at the end only if the reply is
-    none of these. The checks run once per released line.
+    are offered, from a line that may open a call written as JSON or in a
+    call's fence (:func:`_call_opening`) to the end of the request, as such a
+    call is only known when it closes; and content that so far repeats the
+    *reasoning* word for word (unfinished thinking a server sends again as
+    content, :func:`~localmelo.melo.schema.unfinished_thinking`). Held text
+    shows when the text that follows clears it, else at the end only if the
+    reply is none of these; a think mark or a call's opening holds for good.
+    The checks run once per released line.
     """
 
     def __init__(self, tools: Sequence[ToolDef]) -> None:
@@ -628,6 +668,8 @@ class _Hold:
         self.kept = ""  # released by the filter, held back here
         self._reasoning: list[str] = []
         self._thought: list[str] | None = []
+        self._fence: str | None = None  # the code block the shown text is in
+        self._for_good = False
 
     def reasoning(self, text: str) -> None:
         self._reasoning.append(text)
@@ -638,9 +680,19 @@ class _Hold:
         if not delta:
             return ""
         self.kept += delta
-        if self._may_hide(self.shown + self.kept):
+        if self._for_good:
             return ""
-        out, self.shown, self.kept = self.kept, self.shown + self.kept, ""
+        opening, fence = (
+            _call_opening(self.kept, self._fence) if self.tools else ("", None)
+        )
+        text = self.shown + self.kept
+        if opening == "hold" or _THINK_MARK.search(text):
+            self._for_good = True
+            return ""
+        if opening or self._may_hide(text):
+            return ""
+        out, self.shown, self.kept = self.kept, text, ""
+        self._fence = fence
         return out
 
     def end(self, tail: str, reply: Message, unfinished: bool) -> str:
@@ -655,9 +707,7 @@ class _Hold:
         return "" if hidden else rest
 
     def _may_hide(self, text: str) -> bool:
-        if _THINK_MARK.search(text) or broken_tool_call(text, self.tools):
-            return True
-        if self.tools and _JSON_OPENING.match(text):
+        if broken_tool_call(text, self.tools):
             return True
         if self._thought is None:
             self._thought = "".join(self._reasoning).split()
