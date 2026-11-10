@@ -385,8 +385,13 @@ def window_reason(backend: str) -> str:
 
 
 def window_default_label(backend: str) -> str:
-    """The default window with its reason: ``64 (local server)`` or ``20 (cloud)``."""
-    return f"{default_window_messages(backend)} ({window_reason(backend)})"
+    """The default window with its reason: ``64, 256 with a token budget (local server)`` or ``20 (cloud)``."""
+    if backend in CLOUD_BACKENDS:
+        return f"{SHORT_TERM_MAX} ({window_reason(backend)})"
+    return (
+        f"{LOCAL_WINDOW_MESSAGES}, {WINDOW_MESSAGES_MAX} with a token budget "
+        f"({window_reason(backend)})"
+    )
 
 
 @dataclass

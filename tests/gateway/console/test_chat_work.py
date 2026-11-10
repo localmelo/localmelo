@@ -242,8 +242,11 @@ async def test_a_page_the_person_takes_holds_that_run_until_done_or_stop(
             found["card_key"],
             found["run_id"],
         )
-        go.set()
         model = models["workers"][0]
+        # The worker's held request is asked before it is released: a request that
+        # came after the count would read as a call made during the hold.
+        await until(lambda: len(model.requests) == 2)
+        go.set()
         asked = len(model.requests)
         await asyncio.sleep(0.05)
         assert len(model.requests) == asked, "no model call while the person has it"

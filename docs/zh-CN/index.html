@@ -97,7 +97,7 @@
         <ul>
           <li>在搭载 Apple 芯片的 Mac 上推荐 <a href="https://github.com/jundot/omlx">oMLX</a> 作为模型服务器；其他系统用 <a href="https://ollama.com">Ollama</a>。</li>
           <li><code>-u</code> 和 <code>-m</code> 是 <code>--url</code> 和 <code>--model</code> 的简写；答案打印在 stdout 上。</li>
-          <li>在搭载 Apple 芯片的 Mac 上还可以构建 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">App</a>：<code class="wrap">uv run python scripts/build_macos_app.py --install</code>。</li>
+          <li>在搭载 Apple 芯片的 Mac 上还可以构建 <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">App（英文）</a>：<code class="wrap">uv run python scripts/build_macos_app.py --install</code>。</li>
         </ul>
         <div class="masthead-actions">
           <a class="button primary" href="./quickstart.html">阅读快速开始</a>
@@ -107,44 +107,44 @@
       <section class="section" id="features">
         <h2>能做什么</h2>
         <div class="show-grid">
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#hand-work-to-the-main-chat">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#hand-work-to-the-main-chat">
             <img src="../assets/img/main-chat-search.webp" alt="主对话：用 /task 开始的任务、被要求提交后继续它，以及一张说明任务已就绪并附上提交的卡片。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>一个主对话，旁边是旁支对话</strong><span>提问，或者交代工作：对话亲自做事，你要的任务按优先级（P0 到 P5）在旁边运行，完成后以卡片回来。</span></span>
+            <span class="show-text"><strong>一个主对话，旁边是旁支对话（英文）</strong><span>提问，或者交代工作：对话亲自做事，你要的任务按优先级（P0 到 P5）在旁边运行，完成后以卡片回来。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md#memory-across-chats">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#memory-across-chats">
             <img src="../assets/img/memory-tab.webp" alt="“记忆”标签页：melo 记下的关于你的笔记，每条都有来源对话以及编辑和删除按钮。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>看得见的记忆</strong><span>melo 跨对话记忆，新的事实取代旧的。你可以查看、编辑或删除每一条笔记。</span></span>
+            <span class="show-text"><strong>看得见的记忆（英文）</strong><span>melo 跨对话记忆，新的事实取代旧的。你可以查看、编辑或删除每一条笔记。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">
             <img src="../assets/img/scheduled-tab.webp" alt="Scheduled 标签页：带开关的 check-in，以及两个定时事项，各自显示下次运行和上次运行的结果。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>按时运行的定时事项</strong><span>说一次就行，比如 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>。check-in 会告诉你什么做完了。</span></span>
+            <span class="show-text"><strong>按时运行的定时事项（英文）</strong><span>说一次就行，比如 <code class="wrap">every weekday at 8:30, brief me on my calendar</code>。check-in 会告诉你什么做完了。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#the-main-chat-and-side-chats">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#the-main-chat-and-side-chats">
             <img src="../assets/img/cards.webp" alt="主对话中的三张卡片：Done, not finished（还差什么，有 Finish it 按钮）、Needs you（要你回答的问题）和 Ready（任务的小结）。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>说清发生了什么的任务</strong><span>卡片说明任务怎样结束：Ready、Done, not finished 或 Needs you；任务只在它所属对话的文件夹里工作。</span></span>
+            <span class="show-text"><strong>说清发生了什么的任务（英文）</strong><span>卡片说明任务怎样结束：Ready、Done, not finished 或 Needs you；任务只在它所属对话的文件夹里工作。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-main-chat">
             <img src="../assets/img/terminal-main-chat.webp" alt="主对话里的终端：用 /side 开始旁支对话、得到回复、用 /main 回去，以及一张说明任务完成的卡片。" width="1280" height="813" loading="lazy">
-            <span class="show-text"><strong>终端进入同一个对话</strong><span>输入 <code>melo</code> 就进入 App 里同一个主对话，<code>/side</code> 开始旁支对话。</span></span>
+            <span class="show-text"><strong>终端进入同一个对话（英文）</strong><span>输入 <code>melo</code> 就进入 App 里同一个主对话，<code>/side</code> 开始旁支对话。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md#the-activity-pill">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md#the-activity-pill">
             <img src="../assets/img/pill.webp" alt="Melo 的活动胶囊的六种状态：工作中、有多个在运行、在等你批准、完成、已停止、模型服务器连不上。" width="1080" height="590" loading="lazy">
-            <span class="show-text"><strong>显示正在运行什么的胶囊</strong><span>窗口收起时，Mac 上的一个小胶囊说明 melo 正在做什么。</span></span>
+            <span class="show-text"><strong>显示正在运行什么的胶囊（英文）</strong><span>窗口收起时，Mac 上的一个小胶囊说明 melo 正在做什么。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">
             <img src="../assets/img/terminal-approval.webp" alt="终端里的审批面板：写文件将做出的改动，以及一组可选的回答。" width="1280" height="946" loading="lazy">
-            <span class="show-text"><strong>重要操作由你批准</strong><span>melo 运行命令或改文件之前会先问你，并展示改动。你允许过的事汇成设置里的一张清单，可以收回。</span></span>
+            <span class="show-text"><strong>重要操作由你批准（英文）</strong><span>melo 运行命令或改文件之前会先问你，并展示改动。你允许过的事汇成设置里的一张清单，可以收回。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md">
             <img src="../assets/img/browser.webp" alt="终端里的对话：melo 打开一个网页并说出它的内容。" width="1280" height="552" loading="lazy">
-            <span class="show-text"><strong>浏览网页</strong><span>打开浏览功能后，melo 在没有窗口的 Chrome 里浏览，不会把你带到别的桌面。实时观看，需要登录时接管。</span></span>
+            <span class="show-text"><strong>浏览网页（英文）</strong><span>打开浏览功能后，melo 在没有窗口的 Chrome 里浏览，不会把你带到别的桌面。实时观看，需要登录时接管。</span></span>
           </a>
-          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#language">
+          <a class="show-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#language">
             <img src="../assets/img/console-zh.webp" alt="简体中文的网页控制台：主对话、一个设为 8:30 的定时事项和面板的标签页，时间按中文习惯书写。" width="1280" height="800" loading="lazy">
-            <span class="show-text"><strong>English 和简体中文</strong><span>控制台和 App 支持简体中文。在设置里选择，或让“自动”跟随你的浏览器。</span></span>
+            <span class="show-text"><strong>English 和简体中文（英文）</strong><span>控制台和 App 支持简体中文。在设置里选择，或让“自动”跟随你的浏览器。</span></span>
           </a>
         </div>
-        <p class="more-link">另外：<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">模型服务器</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/gateway.md">HTTP API</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">worker 运行</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a> 和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#use-melo-in-scripts">脚本</a>。</p>
+        <p class="more-link">另外：<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">模型服务器（英文）</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">HTTP API（英文）</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">worker 运行（英文）</a>、<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API（英文）</a> 和<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">脚本（英文）</a>。</p>
       </section>
 
       <section class="section" id="auto">
@@ -162,7 +162,7 @@
           <li>任务沿用创建它的对话的模式。</li>
         </ul>
         <!-- usage:auto-switch --><figure class="usage" aria-label="把对话切换到“自动”" data-copy="/approvals auto"><div class="usage-bar"><span class="usage-title">把对话切换到“自动”</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="c">/approvals</span> <span class="a">auto</span></span></code></pre><figcaption>在终端对话里输入，或按 Shift+Tab；/approvals ask 或再按一次 Shift+Tab 切回“询问”。</figcaption></figure><!-- /usage -->
-        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#auto-mode">指南中的自动模式</a></p>
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#auto-mode">指南中的自动模式（英文）</a></p>
       </section>
 
       <section class="section" id="reminders">
@@ -179,7 +179,7 @@
         </ul>
         <!-- usage:reminder --><figure class="usage" aria-label="让 melo 提醒你" data-copy="remind me to send the report on Friday at 9&#10;提醒我明天九点给导师发邮件"><div class="usage-bar"><span class="usage-title">让 melo 提醒你</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">remind me to send the report on Friday at 9</span></span>
 <span class="ln cmd"><span class="p">›</span> <span class="q">提醒我明天九点给导师发邮件</span></span></code></pre><figcaption>在主对话里输入。melo 会显示它理解的日期和时间，等你点“提醒我”。</figcaption></figure><!-- /usage -->
-        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">指南中的提醒</a></p>
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">指南中的提醒（英文）</a></p>
       </section>
 
       <section class="section" id="stopped">
@@ -196,7 +196,7 @@
         </ul>
         <!-- usage:continue-task --><figure class="usage" aria-label="继续已停止的任务" data-copy="continue the recovery card task&#10;继续恢复卡片任务"><div class="usage-bar"><span class="usage-title">继续已停止的任务</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">›</span> <span class="q">continue the recovery card task</span></span>
 <span class="ln cmd"><span class="p">›</span> <span class="q">继续恢复卡片任务</span></span></code></pre><figcaption>在主对话里输入；“继续”和“任务”之间的词指明是哪个任务。</figcaption></figure><!-- /usage -->
-        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#the-main-chat-and-side-chats">指南中的任务</a></p>
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#the-main-chat-and-side-chats">指南中的任务（英文）</a></p>
       </section>
 
       <section class="section" id="roadmap">
@@ -276,7 +276,7 @@
           <li>网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听；<code>melo console</code> 会打印一次性登录链接。</li>
           <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</li>
         </ul>
-        <p class="more-link">请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>。</p>
+        <p class="more-link">请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查的作用（英文）</a>。</p>
       </section>
     </article>
   </main>

@@ -16,17 +16,17 @@ docs/
   concepts/       explanations of components
   project/        project and documentation maintenance
   *.md            compatibility stubs at former page paths, plus the style guide
-  for-agents.md   the compact entry for AI agents
-  llms.txt        the llms.txt index for AI agents (llmstxt.org format)
+  for-agents.md   the contract for AI agents, at most 32 KB
+  llms.txt        the index of pages for AI agents (llmstxt.org format), generated
   index.html      the website's root page; it redirects to en/index.html
   en/             website pages in English
-  zh-CN/          Chinese twins of the Markdown pages, at the same paths; website pages in Chinese
+  zh-CN/          Chinese twins of the start pages, at the same paths; website pages in Chinese
   assets/         the website's stylesheet and images
 ```
 
-- Each page has a Chinese twin at the same path under `docs/zh-CN/`, except
-  `for-agents.md`, `llms.txt` and `index.html` (see [Translations](#translations)).
-  Root-level stubs have none.
+- The start pages have a Chinese twin at the same path under `docs/zh-CN/`:
+  `README.md`, `start/quickstart.md` and `STYLE.md`. Guides, reference,
+  concepts and project pages are English only (see [Translations](#translations)).
 - The website has six pages in each language: Home, Quickstart,
   Architecture, Roadmap, Developers and Memory design. Each English page has
   a Chinese twin with the same element `id`s, the same sections in the same
@@ -83,9 +83,10 @@ preview. See the [English style guide](../STYLE.md) and
 [Chinese style guide](../zh-CN/STYLE.md).
 
 The docs tests check the manifest and every tracked link and anchor. They also
-check that each Chinese twin listed in `tests/docs/test_manifest.py` keeps its
-English anchors, code blocks and inline code. Run them with
-`uv run pytest tests/docs -q`.
+check that each Chinese Markdown twin in `docs/manifest.json` keeps its
+English anchors, code blocks and inline code, that the twins are exactly the
+start pages, the size of the two agent files and the length of a changelog
+line. Run them with `uv run pytest tests/docs -q`.
 
 In `docs/manifest.json`, a page's `fragments` maps each old source path to
 its migration rule. `"same"` sends every fragment to that language's output
@@ -100,12 +101,12 @@ historical fragment, not when merely adding a new heading to an unsplit page.
 
 ## Add or change a page
 
+- A change edits the page about what it changes, in the same pull request.
 - Add a new Markdown page to the index in `docs/README.md` and
-  `docs/zh-CN/README.md`, and add its Chinese twin at the same path under
-  `docs/zh-CN/` in the same pull request. List both in `docs/manifest.json`.
-  Add it to the documentation table of the top-level `README.md` and
-  `README.zh-CN.md` only if a new user needs it; the table stays short and
-  ends with a link to the index.
+  `docs/zh-CN/README.md` (marked （英文）), and list it in `docs/manifest.json`
+  with a one-line `summary`. Add it to the documentation table of the
+  top-level `README.md` and `README.zh-CN.md` only if a new user needs it;
+  the table stays short and ends with a link to the index.
 - Add a new website page in both languages, and to the navigation of every
   website page. Memory design is the exception: it is a design record, and
   the Architecture and Roadmap pages link to it instead.
@@ -115,20 +116,27 @@ historical fragment, not when merely adding a new heading to an unsplit page.
   script `shell` and a transcript with `$ ` prompts `console`; the builder
   draws both as the same blocks.
 - Check every command you document by running it.
-- Keep `for-agents.md` in step with every change to behaviour, options,
-  output or feature status, and add new pages to `llms.txt`. It is written
-  for agents: dense, exact and short.
+- Edit `for-agents.md` only when the contract for agents changes: a command,
+  an exit code, the output, a route, a file location or a rule. It links to
+  the reference pages for details and stays under 32 KB, with no line over
+  400 characters. Its option, setting and route tables, and all of
+  `llms.txt` (from the manifest's `summary` lines), are generated: run
+  `uv run python scripts/agent_docs.py sync` (a test fails while they are stale).
+- Add one line to `CHANGELOG.md` when a person would notice the change: what
+  they see, in their words, under its area, at most 240 characters, with no
+  pull-request number. A release cuts its own section.
 
 ## Translations
 
 - English is the source. Change the Chinese counterpart in the same pull
   request as the English page.
-- The Chinese twins of the Markdown pages are in `docs/zh-CN/`. The website's
-  Chinese pages are `docs/zh-CN/*.html`, and `README.zh-CN.md` is the Chinese
-  project README.
-- `for-agents.md` and `llms.txt` stay English-only by design: they are terse
-  entries for AI agents. `index.html` also stays English-only: it redirects to
-  `en/index.html` and links to `zh-CN/index.html`, the Chinese home page.
+- Only the start pages and the website have Chinese twins:
+  `README.zh-CN.md`, `docs/zh-CN/README.md`, `docs/zh-CN/start/`,
+  `docs/zh-CN/STYLE.md` and the website's `docs/zh-CN/*.html`. Do not add a
+  twin of a guide, concept, reference or project page.
+- `for-agents.md`, `llms.txt` and `index.html` stay English-only:
+  `index.html` redirects to `en/index.html` and links to `zh-CN/index.html`,
+  the Chinese home page.
 - Chinese pages mark links to English-only pages with （英文）.
 - Keep code blocks identical in both languages; comments in shared code
   blocks are in English.

@@ -389,7 +389,7 @@
               <li>运行命令和写文件之前先询问；文件工具只在当前文件夹内工作。</li>
               <li>通过 App 使用的同一个网关打开主对话；<code>-u</code>、<code>-c</code>、<code>-r</code> 和 <code>--yolo</code> 会保留终端自己的对话。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a>
           </div>
           <div class="comp-card" id="c-gateway">
             <h3>网关</h3>
@@ -399,7 +399,7 @@
               <li>网关要求 bearer 令牌或浏览器会话，并且只监听回环地址。</li>
               <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/api-v2.md">API v2 参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2 参考（英文）</a>
           </div>
           <div class="comp-card" id="c-endpoint">
             <h3>端点文件</h3>
@@ -409,7 +409,7 @@
               <li>终端和 App 都先读它，所以后启动的那个会用已在运行的网关。</li>
               <li>里面只有端口，没有凭据。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">终端的主对话</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-main-chat">终端的主对话（英文）</a>
           </div>
           <div class="comp-card" id="c-chats">
             <h3>对话</h3>
@@ -421,7 +421,7 @@
               <li>它工作时你发的话会作为补充加入这一轮，在下一步读到；停止会结束这一轮。</li>
               <li>你仍然可以要求开任务，每个对话都能启动任务；旁支对话结束工作时，主对话会读到一行说明，记忆会保留它的总结。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">会话参考（英文）</a>
           </div>
           <div class="comp-card" id="c-scheduler">
             <h3>调度器</h3>
@@ -431,7 +431,7 @@
               <li>经批准后回来的任务按级别排队等待；没有轮次在运行的对话会把它的名额让给任务。</li>
               <li>可选的模型调用闸门（先到先得或按类别）会读取共享的 GPU 锁和电池状态。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/scheduler.md">调度器指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md">调度器指南（英文）</a>
           </div>
           <div class="comp-card" id="c-chores">
             <h3>定时事项</h3>
@@ -443,7 +443,7 @@
               <li>每 30 分钟，check-in 告诉主对话什么做完了或在等你；没有可说的就不调用模型。</li>
               <li>提醒是只运行一次的事项：<code class="wrap">提醒我明天九点给导师发邮件</code> 会显示它理解的日期，你点“提醒我”之前不会保存任何东西。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">会重复的事项</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">会重复的事项（英文）</a>
           </div>
           <div class="comp-card" id="c-workers">
             <h3>Worker</h3>
@@ -456,7 +456,7 @@
               <li>对话开始的 worker 只运行一次：结束以后它的记录作为背景保留，之后的工作交给新的 worker。</li>
               <li>它开始时带一份来自所属对话的上下文包，遇到阻碍时向该对话求助。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">Worker 参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">Worker 参考（英文）</a>
           </div>
           <div class="comp-card" id="c-agent">
             <h3>智能体</h3>
@@ -466,7 +466,7 @@
               <li>模型只能调用这一步提供的工具。</li>
               <li>由反思决定是否开始下一次尝试。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/how-it-works.md">工作原理</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/how-it-works.md">工作原理（英文）</a>
           </div>
           <div class="comp-card" id="c-checker">
             <h3>检查器</h3>
@@ -478,7 +478,7 @@
               <li>在“自动”下，由审查而不是一次点击来决定每一步；被拦下的步骤会得到解释，“允许一次”只让那一步运行一次。</li>
               <li>你为某个对话允许的事会保存为授权。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查的作用（英文）</a>
           </div>
           <div class="comp-card" id="c-grants">
             <h3>授权</h3>
@@ -489,7 +489,7 @@
               <li>在主对话里允许的，在每个对话里都算；在旁支对话里允许的，只在那里算。</li>
               <li>设置 → 授权列出它们，收回立即生效。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#permissions">授权指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#permissions">授权指南（英文）</a>
           </div>
           <div class="comp-card" id="c-executor">
             <h3>执行器</h3>
@@ -499,7 +499,7 @@
               <li>按权限级别请求审批。</li>
               <li>在 macOS 上，worker 运行、保存的任务和“自动”下的步骤只能在自己的文件夹内写文件，“自动”下的步骤也碰不到 melo 自己的登录信息。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">工具参考（英文）</a>
           </div>
           <div class="comp-card" id="c-mcp">
             <h3>工具：MCP 和浏览器</h3>
@@ -509,7 +509,7 @@
               <li>它们的工具名为 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>。</li>
               <li>打开浏览功能后，melo 在后台的 Chrome 或 Safari 的自动化窗口里读网页，并在网页上操作。没打开时，对话会说明一次，并告诉你怎么打开。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md">工具和 MCP 指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md">工具和 MCP 指南（英文）</a>
           </div>
           <div class="comp-card" id="c-browser">
             <h3>后台浏览器</h3>
@@ -520,7 +520,7 @@
               <li>浏览器面板实时显示网页；接管让你自己登录。</li>
               <li>其他应用在点击之后打开的窗口，会先问你。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md#chrome-in-the-background">浏览指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md#chrome-in-the-background">浏览指南（英文）</a>
           </div>
           <div class="comp-card" id="c-memory">
             <h3>记忆</h3>
@@ -530,7 +530,7 @@
               <li>关于你的笔记和所有对话的索引，召回时注明来源。</li>
               <li>历史记录和长期记忆，开启持久化后保存在 SQLite 中。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md">记忆概念</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md">记忆概念（英文）</a>
           </div>
           <div class="comp-card" id="c-config">
             <h3>配置和设置</h3>
@@ -540,7 +540,7 @@
               <li>首次运行会查找模型服务器，并推荐找到的那个。</li>
               <li>之后用 <code>melo setup</code> 和 <code>melo config</code> 修改。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/configuration.md">配置参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">配置参考（英文）</a>
           </div>
           <div class="comp-card" id="c-providers">
             <h3>提供方</h3>
@@ -549,7 +549,7 @@
               <li>OpenAI 兼容的对话、Ollama 的 <code>/api/chat</code> 和 OpenAI 兼容的嵌入。</li>
               <li>对每个请求应用对话请求超时。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md">模型服务器指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">模型服务器指南（英文）</a>
           </div>
           <div class="comp-card" id="c-backends">
             <h3>模型服务器</h3>
@@ -559,7 +559,7 @@
               <li>OpenAI、Anthropic、Google 和 NVIDIA 的 API。</li>
               <li>localmelo 自己不提供模型；在 Mac 上，首次运行可以在你同意一次后设置 melo_serve 和一个模型。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">后端</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">后端（英文）</a>
           </div>
         </div>
       </section>

@@ -324,9 +324,10 @@ async def test_a_viewer_gets_the_meta_then_the_pictures_and_the_stream_ends_with
         assert picture == MARKER
         view = agent.provider.live
         assert view is not None and view.viewers == 1
-    await until(lambda: view.viewers == 0)
-    assert cast_.stopped == ["t1"]
-    assert view.streaming == 0
+    # The stream stops a moment after the last viewer has left: the leave awaits
+    # between the two, so the stop is what to wait for.
+    await until(lambda: cast_.stopped == ["t1"])
+    assert view.viewers == 0 and view.streaming == 0
 
 
 async def test_only_the_newest_picture_reaches_a_viewer_that_is_slow(
