@@ -130,4 +130,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - `melo-retrieve` and `melo-procedures` compare memory retrievers and replay recorded runs offline.
 - The Python API (experimental) has events, stopping, approvals and sessions.
 - `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
+- Three experimental settings are gone (`--brief-items`, `agent.lean_output`, `agent.thinking_steps`): runs behave as before, and a script that still sets one exits 2 and says so.
 - The MIT license.

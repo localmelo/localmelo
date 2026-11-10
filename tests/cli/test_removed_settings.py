@@ -18,6 +18,9 @@ cache_layout = "v2"
 reflection_gate = "utility"
 window_eviction = "slide"
 window_messages = 32
+thinking_steps = "first_and_failed"
+lean_output = true
+brief_items = true
 
 [memory]
 admit_on_outcome = true

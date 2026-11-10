@@ -200,7 +200,6 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
 | `answer_on_stop` | `true` when the run had it on (the default); absent with `-X agent.answer_on_stop=off`. |
 | `empty_reply_fallback` | `"off"` when the run had it off; absent with the default `"on"`. |
-| `thinking_steps` | `"first_and_failed"` when the run used it; absent with the default `"all"`. |
 | `max_calls` | The run's call budget when it set one; absent otherwise. |
 | `window_eviction` | `chunk` (the default) or `boundary`. |
 | `window_messages` | The window's message cap when it is not 20 (64 by default on a local server or a URL); absent for 20. |

@@ -36,15 +36,9 @@ from localmelo.melo.agent._brief_aids import (
     STEP_PUSH,
     STEP_PUSH_STEPS,
     Dropped,
-    FileStamp,
     dropped_notes,
-    edited_files,
-    mark_items,
-    parse_items,
     render_dropped,
-    render_items,
     start_with,
-    workspace_stamps,
 )
 from localmelo.melo.agent._brief_gate import (
     MAX_CHECK_RETRIES,
@@ -63,13 +57,9 @@ from localmelo.melo.agent._chat import (
     BUDGET_ACCOUNTING,
     BUDGET_HOOK,
     CALL_RECORDER,
-    LEAN_REFLECTION_PROMPT,
-    LEAN_SYSTEM_PROMPT,
     PREFIX_RUN,
     PREFIX_VERSION,
-    REFLECTION_PROMPT,
     RETRY_HOOK,
-    SYSTEM_PROMPT,
     CallTelemetry,
     Chat,
     RequestStats,
@@ -950,10 +940,6 @@ class _RunState:
     check_digest: str | None = None
     check_attempt: int = 0
     last_attempt: bool = False
-    # AgentOptions.brief_items: the brief's numbered items and the files git
-    # listed as changed at the run's start (None: not tracked).
-    items: list[str] = dataclasses.field(default_factory=list)
-    items_baseline: dict[str, FileStamp] | None = None
     boundary_done: bool = False
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
@@ -1338,18 +1324,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             empty_prefix=self.options.reasoning != "legacy",
             context_budget=budget,
             fit_target=WINDOW_FIT_TARGET,
-            # lean_output keeps the full system prompt in the compress modes,
-            # whose note before each tool call is text between tool calls.
-            system_prompt=(
-                LEAN_SYSTEM_PROMPT
-                if self.options.lean_output and not instruction
-                else SYSTEM_PROMPT
-            ),
-            reflection_prompt=(
-                LEAN_REFLECTION_PROMPT
-                if self.options.lean_output
-                else REFLECTION_PROMPT
-            ),
             identity=self.options.identity or "",
             max_calls=self.options.max_calls,
             reserve_answer=self.options.answer_on_stop,
@@ -1980,19 +1954,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         find = getattr(self.chat, "thinking_retry_body", None)
         body = find() if callable(find) else None
         return body if isinstance(body, Mapping) else {}
-
-    def _quiet_step(self, fingerprints: list[tuple[str, str, str]]) -> bool:
-        """Whether this planning call goes out with thinking off (``thinking_steps``, #551).
-
-        Under ``"first_and_failed"`` the plan that follows a tool step that
-        worked is quiet; the first plan of an attempt (no tool step yet) and
-        the plan after a step with an error think.
-        """
-        return (
-            self.options.thinking_steps == "first_and_failed"
-            and bool(fingerprints)
-            and not fingerprints[-1][2]
-        )
 
     async def _do_plan(
         self,
@@ -2928,10 +2889,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         addendum: dict[str, Any] = (
             {"addendum": REFLECTION_ADDENDUM} if run is not None and run.brief else {}
         )
-        if run is not None and run.items:
-            block = await self._items_block(run, "reflection")
-            if block:
-                addendum["addendum"] = f"{REFLECTION_ADDENDUM}\n{block}"
         # The chat's earlier turns, which the window may have lost by now.
         earlier = run.earlier_block if run is not None else ""
 
@@ -3123,8 +3080,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             # the provider's thinking switched off, for this call only.
             retry_body = self._thinking_retry_body() if run.thinking_retry_armed else {}
             run.thinking_retry_armed = False
-            if not retry_body and self._quiet_step(fingerprints):
-                retry_body = self._thinking_retry_body()
             retry_token = LLM_REQUEST_EXTRA_BODY.set(retry_body) if retry_body else None
             try:
                 response, fail = await self._do_plan(
@@ -3900,12 +3855,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                         )
                         run.step_digest = run.workspace_digest
                         run.check_digest = run.workspace_digest
-                        if self.options.brief_items:
-                            run.items = parse_items(query)
-                            if run.items:
-                                run.items_baseline = await asyncio.to_thread(
-                                    workspace_stamps, self._workspace_for_brief()
-                                )
                     if self.options.brief_check is not None:
                         run.check_commands = check_commands(query)
                     async with deadline:
@@ -4752,8 +4701,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             config["answer_on_stop"] = True
         if opts.empty_reply_fallback != "on":
             config["empty_reply_fallback"] = opts.empty_reply_fallback
-        if opts.thinking_steps != "all":
-            config["thinking_steps"] = opts.thinking_steps
         if opts.refused_steps:
             config["refused_steps"] = opts.refused_steps
         if opts.max_calls is not None:
@@ -5247,35 +5194,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         if run.brief:
             run.dropped = [*run.dropped, *dropped_notes(gone)][-DROPPED_KEPT:]
 
-    async def _items_block(self, run: _RunState, scope: str) -> str:
-        """The block that names the brief's items no edit has touched, or "".
-
-        Marks each item from the files git lists as changed now against those
-        at the run's start, and records the marks in a ``brief_items`` notice
-        when the block is shown (*scope*: where it goes).
-        """
-        if run.items_baseline is None:
-            return ""
-        now = await asyncio.to_thread(workspace_stamps, self._workspace_for_brief())
-        if now is None:
-            return ""
-        marks = mark_items(run.items, edited_files(run.items_baseline, now))
-        block = render_items(run.items, marks)
-        if block:
-            run.events.brief_items(
-                scope,
-                {
-                    item.split(".", 1)[0]: mark
-                    for item, mark in zip(run.items, marks, strict=True)
-                },
-            )
-        return block
-
     async def _deadline_check(self, run: _RunState) -> None:
         """With two steps left in a brief run's last attempt, run the checks once.
 
-        With ``brief_items``, the items no edit has touched yet are named in a
-        user line first (joined to the gate's failure message when both come).
         The checks run only when the workspace changed since the checks last ran and the
         gate has not run in this attempt. A pass changes nothing; a failure
         adds the gate's failure message to the window, so the next planning
@@ -5284,10 +5205,6 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         if not run.brief or not run.last_attempt:
             return
         lines = []
-        if run.items:
-            block = await self._items_block(run, "deadline")
-            if block:
-                lines.append(block)
         if (
             run.check_commands
             and run.check_attempt != run.attempts

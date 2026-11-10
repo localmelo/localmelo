@@ -63,7 +63,6 @@ NOTICE_MESSAGES: Mapping[str, str] = {
     ),
     "no_change": "Nothing has changed in the workspace yet.",
     "checkpoint": "Noted where the work stands; older results left the context.",
-    "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
         "The task's check still fails; the run ends completed with failing tests."
     ),
@@ -561,17 +560,6 @@ class _Emitter:
                 "text": redact_secrets(checkpoint.render())[0],
                 "checkpoint": fields,
             },
-        )
-
-    def brief_items(self, scope: str, marks: dict[str, str]) -> None:
-        """A brief run named the items no edit has touched; *marks* maps each
-        item's number to its mark and *scope* is ``"reflection"`` or ``"deadline"``."""
-        if self._sink is None:
-            return
-        self._notice(
-            "brief_items",
-            NOTICE_MESSAGES["brief_items"],
-            {"scope": scope, "marks": marks},
         )
 
     def brief_check(self, result: BriefCheckResult, round_: int) -> None:

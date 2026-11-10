@@ -38,10 +38,10 @@ def test_x_sets_it_for_one_run_and_config_keys_lists_it(
     row = capsys.readouterr().out.splitlines()[1].split()
     assert row == ["agent.max_calls", "30", "unset", "-X"]
     text = cli._build_parser(developer=True).format_help()
-    assert any(
-        line.startswith("  agent.max_calls ") and line.endswith("(#185)")
-        for line in text.splitlines()
+    listed = next(
+        line for line in text.splitlines() if line.startswith("  agent.max_calls ")
     )
+    assert "(#" not in listed, "an advanced setting: no issue decides it"
 
 
 @pytest.mark.parametrize("bad", ["1", "0", "many", "true"])
