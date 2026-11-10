@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,13 +14,14 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import RESTART_CHECK_HEADER, Message, ToolCall, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway import workers as worker_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import (
+    CALL_REASON,
     FENCED_REASON,
     IN_FLIGHT_REASON,
     STOPPED_REASON,
@@ -36,12 +38,15 @@ from localmelo.support.sessions.store import Cause, SessionStore
 from localmelo.tests.gateway.conftest import seed_process
 from localmelo.tests.sessions.helpers import core_event, run_result
 
+# Nothing of the run in flight and no call open: what continues by itself.
+CLEAR: dict[str, Any] = {"in_flight": False, "calls": ()}
+
 
 @pytest.mark.parametrize(
     ("facts", "outcome"),
     [
         # The person stopped it, or it ended.
-        (RestartFacts(state="cancelled", in_flight=False), "keep"),
+        (RestartFacts(state="cancelled", **CLEAR), "keep"),
         # It already waits for the person, or a continue already waits to run.
         (RestartFacts(state="interrupted", waiting=True), "keep"),
         (RestartFacts(state="queued", continued=True), "keep"),
@@ -50,34 +55,44 @@ from localmelo.tests.sessions.helpers import core_event, run_result
         (RestartFacts(state="parked", never_started=True), "keep"),
         # The person paused it: it never goes on by itself.
         (RestartFacts(state="parked", by_person=True, settled=True), "keep"),
-        (RestartFacts(state="running", by_person=True, in_flight=False), "wait"),
+        (RestartFacts(state="running", by_person=True, **CLEAR), "wait"),
         # Its last run finished completely.
         (RestartFacts(state="running", finished=True, crash=True), "reconcile"),
         # Cut off: something in flight waits, nothing in flight continues.
-        (RestartFacts(state="running", crash=True, in_flight=True), "wait"),
-        (RestartFacts(state="running", crash=True, in_flight=False), "continue"),
-        (RestartFacts(state="interrupted", in_flight=False), "continue"),
-        (RestartFacts(state="parked", in_flight=False), "continue"),
-        (RestartFacts(state="queued", in_flight=False), "continue"),
+        (RestartFacts(state="running", crash=True, in_flight=True, calls=()), "wait"),
+        (RestartFacts(state="running", crash=True, **CLEAR), "continue"),
+        (RestartFacts(state="interrupted", **CLEAR), "continue"),
+        (RestartFacts(state="parked", **CLEAR), "continue"),
+        (RestartFacts(state="queued", **CLEAR), "continue"),
+        # One open call melo can check itself continues; any other open call waits:
+        # one it cannot check, one recorded before the fact existed (or unreadable),
+        # more than one.
+        (RestartFacts(state="interrupted", in_flight=False, calls=(True,)), "continue"),
+        (RestartFacts(state="interrupted", in_flight=False, calls=(False,)), "wait"),
+        (RestartFacts(state="interrupted", in_flight=False, calls=(None,)), "wait"),
+        (
+            RestartFacts(state="interrupted", in_flight=False, calls=(True, False)),
+            "wait",
+        ),
+        (
+            RestartFacts(state="interrupted", in_flight=False, calls=(True, True)),
+            "wait",
+        ),
+        (RestartFacts(state="interrupted", in_flight=False), "wait"),  # the default
         # A second crash in a row waits, whatever was in flight.
         (
-            RestartFacts(
-                state="running", crash=True, crashed_before=True, in_flight=False
-            ),
+            RestartFacts(state="running", crash=True, crashed_before=True, **CLEAR),
             "wait",
         ),
         # A clean stop after a crash is no crash loop.
         (
-            RestartFacts(state="interrupted", crashed_before=True, in_flight=False),
+            RestartFacts(state="interrupted", crashed_before=True, **CLEAR),
             "continue",
         ),
         # A run that ended with no complete record of how is not run again.
         (RestartFacts(state="running", crash=True, finished=False), "wait"),
         # A folder missing at start waits; it does not end the task.
-        (
-            RestartFacts(state="interrupted", in_flight=False, workspace_valid=False),
-            "wait",
-        ),
+        (RestartFacts(state="interrupted", workspace_valid=False, **CLEAR), "wait"),
     ],
 )
 def test_restart_outcome_table(facts: RestartFacts, outcome: str) -> None:
@@ -230,6 +245,47 @@ async def test_one_bad_record_costs_that_task_and_a_retry_continues_none_twice(
     assert not await _resumed(tasks.store, bad)
 
 
+async def test_a_store_from_before_the_local_fact_opens_and_its_old_row_waits(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sessions.db"
+    store = SessionStore(path, writer="gateway")
+    await store.open()
+    task_id = await _running(await _opened(store), tmp_path)
+    await store.aclose()
+    # The calls table as the version before made it, with one of its rows open.
+    with contextlib.closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute("ALTER TABLE recovery_calls DROP COLUMN local")
+        conn.execute(
+            "INSERT INTO recovery_calls VALUES (?, 'run', 'old', 'file_write')",
+            (task_id,),
+        )
+    store = SessionStore(path, writer="gateway")
+    await store.open()
+    try:
+        tasks = await _opened(store)
+        recovery = RecoveryStore(store)
+        # A changing call records its row in the upgraded table.
+        await recovery.open_call(
+            task_id, execution_id="run", call_id="new", tool="file_write", local=True
+        )
+        calls = await recovery.open_calls(task_id, execution_id="run")
+        assert calls == [("file_write", None), ("file_write", True)]
+        await recovery.close_call(task_id, execution_id="run", call_id="new")
+        # The old row does not say whether its effect stays local: it waits.
+        await StartupRecovery(store, tasks).run()
+        record = await tasks.get_task(task_id)
+        assert record.state == "interrupted" and record.wait_reason == CALL_REASON
+    finally:
+        await store.aclose()
+
+
+async def _opened(store: SessionStore) -> TaskStore:
+    tasks = TaskStore(store)
+    await tasks.open()
+    return tasks
+
+
 # ── Through the workers, with a held model reply ──
 
 
@@ -237,13 +293,14 @@ class _Runs:
     """What the fake runner saw: each turn's text, and when one started.
 
     With *in_call* the held reply comes inside a call that can change
-    something.
+    something, of *tool*, whose effect stays local or not as *local* says.
     """
 
     def __init__(self) -> None:
         self.texts: list[str] = []
         self.started = asyncio.Event()
         self.in_call = False
+        self.tool, self.local = "shell_exec", False
 
 
 def _fakes(monkeypatch: pytest.MonkeyPatch, runs: _Runs) -> None:
@@ -294,7 +351,7 @@ def _fakes(monkeypatch: pytest.MonkeyPatch, runs: _Runs) -> None:
             if runs.in_call:
                 entry = TOOL_ENTRY.get()
                 assert entry is not None
-                async with entry("shell_exec"):
+                async with entry(runs.tool, runs.local):
                     runs.started.set()
                     await asyncio.Event().wait()
             await asyncio.Event().wait()
@@ -422,23 +479,33 @@ async def test_the_stop_writes_a_cut_task_down_before_its_worker_closes(
     assert (await first.tasks.get_task(task_id)).state == "interrupted"
 
 
-async def test_a_stop_in_the_middle_of_a_changing_call_waits_as_a_kill_does(
-    gateway: tuple[Callable[[], TaskWorkers], Path, _Runs],
+@pytest.mark.parametrize("local", [False, True])
+async def test_a_stop_in_the_middle_of_a_changing_call_waits_unless_melo_can_check_it(
+    gateway: tuple[Callable[[], TaskWorkers], Path, _Runs], local: bool
 ) -> None:
     start, workspace, runs = gateway
     runs.in_call = True
+    runs.tool, runs.local = ("file_write", True) if local else ("shell_exec", False)
     first = start()
     task_id = await _a_running_task(first, workspace, runs)
     await first.aclose()
-    # The call may be half done: its record stays.
+    # The call may be half done: its record stays, with what the executor found.
     assert await RecoveryStore(first.store).open_calls(
         task_id, execution_id=str(await _execution(first, task_id))
-    ) == ["shell_exec"]
+    ) == [(runs.tool, local)]
     again = start()
     await again.open()
-    record = await again.tasks.get_task(task_id)
-    assert record.state == "interrupted" and record.wait_reason == IN_FLIGHT_REASON
-    assert not again.is_active(task_id) and len(runs.texts) == 1
+    if not local:
+        # Not one melo can look at afterwards: it waits as after a kill.
+        record = await again.tasks.get_task(task_id)
+        assert record.state == "interrupted" and record.wait_reason == CALL_REASON
+        assert not again.is_active(task_id) and len(runs.texts) == 1
+        return
+    # A write in its folder: the continued turn checks it first, as data.
+    await asyncio.wait_for(runs.started.wait(), 5)
+    assert runs.texts[-1].startswith(RESTART_CHECK_HEADER)
+    assert "file_write" in runs.texts[-1] and "Where stopped" in runs.texts[-1]
+    assert (await again.get(task_id))["continued_check"] is True
 
 
 async def test_a_restart_never_carries_an_approval_over(

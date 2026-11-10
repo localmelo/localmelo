@@ -517,7 +517,11 @@ class Executor:
                 # length, so a restart knows it may be half done; one that only
                 # reads here needs no record.
                 if capture is not None and not changes_nothing(tool_def):
-                    async with capture(request.tool_name):
+                    local = stays_local(
+                        request.tool_name,
+                        in_folder=policy is not None and outside is None,
+                    )
+                    async with capture(request.tool_name, local):
                         task = asyncio.current_task()
                         if task is not None and task.cancelling():
                             raise asyncio.CancelledError()
@@ -672,6 +676,18 @@ def _outside(
     if reason is not None:
         return None, never_text(path, reason)
     return access, ""
+
+
+def stays_local(tool_name: str, *, in_folder: bool) -> bool:
+    """Whether a changing call's effect stays where melo can look at it afterwards.
+
+    Decided before the call runs, from what the checks above already found:
+    a file write or edit whose path the workspace policy resolved inside the
+    task's folder. Every other tool is not local. A command is not, however
+    its review came out: the review's rules say what to flag, not that an
+    effect stays in the folder. Neither is a browser action or a provided tool.
+    """
+    return tool_name in WRITE_TOOLS and in_folder
 
 
 async def _invoke(

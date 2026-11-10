@@ -13,6 +13,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.builtins import _run_python, _run_shell
+from localmelo.melo.executor.executor import stays_local
 from localmelo.melo.executor.models import (
     ErrorCategory,
     ExecutionRequest,
@@ -24,14 +25,23 @@ from localmelo.melo.executor.process_gate import (
 )
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef
+from localmelo.tests.executor.test_outside_folders import FolderGate
 
 
-def _entry(events: list[str], *, fail: bool = False) -> Any:
-    """A TOOL_ENTRY that notes when a call's record opens and closes."""
+def _entry(
+    events: list[str],
+    *,
+    fail: bool = False,
+    seen: list[tuple[str, bool]] | None = None,
+) -> Any:
+    """A TOOL_ENTRY that notes when a call's record opens and closes (and, in
+    *seen*, each call's tool and whether the executor found its effect local)."""
 
     @contextlib.asynccontextmanager
-    async def entry(tool: str) -> Any:
+    async def entry(tool: str, local: bool) -> Any:
         events.append("entry")
+        if seen is not None:
+            seen.append((tool, local))
         if fail:
             raise RuntimeError("capture unavailable")
         try:
@@ -43,25 +53,31 @@ def _entry(events: list[str], *, fail: bool = False) -> Any:
 
 
 async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A home with the task's folder in it, and a place beside the folder.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    work = tmp_path / "work"
+    work.mkdir()
     hippo = Hippo()
-    executor = Executor(
-        hippo, Checker(mode="interactive"), workspace_root=str(tmp_path)
-    )
+    executor = Executor(hippo, Checker(mode="interactive"), workspace_root=str(work))
     register_builtins(
         executor,
         hippo,
         names={"file_read", "file_write", "python_exec"},
-        workspace_root=str(tmp_path),
+        workspace_root=str(work),
     )
-    (tmp_path / "a").write_text("safe")
+    (work / "a").write_text("safe")
     calls: list[str] = []
 
     async def denied(request: ExecutionRequest) -> ApprovalDecision:
         return ApprovalDecision(False)
 
-    token = TOOL_ENTRY.set(_entry(calls))
+    async def granted(request: ExecutionRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, origin="session")
+
+    seen: list[tuple[str, bool]] = []
+    token = TOOL_ENTRY.set(_entry(calls, seen=seen))
     try:
         # A read changes nothing: no record.
         result = await executor.execute_structured(
@@ -80,6 +96,27 @@ async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
             )
         )
         assert result.status == ExecutionStatus.SUCCESS and calls == ["entry", "exit"]
+        # A write in the folder stays local; a write a person allowed outside it
+        # and a command a chat grant let run are not.
+        outside = tmp_path / "elsewhere.md"
+        result = await executor.execute_structured(
+            ExecutionRequest(
+                tool_name="file_write",
+                arguments={"path": str(outside), "content": "x"},
+            ),
+            approve=FolderGate(ApprovalDecision(True, origin="user")),
+        )
+        assert result.status == ExecutionStatus.SUCCESS and outside.exists()
+        await executor.execute_structured(
+            ExecutionRequest(tool_name="python_exec", arguments={"code": "pass"}),
+            approve=granted,
+        )
+        assert seen == [
+            ("file_write", True),
+            ("file_write", False),
+            ("python_exec", False),
+        ]
+        calls.clear()
 
         # A call cancelled while it runs closes its record too.
         started = asyncio.Event()
@@ -113,7 +150,7 @@ async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
             )
         )
         assert result.status == ExecutionStatus.ERROR and calls == ["entry"]
-        assert not (tmp_path / "c").exists()
+        assert not (work / "c").exists()
     finally:
         TOOL_ENTRY.reset(token)
 
@@ -301,7 +338,7 @@ async def test_entry_callback_suppressed_cancellation_never_invokes_tool() -> No
         return "ok"
 
     @contextlib.asynccontextmanager
-    async def capture(name: str) -> Any:
+    async def capture(name: str, local: bool) -> Any:
         entered.set()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.Event().wait()
@@ -376,3 +413,21 @@ async def test_unsupported_platform_fallback_needs_incomplete_entry(
         if entry_token is not None:
             TOOL_ENTRY.reset(entry_token)
         PROCESS_RECORD.reset(process_token)
+
+
+@pytest.mark.parametrize(
+    ("tool", "in_folder", "local"),
+    [
+        # A file write or edit is local exactly when its path is in the folder.
+        ("file_write", True, True),
+        ("file_edit", False, False),
+        # A command never is, even one the rules found routine and a grant let
+        # run: the rules say what to flag, not that an effect stays here.
+        ("python_exec", True, False),
+        ("browser_click", True, False),
+    ],
+)
+def test_a_changing_call_is_local_only_as_a_write_in_the_folder(
+    tool: str, in_folder: bool, local: bool
+) -> None:
+    assert stays_local(tool, in_folder=in_folder) is local
