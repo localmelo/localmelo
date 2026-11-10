@@ -96,13 +96,13 @@ After an interactive cancellation:
 |---|---|
 | The task record | Saved as `cancelled`; history gets a row for each call of the step that was under way, so each call appears once. |
 | Working memory | Keeps the task and that step. A call that had not returned reads `The run was stopped before this call finished; it may have partly run.` A call that had not started, or that an approval policy was still deciding about, reads `The run was stopped before this call started; it did not run.` The next run on the agent sees this. |
-| Reflections | Cleared without being promoted to long-term memory, so no network request follows. |
+| Reflections | Cleared, with no long-term write and no network request. |
 | Tool processes | A `shell_exec` command, or a `python_exec` child process, is killed with every process it started. |
 | The clean-up | Runs in a task of its own, which a second cancellation does not stop. Writing history and the task record may take up to 10 seconds. `run.finished` still comes, and `agent.close()` waits for it. |
 
 - `timeout_s` still ends a run as `timeout`, interactive or not.
 - If your process must exit, as on SIGTERM, call `agent.begin_exit(reason, within_s=...)` first, then cancel the run and await `agent.close()`.
-- The run then ends with `reason` as its error, `cancelled` when it is interactive and `crashed` otherwise; tool providers that do not close in time are killed, and reflections are not promoted.
+- The run then ends with `reason` as its error, `cancelled` when it is interactive and `crashed` otherwise; tool providers that do not close in time are killed, and reflections are cleared with no long-term write.
 - Direct mode does this on SIGTERM and SIGHUP; see [Signals](../reference/cli.md#signals).
 
 ## Approve tool calls

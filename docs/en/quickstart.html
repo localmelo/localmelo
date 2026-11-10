@@ -184,7 +184,7 @@
               <tr><td><code>Chat backend</code></td><td>Your server type, such as <code>2. Ollama (local endpoint)</code>, or a cloud vendor.</td></tr>
               <tr><td><code>Base URL</code></td><td>Your server's URL; Enter keeps the default in brackets. Ollama's has no <code>/v1</code>.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
-              <tr><td><code>Embedding backend</code></td><td><code>5. None (no long-term memory)</code>, or an embedding model the chat server lists.</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5. None (search by words only)</code>, or an embedding model the chat server lists.</td></tr>
             </tbody>
           </table>
         </div>
@@ -200,7 +200,7 @@
         <figure class="shot">
           <img src="../assets/img/embedding.webp" alt="The first run finds a model server and asks whether to remember across chats with its embedding model." width="1280" height="291" loading="lazy">
         </figure>
-        <p>Long-term memory needs an embedding model that your server already serves. With Ollama:</p>
+        <p>Search by meaning needs an embedding model that your server already serves. With Ollama:</p>
         <!-- usage:embed-ollama --><figure class="usage" aria-label="Embedding model with Ollama" data-copy="ollama pull qwen3-embedding:0.6b&#10;curl -sS http://127.0.0.1:11434/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;qwen3-embedding:0.6b&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;&#10;melo setup"><div class="usage-bar"><span class="usage-title">Embedding model with Ollama</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="Copied" data-fail="Copy failed">Copy</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">ollama</span> <span class="s">pull</span> <span class="a">qwen3-embedding:0.6b</span></span>
 <span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:11434/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
 <span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>

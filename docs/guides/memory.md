@@ -22,8 +22,8 @@ melo "What is 6*7?"
 
 What a later run recalls:
 
-- Recalling long-term memory in a later process needs persistence, memory on and an earlier stored entry.
-- In `legacy`, the persistent long-term store also needs an embedding backend; explicit reasoning modes persist text-only entries without one and find them with BM25.
+- Recalling long-term memory in a later process needs persistence, memory on, a reasoning mode other than `legacy` and an earlier stored entry.
+- A `legacy` run opens no long-term store; a `long_term.db` an earlier version wrote there stays as it is, and the other reasoning modes read it. They persist text-only entries without an embedding backend and find them with BM25.
 - In explicit modes, recall must be enabled and include the `long` kind; `drop` and `replay` leave `auto` recall off by default.
 - Attempt digests enter long-term memory only with a confirmed file write or an eligible passing check; recall prefers digests from the same task and workspace, and a new task gets no cross-task digests until a same-task digest matches (see [digest recall](../reference/memory.md#digest-recall)).
 
@@ -45,7 +45,7 @@ In the web console and the app, melo keeps short notes about you across chats (s
 
 ## Turn long-term memory off
 
-- `--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term memory off for a run: nothing is recalled from it or written to it, and reflections are not promoted.
+- `--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term memory off for a run in the reasoning modes other than `legacy`: nothing is recalled from it or written to it. A `legacy` run has none.
 - Working memory and history work as usual.
 - `embedding_backend = "none"` disables the embedding backend, not memory itself; explicit reasoning modes can still store and recall text-only entries.
 - To set an embedding model, see [Set up an embedding model](embedding.md).
@@ -117,7 +117,7 @@ asyncio.run(main())
 
 `agent.hippo` is the same facade over the stores an agent has opened, so a running script can call `forget` there too. `SqliteHistory` and `SqliteLongTerm` have `forget(task_id)` and `forget_all()` themselves, as do the in-memory `History` and `LongTerm`.
 
-- **What `forget(task_id)` removes.** The task's rows from history's `tasks`, `steps` and `llm_calls` tables, and the long-term entries whose metadata names the task: its reflections (`"task_id"`), not its step summaries (only `"step_id"`).
+- **What `forget(task_id)` removes.** The task's rows from history's `tasks`, `steps` and `llm_calls` tables, and the long-term entries of the task; a step summary an older version wrote names only its step (`"step_id"`), so only `forget_all()` removes it.
 - **What `forget_all()` removes.** Every long-term entry and every row of the three history tables.
 - **What it does not touch.** Working memory (the current conversation), procedural memory (`melo-procedures forget` clears that), and the session stores (the console's chats are in `~/.cache/localmelo/gateway/sessions.db`).
 - **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock; the deletes overwrite what they free (`PRAGMA secure_delete=ON`) and a checkpoint truncates the WAL, so the text is not left in the database file or its `-wal` file; if another connection keeps the WAL from truncating, the checkpoint is skipped with a WARNING and a later one clears it.
@@ -168,7 +168,7 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 | File | What it holds |
 |---|---|
 | `~/.cache/localmelo/memory/history.db` | Your tasks, the model's text, every tool call with its arguments and every tool result, each after the redaction of [Model calls](../reference/memory.md#model-calls); also the model's reasoning for every call, redacted and kept 30 days by default. |
-| `~/.cache/localmelo/memory/long_term.db` | Step summaries and reflections, redacted, with their embedding vectors. |
+| `~/.cache/localmelo/memory/long_term.db` | The entries of the reasoning modes other than `legacy`, redacted, and the step summaries and reflections an older version wrote, with their embedding vectors. |
 | `~/.cache/localmelo/memory/procedures.db` | Each task's normalized query, the folder it ran in and its tool calls' labels (file names and program names, never their content or output). |
 | `~/.cache/localmelo/cli/sessions.db` and `~/.cache/localmelo/cli_history` | Every terminal turn with its tool calls and output; your messages (both `0600`). |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's session rows and turns. |

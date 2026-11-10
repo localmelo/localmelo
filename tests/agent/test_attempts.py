@@ -356,11 +356,11 @@ class TestReflectionInPrompt:
         assert "echo a" in text
 
 
-class TestReflectionPromotion:
-    """Reflections are promoted to long-term memory at terminal state."""
+class TestReflectionsAtTheEnd:
+    """Reflections are cleared at terminal state; none reaches long-term memory."""
 
     @pytest.mark.asyncio
-    async def test_promoted_on_completion(self) -> None:
+    async def test_cleared_on_completion(self) -> None:
         options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
@@ -383,11 +383,11 @@ class TestReflectionPromotion:
         result = await agent.run("echo test")
         assert result == "answer"
 
-        # Reflections cleared from working memory after promotion
+        # Reflections cleared from working memory
         assert len(agent.hippo.working.get_reflections()) == 0
 
-        # Promoted to long-term memory
-        assert len(agent.hippo.long._entries) > 0
+        # Nothing was promoted to long-term memory
+        assert len(agent.hippo.long._entries) == 0
 
     @pytest.mark.asyncio
     async def test_no_promotion_without_embedding(self) -> None:

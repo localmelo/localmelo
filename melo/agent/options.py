@@ -122,9 +122,8 @@ class AgentOptions:
       The CLI sets its own surface's mode; a Python caller gets
       ``shell_exec`` by naming it in ``builtins``. An explicit ``builtins``
       wins.
-    - ``memory``: ``False`` turns off long-term recall, long-term writes
-      and reflection promotion; reflections are still cleared at the end
-      of a run.
+    - ``memory``: ``False`` turns off long-term recall and long-term
+      writes; reflections are still cleared at the end of a run.
     - ``memory_dir``: directory for SQLite persistence. When it is
       ``None``, the ``LOCALMELO_PERSIST_MEMORY`` and
       ``LOCALMELO_MEMORY_DIR`` environment variables decide.

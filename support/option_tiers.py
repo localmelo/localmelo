@@ -273,7 +273,11 @@ OPTION_ROWS = (
         "change a setting for this run (list: melo config keys)",
     ),
     ("-V, --version", "", "show the version"),
-    ("--memory", "on|off", "long-term memory (default on)"),
+    (
+        "--memory",
+        "on|off",
+        "long-term memory outside legacy reasoning (default on)",
+    ),
     ("--builtins", "SET", "built-in tools: all, none or NAME,... (default: per mode)"),
     ("--mcp", "PATH", "MCP servers to use (mcpServers JSON file)"),
     ("--mcp-only", "", "only the MCP tools (--mcp PATH --builtins none)"),

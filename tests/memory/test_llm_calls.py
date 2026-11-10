@@ -46,6 +46,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
 )
+from localmelo.tests.memory.test_long_store import _apply
 
 HISTORY_LOGGER = "localmelo.melo.memory.history.sqlite"
 
@@ -452,7 +453,7 @@ async def test_a_new_long_term_file_is_0600(tmp_path: Path) -> None:
     long_term = SqliteLongTerm(path)
     try:
         with _umask(0o022):
-            await long_term.add("remember this", [1.0, 0.0])
+            await _apply(long_term, "remember this", embedding=[1.0, 0.0])
         wal, shm = Path(f"{path}-wal"), Path(f"{path}-shm")
         assert wal.exists() and shm.exists()
         assert (_mode(path), _mode(wal), _mode(shm)) == (0o600, 0o600, 0o600)

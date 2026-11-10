@@ -17,7 +17,6 @@ from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
-    ProviderError,
 )
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -180,32 +179,13 @@ class BlockingLLM(FakeLLM):
 
 
 class FakeEmbedding(BaseEmbeddingProvider):
-    """Embeds every text alike; fails for texts that start with *fail_prefix*.
+    """Embeds every text alike and counts its requests."""
 
-    The failure raises *error* (by default a ConnectionError), or with
-    *hang* the request never answers.
-    """
-
-    def __init__(
-        self,
-        fail_prefix: str | None = None,
-        *,
-        error: Exception | None = None,
-        hang: bool = False,
-    ) -> None:
+    def __init__(self) -> None:
         self.calls = 0
-        self.fail_prefix = fail_prefix
-        self.error = (
-            error if error is not None else ConnectionError("embedding server down")
-        )
-        self.hang = hang
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self.calls += 1
-        if self.fail_prefix and any(t.startswith(self.fail_prefix) for t in texts):
-            if self.hang:
-                await asyncio.Event().wait()
-            raise self.error
         return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
 
     async def close(self) -> None:
@@ -313,14 +293,6 @@ def _only_task(agent: Agent) -> TaskRecord:
     tasks = list(agent.hippo.history._tasks.values())
     assert len(tasks) == 1
     return tasks[0]
-
-
-def _promoted_reflections(agent: Agent) -> list[str]:
-    return [
-        entry.text
-        for entry in agent.hippo.long._entries
-        if entry.metadata.get("type") == "reflection"
-    ]
 
 
 # ── Statuses ────────────────────────────────────────────────────────────────
@@ -486,7 +458,7 @@ class TestFinally:
         task = _only_task(agent)
         assert (task.status, task.result) == ("crashed", "CancelledError")
         assert agent.hippo.working.get_reflections() == []
-        assert _promoted_reflections(agent) == ["Attempt 0: tried echo"]
+        assert agent.hippo.long._entries == []
 
     @pytest.mark.asyncio
     async def test_save_failure_is_logged_not_raised(
@@ -555,101 +527,15 @@ class TestFinally:
         assert (task.status, task.result) == ("crashed", "ConnectionError: refused")
 
     @pytest.mark.asyncio
-    async def test_reflections_are_promoted_and_cleared_after_a_crash(self) -> None:
+    async def test_reflections_are_cleared_after_a_crash(self) -> None:
         emb = FakeEmbedding()
         llm = FakeLLM([_echo_call("a"), _reflection("continue"), RuntimeError("boom")])
         agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
-        result = await agent.run_task("echo q")
-        assert result.status == "crashed"
-        assert agent.hippo.working.get_reflections() == []
-        assert _promoted_reflections(agent) == ["Attempt 0: tried echo"]
-
-    @pytest.mark.asyncio
-    async def test_memory_off_clears_reflections_without_promoting(self) -> None:
-        emb = FakeEmbedding()
-        llm = FakeLLM([_echo_call("a"), _reflection("continue"), RuntimeError("boom")])
-        options = _options(steps_per_attempt=1, max_attempts=2, memory=False)
-        agent = _agent(llm, options, emb)
         result = await agent.run_task("echo q")
         assert result.status == "crashed"
         assert agent.hippo.working.get_reflections() == []
         assert agent.hippo.long._entries == []
         assert emb.calls == 0
-
-    @pytest.mark.asyncio
-    async def test_promotion_failure_is_logged_and_reflections_cleared(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # Promoted reflections read "Attempt <n>: ..."; nothing else does.
-        emb = FakeEmbedding(fail_prefix="Attempt ")
-        llm = FakeLLM([_echo_call("a"), _reflection("continue"), _answer("done")])
-        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
-        result = await agent.run_task("echo q")
-        assert (result.status, result.result) == ("completed", "done")
-        assert "Could not promote the reflections of task" in caplog.text
-        assert agent.hippo.working.get_reflections() == []
-        assert _only_task(agent).status == "completed"
-
-    @pytest.mark.asyncio
-    async def test_another_promotion_failure_logs_no_traceback(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        emb = FakeEmbedding(fail_prefix="Attempt ", error=RuntimeError("bad vector"))
-        llm = FakeLLM([_echo_call("a"), _reflection("continue"), _answer("done")])
-        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
-        with caplog.at_level(logging.DEBUG):
-            result = await agent.run_task("echo q")
-        assert (result.status, result.result) == ("completed", "done")
-        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
-        assert record.levelno == logging.WARNING
-        assert record.getMessage().endswith(": RuntimeError: bad vector")
-        assert [r for r in caplog.records if r.exc_info] == []
-
-    @pytest.mark.asyncio
-    async def test_a_provider_error_during_promotion_logs_no_traceback(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        down = ProviderError("POST /embeddings failed: ConnectError", retryable=True)
-        emb = FakeEmbedding(fail_prefix="Attempt ", error=down)
-        refused = ProviderError(
-            "POST /chat/completions failed with HTTP 400: no",
-            status_code=400,
-            retryable=False,
-        )
-        llm = FakeLLM([_echo_call("a"), _reflection("continue"), refused])
-        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
-        with caplog.at_level(logging.DEBUG):
-            result = await agent.run_task("echo q")
-        assert (result.status, result.error) == ("provider_error", str(refused))
-        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
-        assert record.levelno == logging.INFO
-        assert record.getMessage().endswith(f": {down}")
-        # A failed request, not a crash: nothing logged with a traceback.
-        assert [r for r in caplog.records if r.exc_info] == []
-        assert agent.hippo.working.get_reflections() == []
-        assert _only_task(agent).status == "provider_error"
-
-    @pytest.mark.asyncio
-    async def test_a_promotion_without_an_answer_is_cut_short(
-        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr("localmelo.melo.agent.agent.PROMOTION_TIMEOUT_S", 0.05)
-        emb = FakeEmbedding(fail_prefix="Attempt ", hang=True)
-        # Attempt 0 reflects; attempt 1 waits for the model until timeout_s.
-        llm = BlockingLLM([_echo_call("a"), _reflection("continue")])
-        options = _options(steps_per_attempt=1, max_attempts=2, timeout_s=0.2)
-        agent = _agent(llm, options, emb)
-        with caplog.at_level(logging.DEBUG):
-            result = await asyncio.wait_for(agent.run_task("echo q"), 5)
-        assert (result.status, result.error) == ("timeout", "Timed out after 0.2 s")
-        # timeout_s, then at most the promotion's bound.
-        assert result.duration_s < 2.0
-        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
-        assert record.levelno == logging.INFO
-        assert record.getMessage().endswith(": no answer within 0.05 s")
-        assert [r for r in caplog.records if r.exc_info] == []
-        assert agent.hippo.working.get_reflections() == []
-        assert _only_task(agent).status == "timeout"
 
 
 # ── Counters ────────────────────────────────────────────────────────────────

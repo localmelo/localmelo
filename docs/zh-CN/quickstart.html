@@ -184,7 +184,7 @@
               <tr><td><code>Chat backend</code></td><td>你的服务器类型，例如 <code>2. Ollama (local endpoint)</code>，或者一个云服务商。</td></tr>
               <tr><td><code>Base URL</code></td><td>服务器地址；按 Enter 采用方括号中的默认值。Ollama 的地址不带 <code>/v1</code>。</td></tr>
               <tr><td><code>Chat model name</code></td><td>模型，例如 <code>qwen3:8b</code>。</td></tr>
-              <tr><td><code>Embedding backend</code></td><td><code>5. None (no long-term memory)</code>，或对话服务器列出的一个嵌入模型。</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5. None (search by words only)</code>，或对话服务器列出的一个嵌入模型。</td></tr>
             </tbody>
           </table>
         </div>
@@ -200,7 +200,7 @@
         <figure class="shot">
           <img src="../assets/img/embedding.webp" alt="首次运行找到一个模型服务器，并询问是否用它的嵌入模型在对话之间保持记忆。" width="1280" height="291" loading="lazy">
         </figure>
-        <p>长期记忆需要一个你的服务器已经在提供的嵌入模型。使用 Ollama 时：</p>
+        <p>按含义搜索需要一个你的服务器已经在提供的嵌入模型。使用 Ollama 时：</p>
         <!-- usage:embed-ollama --><figure class="usage" aria-label="用 Ollama 设置嵌入模型" data-copy="ollama pull qwen3-embedding:0.6b&#10;curl -sS http://127.0.0.1:11434/v1/embeddings \&#10;  -H &#x27;Content-Type: application/json&#x27; \&#10;  -d &#x27;{&quot;model&quot;: &quot;qwen3-embedding:0.6b&quot;, &quot;input&quot;: &quot;ping&quot;}&#x27;&#10;melo setup"><div class="usage-bar"><span class="usage-title">用 Ollama 设置嵌入模型</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">ollama</span> <span class="s">pull</span> <span class="a">qwen3-embedding:0.6b</span></span>
 <span class="ln cmd"><span class="p">$</span> <span class="c">curl</span> <span class="f">-sS</span> <span class="a">http://127.0.0.1:11434/<wbr>v1/<wbr>embeddings</span> <span class="x">\</span></span>
 <span class="ln cmd">  <span class="f">-H</span> <span class="q">'Content-Type: application/json'</span> <span class="x">\</span></span>

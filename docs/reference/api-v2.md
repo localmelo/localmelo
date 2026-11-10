@@ -332,7 +332,7 @@ file's revision.
   "errors": [],
   "choices": {
     "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
-    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (search by words only)"}],
     "hosted": [{"id": "deepseek", "label": "DeepSeek", "backend": "openai", "base_url": "https://api.deepseek.com/v1", "stored_url": "https://api.deepseek.com/v1", "models": ["deepseek-flash", "deepseek-v4-pro"], "key_env": "DEEPSEEK_API_KEY", "key_ref": "keychain:localmelo.deepseek", "free_address": false, "thinking_switch": true, "thinking_off_models": ["deepseek-flash"]}]
   },
   "mode": "default",

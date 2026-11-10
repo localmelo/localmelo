@@ -551,10 +551,10 @@ async def build_session_agent(
     if identify and agent_options.identity is None:
         identity = None
         if base_url:
-            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
+            kept = kept_across_chats(agent_options)
             identity = url_identity(base_url, model, kept, notes)
         elif cfg is not None:
-            kept = kept_across_chats(agent_options, has_embedding=embedding is not None)
+            kept = kept_across_chats(agent_options)
             identity = config_identity(cfg, kept, notes)
         agent_options = dataclasses.replace(agent_options, identity=identity)
     try:
