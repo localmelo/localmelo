@@ -552,6 +552,7 @@
   "chat.closeChat": "关闭对话",
   "chat.closeChatLabel": "关闭对话：{title}",
   "chat.closeFailed": "无法关闭对话：{problem}",
+  "chat.copied": "已拷贝",
   "chat.copyResponse": "拷贝回答",
   "chat.copyResponseFailed": "无法使用剪贴板。请选中回答文字后拷贝。",
   "chat.done": "完成",
