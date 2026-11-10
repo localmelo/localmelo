@@ -2302,16 +2302,20 @@ list: the data of **Settings › Permissions** and of `/grants`.
   it holds in every chat, task and terminal) or `session` (it holds in
   `session_id` only). `session_kind` is `main`, `side`, `task` or `terminal`;
   `chat_title` is that chat's title (`Main chat` for the main chat).
-- `kind` is `tool`, `site`, `folder` or `window`. `key` is the name as it was
+- `kind` is `tool`, `site`, `folder`, `window` or `check`. `key` is the name as it was
   kept: `shell_exec`, `browser:https://example.com`,
-  `browser-act:https://example.com`, a folder path, `window-read:<app>`. A
-  check matches it exactly, except that the person's site grant also covers
-  the other hosts of its site.
+  `browser-act:https://example.com`, a folder path, `window-read:<app>`,
+  `browser-check:https://example.com` (a human check from a known provider,
+  with the page's origin spelt once: lower case, no default port). A check
+  matches it exactly, except that the person's site grant also covers the
+  other hosts of its site, and a kept human check covers such checks on every
+  site.
 - `label` is the words the page shows, in English. `action` is `tool`, `open`,
-  `act` (click and choose), `read` (a site Auto let the chat read), `folder`
-  or `window`. `target` is the tool name, the site the grant covers (the host
-  for a read Auto kept, and for a row kept before a grant covered the whole
-  site), the folder as `~/…` or the app.
+  `act` (click and choose), `read` (a site Auto let the chat read), `folder`,
+  `window` or `check` (human checks on every site). `target` is the tool name,
+  the site the grant covers (the host for a read Auto kept, and for a row kept
+  before a grant covered the whole site), the folder as `~/…`, the app, or
+  empty for `check`.
 - `by` is `person` or `auto`; `granted_at` is Unix seconds. Auto's grants are
   site reads and hold in their chat only, the main chat included.
 - The order is the one the page and `/grants` number: `global` grants first,

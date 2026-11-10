@@ -2199,6 +2199,9 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                     lambda: self._images_on is True,
                 )
             )
+        # The goal reviews used before the call: a call that runs and succeeds
+        # gives them back (#583); a consent review stays spent.
+        reviewed = run.reviews.spent()
         try:
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,
@@ -2208,6 +2211,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             outcome = await self.executor.execute_structured(
                 exec_request, allowed=allowed, approve=gate
             )
+            if outcome.status is ExecutionStatus.SUCCESS:
+                run.reviews.refill(reviewed)
 
             exec_result_check = self.checker.check_executor_result(
                 ExecutorResultPayload(
