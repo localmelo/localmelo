@@ -19,8 +19,9 @@ ToolFunction = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
 # What a running tool says about its own call, for the call's ``tool.finished``
 # event. Each call of a run with an event sink gets a new dict; a tool sets a
 # key in it (never the variable, which a copy of the context would not carry
-# back). The event takes three keys: ``allowed_local`` (true: web_fetch read a
-# test server on this computer that ``[tools] web_fetch_allow_local`` lists),
+# back). The event takes three keys: ``allowed_local`` (true: web_fetch read, or
+# a browser step opened or acted on, a test server on this computer that
+# ``[tools] web_fetch_allow_local`` lists),
 # ``phases`` (seconds by phase of the call, beside its ``duration_s``: where a
 # browser step's time went) and ``effect`` (:data:`NO_EFFECT`: an act after which
 # no change was seen). Unset (None) outside such a run, where there is no event
