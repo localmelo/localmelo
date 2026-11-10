@@ -129,6 +129,12 @@ ROWS: list[tuple[str, Callable[[], FakeDriver], list[Any], bool]] = [
         True,
     ),
     (
+        "a click on a listed page's link",
+        _driver,
+        [_open(FIXTURE), ("browser_click", {"ref": "e1"})],
+        True,
+    ),
+    (
         "a link a public page holds",
         _driver,
         [_open(PUBLIC), ("browser_follow", {"ref": "e1"})],
@@ -289,8 +295,10 @@ async def test_background_chrome_lets_melos_own_navigation_through_and_tells_the
 
     async def load(session: str, start: Callable[[], Awaitable[Any]]) -> None:
         await _pause(browser, FIXTURE, "Document", {}, "nav")  # Chrome pauses the load
-        # Under the mark: a post of the main frame is not melo's navigation.
+        # Under the mark, a post of the main frame is not melo's navigation,
+        # and a sub-request.
         await _pause(browser, FIXTURE, "Document", {}, "post", method="POST")
+        await _pause(browser, FIXTURE, "XHR", {}, "sub")
 
     monkeypatch.setattr(driver, "_target", target)
     monkeypatch.setattr(driver, "_focus", target)
@@ -305,6 +313,7 @@ async def test_background_chrome_lets_melos_own_navigation_through_and_tells_the
     assert [(m, p.get("errorReason")) for m, p in calls.answered()] == [
         ("Fetch.continueRequest", None),  # the load
         blocked,  # a post of the main frame, under the mark
+        blocked,  # a sub-request, under the mark
         blocked,  # the page's own request after the load
         blocked,  # a public page's
     ]
@@ -331,16 +340,27 @@ async def test_a_page_let_through_as_a_server_the_person_wrote_reaches_no_listed
 
 
 async def test_with_nothing_listed_a_local_address_is_refused_as_before() -> None:
-    assert web_local.allow_of(_cfg()) is None
-    for allow in (None, web_local.allow_of(_cfg())):
-        driver = _driver()
-        tools = await _tools(driver, allow)
-        asks = Asks()
-        with asking(asks):
-            out = await run(tools, "browser_open", url=FIXTURE)
-        assert out.is_error and REFUSAL in out.text and NOTE not in out.text
-        assert not asks.asked and not [c for c in driver.calls if c[0] == "open"]
+    allow = web_local.allow_of(_cfg())
+    assert allow is None
+    driver = _driver()
+    tools = await _tools(driver, allow)
+    asks = Asks()
+    with asking(asks):
+        out = await run(tools, "browser_open", url=FIXTURE)
+    assert out.is_error and REFUSAL in out.text and NOTE not in out.text
+    assert not asks.asked and not [c for c in driver.calls if c[0] == "open"]
     assert rule().decide(FIXTURE, "", (), None, sender=OTHER).kind == "block"
+
+
+async def test_a_listed_site_is_asked_about_like_any_site() -> None:
+    tools = await _tools(_driver(), _listed(A))
+    asks = Asks()
+    with asking(asks):
+        assert not (await run(tools, "browser_open", url=PUBLIC)).is_error
+        assert not (await run(tools, "browser_open", url=FIXTURE)).is_error
+    public, listed = asks.asked
+    assert public.split(":", 1)[0] == listed.split(":", 1)[0]  # the same question
+    assert "example.com" in public and f"127.0.0.1:{A}" in listed, asks.asked
 
 
 async def test_melos_own_port_is_refused_even_when_listed() -> None:
@@ -381,9 +401,9 @@ async def test_only_the_listed_address_itself_is_opened(url: str) -> None:
 
 
 async def test_a_step_on_a_listed_server_is_marked_and_another_is_not() -> None:
-    """Opening it, and a part of the reading kept from it; a public page is not marked."""
+    """Opening it, and a part of the reading kept from it; a public page, before or after, is not marked."""
     tools = await _tools(_driver(), _listed(A))
-    for url, marked in ((PUBLIC, False), (FIXTURE, True)):
+    for url, marked in ((PUBLIC, False), (FIXTURE, True), (PUBLIC, False)):
         for name, args in (
             ("browser_open", {"url": url}),
             ("browser_read", {"part": 1}),
