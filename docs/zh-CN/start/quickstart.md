@@ -12,7 +12,7 @@
 
 - macOS（已开发和测试）或 Linux（应该可以运行，但未经测试）。不支持 Windows。
 - Python 3.11 或更新版本、Git 和 [uv](https://docs.astral.sh/uv/)（或 pip，见[使用 pip 安装](#install-with-pip)）。
-- 模型服务器。下面的命令使用 [Ollama](https://ollama.com)：安装并启动它，然后使用 `ollama pull qwen3:8b` 拉取模型。在搭载 Apple silicon 的 Mac 上，推荐使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx)：在命令中改用 `http://127.0.0.1:8000/v1` 和你的模型文件夹名。任何提供 OpenAI 兼容 API 的服务器也可以使用：填写它的 `/v1` URL 和模型名称。
+- 模型服务器。下面的命令使用 [Ollama](https://ollama.com)：安装并启动它，然后使用 `ollama pull qwen3:8b` 拉取模型。在搭载 Apple silicon 的 Mac 上，推荐使用 [oMLX](../../guides/model-servers.md#serve-a-model-with-omlx)（英文）：在命令中改用 `http://127.0.0.1:8000/v1` 和你的模型文件夹名。任何提供 OpenAI 兼容 API 的服务器也可以使用：填写它的 `/v1` URL 和模型名称。
 
 <a id="install"></a>
 
@@ -48,17 +48,17 @@ pip install -e ".[gateway]"
 ## 运行第一个任务
 
 > [!WARNING]
-> 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，见[选择内置工具](../guides/tools-mcp.md#choose-the-built-in-tools)。另见[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../guides/tools-mcp.md#what-the-checks-do)。
+> 模型可以运行 shell 命令和 Python 代码，并读取或写入你有权访问的任何文件：没有沙箱。如需运行不使用工具的任务，见[选择内置工具](../../guides/tools-mcp.md#choose-the-built-in-tools)（英文）。另见[安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)（英文）和[检查的作用](../../guides/tools-mcp.md#what-the-checks-do)（英文）。
 
 ```shell
 melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 
-答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。`-u` 和 `-m` 是 `--url` 和 `--model` 的字母写法；旧写法 `--base-url` 和 `--chat-model` 仍然可用（[旧写法对应的新写法](../reference/cli.md#old-spelling-to-new)）。
+答案会输出到 stdout，命令以退出码 0 结束（`echo $?` 输出 `0`）。`--url` 将 localmelo 指向一个 OpenAI 兼容服务器，仅用于本次运行，无需配置文件。它不发送 API 密钥，因此适用于本地服务器；要使用云端 API，请保存配置（见下文）。`-u` 和 `-m` 是 `--url` 和 `--model` 的字母写法；旧写法 `--base-url` 和 `--chat-model` 仍然可用（[旧写法对应的新写法](../../reference/cli.md#old-spelling-to-new)（英文））。
 
 不带 `--model` 时，melo 会先询问服务器有哪些模型，使用其唯一的对话模型，或服务器说明已在内存中的那一个。有多个对话模型且不知道哪个在内存中时，它会以退出码 2 停止并列出这些模型，因为请求一个尚未加载的模型可能让服务器加载一个很大的模型：请传入 `--model <id>`。
 
-使用 [oMLX](../guides/model-servers.md#serve-a-model-with-omlx) 时，填写它的 URL 和模型文件夹的名称：
+使用 [oMLX](../../guides/model-servers.md#serve-a-model-with-omlx)（英文） 时，填写它的 URL 和模型文件夹的名称：
 
 ```shell
 melo --url http://127.0.0.1:8000/v1 --model Qwen3-8B-4bit "What is 6*7?"
@@ -88,7 +88,7 @@ stdout 中恰好只有这一行。只有 `status` 为 `completed` 时退出码�
 
 ### 运行结果
 
-`status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../reference/run-results.md)。
+`status` 表示运行如何结束，例如 `completed`、`budget_exhausted` 或 `provider_error`。计数器表示运行消耗的步数、模型请求次数和工具调用次数，`config` 记录运行时使用的选项。所有状态和字段见[运行结果](../../reference/run-results.md)（英文）。
 
 <a id="run-a-worker-task"></a>
 
@@ -147,19 +147,19 @@ Try: What is this project? · / commands · ctrl+d quit
 
 第一行显示软件包版本；在 git 检出中还会显示短提交号，如 `melo 0.1.0 (baab21e)`。`melo --version` 输出同一行并以退出码 0 退出。`/status` 检查模型是否有回应，并显示文件夹、会话、审批和上下文用量；`/status all` 还会显示工具、记忆、限制和文件。
 
-尚未保存后端且没有模型服务器在运行时，搭载 Apple silicon 的 Mac 上首次运行的 `melo` 和 `melo setup` 会打印一个列表：这台 Mac、推荐的模型（例如 oMLX 上的 Qwen3 8B），以及它将要安装的每一项的大小和去向（melo_serve、oMLX、对话模型、嵌入模型和一个登录项）。选择 `Set up <model> (<size>)` 之前不会安装任何东西。你同意这一次后，它会安装这些项，每一步显示一行，最后进入对话。这是可选的：`Choose what to install` 可以跳过任何一项，`Use a server I already run` 和 `Use a hosted service` 在同一个菜单里，而且已经在运行的服务器会先于这一切被提供。管道会被告知请在终端中运行 melo；其他系统会打印如何自行启动服务器。详情见[模型服务器指南](../guides/model-servers.md#first-run-setup)。已有连接和直接任务不变。
+尚未保存后端且没有模型服务器在运行时，搭载 Apple silicon 的 Mac 上首次运行的 `melo` 和 `melo setup` 会打印一个列表：这台 Mac、推荐的模型（例如 oMLX 上的 Qwen3 8B），以及它将要安装的每一项的大小和去向（melo_serve、oMLX、对话模型、嵌入模型和一个登录项）。选择 `Set up <model> (<size>)` 之前不会安装任何东西。你同意这一次后，它会安装这些项，每一步显示一行，最后进入对话。这是可选的：`Choose what to install` 可以跳过任何一项，`Use a server I already run` 和 `Use a hosted service` 在同一个菜单里，而且已经在运行的服务器会先于这一切被提供。管道会被告知请在终端中运行 melo；其他系统会打印如何自行启动服务器。详情见[模型服务器指南](../../guides/model-servers.md#first-run-setup)（英文）。已有连接和直接任务不变。
 
 如果服务器还列出嵌入模型，首次运行会多问一个问题 `Remember across chats with <model>?`；选择默认选中的 `Yes, with it` 后，会在一次嵌入探测通过后保存。
 
-在终端里，每个答案固定的问题都是列表：↑ ↓ 或数字键移动，Enter 确认，Esc 取安全答案，回答后列表会被擦除（见[问题都是列表](../guides/terminal.md#questions-are-lists)）。管道输入的答案和脚本仍使用键入的问题（`Use it? [Y/n]:`）。
+在终端里，每个答案固定的问题都是列表：↑ ↓ 或数字键移动，Enter 确认，Esc 取安全答案，回答后列表会被擦除（见[问题都是列表](../../guides/terminal.md#questions-are-lists)（英文））。管道输入的答案和脚本仍使用键入的问题（`Use it? [Y/n]:`）。
 
-输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 服务器保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../guides/configure.md#first-run)和[配置嵌入模型](../guides/embedding.md)。
+输入消息并按 Enter，或输入 `/exit` 退出。此后，`melo` 会直接进入界面，`melo "<task>"` 会使用已保存的服务器。这里的服务器是 Ollama，因此保存为 `ollama` 后端；oMLX 服务器保存为 `omlx`，其他 OpenAI 兼容服务器保存为 `vllm`，即它们的后端键。见[首次运行](../../guides/configure.md#first-run)（英文）和[配置嵌入模型](../../guides/embedding.md)（英文）。
 
 <a id="with-the-setup-wizard"></a>
 
 ### 使用配置向导
 
-配置向导还可以配置嵌入服务器或云端服务。对于云端服务，在列表里选择它，并在提示时输入密钥（输入时隐藏，保存在你 Mac 的钥匙串里；见[云端模型](../guides/hosted-models.md)），或者先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
+配置向导还可以配置嵌入服务器或云端服务。对于云端服务，在列表里选择它，并在提示时输入密钥（输入时隐藏，保存在你 Mac 的钥匙串里；见[云端模型](../../guides/hosted-models.md)（英文）），或者先在当前终端运行 `export OPENAI_API_KEY="<your key>"`（或提供方对应的变量）：向导的测试请求会使用该密钥。先运行向导，再启动网关：
 
 ```shell
 melo setup
@@ -270,18 +270,18 @@ melo --url http://127.0.0.1:8000/v1 --model YOUR_MODEL_ID
 - melo 运行 shell 命令、Python 代码或写入文件前会询问：按 `1` 允许，按 `2` 在本会话中允许该工具，按 `3` 拒绝并告诉 melo 原因。Esc 停止当前轮次。
 - melo 在当前文件夹中工作（`--workspace DIR` 可选择其他文件夹）：文件工具限制在该文件夹内；命令和 Python 可以访问其他文件，因此 melo 会先询问。
 
-[交互式界面](../guides/terminal.md#the-interactive-ui)介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo serve` 启动网关。
+[交互式界面](../../guides/terminal.md#the-interactive-ui)（英文）介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo serve` 启动网关。
 
-`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo setup` 会改变该模型。首次运行、还没有设置模型时，欢迎页会显示一张卡片，找到这台 Mac 上已在运行的模型服务器，点按 **Use this model** 即可连接，无需打开设置（没有服务器在运行时，受支持的 Mac 可以在卡片上确认一次就设置好，和终端一样）。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../guides/web-console.md#web-workspace)。
+`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo setup` 会改变该模型。首次运行、还没有设置模型时，欢迎页会显示一张卡片，找到这台 Mac 上已在运行的模型服务器，点按 **Use this model** 即可连接，无需打开设置（没有服务器在运行时，受支持的 Mac 可以在卡片上确认一次就设置好，和终端一样）。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../../guides/web-console.md#web-workspace)（英文）。
 
 <a id="next-steps"></a>
 
 ## 下一步
 
-- [配置](../reference/configuration.md)：后端、云端 API 密钥、超时。
-- [工具和 MCP](../reference/tools.md)：选择内置工具并添加 MCP 服务器。
-- [网关和 HTTP API](../guides/gateway.md)：会话、网页工作区、登录时运行。
-- [Python API](../reference/python-api.md)：从 Python 运行任务、跟踪事件、审批工具调用。
+- [配置](../../reference/configuration.md)（英文）：后端、云端 API 密钥、超时。
+- [工具和 MCP](../../reference/tools.md)（英文）：选择内置工具并添加 MCP 服务器。
+- [网关和 HTTP API](../../guides/gateway.md)（英文）：会话、网页工作区、登录时运行。
+- [Python API](../../reference/python-api.md)（英文）：从 Python 运行任务、跟踪事件、审批工具调用。
 - [记忆](../../reference/memory.md)（英文）：跨运行保留记忆、检查和重置记忆。
 - [命令行参考](../../reference/cli.md)（英文）：所有选项、退出码和脚本编写。
 - [故障排查](../../reference/troubleshooting.md)（英文）：错误消息和解决办法。

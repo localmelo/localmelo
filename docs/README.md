@@ -10,8 +10,9 @@ The Chinese index is [zh-CN/README.md](zh-CN/README.md).
 
 - [Quickstart](start/quickstart.md): install localmelo, run a first task, save a
   configuration and start the gateway.
-- [localmelo for agents](for-agents.md): a compact entry for coding agents and
-  LLM tools, indexed by [llms.txt](llms.txt).
+- [localmelo for agents](for-agents.md): the contract for coding agents and
+  scripts (commands, exit codes, output, routes, files and rules); every page
+  is in [llms.txt](llms.txt).
 
 ## Guides
 

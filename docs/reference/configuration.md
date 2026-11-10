@@ -629,6 +629,22 @@ chat_model = "Qwen/Qwen3-8B"
 | `LOCALMELO_DETECT_URLS` | The URLs that the [first run](../guides/configure.md#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
 | The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. It is used before a key saved in the keychain. |
+| `LOCALMELO_CHAT` | `local` makes bare `melo` keep the terminal's own chat instead of the gateway's main chat, as `[cli] chat = "local"` does. For scripts and test harnesses. |
+
+These are for tests, screenshots and the macOS app; a person never needs them:
+
+| Variable | Effect |
+|---|---|
+| `LOCALMELO_NOW` | Pins the clock for memory tests and benchmarks: ISO 8601 (no zone means local time) or epoch seconds. The model's `Date:` line and recall's age decay read it; the times stored for new turns and notes stay on the wall clock. Empty or invalid: the wall clock (an invalid value logs one warning). |
+| `LOCALMELO_APP_INSTANCE` | The macOS app's per-launch id (32 hex characters) for the gateway it starts: that gateway's `/api/auth/login` needs the matching `X-LocalMelo-Instance` header, and `melo` opens no browser for it. |
+| `LOCALMELO_LAUNCH_AGENTS` | The folder for the background service's plist, in place of `~/Library/LaunchAgents`. |
+| `LOCALMELO_DESKTOP_HELPER` | The whole command line of the desktop control helper (an MCP server) that handles other apps' windows; empty for none. The test suite sets it empty. |
+| `LOCALMELO_SAFARIDRIVER` | A command line (split as a shell would) in place of `/usr/bin/safaridriver`. Tests and screenshots must set it: the real program opens Safari. |
+| `LOCALMELO_CHROME` | A command line in place of the installed Google Chrome, for `[browser] driver = "chrome"`. |
+| `LOCALMELO_ASCII` | `1` draws ASCII stand-ins for the terminal's symbols. See [the terminal guide](../guides/terminal.md). |
+| `LOCALMELO_BELL` | `0` turns off the terminal bell for approvals and long turns. |
+| `LOCALMELO_CPR` | `1` lets the terminal UI ask the terminal for the cursor position (off by default). |
+| `LOCALMELO_SPINNER_FRAME` | A number that fixes the terminal UI's spinner frame, for screenshots and tests. |
 
 See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 
@@ -640,7 +656,13 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
+| `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |
+| `~/.cache/localmelo/gateway/endpoint.json` | The running gateway's pid, host, port and id; `melo`, `melo-task` and the app find the gateway through it. | By every gateway as it starts. |
+| `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl` | One record per model call of the gateway, with `machine.jsonl` beside it (mode 0600, pruned after 30 days). Off with `[scheduler] call_log = false`; `[scheduler] call_log_dir` moves it. | By the gateway. |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
+| `~/.cache/localmelo/cli_history`, `~/.cache/localmelo/logs/cli.log` | The terminal's input history and log. | By bare `melo` in a terminal. |
+| `~/.cache/localmelo/logs/gateway.log` | The output of a gateway the terminal started in the background (mode 0600). | By bare `melo`, when no gateway runs. |
+| `~/.cache/localmelo/browser/chrome` | The Chrome profile melo browses with (`[browser] driver = "chrome"`). | At the first page. |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 
