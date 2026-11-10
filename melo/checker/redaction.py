@@ -100,6 +100,30 @@ def redact_secrets(text: str) -> tuple[str, int]:
     return text, blocks + keys + tokens + codes
 
 
+def secret_spans(text: str) -> list[tuple[int, int]]:
+    """Where *text* holds what :func:`redact_secrets` replaces: the ``(start, end)``
+    of each key block's body, key, bearer token and code, sorted.
+
+    Each kind is read in *text* as given, not in an earlier pass's output, so a
+    span is a place in *text*. It is for a reader that takes text out by its
+    place: a secret can need words outside its own sentence to be seen (a code's
+    keyword, the word before a token on the next line), and once those are taken
+    out it reads as a number or a word. There is a span exactly when
+    :func:`redact_secrets` counts a secret.
+    """
+    spans: list[tuple[int, int]] = []
+    if "PRIVATE KEY" in text:
+        spans += [
+            match.span(2)
+            for match in _PEM.finditer(text)
+            if match.group(2) != _pem_body(match.group(3))
+        ]
+    spans += [match.span() for match in _KEY.finditer(text)]
+    spans += [(match.end(1), match.end()) for match in _BEARER.finditer(text)]
+    spans += _code_spans(text)
+    return sorted(spans)
+
+
 def redacted(value: Any) -> Any:
     """*value* with every string in it (and in its lists) redacted."""
     if isinstance(value, str):
@@ -118,36 +142,45 @@ def _redact_pem(text: str) -> tuple[str, int]:
     def replace(match: re.Match[str]) -> str:
         nonlocal count
         begin, body, end = match.groups()
-        redacted = "\n" + REDACTED + ("\n" if end else "")
-        if body == redacted:
+        if body == _pem_body(end):
             return match.group(0)
         count += 1
-        return begin + redacted + end
+        return begin + _pem_body(end) + end
 
     return _PEM.sub(replace, text), count
 
 
+def _pem_body(end: str) -> str:
+    """What stands for a key block's body: :data:`REDACTED` on a line of its own."""
+    return "\n" + REDACTED + ("\n" if end else "")
+
+
 def _redact_codes(text: str) -> tuple[str, int]:
     """Pass 4 of :func:`redact_secrets`: the codes next to a keyword."""
-    keywords = [match.span() for match in _CODE_KEYWORD.finditer(text)]
-    if not keywords:
+    spans = _code_spans(text)
+    if not spans:
         return text, 0
-    starts = [start for start, _ in keywords]
-    ends = sorted(end for _, end in keywords)
     parts: list[str] = []
     kept_from = 0
-    count = 0
-    for match in _CODE.finditer(text):
-        start, end = match.span()
-        if not _near_a_keyword(text, start, end, starts, ends):
-            continue
+    for start, end in spans:
         parts += [text[kept_from:start], REDACTED]
         kept_from = end
-        count += 1
-    if not count:
-        return text, 0
     parts.append(text[kept_from:])
-    return "".join(parts), count
+    return "".join(parts), len(spans)
+
+
+def _code_spans(text: str) -> list[tuple[int, int]]:
+    """The ``(start, end)`` of each code of *text* next to a keyword, in order."""
+    keywords = [match.span() for match in _CODE_KEYWORD.finditer(text)]
+    if not keywords:
+        return []
+    starts = [start for start, _ in keywords]
+    ends = sorted(end for _, end in keywords)
+    return [
+        match.span()
+        for match in _CODE.finditer(text)
+        if _near_a_keyword(text, *match.span(), starts, ends)
+    ]
 
 
 def _near_a_keyword(

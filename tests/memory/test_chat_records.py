@@ -269,6 +269,47 @@ def test_only_the_sentences_a_password_reaches_are_left_out() -> None:
     assert index.cleaned(text) == "pwd\n[left out]\nls /srv/app/src"
 
 
+@pytest.mark.parametrize("text", ["pw:\n12345678.", "Tea is ready. pwd\n12345678)"])
+def test_a_value_that_is_no_sentence_is_left_out_by_its_place(text: str) -> None:
+    # A line of digits and a full stop reads as a list marker: no sentence holds it.
+    assert "12345678" not in index.cleaned(text)
+
+
+@pytest.mark.parametrize("word", ["pw", "password"])
+def test_a_refused_sentence_inside_a_longer_one_hides_none_of_it(word: str) -> None:
+    # Replaced one after the other, the short sentence went first, inside the
+    # long one too, and the long one was then never found: its card stayed.
+    text = (
+        f"My card is 4111 1111 1111 1111 and my {word} is plain-Word7.\n"
+        f"my {word} is plain-Word7."
+    )
+    assert index.cleaned(text) == "[left out]\n[left out]"
+    assert index.plain_text(text) == "[left out] [left out]"
+
+
+def test_a_refused_sentence_is_left_out_wherever_else_its_words_stand() -> None:
+    assert index.cleaned("keypw: abcd1. pw: abcd1") == "key[left out]. [left out]"
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("pw: Bearer\nabcdefghijklmnopqrstuvwxyz0123456789 ok.", "abcdefgh"),
+        ("password: Bearer\nabcdefghijklmnopqrstuvwxyz0123456789 ok.", "abcdefgh"),
+        ("pw: abcd1 then the verification code. 482913 is it.", "482913"),
+        ("The code is 4821. Use this OTP now.", "4821"),
+    ],
+)
+def test_a_secret_goes_with_the_sentence_that_makes_it_one(
+    text: str, secret: str
+) -> None:
+    # The word before a token, or a code's keyword, stands in a sentence that is
+    # left out: read after that cut, the token or the code is a word or a number.
+    kept = index.cleaned(f"Tea is ready. {text}")
+    assert kept.startswith("Tea is ready.")
+    assert secret not in kept
+
+
 @pytest.mark.parametrize(
     "text",
     [

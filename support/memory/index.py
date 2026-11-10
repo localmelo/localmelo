@@ -37,7 +37,7 @@ from typing import Any, Final, NamedTuple
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.redaction import redact_secrets, secret_spans
 from localmelo.melo.contracts.sign_in import password_spans
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
@@ -256,26 +256,57 @@ def _item(row: Sequence[Any]) -> MemoryItem:
 
 
 def _kept(text: str) -> str:
-    """*text* without the sentences a note would refuse (a password, a card number),
-    and without any other sentence a password's value reaches into.
+    """*text* without its secrets' sentences: each sentence a note would refuse (a
+    password, a card number), each sentence a secret's place reaches into, and the
+    place itself.
 
-    A value can cross a sentence's end (a quoted one with a full stop in it, one on
-    the line after its word): neither sentence then reads as a password by itself.
-    Every sentence is judged as the text gives it, before anything is taken out: a
-    cut made first would hide the rest of another secret from the test.
+    A secret's place is a password's value or what the redaction replaces. It can
+    lie outside the sentence that makes it one, or cross a sentence's end: a quoted
+    value with a full stop in it, a value or a token on the line after its word, a
+    code in the sentence before its keyword. Neither sentence then reads as a
+    secret by itself. So everything is found in the text as given and taken out in
+    one pass at the end. A cut made first hides what is left of a secret from every
+    later test: the rest of a key after a password word, a code once its keyword's
+    sentence is gone, a long sentence once a shorter one inside it was replaced.
     """
-    sentences = split_sentences(text)
-    reached = password_spans(text)
-    refused = [sentence for _, sentence in sentences if sensitive(sentence)]
-    known = set(refused)
-    # By their place first: the offsets are those of the text as given.
-    for start, sentence in reversed(sentences):
+    places = _merged([*password_spans(text), *secret_spans(text)])
+    out = list(places)  # by its place too: a piece the splitter gives no sentence for
+    refused: dict[str, None] = {}
+    at = 0
+    for start, sentence in split_sentences(text):
         end = start + len(sentence)
-        if sentence not in known and any(a < end and start < b for a, b in reached):
-            text = text[:start] + "[left out]" + text[end:]
-    for sentence in reversed(refused):
-        text = text.replace(sentence, "[left out]")
-    return text
+        while at < len(places) and places[at][1] <= start:
+            at += 1
+        if sensitive(sentence):
+            refused[sentence] = None
+        elif at == len(places) or places[at][0] >= end:
+            continue
+        out.append((start, end))
+    # A refused sentence's words wherever else they stand: a repeat, or inside a
+    # sentence that reads as none.
+    for sentence in refused:
+        found = text.find(sentence)
+        while found >= 0:
+            out.append((found, found + len(sentence)))
+            found = text.find(sentence, found + 1)
+    parts: list[str] = []
+    kept_from = 0
+    for start, end in _merged(out):
+        parts += [text[kept_from:start], "[left out]"]
+        kept_from = end
+    parts.append(text[kept_from:])
+    return "".join(parts)
+
+
+def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """*spans* in order, each run of overlapping ones as one span."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def _clean(text: str) -> str:
