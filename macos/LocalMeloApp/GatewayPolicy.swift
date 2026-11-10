@@ -206,7 +206,7 @@ func quitMessage(_ counts: RunningCounts?, statusKnown: Bool) -> String {
     }
     if counts.tasks > 0 {
         let tasks = L10n.plural("app.quit.tasks", counts.tasks, one: "{n} task", other: "{n} tasks")
-        says.append(L10n.t("app.quit.tasksContinue", " {what} will continue when it opens again; a task stopped in the middle of a step waits for you.", ["what": tasks]))
+        says.append(L10n.t("app.quit.tasksContinue", " {what} will continue when it opens again; a task stopped in the middle of a step melo cannot check by itself waits for you.", ["what": tasks]))
     }
     if counts.runs > 0 { goes.append(L10n.plural("app.quit.runs", counts.runs, one: "{n} run", other: "{n} runs")) }
     if counts.terminal > 0 {

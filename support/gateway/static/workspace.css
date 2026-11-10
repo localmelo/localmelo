@@ -2147,6 +2147,8 @@ dialog::backdrop {
   margin: 0;
   min-width: 0;
 }
+/* A short secondary note under a row's value, such as the one after "Continued after a restart". */
+.worker-meta dd > p { margin: 2px 0 0; }
 .worker-brief {
   white-space: pre-wrap;
 }

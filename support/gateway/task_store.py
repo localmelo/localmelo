@@ -33,7 +33,7 @@ import time
 import uuid
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, get_args
+from typing import Any, Final, NamedTuple, get_args
 
 from localmelo.support.gateway.chore_store import CHORE_SCHEMA
 from localmelo.support.gateway.task_policy import TaskSpec
@@ -118,10 +118,12 @@ _SNAPSHOT_SCHEMA: Final = """CREATE TABLE park_priority (
 
 # The calls that can change something and have not returned, one row each
 # while it runs: a restart that finds one knows the call may be half done.
+# ``local`` says whether its effect stays where melo can look (1) or not (0),
+# decided before the call; a row from before the column has NULL: unknown.
 _CALLS_SCHEMA: Final = """CREATE TABLE IF NOT EXISTS recovery_calls (
   task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
   execution_id TEXT NOT NULL, call_id TEXT NOT NULL, tool TEXT NOT NULL,
-  PRIMARY KEY (task_id, execution_id, call_id))"""
+  local INTEGER, PRIMARY KEY (task_id, execution_id, call_id))"""
 
 _RECOVERY_SCHEMA: Final = (
     """CREATE TABLE IF NOT EXISTS recovery_provenance (
@@ -270,12 +272,20 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+class Continued(NamedTuple):
+    """A restart's continue of a task: when, and the note its turn starts with ("" for none)."""
+
+    at: float
+    check: str
+
+
 def _resume_request(
     generation: int | None,
     previous: str | None,
     actor: str,
     next_turn: int,
     at: float | None = None,
+    check: str = "",
 ) -> str:
     return json.dumps(
         {
@@ -286,6 +296,8 @@ def _resume_request(
             "next_turn": next_turn,
             # When the start continued the task by itself (its page shows it).
             **({} if at is None else {"at": at}),
+            # What its turn checks first: a step that may be half done.
+            **({"check": check} if check else {}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -434,6 +446,7 @@ class TaskStore:
                     await conn.execute(statement)
                 await self._ensure_host_column(conn)
                 await self._ensure_ending_column(conn)
+                await self._ensure_local_column(conn)
                 await conn.execute(_CREATE_KEYS)
                 await conn.execute(
                     "UPDATE schema_components SET version = ? WHERE name = ?",
@@ -448,6 +461,7 @@ class TaskStore:
                     _CREATE_KEYS
                 )  # IF NOT EXISTS: older v6 files lack it
                 await conn.execute(_CALLS_SCHEMA)  # IF NOT EXISTS: and this table
+                await self._ensure_local_column(conn)
             elif current > SCHEDULER_VERSION:
                 raise SessionStoreError(
                     f"{self._store.path} has scheduler schema version {current}; "
@@ -475,6 +489,19 @@ class TaskStore:
         for name in ("ending", "work_base", "finishing"):
             if name not in columns:
                 await conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} TEXT")
+
+    @staticmethod
+    async def _ensure_local_column(conn: Any) -> None:
+        """Record whether an open call's effect stays local (idempotent).
+
+        Rows written before the column exist read NULL: unknown, so a restart
+        that finds one waits for the person.
+        """
+        columns = {
+            row[1] for row in await _rows(conn, "PRAGMA table_info(recovery_calls)")
+        }
+        if columns and "local" not in columns:
+            await conn.execute("ALTER TABLE recovery_calls ADD COLUMN local INTEGER")
 
     @staticmethod
     async def _ensure_host_column(conn: Any) -> None:
@@ -714,8 +741,8 @@ class TaskStore:
             )
         return bool(row and row[0])
 
-    async def continued_at(self, task_id: str) -> float | None:
-        """When the start last continued *task_id* by itself, or ``None``.
+    async def continued(self, task_id: str) -> Continued | None:
+        """When the start last continued *task_id* by itself, and its note, or ``None``.
 
         Only while that is the newest Resume of the task: one the person made
         since is not a restart's. One read of the newest Resume's receipt.
@@ -734,8 +761,10 @@ class TaskStore:
             return None
         if not isinstance(request, dict) or request.get("actor") != RESTART:
             return None
-        at = request.get("at")
-        return float(at) if isinstance(at, int | float) else None
+        at, check = request.get("at"), request.get("check")
+        if not isinstance(at, int | float):
+            return None
+        return Continued(float(at), check if isinstance(check, str) else "")
 
     async def resume_waiting_turn(self, task_id: str) -> bool:
         """Whether the newest committed Resume still waits for its first turn."""
@@ -1896,6 +1925,7 @@ class TaskStore:
         first_start: bool,
         actor: str = "user",
         because: str = "",
+        check: str = "",
     ) -> TaskRecord:
         """Queue one recovered task and record the Resume operation atomically.
 
@@ -1904,7 +1934,8 @@ class TaskStore:
         repeated ``operation_id`` returns the stored row without a second
         transition. A terminal or changed row refuses the resume. *because*
         is the ``sched.resumed`` event's reason (``"restart"``: the start
-        continued the task by itself).
+        continued the task by itself); *check*, kept for a restart's continue
+        alone, is the note its turn starts with.
         """
         if not isinstance(operation_id, str) or not operation_id.strip():
             raise ValueError("operation_id must be a non-empty string")
@@ -2036,6 +2067,7 @@ class TaskStore:
                 actor,
                 await _next_turn_number(conn, task_id),
                 at=now if actor == RESTART else None,
+                check=check if actor == RESTART else "",
             )
             await conn.execute(
                 "INSERT INTO recovery_operations VALUES "

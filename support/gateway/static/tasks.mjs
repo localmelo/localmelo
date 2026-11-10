@@ -229,8 +229,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
     if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
     row(t('tasks.row.updated'), when(task.updated_at));
-    // The start continued it by itself after a restart: one quiet line, with the time.
-    if (task.continued_at != null) row(t('tasks.row.continued'), when(task.continued_at));
+    // The start continued it by itself after a restart: one quiet line, with the time,
+    // and a note when its turn was asked to look at a step that may be half done.
+    if (task.continued_at != null) {
+      const continued = row(t('tasks.row.continued'), when(task.continued_at));
+      if (task.continued_check) continued.append(node('p', 'muted', t('tasks.row.continuedCheck')));
+    }
     // A refused folder says why in its own box below, in words.
     if (task.wait_reason && !task.folder_problem && !isStopped(task)) row(t('tasks.row.waiting'), task.wait_reason);
     // What the run says is left, from its stop answer.

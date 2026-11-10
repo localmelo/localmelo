@@ -391,10 +391,10 @@ class MainChatCards:
             # Which end this is: a follow-up's row names the end it follows, so the
             # page orders the two by end and not by when each was written (#431).
             card["end_id"] = stored.id
-            continued = await self._console.workers.tasks.continued_at(info.id)
+            continued = await self._console.workers.tasks.continued(info.id)
             if continued is not None:
                 # The start continued it by itself: its card says so, with the time.
-                card["continued_at"] = continued
+                card["continued_at"] = continued.at
             if self._console.followups.comes_after(stored.id):
                 # Its chat follows up on this end: more may run (#431).
                 card["follow_up"] = True
