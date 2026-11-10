@@ -25,6 +25,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A thinking model's answer is no longer lost, and a reply that is only unfinished thinking or a broken tool call is never shown as the answer.
 - A question that asks for a short answer gets one in at most two steps.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
+- A chat's reply appears line by line as it is written, in the console, the app and the terminal; Stop ends it at once and keeps what was shown.
 
 ### Tasks
 

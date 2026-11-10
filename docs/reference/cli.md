@@ -626,7 +626,7 @@ These options apply to `melo` without a task.
   and so does a server that ignores a streamed request or closes the stream
   before sending anything: melo uses its whole reply, asks it once more without
   streaming when needed, and says so once. Direct mode and stdin-closed runs
-  never stream. See [Streamed replies](../guides/terminal.md#streamed-replies).
+  never stream; the gateway streams a chat's replies and reads the same hint. See [Streamed replies](../guides/terminal.md#streamed-replies).
 - Text attachments in the interactive UI: `/attach PATH` stages one file
   (quote paths with spaces), `/attachments` lists staged files, and `/detach N`
   or `/detach all` removes them. Explicit selection from `@` file completion

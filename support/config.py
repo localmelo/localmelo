@@ -208,8 +208,10 @@ class CliConfig:
 
     ``reasoning_tags`` maps a model id to its trusted framing declaration
     (``explicit``, ``closing_only`` or ``none``). An undeclared model keeps the
-    conservative rule: streamed content is held until the reply ends. Only the
-    interactive UI reads ``stream``: direct runs and the gateway never stream.
+    conservative rule: streamed content is held until the reply ends. The
+    gateway reads the same declarations for a chat's live replies. Only the
+    interactive UI reads ``stream`` (in the main chat: whether it draws the
+    gateway's live text); direct runs never stream.
     """
 
     stream: bool = True

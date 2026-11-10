@@ -1211,6 +1211,10 @@ The session's turns, oldest first within the page.
   still listed.
 - `answer` and `result.result` are the stored copies: secrets are redacted
   and, after retention, an inline `<think>` block is gone.
+- `result.first_word_s` is the seconds from the turn's start to the first
+  line of its reply that showed as it was written (see
+  [Live replies](events.md#live-replies)); absent when nothing showed so, as
+  for a server that sends replies whole.
 - `cause` is `""` while a turn runs.
 - The main chat's pages add `cards`, its cards beside the page's turns, oldest
   first: from the page's oldest turn (from the start, on the oldest page) up to
@@ -1464,7 +1468,10 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
   1 minute, or whose last viewer is gone for 5 seconds, is declined:
   `approval.resolved` with `outcome` `denied` and `origin` `timeout`. The
   console keeps its stream open while its page is hidden, so a hidden page
-  still counts as a viewer.
+  still counts as a viewer. Such a stream also carries a chat's reply as it
+  is written: `reply.live` frames, with no `id:` line and no `id`, which are
+  never stored (see [Live replies](events.md#live-replies)). A stream without
+  `watch` carries only stored events.
 - The stream ends when the client disconnects, when the session no longer
   exists (a reconnect then gets 404), and when the gateway shuts down. A
   browser reconnects with `Last-Event-ID` and receives every event it

@@ -860,6 +860,33 @@ The store guarantees:
   (`Last-Event-ID`) receives what it missed, the events that recovery wrote
   included.
 
+## Live replies
+
+A chat's turn in the gateway streams its replies. What the run releases for
+the screen (complete lines, already redacted, never the model's thinking or a
+tool call's arguments) reaches a stream that shows the chat to a person
+(`watch=true`) as `reply.live` frames: at once for a request's first line,
+then at most one frame every 40 ms. They are not stored, have no `id`, and
+never move a reconnect's cursor; the stored events stay the turn's record,
+and its `assistant.message` and `run.finished` carry the finished reply as
+without a stream.
+
+| Type | When | `data` keys |
+|---|---|---|
+| `reply.live` | A planning request of the turn released text. | `turn`, `turn_id`, `step`, `attempt`, `at`, `text` |
+
+- `step` is the planning step, and `attempt` counts its requests from 1: a
+  retry's text starts over.
+- `at` is where `text` starts in that request's text so far. A stream gets
+  each request's text in one run from `at` 0, with no repeat; one that
+  connects or reconnects while a reply is written gets the text so far from
+  `at` 0, once, then the rest.
+- A step's text is done when its stored `assistant.message` comes, and a
+  turn's when `turn.finished` comes; a stopped turn's partial text is not
+  stored.
+- The turn's `result` records `first_word_s` (see
+  [`GET /api/sessions/{id}/turns`](api-v2.md#get-apisessionsidturns)).
+
 ## Stability
 
 Within schema version 1 (`v` 1), types and keys are only ever added, never

@@ -100,7 +100,7 @@ Three limits apply at different levels:
 | Run time limit (`--timeout`) | The only limit on a whole run; when it expires, the run ends as `timeout`. |
 
 - `shell_exec` and `python_exec` run in a child process with a process group, which a timeout or a cancellation kills.
-- Direct runs, workers and the gateway do not stream replies, so a server that sends nothing until the whole reply is written must finish within the timeout; a slow thinking model may need more.
+- Direct runs and workers do not stream replies, so a server that sends nothing until the whole reply is written must finish within the timeout; a slow thinking model may need more. A chat's turns in the gateway ask the server to stream.
 
 ## The main chat and tasks
 

@@ -280,9 +280,10 @@ The bar under the input box answers "how much has this used" and "what runs besi
 - `/stream off` turns it off for later turns, `melo -X cli.stream=false` for one run and `melo config set cli.stream false` for good.
 - A server that does not stream needs no setting: melo shows the reply when it is complete and says so once (`This server sends replies whole; melo shows them when they are complete.`).
 - A stream that breaks after part of a reply is still an error.
-- Direct mode, workers and the gateway never stream.
+- The main chat streams too: the gateway sends the reply's lines as they are written, and `/stream off` leaves them out here.
+- Direct mode and workers never stream.
 
-Whether a reply shows as it is written depends on how its model frames reasoning, which a per-model hint in `config.toml` declares:
+Whether a reply shows as it is written depends on how its model frames reasoning, which a per-model hint in `config.toml` declares (the gateway reads the same hint for the main chat and the side chats):
 
 ```toml
 [cli.reasoning_tags]
