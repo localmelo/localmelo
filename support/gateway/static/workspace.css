@@ -1331,7 +1331,7 @@ dialog::backdrop {
 .drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
 .drawer-subhead { margin: 18px 0 2px; font-size: var(--text-body); }
-.drawer-approval-step, .task-earlier-step { display: block; overflow: hidden; color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-approval-step { display: block; overflow: hidden; color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1764,7 +1764,7 @@ dialog::backdrop {
 .approval-actions .primary-button, .failure-actions .primary-button { gap: 0; }
 .failure-actions .primary-button { font-size: var(--text-small); min-height: 32px; padding: 6px 14px; }
 .approval-warning { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
-.approval-remembered, .approval-sending { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
+.approval-sending { margin: 0 0 4px; color: var(--ink-2); line-height: 1.5; }
 .failure-hint { margin: 0 0 8px; color: var(--ink-2); line-height: 1.5; }
 .failure-error { margin: 0 0 8px; color: var(--ink-2); overflow-wrap: anywhere; }
 .failure-card[data-severity="error"] .failure-error,
@@ -2623,14 +2623,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
 .task-block > .block-card { margin: 0; }
 /* Steps that ran on the person's earlier approval: the step, when, and Revoke. */
-.task-earlier { display: grid; gap: var(--space-2); }
-.task-earlier h2 { margin-bottom: 0; }
-.task-earlier > p { margin: 0; }
-.task-earlier-list { margin: 0; padding: 0; list-style: none; }
-.task-earlier-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
-.task-earlier-when { grid-column: 1; color: var(--ink-3); font-size: var(--text-caption); }
-.task-earlier-row > :is(button, .task-earlier-revoked) { grid-column: 2; grid-row: 1 / span 2; }
-.task-earlier-revoked { color: var(--ink-3); }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }

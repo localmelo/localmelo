@@ -5732,40 +5732,6 @@ test('a step Auto blocked in a task shows in its chat, and Allow once there uses
   assert.equal(findNode(card(), (node) => node.classList?.contains('block-allow')), null);
 });
 
-test('a step that ran on an earlier approval keeps Revoke in its chat after the task ends, and Revoke answers it', async () => {
-  const used = echoRow(20, {echo: 'earlier', task_id: 't', title: 'Check the notes', entry_id: 'e1', approved_at: NOW - 600, preview: 'print(1)',
-    line: 'Used your approval from 14:02', said: {key: 'approvals.used', params: {time: '14:02'}}});
-  const cards = [cardRow(21, {at: NOW, ts: NOW, state: 'done', source_id: 't', source_kind: 'task', title: 'Check the notes', line: 'Done.'})];
-  const h = harness(mainRoutes({
-    'GET /sessions/m/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0, cards, echoes: [used]},
-    'POST /front/echoes/20': {status: 200, body: {echo: echoRow(22, {echo: 'revoked', of: 20, task_id: 't', title: 'Check the notes', line: 'Revoked: that step asks you again next time'})}},
-  }));
-  await h.run('init()');
-  const approved = new Date((NOW - 600) * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-  assert.ok(h.text('messages').includes(`Used your approval from ${approved} Task “Check the notes” ran print(1) Revoke`));
-  await findNode(h.element('messages'), (node) => node.tag === 'button' && node.textContent === 'Revoke').click();
-  await settle();
-  assert.deepEqual(h.net.callsTo('/front/echoes/20')[0].body, {do: 'revoke'});
-  assert.match(h.text('messages'), /Revoked: that step asks you again next time/);
-  assert.equal(findNode(h.element('messages'), (node) => node.tag === 'button' && node.textContent === 'Revoke'), null);
-});
-
-test('a task\'s page lists the steps that ran on an earlier approval, and Revoke takes the approval back', async () => {
-  let live = true;
-  const earlier = () => [{entry_id: 'e1', chat_id: 'm', request_id: 'q1', preview: 'print(1)', approved_at: 100, at: 160, live}];
-  const h = await openTask({
-    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'done', earlier: earlier()})}),
-    'DELETE /sessions/m/approvals/e1': () => { live = false; return {status: 204, body: {}}; },
-  });
-  const panel = () => h.text('task-panel');
-  assert.match(panel(), /Ran on your earlier approval.*matched one you allowed in this task's chat exactly.*print\(1\).*Approved .* · ran .*Revoke/);
-  await labelled(h, 'Revoke').click();
-  await settle();
-  assert.equal(h.net.callsTo('/sessions/m/approvals/e1')[0].method, 'DELETE');
-  assert.match(panel(), /print\(1\).*Revoked/);
-  assert.equal(labelled(h, 'Revoke'), null);
-});
-
 // ── Slash commands in the composer ──
 
 const SLASH = JSON.parse(readFileSync(new URL('../fixtures/slash_commands.json', import.meta.url), 'utf8'));
