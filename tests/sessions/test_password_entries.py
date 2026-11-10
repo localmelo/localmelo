@@ -59,8 +59,10 @@ async def test_a_password_in_a_file_a_turn_carries_is_hidden_as_a_typed_one_is(
     chat = Chat(store, None, tmp_path / "w")
     try:
         chat.model.plans.append(_reply("Read it."))
+        # The file's name is the person's text too: it is hidden first, as it reads first.
         file = TextAttachment(
-            "login.txt", f"forum.example\nmy password is {PASSWORD}\n"
+            "login, password: nameSecret-5 backup.txt",
+            f"forum.example\nmy password is {PASSWORD}\n",
         )
         result = await chat.runner.run_turn(
             "use the login in the file",
@@ -71,11 +73,15 @@ async def test_a_password_in_a_file_a_turn_carries_is_hidden_as_a_typed_one_is(
         assert chat.runner.session_id is not None
         [turn] = await store.list_turns(chat.runner.session_id)
         assert turn.attachments == (
-            TextAttachment("login.txt", "forum.example\nmy password is [password-1]\n"),
+            TextAttachment(
+                "login, password: [password-1] backup.txt",
+                "forum.example\nmy password is [password-2]\n",
+            ),
         )
         assert turn.typed_text == "use the login in the file"
-        assert "my password is [password-1]" in turn.user_text
+        assert "my password is [password-2]" in turn.user_text
         # The model read the very text that is stored: the run's own hiding finds nothing left.
+        assert "nameSecret-5" not in dump(tmp_path / "sessions.db")
         assert PASSWORD not in dump(tmp_path / "sessions.db")
         assert turn.user_text in chat.last_message()
         assert PASSWORD not in repr(chat.kwargs)
