@@ -204,8 +204,6 @@
   "approval.rule.dialogOnce": "网页每次这样问，melo 都会问你。",
   "approval.rule.handoff": "在这个{scope}里，网页再次打开 {app} 时不会再问你。",
   "approval.rule.handoffMain": "在所有对话里，网页再次打开 {app} 时不会再问你。",
-  "approval.rule.high": "{scope}范围的允许从不包括安装、下载或 {workspace} 之外的改动。",
-  "approval.rule.highMain": "在所有对话中的允许从不包括安装、下载或 {workspace} 之外的改动。",
   "approval.rule.open": "在这个{scope}里，melo 打开 {site} 前不会再问你。",
   "approval.rule.openMain": "在所有对话里，melo 打开 {site} 前不会再问你。",
   "approval.rule.openWhole": "在这个{scope}里，melo 打开 {site} 整个网站前不会再问你。",

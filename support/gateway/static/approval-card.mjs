@@ -439,8 +439,11 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     rule = outside.access === "write" ? t("approval.rule.outsideWrite", { workspace })
       : grantable ? (everywhere ? t("approval.rule.outsideReadMain", { folder: outsideFolder })
         : t("approval.rule.outsideRead", { scope, folder: outsideFolder })) : t("approval.rule.outsideOnce");
-  } else if (high) rule = everywhere ? t("approval.rule.highMain", { workspace }) : t("approval.rule.high", { scope, workspace });
-  else if (command) {
+  } else if (high) {
+    // A high-impact card offers no kept answer (`high` leaves out the site question the server offers one for), so
+    // it has no line about what one covers: its caption says it asks every time.
+    rule = "";
+  } else if (command) {
     const shell = tool === "shell_exec";
     rule = everywhere ? t(shell ? "approval.rule.shellMain" : "approval.rule.pythonMain", { workspace })
       : t(shell ? "approval.rule.shell" : "approval.rule.python", { scope, workspace });
@@ -449,7 +452,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   grant.id = `approval-scope-${id}`;
   if (offered.includes(session)) session.setAttribute("aria-describedby", grant.id);
   if (offered.includes(always)) always.setAttribute("aria-describedby", grant.id);
-  card.append(grant);
+  if (rule) card.append(grant);
   // In the main chat a kept answer counts everywhere: one line says so, where, and how to take it back.
   const wide = everywhere && offered.includes(session)
     ? el("p", "approval-warning approval-everywhere", t("approval.everywhere"))

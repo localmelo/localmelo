@@ -464,15 +464,13 @@ test('a high-impact card says why melo asks, shows the request, and offers no ch
   assert.deepEqual(actions.children.map((node) => [node.textContent, node.className.split(' ')[0]]),
     [['Allow once', 'outline-button'], ['Deny', 'primary-button']], 'the safe answer is the filled one');
   assert.equal(findNode(card, (node) => String(node.textContent).startsWith('Allow for this')), null);
-  assert.equal(findNode(card, (node) => node.id === 'approval-scope-high').textContent,
-    'A chat-wide allow never covers installs, downloads or changes outside ~/melo_test_workspace.');
+  assert.equal(findNode(card, (node) => node.id === 'approval-scope-high'), null, 'no line about a kept answer it does not offer');
   assert.doesNotMatch(flatten(card), /lets routine/);
 });
 
-test('a high-impact card in Tasks says a task-wide allow, and cuts a long request', () => {
+test('a high-impact card in Tasks cuts a long request', () => {
   const c = cards();
   const card = c.draw(highImpact(), {scope: 'task', asked: 'x'.repeat(250)});
-  assert.match(findNode(card, (node) => node.id === 'approval-scope-high').textContent, /^A task-wide allow never covers/);
   assert.equal(findNode(card, (node) => node.className === 'approval-asked').textContent, `You asked: “${'x'.repeat(200)}…”`);
   const bare = c.draw(highImpact({review: {verdict: 'high', title: 'Run this?', reasons: []}}));
   assert.equal(findNode(bare, (node) => node.className === 'approval-why'), null, 'no reasons, no heading');
