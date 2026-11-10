@@ -290,31 +290,42 @@ async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_s
     typed = "have a look at the file"
     text = "log in at files-only.example\nmy password is quokka-5521"
     given = spy_on_words(monkeypatch)
-    async with ask_console(
-        tmp_path, monkeypatch, main=[answer("Done."), answer("Done.")], run=False
-    ) as (console, client, _):
-        main = str(console.main_id)
-        with monkeypatch.context() as spy:
-            spy.setattr(console.asks, "holds", lambda session: True)
-            with_words = {
-                "attachments": [a_file("notes.txt", text)],
-                "client_request_id": "q-1",
-            }
-            queued = await _post_turn(client, main, typed, **with_words)
-            # A file and no words.
-            file_only = {
-                "attachments": [a_file("other.txt", "my password is quokka-5522")],
-                "client_request_id": "q-2",
-            }
-            alone = await _post_turn(client, main, "", **file_only)
+    release = asyncio.Event()
+    main = [held(release, answer("First.")), answer("Second."), answer("Third.")]
+    async with ask_console(tmp_path, monkeypatch, main=main, run=False) as (
+        console,
+        client,
+        models,
+    ):
+        chat = str(console.main_id)
+        assert (await _post_turn(client, chat, "start the job")).status_code == 202
+        await until(lambda: len(models["main"].requests) == 1)
+        # Words and a file sent while the turn runs wait for the next one.
+        with_words = {
+            "attachments": [a_file("notes.txt", text)],
+            "client_request_id": "q-1",
+        }
+        queued = await _post_turn(client, chat, typed, **with_words)
+        # A file and no words, sent while the chat answers a task's question.
+        with monkeypatch.context() as answering:
+            answering.setattr(console.asks, "holds", lambda session: True)
+            alone = await _post_turn(
+                client,
+                chat,
+                "",
+                attachments=[a_file("other.txt", "my password is quokka-5522")],
+                client_request_id="q-2",
+            )
         for response in (queued, alone):
             assert response.status_code == 200, response.text
             assert response.json()["echo"]["echo"] == "queued"
-        info = await console.store.get_session(main)
+        info = await console.store.get_session(chat)
         assert info is not None and info.meta["queued"][0]["attachments"]
-        await until(lambda: len(given) == 2)
-        await _wait_turn(client, main)
-        first, second = await console.store.list_turns(main)
+        release.set()
+        await until(lambda: len(given) == 3)
+        await console.asks.settle()
+        await _wait_turn(client, chat)
+        _, first, second = await console.store.list_turns(chat)
         # The turn has its typed words and the file stored apart, the handle in the file.
         assert first.typed_text == typed
         assert first.attachments == (
@@ -328,10 +339,10 @@ async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_s
             TextAttachment("other.txt", "my password is [password-2]"),
         )
         # The run is given those words, never a file's text.
-        assert given == [typed, "[attached: other.txt]"]
+        assert given == ["start the job", typed, "[attached: other.txt]"]
         assert "quokka" not in stored(tmp_path / "sessions.db")
         # The same key with the same message is that turn, not a second one.
-        again = await _post_turn(client, main, typed, **with_words)
+        again = await _post_turn(client, chat, typed, **with_words)
         assert again.status_code == 200, again.text
         assert again.json()["repeated"] and again.json()["turn_id"] == first.id
 

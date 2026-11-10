@@ -342,8 +342,20 @@ def _four_steps() -> list[Message]:
     ]
 
 
+@pytest.mark.parametrize(
+    "sent",
+    [
+        {},
+        # A file keeps its words and its snapshot on every retry (#626).
+        {
+            "attachments": [{"name": "notes.txt", "text": "the notes", "chars": 9}],
+            "client_request_id": "page-key",
+        },
+    ],
+    ids=["words", "words and a file"],
+)
 async def test_a_retried_turn_admits_its_work_once_whatever_the_model_writes(
-    tmp_path: Path,
+    tmp_path: Path, sent: dict[str, Any]
 ) -> None:
     first = {"title": "Slides", "objective": "Make 6 slides"}
     again = {"title": "Other words", "objective": "Make ten slides now"}
@@ -357,7 +369,7 @@ async def test_a_retried_turn_admits_its_work_once_whatever_the_model_writes(
     )
     typed = "make slides from my notes"
     async with front_console(tmp_path, *replies) as (console, client, _):
-        await _say(client, console, typed)
+        await _say(client, console, typed, **sent)
         turn = await _wait_turn(client, str(console.main_id))
         chat = str(console.main_id)
         for _ in range(2):
