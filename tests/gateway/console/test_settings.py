@@ -1460,7 +1460,8 @@ def test_the_developer_section_lists_every_key_by_section_with_its_value(
     assert rows["scheduler.n_srv"]["default"] == "8"
     assert rows["agent.reasoning"]["flag"] == "--reasoning"
     assert rows["agent.reasoning"]["issue"] == "#183"
-    assert rows["memory.retriever"]["issue"] == "#299"
+    assert rows["memory.recall_form"]["issue"] == "#428"  # still a comparison
+    assert rows["memory.retriever"]["issue"] == ""  # an ordinary advanced setting
     assert rows["agent.attempt_policy"]["file"] is False
     assert rows["agent.attempt_policy"]["value"] == "reflect"
     assert body["run_options"] == [

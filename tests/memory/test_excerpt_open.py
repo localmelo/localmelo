@@ -1,13 +1,12 @@
-"""A cut excerpt can be opened whole: ``[memory] excerpt_open = "on"`` (#428).
+"""A cut excerpt can be opened whole (#428).
 
-With the setting off (the default) the recall block, the search tool's result and the
-tool list are exactly what they were. With ``on``, in the excerpt form of chat turns, a
-line that shows less than the whole turn (the excerpt was cut, or the document is a
-piece of a longer turn) starts with the turn's id, ``[t123]``, counted in the line's
-room; a line that shows the whole turn, and every note, reads as before. One guide line
-follows the excerpts when at least one line has an id, in the block and in the search
-result, and ``open_memory`` is offered. The list form and memory items are not
-affected. Synthetic notes and turns, words only, no model.
+In the excerpt form of chat turns, a line that shows less than the whole turn (the
+excerpt was cut, or the document is a piece of a longer turn) starts with the turn's
+id, ``[t123]``, counted in the line's room; a line that shows the whole turn, and
+every note, reads as it always did. One guide line follows the excerpts when at least
+one line has an id, in the block and in the search result, and ``open_memory`` is
+offered. The list form and memory items are not affected. Synthetic notes and turns,
+words only, no model.
 """
 
 from __future__ import annotations
@@ -20,18 +19,19 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.config import Config, MemoryConfig
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import (
+    BLOCK_CHARS,
     BLOCK_HEADER,
     CUT_GUIDE,
     HEADS,
     ITEM_CHARS,
     LIST_GUIDE,
-    TURN_CHARS,
     WHOLE,
     Item,
     Shown,
+    block,
     day,
     snippet,
     turn_excerpt,
@@ -78,8 +78,7 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
 
 
 def memory_of(tmp_path: Path, **settings: object) -> tuple[ChatMemory, Config]:
-    """A memory with these ``[memory]`` settings. A test that needs a turn cut names
-    its room (``recall_item_chars``), so it does not depend on the shipped default."""
+    """A memory with these ``[memory]`` settings."""
     cfg = config(**settings)
     return ChatMemory(lambda: cfg, directory=str(tmp_path / "memory")), cfg
 
@@ -108,37 +107,17 @@ def turn_lines(text: str) -> list[str]:
     ]
 
 
-# ── The setting and its effect on one line ──
+# ── The effect on one line ──
 
 
-def test_the_setting_is_on_by_default_and_has_no_effect_with_the_list_form() -> None:
-    assert MemoryConfig().excerpt_open == "on" and Config().memory.excerpt_open == "on"
-    assert config().memory.excerpt_open == "off"  # this file's helper pins it off
-    assert RecallSettings().excerpt_open is True
+def test_excerpts_open_but_the_list_form_and_items_do_not() -> None:
     assert RecallSettings().opens_excerpts
-    assert not RecallSettings(excerpt_open=False).opens_excerpts
-    assert RecallSettings(excerpt_open=True).opens_excerpts
     # The list form always offers open_memory and shows no excerpt; items are not turns.
-    assert not RecallSettings(excerpt_open=True, listing=True).opens_excerpts
-    assert not RecallSettings(excerpt_open=True, items=True).opens_excerpts
+    assert not RecallSettings(listing=True).opens_excerpts
+    assert not RecallSettings(items=True).opens_excerpts
     assert Shown.of(300, None, True).ids and not Shown.of(300).ids
-    assert RecallSettings(excerpt_open=True).shown("tomato").ids
-    assert not RecallSettings(excerpt_open=True, listing=True).shown("tomato").ids
     assert RecallSettings().shown("tomato").ids
-    assert not RecallSettings(excerpt_open=False).shown("tomato").ids
-
-
-async def test_a_bad_value_reads_as_the_default_on(tmp_path: Path) -> None:
-    memory, cfg = memory_of(tmp_path)
-    try:
-        assert memory.recall_settings().excerpt_open is False  # pinned off here
-        cfg.memory.excerpt_open = "on"
-        assert memory.recall_settings().excerpt_open is True
-        for bad in ("maybe", True, 1, None):
-            cfg.memory.excerpt_open = bad  # type: ignore[assignment]
-            assert memory.recall_settings().excerpt_open is True, bad
-    finally:
-        await memory.aclose()
+    assert not RecallSettings(listing=True).shown("tomato").ids
 
 
 def test_turn_excerpt_says_whether_it_shows_less_than_the_whole_text() -> None:
@@ -257,57 +236,30 @@ def test_a_line_with_an_id_reads_as_the_line_without_it_otherwise() -> None:
     assert not memory_item.line(now, show=show).startswith("[")
 
 
-# ── Off is the block, the search result and the tools as they were ──
+def test_the_guide_line_counts_toward_the_size_bound_of_the_block() -> None:
+    show = Shown.of(234, None, True)
+
+    def turn(n: int, text: str) -> Item:
+        return Item(f"d:{n}", text, "chat “Garden”, Oct 30", "s", n, 1.0)
+
+    whole = turn(1, "User: Where is the shed key?\nmelo: On the hook by the door.")
+    cut = turn(2, "User: Where?\nmelo: " + numbered(900))
+    # With room for everything, the block holds both lines and the guide under them.
+    text, used = block([whole, cut], show=show)
+    assert [item.key for item in used] == ["d:1", "d:2"]
+    assert text.count(CUT_GUIDE) == 1 and text.endswith(CUT_GUIDE)
+    # Room for the header and the two lines but not for the guide that the line with
+    # an id brings: the block stays within it and the cut turn is left out.
+    chars = len(text) - len(CUT_GUIDE) - 1
+    tight, kept = block([whole, cut], chars=chars, show=show)
+    assert len(tight) <= chars and CUT_GUIDE not in tight
+    assert [item.key for item in kept] == ["d:1"]
+    # The same room holds both when no line has an id, so the guide decided it.
+    plain, both = block([whole, cut], chars=chars, show=HEADS)
+    assert len(plain) <= chars and [item.key for item in both] == ["d:1", "d:2"]
 
 
-# The shipped room of a recalled turn (None: not set, so the default), and two
-# explicit rooms, one of them the 234-character head the default used to be.
-ROOMS = [None, TURN_CHARS, 400]
-
-
-@pytest.mark.parametrize("room", ROOMS)
-async def test_off_is_the_block_the_search_result_and_the_tools_as_they_were(
-    tmp_path: Path, store: SessionStore, room: int | None
-) -> None:
-    sized = {} if room is None else {"recall_item_chars": room}
-    memory, cfg = memory_of(tmp_path, excerpt_open="off", **sized)
-    try:
-        await teach(memory, store, await _turn(store, "Stakes"), NOTE)
-        at = time.time() - 3 * DAY
-        await add_turn(memory, store, SHORT_TYPED, LONG_ANSWER, at=at, title="Beds")
-        # The user's words whole, melo's reply cut to what is left of the room.
-        left = (ITEM_CHARS if room is None else room) - len(SHORT_TYPED)
-        line = (
-            f"the user said “{SHORT_TYPED}”; melo replied “"
-            f"{snippet(' '.join(LONG_ANSWER.split()), left)}” (chat “Beds”, {day(at)})"
-        )
-        assert line.count("…") == 1  # the reply is cut
-        found = await ask(memory, store)
-        assert turn_lines(found.block) == [line]
-        assert "[t" not in found.block and CUT_GUIDE not in found.block
-        assert LIST_GUIDE not in found.block
-        reply = await MemoryTools(memory).search(query=QUESTION)
-        assert f"2. {line}" in reply.split("\n") and CUT_GUIDE not in reply
-        tools = await MemoryTools(memory).start()
-        assert [t.definition.name for t in tools] == ["search_memory", "remember"]
-        assert tools[0].definition is SEARCH_MEMORY and tools[1].definition is REMEMBER
-        assert CUT_GUIDE not in SEARCH_MEMORY.description
-        # Naming it again changes nothing, byte for byte.
-        cfg.memory.excerpt_open = "off"
-        again = await ask(memory, store)
-        assert again.block == found.block
-        assert await MemoryTools(memory).search(query=QUESTION) == reply
-        assert [i.shown for i in again.used] == [i.shown for i in found.used]
-        # Turning it on changes the line; turning it off again changes it back.
-        cfg.memory.excerpt_open = "on"
-        assert (await ask(memory, store)).block != found.block
-        cfg.memory.excerpt_open = "off"
-        assert (await ask(memory, store)).block == found.block
-    finally:
-        await memory.aclose()
-
-
-# ── On is the default: no setting, no config ──
+# ── The block and the tools ──
 
 
 @pytest.mark.parametrize("configured", [False, True])
@@ -345,12 +297,10 @@ async def test_with_no_setting_a_cut_line_has_an_id_the_guide_and_open_memory(
 # ── On: the block ──
 
 
-@pytest.mark.parametrize("room", ROOMS)
 async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
-    tmp_path: Path, store: SessionStore, room: int | None
+    tmp_path: Path, store: SessionStore
 ) -> None:
-    sized = {} if room is None else {"recall_item_chars": room}
-    memory, _ = memory_of(tmp_path, excerpt_open="on", **sized)
+    memory, _ = memory_of(tmp_path)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
         at = time.time() - 3 * DAY
@@ -368,11 +318,7 @@ async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
         found = await ask(memory, store)
         cut, whole = turn_lines(found.block)
         # The id is counted in the room: the room less its 7 or more characters.
-        left = (
-            (ITEM_CHARS if room is None else room)
-            - len(f"[t{long_id}] ")
-            - len(SHORT_TYPED)
-        )
+        left = ITEM_CHARS - len(f"[t{long_id}] ") - len(SHORT_TYPED)
         assert cut == (
             f"[t{long_id}] the user said “{SHORT_TYPED}”; melo replied “"
             f"{snippet(' '.join(LONG_ANSWER.split()), left)}” (chat “Long”, {day(at)})"
@@ -407,7 +353,7 @@ async def test_a_cut_turn_starts_with_its_id_and_a_whole_turn_has_none(
 async def test_the_guide_appears_only_when_a_line_carries_an_id(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
+    memory, _ = memory_of(tmp_path)
     tools = MemoryTools(memory)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
@@ -438,9 +384,7 @@ async def test_the_guide_appears_only_when_a_line_carries_an_id(
 async def test_a_chunk_of_a_longer_turn_carries_its_id_even_when_its_text_is_short(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(
-        tmp_path, excerpt_open="on", recall_item_chars=2000, recall_chars=8000
-    )
+    memory, _ = memory_of(tmp_path)
     try:
         filler = "".join(f"Calm weather note {n} came and went. " for n in range(120))
         answer = filler + "The zucchini harvest peaks in late August. " + filler
@@ -471,7 +415,7 @@ async def test_a_chunk_of_a_longer_turn_carries_its_id_even_when_its_text_is_sho
 async def test_the_more_mark_follows_the_chunks_when_a_turn_is_indexed_again(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=2000)
+    memory, _ = memory_of(tmp_path)
     typed = "Where is the shed key?"
     try:
         session_id, _ = await add_turn(memory, store, typed, "Over there.")
@@ -500,18 +444,16 @@ async def test_the_more_mark_follows_the_chunks_when_a_turn_is_indexed_again(
         await memory.aclose()
 
 
-async def test_a_whole_turn_in_a_big_room_has_no_id_even_when_long(
+async def test_a_whole_turn_that_fits_the_room_has_no_id_even_when_long(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(
-        tmp_path, excerpt_open="on", recall_item_chars=2000, recall_chars=8000
-    )
+    memory, _ = memory_of(tmp_path)
     try:
-        answer = numbered(900)
+        answer = numbered(700)
         await add_turn(memory, store, "Where do the beds get sun?", answer)
         found = await ask(memory, store, "beds sun")
         (line,) = turn_lines(found.block)
-        # 900 characters fit the room of 2000 whole: no id, no guide, today's line.
+        # 700 characters fit the room of 900 whole: no id, no guide, today's line.
         assert "[t" not in found.block and CUT_GUIDE not in found.block
         assert " ".join(answer.split()) in line
         (head,) = (i for i in memory._corpus.items.values() if i.is_turn)
@@ -520,15 +462,13 @@ async def test_a_whole_turn_in_a_big_room_has_no_id_even_when_long(
         await memory.aclose()
 
 
-@pytest.mark.parametrize("room", [120, 234, 400, 900])
 async def test_the_block_and_each_line_stay_within_their_room(
-    tmp_path: Path, store: SessionStore, room: int
+    tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, cfg = memory_of(tmp_path, excerpt_open="on", recall_item_chars=room)
-    cfg.memory.recall_docs = 4
+    memory, _ = memory_of(tmp_path)
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
-        for n in range(4):
+        for n in range(2):
             await add_turn(
                 memory,
                 store,
@@ -537,29 +477,22 @@ async def test_the_block_and_each_line_stay_within_their_room(
                 at=time.time() - (n + 2) * 3 * DAY,
                 title=f"Bed {n}",
             )
-        seen = set()
-        for chars in range(200, 4001, 40):
-            cfg.memory.recall_chars = chars
-            found = await ask(memory, store)
-            text = found.block.removeprefix("\n\n")
-            assert len(text) <= chars, (room, chars, len(text))
-            ided = [
-                line for line in text.split("\n") if re.match(r"^- \[t\d+\] ", line)
-            ]
-            # The guide is there exactly when an id is, and it counts in the room.
-            assert (CUT_GUIDE in text) == bool(ided), (room, chars)
-            seen.add(len(ided))
-            for line in ided:
-                prefix = re.match(r"^- (\[t\d+\] )", line)
-                assert prefix is not None
-                said = line[len("- ") + len(prefix.group(1)) :].rsplit(" (", 1)[0]
-                assert room_used(said) <= room - len(prefix.group(1)), (room, line)
-            assert [i.shown for i in found.used if not i.is_record] == [
-                line[2:]
-                for line in text.split("\n")
-                if line.startswith("- ") and NOTE not in line and "(chat" in line
-            ]
-        assert {0, 1, 2} <= seen  # blocks with none, one and several ids
+        found = await ask(memory, store)
+        text = found.block.removeprefix("\n\n")
+        assert len(text) <= BLOCK_CHARS
+        ided = [line for line in text.split("\n") if re.match(r"^- \[t\d+\] ", line)]
+        # The guide is there exactly when an id is, and it counts in the room.
+        assert len(ided) == 2 and text.count(CUT_GUIDE) == 1
+        for line in ided:
+            prefix = re.match(r"^- (\[t\d+\] )", line)
+            assert prefix is not None
+            said = line[len("- ") + len(prefix.group(1)) :].rsplit(" (", 1)[0]
+            assert room_used(said) <= ITEM_CHARS - len(prefix.group(1)), line
+        assert [i.shown for i in found.used if not i.is_record] == [
+            line[2:]
+            for line in text.split("\n")
+            if line.startswith("- ") and NOTE not in line and "(chat" in line
+        ]
     finally:
         await memory.aclose()
 
@@ -570,7 +503,7 @@ async def test_the_block_and_each_line_stay_within_their_room(
 async def test_open_memory_is_offered_and_search_says_what_an_id_line_is(
     tmp_path: Path,
 ) -> None:
-    memory, cfg = memory_of(tmp_path, excerpt_open="on")
+    memory, cfg = memory_of(tmp_path)
     try:
         tools = await MemoryTools(memory).start()
         assert [t.definition.name for t in tools] == [
@@ -590,11 +523,8 @@ async def test_open_memory_is_offered_and_search_says_what_an_id_line_is(
         assert search.definition.annotations == {"readOnlyHint": True}
         assert search_memory_opening().description == search.definition.description
         assert CUT_GUIDE.isascii()  # English only
-        # The tool list is read when an agent starts, from the setting then.
-        cfg.memory.excerpt_open = "off"
-        assert len(await MemoryTools(memory).start()) == 2
-        # Memory items are not turns: nothing is offered for them.
-        cfg.memory.excerpt_open = "on"
+        # Memory items are not turns: nothing is offered for them. The tool list is
+        # read when an agent starts, from the setting then.
         cfg.memory.recall_source = "items"
         assert [t.definition.name for t in await MemoryTools(memory).start()] == [
             "search_memory",
@@ -607,12 +537,7 @@ async def test_open_memory_is_offered_and_search_says_what_an_id_line_is(
 async def test_an_id_from_the_block_or_the_search_opens_the_whole_turn_cut_at_recall_open_chars(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, cfg = memory_of(
-        tmp_path,
-        excerpt_open="on",
-        recall_item_chars=TURN_CHARS,
-        recall_open_chars=1000,
-    )
+    memory, cfg = memory_of(tmp_path, recall_open_chars=1000)
     tools = MemoryTools(memory)
     try:
         at = time.time() - 3 * DAY
@@ -650,7 +575,7 @@ async def test_an_id_from_the_block_or_the_search_opens_the_whole_turn_cut_at_re
 async def test_the_id_of_a_chunk_opens_the_whole_turn_and_a_turn_never_shown_is_as_before(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_open_chars=16000)
+    memory, _ = memory_of(tmp_path, recall_open_chars=16000)
     tools = MemoryTools(memory)
     try:
         filler = "".join(f"Calm weather note {n} came and went. " for n in range(150))
@@ -684,7 +609,7 @@ async def test_the_id_of_a_chunk_opens_the_whole_turn_and_a_turn_never_shown_is_
 async def test_the_chats_own_past_has_an_id_and_opens_until_the_window_holds_it(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
+    memory, _ = memory_of(tmp_path)
     tools = MemoryTools(memory)
     try:
         info = await _turn(store, "Garden")
@@ -718,7 +643,7 @@ async def test_the_chats_own_past_has_an_id_and_opens_until_the_window_holds_it(
 async def test_the_memory_event_names_what_was_opened_as_for_the_list_form(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _ = memory_of(tmp_path, excerpt_open="on", recall_item_chars=TURN_CHARS)
+    memory, _ = memory_of(tmp_path)
     tools = MemoryTools(memory)
     emitted: list[dict[str, Any]] = []
     try:
@@ -743,49 +668,32 @@ async def test_the_memory_event_names_what_was_opened_as_for_the_list_form(
 # ── The list form and items are as they are ──
 
 
-async def test_with_the_list_form_it_changes_nothing(
+async def test_the_list_form_has_no_excerpt_ids_and_offers_open_memory(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    reads = []
-    for name in ("off", "on"):
-        memory, _ = memory_of(tmp_path / name, recall_form="list", excerpt_open=name)
-        try:
-            await teach(memory, store, await _turn(store, "Stakes"), NOTE)
-            await add_turn(
-                memory,
-                store,
-                SHORT_TYPED,
-                LONG_ANSWER,
-                at=1_700_000_000.0,
-                title="Long",
-            )
-            found = await ask(memory, store)
-            tools = await MemoryTools(memory).start()
-            result = await MemoryTools(memory).search(query=QUESTION)
-            assert CUT_GUIDE not in found.block and CUT_GUIDE not in result
-            assert LIST_GUIDE in found.block and LIST_GUIDE in result
-            assert [t.definition.name for t in tools] == [
-                "search_memory",
-                "remember",
-                "open_memory",
-            ]
-            assert not memory.recall_settings().opens_excerpts
-            ids = re.compile(r"\[t\d+\]")
-            reads.append(
-                (
-                    ids.sub("[t]", found.block),
-                    ids.sub("[t]", result),
-                    [(t.definition.name, t.definition.description) for t in tools],
-                    [ids.sub("[t]", item.shown) for item in found.used],
-                )
-            )
-        finally:
-            await memory.aclose()
-    assert reads[0] == reads[1]
+    memory, _ = memory_of(tmp_path, recall_form="list")
+    try:
+        await teach(memory, store, await _turn(store, "Stakes"), NOTE)
+        await add_turn(
+            memory, store, SHORT_TYPED, LONG_ANSWER, at=1_700_000_000.0, title="Long"
+        )
+        found = await ask(memory, store)
+        tools = await MemoryTools(memory).start()
+        result = await MemoryTools(memory).search(query=QUESTION)
+        assert CUT_GUIDE not in found.block and CUT_GUIDE not in result
+        assert LIST_GUIDE in found.block and LIST_GUIDE in result
+        assert [t.definition.name for t in tools] == [
+            "search_memory",
+            "remember",
+            "open_memory",
+        ]
+        assert not memory.recall_settings().opens_excerpts
+    finally:
+        await memory.aclose()
 
 
 async def test_with_memory_items_it_changes_nothing(tmp_path: Path) -> None:
-    memory, _ = memory_of(tmp_path, recall_source="items", excerpt_open="on")
+    memory, _ = memory_of(tmp_path, recall_source="items")
     try:
         assert not memory.recall_settings().opens_excerpts
         tools = await MemoryTools(memory).start()

@@ -2,8 +2,8 @@
 
 Items a chat model encoded from the chats take the place of the turns: recall ranks,
 bars, picks and shows them as it does turns, a list line is ``[m12] …`` under its own
-guide, ``open_memory`` opens an item (and, with ``open_sources``, the turns it came
-from), a replaced item reads as older, a conflicting one names its partner, and the
+guide, ``open_memory`` opens an item (and names the turns it came from), a
+replaced item reads as older, a conflicting one names its partner, and the
 turn's memory event says which items were used, searched and opened. A turn leaves
 recall only while a stored item cites it (whatever the item's status), whatever the
 chat's progress mark says: a chat nobody encoded, or a turn the encoder left out, is
@@ -38,6 +38,7 @@ from localmelo.support.memory.hippo_route import Judged, Router
 from localmelo.support.memory.index import SUMMARY_TURN, MemoryItem
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
+    ITEM_CHARS,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
     OLDER,
@@ -55,11 +56,10 @@ from localmelo.support.memory.service import (
     IN_THIS_CHAT,
     NO_SUCH_TURN,
     OPEN_MEMORY,
+    OPEN_MEMORY_ITEMS,
     OPEN_USAGE_ITEMS,
-    SEARCH_MEMORY,
     MemoryTools,
     Reading,
-    open_memory_items,
     search_memory_listing,
     search_memory_opening,
 )
@@ -202,7 +202,7 @@ async def test_the_default_source_is_turns_and_items_in_the_index_change_nothing
     tmp_path: Path, store: SessionStore
 ) -> None:
     cfg = config()
-    assert cfg.memory.recall_source == "turns" and cfg.memory.open_sources == "off"
+    assert cfg.memory.recall_source == "turns"
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         session_id, _ = await add_turn(
@@ -232,9 +232,7 @@ async def test_the_item_settings_are_read_each_time(
     try:
         assert not memory.recall_settings().items
         cfg.memory.recall_source = "items"
-        cfg.memory.open_sources = "on"
-        settings = memory.recall_settings()
-        assert settings.items and settings.open_sources
+        assert memory.recall_settings().items
         cfg.memory.recall_source = "turns"
         assert not memory.recall_settings().items
     finally:
@@ -269,8 +267,8 @@ async def test_an_item_is_recalled_in_place_of_the_turn_as_its_title_and_text(
 async def test_the_item_shows_its_own_words_the_way_a_turn_shows_its_head(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    long = "The user stakes the tomato garden with bamboo. " + "It rains. " * 120
-    cfg = config(recall_source="items", recall_item_chars=300)
+    long = "The user stakes the tomato garden with bamboo. " + "It rains. " * 300
+    cfg = config(recall_source="items")
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         session_id, _ = await add_turn(
@@ -280,7 +278,7 @@ async def test_the_item_shows_its_own_words_the_way_a_turn_shows_its_head(
         found = await ask(memory, store)
         (line,) = found.block.split("\n")[3:]
         assert line.startswith(f"- “{TITLE}”: The user stakes the tomato garden")
-        assert len(line) < 300 + len(TITLE) + 60 and "…" in line
+        assert len(line) < ITEM_CHARS + len(TITLE) + 60 and "…" in line
     finally:
         await memory.aclose()
 
@@ -383,7 +381,7 @@ async def test_an_item_is_one_list_line_under_its_own_guide(
         when = day(time.time() - 3 * DAY)
         assert found.block.split("\n")[2:] == [
             BLOCK_HEADER,
-            ITEM_LIST_GUIDE,
+            f"{ITEM_LIST_GUIDE} {PREMISE_GUIDE}",
             f"[m{fill.item}] {when} · chat “Garden” · “{TITLE}” · words",
         ]
         assert LIST_GUIDE not in found.block
@@ -394,7 +392,7 @@ async def test_an_item_is_one_list_line_under_its_own_guide(
         )
         reply = await MemoryTools(memory).search(query=QUESTION)
         assert reply.split("\n") == [
-            ITEM_LIST_GUIDE,
+            f"{ITEM_LIST_GUIDE} {PREMISE_GUIDE}",
             f"[m{fill.item}] {when} · chat “Garden” · “{TITLE}” · words",
         ]
     finally:
@@ -423,14 +421,9 @@ async def test_the_tools_of_the_item_list_form_are_ascii_and_name_the_ids(
             assert "memory item" in tool.description.lower()
         ids = opened.definition.parameters["properties"]["ids"]
         assert ids["description"] == "Ids from the list, such as m12 or t123."
-        # Sources off: the item comes with the ids of its turns; on: with the turns.
+        # The item comes with the ids of its turns, not the turns.
         assert "and the ids of the turns it came from" in opened.definition.description
         assert "the earlier chat turns" not in opened.definition.description
-        assert (
-            "the earlier chat turns it came from" in open_memory_items(True).description
-        )
-        assert "ids of the turns" not in open_memory_items(True).description
-        assert open_memory_items(True).description.isascii()
         assert opened.definition.description.isascii()
         # Turns mode keeps the turn tools.
         cfg.memory.recall_source = "turns"
@@ -504,47 +497,6 @@ async def test_an_item_of_a_deleted_chat_is_gone(
         await memory.aclose()
 
 
-async def test_the_sources_of_an_item_come_with_it_when_asked_for(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    cfg = config(recall_source="items", recall_form="list", open_sources="on")
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
-    try:
-        when = time.time() - 3 * DAY
-        session_id, (first,) = await add_turn(
-            memory, store, "Which bed gets the sun?", "Bed one.", at=when, title="G"
-        )
-        _, (second,) = await add_turn(
-            memory,
-            store,
-            "What do I stake it with?",
-            "Bamboo works well.",
-            at=when + 60,
-            session_id=session_id,
-            turn=2,
-            title="G",
-        )
-        number = await put(memory, session_id, TITLE, TEXT, turns=(1, 2), at=when)
-        reply = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
-        head, body = reply.split("\n", 1)
-        assert head.startswith(f"[m{number}] ") and body.startswith(f"{TITLE}\n{TEXT}")
-        assert "Source turns:" in body and "From turn" not in reply
-        turns = body.split("Source turns:\n")[1].split("\n")
-        assert len(turns) == 2
-        assert "Which bed gets the sun?" in turns[0] and "Bed one." in turns[0]
-        assert "What do I stake it with?" in turns[1] and "Bamboo" in turns[1]
-        # Without the setting the turns are named, not shown.
-        cfg.memory.open_sources = "off"
-        alone = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
-        assert "Source turns:" not in alone and "Bamboo" not in alone
-        assert alone.endswith(
-            f"\n{TEXT}\nFrom turns t{first}, t{second}: "
-            "open one for what was said word for word."
-        )
-    finally:
-        await memory.aclose()
-
-
 # ── An opened item names the turns it came from ──
 
 
@@ -604,7 +556,7 @@ async def test_an_opened_item_names_its_source_turns_and_each_id_opens_the_turn(
         tools = MemoryTools(memory)
         if source == "auto":  # every turn is read: the chat reads items
             assert await memory.reading() == Reading(True, 1.0)
-        assert (await tools.start())[2].definition == open_memory_items(False)
+        assert (await tools.start())[2].definition == OPEN_MEMORY_ITEMS
         reply = await tools.open_memory(ids=[f"m{number}"])
         # Ids only, in time order; a turn's head names it.
         assert reply == (
@@ -669,7 +621,7 @@ async def test_the_pointer_leaves_out_turns_the_chat_would_not_show(
         found = await memory.open_item(number)
         assert not isinstance(found, str)
         assert await memory.source_turns(
-            found.item, exclude_session="elsewhere", keep_from_turn=0
+            found, exclude_session="elsewhere", keep_from_turn=0
         ) == [ids[0] for ids in docs]
         # No source left to name: no line (outside the chat's own view).
         CHAT_TURN.set(None)
@@ -731,40 +683,6 @@ async def test_an_item_fits_recall_open_chars_with_its_pointer(
         await memory.aclose()
 
 
-async def test_an_opened_item_and_its_sources_fit_in_recall_open_chars(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    cfg = config(
-        recall_source="items",
-        recall_form="list",
-        open_sources="on",
-        recall_open_chars=1000,
-    )
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
-    try:
-        when = time.time() - 3 * DAY
-        sentence = "Sentence {n} says to water the tomato plants early. "
-        session_id = ""
-        for turn in (1, 2, 3):
-            session_id, _ = await add_turn(
-                memory,
-                store,
-                f"Question {turn}?",
-                "".join(sentence.format(n=n) for n in range(80)),
-                at=when + turn,
-                session_id=session_id or None,
-                turn=turn,
-                title="G",
-            )
-        number = await put(memory, session_id, TITLE, TEXT, turns=(1, 2, 3), at=when)
-        reply = await MemoryTools(memory).open_memory(ids=[f"m{number}"])
-        assert len(reply) <= 1000
-        assert TEXT in reply and "Source turns:" in reply
-        assert "… (cut)" in reply
-    finally:
-        await memory.aclose()
-
-
 async def test_a_chat_that_shows_the_sources_does_not_open_the_item(
     tmp_path: Path, store: SessionStore
 ) -> None:
@@ -792,11 +710,11 @@ async def test_a_chat_that_shows_the_sources_does_not_open_the_item(
             number, exclude_session=info.session_id, keep_from_turn=4
         )
         assert not isinstance(past, str)
-        assert past.item.where.startswith("this chat, ")
+        assert past.where.startswith("this chat, ")
         other = await memory.open_item(
             number, exclude_session="elsewhere", keep_from_turn=0
         )
-        assert not isinstance(other, str) and other.item.where.startswith("chat “")
+        assert not isinstance(other, str) and other.where.startswith("chat “")
     finally:
         await memory.aclose()
 
@@ -1045,7 +963,7 @@ async def test_the_corpus_reads_an_item_again_when_its_status_changes(
 async def test_the_event_names_the_items_used_searched_and_opened(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_source="items", recall_form="list", open_sources="on")
+    cfg = config(recall_source="items", recall_form="list")
     fill = await held(tmp_path, store, cfg)
     memory = fill.memory
     try:
@@ -1160,7 +1078,7 @@ async def test_a_half_encoded_chat_recalls_its_later_turns_beside_its_items(
 async def test_a_list_of_turns_and_items_has_one_guide_line_with_the_premise_sentence(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_source="items", recall_form="list", premise_check="on")
+    cfg = config(recall_source="items", recall_form="list")
     fill = await held(tmp_path, store, cfg, later=LATER)
     memory = fill.memory
     try:
@@ -1429,14 +1347,10 @@ async def test_a_turn_cited_by_a_replaced_item_is_not_recalled_as_a_turn_on_any_
 ) -> None:
     """Item 1 cites chat A's turn and item 2, from chat B, replaces it through the
     router. A new chat that asks about both finds the items, never A's turn: not in the
-    block, nor in a search, nor in the corpus, with the shipped excerpt-open, premise
-    and gather settings and whatever the question (a past one included)."""
+    block, nor in a search, nor in the corpus, whatever the question (a past one
+    included)."""
     encoder = ENCODER if variant["recall_source"] == "auto" else "1:stub"
-    cfg = (
-        auto_config(excerpt_open="on", premise_check="on")
-        if variant["recall_source"] == "auto"
-        else config(excerpt_open="on", premise_check="on", **variant)
-    )
+    cfg = auto_config() if variant["recall_source"] == "auto" else config(**variant)
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         _, index = memory.stores()
@@ -1870,7 +1784,7 @@ async def test_the_tools_register_the_turns_state_when_the_state_cannot_be_read(
         tools = await MemoryTools(memory).start()
         names = [t.definition.name for t in tools]
         assert names == ["search_memory", "remember", "open_memory"]
-        assert tools[0].definition == SEARCH_MEMORY
+        assert tools[0].definition == search_memory_opening()
         assert tools[2].definition == OPEN_MEMORY
         # The log holds the error's class and nothing it said.
         assert any("OperationalError" in line for line in caplog.messages)
@@ -2009,16 +1923,14 @@ async def test_two_turns_can_read_in_different_states_at_once(
         await memory.aclose()
 
 
-@pytest.mark.parametrize("excerpt_open", ["on", "off"])
 async def test_one_agent_keeps_working_as_its_chat_crosses_between_the_states(
     tmp_path: Path,
     store: SessionStore,
     monkeypatch: pytest.MonkeyPatch,
-    excerpt_open: str,
 ) -> None:
     monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
     monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
-    cfg = auto_config(excerpt_open=excerpt_open)
+    cfg = auto_config()
     fill = await held(tmp_path, store, cfg, later=LATER, encoder=ENCODER)
     memory = fill.memory
     index = memory.stores()[1]
@@ -2060,15 +1972,11 @@ async def test_one_agent_keeps_working_as_its_chat_crosses_between_the_states(
         return block, tools, searched, opened
 
     try:
-        # Half the turns are read: the chat reads turns, and `open_memory` is offered
-        # even with `excerpt_open = "off"`.
+        # Half the turns are read: the chat reads turns, and `open_memory` is offered.
         block, tools, searched, opened = await turn([f"t{fill.doc}"])
         registered = {t.name: t for t in tools}
         assert set(registered) == {"search_memory", "remember", "open_memory"}
-        opening = excerpt_open == "on"
-        assert registered["search_memory"] == (
-            search_memory_opening() if opening else SEARCH_MEMORY
-        )
+        assert registered["search_memory"] == search_memory_opening()
         assert registered["open_memory"] == OPEN_MEMORY
         assert not has_item_line(block) and not has_item_line(searched)
         assert TURN[0] in opened and TURN[1] in opened

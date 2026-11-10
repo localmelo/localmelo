@@ -1,12 +1,12 @@
-"""Recall looks wider for a question that counts, totals or compares: ``[memory] gather``.
+"""Recall looks wider for a question that counts, totals or compares.
 
 ``asks_to_gather`` finds such a question (English by words that stand alone, Chinese
 by text) that also speaks of its speaker ("I", "my", "we", "我" …): a generic prompt
-("how many seconds are in a day") is not one. With ``gather = "wide"`` the list form's vector bar drops to
-``gather_min_cosine`` for it in the recall block, and for every list-form
-``search_memory``; ``"guide"`` adds one sentence under the list for a gathering
-turn. ``"off"`` (the default) changes no byte of the block, the search result or
-the recall data. Synthetic turns and fixed vectors, no model.
+("how many seconds are in a day") is not one. For it the list form's vector bar
+drops to ``GATHER_COSINE`` (or the recall bar when that is lower) in the recall block
+and in every list-form ``search_memory``, and one sentence (``GATHER_GUIDE``) follows
+the list's guide line. A question that does not gather, and the excerpt form, read
+as they always did. Synthetic turns and fixed vectors, no model.
 """
 
 from __future__ import annotations
@@ -17,13 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.config import (
-    MEMORY_GATHER,
-    MEMORY_GATHER_DEFAULT,
-    MEMORY_GATHER_MIN_COSINE,
-    Config,
-    MemoryConfig,
-)
+from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import MemoryItem
 from localmelo.support.memory.recall import (
@@ -33,6 +27,7 @@ from localmelo.support.memory.recall import (
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
     MIN_COSINE,
+    PREMISE_GUIDE,
     asks_to_gather,
     day,
 )
@@ -191,18 +186,12 @@ def test_a_generic_prompt_a_plain_message_and_a_word_inside_a_word_do_not(
     assert asks_to_gather(message) is False
 
 
-# ── The settings ──
+# ── The constants ──
 
 
-def test_the_constants_and_the_defaults() -> None:
-    assert MEMORY_GATHER == ("off", "wide", "guide")
-    assert MEMORY_GATHER_MIN_COSINE == (0.20, 0.55)
+def test_the_constants() -> None:
     assert GATHER_COSINE == 0.40 and MIN_COSINE == 0.55
-    # ``guide`` is the shipped default; ``off`` and ``wide`` stay developer values.
-    assert MEMORY_GATHER_DEFAULT == "guide"
-    assert MemoryConfig().gather == "guide" and MemoryConfig().gather_min_cosine == 0.40
-    assert RecallSettings().gather == "guide" and RecallSettings().gather_floor == 0.40
-    assert RecallSettings().gathers is True
+    assert RecallSettings().wide_floor == 0.40
     assert GATHER_GUIDE == (
         "This asks for a count, total or comparison: open every listed item that "
         "may belong, search again with other words for each kind not listed yet, "
@@ -210,35 +199,17 @@ def test_the_constants_and_the_defaults() -> None:
     )
 
 
-async def test_the_settings_are_read_each_turn_and_a_bad_one_is_the_default(
+async def test_the_wide_bar_is_never_above_the_recall_bar_read_each_turn(
     tmp_path: Path,
 ) -> None:
     cfg = config()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
-        first = memory.recall_settings()
-        assert (first.gather, first.gather_floor, first.gathers) == (
-            "guide",
-            0.40,
-            True,
-        )
-        cfg.memory.gather = "off"
-        assert memory.recall_settings().gathers is False
-        cfg.memory.gather = "wide"
-        cfg.memory.gather_min_cosine = 0.30
-        wide = memory.recall_settings()
-        assert (wide.gather, wide.gather_floor, wide.gathers) == ("wide", 0.30, True)
-        assert wide.wide_floor == 0.30
+        assert memory.recall_settings().wide_floor == 0.40
         cfg.memory.recall_min_cosine = 0.25  # a lower recall bar is never raised
         assert memory.recall_settings().wide_floor == 0.25
-        cfg.memory.gather = "guide"
-        assert memory.recall_settings().gather == "guide"
-        for bad in ("narrow", True, 1, None):
-            cfg.memory.gather = bad  # type: ignore[assignment]
-            assert memory.recall_settings().gather == "guide", bad
-        for value in (0.19, 0.56, True, "0.4", float("nan")):
-            cfg.memory.gather_min_cosine = value  # type: ignore[assignment]
-            assert memory.recall_settings().gather_floor == 0.40, value
+        cfg.memory.recall_min_cosine = 0.60
+        assert memory.recall_settings().wide_floor == 0.40
     finally:
         await memory.aclose()
 
@@ -307,9 +278,15 @@ def line_of(n: int, cosine: str) -> str:
     return f"[t{n + 1}] {when} · chat “{typed}” · “{typed}” · {cosine}"
 
 
-def listed(*rows: tuple[int, str]) -> str:
+def guide(gather: bool = False) -> str:
+    """The line above the list: its guide, the gather sentence for a turn that
+    asks to count, total or compare, then the premise sentence."""
+    return " ".join([LIST_GUIDE, *([GATHER_GUIDE] if gather else []), PREMISE_GUIDE])
+
+
+def listed(*rows: tuple[int, str], gather: bool = False) -> str:
     """The block, or the search result without a note, that lists the *rows*."""
-    return "\n".join([LIST_GUIDE, *(line_of(n, cosine) for n, cosine in rows)])
+    return "\n".join([guide(gather), *(line_of(n, cosine) for n, cosine in rows)])
 
 
 STRONG = (0, "0.70")
@@ -317,63 +294,22 @@ EVIDENCE = [(1, "0.52"), (2, "0.45"), (3, "0.42")]
 AS_ALWAYS = f"\n\n{BLOCK_HEADER}\n"
 
 
-# ── Off changes nothing ──
-
-# ── Off changes nothing ──
+# ── The block ──
 
 
-@pytest.mark.parametrize("form", ["list", "excerpt"])
-async def test_off_leaves_the_block_the_search_result_and_the_recall_data_as_they_were(
-    tmp_path: Path, store: SessionStore, form: str
-) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form=form, gather="off")
-    try:
-        for question in (GATHER, PLAIN):
-            found = await ask(memory, store, question)
-            data = found.event()["recall"]  # type: ignore[index]
-            assert set(data) == {
-                "retriever",
-                "fallback",
-                "embed_ms",
-                "search_ms",
-                "select_ms",
-                "select_tokens",
-                "candidates",
-                "used",
-                "block_chars",
-                "query_from",
-            }
-            assert found.recall is not None
-            assert found.recall.gather is None and found.recall.floor is None
-            assert data["candidates"] == 1 and data["used"] == 1
-            assert data["retriever"] == "embedding" and data["query_from"] == "message"
-            reply = await MemoryTools(memory).search(query=WORDS)
-            if form == "list":
-                assert found.block == AS_ALWAYS + listed(STRONG)
-                assert reply == listed(STRONG)
-            else:
-                said = (
-                    "the user said “My cardiologist moved my appointment.”; melo "
-                    "replied “Moved to Friday.” (chat “My cardiologist moved my "
-                    f"appointment.”, {day(time.time() - 3 * DAY)})"
-                )
-                assert found.block == f"{AS_ALWAYS}- {said}"
-                assert reply == f"1. {said}"
-            assert data["block_chars"] == len(found.block)
-    finally:
-        await memory.aclose()
-
-
-# ── Wide: the block ──
-
-
-async def test_wide_lists_the_evidence_under_the_default_bar_for_a_gathering_question(
+async def test_a_gathering_question_lists_the_evidence_under_the_default_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, ids, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
+    memory, ids, _ = await memory_of(tmp_path, store, recall_form="list")
     try:
         found = await ask(memory, store, GATHER)
-        assert found.block == AS_ALWAYS + listed(STRONG, *EVIDENCE)
+        assert found.block == AS_ALWAYS + listed(STRONG, *EVIDENCE, gather=True)
+        lines = found.block.split("\n")
+        assert lines[2:4] == [
+            BLOCK_HEADER,
+            f"{LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}",
+        ]
+        assert found.block.count(GATHER_GUIDE) == 1
         assert ids_of(found.block) == ids[:4]  # the far sofa (0.30) stays out
         assert found.recall is not None
         assert found.recall.gather is True and found.recall.floor == 0.40
@@ -385,65 +321,64 @@ async def test_wide_lists_the_evidence_under_the_default_bar_for_a_gathering_que
         await memory.aclose()
 
 
-async def test_wide_keeps_the_default_bar_for_a_plain_question_on_the_same_memory(
+async def test_a_plain_question_keeps_the_default_bar_and_no_sentence(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="list")
     try:
         found = await ask(memory, store, PLAIN)
         assert found.block == AS_ALWAYS + listed(STRONG)
+        assert GATHER_GUIDE not in found.block
         assert found.recall is not None
         assert found.recall.gather is False and found.recall.floor == 0.55
         data = found.event()["recall"]  # type: ignore[index]
         assert data["gather"] is False and data["floor"] == 0.55
         assert data["used"] == 1
+        # Nothing to search for: still no gathering, and the default bar.
+        blank = await ask(memory, store, "   ")
+        assert blank.recall is not None and blank.recall.query_from == "none"
+        assert blank.recall.gather is False and blank.recall.floor == 0.55
     finally:
         await memory.aclose()
 
 
-async def test_wide_changes_the_excerpt_form_not_at_all(
+async def test_the_excerpt_form_has_no_wider_bar_and_no_sentence(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    off, _, _ = await memory_of(
-        tmp_path / "a", store, recall_form="excerpt", gather="off"
-    )
-    wide, _, _ = await memory_of(
-        tmp_path / "b", store, recall_form="excerpt", gather="wide"
-    )
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="excerpt")
     try:
-        for question in (GATHER, PLAIN):
-            before = await ask(off, store, question)
-            after = await ask(wide, store, question)
-            assert after.block == before.block
-            assert [i.key for i in after.used] == [i.key for i in before.used]
-            assert after.recall is not None and after.recall.floor == 0.55
-            # The detector fires on GATHER, but the excerpt form has no floor to lower.
-            assert after.recall.gather is (question == GATHER)
-        assert await MemoryTools(wide).search(query=WORDS) == (
-            await MemoryTools(off).search(query=WORDS)
+        said = (
+            "the user said “My cardiologist moved my appointment.”; melo "
+            "replied “Moved to Friday.” (chat “My cardiologist moved my "
+            f"appointment.”, {day(time.time() - 3 * DAY)})"
         )
+        for question in (GATHER, PLAIN):
+            found = await ask(memory, store, question)
+            assert found.block == f"{AS_ALWAYS}- {said}"
+            assert GATHER_GUIDE not in found.block
+            # The detector fires on GATHER, but the excerpt form has no bar to lower.
+            assert found.recall is not None and found.recall.floor == 0.55
+            assert found.recall.gather is (question == GATHER)
+        assert await MemoryTools(memory).search(query=WORDS) == f"1. {said}"
     finally:
-        await off.aclose()
-        await wide.aclose()
+        await memory.aclose()
 
 
-async def test_the_gather_bar_is_the_setting_and_never_above_the_recall_bar(
+async def test_the_wide_bar_is_never_above_the_recall_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, ids, cfg = await memory_of(
-        tmp_path, store, recall_form="list", gather="wide", gather_min_cosine=0.30
-    )
+    memory, ids, cfg = await memory_of(tmp_path, store, recall_form="list")
     try:
-        found = await ask(memory, store, GATHER)
-        assert ids_of(found.block) == ids  # the sofa (0.30) is at the bar
-        assert found.recall is not None and found.recall.floor == 0.30
-        assert lines_of(found.block)[-1].endswith(" · 0.30")
         # A recall bar below the gather bar wins: the bar is never raised.
-        cfg.memory.gather_min_cosine = 0.50
-        cfg.memory.recall_min_cosine = 0.44
+        cfg.memory.recall_min_cosine = 0.35
         low = await ask(memory, store, GATHER)
-        assert ids_of(low.block) == ids[:3]
-        assert low.recall is not None and low.recall.floor == 0.44
+        assert ids_of(low.block) == ids[:4]
+        assert low.recall is not None and low.recall.floor == 0.35
+        cfg.memory.recall_min_cosine = 0.30
+        all_five = await ask(memory, store, GATHER)
+        assert ids_of(all_five.block) == ids  # the sofa (0.30) is at the bar
+        assert all_five.recall is not None and all_five.recall.floor == 0.30
+        assert lines_of(all_five.block)[-1].endswith(" · 0.30")
     finally:
         await memory.aclose()
 
@@ -451,7 +386,7 @@ async def test_the_gather_bar_is_the_setting_and_never_above_the_recall_bar(
 async def test_the_list_keeps_its_own_bound_and_the_word_bar_is_unchanged(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="list")
     try:
         for n in range(25):
             await add_turn(
@@ -465,7 +400,7 @@ async def test_the_list_keeps_its_own_bound_and_the_word_bar_is_unchanged(
         found = await ask(memory, store, GATHER)
         assert len(ids_of(found.block)) == 20  # recall_list_max, as before
         # A turn with some of the question's words and no vector is still left out
-        # (the bar of words is unchanged), under wide as under off.
+        # (the bar of words is unchanged).
         await add_turn(
             memory, store, "Zebra clinics are loud.", "They are.", at=time.time()
         )
@@ -478,7 +413,7 @@ async def test_the_list_keeps_its_own_bound_and_the_word_bar_is_unchanged(
 async def test_a_follow_up_is_checked_with_the_words_it_is_searched_with(
     tmp_path: Path, store: SessionStore, clock: Clock
 ) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="list")
     try:
         for asked, gathers, count in ((GATHER, True, 4), (PLAIN, False, 1)):
             turns = await chat_of(store, clock, ["Hello there", asked, "Okay, thanks"])
@@ -492,53 +427,40 @@ async def test_a_follow_up_is_checked_with_the_words_it_is_searched_with(
         await memory.aclose()
 
 
-# ── Wide: the search tool ──
+# ── The search tool ──
 
 
-async def test_a_list_form_search_goes_down_to_the_gather_bar_only_under_a_gathering_turn(
+async def test_a_list_form_search_goes_down_to_the_wide_bar_only_under_a_gathering_turn(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="list", gather="off")
-    wide, ids, cfg = await memory_of(
-        tmp_path / "b", store, recall_form="list", gather="wide"
-    )
+    memory, ids, _ = await memory_of(tmp_path, store, recall_form="list")
+    tools = MemoryTools(memory)
     try:
-        # No turn is under way: the search has no message to read, so it reads as it
-        # does with gather off, whatever its words.
+        # No turn is under way: the search has no message to read, so it keeps the
+        # recall bar, whatever its words.
         assert CHAT_TURN.get() is None
-        assert await MemoryTools(off).search(query=WORDS) == listed(STRONG)
-        assert await MemoryTools(wide).search(query=WORDS) == listed(STRONG)
+        assert await tools.search(query=WORDS) == listed(STRONG)
         # A plain turn: the same.
-        await ask(wide, store, PLAIN)
-        assert await MemoryTools(wide).search(query=WORDS) == listed(STRONG)
-        # A gathering turn: the bar is the gather bar, whatever the model searched for
+        await ask(memory, store, PLAIN)
+        assert await tools.search(query=WORDS) == listed(STRONG)
+        # A gathering turn: the bar is the wide bar, whatever the model searched for
         # (its words hold no counting word).
-        await ask(wide, store, GATHER)
-        reply = await MemoryTools(wide).search(query=WORDS)
-        assert reply == listed(STRONG, *EVIDENCE)
+        await ask(memory, store, GATHER)
+        reply = await tools.search(query=WORDS)
+        assert reply == listed(STRONG, *EVIDENCE, gather=True)
         assert ids_of(reply) == ids[:4]
-        assert LIST_GUIDE in reply and GATHER_GUIDE not in reply
-        assert await MemoryTools(wide).search(query=WORDS, k=2) == listed(
-            STRONG, EVIDENCE[0]
+        assert await tools.search(query=WORDS, k=2) == listed(
+            STRONG, EVIDENCE[0], gather=True
         )
-        assert await MemoryTools(wide).search(query=WORDS, scope="records") == (
-            NOTHING_FOUND
-        )
-        cfg.memory.gather_min_cosine = 0.50
-        assert ids_of(await MemoryTools(wide).search(query=WORDS)) == ids[:2]
-        cfg.memory.gather = "off"
-        assert await MemoryTools(wide).search(query=WORDS) == listed(STRONG)
+        assert await tools.search(query=WORDS, scope="records") == NOTHING_FOUND
     finally:
-        await off.aclose()
-        await wide.aclose()
+        await memory.aclose()
 
 
-async def test_the_search_of_the_excerpt_form_has_no_gather_bar(
+async def test_the_search_of_the_excerpt_form_has_no_wide_bar(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _, _ = await memory_of(
-        tmp_path, store, recall_form="excerpt", gather="wide"
-    )
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="excerpt")
     try:
         reply = await MemoryTools(memory).search(query=WORDS)
         assert len(reply.split("\n")) == 1 and "cardiologist" in reply
@@ -550,20 +472,14 @@ async def test_the_search_of_the_excerpt_form_has_no_gather_bar(
         await memory.aclose()
 
 
-# ── Guide ──
+# ── The guide ──
 
 
-async def test_guide_adds_one_sentence_after_the_guide_line_for_a_gathering_turn_only(
+async def test_the_sentence_follows_the_guide_line_for_a_gathering_turn_only(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="guide")
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="list")
     try:
-        found = await ask(memory, store, GATHER)
-        lines = found.block.split("\n")
-        assert lines[2:4] == [BLOCK_HEADER, f"{LIST_GUIDE} {GATHER_GUIDE}"]
-        assert found.block.count(GATHER_GUIDE) == 1
-        assert len(lines_of(found.block)) == 4  # wide's list too
-        assert found.recall is not None and found.recall.floor == 0.40
         plain = await ask(memory, store, PLAIN)
         assert plain.block == AS_ALWAYS + listed(STRONG)
         assert GATHER_GUIDE not in plain.block
@@ -572,21 +488,10 @@ async def test_guide_adds_one_sentence_after_the_guide_line_for_a_gathering_turn
         await memory.aclose()
 
 
-async def test_wide_has_no_sentence(tmp_path: Path, store: SessionStore) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
-    try:
-        found = await ask(memory, store, GATHER)
-        assert GATHER_GUIDE not in found.block
-        reply = await MemoryTools(memory).search(query=WORDS)
-        assert GATHER_GUIDE not in reply
-    finally:
-        await memory.aclose()
-
-
-async def test_guide_puts_the_sentence_in_the_search_of_a_gathering_turn(
+async def test_the_search_of_a_gathering_turn_carries_the_sentence_once(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="guide")
+    memory, _, _ = await memory_of(tmp_path, store, recall_form="list")
     tools = MemoryTools(memory)
     try:
         # The search reads the turn under way: a gathering one gets the sentence,
@@ -594,7 +499,7 @@ async def test_guide_puts_the_sentence_in_the_search_of_a_gathering_turn(
         await ask(memory, store, GATHER)
         reply = await tools.search(query=WORDS)
         lines = reply.split("\n")
-        assert lines[0] == f"{LIST_GUIDE} {GATHER_GUIDE}"
+        assert lines[0] == f"{LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}"
         assert reply.count(GATHER_GUIDE) == 1
         assert [line[:3] for line in lines[1:]] == ["[t1", "[t2", "[t3", "[t4"]
         # A plain turn, and a search outside any turn, get the guide line as before.
@@ -602,7 +507,7 @@ async def test_guide_puts_the_sentence_in_the_search_of_a_gathering_turn(
         plain = await tools.search(query=WORDS)
         assert plain == listed(STRONG)  # and the default bar
         CHAT_TURN.set(None)
-        assert (await tools.search(query=WORDS)).split("\n")[0] == LIST_GUIDE
+        assert (await tools.search(query=WORDS)).split("\n")[0] == guide()
         # With no list there is no guide line, so no sentence.
         await ask(memory, store, GATHER)
         assert await tools.search(query="saxophone") == NOTHING_FOUND
@@ -610,11 +515,11 @@ async def test_guide_puts_the_sentence_in_the_search_of_a_gathering_turn(
         await memory.aclose()
 
 
-async def test_guide_follows_the_item_guide_of_the_items_arm(
+async def test_the_sentence_follows_the_item_guide_of_the_items_arm(
     tmp_path: Path, store: SessionStore
 ) -> None:
     memory, _, _ = await memory_of(
-        tmp_path, store, recall_form="list", recall_source="items", gather="guide"
+        tmp_path, store, recall_form="list", recall_source="items"
     )
     try:
         _, index = memory.stores()
@@ -637,119 +542,26 @@ async def test_guide_follows_the_item_guide_of_the_items_arm(
         )
         found = await ask(memory, store, GATHER)
         lines = found.block.split("\n")
-        assert lines[3] == f"{ITEM_LIST_GUIDE} {GATHER_GUIDE}"
+        assert lines[3] == f"{ITEM_LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}"
         assert lines[4].startswith(f"[m{number}] ") and lines[4].endswith(" · 0.45")
         reply = await MemoryTools(memory).search(query=WORDS)
-        assert reply.split("\n")[0] == f"{ITEM_LIST_GUIDE} {GATHER_GUIDE}"
+        assert reply.split("\n")[0] == (
+            f"{ITEM_LIST_GUIDE} {GATHER_GUIDE} {PREMISE_GUIDE}"
+        )
         plain = await ask(memory, store, PLAIN)
         assert plain.block == ""  # an item at 0.45 is under the default bar
     finally:
         await memory.aclose()
 
 
-# ── The default ──
-
-
-@pytest.mark.parametrize("form", ["list", "excerpt"])
-async def test_the_default_leaves_a_turn_that_does_not_gather_as_off_has_it(
-    tmp_path: Path, store: SessionStore, form: str
-) -> None:
-    off, _, _ = await memory_of(tmp_path / "a", store, recall_form=form, gather="off")
-    default, _, cfg = await memory_of(tmp_path / "b", store, recall_form=form)
-    assert cfg.memory.gather == "guide"  # nothing set it
-    try:
-        assert [t.definition for t in await MemoryTools(default).start()] == [
-            t.definition for t in await MemoryTools(off).start()
-        ]
-        for question in (PLAIN, "What is the capital of France?", "   "):
-            before = await ask(off, store, question)
-            after = await ask(default, store, question)
-            assert after.block == before.block, question
-            assert [i.key for i in after.used] == [i.key for i in before.used]
-            assert after.recall is not None and before.recall is not None
-            # The turn's data says the detector did not fire and the bar it used.
-            assert after.recall.gather is False and after.recall.floor == 0.55
-            assert before.recall.gather is None and before.recall.floor is None
-            shown = after.event()["recall"]  # type: ignore[index]
-            asked = before.event()["recall"]  # type: ignore[index]
-            assert set(shown) - set(asked) == {"gather", "floor"}
-            for key in ("retriever", "fallback", "candidates", "used", "block_chars"):
-                assert shown[key] == asked[key], key
-            assert shown["query_from"] == asked["query_from"]
-            for words in (WORDS, "saxophone", "cardiologist appointment"):
-                assert await MemoryTools(default).search(query=words) == (
-                    await MemoryTools(off).search(query=words)
-                ), words
-    finally:
-        await off.aclose()
-        await default.aclose()
-
-
-async def test_the_default_looks_wider_with_the_guide_for_a_gathering_message_in_list_form(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    off, _, _ = await memory_of(tmp_path / "a", store, recall_form="list", gather="off")
-    default, ids, _ = await memory_of(tmp_path / "b", store, recall_form="list")
-    try:
-        before = await ask(off, store, GATHER)
-        assert before.block == AS_ALWAYS + listed(STRONG)
-        found = await ask(default, store, GATHER)
-        lines = found.block.split("\n")
-        assert lines[2:4] == [BLOCK_HEADER, f"{LIST_GUIDE} {GATHER_GUIDE}"]
-        assert found.block.count(GATHER_GUIDE) == 1
-        assert ids_of(found.block) == ids[:4]  # the wide bar, 0.40
-        assert found.recall is not None
-        assert found.recall.gather is True and found.recall.floor == 0.40
-        reply = await MemoryTools(default).search(query=WORDS)
-        assert reply.split("\n")[0] == f"{LIST_GUIDE} {GATHER_GUIDE}"
-        assert ids_of(reply) == ids[:4]
-    finally:
-        await off.aclose()
-        await default.aclose()
-
-
-async def test_the_default_changes_the_excerpt_form_of_a_gathering_message_not_at_all(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    off, _, _ = await memory_of(
-        tmp_path / "a", store, recall_form="excerpt", gather="off"
-    )
-    default, _, _ = await memory_of(tmp_path / "b", store, recall_form="excerpt")
-    try:
-        before = await ask(off, store, GATHER)
-        after = await ask(default, store, GATHER)
-        assert after.block == before.block and GATHER_GUIDE not in after.block
-        # The detector fires, but the excerpt form has no floor to lower.
-        assert after.recall is not None
-        assert after.recall.gather is True and after.recall.floor == 0.55
-        assert await MemoryTools(default).search(query=WORDS) == (
-            await MemoryTools(off).search(query=WORDS)
-        )
-    finally:
-        await off.aclose()
-        await default.aclose()
-
-
 # ── The recall data ──
 
 
-def test_the_recall_data_carries_gather_and_floor_only_when_the_setting_is_on() -> None:
-    off = Recall().to_json()
-    assert "gather" not in off and "floor" not in off
-    on = Recall(gather=False, floor=0.55).to_json()
-    assert on["gather"] is False and on["floor"] == 0.55
+def test_the_recall_data_always_carries_gather_and_floor() -> None:
+    base = Recall().to_json()
+    assert base["gather"] is False and base["floor"] == MIN_COSINE
     fired = Recall(gather=True, floor=0.4).to_json()
     assert fired["gather"] is True and fired["floor"] == 0.4
-    assert {k: v for k, v in fired.items() if k not in ("gather", "floor")} == off
-
-
-async def test_a_message_with_nothing_to_search_still_reports_the_floor_when_on(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    memory, _, _ = await memory_of(tmp_path, store, recall_form="list", gather="wide")
-    try:
-        found = await ask(memory, store, "   ")
-        assert found.recall is not None and found.recall.query_from == "none"
-        assert found.recall.gather is False and found.recall.floor == 0.55
-    finally:
-        await memory.aclose()
+    assert {k: v for k, v in fired.items() if k not in ("gather", "floor")} == {
+        k: v for k, v in base.items() if k not in ("gather", "floor")
+    }

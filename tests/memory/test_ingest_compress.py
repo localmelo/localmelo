@@ -24,7 +24,13 @@ from localmelo.support.config import (
     LocalBackendConfig,
     MemoryConfig,
 )
-from localmelo.support.memory import ChatMemory, hippo_encode, ingest, note_judge
+from localmelo.support.memory import (
+    ChatMemory,
+    hippo_encode,
+    ingest,
+    note_judge,
+    service,
+)
 from localmelo.support.memory.index import cleaned
 from localmelo.support.memory.ingest import IngestError
 from localmelo.support.sessions.store import SessionStore
@@ -550,7 +556,10 @@ async def test_a_duplicate_is_cited_by_the_item_it_repeats_and_deleting_the_firs
     ("bad", "mark"), [(None, 4), (2, 2), (0, None)], ids=["none", "third", "first"]
 )
 async def test_the_mark_does_not_pass_a_window_that_failed(
-    tmp_path: Path, bad: int | None, mark: int | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bad: int | None,
+    mark: int | None,
 ) -> None:
     # One exchange to a window: four long exchanges, the window of exchange *bad*
     # fails. The mark stops before it, so its turn is read again; the items of the
@@ -572,7 +581,8 @@ async def test_the_mark_does_not_pass_a_window_that_failed(
     def reply(prompt: str) -> str:
         return "RAISE" if bad in labels(prompt) else by_label(prompt)
 
-    cfg = settings(tmp_path, compress_at_chars=4000)
+    monkeypatch.setattr(service, "COMPRESS_AT_CHARS", 4000)  # one exchange a window
+    cfg = settings(tmp_path)
     report, chats, memory = await compress(
         tmp_path, {"sessions": [data]}, StubEncoder(reply), cfg=cfg
     )

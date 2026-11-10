@@ -7,9 +7,8 @@ it?". Wednesday stayed active and the later question got a mixed answer. After a
 completed chat run in which no note was kept, code keeps each plain statement of
 the typed words that gives a new value to a subject an active note holds
 (``ChatMemory.keep_changes``), as a note that supersedes the old one (with
-Undo), whatever ``[memory] keep_statements`` says. A statement of a new subject
-is left to the model, and so is a question; a turn that kept a note, a worker,
-a task's runner and memory off do nothing. End to end on the stub model, with
+Undo). A statement of a new subject is left to the model, and so is a question;
+a turn that kept a note, a worker, a task's runner and memory off do nothing. End to end on the stub model, with
 words only and with a fake embedding server.
 """
 
@@ -206,12 +205,10 @@ async def test_only_the_turn_under_way_keeps_a_change(
     assert await memory.keep_changes(other) == []  # a note was kept now
 
 
-@pytest.mark.parametrize("keep", [True, False])
-async def test_it_runs_whatever_keep_statements_says(
-    store: SessionStore, stub: StubServer, tmp_path: Path, keep: bool
+async def test_it_keeps_the_new_value_after_a_completed_run(
+    store: SessionStore, stub: StubServer, tmp_path: Path
 ) -> None:
     cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory.keep_statements = keep
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         await teach(memory, store, stub, tmp_path)

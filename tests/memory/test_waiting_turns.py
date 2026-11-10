@@ -18,7 +18,7 @@ import pytest
 
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config, MemoryConfig
-from localmelo.support.memory import ChatMemory, hippo_encode
+from localmelo.support.memory import ChatMemory, hippo_encode, service
 from localmelo.support.sessions.store import NewSession, SessionStore, TurnInfo
 from localmelo.tests.memory.hippo_helpers import StubEncoder, item, says
 
@@ -39,9 +39,12 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
 
 
 @pytest.fixture()
-async def memory(tmp_path: Path) -> AsyncIterator[ChatMemory]:
+async def memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[ChatMemory]:
+    monkeypatch.setattr(service, "COMPRESS_AT_CHARS", WINDOW)
     cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory = MemoryConfig(compress_at_chars=WINDOW)
+    cfg.memory = MemoryConfig()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         yield memory

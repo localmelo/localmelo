@@ -1,11 +1,10 @@
 """How much of a recalled chat turn is shown, and which part of it.
 
-``[memory] recall_item_chars`` (the room one turn takes in the block and in the
-search tool's list; the shipped default is 900, and 234 reads a turn exactly as it
-always did) and ``recall_excerpt`` (``head``, the start of each part, or
-``match``, the sentences of each part that hold most of the question's content
-words). The default head, :data:`HEADS`, reads exactly as a turn always did.
-Synthetic turns, words only, no model.
+The room one turn takes in the block and in the search tool's list is 900
+characters, and ``[memory] recall_excerpt`` is ``head`` (the start of each part) or
+``match`` (the sentences of each part that hold most of the question's content
+words). The head at the floor room, :data:`HEADS`, reads exactly as a turn always
+did. Synthetic turns, words only, no model.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import (
     HEADS,
+    ITEM_CHARS,
     TURN_CHARS,
     Item,
     Shown,
@@ -342,10 +342,10 @@ async def memory_with(
     return memory
 
 
-async def test_the_recall_block_follows_the_two_settings(
+async def test_the_recall_block_follows_the_excerpt_setting(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_chars=4000, recall_item_chars=TURN_CHARS)
+    cfg = config()
     memory = await memory_with(tmp_path, store, cfg, english())
     try:
 
@@ -359,29 +359,18 @@ async def test_the_recall_block_follows_the_two_settings(
         cfg.memory.recall_excerpt = "match"
         match = await ask()
         assert "tomato harvest peaks" in match and "…" in match
-        assert TYPED in match and len(match) < 600
-        # The room is read again each turn.
-        cfg.memory.recall_item_chars = 800
-        bigger = await ask()
-        assert TARGET in bigger and len(bigger) > len(match) + 300
+        assert TYPED in match and len(match) < ITEM_CHARS + 400
+        # The setting is read again each turn.
         cfg.memory.recall_excerpt = "head"
-        assert (
-            len(await ask()) > len(head) + 300 and "tomato harvest" not in await ask()
-        )
-        # The size bound of the block still holds.
-        cfg.memory.recall_chars = 900
-        cfg.memory.recall_item_chars = 2000
-        cfg.memory.recall_excerpt = "match"
-        found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
-        assert len(found.block) <= 900 + 2 and found.used == ()
+        assert await ask() == head
     finally:
         await memory.aclose()
 
 
-async def test_the_search_tool_follows_the_two_settings_too(
+async def test_the_search_tool_follows_the_excerpt_setting_too(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_item_chars=TURN_CHARS)
+    cfg = config()
     memory = await memory_with(tmp_path, store, cfg, english())
     tools = MemoryTools(memory)
     try:
@@ -390,11 +379,6 @@ async def test_the_search_tool_follows_the_two_settings_too(
         cfg.memory.recall_excerpt = "match"
         match = await tools.search(query=QUESTION)
         assert "tomato harvest peaks" in match and "…" in match
-        cfg.memory.recall_item_chars = 800
-        assert TARGET in await tools.search(query=QUESTION)
-        assert len(await tools.search(query=QUESTION)) > len(match) + 300
-        # The default room and the head: the list reads as it did.
-        cfg.memory.recall_item_chars = TURN_CHARS
         cfg.memory.recall_excerpt = "head"
         assert await tools.search(query=QUESTION) == head
         # The items found and the page's text are the same whatever the settings.
