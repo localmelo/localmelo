@@ -20,6 +20,7 @@ from localmelo.melo.agent._brief_aids import covered_lines, dropped_calls
 from localmelo.melo.agent._checkpoint import (
     CHECKPOINT_CARRY_NOTE,
     CHECKPOINT_PROMPT,
+    EARLY_NOTE,
     _CheckpointLoop,
 )
 from localmelo.melo.contracts.events import AgentEvent
@@ -103,7 +104,7 @@ class Stub(BaseLLMProvider):
 
 
 async def _run(
-    llm: Stub, pad: int = PAD, **options: Any
+    llm: Stub, pad: int = PAD, task: str = TASK, **options: Any
 ) -> tuple[RunResult, list[AgentEvent], Agent]:
     agent = Agent(
         llm=llm,
@@ -123,7 +124,7 @@ async def _run(
     agent.executor.register("echo", echo)
     events: list[AgentEvent] = []
     try:
-        result = await agent.run_task(TASK, on_event=events.append)
+        result = await agent.run_task(task, on_event=events.append)
     finally:
         await agent.close()
     return result, events, agent
@@ -309,7 +310,11 @@ async def test_the_checkpoint_is_the_models_notes_and_nothing_more(
 async def test_without_a_budget_the_requests_are_as_before(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    no_budget = {"context_window": None, "output_reserve": None, "safety_margin": None}
+    no_budget: dict[str, Any] = {
+        "context_window": None,
+        "output_reserve": None,
+        "safety_margin": None,
+    }
     llm = Stub(steps=30)
     result, _, _ = await _run(llm, pad=4000, **no_budget)
     assert result.checkpoints == 0 and llm.asked == 0
@@ -337,3 +342,29 @@ def test_a_stored_window_keeps_the_block() -> None:
     agent = Agent(llm=Stub(steps=0), options=AgentOptions(memory=False))
     assert agent.load_conversation(decoded) == 4
     assert agent.conversation()[1].content == block.content
+
+
+@pytest.mark.parametrize(
+    "task", [TASK, "echo every part and write the summary to summary.md"]
+)
+async def test_the_early_line_comes_once_in_each_fill_with_a_file_product(
+    task: str,
+) -> None:
+    llm = Stub(steps=50)
+    result, _, _ = await _run(llm, task=task)
+    assert result.checkpoints >= 2
+    early = EARLY_NOTE.split("{files}")[0]
+    marks = [
+        "early" if early in r[-1].content else "checkpoint" if _asks(r) else ""
+        for r in llm.requests
+    ]
+    if "summary.md" not in task:
+        assert "early" not in marks
+        return
+    assert EARLY_NOTE.format(files="summary.md") in str(llm.requests)
+    # Once before the first checkpoint and at most once in each fill after it.
+    fills = "".join("E" if m == "early" else "C" if m else "" for m in marks).split("C")
+    assert fills[0] == "E" and all(len(fill) <= 1 for fill in fills)
+    # Only the outgoing request carries it: the window does not keep it.
+    after = [i + 1 for i, m in enumerate(marks) if m == "early"]
+    assert all(early not in str(llm.requests[i]) for i in after if i < len(marks))

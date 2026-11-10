@@ -939,6 +939,10 @@ class _RunState:
     checkpoint: WorkCheckpoint | None = None
     checkpoint_msg: Message | None = None
     checkpoints: int = 0
+    # The early line (EARLY_LINE): the trailing line the next planning request
+    # carries, and whether this fill has had it.
+    early_note: str = ""
+    early_sent: bool = False
     writes: list[tuple[str, dict[str, Any], str]] = dataclasses.field(
         default_factory=list
     )
@@ -2081,9 +2085,15 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             plan_args["coalesce_users"] = True
         if ready is not None:
             plan_args["on_ready"] = ready
-        if on_ready is None and run is not None and run.brief and run.dropped:
+        if on_ready is None and run is not None:
             # Not at a step that carries inbox lines: they must end the request.
-            plan_args["tail_note"] = render_dropped(run.dropped, sent)
+            tail = [
+                render_dropped(run.dropped, sent) if run.brief and run.dropped else "",
+                run.early_note,
+            ]
+            run.early_note = ""
+            if any(tail):
+                plan_args["tail_note"] = "\n\n".join(line for line in tail if line)
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,

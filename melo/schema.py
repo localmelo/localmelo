@@ -29,6 +29,10 @@ WINDOW_FIT_TARGET = 0.7
 # checkpoint's own asking message, so the checkpoint call fits as it is and sees
 # everything that is about to leave.
 CHECKPOINT_LINE = 0.85
+# Once in each fill (up to a checkpoint), the first planning request past
+# EARLY_LINE of the input limit asks a task whose result goes into a file to write
+# what it has there now, while the results are still in context.
+EARLY_LINE = 0.6
 # The largest context a budget from the model server's own length uses (when
 # nothing sets AgentOptions.context_window). Above it a personal computer pays
 # twice for every token: the server's prompt cache holds it in memory, and once

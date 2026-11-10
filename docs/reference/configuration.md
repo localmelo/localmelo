@@ -358,7 +358,11 @@ When the model's notes cannot be read, or no request is left for them (`max_call
 the computed lines alone, and the run goes on. The fit stays as the net for a single step too large:
 the units it drops are added to the block's list at the next request, so no drop goes unsaid. Each
 checkpoint is a `checkpoint` notice (see [Events](events.md)) and counts in the result's
-`checkpoints`. Without a token budget nothing of this happens.
+`checkpoints`. Earlier, once in each fill, the first planning request past 60% of the limit in work
+whose result goes into a file (your words ask for a file, or a file was written) ends with one line
+that asks the model to write what it has to that file now, while the results are still in context;
+the line is on that request only, not in the window. Without a token budget nothing of this
+happens.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
