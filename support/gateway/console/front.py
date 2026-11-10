@@ -2626,8 +2626,8 @@ class Front:
         if do == "undo" and kind == "answer_sent":
             return await self._take_back(echo_id, echo)
         if do == "revoke" and kind == "earlier":
-            # The person takes back the approval a task's step ran on (#369).
-            self.console.approvals.revoke(self.chat_id or "", str(echo.get("entry_id")))
+            # A line from before every Allow once was one call: nothing of that
+            # approval is kept any more, so the step asks again; the line ends.
             return await self.echo(
                 {"echo": "revoked", "of": echo_id, "task_id": echo.get("task_id"),
                  "title": echo.get("title", ""), "line": t_in("en", "approvals.revoked"),

@@ -27,7 +27,8 @@ from localmelo.support.sessions.agents import (
     configured_session_options,
 )
 
-DEFAULTS = {"window_eviction": "chunk", "window_messages": 64}
+# On a local server an unset window is the agent's: 64, or 256 with a token budget.
+DEFAULTS = {"window_eviction": "chunk", "window_messages": None}
 URL = "http://127.0.0.1:1/v1"
 
 

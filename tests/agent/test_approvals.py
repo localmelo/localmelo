@@ -883,7 +883,7 @@ class TestDecisions:
             pytest.param(
                 lambda: ApprovalDecision(False, origin="session"),
                 "ValueError: ApprovalDecision.origin 'session' needs allow=True: a "
-                "grant or an earlier approval only allows",
+                "grant only allows",
                 id="session_denial",
             ),
             pytest.param(

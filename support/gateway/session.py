@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support.backends import providers_for
-from localmelo.support.sessions.agents import (
-    configured_attempt_options,
-    configured_cache_options,
-)
+from localmelo.support.sessions.agents import configured_run_options
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -85,11 +82,8 @@ class SessionManager:
         if self._config is None:
             raise RuntimeError("SessionManager requires a config to create agents")
         # A session keeps its answers, so a follow-up sees them (#37's option).
-        options = configured_attempt_options(
-            self._config,
-            configured_cache_options(
-                self._config, AgentOptions(record_answers=True, mode="gateway")
-            ),
+        options = configured_run_options(
+            self._config, AgentOptions(record_answers=True, mode="gateway")
         )
         llm, embedding = providers_for(self._config, options.reasoning)
         return Agent(llm=llm, embedding=embedding, options=options)

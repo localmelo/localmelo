@@ -1592,10 +1592,6 @@ async def test_the_high_impact_panel_shows_why_and_answers_by_position(
         assert "⚠ melo asks because this call installs playwright with pip" in text
         assert "  1. Yes" in text and "❯ 2. No, and tell melo why" in text
         assert "allow every" not in text and "3." not in text
-        assert (
-            "Session grants never cover installs, downloads or changes outside "
-            "the folder." in " ".join(text.split())
-        )
         assert "enter confirm · 1-2 · v view all" in text
         now[0] += 1
         app.type("3")  # there is no third option

@@ -336,8 +336,6 @@ A call that installs software, downloads files, changes files outside the folder
 ╰────────────────────────────────────────────────────────────────────────────╯
   1. Yes
 ❯ 2. No, and tell melo why
-  Session grants never cover installs, downloads or changes outside the
-  folder.
   ↑↓ select · enter confirm · 1-2 · v view all · esc stop the turn
 ```
 

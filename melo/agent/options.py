@@ -21,7 +21,6 @@ from localmelo.melo.memory.recall import (
     RetrieverMode,
 )
 from localmelo.melo.schema import (
-    LOCAL_WINDOW_MESSAGES,
     MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
     MAX_EXTENSIONS,
@@ -78,6 +77,13 @@ class AgentOptions:
     attempt is long: 50 steps, in a run of 100 (see ``steps_per_attempt``).
     An invalid value raises ``ValueError`` naming the field.
 
+    - ``context_window``, ``output_reserve``, ``safety_margin``: the token
+      budget planning and reflection requests are fitted to, all three or none.
+      None (the default) takes the budget from the length the model server
+      reports (``BaseLLMProvider.context_length``, at most
+      ``DEFAULT_CONTEXT_CAP``), asked once before the first run; with no length
+      the requests are fitted to the prompt cap's characters. A set budget
+      always wins.
     - ``max_steps``: cap on planning calls for the whole run (100).
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most
       ``steps_per_attempt`` steps (50), up to ``max_attempts`` of them, with a
@@ -200,13 +206,15 @@ class AgentOptions:
       when the next attempt starts after a reflection. Both keep the retained
       history stable for several steps, which a server's prompt cache can
       reuse.
-    - ``window_messages``: the working window's message cap (8 to 256, default
-      ``LOCAL_WINDOW_MESSAGES``, 64). A larger cap leaves the prompt-size fit
-      (see ``window_eviction``) to drop history. 20 is the cap before this
-      default changed, and the one that the CLI, the console and the gateway
-      use on a cloud vendor's backend when the config sets none (see
-      ``support.config.default_window_messages``); a Python caller sets it
-      here.
+    - ``window_messages``: the working window's message cap (8 to 256). None
+      (the default) is ``LOCAL_WINDOW_MESSAGES`` (64), or
+      ``WINDOW_MESSAGES_MAX`` (256) while a token budget is in force (see
+      ``context_window``), so that the budget's fit is the limit that drops
+      history. A larger cap leaves the prompt-size fit (see
+      ``window_eviction``) to drop history. 20 is the cap that the CLI, the
+      console and the gateway use on a cloud vendor's backend when the config
+      sets none (see ``support.config.default_window_messages``); a Python
+      caller sets it here. ``Agent.window_messages`` is the cap in force.
     - ``brief_probe``: set only by the ``--brief`` worker path. A function of
       the workspace root that returns a digest of the workspace's changes
       (``None`` outside a git tree). Setting it marks the run as a brief run:
@@ -398,7 +406,7 @@ class AgentOptions:
     window_eviction: WindowEviction = "chunk"
     brief_probe: Callable[[str], str | None] | None = None
     brief_check: BriefCheck | None = None
-    window_messages: int = LOCAL_WINDOW_MESSAGES
+    window_messages: int | None = None
     brief_items: bool = False
     lean_output: bool = False
     confine_writes: bool = False
@@ -418,7 +426,7 @@ class AgentOptions:
     read_folders: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if (
+        if self.window_messages is not None and (
             isinstance(self.window_messages, bool)
             or not isinstance(self.window_messages, int)
             or not WINDOW_MESSAGES_MIN <= self.window_messages <= WINDOW_MESSAGES_MAX

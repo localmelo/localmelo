@@ -6,7 +6,6 @@ import contextvars
 import dataclasses
 import json
 import logging
-import math
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -33,6 +32,7 @@ from localmelo.melo.agent._prefix_diag import (
 from localmelo.melo.agent._request_accounting import (
     ContextBudget,
     RequestAccounting,
+    calibrated,
     request_proxy,
 )
 from localmelo.melo.checker.checker import PROMPT_CAP_CHARS, prompt_chars
@@ -938,8 +938,7 @@ class Chat:
             if accounting is None:
                 return prompt_chars(candidate, count_thinking=replay)
             size, _ = request_proxy(candidate, offered, replay=replay)
-            ratio = accounting.ratios.get((self.llm.model, kind), 1.0)
-            return math.ceil(size * max(1.0, ratio))
+            return calibrated(size, accounting.ratios.get((self.llm.model, kind)))
 
         # The context budget's input tokens, else the prompt cap's characters.
         limit = (
@@ -966,8 +965,12 @@ class Chat:
                     hold=cut,
                     history=history,
                 )
-            except ContextFitError:
+            except ContextFitError as exc:
                 if accounting is not None:
+                    # The server's own context cannot hold the pinned request:
+                    # say so, instead of sending what the server would cut.
+                    if (small := accounting.budget.too_small()) is not None:
+                        raise ContextFitError(small) from exc
                     raise
                 # Over the prompt cap even fitted: the check below refuses it.
         # The request that closes a stopped run is not refused: its evidence

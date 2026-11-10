@@ -41,8 +41,7 @@ from localmelo.melo.contracts.approvals import (
     AskWatch,
     AutoPolicy,
     DenyAllPolicy,
-    grant_offered,
-    never_granted,
+    kept_offered,
     whole_site,
 )
 from localmelo.melo.contracts.review import (
@@ -720,12 +719,6 @@ def session_warning(tool: str, workspace: str) -> list[str]:
     ]
 
 
-# Under the options of a high-impact call, which has no session choice.
-NO_GRANT_RULE: Final = (
-    "Session grants never cover installs, downloads or changes outside the folder."
-)
-
-
 class TerminalApprover:
     """Asks the person at the terminal about one request at a time."""
 
@@ -752,8 +745,10 @@ class TerminalApprover:
 
         The session choice is offered unless *offer_session* says no or the
         request is a high-impact call, which a grant never covers; that
-        panel starts on No. *everywhere* is the main chat's own request,
-        whose session choice says it counts in every chat. A cancellation (a
+        panel starts on No. A relayed request passes the gateway's word as
+        *offer_session*; this rule can only take the choice away.
+        *everywhere* is the main chat's own request, whose session choice
+        says it counts in every chat. A cancellation (a
         stop, a shutdown) withdraws the panel and propagates: a withdrawn
         prompt is not a denial.
         """
@@ -769,20 +764,18 @@ class TerminalApprover:
         # A grant never covers a high-impact call, whatever the caller says;
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
-        offered = grant_offered(request) if outside is None else outside.grantable
-        # An answer to typing or to a form's send is never kept for the chat: no session choice.
-        grantable = offered and not never_granted(request.tool_name)
+        kept = kept_offered(request) and offer_session is not False
         self.pending = PendingApproval(
             request=request,
-            offer_session=grantable and offer_session is not False,
+            offer_session=kept,
             opened_at=self._clock(),
             future=future,
             target=target,
             selected=2 if outside is not None and outside.access == "write" else 0,
-            offer_always=outside is not None and offered,
+            offer_always=outside is not None and kept,
             everywhere=everywhere,
         )
-        if outside is None and not offered:
+        if outside is None and not kept:
             self.pending.selected = 2
         self.on_change()
         try:

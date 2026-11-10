@@ -1,8 +1,9 @@
 """``window_messages`` at the configuration and CLI boundaries.
 
-It defaults to 64 on a local server and on a URL, and to 20 on a cloud vendor's
-backend; the config leaves it unset (``None``) until a file sets it, and a value that
-is set always wins.
+It defaults to 64 on a local server and on a URL (256 while a token budget is in
+force: the agent decides, so the options leave it ``None``), and to 20 on a cloud
+vendor's backend; the config leaves it unset (``None``) until a file sets it, and a
+value that is set always wins.
 """
 
 from __future__ import annotations
@@ -39,8 +40,7 @@ from localmelo.support.sessions.agents import (
 )
 
 URL = "http://127.0.0.1:1/v1"
-# The AgentOptions default, the AgentConfig default (unset: the backend decides) and a
-# value that is not the default.
+# A window set to the local default, and a value that is not the default.
 OPTION_DEFAULT: Final = LOCAL_WINDOW_MESSAGES
 SET_VALUE: Final = SHORT_TERM_MAX
 
@@ -55,7 +55,8 @@ def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_the_defaults_are_the_measured_window() -> None:
-    assert AgentOptions().window_messages == LOCAL_WINDOW_MESSAGES == 64
+    assert AgentOptions().window_messages is None  # the agent decides
+    assert LOCAL_WINDOW_MESSAGES == 64
     assert AgentConfig().window_messages is None  # the backend decides
     assert (WINDOW_MESSAGES_MIN, WINDOW_MESSAGES_MAX) == (8, 256)
 
@@ -79,7 +80,8 @@ def test_the_window_default_is_64_except_on_a_cloud_vendor(
     backend: str, cap: int
 ) -> None:
     assert default_window_messages(backend) == cap
-    assert AgentConfig().window_for(backend) == cap
+    # A local server's window is the agent's own default (64, or 256 with a budget).
+    assert AgentConfig().window_for(backend) == (cap if cap == 20 else None)
     # A value the config sets wins on every backend.
     assert AgentConfig(window_messages=32).window_for(backend) == 32
     assert AgentConfig(window_messages=64).window_for(backend) == 64
@@ -100,7 +102,9 @@ def test_the_config_roundtrip_writes_only_a_value_that_is_set(
         explicit={"window_messages"},
     )
     assert explicit.window_messages == OPTION_DEFAULT
-    kept = configured_cache_options(load(), AgentOptions(), keep={"window_messages"})
+    kept = configured_cache_options(
+        load(), AgentOptions(window_messages=OPTION_DEFAULT), keep={"window_messages"}
+    )
     assert kept.window_messages == OPTION_DEFAULT
 
 
@@ -113,11 +117,18 @@ def test_a_window_set_to_the_local_default_stays_on_a_cloud_backend(
     assert configured_session_options(load()).window_messages == 64
     save(Config(chat_backend="openai"))
     assert configured_session_options(load()).window_messages == 20
+    save(Config(chat_backend="vllm"))
+    assert configured_session_options(load()).window_messages is None
 
 
 def test_the_window_follows_the_backend_unless_the_config_sets_it() -> None:
     options = AgentOptions()
-    for backend, cap in (("vllm", 64), ("ollama", 64), ("openai", 20), ("nvidia", 20)):
+    for backend, cap in (
+        ("vllm", None),
+        ("ollama", None),
+        ("openai", 20),
+        ("nvidia", 20),
+    ):
         cfg = Config(chat_backend=backend)
         assert configured_session_options(cfg).window_messages == cap
         assert configured_cache_options(cfg, options).window_messages == cap
@@ -162,7 +173,7 @@ def test_the_flag_reaches_the_options_and_none_keeps_the_default() -> None:
     args = parser.parse_args(["--base-url", URL, "--window-messages", "20", "t"])
     assert cli._direct_options(parser, args).window_messages == SET_VALUE
     args = parser.parse_args(["--base-url", URL, "t"])
-    assert cli._direct_options(parser, args).window_messages == OPTION_DEFAULT
+    assert cli._direct_options(parser, args).window_messages is None
 
 
 def test_the_flag_is_an_advanced_option() -> None:
@@ -180,7 +191,10 @@ def test_the_help_names_the_default() -> None:
     assert "agent.window_messages unset --window-messages" in text
     actions = cli._build_parser()._option_string_actions
     window = " ".join(str(actions["--window-messages"].help).split())
-    assert "(default 64 on a local server or a URL, 20 on a cloud vendor)" in window
+    assert (
+        "(default 64 on a local server or a URL, 256 there with a token budget, "
+        "20 on a cloud vendor)" in window
+    )
 
 
 async def test_direct_cli_takes_the_config_and_a_flag_beats_it(
@@ -219,7 +233,7 @@ async def test_a_url_run_has_the_local_window_whatever_backend_the_config_names(
         args, parser=parser, options=cli._direct_options(parser, args)
     )
     try:
-        assert agent.options.window_messages == LOCAL_WINDOW_MESSAGES
+        assert agent.window_messages == LOCAL_WINDOW_MESSAGES
     finally:
         await agent.close()
     # A window the config sets still wins for a URL.
@@ -250,7 +264,7 @@ async def test_a_configured_cloud_backend_keeps_the_earlier_window(
             args, parser=parser, options=cli._direct_options(parser, args)
         )
         try:
-            return agent.options.window_messages
+            return agent.window_messages
         finally:
             await agent.close()
 

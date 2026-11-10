@@ -40,13 +40,18 @@ from localmelo.support.providers._http import (
     switching_for,
     unreachable,
 )
+from localmelo.support.providers.llm._model_server import (
+    Replies,
+    as_length,
+    server_context_length,
+    server_takes_images,
+)
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
     raw_tool_arguments,
 )
 from localmelo.support.providers.llm._sse import sse_data
-from localmelo.support.providers.llm._vision import server_takes_images
 
 # The most bytes of a response that is one JSON body (not a stream) that
 # stream_chat reads, for a server that ignores ``stream``.
@@ -471,7 +476,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         Whether :meth:`takes_images` asks the server (its model listing, oMLX's
         status route and Ollama's show route) when *reads_images* is ``None``.
         ``True`` by default; a hosted service answers none of them, so its backend
-        turns it off.
+        turns it off, and :meth:`context_length` then asks its listing only.
     """
 
     def __init__(
@@ -533,6 +538,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         # :meth:`_missing_model`); a service that needs a key has none to ask.
         self._listing_transport = transport
         self._lists_models = not api_key
+        # What the server said about the model, shared by takes_images and
+        # context_length so that each route is fetched once.
+        self._server_replies: Replies = {}
 
     def _payload(
         self,
@@ -978,14 +986,40 @@ class OpenAICompatLLM(BaseLLMProvider):
             return self.reads_images
         if not self.probe_images:
             return None
-        root = str(self._http.base_url).rstrip("/").removesuffix("/v1")
         return await server_takes_images(
             self._http,
             self.model,
             listing="/models",
             status="/models/status",
-            show=f"{root}/api/show",
+            show=f"{self._root()}/api/show",
+            replies=self._server_replies,
         )
+
+    async def context_length(self) -> int | None:
+        """The context the server runs the model with: its listing, oMLX's status, Ollama's running model; else None.
+
+        A hosted service (``probe_images`` off) is asked its listing only.
+        """
+        local = self.probe_images
+        return await server_context_length(
+            self._http,
+            self.model,
+            listing="/models",
+            status="/models/status" if local else None,
+            running=f"{self._root()}/api/ps" if local else None,
+            replies=self._server_replies,
+        )
+
+    def output_limit(self) -> int | None:
+        """``max_completion_tokens`` or ``max_tokens`` of a planning request's body, if set."""
+        body = {**self.extra_body, **self.extra_body_by_kind.get("plan", {})}
+        return as_length(body.get("max_completion_tokens")) or as_length(
+            body.get("max_tokens")
+        )
+
+    def _root(self) -> str:
+        """The server's address without ``/v1``, where Ollama's own routes live."""
+        return str(self._http.base_url).rstrip("/").removesuffix("/v1")
 
     async def close(self) -> None:
         await self._http.aclose()

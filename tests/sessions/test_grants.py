@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -17,14 +18,12 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
     ApprovalDecision,
     ApprovalRequest,
     holds_grant,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.support.sessions.approvals import (
-    ApprovalLedger,
     ChatPolicy,
     OwnedTaskPolicy,
     RememberingPolicy,
@@ -117,12 +116,9 @@ async def test_the_person_s_word_in_the_main_chat_counts_in_every_session(
     assert decision.allow and decision.origin == "session" and asker.requests == []
 
     # A task of a side chat, through its chat (#369), after the review window.
-    ledger = ApprovalLedger()
-    ledger.grants_of = book.allowed_for
     task_policy = OwnedTaskPolicy(
         RememberingPolicy(Asker(), grants=book.view("t1", "task", inherit=False)),
-        ledger,
-        "t1",
+        book,
         owner=lambda: _chat(side),
         started=_start,
     )
@@ -328,12 +324,8 @@ def test_money_account_and_allow_once_are_never_kept() -> None:
     account = _request(review=ActionReview("undecided", ("account",)))
     with pytest.raises(GrantRefusedError):
         check_grant("tool", "shell_exec", "person", request=account)
-    for once in (
-        ApprovalDecision(True),
-        ApprovalDecision(True, ALLOWED_ONCE, remember=True),
-    ):
-        with pytest.raises(GrantRefusedError, match="Allow once"):
-            check_grant("tool", "shell_exec", "person", decision=once)
+    with pytest.raises(GrantRefusedError, match="Allow once"):
+        check_grant("tool", "shell_exec", "person", decision=ApprovalDecision(True))
     high = _request(review=ActionReview("high", ("install",)))
     with pytest.raises(GrantRefusedError, match="high-impact"):
         check_grant("tool", "shell_exec", "person", request=high)
@@ -720,3 +712,65 @@ async def test_a_revoke_that_cannot_be_saved_raises_and_still_holds_here(
         await book.forget(side, "file_write")
     # The check stopped using it all the same.
     assert "file_write" not in book.allowed_for(side)
+
+
+@pytest.mark.parametrize("wait", ["flush", "settle", "settle-failed"])
+def test_the_shutdown_wait_never_spins_on_a_write_that_just_finished(
+    wait: str,
+) -> None:
+    """A write that ends in the loop pass in which a shutdown wait starts.
+
+    Its done-callback is still queued behind the wait, and ``gather`` of a
+    done task completes without yielding: a loop that waited for the callback
+    to empty the set spun on one core for ever. The loop runs in a thread so
+    that a spin fails the test instead of hanging it (on a failure the thread
+    spins until the test process exits). ``settle-failed``: a write queued
+    while ``settle`` waits fails as the first ends, and its own callback drops
+    it before ``settle`` looks again; ``settle`` still reports it.
+    """
+    outcome: list[str] = []
+
+    async def scenario() -> None:
+        book = GrantBook()
+        written, closing = asyncio.Event(), asyncio.Event()
+
+        async def write() -> None:
+            await written.wait()
+
+        async def fails() -> None:
+            raise OSError("disk full")
+
+        book._queue(write(), "grant_add")
+        if wait == "settle-failed":
+            settling = asyncio.ensure_future(book.settle())
+            await asyncio.sleep(0)
+            book._queue(fails(), "grant_add")  # waits for the first write's lock
+            written.set()
+            try:
+                await settling
+                outcome.append("settled")
+            except SessionStoreError:
+                outcome.append("failed")
+            return
+
+        async def close() -> None:
+            await closing.wait()
+            await getattr(book, wait)()
+
+        closer = asyncio.ensure_future(close())
+        await asyncio.sleep(0)
+        # The write goes on first, then the close, in the same pass.
+        written.set()
+        closing.set()
+        await closer
+        outcome.append("settled")
+
+    done = threading.Event()
+
+    def run() -> None:
+        asyncio.run(scenario())
+        done.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert done.wait(5), f"GrantBook.{wait} spun on a write that had just finished"
+    assert outcome == ["failed" if wait == "settle-failed" else "settled"]

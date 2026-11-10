@@ -21,6 +21,7 @@ from localmelo.melo.schema import Message
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.fixtures.chat_routes import chat_only
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -412,7 +413,7 @@ async def test_a_run_names_the_kind_of_each_request(kind: str) -> None:
         )
         return httpx.Response(200, json=replies.popleft())
 
-    transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(chat_only(handler))
     llm: OpenAICompatLLM | OllamaNativeChat
     if kind == "openai":
         llm = OpenAICompatLLM(

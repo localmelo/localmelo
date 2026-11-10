@@ -479,7 +479,7 @@ _ACTIONS: Final = {
         "Rephrase the request, or /retry."
     ),
     "context_budget_exceeded": (
-        "Reduce the task or increase the configured context window; then /retry."
+        "Reduce the task or use a longer context; then /retry."
     ),
     "budget_exhausted": (
         "/retry tries again; for more steps, quit and run melo -c --steps 60."
