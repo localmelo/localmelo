@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setupDrawer} from '../../support/gateway/static/drawer.mjs';
+import {useLanguage} from '../../support/gateway/static/i18n.mjs';
+import {stepWords, toolWords} from '../../support/gateway/static/step-words.mjs';
 
 function deferred() {
   let resolve, reject;
@@ -50,7 +52,7 @@ test('tools render safely and revoke one or all through encoded paths', async ()
     'GET /sessions/s%2F1/tools': () => ++count === 1 ? tools : emptyTools,
     'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': {revoked: [{key: '<shell/a>', scope: 'session'}], everywhere: false},
     'DELETE /sessions/s%2F1/grants': {revoked: 1, still_everywhere: 0},
-  });
+  }, {on: true});
   await h.drawer.open();
   assert.match(h.text(), /<script>bad<\/script>/);
   assert.equal(h.root.querySelectorAll('script').length, 0);
@@ -179,8 +181,29 @@ test('Tab and Shift+Tab wrap focus while open and ignore disabled buttons', asyn
   assert.equal(prevented, false);
 });
 
+test('default mode lists each tool by what it does and whether it is allowed, without the model\'s instructions', async () => {
+  const h = harness({'GET /sessions/s%2F1/tools': {...tools, tools: [
+    {name: 'file_read', source: 'builtin', description: 'Read a file from the workspace.', granted: false},
+    {name: 'web_fetch', source: 'builtin', description: 'Fetch a page.', granted: true},
+    {name: 'web_search', source: 'builtin', description: 'Search.', granted: false},
+  ]}});
+  await h.drawer.open();
+  const all = (node) => [node, ...node.children.flatMap(all)];
+  const rows = all(h.root).filter((node) => node.className === 'drawer-tool');
+  assert.deepEqual(rows.map((row) => row.children.slice(0, 2).map((part) => part.textContent).join('')), ['Read a file · Not allowed', 'Open a page · Allowed', 'Search the web · Not allowed']);
+  assert.doesNotMatch(h.text(), /Read a file from the workspace|Fetch a page|file_read|builtin|Viewing tools opens the Agent/);
+  assert.equal(h.find('Revoke').attributes['aria-label'], 'Revoke Open a page');
+  // In Chinese the space a phrase keeps for a name goes between two Chinese words, and stays next to a file name.
+  try {
+    await useLanguage('zh-Hans');
+    assert.deepEqual([toolWords('file_edit'), stepWords('file_edit', {path: 'notes/a.md'}, 'ask')], ['编辑一个文件', '编辑 a.md']);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
 test('tools hint explains the Agent and open(tab) loads only the requested tab', async () => {
-  const h = harness({'GET /sessions/s%2F1/tools': emptyTools, 'GET /sessions/s%2F1/memory': memory});
+  const h = harness({'GET /sessions/s%2F1/tools': emptyTools, 'GET /sessions/s%2F1/memory': memory}, {on: true});
   await h.drawer.open('memory');
   assert.deepEqual(h.calls, [['/sessions/s%2F1/memory', 'GET']]);
   await h.drawer.open('tools');

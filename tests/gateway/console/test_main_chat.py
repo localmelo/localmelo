@@ -488,6 +488,8 @@ async def test_a_card_title_is_short_and_a_failed_card_gives_the_reason(
         assert card["line"] == (
             "Could not get an answer from the model server: connection refused"
         )
+        # Its kind travels too: the page words it in its own language, not the raw line.
+        assert card["failure"] == {"status": "provider_error", "cause": "run"}
 
 
 async def test_a_continued_run_that_could_not_start_says_so_on_its_card(

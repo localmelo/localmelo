@@ -60,6 +60,7 @@ The Chinese index is [zh-CN/README.md](zh-CN/README.md).
   (website): repository layout, development, tests and contributions.
 - [Contributing](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)
 - [Maintaining the docs](project/documentation.md): layout and publishing
+- [Console design](project/console-design.md): reading order, four rules, sizes and cards
 - [Security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
 - [Changelog](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md)
 - [License](https://github.com/localmelo/localmelo/blob/main/LICENSE)

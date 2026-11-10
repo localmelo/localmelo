@@ -55,6 +55,7 @@
 - [开发者指南](https://localmelo.github.io/localmelo/zh-CN/developers.html)（网站）：仓库结构、开发、测试和贡献。
 - [贡献指南](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)
 - [维护文档](../project/documentation.md)（英文）：目录结构和发布。
+- [控制台设计](../project/console-design.md)（英文）：阅读顺序、四条规则、字号和卡片。
 - [安全策略](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
 - [更新日志](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md)
 - [许可证](https://github.com/localmelo/localmelo/blob/main/LICENSE)
