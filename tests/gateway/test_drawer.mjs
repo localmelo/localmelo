@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setupDrawer} from '../../support/gateway/static/drawer.mjs';
+import {useLanguage} from '../../support/gateway/static/i18n.mjs';
+import {stepWords, toolWords} from '../../support/gateway/static/step-words.mjs';
 
 function deferred() {
   let resolve, reject;
@@ -191,6 +193,13 @@ test('default mode lists each tool by what it does and whether it is allowed, wi
   assert.deepEqual(rows.map((row) => row.children.slice(0, 2).map((part) => part.textContent).join('')), ['Read a file · Not allowed', 'Open a page · Allowed', 'Search the web · Not allowed']);
   assert.doesNotMatch(h.text(), /Read a file from the workspace|Fetch a page|file_read|builtin|Viewing tools opens the Agent/);
   assert.equal(h.find('Revoke').attributes['aria-label'], 'Revoke Open a page');
+  // In Chinese the space a phrase keeps for a name goes between two Chinese words, and stays next to a file name.
+  try {
+    await useLanguage('zh-Hans');
+    assert.deepEqual([toolWords('file_edit'), stepWords('file_edit', {path: 'notes/a.md'}, 'ask')], ['编辑一个文件', '编辑 a.md']);
+  } finally {
+    await useLanguage('en');
+  }
 });
 
 test('tools hint explains the Agent and open(tab) loads only the requested tab', async () => {

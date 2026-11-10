@@ -1223,9 +1223,10 @@ dialog.picture-box {
 .folder-path input[aria-invalid="true"] { border-color: var(--error); }
 .folder-path .field-hint { flex: 1 0 100%; margin: 0; }
 .starters { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); max-width: 800px; margin: var(--space-3) auto 0; }
-/* Starters sit one step below the composer: no fill and no edge of their own until a pointer or the keyboard reaches one. */
-.starters button { padding: 6px var(--space-3); background: none; border: 1px solid transparent; border-radius: var(--radius-pill); color: var(--ink-2); font-size: var(--text-small); }
-.starters button:hover, .starters button:focus-visible { border-color: var(--line); background: var(--raised); color: var(--ink); }
+/* Starters sit one step below the composer: no fill and no edge until a pointer or the keyboard reaches one; the accent
+   colour, as the page's other boxless things you can press have, says they can be pressed. */
+.starters button { padding: 6px var(--space-3); background: none; border: 1px solid transparent; border-radius: var(--radius-pill); color: var(--accent); font-size: var(--text-small); }
+.starters button:hover, .starters button:focus-visible { border-color: var(--line); background: var(--raised); }
 .send-button {
   flex: none;
   width: 32px;

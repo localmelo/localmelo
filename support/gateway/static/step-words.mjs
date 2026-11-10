@@ -44,7 +44,7 @@ const TOOL_LINES = {
  */
 export function toolWords(name) {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
-  return TOOL_LINES[tool] ? t(TOOL_LINES[tool]) : stepWords(tool, {}, 'ask');
+  return TOOL_LINES[tool] ? closeUp(t(TOOL_LINES[tool])) : stepWords(tool, {}, 'ask');
 }
 
 /** A task tool's own check turned the call down, so it did nothing (the server's `refused_step`). */
@@ -58,6 +58,16 @@ export function refusedStep(output) {
  * a note was not kept ("Not remembered"), a message to a finished task started a new one ("Started task").
  */
 export function stepWords(name, args, done = false, output = '') {
+  return closeUp(phrase(name, args, done, output));
+}
+
+// A catalog phrase keeps a space around its `{what}` so a file name or a host stands apart ("读取 notes.md"); between
+// two Chinese or Japanese characters that space is a gap a reader stops at ("编辑 一个文件"), so it goes.
+const WIDE = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef“”';
+const GAP = new RegExp(`([${WIDE}]) +(?=[${WIDE}])`, 'gu');
+const closeUp = (text) => String(text).replace(GAP, '$1');
+
+function phrase(name, args, done, output) {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
   const a = args && typeof args === 'object' ? args : {};
   // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
