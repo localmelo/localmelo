@@ -90,9 +90,7 @@ NOTE = (
     "try to reach it another way, and when a page needs a login or blocks "
     "automated readers, tell the user so."
 )
-NOTE_BROWSER = (
-    " When web_fetch cannot read a page that way, browser_open can try it in Safari."
-)
+NOTE_BROWSER = " When web_fetch cannot read a page that way, browser_open can try it in melo's browser."
 
 TOOL = ToolDef(
     name=NAME,
@@ -396,7 +394,7 @@ class WebFetchProvider(BaseToolProvider):
             self._kept.popitem(last=False)
 
     def _browser_hint(self) -> str:
-        return " browser_open can try it in Safari." if self.browser else ""
+        return " browser_open can try it in melo's browser." if self.browser else ""
 
     def _written(self, address: str) -> tuple[str, LocalAllow] | None:
         """The address and the hook for a server on this computer the person wrote (#547).

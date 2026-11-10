@@ -47,7 +47,7 @@ from localmelo.support.backends.discovery import DISCOVERY_TIMEOUT_S, DiscoveryE
 from localmelo.support.backends.model_offer import check_chat_model, offer
 from localmelo.support.backends.openai_family import CLOUD_BACKENDS, LOCAL_BACKENDS
 from localmelo.support.backends.registry import get_backend, in_use
-from localmelo.support.browser import chrome, desktop
+from localmelo.support.browser import chrome, desktop, driver_for_on
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.probe import redact_userinfo, url_label
 from localmelo.support.gateway.console.registry import DEFAULT_WORKSPACE
@@ -675,7 +675,7 @@ def _build_candidate(
     browser = getattr(body, "browser", None)
     if browser is not None and driver is None:
         on = candidate.browser.driver if candidate.browser.driver != "off" else ""
-        candidate.browser.driver = (on or "safari-automation") if browser else "off"
+        candidate.browser.driver = (on or driver_for_on()) if browser else "off"
     if driver is not None:
         candidate.browser.driver = driver
     app_windows = getattr(body, "app_windows", None)
