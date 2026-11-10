@@ -205,7 +205,7 @@ Nothing is written without a signal:
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
 | `user_request` | The user's message asks to remember (`remember that …`, `记住…`). | The fact the request carries after its marker, this run's `remember` notes and its final digest at the run's end; never the final reflection. The fact is classified by `classify_kind`, so it is `semantic` unless it is first-person (`profile`), and the meta-noun and question rules below apply to it. |
 | `user_statement` | A declarative sentence of the user's message states a stable fact without a remember request, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
-| `outcome` | A console or app chat keeps a note whose source is not the user's own typed words (the note gate's `pointed` or `inferred`). | That note, at once. |
+| `outcome` | A console or app chat keeps a note whose source is not the user's own typed words (source `pointed`, or `inferred` on a note an earlier version kept). | That note, at once. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 
 Only the user's own text gives a user signal: a tool result, a note, a recall

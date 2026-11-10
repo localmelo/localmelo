@@ -42,6 +42,7 @@ from localmelo.support.gateway.task_files import files_line
 from localmelo.support.memory import ChatMemory, note_gate
 from localmelo.support.memory.digest import DigestItem
 from localmelo.support.memory.recall import (
+    ITEM_CHARS,
     TURN_CHARS,
     WHOLE,
     Item,
@@ -290,13 +291,13 @@ def _marked(item: Item, line: str) -> str:
     return line + DISAGREES if item.conflicts else line
 
 
-def _recalled(item: Item, room: int) -> _Line:
+def _recalled(item: Item) -> _Line:
     """A recalled or found item as one line, with the excerpt the chat read.
 
     The chat's line (``Item.shown``) may show a part of a long turn other than
     its head: the words it shows that the head does not are looked for again,
-    in the recall's own *room*. The line's *short* form is the same part in a
-    recall line's default room. No id is carried.
+    in the recall's own room (:data:`ITEM_CHARS`). The line's *short* form is the
+    same part in a recall line's default room. No id is carried.
     """
     named = _named(item)
     head = named.line()
@@ -305,7 +306,7 @@ def _recalled(item: Item, room: int) -> _Line:
         if item.shown
         else frozenset()
     )
-    full = _flat(named.line(show=Shown(room, terms)))
+    full = _flat(named.line(show=Shown(ITEM_CHARS, terms)))
     short = _flat(named.line(show=Shown(TURN_CHARS, terms)))
     return _Line(
         _key(item),
@@ -359,7 +360,6 @@ async def picked_lines(
         if opened is not None:
             add(opened)
     seen |= earlier
-    room = _recall_room(memory)
     items = [*handover.searched, *handover.used]
     topics = await _topics(memory) if any(item.is_record for item in items) else {}
     for item in items:
@@ -367,7 +367,7 @@ async def picked_lines(
             topic = topics.get(item.key)
             if topic is None or topic in LEFT_OUT_TOPICS:
                 continue  # a note deleted since, or one of People or Decisions
-        add(_recalled(item, room))
+        add(_recalled(item))
     for digest in handover.digest:
         line = _flat(digest.line)
         if any(line.count(speaker) > 1 for speaker in _SPEAKERS):
@@ -388,17 +388,6 @@ def _entry_key(entry: dict[str, Any]) -> tuple[str, ...]:
     if "item" in entry:
         return ("key", f"m:{entry['item']}")
     return ("turn", str(entry.get("session_id", "")), str(entry.get("turn", "")))
-
-
-def _recall_room(memory: ChatMemory) -> int:
-    """The room the chat's recall gives one turn (``[memory] recall_item_chars``)."""
-    settings = getattr(memory, "recall_settings", None)
-    if settings is None:
-        return TURN_CHARS
-    try:
-        return int(settings().item_chars)
-    except Exception:
-        return TURN_CHARS
 
 
 async def _topics(memory: ChatMemory) -> dict[str, str]:

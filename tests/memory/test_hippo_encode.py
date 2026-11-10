@@ -1,6 +1,6 @@
 """The Hippo encoder: a chat's turns become memory items (developer setting, #428).
 
-A chat's exchanges are packed into windows of at most ``compress_at_chars``
+A chat's exchanges are packed into windows of at most ``COMPRESS_AT_CHARS``
 characters, one model request each at temperature 0; the reply's JSON is checked
 (sources outside the window dropped, an item left with none dropped and counted,
 exchanges named nowhere unmentioned), a lasting statement no item covers is made

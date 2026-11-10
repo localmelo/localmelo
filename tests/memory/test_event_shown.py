@@ -2,8 +2,8 @@
 
 Each entry of ``used[]`` (the recall block's items) and ``searched[]`` (what
 ``search_memory`` returned) has a ``shown`` key: the line as the block or the
-search result worded it, without a list number, whatever ``recall_item_chars``,
-``recall_excerpt`` and ``recall_form`` made of it. ``text`` stays the stored text.
+search result worded it, without a list number, whatever ``recall_excerpt`` and
+``recall_form`` made of it. ``text`` stays the stored text.
 Synthetic notes and turns, words only, no model.
 """
 
@@ -20,7 +20,9 @@ from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
+    CUT_GUIDE,
     LIST_GUIDE,
+    PREMISE_GUIDE,
     Item,
     Shown,
     block,
@@ -40,6 +42,7 @@ from localmelo.tests.memory.test_recall_excerpt import (
 
 NOTE = "My tomato harvest is the pride of my garden."
 DAY = 86_400.0
+GUIDE = f"{LIST_GUIDE} {PREMISE_GUIDE}"  # the line above a list of turns
 
 
 @pytest.fixture()
@@ -84,10 +87,12 @@ def body(text: str) -> list[str]:
 def read_back(entries: list[dict[str, Any]], listing: bool) -> list[str]:
     """The lines a block of these entries is made of, from their ``shown`` keys."""
     if not listing:
-        return [f"- {entry['shown']}" for entry in entries]
+        lines = [f"- {e['shown']}" for e in entries]
+        cut = any(e["shown"].startswith("[t") for e in entries)
+        return [*lines, CUT_GUIDE] if cut else lines
     notes = [f"- {e['shown']}" for e in entries if e["kind"] == "record"]
     turns = [e["shown"] for e in entries if e["kind"] == "chat"]
-    return [*notes, LIST_GUIDE, *turns] if turns else notes
+    return [*notes, GUIDE, *turns] if turns else notes
 
 
 def numbered(entries: list[dict[str, Any]], listing: bool) -> list[str]:
@@ -95,20 +100,16 @@ def numbered(entries: list[dict[str, Any]], listing: bool) -> list[str]:
     notes = [e["shown"] for e in entries if e["kind"] == "record"]
     turns = [e["shown"] for e in entries if e["kind"] == "chat"]
     if not listing:
-        return [f"{n}. {e['shown']}" for n, e in enumerate(entries, 1)]
+        shown = [f"{n}. {e['shown']}" for n, e in enumerate(entries, 1)]
+        return [*shown, CUT_GUIDE] if any(". [t" in line for line in shown) else shown
     lines = [f"{n}. {shown}" for n, shown in enumerate(notes, 1)]
-    return [*lines, LIST_GUIDE, *turns] if turns else lines
+    return [*lines, GUIDE, *turns] if turns else lines
 
 
 SETTINGS = [
     pytest.param({}, id="defaults"),
-    pytest.param({"recall_item_chars": 800, "recall_chars": 4000}, id="larger-room"),
-    pytest.param(
-        {"recall_excerpt": "match", "recall_item_chars": 400, "recall_chars": 4000},
-        id="match",
-    ),
-    # The guide line as it was: its sentences are pinned in test_premise_check.py.
-    pytest.param({"recall_form": "list", "premise_check": "off"}, id="list"),
+    pytest.param({"recall_excerpt": "match"}, id="match"),
+    pytest.param({"recall_form": "list"}, id="list"),
 ]
 
 
@@ -136,8 +137,6 @@ async def test_used_entries_carry_the_line_the_block_holds(
         assert all(TARGET not in e["text"] for e in chats)
         if settings.get("recall_excerpt") == "match":
             assert all(TARGET in e["shown"] for e in chats)
-        if settings.get("recall_item_chars") == 800:
-            assert all(len(e["shown"]) > 600 for e in chats)
     finally:
         await memory.aclose()
 
@@ -171,10 +170,10 @@ async def test_searched_entries_carry_the_line_the_search_returned(
         await memory.aclose()
 
 
-async def test_the_head_room_event_shows_a_turns_head_and_a_larger_room_more(
+async def test_the_event_shows_a_turns_head_and_under_match_its_matching_sentences(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_chars=4000, recall_item_chars=234)  # the head a turn had
+    cfg = config()
     memory = await build(tmp_path, store, cfg)
     try:
 
@@ -189,15 +188,8 @@ async def test_the_head_room_event_shows_a_turns_head_and_a_larger_room_more(
         cfg.memory.recall_excerpt = "match"
         match = await chats()
         assert all(TARGET in e["shown"] and "…" in e["shown"] for e in match)
-        cfg.memory.recall_item_chars = 800
-        wide = await chats()
-        assert all(
-            len(w["shown"]) > len(m["shown"]) + 100
-            for w, m in zip(wide, match, strict=True)
-        )
         # What the page and the JSON keep does not follow the settings.
         assert [e["text"] for e in head] == [e["text"] for e in match]
-        assert [e["text"] for e in match] == [e["text"] for e in wide]
     finally:
         await memory.aclose()
 
@@ -222,23 +214,6 @@ async def test_an_item_found_again_keeps_the_line_of_its_first_search(
         assert emitted[-1]["searched"] == first
     finally:
         CHAT_TURN.set(None)
-        await memory.aclose()
-
-
-async def test_an_item_left_out_of_the_block_has_no_entry(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    cfg = config(recall_chars=900, recall_item_chars=2000, recall_excerpt="match")
-    memory = await build(tmp_path, store, cfg)
-    try:
-        found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
-        data = found.event()
-        assert data is not None
-        # Only the note fits; the turns are too long for the room.
-        assert [e["kind"] for e in data["used"]] == ["record"]
-        assert body(found.block) == read_back(data["used"], False)
-        assert found.recall is not None and found.recall.used == 1
-    finally:
         await memory.aclose()
 
 

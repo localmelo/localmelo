@@ -2435,7 +2435,7 @@ panel uses these routes.
   chat and the day, or `from a deleted chat, Oct 30` (`chat_gone` true) once the chat is
   gone; a note kept from a page or file the user pointed to (developer setting
   `[memory] note_gate`) has `from jane.example.com, Oct 30` (or `from the file resume.pdf, Oct 30`)
-  in `from` and `source`, and one the model inferred `melo inferred it from chat “Plans”, Oct 30`
+  in `from` and `source`, and a note an earlier version kept as inferred has `melo inferred it from chat “Plans”, Oct 30`
   in `from` and `melo inferred it · chat “Plans”, Oct 30` in `source`; `edited` is true once the user reworded the note; `imported` is true for a note
   brought in from another assistant's file (with its `batch_id`; see below). `documents` counts the chat turns in the
   index, `embedding_model` is the model that searches by meaning (`""`: words only, which

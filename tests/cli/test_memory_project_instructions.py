@@ -37,7 +37,7 @@ def test_it_is_on_by_default_and_saved_only_when_off(tmp_path: Path) -> None:
         save(cfg)
         assert '[memory]\nproject_instructions = "off"\n' in path.read_text()
         assert config.load().memory.project_instructions == "off"
-        cfg.memory = MemoryConfig(project_instructions="on", recall_records=5)
+        cfg.memory = MemoryConfig(project_instructions="on", recall_list_max=5)
         save(cfg)
         assert "project_instructions" not in path.read_text()
 

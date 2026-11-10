@@ -161,33 +161,20 @@ it; the option shown still works. A comparison names the issue that decides it.
   retrieval.cross_task_cold    0
   retrieval.extra_body         none        --retrieval-extra-body (#4)
   memory.across_chats          true
-  memory.retriever             auto         (#299)
-  memory.keep_statements       false        (#299)
+  memory.retriever             auto
   memory.sleep                 off          (#363)
   memory.sleep_lock            ""           (#363)
-  memory.recall_records        3            (#349)
-  memory.recall_docs           2            (#349)
-  memory.recall_chars          4000         (#349)
-  memory.recall_notes          on           (#349)
-  memory.search_when_empty     off          (#349)
   memory.recall_min_cosine     0.55         (#349)
   memory.recall_min_coverage   0.6          (#349)
-  memory.recall_item_chars     900          (#349)
   memory.recall_excerpt        head         (#349)
   memory.recall_form           excerpt      (#428)
   memory.recall_list_max       20           (#428)
   memory.recall_open_chars     4000         (#428)
-  memory.excerpt_open          on           (#428)
   memory.recall_source         turns        (#428)
-  memory.open_sources          off          (#428)
-  memory.premise_check         on           (#428)
-  memory.compress_at_chars     12000        (#428)
-  memory.compress_parallel     1            (#428)
-  memory.compress_cache        ""           (#428)
+  memory.compress_parallel     1
+  memory.compress_cache        ""
   memory.note_gate             typed        (#442)
   memory.note_min_cosine       0.55         (#442)
-  memory.gather                guide        (#428)
-  memory.gather_min_cosine     0.4          (#428)
   memory.project_instructions  on
   memory.keep_decision_text    false       --keep-decision-text (#4)
   memory.dir                   built in    --memory-dir

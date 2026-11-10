@@ -1,6 +1,7 @@
 """``open_memory``: the model opens the chat turns of the list it was given, whole.
 
-Offered only with ``[memory] recall_form = "list"``; takes 1 to 5 ids such as
+Offered with the list form (``[memory] recall_form = "list"``) and for the ids of the
+excerpt form's cut lines; takes 1 to 5 ids such as
 ``t123`` from a list line and returns each turn with every chunk joined in
 order, its date and chat, up to ``recall_open_chars`` (cut at a sentence end and
 marked). An unknown id, a deleted chat's turn, a note's id, a turn the chat shows
@@ -142,13 +143,22 @@ def test_text_cut_at_a_sentence_end_carries_the_mark_and_fits() -> None:
 # ── The tool ──
 
 
-async def test_it_is_offered_only_with_the_list_form(tmp_path: Path) -> None:
+async def test_it_is_offered_with_cut_excerpts_and_with_the_list_form(
+    tmp_path: Path,
+) -> None:
     cfg = config()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
+        # The excerpt form offers it for the ids of its cut lines; memory items in
+        # the excerpt form carry no ids, so nothing is opened there.
+        assert "open_memory" in [
+            t.definition.name for t in await MemoryTools(memory).start()
+        ]
+        cfg.memory.recall_source = "items"
         assert "open_memory" not in [
             t.definition.name for t in await MemoryTools(memory).start()
         ]
+        cfg.memory.recall_source = "turns"
         cfg.memory.recall_form = "list"
         tools = await MemoryTools(memory).start()
         (opened,) = [t for t in tools if t.definition.name == "open_memory"]

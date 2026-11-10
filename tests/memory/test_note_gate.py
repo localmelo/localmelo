@@ -189,7 +189,7 @@ def test_cosine_and_the_best_of_a_group() -> None:
 
 
 def test_the_levels_include_the_ones_before_them() -> None:
-    order = ["typed", "pointed", "meaning", "model"]
+    order = ["typed", "pointed", "meaning"]
     for n, level in enumerate(order):
         for m, wanted in enumerate(order):
             assert gate.level_at_least(level, wanted) is (n >= m)

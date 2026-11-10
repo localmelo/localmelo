@@ -4,9 +4,9 @@ Notes read as they always did. A chat turn becomes one line, ``[t12] Oct 30 ·
 Main chat · “title” · 0.71``, under one line that says to open the turns that
 may hold the answer with ``open_memory`` (tests/memory/test_open_memory.py), in
 the recall block and in the memory search tool alike. Every turn that passes the
-bars is listed, ``recall_list_max`` at most, whatever ``recall_docs``,
-``recall_chars`` and a chat's cap say. The default form, ``excerpt``, is
-unchanged. Synthetic notes, turns and fixed vectors, no model.
+bars is listed, ``recall_list_max`` at most, whatever the excerpt form's bounds
+and a chat's cap say. The default form, ``excerpt``, is unchanged. Synthetic notes,
+turns and fixed vectors, no model.
 """
 
 from __future__ import annotations
@@ -23,12 +23,14 @@ from localmelo.support.config import Config, MemoryConfig
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.index import Document, document_chunks
 from localmelo.support.memory.recall import (
+    AUTO_RECORDS,
     BLOCK_HEADER,
     LIST_GUIDE,
     LIST_MAX,
     LIST_TITLE_CHARS,
     OLDER_TURN,
     OPEN_CHARS,
+    PREMISE_GUIDE,
     Item,
     day,
     gate_terms,
@@ -56,6 +58,8 @@ QUESTION = "what do I plant in the tomato garden?"
 NOTE = "I stake the tomato garden with bamboo."
 NOTHING_FOUND = "Nothing in melo's memory matches that."
 DAY = 86_400.0
+# The line above a list of turns: its guide, then the premise check's sentence.
+GUIDE = f"{LIST_GUIDE} {PREMISE_GUIDE}"
 
 
 @pytest.fixture()
@@ -69,8 +73,6 @@ async def store(tmp_path: Path) -> AsyncIterator[SessionStore]:
 
 
 def config(**memory: object) -> Config:
-    memory.setdefault("excerpt_open", "off")  # the excerpt form as it was, no ids
-    memory.setdefault("premise_check", "off")  # the list form's guide line as it was
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(**memory)  # type: ignore[arg-type]
     return cfg
@@ -187,7 +189,7 @@ async def test_the_excerpt_form_is_the_default_and_reads_exactly_as_it_did(
     memory = fill.memory
     try:
         settings = memory.recall_settings()
-        assert settings == RecallSettings(excerpt_open=False, premise=False)
+        assert settings == RecallSettings()
         assert not settings.listing
         found = await ask(memory, store)
         # A note and two turns, as the block always held them.
@@ -219,26 +221,20 @@ async def test_the_excerpt_form_is_the_default_and_reads_exactly_as_it_did(
         await memory.aclose()
 
 
-async def test_the_excerpt_form_offers_the_two_tools_it_always_did(
+async def test_the_excerpt_form_offers_search_remember_and_open_memory(
     tmp_path: Path,
 ) -> None:
     cfg = config()
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
-        search, remember = await memory.tools().start()
-        assert search.definition is SEARCH_MEMORY
-        assert remember.definition is REMEMBER
-        assert [t.definition.name for t in await memory.tools().start()] == [
-            "search_memory",
-            "remember",
-        ]
+        search, remember, opened = await memory.tools().start()
+        assert search.definition.name == "search_memory"
+        assert remember.definition is REMEMBER and opened.definition is OPEN_MEMORY
         assert SEARCH_MEMORY.parameters["properties"]["k"]["maximum"] == 8
         # The tool list is read when an agent starts, from the setting then.
         cfg.memory.recall_form = "list"
         names = [t.definition.name for t in await memory.tools().start()]
         assert names == ["search_memory", "remember", "open_memory"]
-        cfg.memory.recall_form = "excerpt"
-        assert len(await memory.tools().start()) == 2
     finally:
         await memory.aclose()
 
@@ -257,7 +253,7 @@ async def test_a_turn_is_one_line_and_a_note_reads_as_before(
         header, note, *rest = found.block.split("\n")[2:]
         assert header == BLOCK_HEADER
         assert note == f"- {note_line(memory)}"
-        assert rest[0] == LIST_GUIDE
+        assert rest[0] == GUIDE
         assert LIST_GUIDE == (
             "Older chat turns that may hold the answer, closest first. Open the ones "
             "you need with open_memory before you answer from them; a title is not "
@@ -590,11 +586,9 @@ async def test_the_cap_is_recall_list_max_and_the_best_come_first(
                 f"d:{n}" for n in ids_of(capped.block)
             ]
             assert ids_of(capped.block) == ids_of(found.block)[:cap]
-        # The excerpt form's own bounds are not the list's.
+        # The excerpt form's own bounds (two turns, a block of 4000 characters) are
+        # not the list's.
         cfg.memory.recall_list_max = 5
-        cfg.memory.recall_docs = 0
-        cfg.memory.recall_chars = 200
-        cfg.memory.recall_records = 0
         assert len(lines_of((await ask(memory, store, "tomato garden bed")).block)) == 5
     finally:
         await memory.aclose()
@@ -603,7 +597,7 @@ async def test_the_cap_is_recall_list_max_and_the_best_come_first(
 async def test_a_chats_cap_does_not_apply_to_the_list(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_form="list", recall_docs=20)
+    cfg = config(recall_form="list")
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         sid = (await _turn(store, "One chat")).session_id
@@ -646,7 +640,7 @@ async def test_the_bars_still_drop_what_they_dropped(
 async def test_the_guidance_line_is_there_only_when_a_turn_is_listed(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_form="list", search_when_empty="hint")
+    cfg = config(recall_form="list")
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         await teach(memory, store, await _turn(store, "Stakes"), NOTE)
@@ -657,9 +651,9 @@ async def test_the_guidance_line_is_there_only_when_a_turn_is_listed(
         both = await ask(memory, store)
         assert both.block.count(LIST_GUIDE) == 1
         assert both.block.index(LIST_GUIDE) > both.block.index(f"“{NOTE}”")
-        # Nothing recalled: no list and no guidance, only the hint if asked for.
+        # Nothing recalled: no list and no guidance.
         nothing = await ask(memory, store, "write a poem about autumn")
-        assert LIST_GUIDE not in nothing.block and nothing.search_hint
+        assert nothing.block == ""
         # Kept lines come first, as in the excerpt form.
         kept = await ask(memory, store, "Remember that my tea is oolong.")
         assert kept.block.split("\n")[3].startswith("melo kept from")
@@ -676,9 +670,10 @@ async def test_the_notes_keep_their_own_bound_and_the_list_its_own(
             ("water", "every morning"),
             ("prune", "in June"),
             ("mulch", "with straw"),
+            ("thin", "in April"),
         )
     ]
-    cfg = config(recall_form="list", recall_records=2)
+    cfg = config(recall_form="list")
     memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
     try:
         for n, said in enumerate(notes):
@@ -686,13 +681,9 @@ async def test_the_notes_keep_their_own_bound_and_the_list_its_own(
         for n in range(4):
             await add_turn(memory, store, f"Tomato garden bed {n}?", "South.")
         found = await ask(memory, store, "tomato garden")
-        assert sum(item.is_record for item in found.used) == 2
+        # Four notes match: the block holds AUTO_RECORDS of them, the list its own.
+        assert sum(item.is_record for item in found.used) == AUTO_RECORDS == 3
         assert len(lines_of(found.block)) == 4
-        # recall_notes = off: no notes, the list as before.
-        cfg.memory.recall_notes = "off"
-        turns_only = await ask(memory, store, "tomato garden")
-        assert not any(item.is_record for item in turns_only.used)
-        assert len(lines_of(turns_only.block)) == 4
     finally:
         await memory.aclose()
 
@@ -843,7 +834,7 @@ async def test_the_search_result_lists_the_turns_under_the_guidance_line(
         reply = await tools.search(query=QUESTION)
         head, guide, *rest = reply.split("\n")
         assert head == f"1. {note_line(memory)}"
-        assert guide == LIST_GUIDE
+        assert guide == GUIDE
         assert [int(line[2 : line.index("]")]) for line in rest] == fill.ids
         assert all(line.endswith("· words") for line in rest)
         # Scope picks the kind, as it does for an excerpt.

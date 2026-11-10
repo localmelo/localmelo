@@ -72,34 +72,17 @@ RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
 MEMORY_RETRIEVERS = ("auto", "bm25", "embedding", "llm")
 # How notes are tidied while melo is idle: see MemoryConfig.sleep.
 MEMORY_SLEEP = ("off", "rules")
-# The recall budget and its bounds (inclusive): see MemoryConfig.recall_records.
-MEMORY_RECALL_RECORDS = (0, 20)
-MEMORY_RECALL_DOCS = (0, 20)
-MEMORY_RECALL_CHARS = (200, 8000)
-# The room one recalled chat turn takes in the block and in the search tool's
-# list, and which part of a turn is shown: see MemoryConfig.recall_item_chars.
-MEMORY_RECALL_ITEM_CHARS = (120, 2000)
+# Which part of a recalled chat turn is shown: see MemoryConfig.recall_excerpt.
 MEMORY_RECALL_EXCERPT = ("head", "match")
 # How recall shows earlier chat turns: as excerpts, or as a list of titles the model
 # opens, and the list form's two sizes: see MemoryConfig.recall_form.
 MEMORY_RECALL_FORM = ("excerpt", "list")
 MEMORY_RECALL_LIST_MAX = (1, 50)
 MEMORY_RECALL_OPEN_CHARS = (500, 16000)
-# Whether a turn's excerpt that shows less than the whole turn carries its id, so the
-# model can open the whole turn (on, the default; off is the developer comparison):
-# see MemoryConfig.excerpt_open.
-MEMORY_EXCERPT_OPEN = ("off", "on")
-# Whether recall draws on the chat turns or on memory items encoded from them, and
-# whether an opened item also shows its source turns; the size of the window a chat
-# is cut into for that encoding: see MemoryConfig.recall_source. ``auto`` reads turns
-# until the encoder has caught up, then items.
+# Whether recall draws on the chat turns or on memory items encoded from them: see
+# MemoryConfig.recall_source. ``auto`` reads turns until the encoder has caught up,
+# then items.
 MEMORY_RECALL_SOURCE = ("turns", "items", "auto")
-MEMORY_OPEN_SOURCES = ("off", "on")
-# Whether the list form's guide line also tells the model to say it has no record of
-# what a question names that none of the listed lines mention (on, the default; off
-# is the developer comparison): see MemoryConfig.premise_check.
-MEMORY_PREMISE_CHECK = ("off", "on")
-MEMORY_COMPRESS_AT_CHARS = (4000, 60000)
 # How many windows of one ingest the encoder is asked for at once: see
 # MemoryConfig.compress_parallel.
 MEMORY_COMPRESS_PARALLEL = (1, 8)
@@ -107,21 +90,13 @@ MEMORY_COMPRESS_PARALLEL = (1, 8)
 # MemoryConfig.recall_min_cosine and recall_min_coverage.
 MEMORY_RECALL_MIN_COSINE = (0.20, 0.95)
 MEMORY_RECALL_MIN_COVERAGE = (0.10, 1.00)
-# How recall looks wider for a question that counts, totals or compares, and the
-# vector bar it uses then: see MemoryConfig.gather and gather_min_cosine.
-MEMORY_GATHER = ("off", "wide", "guide")
-MEMORY_GATHER_DEFAULT = "guide"
-MEMORY_GATHER_MIN_COSINE = (0.20, 0.55)
 # How far back a new chat's first turn looks into the other chats: see
 # ChatConfig.recent_digest_minutes (0 turns it off).
 CHAT_RECENT_DIGEST_MINUTES = (0, 1440)
-# Whether recall carries notes, and what a turn that recalls nothing is told.
-MEMORY_RECALL_NOTES = ("on", "off")
-MEMORY_SEARCH_WHEN_EMPTY = ("off", "hint")
-# Where a note the chat's model keeps may come from, in four cumulative levels,
+# Where a note the chat's model keeps may come from, in three cumulative levels,
 # and the bar a note's meaning must clear against its sources: see
 # MemoryConfig.note_gate.
-MEMORY_NOTE_GATE = ("typed", "pointed", "meaning", "model")
+MEMORY_NOTE_GATE = ("typed", "pointed", "meaning")
 MEMORY_NOTE_MIN_COSINE = (0.20, 0.95)
 # Whether a task reads its project's own instruction file: see MemoryConfig.
 MEMORY_PROJECT_INSTRUCTIONS = ("on", "off")
@@ -400,119 +375,69 @@ class MemoryConfig:
     chat message finds its notes: ``auto`` (words, and meaning too when an
     embedding model is set up), ``bm25`` (words only), ``embedding`` (words and
     meaning; an embedding model is required) or ``llm`` (words pick candidates
-    and the chat model chooses among them, with no embedding calls).
-    ``keep_statements``, a developer setting for comparison and off by default,
-    makes code keep after a chat turn the plain, lasting facts the user stated
-    that the model did not keep with ``remember``. ``sleep``, another developer
-    setting, tidies the notes while melo is idle: ``off`` (the default) or
+    and the chat model chooses among them, with no embedding calls). ``sleep``, a
+    developer setting, tidies the notes while melo is idle: ``off`` (the default) or
     ``rules`` (code rules, no chat-model call). ``sleep_lock`` is an optional
-    path whose presence stops a run before an embedding request. Five more
-    developer settings shape the recall block a chat message carries: ``recall_records``
-    notes (3 by default) and ``recall_docs`` chat turns (2) at most (0-20 each) in a
-    block of at most ``recall_chars`` characters (200-8000, 4000 by default);
-    ``recall_notes = "off"`` leaves notes out of the block and the
-    pinned lines, so only turns are recalled; and ``search_when_empty = "hint"``
-    adds one line to a block that recalls nothing, telling the model to call the
-    memory search tool first. Two more set the bars an item must pass to be
-    recalled at all, in the block and in the memory search tool:
-    ``recall_min_cosine`` (0.20-0.95), the least similarity of meaning, and
-    ``recall_min_coverage`` (0.10-1.00), the least share of the question's
-    content words that a note or turn must hold. Two more set how much of a
-    recalled chat turn is shown, in the block and in the search tool:
-    ``recall_item_chars`` (120-2000, 900 by default), the room one turn takes, and
-    ``recall_excerpt``, ``head`` (the start of each part, the default) or
-    ``match`` (the sentences of each part that hold most of the question's
-    content words). Three more set how recalled chat turns are shown at all:
-    ``recall_form``, ``excerpt`` (an excerpt of each turn, the default) or
-    ``list`` (one line per turn, with its id, date, chat, a title and its
-    similarity, and a tool, ``open_memory``, with which the model opens the turns
-    it needs in full). Notes are shown as before in both forms. The list form
-    lists every turn that passes the bars, ``recall_list_max`` (1-50) at most, in
-    the block and in the search tool alike, and ``recall_open_chars`` (500-16000)
-    is the room one opened turn takes; ``recall_docs`` and ``recall_chars`` do not
-    bound the list, and ``recall_item_chars`` and ``recall_excerpt`` apply to the
-    excerpt form only. ``excerpt_open``, ``on`` (the default) or ``off``, is for the
-    excerpt form of chat turns: with ``on`` a line that shows less than the whole
-    turn (an excerpt that was cut, or a piece of a long turn) starts with the
-    turn's id, such as ``[t123]``, a line under the items says so, and the model
-    has ``open_memory`` to open the turn whole within ``recall_open_chars``; a line
-    that shows the whole turn reads as before; ``off`` is the developer comparison
-    (the block, the search result and the tools as before). It has no effect with
-    ``recall_form = "list"`` (which always offers ``open_memory``) or
-    ``recall_source = "items"``. Four more are about memory items (#428). ``recall_source``,
-    ``turns`` (recall draws on the chat turns, the default), ``items`` (it draws
-    on the memory items a chat model encoded from the chats, in place of the turns;
-    ``melo memory ingest FILE -X ingest=compress`` writes them) or ``auto`` (it draws
-    on the turns until the encoder has read nearly all of them, then on the items, in
-    the list form; only a chat model we have checked, and only items such a model
-    wrote, count); ``open_sources``,
-    ``off`` (the default: an opened item shows its title and text only) or ``on``
-    (it also shows its source turns whole, within ``recall_open_chars``);
-    ``premise_check``, ``on`` (the default) or ``off``, ends the line above the list
-    form's lines with one sentence that tells the model to say first that it has no
-    record of a person, thing, place or role the question names when none of the
-    lines mention it, and not to answer from something similar (it has no effect
-    on the excerpt form);
-    ``compress_at_chars`` (4000-60000), the size of the window a chat is cut into
-    for the chat model to encode, one model call each; ``compress_parallel`` (1-8,
-    default 1), how many of those windows ``melo memory ingest`` has the chat
-    model read at once (the items are the same, only the time changes); and ``compress_cache``, the
-    path of the file that keeps each window's reply (empty: ``compress_cache.jsonl``
-    in the memory folder). Two more are about where a note the chat's model keeps
-    with ``remember`` may come from (#442). ``note_gate``, ``typed`` (the words the
-    user typed in the chat and a finished task's result shown in it, the default),
-    ``pointed`` (also a page or file the user pointed to in the chat), ``meaning``
-    (also a note that says the same in other words or another language: its key
-    tokens must be found and its meaning must be close to a source) or ``model``
-    (also a note the model infers from what the user typed, kept as inferred); each
-    level includes the ones before it. ``note_min_cosine`` (0.20-0.95) is the least
-    similarity of meaning that counts as support in the last two levels (the
-    inferred note's bar is 0.15 lower). Two more are for questions about the person's
-    own life that count, total or compare across things (#428), and apply to
-    ``recall_form = "list"``.
-    ``gather``, ``guide`` (the default: for such a question the block's vector bar is
-    the lower of ``recall_min_cosine`` and ``gather_min_cosine``, every list-form
-    ``search_memory`` uses that lower bar, and one more sentence under the list says to
-    open every item that may belong and to search again for each kind not listed yet),
-    ``wide`` (the lower bar without the sentence) or ``off`` (recall as before; a
-    message that does not ask to count, total or compare is recalled for the same way
-    under every value); ``gather_min_cosine`` (0.20-0.55, 0.40 by default) is that
-    lower bar.
-    ``project_instructions = "off"`` stops a
-    task that the person made from reading the instruction file of its folder (``AGENTS.md``,
-    ``CLAUDE.md`` or ``GEMINI.md``, the nearest first) when it starts.
+    path whose presence stops a run before an embedding request. Two developer
+    settings set the bars an item must pass to be recalled at all, in the block and
+    in the memory search tool: ``recall_min_cosine`` (0.20-0.95), the least
+    similarity of meaning, and ``recall_min_coverage`` (0.10-1.00), the least share
+    of the question's content words that a note or turn must hold. ``recall_excerpt``
+    sets which part of a recalled chat turn is shown, in the block and in the search
+    tool: ``head`` (the start of each part, the default) or ``match`` (the sentences
+    of each part that hold most of the question's content words). Three more set how
+    recalled chat turns are shown at all: ``recall_form``, ``excerpt`` (an excerpt of
+    each turn, the default) or ``list`` (one line per turn, with its id, date, chat,
+    a title and its similarity, and a tool, ``open_memory``, with which the model
+    opens the turns it needs in full). Notes are shown as before in both forms. The
+    list form lists every turn that passes the bars, ``recall_list_max`` (1-50) at
+    most, in the block and in the search tool alike, and ``recall_open_chars``
+    (500-16000) is the room one opened turn takes; the block's size bound and a
+    turn's room do not bound the list, and ``recall_excerpt`` applies to the excerpt
+    form only. In the
+    excerpt form a line that shows less than the whole turn (an excerpt that was
+    cut, or a piece of a long turn) starts with the turn's id, such as ``[t123]``, a
+    line under the items says so, and the model has ``open_memory`` to open the turn
+    whole within ``recall_open_chars``. Three more are about memory items (#428).
+    ``recall_source``, ``turns`` (recall draws on the chat turns, the default),
+    ``items`` (it draws on the memory items a chat model encoded from the chats, in
+    place of the turns; ``melo memory ingest FILE -X ingest=compress`` writes them)
+    or ``auto`` (it draws on the turns until the encoder has read nearly all of
+    them, then on the items, in the list form; only a chat model we have checked,
+    and only items such a model wrote, count). ``compress_parallel`` (1-8, default
+    1) is how many windows of a chat ``melo memory ingest`` has the chat model read
+    at once (the items are the same, only the time changes), and ``compress_cache``
+    the path of the file that keeps each window's reply (empty:
+    ``compress_cache.jsonl`` in the memory folder). Two more are about where a note
+    the chat's model keeps with ``remember`` may come from (#442). ``note_gate``,
+    ``typed`` (the words the user typed in the chat and a finished task's result
+    shown in it, the default), ``pointed`` (also a page or file the user pointed to
+    in the chat) or ``meaning`` (also a note that says the same in other words or
+    another language: its key tokens must be found and its meaning must be close to
+    a source); each level includes the ones before it. ``note_min_cosine``
+    (0.20-0.95) is the least similarity of meaning that counts as support in the
+    last level. ``project_instructions = "off"`` stops a task that the person made
+    from reading the instruction file of its folder (``AGENTS.md``, ``CLAUDE.md`` or
+    ``GEMINI.md``, the nearest first) when it starts.
     """
 
     across_chats: bool = True
     retriever: str = "auto"  # auto | bm25 | embedding | llm
-    keep_statements: bool = False
     sleep: str = "off"  # off | rules
     sleep_lock: str = ""  # Optional lock path: no embedding requests while it exists.
-    recall_records: int = 3  # Most notes a chat message's recall block holds.
-    recall_docs: int = 2  # Most chat turns it holds.
-    recall_chars: int = 4000  # Its size bound, in characters.
-    recall_notes: str = "on"  # on | off: no notes in the block or the pinned lines.
-    search_when_empty: str = "off"  # off | hint: a line when nothing was recalled.
     recall_min_cosine: float = 0.55  # Least similarity of meaning to be recalled.
     recall_min_coverage: float = 0.6  # Least share of the question's words held.
-    recall_item_chars: int = 900  # The room one recalled chat turn takes.
     recall_excerpt: str = "head"  # head | match: which part of a turn is shown.
     recall_form: str = "excerpt"  # excerpt | list: turns as excerpts, or as a list.
     recall_list_max: int = 20  # The most turns the list form lists.
     recall_open_chars: int = 4000  # The room one turn the model opens takes.
-    excerpt_open: str = "on"  # on | off: a cut excerpt carries its id to open.
     recall_source: str = "turns"  # turns | items | auto: what recall draws on.
-    open_sources: str = "off"  # off | on: an opened item also shows its source turns.
-    premise_check: str = "on"  # on | off: the list guide asks for "no record" first.
-    compress_at_chars: int = 12000  # The size of a window a chat is encoded in.
     compress_parallel: int = 1  # Windows an ingest asks the encoder for at once.
     compress_cache: str = (
         ""  # Where encoder replies are kept; empty: in the memory dir.
     )
-    note_gate: str = "typed"  # typed | pointed | meaning | model: note sources.
+    note_gate: str = "typed"  # typed | pointed | meaning: note sources.
     note_min_cosine: float = 0.55  # Least similarity of a note to its source.
-    gather: str = MEMORY_GATHER_DEFAULT  # guide | wide | off: look wider to count.
-    gather_min_cosine: float = 0.40  # The vector bar for such a question.
     project_instructions: str = "on"  # on | off: a task reads its folder's AGENTS.md.
 
 
@@ -884,13 +809,8 @@ class Config:
             if "\x00" in getattr(self.memory, name):
                 errors.append(f"[memory] {name} must be a path string without NUL")
         for name, (low, high) in (
-            ("recall_records", MEMORY_RECALL_RECORDS),
-            ("recall_docs", MEMORY_RECALL_DOCS),
-            ("recall_chars", MEMORY_RECALL_CHARS),
-            ("recall_item_chars", MEMORY_RECALL_ITEM_CHARS),
             ("recall_list_max", MEMORY_RECALL_LIST_MAX),
             ("recall_open_chars", MEMORY_RECALL_OPEN_CHARS),
-            ("compress_at_chars", MEMORY_COMPRESS_AT_CHARS),
             ("compress_parallel", MEMORY_COMPRESS_PARALLEL),
         ):
             value = getattr(self.memory, name)
@@ -902,7 +822,6 @@ class Config:
             ("recall_min_cosine", MEMORY_RECALL_MIN_COSINE),
             ("recall_min_coverage", MEMORY_RECALL_MIN_COVERAGE),
             ("note_min_cosine", MEMORY_NOTE_MIN_COSINE),
-            ("gather_min_cosine", MEMORY_GATHER_MIN_COSINE),
         ):
             value = getattr(self.memory, name)
             if not floor <= value <= ceiling:
@@ -910,16 +829,10 @@ class Config:
                     f"[memory] {name} must be from {floor} to {ceiling}, got {value}"
                 )
         for name, allowed in (
-            ("recall_notes", MEMORY_RECALL_NOTES),
-            ("search_when_empty", MEMORY_SEARCH_WHEN_EMPTY),
             ("recall_excerpt", MEMORY_RECALL_EXCERPT),
             ("recall_form", MEMORY_RECALL_FORM),
-            ("excerpt_open", MEMORY_EXCERPT_OPEN),
             ("note_gate", MEMORY_NOTE_GATE),
-            ("gather", MEMORY_GATHER),
             ("recall_source", MEMORY_RECALL_SOURCE),
-            ("open_sources", MEMORY_OPEN_SOURCES),
-            ("premise_check", MEMORY_PREMISE_CHECK),
             ("project_instructions", MEMORY_PROJECT_INSTRUCTIONS),
         ):
             value = getattr(self.memory, name)
