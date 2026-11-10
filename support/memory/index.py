@@ -38,6 +38,7 @@ import aiosqlite
 import numpy as np
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.sign_in import without_passwords
 from localmelo.melo.memory._sqlite import (
     checkpoint_wal,
     create_private_file,
@@ -265,11 +266,14 @@ def _kept(text: str) -> str:
 def _clean(text: str) -> str:
     """*text* without its secrets: a sentence a note would refuse is left out, the
     rest redacted. A private key block is redacted whole first: left out line by
-    line, its header would go and its body stay."""
+    line, its header would go and its body stay. A password the text gives is cut
+    out first for the same reason: its value can cross a sentence's end (a quoted
+    value with a full stop in it, a value on the next line), where leaving out by
+    sentence would keep a part of it."""
     text = text.strip()
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
-    return redact_secrets(_kept(text))[0]
+    return redact_secrets(_kept(without_passwords(text)))[0]
 
 
 def cleaned(text: str) -> str:

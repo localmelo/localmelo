@@ -332,7 +332,7 @@ async def test_a_password_given_after_a_short_word_reaches_no_window_and_no_file
                 "date": "2023-05-22T10:00:00",
                 "turns": [
                     {"role": "user", "text": f"My pw is {value}. I like tea."},
-                    {"role": "assistant", "text": "Signed in. Tea it is."},
+                    {"role": "assistant", "text": f"Signed in with pw: {value}"},
                 ],
             }
         ]

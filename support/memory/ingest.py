@@ -27,14 +27,16 @@ user message before it, and a message with no text, are skipped and counted.
 A user message over :data:`~localmelo.melo.checker.validators.MAX_QUERY_LEN`
 characters is cut there and counted as ``trimmed``.
 
-A password a message or a session's title gives is replaced by its handle
-before anything is stored, indexed, kept as a note or read by a model, as at a
-chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): the
-value reaches no record. An assistant message is hidden too: in a file it can
-repeat what the person gave, and a stored answer is read again by search and by
-a model when the chat goes on. The command is a process of its own, so no handle
-it makes can be typed. A handle can be longer than the value it stands for, so a
-user message is cut after the hiding, and a title is cut to the store's limit.
+A password a message or a session's title gives is cut out before anything is
+stored, indexed, kept as a note or read by a model, and ``[…]`` stands in its
+place (:func:`~localmelo.melo.contracts.sign_in.without_passwords`): the value
+reaches no record. Nothing is typed from a loaded chat, so no handle is made and
+the passwords of the person at the keyboard are not touched. An assistant
+message is cut the same way: in a file it can repeat what the person gave, and
+a stored answer is read again by search and by a model when the chat goes on. A
+user message is cut to the store's limit after that, so no part of a value is
+left at the cut. A title is cut to the store's limit too: a longer one would
+stop the run.
 
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
@@ -66,7 +68,7 @@ from typing import Any, Final
 
 from localmelo.melo import clock
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.melo.contracts.sign_in import hide_passwords
+from localmelo.melo.contracts.sign_in import without_passwords
 from localmelo.support.memory import ChatMemory, hippo_encode, hippo_judge
 from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import is_cut
@@ -419,12 +421,12 @@ async def run(
         source: dict[str, Any] = {}
         mine: list[hippo_encode.Turn] = []
         for exchange in pairs:
-            # Hidden first, then cut: no part of a value is left at the cut.
-            typed = hide_passwords(exchange.typed)
+            # Cut out first, then cut to length: no part of a value is left there.
+            typed = without_passwords(exchange.typed)
             if len(typed) > MAX_QUERY_LEN:
                 typed = typed[:MAX_QUERY_LEN]
                 report.trimmed += 1
-            answer = hide_passwords(exchange.answer)
+            answer = without_passwords(exchange.answer)
             pin.at = exchange.asked_at
             info = await chats.begin_turn(
                 session_id or None,
@@ -436,9 +438,9 @@ async def run(
                 session_id = info.session_id
                 report.sessions += 1
                 report.ids[chat.label] = session_id
-                # Hidden, then cut to the store's limit: a handle can be longer than
-                # its value, and a title over the limit would stop the run.
-                title = hide_passwords(chat.title).strip()[:_MAX_TITLE_CHARS].rstrip()
+                # Cut to the store's limit: a longer title would stop the run.
+                title = without_passwords(chat.title).strip()
+                title = title[:_MAX_TITLE_CHARS].rstrip()
                 if title:
                     await chats.rename_session(session_id, title)
                 session = await chats.get_session(session_id)

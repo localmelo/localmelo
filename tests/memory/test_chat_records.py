@@ -229,6 +229,18 @@ def test_a_password_given_after_a_short_word_is_a_secret(text: str) -> None:
 
 @pytest.mark.parametrize(
     "text",
+    ['pw: "plain. Word7" ok.', 'password: "plain. Word7" ok.', "pwd:\nplain-Word7"],
+)
+def test_a_password_that_crosses_a_sentence_end_leaves_no_part_in_the_index(
+    text: str,
+) -> None:
+    kept = index.cleaned(f"Tea is ready. {text}")
+    assert kept.startswith("Tea is ready.")
+    assert "plain" not in kept and "Word7" not in kept
+
+
+@pytest.mark.parametrize(
+    "text",
     ["Run pwd to print the folder.", "The pw manager is open.", "My pw is wrong."],
 )
 def test_the_short_words_alone_are_not_a_secret(text: str) -> None:

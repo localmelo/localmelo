@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.melo.contracts.sign_in import HANDLE
+from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.memory import ChatMemory, ingest
 from localmelo.support.memory.index import DOC_CHARS, MAX_CHUNKS, document_chunks
 from localmelo.support.memory.ingest import Chat, Exchange, IngestError, Message
@@ -473,7 +473,8 @@ async def test_a_password_in_a_message_or_a_title_reaches_no_record(
                 # A file's assistant message can repeat what the person gave.
                 ("assistant", f"Signed in with pw: {PASSWORD}"),
                 ("user", "I live in Pittsburgh."),
-                ("assistant", "Noted."),
+                # A quoted value with a full stop in it crosses a sentence's end.
+                ("assistant", 'Noted. The old pw: "first. Word7" is gone.'),
                 title=f"Forum pwd: {PASSWORD}",
             ),
             # No title: the store names the chat after its first message.
@@ -495,27 +496,26 @@ async def test_a_password_in_a_message_or_a_title_reaches_no_record(
             kept += [t.answer or "" for t in turns]
             assert not [text for text in kept if PASSWORD in text]
         first = (await chats.list_turns(report.ids["pw"]))[0]
-        assert HANDLE.search(first.user_text), "a handle stands where the value was"
-        assert HANDLE.search(first.answer or ""), "in the answer too"
+        assert "pw is […]" in first.user_text, "a mark stands where the value was"
+        assert "pw: […]" in (first.answer or ""), "in the answer too"
+        # Nothing is typed from a loaded chat: no handle was made, nothing kept.
+        assert repr(VAULT) == "Vault(0 password(s))"
         # The rest of what was said is kept: a lasting fact still becomes a note.
         notes = [n.text for n in await memory.records()]
         assert "You live in Pittsburgh." in notes
     finally:
         await close(chats, memory)
-    # No file the run wrote holds the value: the chat store, the index, the notes.
-    assert holding(tmp_path, PASSWORD) == []
+    # No file the run wrote holds a value: the chat store, the index, the notes.
+    assert holding(tmp_path, "Word7") == []
 
 
-@pytest.mark.parametrize("left", [3, 6])
-async def test_a_password_at_the_stores_limit_is_hidden_before_the_cut(
-    tmp_path: Path, left: int
+async def test_a_password_at_the_stores_limit_is_cut_out_before_the_cut(
+    tmp_path: Path,
 ) -> None:
-    # The store's limit falls *left* characters into the value. Cut first, three
-    # characters of it would stay as they are (too short to count as a value) and
-    # six would be hidden into a handle that passes the limit. Hidden first, the
-    # cut can only fall in the handle.
+    # The store's limit falls three characters into the value. Cut to length
+    # first, those three would stay as they are: too short to read as a value.
     lead = " my password is "
-    text = "x" * (MAX_QUERY_LEN - len(lead) - left) + lead + PASSWORD + " and more"
+    text = "x" * (MAX_QUERY_LEN - len(lead) - 3) + lead + PASSWORD + " and more"
     data = {
         "sessions": [
             chat("a", "2023-05-20T13:40:00", ("user", text), ("assistant", "ok"))
@@ -530,15 +530,11 @@ async def test_a_password_at_the_stores_limit_is_hidden_before_the_cut(
         assert PASSWORD[:3] not in stored[-30:]
     finally:
         await close(chats, memory)
-    assert holding(tmp_path, PASSWORD[:3] + PASSWORD[3]) == []
 
 
-async def test_a_title_that_hiding_lengthens_is_cut_to_the_stores_limit(
+async def test_a_long_title_is_cut_to_the_stores_limit_and_holds_no_password(
     tmp_path: Path,
 ) -> None:
-    # A handle is longer than a short value: 200 characters as given, more hidden.
-    ending = " pwd: abcd1"
-    title = "t" * (200 - len(ending)) + ending
     data = {
         "sessions": [
             chat(
@@ -546,7 +542,7 @@ async def test_a_title_that_hiding_lengthens_is_cut_to_the_stores_limit(
                 "2023-05-20T13:40:00",
                 ("user", "I live in Pittsburgh."),
                 ("assistant", "ok"),
-                title=title,
+                title="Forum pwd: abcd1 " + "t" * 220,
             )
         ]
     }
@@ -554,7 +550,8 @@ async def test_a_title_that_hiding_lengthens_is_cut_to_the_stores_limit(
     try:
         assert (report.sessions, report.turns) == (1, 1)
         (session,) = await chats.list_sessions(limit=10, kinds=None)
-        assert len(session.title) == 200 and "abcd1" not in session.title
+        assert len(session.title) == 200
+        assert session.title.startswith("Forum pwd: […] t")
     finally:
         await close(chats, memory)
 

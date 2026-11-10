@@ -22,12 +22,11 @@ plainly a password given, nothing is cut out and nothing can be typed: the page
 is handed to the person, as before. A card number or a one-time code is never
 cut out or typed: those stay the person's.
 
-Two readers pass text that is not a message of this turn. Memory asks
-:func:`gives_password` whether a sentence gives one, so that it leaves the
-sentence out; nothing is kept for that. The developer command that loads past
-chats from a file hides its messages, the assistant's too, with
-:func:`hide_passwords`; it runs in a process of its own, where no handle it
-makes can be typed.
+Text that is kept and never typed from is read by two functions that only
+read: :func:`gives_password` says whether a text gives a password, for memory to
+refuse it as a note, and :func:`without_passwords` cuts the values out, for
+memory's index and for chats loaded from a file. Neither keeps a value or makes
+a handle.
 
 This module imports only the standard library.
 """
@@ -177,10 +176,23 @@ def hide_passwords(text: str) -> str:
 def gives_password(text: str) -> bool:
     """Whether *text* gives a password, as :func:`hide_passwords` would read it.
 
-    It only reads: nothing is kept and no handle is made. A text already
-    hidden gives none.
+    It only reads: nothing is kept and no handle is made. A handle is not a
+    value.
     """
     return bool(_values(text))
+
+
+def without_passwords(text: str) -> str:
+    """*text* with each password it gives cut out and ``[…]`` in its place.
+
+    What :func:`hide_passwords` would hide, left as :func:`spent` leaves a
+    handle. It only reads: nothing is kept and no handle is made, so nothing
+    in the result can be typed. For text that is kept and never typed from.
+    """
+    out = text
+    for start, end, _ in reversed(_values(text)):
+        out = out[:start] + "[…]" + out[end:]
+    return out
 
 
 def spent(text: str) -> str:
