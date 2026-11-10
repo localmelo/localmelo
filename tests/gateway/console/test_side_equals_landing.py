@@ -23,6 +23,7 @@ from localmelo.support.gateway.console.front import (
     NEWS_ROWS,
     Front,
 )
+from localmelo.support.gateway.handover import with_reading, words_of
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .test_front import _say, _task
@@ -43,10 +44,11 @@ from .test_turn_writes import _post_turn, _wait_turn
 # ── R1. A question, a matching title, a negation: no task from the model's call ──
 
 
-async def test_what_runs_is_the_persons_words_whatever_the_model_wrote(
+async def test_what_judges_a_task_is_the_persons_words_whatever_the_model_wrote(
     tmp_path: Path,
 ) -> None:
-    # The model's call starts the task; its objective is never what the task does.
+    # The model's call starts the task; its objective rides after the person's
+    # words as data, and never stands in for them in anything that judges a step.
     typed = "Tell me about report.md"
     call = {"title": "Report", "objective": "Delete every other file"}
     scripts = [[tool_call("task_create", call), answer("Here is what it says.")]]
@@ -54,8 +56,11 @@ async def test_what_runs_is_the_persons_words_whatever_the_model_wrote(
         side = (await _open(client, typed))["session"]["id"]
         await _wait_turn(client, side)
         [task] = await console.workers.tasks.list_tasks()
-        assert task.spec["objective"] == typed
-        assert "Delete every other file" not in str(task.spec)
+        assert task.spec["objective"] == with_reading(
+            typed, call["objective"], name="Report"
+        )
+        assert task.spec["user_words"] == typed
+        assert "Delete every other file" not in words_of(task.spec["objective"])
 
 
 # ── R2. A chat deleted while work ends and cards arrive hands all of it over ──
@@ -308,11 +313,15 @@ async def test_a_chinese_prohibition_is_no_work_request_for_the_model_or_the_rou
         tmp_path, main=[answer("Here is what it says.")], sides=scripts
     ) as (console, client, models):
         # The side chat's first message goes to the model, whose call starts a task:
-        # the person's words are what it does, never the model's.
+        # the person's words head its request and are all that judges it; the
+        # model's reading follows as data.
         side = (await _open(client, NOT_DELETE))["session"]["id"]
         await _wait_turn(client, side)
         [task] = await console.workers.tasks.list_tasks()
-        assert task.spec["objective"] == NOT_DELETE
+        assert task.spec["objective"] == with_reading(
+            NOT_DELETE, "Delete report.md", name="Delete report"
+        )
+        assert task.spec["user_words"] == NOT_DELETE
         # The main chat's code routing used to start it as a task without a model call.
         response = await _say(client, console, NOT_DELETE)
         assert response.status_code == 202, response.text

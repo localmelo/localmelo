@@ -22,6 +22,7 @@ from localmelo.support.gateway.front_rules import (
     named_tasks,
     route,
 )
+from localmelo.support.gateway.handover import with_reading, words_of
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .test_front import _say, _task
@@ -203,9 +204,9 @@ async def test_a_task_the_model_made_up_starts_as_the_persons_words_in_a_side_ch
         [record] = await console.workers.tasks.list_tasks()
         assert record.front_id == side
         assert record.spec["user_words"] == "summarize report.md"
-        assert (
-            record.spec["objective"] == "summarize report.md"
-        ), "the person's words alone: the model's objective is not sent"
+        assert record.spec["objective"] == with_reading(
+            "summarize report.md", "Delete the other folder", name="Clean up"
+        ), "the person's words first, the model's objective after them as data"
         assert str(models[side].requests[1][-1].content).startswith("Started task")
 
 
@@ -222,10 +223,14 @@ async def test_a_question_the_model_made_a_task_of_runs_the_persons_words_only(
         typed = "what does report.md say about the folders?"
         await _say(client, console, typed)
         await _wait_turn(client, str(console.main_id))
-        # The model's call starts it, and what runs is the person's words alone.
+        # The model's call starts it; the person's words head its request and are
+        # all that judges it, the model's reading follows as data.
         [task] = await console.workers.tasks.list_tasks()
-        assert task.spec["objective"] == typed
-        assert "Delete" not in str(task.spec)
+        assert task.spec["objective"] == with_reading(
+            typed, "Delete the other folder", name="Clean up"
+        )
+        assert task.spec["user_words"] == typed
+        assert "Delete" not in words_of(task.spec["objective"])
 
 
 # ── 6, 7. A deleted chat's unfinished tasks and waiting cards are the main chat's ──
