@@ -99,6 +99,40 @@ test('a step only a click can allow has Allow once; a change to localmelo has no
   assert.equal(blockFacts({approval: {allowed: true, origin: 'auto'}}), null);
 });
 
+// A typing question Auto refused in a task nobody could be asked for (#617): the call's `tool_asks` record.
+const TYPED = 'Checked in <b>today</b>.\nSecond line, all of it shown, with nothing cut from the end of it at all.';
+const TYPING = {
+  request_id: 'q1', tool: 'browser-type:https://notes.example', allowed: false, origin: 'auto', mode: 'auto',
+  reason: 'sends data from this Mac', step_key: 'k9', preview: 'type 98 character(s) into a textbox "Note" on notes.example in Safari',
+  arguments: {site: 'notes.example', access: 'type', how: 'type', text: TYPED, on: 'a textbox "Note"'},
+  review: {verdict: 'high', categories: ['send_out'], reasons: ['Sends data from this Mac, as your model\'s review says.'], by: 'model'},
+};
+
+test('a blocked typing step shows its site and the whole text, as text, with Allow once', () => {
+  const facts = blockFacts({approval: TYPING, name: 'browser_type', preview: TYPING.preview});
+  assert.equal(facts.step, TYPED, 'the whole text, uncut');
+  const card = blockCard(fakeDoc(), facts, {onAllow: () => {}});
+  // The same facts as the live card for this question: the site and the box it types into.
+  assert.equal(byClass(card, 'block-gist').textContent, 'Type into “Note” on notes.example?');
+  // What the model found is the title: said once.
+  assert.equal((text(card).match(/Send data from this Mac/gi) ?? []).length, 1);
+  assert.match(text(card), /Your model's review stopped it\./);
+  const step = byClass(card, 'block-step');
+  assert.equal(step.textContent, TYPED, 'drawn as text: the markup in it stays characters');
+  assert.equal(step.innerHTML, undefined);
+  assert.match(text(card), /The text it will type/);
+  assert.ok(byClass(card, 'block-allow'));
+  // In default mode no tool of ours by name.
+  assert.doesNotMatch(text(card), /browser_type|browser-type/);
+});
+
+test('a blocked question without its key, an old record, has no Allow once', () => {
+  const {step_key: _key, ...old} = TYPING;
+  const card = blockCard(fakeDoc(), blockFacts({approval: old, name: 'browser_type'}));
+  assert.equal(byClass(card, 'block-allow'), null);
+  assert.equal(byClass(card, 'block-step').textContent, TYPED);
+});
+
 test('after Allow once the button goes: waiting, ran, or run out', () => {
   assert.deepEqual(allowState({}), {state: 'open'});
   assert.deepEqual(allowState({until: 100, now: 50}), {state: 'pending', at: 100});

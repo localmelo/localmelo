@@ -391,7 +391,7 @@
   "auto.reason.download": "这一步会下载文件到这台 Mac。",
   "auto.reason.env": "这一步会创建编程环境。",
   "auto.reason.install": "这一步会安装软件。",
-  "auto.reason.model": "你的模型审查后认为，这一步会{what}。",
+  "auto.reason.model": "你的模型审查后拦下了它。",
   "auto.reason.money": "这一步会花钱。",
   "auto.reason.opaque": "这一步运行的代码 melo 无法检查。",
   "auto.reason.open_app": "一个网页要求打开这台 Mac 上的另一个应用。",

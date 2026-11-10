@@ -51,6 +51,7 @@ from localmelo.support.browser import configured_driver
 from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
+    allowed_note,
     block_to_allow,
     blocked_steps,
     denied_steps,
@@ -1445,6 +1446,25 @@ class TaskWorkers:
         except BaseException:
             policy.withdraw(key)
             raise
+
+    async def _allowed_note(self, record: TaskRecord) -> str:
+        """The note of the steps allowed once in *record*'s task and not used, or ``""``.
+
+        Read from the blocks of this task and, for a fresh task its job went on
+        in, of the task it followed; only while the allowance holds.
+        """
+        held = self._auto.get(record.task_id)
+        if held is None or not held.has_allowances():
+            return ""
+        packet = Handoff.read(record.spec)
+        sessions = [record.task_id]
+        if packet.origin == "task" and packet.source:
+            sessions.append(packet.source)
+        try:
+            return await allowed_note(self.store, sessions, held.allowed_once)
+        except Exception:
+            log.exception("Could not read the allowed steps of task %s", record.task_id)
+            return ""
 
     async def open_blocks(self, task_id: str) -> builtins.list[dict[str, Any]]:
         """The steps Auto blocked in *task_id* that its Allow once may still run.
@@ -2880,6 +2900,9 @@ class TaskWorkers:
             if chat is not None and self.browsers is not None:
                 self.browsers.attach_task(task_id, agent, chat)
             base = await self._baseline(workspace, record)
+            # A step the person allowed once (#617), as melo's note: a retry can
+            # repeat it exactly.
+            allowed_step = await self._allowed_note(record)
             # A person's task decides by the mode of the chat that owns it, read at
             # each step (#576); known before the first one.
             owner, mode_now = await self._following(record, task_mode)
@@ -2902,6 +2925,7 @@ class TaskWorkers:
                 context=(
                     *_task_blocks(record.spec),
                     *(() if chat is None else (ACTING_NOTE,)),
+                    *((allowed_step,) if allowed_step else ()),
                 ),
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
                 observe=lambda event: self._observe(task_id, event),

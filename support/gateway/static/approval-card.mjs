@@ -20,7 +20,7 @@
  * the folder of the chat that is open, for a request and a view that name none. `later(fn, ms)` is
  * `setTimeout`, which the page (and its tests) may replace.
  */
-import { gistWords, reviewWords } from "./blocked.mjs";
+import { actionTitle, controlOf, gistWords, pageText, reviewWords } from "./blocked.mjs";
 import { maker } from "./dom.mjs";
 import { t } from "./i18n.mjs";
 import { formatBytes } from "./turns.mjs";
@@ -42,15 +42,6 @@ export function guardLeft(state) {
   return Math.max(0, Math.ceil(GUARD_MS - (approvalNow() - state.mountedAt)));
 }
 
-// The engine's words for a control, `a button "Sign in"` (and ` inside a box from accounts.example.org`), as the
-// request carries them in `on`: its kind, its label and the other site's box. null when the words are not those.
-const CONTROL_KINDS = ["link", "button", "textbox", "checkbox", "select"];
-function controlOf(on) {
-  const found = /^an? ([a-z]+)(?: "(.*)")?(?: inside a box from (\S+))?$/.exec(String(on ?? "").trim());
-  if (!found || !CONTROL_KINDS.includes(found[1])) return null;
-  return { kind: found[1], label: found[2] ?? "", frame: found[3] ?? "" };
-}
-
 // The kept choice's sentence about a site: for this chat or task, in the main chat, and the same two when the
 // server read the question as one site (`kept_site`), which is what the answer then covers. The question itself
 // keeps naming the exact host.
@@ -60,13 +51,6 @@ const SITE_RULES = {
   act: ["approval.rule.act", "approval.rule.actMain", "approval.rule.actWhole", "approval.rule.actWholeMain"],
 };
 const siteRule = (kind, request, everywhere) => SITE_RULES[kind][(request.kept_site ? 2 : 0) + (everywhere ? 1 : 0)];
-
-// What a click, a choice or typing is on, in a question: “Sign in” when it is named, else the kind of control.
-function actionTitle(key, control, site) {
-  return control.label
-    ? t(`approval.${key}`, { label: control.label, site })
-    : t(`approval.${key}Kind`, { kind: t(`approval.kind.${control.kind}`), site });
-}
 
 // "5 lines removed, 1 added": the size of what a file write replaces.
 function diffSummary({added, removed}) {
@@ -189,8 +173,7 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     const control = sending ? null : controlOf(args.on);
     const choosing = /^choose\b/.test(String(args.how ?? "")); // the engine's own word for a choice
     title = t(sending ? "approval.submitSite" : typing ? "approval.typeSite" : "approval.actSite", { site });
-    if (control && typing) title = actionTitle("typeInto", control, site);
-    else if (control && choosing) title = control.label ? t("approval.actChoose", { label: control.label, site }) : t("approval.actChooseKind", { site });
+    if (control && choosing) title = control.label ? t("approval.actChoose", { label: control.label, site }) : t("approval.actChooseKind", { site });
     else if (control) title = actionTitle("actClick", control, site);
     caption = t(sending ? "approval.submitCaption" : typing ? "approval.typeCaption" : "approval.actCaption");
     if (sending || typing) rule = t(sending ? "approval.rule.submitOnce" : "approval.rule.typeOnce");
@@ -205,17 +188,11 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
       content = "";
       noBox = true;
     }
-    if (sending) {
-      // Where the form goes (or that the page decides) and what it holds, nothing secret in it.
+    if (sending || typing) {
+      // Where the form goes (or that the page decides) and what it holds, nothing secret in it; or the
+      // whole text typed, uncut: what goes into the page, as a blocked step's card shows it too.
       why = content;
-      const rows = Array.isArray(args.fields) ? args.fields.map(([name, value]) => `${name}: ${value}`) : [];
-      content = [args.to ? String(args.to) : t("approval.submitPage"), ...(rows.length ? ["", t("approval.submitFields"), ...rows] : [])].join("\n");
-      what = t("approval.submitAddress");
-    } else if (typing) {
-      // The whole text, uncut: it is what goes into the page.
-      why = content;
-      content = String(args.text ?? "");
-      what = t("approval.actTyped");
+      ({ title, what, text: content } = pageText(tool, args));
     }
   } else if (tool.startsWith("browser-attach:")) {
     // A file from this computer for a page's upload field: asked every time. The sentence names the file and its

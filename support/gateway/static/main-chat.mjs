@@ -11,7 +11,7 @@
  */
 
 import {ENDING_MARKS, canFinish, endingName, endingWhy, finishLabel, readEnding} from "./endings.mjs";
-import {blockCard, blockFacts} from "./blocked.mjs";
+import {blockCard, blockFacts, pageText} from "./blocked.mjs";
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
@@ -74,13 +74,15 @@ export function readCard(row) {
     // The start continued its task by itself after a restart: when.
     ...(Number(data.continued_at) > 0 ? {continuedAt: Number(data.continued_at)} : {}),
     // An end that needs the person while exactly one step Auto blocked can still be allowed once: that step.
-    // It holds what the step's own card shows, so the card says which step its button allows.
+    // It holds what the step's own card shows, so the card says which step its button allows; a question its
+    // tool asked itself (typing on a page, a form sent) also keeps its name and arguments: the card shows its text.
     ...(state === "done" && data.block?.request_id ? {block: {
       requestId: String(data.block.request_id),
       stepKey: String(data.block.step_key ?? ""),
       name: String(data.block.name ?? ""),
       preview: String(data.block.preview ?? ""),
       review: data.block.review && typeof data.block.review === "object" ? data.block.review : {},
+      ...questionOf(data.block),
     }} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
@@ -90,21 +92,32 @@ export function readCard(row) {
       review: data.review && typeof data.review === "object" ? data.review : {},
       canAllow: data.can_allow === true,
       finished: data.finished === true,
+      ...questionOf(data),
     } : {}),
   };
+}
+
+/** The question a stored block was (`question`, `arguments`), when its tool asked one itself. */
+function questionOf(data) {
+  return typeof data.question === "string" && data.question
+    ? {question: data.question, arguments: data.arguments && typeof data.arguments === "object" ? data.arguments : {}}
+    : {};
 }
 
 /** What a blocked card's block says (`blocked.mjs`), or null; Allow once only where the server offers it. */
 export function cardBlock(card) {
   if (card?.state !== "blocked") return null;
-  const facts = stepFacts({requestId: card.requestId, stepKey: card.stepKey, name: card.name, preview: card.preview, review: card.review});
+  const facts = stepFacts(card);
   if (!facts || !facts.category) return null;
   return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
 }
 
-/** What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review; null if unusable. */
-const stepFacts = ({requestId, stepKey, name, preview, review}) => blockFacts({
-  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review},
+/**
+ * What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review, and for a question
+ * its tool asked itself its name and arguments; null if unusable.
+ */
+const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args},
   name,
   preview,
 });
@@ -265,6 +278,14 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   const why = card.ending && card.state !== "waiting" ? endingWhy(card.ending) : "";
   if (why) text.append(el("p", "main-card-why", why));
   if (card.continuedAt) text.append(el("p", "main-card-line", t("cards.continued", {when: clock(card.continuedAt)})));
+  // Allow this step for a text typed or a form sent shows all of it first, as its blocked card does; the sentence that
+  // names the site and the box stands by the button.
+  const page = card.block && step && card.block.question ? pageText(card.block.question, card.block.arguments) : null;
+  if (page) {
+    const shown = el("div", "block-code");
+    shown.append(el("code", "block-step", page.text));
+    text.append(shown);
+  }
   if (facts) text.append(blockCard(doc, facts, block ?? {}));
   const inline = card.state === "waiting" && approval;
   if (inline) text.append(approval);
