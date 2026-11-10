@@ -67,11 +67,11 @@ uv run python scripts/build_macos_app.py --install
 
 - 从 Spotlight 打开 localmelo：网页控制台外面的一个原生窗口。
 - 菜单栏显示有多少对话和任务在运行，以及何时有一个在等你；窗口收起时，一个小胶囊说明 Melo 正在做什么。
-- 这是开发版本，使用临时签名（ad hoc）；构建需要 Swift 编译器（[macOS 应用指南](docs/zh-CN/guides/macos-app.md)）。
+- 这是开发版本，使用临时签名（ad hoc）；构建需要 Swift 编译器（[macOS 应用指南](docs/guides/macos-app.md)（英文））。
 
 ## 快速开始
 
-在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，推荐使用模型服务器 [oMLX](https://github.com/jundot/omlx)。把每个模型放进 `~/models` 下各自的文件夹（[方法](docs/zh-CN/guides/model-servers.md#serve-a-model-with-omlx)），然后提供这个文件夹：
+在搭载 Apple 芯片、macOS 15 或更高版本的 Mac 上，推荐使用模型服务器 [oMLX](https://github.com/jundot/omlx)。把每个模型放进 `~/models` 下各自的文件夹（[方法](docs/guides/model-servers.md#serve-a-model-with-omlx)（英文）），然后提供这个文件夹：
 
 <!-- usage:omlx-serve-readme -->
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage/omlx-serve-readme.dark.svg"><img alt="终端: 提供模型" src="docs/assets/usage/omlx-serve-readme.light.svg"></picture>
@@ -103,10 +103,10 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 ```
 <!-- /usage -->
 
-- 单独运行 `melo` 可以对话；第一次运行会找到正在运行的服务器并保存配置。未找到时，搭载 Apple silicon 的 Mac 会列出它将要安装的内容（melo_serve、oMLX、一个模型），你同意一次后才开始设置；每一项都可以跳过，也可以[改用已在运行的服务器或云端服务](docs/zh-CN/guides/model-servers.md#first-run-setup)。
+- 单独运行 `melo` 可以对话；第一次运行会找到正在运行的服务器并保存配置。未找到时，搭载 Apple silicon 的 Mac 会列出它将要安装的内容（melo_serve、oMLX、一个模型），你同意一次后才开始设置；每一项都可以跳过，也可以[改用已在运行的服务器或云端服务](docs/guides/model-servers.md#first-run-setup)（英文）。
 - `melo serve` 启动网关，并在浏览器中打开网页控制台。
-- `-u` 和 `-m` 是 `--url` 和 `--model` 的简写；[旧写法](docs/zh-CN/reference/cli.md#old-spelling-to-new)仍然可用。
-- [`melo-task`](docs/zh-CN/reference/scheduler.md#task-command) 创建并控制网关的后台任务。
+- `-u` 和 `-m` 是 `--url` 和 `--model` 的简写；[旧写法](docs/reference/cli.md#old-spelling-to-new)（英文）仍然可用。
+- [`melo-task`](docs/reference/scheduler.md#task-command)（英文） 创建并控制网关的后台任务。
 
 ## 了解更多
 
@@ -128,7 +128,7 @@ melo --url http://127.0.0.1:11434/v1 --model qwen3:8b "What is 6*7?"
 - 在 macOS 的“自动”模式下，一个步骤还会在写入沙箱里运行：它的文件只留在文件夹里，碰不到 melo 自己的登录信息。
 - 网关要求身份验证并拒绝非回环监听。
 - 令牌无法防御同一操作系统用户下的恶意进程。
-- 详见 [SECURITY.md（英文）](SECURITY.md)和[检查的作用](docs/zh-CN/guides/tools-mcp.md#what-the-checks-do)。
+- 详见 [SECURITY.md（英文）](SECURITY.md)和[检查的作用](docs/guides/tools-mcp.md#what-the-checks-do)（英文）。
 
 ## 参与贡献
 

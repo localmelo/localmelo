@@ -105,7 +105,7 @@
         <ul>
           <li>uv 创建 <code>.venv/</code>（需要时会安装 Python 3.13），并装好网关的依赖。</li>
           <li>激活只对当前终端有效；在其他地方用 <code>uv run --project &lt;clone&gt; melo …</code>。</li>
-          <li>在搭载 Apple 芯片的 Mac 上，<code class="wrap">uv run python scripts/build_macos_app.py --install</code> 会把 <a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/macos-app.md">App</a> 构建到 <code>~/Applications</code>。</li>
+          <li>在搭载 Apple 芯片的 Mac 上，<code class="wrap">uv run python scripts/build_macos_app.py --install</code> 会把 <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/macos-app.md">App（英文）</a> 构建到 <code>~/Applications</code>。</li>
         </ul>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
@@ -129,7 +129,7 @@
           <li>答案打印在 stdout 上，退出码为 0（<code>echo $?</code> 打印 <code>0</code>）。</li>
           <li><code>-u</code>（<code>--url</code>）为本次运行指定服务器，不读配置文件；<code>-m</code>（<code>--model</code>）指定模型。</li>
           <li>它不发送 API 密钥：使用云端 API 时，请保存配置（见下文）。</li>
-          <li>全部选项见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a>。</li>
+          <li>全部选项见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a>。</li>
         </ul>
       </section>
 
@@ -143,7 +143,7 @@
         <ul>
           <li><code>status</code> 说明运行如何结束，例如 <code>completed</code>、<code>budget_exhausted</code> 或 <code>provider_error</code>。</li>
           <li>计数字段给出步数、模型请求数和工具调用数；<code>config</code> 记录运行用的选项。</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/run-results.md">运行结果</a>列出了每个状态和字段。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/run-results.md">运行结果（英文）</a>列出了每个状态和字段。</li>
         </ul>
       </section>
 
@@ -166,8 +166,8 @@
         <ul>
           <li>此后，<code>melo</code> 和 <code>melo "&lt;task&gt;"</code> 都使用保存的服务器。</li>
           <li>每个问题都是一个列表：↑ ↓ 移动，Enter 确认，Esc 选择安全的答案。</li>
-          <li>尚未保存后端且没有服务器在运行时，搭载 Apple silicon 的 Mac 会打印<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#first-run-setup">一个列表，列出它将要安装的内容</a>，你同意一次后才开始设置。每一项都可以跳过，<code>Use a server I already run</code> 和 <code>Use a hosted service</code> 在同一个菜单里，已经在运行的服务器会先被提供。其他平台保留手动说明。</li>
-          <li>细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/configure.md#first-run">首次运行</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/embedding.md">设置嵌入模型</a>。</li>
+          <li>尚未保存后端且没有服务器在运行时，搭载 Apple silicon 的 Mac 会打印<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#first-run-setup">一个列表，列出它将要安装的内容（英文）</a>，你同意一次后才开始设置。每一项都可以跳过，<code>Use a server I already run</code> 和 <code>Use a hosted service</code> 在同一个菜单里，已经在运行的服务器会先被提供。其他平台保留手动说明。</li>
+          <li>细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">首次运行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">设置嵌入模型（英文）</a>。</li>
         </ul>
 
         <h3 id="with-the-setup-wizard">使用配置向导</h3>
@@ -215,7 +215,7 @@
           <li>回复中必须有非空的 <code>data[0].embedding</code>。</li>
           <li>使用 oMLX 时，设置 <code>embedding_backend = "vllm"</code> 以及 <code>embedding_url</code> 和 <code>embedding_model</code>（<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX（英文）</a>）。</li>
           <li>换模型就换了向量：旧条目不再参与排序，直到你删除 <code>~/.cache/localmelo/memory/long_term.db*</code>。</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/embedding.md">指南</a>涵盖 Ollama、oMLX、vLLM、SGLang 和 MLC。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">指南（英文）</a>涵盖 Ollama、oMLX、vLLM、SGLang 和 MLC。</li>
         </ul>
       </section>
 
@@ -234,7 +234,7 @@
           <li>在这台电脑的终端里，<code>melo serve</code> 会在浏览器中打开控制台；<code>melo console</code> 可再次打开。</li>
           <li>通过 SSH 时，<code>melo console</code> 打印一个一次性链接，需在 60 秒内打开；不要分享它。</li>
           <li>Ctrl+C 停止网关；之后 <code>melo "What is 6*7?"</code> 使用保存的配置。</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/scheduler.md#task-command"><code>melo-task</code></a> 创建并控制网关的任务。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#task-command"><code>melo-task</code>（英文）</a> 创建并控制网关的任务。</li>
         </ul>
       </section>
 
@@ -254,7 +254,7 @@
           <li>输入 <code>/</code> 查看命令：<code>/help</code>、<code>/model</code>、<code>/status</code>、<code>/attach PATH</code>、<code>/new</code>；Ctrl+D 退出。</li>
           <li>运行 shell 命令、Python 代码或写文件之前，melo 会先问你：允许一次、在本会话中允许，或拒绝并说明原因。</li>
           <li>melo 在当前文件夹中工作（<code>-w DIR</code> 指定其他文件夹）；Esc 停止一轮。</li>
-          <li>按键和其余内容见<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-interactive-ui">交互式界面</a>。</li>
+          <li>按键和其余内容见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">交互式界面（英文）</a>。</li>
         </ul>
         <figure class="shot">
           <img src="../assets/img/panel.webp" alt="网页控制台：对话旁边的面板显示今天的活动和一个等待审批的任务。" width="1280" height="800" loading="lazy">
@@ -312,13 +312,13 @@
           <table>
             <thead><tr><th scope="col">页面</th><th scope="col">内容</th></tr></thead>
             <tbody>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/configuration.md">配置</a></td><td>后端、云端 API 密钥、超时</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具和 MCP</a></td><td>内置工具和 MCP 服务器</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/gateway.md">网关和 HTTP API</a></td><td>会话、控制台、登录时运行</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/python-api.md">Python API</a></td><td>从 Python 运行任务、跟随事件、审批工具调用</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/memory.md">记忆</a></td><td>保留、查看和重置记忆</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a></td><td>全部选项、退出码、脚本用法</td></tr>
-              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/troubleshooting.md">故障排查</a></td><td>错误信息和解决办法</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">配置（英文）</a></td><td>后端、云端 API 密钥、超时</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">工具和 MCP（英文）</a></td><td>内置工具和 MCP 服务器</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">网关和 HTTP API（英文）</a></td><td>会话、控制台、登录时运行</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API（英文）</a></td><td>从 Python 运行任务、跟随事件、审批工具调用</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">记忆（英文）</a></td><td>保留、查看和重置记忆</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a></td><td>全部选项、退出码、脚本用法</td></tr>
+              <tr><td><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/troubleshooting.md">故障排查（英文）</a></td><td>错误信息和解决办法</td></tr>
             </tbody>
           </table>
         </div>
