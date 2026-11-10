@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent._earlier import EARLIER_TURNS
 from localmelo.melo.agent.agent import CANCELLED_ERROR, FINALIZE_TIMEOUT_S
+from localmelo.melo.agent.options import NOTE_MODES
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
@@ -93,8 +94,6 @@ logger = logging.getLogger(__name__)
 
 # ChatMemory's tool that keeps a note of the person's words.
 _NOTE_TOOLS: Final = ("remember",)
-# The reasoning modes whose replies end with a note block the answer leaves out.
-_NOTE_MODES: Final = frozenset({"compress", "compress+replay"})
 # The sessions where only a person's turn acts: the main chat and the side chats.
 CHAT_KINDS: Final = frozenset({"front", "chat"})
 
@@ -948,7 +947,7 @@ class SessionRunner:
         live = self._live
         display = (
             None
-            if live is None or turn.agent.options.reasoning in _NOTE_MODES
+            if live is None or turn.agent.options.reasoning in NOTE_MODES
             else live(turn.turn)
         )
         token = STREAM_DISPLAY.set(display)

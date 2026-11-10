@@ -33,6 +33,9 @@ from localmelo.melo.schema import (
 AttemptPolicy = Literal["reflect", "none"]
 ToolExposure = Literal["retrieve", "all"]
 ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
+# The reasoning modes that compress each reply into a note: the reply's
+# ``<note>`` block is cut off its answer.
+NOTE_MODES: frozenset[ReasoningMode] = frozenset({"compress", "compress+replay"})
 NoteWriter = Literal["auto", "heuristic"]
 WindowEviction = Literal["chunk", "boundary"]
 ToolImages = Literal["auto", "on", "off"]
