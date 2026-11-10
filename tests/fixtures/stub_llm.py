@@ -35,7 +35,9 @@ A reply with ``stream`` is sent as incremental SSE instead of one JSON
 body: ``{"chunks": [...], "reasoning": [...], "delay_s": 0.02, "slice": 0,
 "drop": false}``. ``chunks`` are content deltas (the reply's ``content``
 when absent), ``reasoning`` deltas go to ``reasoning_content``, and
-``tool_calls`` are sent as complete fragments before the finish reason. A
+``tool_calls`` are sent as complete fragments before the finish reason, and
+the usage frame only when the request asks for it (``stream_options`` with
+``include_usage``), as hosted servers do. A
 request with ``"stream": true`` gets any other reply as SSE too (its reasoning
 and its content, one delta each), so the terminal UI, which streams by default,
 runs against every scenario.
@@ -244,7 +246,7 @@ class StubServer:
                         "stream": {"reasoning": [reasoning] if reasoning else []},
                     }
                 if "stream" in reply:
-                    self._stream(reply)
+                    self._stream(reply, body)
                     return
                 if "status" in reply:
                     data = str(reply.get("body", "")).encode()
@@ -255,9 +257,10 @@ class StubServer:
                     return
                 self._json(200, _completion(reply, body), reply.get("headers"))
 
-            def _stream(self, reply: dict[str, Any]) -> None:
+            def _stream(self, reply: dict[str, Any], request: dict[str, Any]) -> None:
                 stream = reply["stream"]
-                body = _stream_body(reply)
+                options = request.get("stream_options") or {}
+                body = _stream_body(reply, usage=options.get("include_usage") is True)
                 delay = float(stream.get("delay_s") or 0)
                 size = int(stream.get("slice") or 0)
                 # Without a byte slice, one SSE frame is one write, so the
@@ -303,8 +306,11 @@ def _sse(payload: dict[str, Any]) -> bytes:
     return b"data: " + json.dumps(payload, ensure_ascii=False).encode() + b"\n\n"
 
 
-def _stream_body(reply: dict[str, Any]) -> bytes:
-    """The SSE body of a streamed reply, without the finish when it drops."""
+def _stream_body(reply: dict[str, Any], *, usage: bool = True) -> bytes:
+    """The SSE body of a streamed reply, without the finish when it drops.
+
+    The usage frame comes only with *usage*: a request that asked for it.
+    """
     stream = reply["stream"]
     chunks: list[bytes] = []
 
@@ -336,12 +342,13 @@ def _stream_body(reply: dict[str, Any]) -> bytes:
         )
     if stream.get("drop"):
         return b"".join(chunks)
-    usage = dict(reply.get("usage") or DEFAULT_USAGE)
-    usage.setdefault(
-        "total_tokens",
-        usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
-    )
-    chunks.append(_sse({"choices": [], "usage": usage}))
+    if usage:
+        counts = dict(reply.get("usage") or DEFAULT_USAGE)
+        counts.setdefault(
+            "total_tokens",
+            counts.get("prompt_tokens", 0) + counts.get("completion_tokens", 0),
+        )
+        chunks.append(_sse({"choices": [], "usage": counts}))
     chunks.append(
         _sse(
             {

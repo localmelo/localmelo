@@ -156,8 +156,13 @@ async def test_pieces_come_before_the_stored_reply_which_is_their_sum(
     assert LIVE_EVENT not in {e.event["type"] for e in stored}
     reply = next(e for e in stored if e.event["type"] == "assistant.message")
     assert reply.event["data"]["content"] == REPLY
+    # The stream asked for the server's token counts, and they were kept as a
+    # whole reply's are (the stub sends them only when asked).
+    assert stub.requests[0]["stream_options"] == {"include_usage": True}
+    assert reply.event["data"]["usage"]["prompt_tokens"] == 120
     (row,) = await store.list_turns(turn.session_id)
     assert row.result is not None and 0 <= row.result["first_word_s"] < 20
+    assert row.result["usage"]["prompt_tokens"] == 120
     await runner.close()
 
 

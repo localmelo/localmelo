@@ -483,33 +483,32 @@ async def test_error_frames_and_incomplete_calls(raw: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_usage_opt_in_and_compatible_final_frames() -> None:
+async def test_a_stream_asks_for_usage_and_a_server_that_refuses_it_answers_whole() -> None:
     requests: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
         body = json.loads(req.content)
         requests.append(body)
-        raw = frame({"choices": [{"finish_reason": "stop"}]})
-        if body.get("stream_options", {}).get("include_usage"):
-            raw += frame({"usage": {"prompt_tokens": 2, "completion_tokens": 3}})
-        return httpx.Response(200, stream=Bytes([raw + b"data: [DONE]\n\n"]))
+        if body.get("stream"):
+            return httpx.Response(400, json={"error": "unknown field: stream_options"})
+        message = {"role": "assistant", "content": "whole"}
+        usage = {"prompt_tokens": 2, "completion_tokens": 3}
+        return httpx.Response(200, json={"choices": [{"message": message}], "usage": usage})
 
-    for options in ({}, {"stream_options": {"include_usage": True}}):
-        provider = OpenAICompatLLM(
-            "http://example.test/v1",
-            "test",
-            extra_body=options,
-            transport=httpx.MockTransport(handler),
-        )
-        try:
+    provider = OpenAICompatLLM(
+        "http://example.test/v1", "test", transport=httpx.MockTransport(handler)
+    )
+    try:
+        for _ in range(2):
             events = [event async for event in provider.stream_chat([])]
             reply = events[-1].reply
-            assert reply is not None
-            assert (reply.usage is not None) == bool(options)
-        finally:
-            await provider.close()
-    assert "stream_options" not in requests[0]
-    assert requests[1]["stream_options"] == {"include_usage": True}
+            assert reply is not None and events[-1].whole
+            assert reply.usage is not None and reply.usage["prompt_tokens"] == 2
+    finally:
+        await provider.close()
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    # The refusal is kept: the second turn asks for the whole reply at once.
+    assert [bool(r.get("stream")) for r in requests] == [True, False, False]
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from collections.abc import (
 )
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Final
 
 import httpx
 
@@ -105,6 +105,14 @@ def rate_limits(
         if best is None or used > best[0]:
             best = (used, _reset_at(fields.get("reset", ""), now))
     return best
+
+
+# The answers of a server that cannot take a streamed request as it is sent.
+_REFUSED_STREAM: Final = frozenset({400, 422})
+
+
+class _StreamRefusedError(Exception):
+    """The server refused the streamed request before it sent anything."""
 
 
 def _reject_nonfinite(value: str) -> None:
@@ -413,7 +421,9 @@ class OpenAICompatLLM(BaseLLMProvider):
     :meth:`stream_chat` copes with a server that does not stream: it reads a
     response that is one JSON body as the completion :meth:`chat` would
     return, and asks again, once and without streaming, when a stream ends
-    before it delivered anything. Either way the reply is marked
+    before it delivered anything or the server refuses the streamed request
+    (HTTP 400 or 422, which asks for its usage with
+    ``stream_options.include_usage``). Either way the reply is marked
     ``whole=True`` and ``sends_whole_replies`` becomes true: this provider
     asks that server for whole replies from then on.
 
@@ -544,6 +554,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         }
         if stream:
             payload["stream"] = True
+            # The server's own token counts: the context budget and the gate
+            # read them, and many servers send them in a stream only when asked.
+            payload.setdefault("stream_options", {"include_usage": True})
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
             payload["tool_choice"] = "auto"
@@ -773,7 +786,7 @@ class OpenAICompatLLM(BaseLLMProvider):
                     error_response = httpx.Response(
                         response.status_code, content=bytes(error_body[:65_536])
                     )
-                    raise ProviderError(
+                    error = ProviderError(
                         f"POST /chat/completions failed with HTTP {response.status_code}",
                         status_code=response.status_code,
                         retryable=response.status_code in RETRYABLE_STATUS_CODES,
@@ -782,6 +795,13 @@ class OpenAICompatLLM(BaseLLMProvider):
                         served=switched_to(error_response),
                         switching_s=switching_for(error_response),
                     )
+                    if response.status_code in _REFUSED_STREAM and not (
+                        error.context_overflow or error.served
+                    ):
+                        # A server that refuses the streamed request (its
+                        # options) is asked for the whole reply, from now on.
+                        raise _StreamRefusedError from error
+                    raise error
                 opened = True
                 self.last_limits = rate_limits(response.headers)
                 chunks = response.aiter_bytes()
@@ -892,6 +912,8 @@ class OpenAICompatLLM(BaseLLMProvider):
                             if not isinstance(final, str) or finish:
                                 raise ProviderError("Malformed SSE finish reason")
                             finish = final
+        except _StreamRefusedError:
+            pass  # nothing reached the caller: the whole reply, below
         # A transport error, before or after part of the reply, is retried as
         # the whole-reply call's is: the caller's displays start the reply again.
         except httpx.ConnectError as exc:
