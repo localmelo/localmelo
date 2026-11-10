@@ -573,6 +573,14 @@ def grant_offered(request: ApprovalRequest) -> bool:
     return offers_grant(request.review) or site_grant(request) or window_grant(request)
 
 
+def kept_offered(request: ApprovalRequest) -> bool:
+    """Whether a kept answer is offered for *request*: a folder outside the
+    workspace by its own rule (``outside.grantable``, #405), else :func:`grant_offered`.
+    """
+    outside = request.outside
+    return outside.grantable if outside is not None else grant_offered(request)
+
+
 # Set around each tool call of a run that has a policy: asks that policy about
 # something the tool found out while it ran, such as the site a redirect led
 # to. The arguments are the tool name the policy sees (a grant of the run

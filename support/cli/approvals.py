@@ -41,8 +41,7 @@ from localmelo.melo.contracts.approvals import (
     AskWatch,
     AutoPolicy,
     DenyAllPolicy,
-    grant_offered,
-    never_granted,
+    kept_offered,
     whole_site,
 )
 from localmelo.melo.contracts.review import (
@@ -765,13 +764,7 @@ class TerminalApprover:
         # A grant never covers a high-impact call, whatever the caller says;
         # a folder outside the workspace is offered only when it may be kept.
         outside = request.outside
-        offered = grant_offered(request) if outside is None else outside.grantable
-        # An answer to typing or to a form's send is never kept for the chat: no session choice.
-        kept = (
-            offered
-            and not never_granted(request.tool_name)
-            and offer_session is not False
-        )
+        kept = kept_offered(request) and offer_session is not False
         self.pending = PendingApproval(
             request=request,
             offer_session=kept,

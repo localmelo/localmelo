@@ -2622,7 +2622,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-blocked > p { margin: 0; }
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
 .task-block > .block-card { margin: 0; }
-/* Steps that ran on the person's earlier approval: the step, when, and Revoke. */
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }

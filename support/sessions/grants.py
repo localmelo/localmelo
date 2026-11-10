@@ -1021,10 +1021,6 @@ class SessionGrants:
         """The sites Auto let this chat read."""
         return frozenset(g.key for g in self._visible() if g.decided_by == "auto")
 
-    def held(self) -> frozenset[str]:
-        """Every name that holds here: the person's (:meth:`names`) and Auto's (:meth:`passed`)."""
-        return self.names() | self.passed()
-
     def folders(self) -> tuple[str, ...]:
         """The folders outside the workspace allowed for reading here, oldest first."""
         return tuple(

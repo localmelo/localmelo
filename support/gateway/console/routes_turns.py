@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
-from localmelo.melo.contracts.approvals import ApprovalDecision, grant_offered
+from localmelo.melo.contracts.approvals import ApprovalDecision, kept_offered
 from localmelo.melo.contracts.inbox import MAX_NOTE_CHARS
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.support.gateway.auto_blocks import (
@@ -813,16 +813,18 @@ def add_routes(app: FastAPI, console: Console) -> None:
         outside = None if asked is None else asked.outside
         if body.choice == "always" and asked is not None and outside is None:
             raise ApiError(400, "invalid_request", t("errors.alwaysNotFolder"))
-        if body.choice in ("session", "always") and asked is not None:
-            # The card offers a kept answer only where the server says so
-            # (``offers_chat``, ``outside.grantable``); one sent anyway is
-            # refused, not turned into another answer: the card still asks.
-            # A folder outside the workspace (#405) is kept by its own rule.
-            # (With no request read, nothing waits: the broker refuses the
-            # answer below with no await between, so nothing is kept.)
-            kept = outside.grantable if outside is not None else grant_offered(asked)
-            if not kept:
-                raise ApiError(409, "not_offered", t("errors.notOffered"))
+        # The card offers a kept answer only where the server says so
+        # (``offers_chat``, ``outside.grantable``); one sent anyway is
+        # refused, not turned into another answer: the card still asks.
+        # A folder outside the workspace (#405) is kept by its own rule.
+        # (With no request read, nothing waits: the broker refuses the
+        # answer below with no await between, so nothing is kept.)
+        if (
+            body.choice in ("session", "always")
+            and asked is not None
+            and not kept_offered(asked)
+        ):
+            raise ApiError(409, "not_offered", t("errors.notOffered"))
         if body.choice == "once":
             decision = ApprovalDecision(True)
         elif body.choice in ("session", "always"):

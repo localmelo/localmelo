@@ -119,6 +119,12 @@ def kept_answer(
     return None
 
 
+def grant_silences(grants: SessionGrants, request: ApprovalRequest) -> bool:
+    """Whether the person's grant would let *request* run unasked: the gate then
+    lets the user's model review an undecided call first (#279 §3.3)."""
+    return grants.covers(request.tool_name)
+
+
 class RememberingPolicy:
     """An approval policy that asks through *ask* and keeps session grants.
 
@@ -172,7 +178,7 @@ class RememberingPolicy:
     @property
     def allowed_tools(self) -> frozenset[str]:
         """The names granted for the chat, and the sites Auto let it use."""
-        return self.grants.held()
+        return self.grants.names() | self.grants.passed()
 
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed for this chat (``window-read:<app>``, a site, a tool)."""
@@ -271,9 +277,8 @@ class RememberingPolicy:
         return decision
 
     def silent_for(self, request: ApprovalRequest) -> bool:
-        """Whether a grant would let *request* run unasked: the gate then lets
-        the user's model review an undecided call first (#279 §3.3)."""
-        return self.grants.covers(request.tool_name)
+        """Whether a grant would let *request* run unasked (:func:`grant_silences`)."""
+        return grant_silences(self.grants, request)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.outside is not None:
@@ -745,16 +750,15 @@ class OwnedTaskPolicy:
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         mode = review_mode(self.inner, request)
         grants = self._chat_grants()
-        # As in the chat (RememberingPolicy.silent_for): the person's grant only.
-        silent = grants is not None and grants.covers(request.tool_name)
+        silent = grants is not None and grant_silences(grants, request)
         return "silent" if mode == "ask" and silent else mode
 
     def granted(self, name: str) -> bool:
         """Whether the question *name* is allowed: by the task's own grants, or its chat's."""
-        grants = self._chat_grants()
-        return (grants is not None and name in grants.held()) or holds_grant(
-            self.inner, name
+        held = self._chat_grants() is not None and name in self._book.allowed_for(
+            self._chat
         )
+        return held or holds_grant(self.inner, name)
 
     async def take_back_site(self, key: str, by: str | None = None) -> bool:
         """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
