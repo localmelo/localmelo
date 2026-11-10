@@ -859,8 +859,17 @@ or melo made, keep the mode they were made with; a task that ended keeps
 the mode it ended with. A task in Auto asks nobody, so nothing holds it, and its calls run
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
-`review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
-allowed step ran, else `null`), and `allowances` as a chat's. A blocked
+`review`, `preview`, `ts`, `turn`, `can_allow`, `used_at`, when the
+allowed step ran, else `null`, and `question` and `arguments`), and `allowances` as a chat's.
+A step a tool's own question decides (typing on a page, a form sent, a click,
+a page opened) has that question's name in `question`
+(`browser-type:https://notes.example`) and its own `preview`; a call's own
+block has `null` in `question`. Only a text typed or a form sent can be
+allowed (`can_allow`), and only when a chat's card would have asked about it
+and its site was not refused earlier in the task; such a block alone has
+`arguments` (the whole text typed, where a form goes and what it holds), and
+every other has `null` there. The run that goes on after Allow once reads that
+step, as melo's note, so it can repeat it exactly. A blocked
 step's `review` carries the card's `gist` (see `pending_approvals` in `GET
 /api/sessions/{id}`) when the call had one. The task goes
 on without a blocked step. `POST
@@ -1294,12 +1303,13 @@ Its `data`:
   continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
   for an answer), `answered` (that approval was answered) or `blocked` (a
   step Auto blocked in a task: `request_id`, `step_key`, `name`, `preview`,
-  `review` and `can_allow` as in the task's `blocked`, `line` `Blocked: deletes
+  `review`, `can_allow`, `question` and `arguments` as in the task's `blocked`, `line` `Blocked: deletes
   files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`).
   Every `blocked` card is shown: none folds into a newer card of its task.
   A task's `done` card whose `ending` is `blocked` (it needs the person) has
   `block` (`request_id`, `step_key`, `name`, `preview`, `review`, as in the
-  task's `blocked`) when exactly one step Auto blocked in it can still be
+  task's `blocked`, and `question` and `arguments` for a text typed or a form
+  sent) when exactly one step Auto blocked in it can still be
   allowed once and it is a step of the run that end closed: its Allow this
   step calls the same route. `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
@@ -2218,8 +2228,12 @@ off-request step is blocked and explained). Every session object carries:
   after it was used or ran out, so a page can say so.
 
 A blocked step is the `tool.finished` record of its call with an
-`approval` of origin `auto` and `allowed` false (see
-[events](events.md)). In Auto the chat's calls run under the write sandbox
+`approval` of origin `auto` and `allowed` false, or with such an entry in its
+`tool_asks` (a question the call's tool asked itself, named by its `tool`,
+with its `review`, and its `step_key` and `arguments` only when Allow once may
+run it; see [events](events.md)). A question run on an allowance adds a
+`tool_asks` entry with `allowed` true, origin `user`, `allowance: "once"` and
+its `step_key`. In Auto the chat's calls run under the write sandbox
 of `[agent] confine_writes`: a write outside the folder and the temporary
 folders fails, and its output starts with a line that says so.
 

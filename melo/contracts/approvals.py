@@ -790,6 +790,22 @@ ALLOW_ONCE_S: Final = 30 * 60
 ALLOWED_ONCE: Final = "allowed once"
 
 
+def allowance_key(request: ApprovalRequest) -> str:
+    """The key an Allow once of *request* is kept under, and looked up by (:class:`AutoPolicy`).
+
+    The exact step: its tool, or the name of the question its tool asked
+    (``browser-type:<origin>``), every argument (for a question, the whole
+    text and where it goes), the folder and the files its review read.
+    """
+    review = request.review
+    return step_key(
+        request.tool_name,
+        request.arguments,
+        request.workspace_root,
+        review.inputs if review is not None else (),
+    )
+
+
 class Allowance(ApprovalDecision):
     """The decision that runs one step on the person's Allow once of it in auto mode.
 
@@ -973,12 +989,7 @@ class AutoPolicy:
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         review = request.review
-        key = step_key(
-            request.tool_name,
-            request.arguments,
-            request.workspace_root,
-            review.inputs if review is not None else (),
-        )
+        key = allowance_key(request)
         if (
             review is not None
             and self.allowed_once(key)
@@ -1325,6 +1336,17 @@ ALLOW_WHEN_OPEN: Final = (
     "this step once from the chat, switch the chat to Ask, or keep the chat open "
     "so that melo asks them on a card the next time."
 )
+# The same two for a step the person cannot allow once from the chat (a question
+# that does not hold its whole step, a text holding a secret, a site refused).
+ASK_WHEN_OPEN: Final = (
+    "that this step needs them and nobody could be asked now: they can keep the "
+    "chat open so that melo asks them on a card the next time, or switch the chat "
+    "to Ask."
+)
+BLOCKED_IN_CHAT: Final = (
+    "that this step stays blocked in Auto: they can do it themselves, change what "
+    "they ask for, or switch the chat to Ask so that melo asks them first."
+)
 # A question only the person can answer (another app's window, a press in one, a page to
 # take over) that Auto refused because nobody has the chat open: the model reads the
 # truth, so it does not make up a reason.
@@ -1360,7 +1382,16 @@ TASK_ASKS_NOBODY: Final = (
 ALLOW_IN_TASK: Final = (
     "that the task goes on without it, and that once it has finished this step is "
     "new work they ask the chat for. A task that cannot finish without the step "
-    "ends with Ending: blocked instead, and then they can allow it once."
+    "ends with Ending: blocked instead, and then they can allow it once. Tried "
+    "again before they do, it is reviewed again and blocked; once they allow it, "
+    "melo tells you which step, and you run exactly that step again."
+)
+# A step of a task that the person cannot allow from the task (a text a review
+# filed under passwords or keys, a site refused in the task).
+BLOCKED_IN_TASK: Final = (
+    "that the task goes on without it, and that this step cannot be allowed "
+    "from the task: tried again, it is reviewed again and blocked. If it is "
+    "needed, they can ask for it in a chat, where they decide on it themselves."
 )
 ALLOW_NEVER: Final = (
     "that this step cannot be allowed: melo never changes its own runtime, "
@@ -1463,10 +1494,13 @@ def block_note(
     folder: str = "the folder",
     second: bool = False,
     changed: bool = False,
+    allowable: bool = True,
 ) -> str:
     """The text the model reads for a step auto mode blocked.
 
-    *task*: the run is a saved task, offered the allowance while its job is unfinished;
+    *task*: the run is a saved task, offered the allowance while its job is
+    unfinished; *allowable*: the person can allow the step once (in a task or
+    a chat), else the note says what they can do instead;
     *folder*: the workspace, for a step that can never be allowed; *second*:
     a second block of the same kind in this turn, which stops the run;
     *changed*: the user allowed a step and this retry differs from it.
@@ -1484,10 +1518,12 @@ def block_note(
     if review is not None and "self" in review.categories:
         allow = ALLOW_NEVER.format(folder=folder)
     elif task:
-        allow = ALLOW_IN_TASK
-    else:
+        allow = ALLOW_IN_TASK if allowable else BLOCKED_IN_TASK
+    elif asks_in_auto(review):
         # A kind the card asks about was blocked only because nobody could be
-        # asked now (#465).
-        allow = ALLOW_WHEN_OPEN if asks_in_auto(review) else ALLOW_IN_CHAT
+        # asked now (#465); Allow once on the block only where it has a key.
+        allow = ALLOW_WHEN_OPEN if allowable else ASK_WHEN_OPEN
+    else:
+        allow = ALLOW_IN_CHAT if allowable else BLOCKED_IN_CHAT
     note = BLOCK_NOTE.format(it=it, off_goal=off_goal, allow=allow)
     return note + ALLOWED_EXACTLY if changed else note
