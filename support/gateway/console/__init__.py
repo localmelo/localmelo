@@ -40,11 +40,7 @@ from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.memory import ChatMemory
 from localmelo.support.sessions import display
-from localmelo.support.sessions.approvals import (
-    ApprovalBroker,
-    ApprovalLedger,
-    ApprovalUse,
-)
+from localmelo.support.sessions.approvals import ApprovalBroker
 from localmelo.support.sessions.grants import GrantBook
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import (
@@ -193,8 +189,6 @@ class Console:
         # The side chats' fronts, made when a chat first needs one.
         self._side_fronts: dict[str, Front] = {}
         own_front = self.options.front_builder or not self.options.builder
-        # The person's Allows per chat, which the chat's tasks use (#369).
-        self.approvals = ApprovalLedger()
         # Every "allow for this chat", in the store's table: the main chat's
         # count in every chat and task, and they outlive a restart.
         self.grants = GrantBook(self.store)
@@ -206,7 +200,6 @@ class Console:
             front_builder=self._front_agent if own_front else None,
             gate=self.gate,
             memory=self.memory,
-            ledger=self.approvals,
             viewers=self.hub.viewers,
             grants=self.grants,
         )
@@ -220,7 +213,6 @@ class Console:
             self.hub,
             broker=self.broker,
             memory=self.memory,
-            ledger=self.approvals,
         )
         self.workers.grants = self.grants
         self.workers.browsers = self.browser_cards
@@ -231,12 +223,11 @@ class Console:
         self.sessions.inbox_for = lambda chat: ChatNotes(self.asks, chat)
         # A chat follows up on a task it started that failed or stopped (#411).
         self.followups = TaskFollowups(self)
-        # A task's approvals go through its chat (#369): its chat's recorded
-        # approvals first, then the person, with melo's explanation.
+        # A task's approvals go through its chat (#369): its chat's grants
+        # first, then the person, with melo's explanation.
         self.explanations = Explanations(self)
         self.workers.chat_of = self.effective_owner
         self.workers.chat_modes = self.sessions
-        self.workers.on_earlier = self._used_earlier
         self.workers.on_ask = self.explanations.start
         self.workers.on_unsent = self._unsent
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
@@ -377,23 +368,6 @@ class Console:
             )
         return found
 
-    async def _used_earlier(self, use: ApprovalUse) -> None:
-        """A task's step ran on the person's earlier approval: its chat says so, with Revoke."""
-        record = await self.workers.tasks.get_task(use.task_id)
-        clock = time.strftime("%H:%M", time.localtime(use.approved_at))
-        await self.front_for(use.chat_id).echo(
-            {
-                "echo": "earlier",
-                "task_id": use.task_id,
-                "title": record.title,
-                "entry_id": use.entry_id,
-                "approved_at": use.approved_at,
-                "preview": use.preview,
-                "line": t_in("en", "approvals.used", time=clock),
-                "said": said("approvals.used", time=clock),
-            }
-        )
-
     async def _unsent(self, record: TaskRecord, problem: str) -> None:
         """The person's message *record* never read did not go on in a fresh task
         (#571): its chat says so, and the message stays theirs to send again."""
@@ -441,8 +415,6 @@ class Console:
         except Exception:
             logger.exception("Could not move a deleted chat's open questions")
         await self.forget_front(chat_id)
-        # The Allows given in it go with it: its tasks ask the main chat's.
-        self.approvals.drop(chat_id)
 
     # ── The gate ──
 

@@ -44,7 +44,6 @@ from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.browser import sites
 from localmelo.support.browser.provider import TOOLS as BROWSER_TOOLS
 from localmelo.support.sessions.approvals import (
-    ApprovalLedger,
     ChatPolicy,
     OwnedTaskPolicy,
     RememberingPolicy,
@@ -602,10 +601,6 @@ async def test_a_task_s_refusal_takes_back_its_own_and_its_chat_s_answers() -> N
     assert book.view("task", "task", inherit=False).grant_now(
         "browser:https://cdn.collect.com"
     )
-    ledger = ApprovalLedger()
-    ledger.grants_of = book.allowed_for
-    ledger.site_kept = book.site_kept
-    ledger.take_back_site = book.take_back_site
 
     async def owner() -> str:
         return "chat"
@@ -616,8 +611,7 @@ async def test_a_task_s_refusal_takes_back_its_own_and_its_chat_s_answers() -> N
     person = Answers(NO)
     task = OwnedTaskPolicy(
         RememberingPolicy(person, grants=book.view("task", "task", inherit=False)),
-        ledger,
-        "task",
+        book,
         owner,
         started=started,
     )
@@ -1478,8 +1472,16 @@ async def test_a_refusal_the_file_refuses_holds_for_the_run_and_says_so(
 
 @pytest.mark.asyncio
 async def test_a_task_says_so_when_its_chat_s_take_back_is_not_saved() -> None:
-    async def refused(chat_id: str, key: str, by: str | None) -> bool:
-        return False
+    class Refusing(GrantBook):
+        async def take_back_site(
+            self,
+            session_id: str | None,
+            key: str,
+            by: str | None = None,
+            *,
+            inherit: bool = True,
+        ) -> bool:
+            return False
 
     async def owner() -> str:
         return "chat"
@@ -1487,10 +1489,8 @@ async def test_a_task_says_so_when_its_chat_s_take_back_is_not_saved() -> None:
     async def started(chat_id: str) -> float:
         return 1.0
 
-    ledger = ApprovalLedger()
-    ledger.take_back_site = refused
     task = OwnedTaskPolicy(
-        RememberingPolicy(Answers(NO)), ledger, "task", owner, started=started
+        RememberingPolicy(Answers(NO)), Refusing(), owner, started=started
     )
     await task.review_window()
     llm = ScriptedLLM([_reads(REFUSED), _answer("No.")])
@@ -1529,14 +1529,9 @@ async def test_stop_during_a_task_s_take_back_leaves_neither_scope_holding(
     async def started(chat_id: str) -> float:
         return 1.0
 
-    ledger = ApprovalLedger()
-    ledger.grants_of = book.allowed_for
-    ledger.site_kept = book.site_kept
-    ledger.take_back_site = book.take_back_site
     task = OwnedTaskPolicy(
         RememberingPolicy(Answers(NO), grants=view),
-        ledger,
-        work,
+        book,
         owner,
         started=started,
     )

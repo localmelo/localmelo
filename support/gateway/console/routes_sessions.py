@@ -27,7 +27,6 @@ from localmelo.support.sessions.submissions import check_client_request_id
 from .browser_cards import BROWSER_EVENT, BROWSER_ROWS
 from .cards import CARD_EVENT, CARD_PAGE, card_json
 from .errors import ApiError
-from .explain import remembered
 from .front import ECHO_EVENT
 from .running import waiting_by_chat
 from .shapes import approval_json, session_json, submission_json, turn_json
@@ -94,15 +93,9 @@ def _completion_tokens(turn: TurnInfo) -> int:
     return max(0, value)
 
 
-def _pending_approvals(
-    console: Console, session_id: str, kind: str
-) -> list[dict[str, Any]]:
-    """A session's waiting approvals; a chat's say whether its Allow is kept for its tasks (#369)."""
-    chat = kind != "task"
-    return [
-        {**approval_json(r), "remembered": chat and remembered("user", r)}
-        for r in console.broker.pending(session_id)
-    ]
+def _pending_approvals(console: Console, session_id: str) -> list[dict[str, Any]]:
+    """A session's waiting approvals, as the card reads them."""
+    return [approval_json(r) for r in console.broker.pending(session_id)]
 
 
 def _worker_body(
@@ -267,7 +260,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     else console.session_body(info)
                 ),
                 "pending_approvals": (
-                    [] if worker else _pending_approvals(console, session_id, info.kind)
+                    [] if worker else _pending_approvals(console, session_id)
                 ),
                 "grants": grants,
                 "granted_at": granted_at,

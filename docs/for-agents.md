@@ -296,7 +296,6 @@ Every route the gateway serves:
 | `DELETE /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#delete-apisessionsid) |
 | `GET /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#get-apisessionsid) |
 | `PATCH /api/sessions/{session_id}` | [api-v2](reference/api-v2.md#patch-apisessionsid) |
-| `DELETE /api/sessions/{session_id}/approvals/{entry_id}` | [api-v2](reference/api-v2.md#delete-apisessionsidapprovalsentry_id) |
 | `GET /api/sessions/{session_id}/blobs/{sha256}` | [api-v2](reference/api-v2.md#get-apisessionsidblobssha256) |
 | `POST /api/sessions/{session_id}/blocks/{request_id}/allow` | [api-v2](reference/api-v2.md#post-apisessionsidblocksrequest_idallow) |
 | `GET /api/sessions/{session_id}/browser` | [api-v2](reference/api-v2.md#get-apisessionsidbrowser) |

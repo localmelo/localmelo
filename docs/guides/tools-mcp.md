@@ -305,7 +305,7 @@ A high-impact call gets its own card in the web console and its own panel in the
 - starts with one plain sentence about what the step will do, built by melo from the call and naming every effect it finds in order ("Run the command ls -1", "Operate Safari, then delete files"). The model's own words (a `why` argument, or a comment at the top of its code) are always labelled "melo says: …": they are the sentence only when the rules found nothing, and stand below it otherwise, so they never make a step look safer. They show only in the language of your own recent messages: words the model wrote in another script (English under a Chinese chat, say) are left out and the card keeps melo's own sentence. If the words say one thing and the code deletes files or sends data out, a warning quotes the words. It also warns when the words name a file, folder or website and the code deletes or sends to a place they do not name, even if it also acts on one they do (`melo described this as “Delete notes.tmp”, but the code deletes build/.`); words that name none never warn;
 - names what the call does as a question ("Install software?", "Change files outside demo-project?", "Control an app?");
 - lists up to three reasons and offers no session choice;
-- starts on No in the terminal, with one line saying that a session grant never covers installs, downloads or changes outside the folder;
+- starts on No in the terminal;
 - shows the message that started the turn (the console card).
 
 What else is decided:

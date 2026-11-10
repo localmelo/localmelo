@@ -157,8 +157,6 @@ from localmelo.support.sessions.agents import (
 )
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
-    ApprovalLedger,
-    ApprovalUse,
     CardWatch,
     ChatMode,
     ModePolicy,
@@ -389,8 +387,8 @@ def task_home(task_id: str) -> tuple[str, dict[str, str]]:
 EXPLAINED_ORIGINS: Final = frozenset({"user", "user_rule"})
 
 
-def _remembers(origin: str) -> bool:
-    """Whether a task of *origin* uses and records the person's approvals in its chat.
+def _asks_through_chat(origin: str) -> bool:
+    """Whether a task of *origin* uses its chat's grants and asks the person through it.
 
     Only a task the person started: not a chore (``user_rule``), which runs on a
     rule the person set before (it asks, and Auto blocks, as it always did,
@@ -398,7 +396,7 @@ def _remembers(origin: str) -> bool:
     started.
     """
     try:
-        return origin == "user" and worker_tool_allowlist(origin).remember_approvals
+        return origin == "user" and worker_tool_allowlist(origin).chat_approvals
     except TaskPolicyError:
         return False
 
@@ -632,7 +630,6 @@ class TaskWorkers:
         hub: SessionHub,
         broker: ApprovalBroker | None = None,
         memory: ChatMemory | None = None,
-        ledger: ApprovalLedger | None = None,
     ) -> None:
         self.store = store
         # A task's result goes into the conversation index; a worker writes
@@ -686,20 +683,17 @@ class TaskWorkers:
         self.owner: OwnerChannel | None = None
         # Who shows a task's browser in the chat that owns it; the console sets it.
         self.browsers: BrowserSources | None = None
-        # The person's Allows per chat: a task uses its chat's (#369). The
-        # console sets the chat that owns work a chat started (the main chat
-        # once that chat is gone), what a step that ran on an earlier
-        # approval shows, and what starts when a task asks the person.
-        self.ledger = ledger or ApprovalLedger()
         # Every grant, in the store's table (the console sets its book): a
         # task keeps what the person allowed for it; its chat's grants and the
         # main chat's reach it through its chat (#369).
         self.grants = GrantBook()
+        # The chat that owns work a chat started (the main chat once that chat
+        # is gone), and what starts when a task asks the person; the console
+        # sets both.
         self.chat_of: Callable[[str | None], Awaitable[str | None]] | None = None
         # Each chat's mode, the one a person's task decides by (#576); the
         # console sets it. Without it a task has the mode it was made with.
         self.chat_modes: ChatModes | None = None
-        self.on_earlier: Callable[[ApprovalUse], Awaitable[None]] | None = None
         self.on_ask: Callable[[str, ApprovalRequest], None] | None = None
         # Told why the person's messages a chat's worker never read could not
         # go on in a fresh task (#571), so its chat says so.
@@ -1000,7 +994,7 @@ class TaskWorkers:
         """
         task_id = record.task_id
         modes = self.chat_modes
-        if modes is None or not _remembers(record.origin):
+        if modes is None or not _asks_through_chat(record.origin):
             return (lambda: self._owner_chat(task_id)), (lambda: fixed)
         chat: list[str | None] = [None]
 
@@ -1018,7 +1012,7 @@ class TaskWorkers:
         modes = self.chat_modes
         if (
             modes is None
-            or not _remembers(record.origin)
+            or not _asks_through_chat(record.origin)
             or record.state in TERMINAL_PHASES
         ):
             return None
@@ -2851,12 +2845,12 @@ class TaskWorkers:
             # its workspace (#405), through its chat, in Ask and in Auto.
             asking = RememberingPolicy(
                 runner.observe(paused_ask),
-                folders=_remembers(record.origin),
+                folders=_asks_through_chat(record.origin),
                 saved=SavedFolders(),
                 grants=self.grants.view(task_id, "task", inherit=False),
             )
             policy: ApprovalPolicy = asking
-            if _remembers(record.origin):
+            if _asks_through_chat(record.origin):
                 # A step Auto stops that the person may allow is asked through
                 # the chat (#465), while someone sees the task or its chat.
                 auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
@@ -2864,13 +2858,11 @@ class TaskWorkers:
                 auto.watch = self._card_watch(task_id)
                 # The mode of its chat at every step (#576), Ask or Auto.
                 followed = ModePolicy(asking, auto, mode_now)
-                # Its chat's grants and the person's earlier Allows first (#369).
+                # Its chat's grants first (#369).
                 policy = OwnedTaskPolicy(
                     followed,
-                    self.ledger,
-                    task_id,
+                    self.grants,
                     owner,
-                    self._earlier,
                     started=self._chat_started,
                     folders=asking,
                 )
@@ -3256,10 +3248,6 @@ class TaskWorkers:
         session = await self.store.get_session(chat_id)
         return session.created_at if session is not None else None
 
-    async def _earlier(self, use: ApprovalUse) -> None:
-        if self.on_earlier is not None:
-            await self.on_earlier(use)
-
     async def _body(self, record: TaskRecord) -> dict:
         body = asdict(record)
         body.pop("finishing", None)  # the worker's own mark, not part of the body
@@ -3300,8 +3288,6 @@ class TaskWorkers:
             body["blocked"] = [{**b, "can_allow": False} for b in body["blocked"]]
         policy = self._auto.get(record.task_id)
         body["allowances"] = dict(policy.given) if policy is not None else {}
-        # Its steps that ran on the person's earlier approval, each with Revoke (#369).
-        body["earlier"] = self.ledger.uses_of(record.task_id)
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).
