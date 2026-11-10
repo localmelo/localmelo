@@ -54,7 +54,7 @@ The page opens in default mode, which leaves out what only a developer needs: th
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
 status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
 priority line and menu of a task's page. It has no Workers and no priority codes to learn either: the panel's **Workers** tab, the welcome link to worker runs, **Run as a task** and the `P0` to `P5` chips and lists belong to developer mode, a task shows as what melo is doing (in Now and in the chat that asked), and a priority you changed reads in words (`today`). It says things plainly too: a running chat reads
-`Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s`, the line under an answer gives its time, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
+`Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s` and the time shows nowhere else, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings. With melo_serve it shows the model and its backend and opens the list of models to switch to, as does the model button under the message box ([Switch the model](model-servers.md#switch-the-model)).
 A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are a developer-mode view, the
@@ -84,11 +84,12 @@ for you to send or change, and step aside once there is text.
    its own. Answers are rendered as Markdown, with code blocks.
 3. A turn reads like the terminal's: your message, a work group with the
    tool cards it ran, its reasoning, its notices and reflections, the live
-   row while it runs, and the final answer with `Copy response`. Output that
+   row while it runs, and the final answer with its copy button (an icon; it says
+   **Copied** for a moment). Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline, and the pictures the turn made show under the answer
    (see [Pictures in the answer](#pictures-in-the-answer)). A turn that answers without tool calls shows its
-   time once, in the line under the answer; its reasoning, when it has some,
+   time once, beside the copy button under the answer; its reasoning, when it has some,
    opens under a `Thought` line. Chats tell the model that it is melo from
    localmelo, which model and server it runs on and what it remembers, so asking
    "who are you?" or "what do you remember?" is answered plainly (see [What melo says about itself](terminal.md#what-melo-says-about-itself)).
@@ -161,7 +162,8 @@ What you allow in the main chat counts everywhere; in a side chat, only there (s
 
 When a side chat's run ends, the main chat shows a card under the day it happened. So does a
 task of the main chat that finishes, fails or waits for your approval; a side chat's own tasks
-come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads:
+come back to that side chat ([below](#side-chats-start-tasks-too)). Cards and the chat's lines about tasks hang on one
+thin line under melo's replies, apart from the talk; only a card that asks you something is a box. A card reads:
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.

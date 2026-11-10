@@ -318,29 +318,42 @@ button:hover:not(:disabled) {
 .header-parent::after { content: "›"; margin-left: 6px; color: var(--ink-3); text-decoration: none; display: inline-block; }
 .welcome > #welcome-workers { margin-top: -12px; }
 .welcome-link a { color: var(--accent); font-size: var(--text-small); }
+/* The task lane: what the chat did with tasks (echoes) and what tasks and side chats sent back (cards) hang on one
+   thread under melo's face, apart from the talk. Each item is a bead (its 20 px mark) on the thread, its words at the
+   reply label's indent. A line the person can act on reads in ink-2, a record in ink-3; only what asks the person
+   is a box (amber). The thread runs from the first bead of a run to its last; a lone item has none. */
+:is(.echo, .main-card) { position: relative; max-width: 600px; margin: 0; padding: 5px 0 5px 4px; }
+:is(.echo, .main-card)::before { content: ""; position: absolute; top: 0; bottom: 0; left: 13.5px; width: 1px; background: var(--line); }
+:is(.echo, .main-card):not(:is(.echo, .main-card) + :is(.echo, .main-card)) { margin-top: -8px; }
+:is(.echo, .main-card):not(:is(.echo, .main-card) + :is(.echo, .main-card))::before { top: 15px; }
+:is(.echo, .main-card):not(:has(+ :is(.echo, .main-card))) { margin-bottom: 24px; }
+:is(.echo, .main-card):not(:has(+ :is(.echo, .main-card)))::before { bottom: auto; height: 15px; }
+:is(.echo, .main-card):not(:is(.echo, .main-card) + :is(.echo, .main-card)):not(:has(+ :is(.echo, .main-card)))::before { content: none; }
+:is(.echo-mark, .main-card-mark) { position: relative; }
 /* Cards: what a side chat or a task sent back. Events, so they sit apart from the turns. */
 .day-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; color: var(--ink-3); font-size: var(--text-caption); font-weight: 500; }
 .day-divider::before, .day-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.main-card { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; max-width: 600px; margin: 0 0 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.main-card[data-state="waiting"] { border-color: var(--warn); background: var(--warn-tint); }
-.main-card-mark { grid-row: span 2; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--tint); color: var(--ok); font-weight: 600; }
+.main-card { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; isolation: isolate; color: var(--ink-3); font-size: var(--text-small); }
+/* What asks the person (an approval, a task that needs you, a step Auto blocked): its words and buttons in an amber
+   box beside its bead. */
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) { margin-block: 4px; padding-block: 12px; color: var(--ink-2); }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"])::after { content: ""; position: absolute; inset: 0 0 0 30px; z-index: -1; border: 1px solid var(--warn); border-radius: var(--radius-card); background: var(--warn-tint); }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) > :is(.main-card-text, .main-card-foot) { padding-inline: 14px; }
+.main-card:is([data-state="waiting"], [data-state="blocked"], [data-ending="blocked"]) .main-card-title { font-size: var(--text-body); font-weight: 600; color: var(--ink); }
+.main-card-mark { grid-row: span 2; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--tint); color: var(--ok); font-size: var(--text-caption); font-weight: 600; }
 .main-card[data-state="waiting"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-state="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card[data-state="stopped"] .main-card-mark { background: var(--raised); color: var(--warn); }
 .main-card-text { min-width: 0; }
-.main-card-title { margin: 3px 0 0; font-size: var(--text-body); font-weight: 600; overflow-wrap: anywhere; }
-.main-card-line { margin: 2px 0 0; color: var(--ink-2); font-size: var(--text-small); overflow-wrap: anywhere; white-space: pre-line; }
-/* An answered approval is a settled fact: no warning colour, a quieter weight. */
-.main-card[data-state="answered"] { padding-block: 9px; background: transparent; }
-.main-card[data-state="answered"] .main-card-title { font-weight: 500; }
+.main-card-title { margin: 0; color: var(--ink-2); font-size: var(--text-small); font-weight: 500; overflow-wrap: anywhere; }
+.main-card-line { margin: 2px 0 0; color: var(--ink-3); font-size: var(--text-small); overflow-wrap: anywhere; white-space: pre-line; }
 .main-card[data-answer="denied"] .main-card-mark { color: var(--error); }
-.main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.main-card-foot { grid-column: 2; display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .main-card-foot .link-button { padding: 0; font-size: var(--text-small); }
 .main-card-note { color: var(--ink-2); font-size: var(--text-small); }
 .main-card-time { margin-left: auto; color: var(--ink-3); font-size: var(--text-caption); }
 /* How a task ended, as code decided it (endings.mjs), coloured by meaning: ready green, done but not
    finished and needs you amber (needs you takes the waiting card's fill), failed red, stopped muted. */
-.main-card[data-ending="blocked"] { border-color: var(--warn); background: var(--warn-tint); }
 .main-card[data-ending="draft"] .main-card-mark, .main-card[data-ending="blocked"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-ending="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card[data-ending="dropped"] .main-card-mark { background: var(--raised); color: var(--ink-3); }
@@ -348,7 +361,6 @@ button:hover:not(:disabled) {
 /* A ready task's note (no tests apply) is a remark, not a warning. */
 .main-card[data-ending="ready"] .main-card-why { color: var(--ink-3); font-weight: 400; }
 /* A step Auto blocked in a task: the block's amber edge, and the block itself under the heading, unboxed. */
-.main-card[data-state="blocked"] { box-shadow: inset 3px 0 0 var(--warn); }
 .main-card[data-state="blocked"] .main-card-mark { background: var(--warn-tint); color: var(--warn); }
 .main-card .block-card { margin: var(--space-2) 0 0; padding: 0; background: none; border: 0; box-shadow: none; }
 .main-card .block-mark { display: none; }
@@ -359,12 +371,15 @@ button:hover:not(:disabled) {
 .main-card .approval-card { margin: 10px 0 0; }
 /* Echoes: one quiet line for what the main chat did with a task. The level word is the colour:
    amber when it jumps the queue (Now, Today), green for Normal, grey below. */
-.echo { display: flex; align-items: flex-start; gap: 10px; max-width: 600px; margin: -8px 0 20px; color: var(--ink-2); font-size: var(--text-small); }
+.echo { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-2); font-size: var(--text-small); }
+/* A line with nothing left to do is a record. */
+.echo:not(:has(.echo-actions, .ask-reply)) { color: var(--ink-3); }
 .echo-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 6px; min-width: 0; min-height: 20px; }
 .echo-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--raised); color: var(--ink-3); font-size: var(--text-caption); font-weight: 600; }
 .echo[data-kind="started"] .echo-mark { background: var(--tint); color: var(--ok); }
 .echo[data-kind="failed"] { color: var(--error); }
-.echo[data-kind="suggest"] .echo-mark, .echo[data-kind="ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
+/* A question is amber; a suggestion is an offer, so its mark stays quiet and its button says what it does. */
+.echo[data-kind="ask"] .echo-mark { background: var(--warn-tint); color: var(--warn); }
 .echo[data-kind="chore"] .echo-mark, .echo[data-kind="chore_saved"] .echo-mark, .echo[data-kind="checkin"] .echo-mark { background: var(--tint); color: var(--accent); }
 /* "While you were away, melo tidied 3 notes · Undo": the dot is part of the line, and what changed folds under it. */
 .echo[data-kind="sleep"] .echo-mark { background: var(--tint); color: var(--accent); }
@@ -425,9 +440,6 @@ button:hover:not(:disabled) {
   .header-trail { align-items: center; }
   .header-parent { margin-block: -12px; }
   .main-card-foot { margin-top: 0; }
-}
-@media (max-width: 700px) {
-  .main-card { margin-bottom: 16px; }
 }
 .sidebar-bottom {
   padding-top: 14px;
@@ -1050,20 +1062,39 @@ dialog.picture-box {
 @media (max-width: 700px) {
   .picture-box-bar .outline-button { min-height: 44px; }
 }
+/* Under an answer: the copy icon first, then the facts no other line gives (a plain reply's time). */
 .message-actions {
-  margin-top: 10px;
+  margin-top: 6px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   color: var(--ink-3);
   font-size: var(--text-caption);
 }
+/* The glyph sits on the answer's left edge; the button around it is 28 px to hit. */
 .copy-button {
-  background: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -7px;
+  padding: 0;
   border: 0;
+  border-radius: var(--radius-control);
+  background: none;
   color: var(--ink-3);
-  font-size: var(--text-caption);
-  padding: 4px 0;
+  font-size: var(--text-reading);
+  line-height: 1;
+  transition: opacity 0.15s, background 0.15s;
+}
+.copy-button:hover:not(:disabled) { background: var(--raised); color: var(--ink); filter: none; }
+.copy-button[data-copied] { color: var(--ok); }
+/* Older replies keep the icon out of sight until a pointer or the keyboard reaches them; the newest always shows it. */
+@media (hover: hover) and (pointer: fine) {
+  .msg.assistant:not(:hover, :focus-within) .message-actions:not([data-newest]) .copy-button { opacity: 0; }
+}
+@media (max-width: 700px), (pointer: coarse) {
+  .copy-button { width: 44px; height: 44px; margin: -8px 0 -8px -15px; }
 }
 .muted {
   color: var(--ink-3);
@@ -1568,6 +1599,9 @@ dialog::backdrop {
 .work-group[open] > summary.work-summary {
   border-bottom: 1px solid var(--line);
 }
+/* Closed, the steps are one quiet line above the answer; their box shows only once they are open. */
+details.work-group:not([open]) { border-color: transparent; background: none; }
+details.work-group:not([open]) > summary.work-summary { padding-inline: 0; }
 .work-group > *:not(summary) {
   border-top: 1px solid var(--line);
 }
@@ -2236,7 +2270,14 @@ dialog::backdrop {
 .panel-foot .link-button { padding: 0; color: var(--ink-2); font-size: var(--text-small); text-decoration: none; }
 .panel-link, .activity-open { color: var(--accent); font-weight: 600; }
 .activity-list { margin: 0; padding: 0; list-style: none; }
-.activity-row { margin: 2px 0; border-radius: var(--radius-card); }
+/* Tasks are peers in one list: a hairline between rows, inset to the text. A row that is its own box (it waits for
+   the person, or it is open) needs no line, nor does the row after it. */
+.activity-row { position: relative; margin: 0; border-radius: var(--radius-card); }
+.activity-row + .activity-row::before { content: ""; position: absolute; top: 0; left: 50px; right: 8px; height: 1px; background: var(--line); }
+.activity-row:is([data-state="waiting"], :has(> .activity-detail)) { margin: 4px 0; }
+.activity-row:is([data-state="waiting"], :has(> .activity-detail))::before,
+.activity-row:is([data-state="waiting"], :has(> .activity-detail)) + .activity-row::before { content: none; }
+.activity-row:hover::before, .activity-row:hover + .activity-row::before { opacity: 0; }
 .activity-row:has(> .activity-detail) { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
 .activity-row[data-state="waiting"] { background: var(--wait-fill); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
 .activity-head { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: start; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--radius-card); background: none; color: inherit; text-align: left; }

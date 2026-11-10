@@ -562,6 +562,7 @@
   "chat.closeChat": "Close chat",
   "chat.closeChatLabel": "Close chat: {title}",
   "chat.closeFailed": "Could not close the chat: {problem}",
+  "chat.copied": "Copied",
   "chat.copyResponse": "Copy response",
   "chat.copyResponseFailed": "Clipboard unavailable. Select the response text to copy it.",
   "chat.done": "Done",
