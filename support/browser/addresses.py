@@ -33,8 +33,8 @@ A second exception, for a test: the servers the developer setting ``[tools]
 web_fetch_allow_local`` lists (:mod:`localmelo.support.web_local`), exact
 ``127.0.0.1:PORT`` or ``[::1]:PORT`` written as the address itself, never a
 name or another spelling. :func:`require_public` lets one through only when
-its caller passes the list (*allow*, the session's one
-:class:`~localmelo.support.web.guard.LocalAllow`), and the browser tools pass
+its caller passes the list (*allow*, the one
+:class:`~localmelo.support.web.guard.LocalAllow` the session built and also hands to ``web_fetch``), and the browser tools pass
 it for exactly two askers: melo's own navigation, and a page already on a
 listed server (its tab got there by one of the two). A request of any other
 page (a public one, a tab that appeared by itself, a frame of a public page)

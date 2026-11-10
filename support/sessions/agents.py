@@ -434,8 +434,15 @@ async def build_session_agent(
         embedding_base_url,
         *(local_ports.urls_of(cfg) if cfg is not None else ()),
     )
+    # The list of test servers is built once and read by both tools.
+    from localmelo.support import web_local
+
+    listed = (
+        web_local.allow_of(cfg, protect=protect)
+        if browser_driver != "off" or web_fetch
+        else None
+    )
     if browser_driver != "off":
-        from localmelo.support import web_local
         from localmelo.support.browser import provider_for
 
         browser = provider_for(
@@ -446,7 +453,7 @@ async def build_session_agent(
             live=cfg is None or cfg.browser.live is True,
             live_fps=cfg.browser.live_fps if cfg is not None else 15,
             chat_id=chat_id,
-            listed=web_local.allow_of(cfg, protect=protect),
+            listed=listed,
         )
         if browser is not None:
             providers.append(browser)
@@ -459,11 +466,13 @@ async def build_session_agent(
             )
     if web_fetch:
         from localmelo.support.web import WebFetchProvider
+        from localmelo.support.web.fetch import WebFetcher
 
         providers.append(
             WebFetchProvider(
                 browser=browser_driver != "off",
                 task=web_task,
+                fetcher=WebFetcher(allow=listed),
                 cfg=cfg,
                 protect=protect,
             )

@@ -394,8 +394,12 @@ async def test_a_step_on_a_listed_server_is_marked_and_another_is_not() -> None:
 async def test_a_session_gives_the_browser_the_list_of_its_live_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read when the session's tools are made, from its own config, not the saved file."""
+    """Read when the session's tools are made, from its own config, not the saved file.
+
+    ``web_fetch`` gets the very object the browser gets.
+    """
     from localmelo.support import browser as browser_package
+    from localmelo.support import web as web_package
     from localmelo.support.sessions.agents import build_session_agent
 
     config.save(_cfg())  # the file lists nothing
@@ -408,7 +412,15 @@ async def test_a_session_gives_the_browser_the_list_of_its_live_config(
         given.append(kwargs["listed"])
         return made(driver, **kwargs)
 
+    fetchers: list[Any] = []
+    fetch_provider = web_package.WebFetchProvider
+
+    def fetch_spy(**kwargs: Any) -> Any:
+        fetchers.append(kwargs["fetcher"])
+        return fetch_provider(**kwargs)
+
     monkeypatch.setattr(browser_package, "provider_for", spy)
+    monkeypatch.setattr(web_package, "WebFetchProvider", fetch_spy)
     agent = await build_session_agent(
         cfg=live,
         base_url=None,
@@ -416,9 +428,12 @@ async def test_a_session_gives_the_browser_the_list_of_its_live_config(
         workspace=str(Path.cwd()),
         options=AgentOptions(mode="interactive"),
         browser_driver="chrome",
+        web_fetch=True,
     )
     await agent.close()
     [allow] = given
+    [fetcher] = fetchers
+    assert fetcher._allow is allow
     assert allow.listed(FIXTURE) == ("127.0.0.1", A)
     assert allow.listed(f"http://127.0.0.1:{GATEWAY}/") is None
 

@@ -29,9 +29,10 @@ are strict. The key keeps its first name, which says ``web_fetch`` only:
   run reads it, and a call of the shell or Python cannot set it (the shell
   review keeps :data:`KEY`'s full name, ``tools.web_fetch_allow_local``, among
   the settings it guards).
-- The list reaches ``web_fetch``'s fetcher, as its ``allow`` hook
+- The session builds the list once and hands that one object to
+  ``web_fetch``'s fetcher, as its ``allow`` hook
   (:class:`~localmelo.support.web.guard.LocalAllow`; a redirect meets the
-  same list), and the browser tools, as the same one object. The browser
+  same list), and to the browser tools. The browser
   passes it only for melo's own navigation and for a page already on a
   listed server, never for a request of any other page (see
   :mod:`localmelo.support.browser.addresses`).
