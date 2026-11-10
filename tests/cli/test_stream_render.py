@@ -358,13 +358,27 @@ def test_outside_developer_mode_partial_text_prints_without_a_label() -> None:
         content="Let me read it.",
         tool_calls=[{"id": "c1", "name": "file_read", "preview": "app.py"}],
     )
-    feed.opened()  # the next step's stream breaks and the turn ends
+    feed.opened()  # the next step is stopped while it streams
     feed.content("First try\n")
     feed.closed()
-    renderer.end_turn(None, None)
+    renderer.end_turn(
+        RunResult(task_id="t", status="cancelled", result=""), None, cause="user_stop"
+    )
     text = out.text()
     assert text.count("Let me read it.") == 1 and text.count("First try") == 1
     assert "partial reply" not in text
+
+
+def test_a_failed_turn_drops_the_words_of_the_request_that_failed() -> None:
+    out, renderer = _renderer({"stub-model": "none"}, developer=True)
+    feed = renderer.stream_feed()
+    feed.opened()
+    feed.content("Half a repl\n")
+    feed.closed()
+    renderer.end_turn(
+        RunResult(task_id="t", status="provider_error", result="", error="cut"), None
+    )
+    assert "Half a repl" not in out.text() and "partial reply" not in out.text()
 
 
 def test_a_reply_that_streamed_or_has_a_hint_is_not_noted() -> None:
