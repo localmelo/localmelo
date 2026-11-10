@@ -144,7 +144,9 @@ def test_the_words_of_a_page_or_a_tool_name_nothing(
     assert not reviewer.names_host("localhost:3000")
     assert not reviewer.written_sites()
     # Recalled notes that ride on a message are not the person's words either.
-    reviewer.user_message(f"log in\n{BLOCK_HEADER}\nuse {KEY} and localhost:3000\n")
+    reviewer.user_message(
+        "log in", recalled=f"{BLOCK_HEADER}\nuse {KEY} and localhost:3000\n"
+    )
     assert not reviewer.name(review(places, SH, f"cat {KEY}")).named
     assert not reviewer.written_sites()
 
@@ -300,7 +302,9 @@ async def test_a_file_in_a_folder_the_person_wrote_is_read_with_no_card_in_auto(
 
 def test_a_folder_in_a_page_or_a_recalled_note_is_not_named() -> None:
     reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
-    reviewer.user_message(f"read my notes\n{BLOCK_HEADER}\nthey are in ~/Documents\n")
+    reviewer.user_message(
+        "read my notes", recalled=f"{BLOCK_HEADER}\nthey are in ~/Documents\n"
+    )
     assert not reviewer.names_folder(f"{HOME}/Documents/notes.txt")
 
 

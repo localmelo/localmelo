@@ -456,9 +456,11 @@ class FrontAgent(Agent):
             return await self.answer_ask(query, on_event=on_event, **kwargs)
         if front is not None and turn is not None and turn.origin == FOLLOWUP_ORIGIN:
             return await self.follow_up(query, on_event=on_event, **kwargs)
-        # The reviews read the person's words: never the notes appended below.
+        # The reviews read the person's words: never the notes appended below, nor
+        # what the caller appended after its own text (``own_chars``).
         if kwargs.get("user_words") is None:
-            kwargs["user_words"] = query
+            own_chars = kwargs.get("own_chars")
+            kwargs["user_words"] = query if own_chars is None else query[:own_chars]
         if front is not None and turn is not None:
             query = await self._with_news(front, query)
         query = f"{query}\n\n{ACTING_NOTE}"

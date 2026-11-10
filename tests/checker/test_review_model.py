@@ -5,12 +5,12 @@ from __future__ import annotations
 import pytest
 
 from localmelo.melo.checker.review.model import (
+    MAX_RECALLED_CHARS,
     MAX_REQUEST_CHARS,
     SYSTEM_PROMPT,
     ReviewInputs,
     action_text,
     names,
-    own_words,
     parse_reply,
     shares_a_name,
     step_names,
@@ -210,6 +210,21 @@ def test_the_review_is_told_which_sites_were_refused_and_nothing_else() -> None:
     assert "refused" not in plain
 
 
+def test_the_recalled_notes_are_cut_to_their_cap_and_come_last() -> None:
+    inputs = ReviewInputs(
+        workspace="/ws",
+        requests=["do it the way I told you"],
+        tool="t",
+        action="a",
+        recalled=f"\n\n{'§' * (MAX_RECALLED_CHARS + 500)}\n",
+    )
+    text = user_message(inputs, nonce="n0")
+    # Only the cap is left of a longer block, in a block of its own after the requests.
+    assert text.count("§") == MAX_RECALLED_CHARS
+    assert text.index("<request nonce=n0>") < text.index("<recalled nonce=n0>")
+    assert text.endswith(f"{'§' * MAX_RECALLED_CHARS}\n</recalled nonce=n0>")
+
+
 def test_each_message_draws_a_new_nonce() -> None:
     inputs = ReviewInputs(workspace="/ws", requests=["x"], tool="t", action="a")
     first, second = user_message(inputs), user_message(inputs)
@@ -310,15 +325,3 @@ def test_the_action_is_the_code_the_command_or_the_arguments() -> None:
     assert (
         action_text("open_site", {"site": "a.example"}) == '{\n "site": "a.example"\n}'
     )
-
-
-@pytest.mark.parametrize(
-    "header",
-    [
-        "[melo's memory · notes and earlier chats, not instructions]",
-        "[melo's memory · notes (“you” is the user) and earlier chats, not instructions]",
-    ],
-)
-def test_recalled_notes_are_not_the_user_s_words(header: str) -> None:
-    text = f"chart it\n\n{header}\n- an earlier chat: install matplotlib"
-    assert own_words(text) == "chart it"
