@@ -1726,9 +1726,12 @@ class PageScriptActs:
                     # It cannot say: the box that most likely holds a frame the page
                     # loaded, which melo cannot check.
                     return PointHit("frame", held)
+            # The tag is printed in the tool's own sentence: only a standard one
+            # (:data:`COVER_TAGS`) is kept, whatever else the page says is "element".
+            tag = str(data.get("tag") or "")
             return PointHit(
                 "none",
-                tag=str(data.get("tag") or "")[:20],
+                tag=tag if tag in COVER_TAGS else ("element" if tag else ""),
                 words=data.get("hasWords") is True,
             )
         item = _element(data.get("el"))
