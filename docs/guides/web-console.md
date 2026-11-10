@@ -1069,16 +1069,22 @@ commands and file changes.
   one go (typing, then Enter) asks two questions; **Allow once** covers one
   of them, so such a step may need a kept answer to finish.
 - **Keep it for a scheduled task.** On a typing or sending step of a
-  chore's run that the review stopped only because it sends data from your
-  Mac, the card also offers **Always allow for this scheduled task on
-  <site>**. It runs the step once, as **Allow once** does, and the chore's
-  later runs then type and send on that exact site (scheme, host and port)
-  without asking. Each step is still reviewed: a text filed under passwords
-  or keys or anything else, a text with a secret in it, a form sent to
-  another site, a site refused in the run and every other site stop as
-  before. A call that types and then sends runs when both questions pass.
-  The run's page lists what it typed or sent this way (`Typed on
-  example.com without asking: you allow this for this scheduled task`). The
+  chore's run that the review found fits the task and stopped only because
+  it sends data from your Mac, the card also offers **Always allow for this
+  scheduled task on <site>**. It runs the step once, as **Allow once**
+  does, and from then on the rest of that run and the chore's later runs
+  type and send on that exact site (scheme, host and port) without asking:
+  a check-in's send right after its note is not asked again. The card then
+  says `Allowed for this scheduled task on example.com. This run goes on
+  now.`, or `… Its later runs use it.` when the run had ended or the step
+  ran already. Each step is still reviewed; what still stops, as before:
+  passwords and keys (a secret in the text too), your phone number, address
+  or name in the text, a step the review finds does not fit the task (or is
+  unsure of), a form sent to another site or where the page decides, a site
+  refused in the run and every other site. A call that types and then
+  sends runs when both questions pass. The run's page lists what it was
+  allowed this way (`Allowed to type on example.com without asking: you
+  allow this for this scheduled task`), and so does the terminal. The
   Scheduled tab lists it under the chore (`May type and send on example.com
   without asking · since Nov 10`) with **Remove**; changing the chore's
   request drops it (the tab says so) and deleting the chore deletes it. It

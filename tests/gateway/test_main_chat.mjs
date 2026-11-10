@@ -556,10 +556,12 @@ test('a scheduled task\'s card also offers to keep the answer for its next runs 
     ['Allow this step', 'Always allow for this scheduled task on notes.example', 'Open task']);
   doc.made.find((item) => item.textContent.startsWith('Always allow')).listeners.click();
   assert.deepEqual(kept, ['r1']);
-  // Kept: the card says so, with no button.
-  const after = fakeDoc();
-  cardNode({doc: after, card: {...card, block: {...card.block, kept: true}}, open: () => {}, step: {state: 'allowed'}});
-  assert.ok(after.made.some((item) => item.textContent === 'Allowed for this scheduled task on notes.example'));
+  // Kept: the card says so, with no button: this run goes on now, or only later runs use it.
+  for (const [now, said] of [[true, 'This run goes on now.'], [false, 'Its later runs use it.']]) {
+    const after = fakeDoc();
+    cardNode({doc: after, card: {...card, block: {...card.block, kept: true}}, open: () => {}, step: {state: 'allowed', now}});
+    assert.ok(after.made.some((item) => item.textContent === `Allowed for this scheduled task on notes.example. ${said}`));
+  }
 });
 
 test('a suggestion to send keeps its Send, in the page\'s language, after its task ended', async () => {

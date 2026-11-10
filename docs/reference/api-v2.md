@@ -897,21 +897,27 @@ the step is new work for the chat). A task's allowances go when it finishes.
 A scheduled task's run (a chore's timed run or Run now, by its stored request
 key) also has, on each block, `keep_site`: the origin (`https://notes.example`)
 on which the person's answer may be kept for the chore's next runs, or `null`.
-It is set only for a block that can be allowed, that the model reviewed as
-sending data out and nothing else, on the site its question names (a form sent
-to that same site). `kept` says the chore keeps that site now. The task body
+It is set only for a block that a kept answer would have let run: one that can
+be allowed, that the model found fits the request and reviewed as sending data
+out and nothing else, whose text melo's detector found none of the person's
+phone number, address or real name in (the block's `personal` is `false`), on
+the site its question names (a form sent to that same site). `kept` says the
+chore keeps that site now. The task body
 also has `kept_uses`: each step that ran on a kept answer, as `{"question",
 "arguments", "ts"}` (`[]` for any other task). `POST
 /api/tasks/{task_id}/blocks/{request_id}/keep` takes no body: the chore and the
 site come from the stored block. It keeps typing and sending on that site for
 the chore, then allows the step once as `/allow` does; the answer is 202 with
 `"message"` as for `/allow`, or `"kept"` when the step cannot run now (it ran
-already, or its job finished). 409 `not_keepable` for a block of any other task
+already, or its job finished). After `"queued"`, `"continued"` or `"successor"`
+the run that goes on (the fresh task, for a successor) holds the kept answer
+for the rest of its run. 409 `not_keepable` for a block of any other task
 (a chat's, a one-time task) or one with no `keep_site`, 404 `not_found` for no
 such block or a chore deleted, 409 `request_changed` when the chore's request
 changed since that run. In a later run, a typing or sending question on a kept
-site runs without asking when the model's review finds only `send_out`, melo's
-detectors find no secret and the site is not refused in the run; its
+site runs without asking when the model's review finds it fits the request and
+only `send_out`, melo's detectors find no secret and none of the person's
+details, and the site is not refused in the run; its
 `tool_asks` row has `"allowance": "kept"`, `"origin": "user"` and the whole
 `arguments`.
 

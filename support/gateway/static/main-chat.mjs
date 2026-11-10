@@ -323,10 +323,14 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
  * then the button, what it did once clicked, or why it did not. A scheduled task's run (`facts.keepSite`) also offers
  * to keep the answer for its next runs on that site (`onKeep`), as the step's own card does.
  */
-function stepNodes(el, {state = "open", error = "", onAllow = null, onKeep = null}, facts = null) {
+function stepNodes(el, {state = "open", now = true, error = "", onAllow = null, onKeep = null}, facts = null) {
   const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
   const site = facts?.keepSite ? facts.keepSite.slice(facts.keepSite.indexOf("://") + 3) : "";
-  if (state === "allowed") return [...what, el("span", "main-card-note", t(facts?.kept ? "auto.blocked.kept" : "cards.allowedOnce", {site}))];
+  if (state === "allowed") {
+    // Kept: this run goes on with the step now, or (nothing was allowed now) only its later runs use it.
+    const words = facts?.kept ? (now ? "auto.blocked.keptNow" : "auto.blocked.keptLater") : "cards.allowedOnce";
+    return [...what, el("span", "main-card-note", t(words, {site}))];
+  }
   const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
   allow.type = "button";
   allow.disabled = state === "allowing";
@@ -357,7 +361,9 @@ export function stepState(card, {given = {}, busy = {}, echoes = []} = {}) {
   const id = card.block?.requestId;
   if (!id) return null;
   const typed = echoes.some((echo) => echo.kind === "sent" && echo.how === "allowed" && String(echo.request_id) === id);
-  if (typed || given[id]) return {state: "allowed"};
+  // `now`: the step goes ahead in this run (allowed once here or by the typed yes); a keep that only later runs use has
+  // no allowance.
+  if (typed || given[id]) return {state: "allowed", now: typed || given[id].until != null || given[id].used != null};
   const now = busy[id];
   const going = now === "allowing" || now === "keeping";
   return {state: going ? "allowing" : "open", error: now && !going ? now : ""};

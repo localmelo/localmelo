@@ -141,13 +141,17 @@ test('a scheduled task\'s blocked step offers to keep the answer on its site, an
   const keep = byClass(card, 'block-keep');
   assert.equal(keep.textContent, 'Always allow for this scheduled task on notes.example');
   assert.ok(byClass(card, 'block-allow'), 'beside Allow once');
-  assert.match(text(card), /Passwords, keys and other sites still stop\./);
+  assert.match(text(card), /Still stops: passwords and keys, your phone, address or name, steps that don't fit the task, other sites\./);
   keep.click();
   assert.equal(kept, 1);
   // Kept already: it says so, with no second button; any other task's block has none at all.
-  const done = blockCard(fakeDoc(), blockFacts({approval: {...TYPING, keep_site: 'https://notes.example', kept: true}}), {});
+  const keptFacts = blockFacts({approval: {...TYPING, keep_site: 'https://notes.example', kept: true}});
+  const done = blockCard(fakeDoc(), keptFacts, {});
   assert.equal(byClass(done, 'block-keep'), null);
-  assert.match(text(done), /Allowed for this scheduled task on notes\.example/);
+  assert.match(text(done), /Allowed for this scheduled task on notes\.example\. Its later runs use it\./);
+  // Kept as the step goes ahead: this run goes on now.
+  const going = blockCard(fakeDoc(), keptFacts, {allowing: {state: 'pending', at: 100}});
+  assert.match(text(going), /Allowed for this scheduled task on notes\.example\. This run goes on now\./);
   assert.equal(byClass(blockCard(fakeDoc(), blockFacts({approval: TYPING}), {}), 'block-keep'), null);
   // A finished run has nothing to allow now, and still offers the next runs.
   const finished = blockCard(fakeDoc(), {...facts, allow: false, finished: true}, {});

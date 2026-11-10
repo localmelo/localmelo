@@ -186,12 +186,14 @@ function allowRow(doc, allowing, {busy, onAllow}) {
 }
 
 /** The second choice of a scheduled task's blocked step: keep the answer for its next runs on the site, or that it is kept. */
-function keepRow(doc, facts, {busy, onKeep}) {
+function keepRow(doc, facts, {allowing, busy, onKeep}) {
   const {node} = maker(doc);
   const row = node('div', 'block-foot block-keep-row');
   const site = facts.keepSite.slice(facts.keepSite.indexOf('://') + 3);
   if (facts.kept) {
-    row.append(node('span', 'block-done', t('auto.blocked.kept', {site})));
+    // Kept: this run goes on with the step now (it was allowed once), or only its later runs use it.
+    const now = allowing.state === 'pending' || allowing.state === 'used';
+    row.append(node('span', 'block-done', t(now ? 'auto.blocked.keptNow' : 'auto.blocked.keptLater', {site})));
     return row;
   }
   const keep = node('button', 'outline-button block-keep', t(busy === 'keeping' ? 'auto.blocked.keeping' : 'auto.blocked.keep', {site}));
@@ -274,7 +276,7 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
   if (!facts.allow && !facts.keepSite) return card;
   // A finished job has nothing to allow now; a scheduled task's next runs are still the person's to decide.
   if (facts.allow) card.append(allowRow(doc, allowing, {busy, onAllow}));
-  if (facts.keepSite) card.append(keepRow(doc, facts, {busy, onKeep}));
+  if (facts.keepSite) card.append(keepRow(doc, facts, {allowing, busy, onKeep}));
   if (error) {
     const problem = node('p', 'block-error', t('auto.blocked.failed', {problem: error}));
     problem.setAttribute('role', 'alert');

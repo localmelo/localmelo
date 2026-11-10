@@ -659,8 +659,10 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
       delete state.blockError[requestId];
+      const site = String(blockedOf(state.task).find((block) => block.request_id === requestId)?.keep_site ?? '').split('://')[1] ?? '';
       state.task = outcome.data.task;
-      state.notice = t(how === 'keep' ? 'tasks.blocked.kept' : 'tasks.blocked.allowed');
+      state.notice = how !== 'keep' ? t('tasks.blocked.allowed')
+        : t(outcome.data.message === 'kept' ? 'auto.blocked.keptLater' : 'auto.blocked.keptNow', {site});
       live?.sync(outcome.data.task);
     } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
