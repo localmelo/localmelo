@@ -16,7 +16,8 @@ is asked on a waiting one. A task's card also keeps its ``ending`` (``state``,
 ``proposed``, ``reasons``, ``question``): how code found that end ended, as its
 ``sched.finished`` event carries it (:mod:`..task_endings`), which the page reads
 as Ready, Done, not finished or Needs you. A Needs you card also has ``block``
-(``request_id``, ``step_key``) when exactly one step Auto blocked in its task
+(``request_id``, ``step_key``, and for a question its tool asked itself its
+``question`` and ``arguments``) when exactly one step Auto blocked in its task
 can still be allowed once (``TaskWorkers.open_blocks``): its Allow this step.
 
 A waiting card carries its ``request_id``. When that approval is answered, a
@@ -497,7 +498,8 @@ class MainChatCards:
             return {}
         if len(found) != 1:
             return {}
-        return {"block": {k: found[0][k] for k in ("request_id", "step_key")}}
+        keys = ("request_id", "step_key", "question", "arguments")
+        return {"block": {k: found[0][k] for k in keys if found[0].get(k) is not None}}
 
     async def _reminder_words(self, task_id: str) -> str | None:
         """The person's words of a reminder's task, or ``None`` for any other task."""

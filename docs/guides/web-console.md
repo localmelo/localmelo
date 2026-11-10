@@ -1049,7 +1049,12 @@ commands and file changes.
   and lists **Blocked steps**, each opening the same card; the task goes on
   without them, and **Allow once** there sends the message to the task
   while its job is unfinished. Once it finished, the step is new work you
-  ask the chat for.
+  ask the chat for. Typing on a page and sending a form are blocked steps
+  like any other: the card says the site and shows the whole text, or where
+  the form goes and what it holds, and **Allow once** runs that exact text
+  there once. Another text, another box, another site or the form's send is
+  a step of its own that is checked again; a site refused earlier in the
+  task offers no **Allow once**.
 - An **Allow once** on a blocked step lives in memory: restarting
   localmelo forgets it, and an allowance the retried turn did not use goes
   when that turn ends. Sites allowed for a chat are grants, which are kept

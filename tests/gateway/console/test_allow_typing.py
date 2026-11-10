@@ -162,6 +162,14 @@ async def test_a_blocked_typing_step_is_listed_carded_and_allowed_once(
             True,
         )
         assert card["arguments"]["text"] == NOTE
+        # The task's end card offers its one open step, with what it types.
+        [end] = [
+            e.event["data"]
+            for e in await all_events(console.store, console.main_id)
+            if e.event["type"] == "attention.card" and "block" in e.event["data"]
+        ]
+        assert end["block"]["request_id"] == blocked["request_id"]
+        assert end["block"]["arguments"]["text"] == NOTE
 
         allowed = await client.post(
             f"/api/tasks/{task_id}/blocks/{blocked['request_id']}/allow"

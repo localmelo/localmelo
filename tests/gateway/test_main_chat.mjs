@@ -544,3 +544,22 @@ test('a suggestion to send keeps its Send, in the page\'s language, after its ta
     await useLanguage('en');
   }
 });
+
+test('a card that needs the person shows the whole text of a typing step before its Allow this step', () => {
+  const text = 'Checked in <b>today</b>.\nAll of it shown.';
+  const row = {id: 12, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'},
+    block: {request_id: 'q1', step_key: 'k9', question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}}};
+  const card = readCard(row);
+  const doc = fakeDoc();
+  cardNode({doc, card, open: () => {}, step: mainChat.stepState(card)});
+  const shown = doc.made.find((item) => item.className === 'block-step');
+  assert.equal(shown.textContent, text, 'the whole text, as text');
+  assert.ok(doc.made.some((item) => item.textContent === 'Let melo type on notes.example?'));
+  assert.ok(doc.made.indexOf(shown) < doc.made.findIndex((item) => item.textContent === 'Allow this step'));
+  // A step Auto blocked in a task, on its own card in the chat: the text too.
+  const blocked = readCard({id: 13, ts: NOON, data: {state: 'blocked', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    request_id: 'q1', step_key: 'k9', name: 'browser_type', review: {categories: ['send_out']}, can_allow: true,
+    question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}});
+  assert.equal(mainChat.cardBlock(blocked).step, text);
+});
