@@ -87,6 +87,7 @@ from localmelo.melo.contracts.folders import (
     home_label,
 )
 from localmelo.melo.contracts.pause import PAUSE, Resumed, RunPause
+from localmelo.melo.contracts.review import host_site, url_site
 from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.melo.contracts.tools import (
     NO_EFFECT,
@@ -147,6 +148,7 @@ from localmelo.support.browser.takeover import (
     Returned,
     held_words,
     is_human_check,
+    names_a_check,
     needs_person,
 )
 
@@ -2131,12 +2133,15 @@ class BrowserToolProvider(BaseToolProvider):
         on: str = "",
         origin: str | None = None,
         search: bool = False,
+        check: tuple[str, bool] | None = None,
     ) -> set[str] | None:
         """Everything that must hold before melo does something on a page, and the tabs there are now.
 
         The tab's address is read again, the person is asked (about the site
         for a click or a choice, about the whole text for typing; *on* names
-        the element in words), and the window's tabs are listed so the ones
+        the element in words; a click inside a human check, *check* from
+        :func:`_human_check`, by the check's own question instead of the
+        click's, #583), and the window's tabs are listed so the ones
         the action opens are known for what they are. A window that cannot be
         listed is not acted in. Typing is asked about for *origin*, the site
         of the box itself (:func:`_box_origin`), not the page it sits in:
@@ -2147,7 +2152,9 @@ class BrowserToolProvider(BaseToolProvider):
         await self._recheck(
             tab_id
         )  # where the tab is now, before anything is done on it
-        if typed is None:
+        if check is not None:
+            await sites.require_check(snap.origin, check[0], known=check[1])
+        elif typed is None:
             await sites.require_act(snap.origin, what, on)
         else:
             await sites.require_type(
@@ -3055,11 +3062,15 @@ class BrowserToolProvider(BaseToolProvider):
         if item.kind in ("textbox", "select"):
             use = "browser_type" if item.kind == "textbox" else "browser_select"
             raise BrowserError(f"{ref} is a {item.kind}: use {use}.")
-        check = bool(item.site) and is_human_check(item.site)
+        # A control the browser's own reading lists in a box from another site.
+        found = _human_check(snap.origin, item.site) if item.site else None
+        check = found is not None
         if check:
             self._check_spent(tab_id, item.site, snap.origin)
         await _ask_foreign(snap.origin, item, "click")
-        before = await self._acting(tab_id, snap, "click", on=_control_words(item))
+        before = await self._acting(
+            tab_id, snap, "click", on=_control_words(item), check=found
+        )
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
@@ -3343,7 +3354,8 @@ class BrowserToolProvider(BaseToolProvider):
         item = hit.element
         if hit.surface == "none" or item is None:
             raise BrowserError(_nothing_there(hit))
-        check = hit.surface == "frame" and hit.check
+        found = _human_check(origin, hit.there) if hit.surface == "frame" else None
+        check = found is not None
         what = _point_words(hit.surface, item, hit.site, check)
         if check:
             self._check_spent(tab_id, hit.site, origin)
@@ -3356,10 +3368,10 @@ class BrowserToolProvider(BaseToolProvider):
             await sites.require_point(
                 origin, f"{what}, which agrees to terms, consent or a sign-in"
             )
-        # A box melo knows by its title, or by what the page loads for a human
-        # check, is clicked like any other control: on the click's own question,
-        # which names it (#465).
-        before = await self._acting(tab_id, snap, "click", on=what)
+        # A box melo knows by its title is clicked like any other control, on the
+        # click's own question, which names it (#465); a press code proves is
+        # inside a human check asks the check's own question (#583).
+        before = await self._acting(tab_id, snap, "click", on=what, check=found)
         assert before is not None
         done: set[str] = set()
         if item.kind == "link" and item.href:
@@ -3376,7 +3388,8 @@ class BrowserToolProvider(BaseToolProvider):
             send=bool(item.submit),
             point=(cx, cy),
             view=view,
-            proof=hit.site if check else "",
+            # The browser proves the check's frame there again right before it presses.
+            proof=found[0] if found is not None else "",
         )
         result, _used = await self._run_act(tab_id, snap, "", act, before)
         self._points[tab_id] = (view, cx, cy)
@@ -3857,6 +3870,41 @@ async def _ask_foreign(origin: str, item: Element, how: str) -> None:
         how,
         known=False,
     )
+
+
+def _human_check(origin: str, there: str) -> tuple[str, bool] | None:
+    """The human check a press on *origin*'s page lands in, or None when code cannot prove it is in one (#583).
+
+    *there* is the address of the frame at the press as the browser itself
+    gives it (a point's frame, or the box its own reading lists a control in).
+    A known check provider's frame (:func:`~takeover.is_human_check`) is one,
+    on any page: ``(there, True)``. Any other frame from another site whose
+    address names a check (:func:`~takeover.names_a_check`) is a box of its
+    own: ``(there, False)``. The page's words, a frame address only the page
+    gives and a frame of the page's own site (whatever its host is called) never
+    make a check.
+    """
+    frame = sites.origin_of(there) if there else None
+    if frame is None or frame == origin:
+        return None
+    if is_human_check(there):
+        return there, True
+    if _one_site(frame, origin) or not names_a_check(there):
+        return None
+    return there, False
+
+
+def _one_site(one: str, other: str) -> bool:
+    """Whether the origins *one* and *other* are of one site (one registrable domain, #577), or melo cannot tell.
+
+    A host :func:`~localmelo.melo.contracts.review.host_site` does not read as
+    one site stands for itself; an origin with no readable host counts as one
+    site with anything (fails closed: no box of its own).
+    """
+    first, second = url_site(one), url_site(other)
+    if first is None or second is None:
+        return True
+    return (host_site(first) or first) == (host_site(second) or second)
 
 
 def _box_origin(snap: render.Snapshot, item: Element) -> str:

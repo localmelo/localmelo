@@ -2873,6 +2873,11 @@ class TaskWorkers:
                 auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
                 auto.asking = None
                 policy = auto
+            if record.origin == "user_rule":
+                # A chore follows the chat it came from in what only the person
+                # answers (#583): that chat's "Always" for a human check holds, and
+                # without it the chore asks as before. No other grant of the chat.
+                policy = OwnedTaskPolicy(policy, self.grants, owner)
             # A run its chat continued on its own never repeats a blocked step
             # (#411), and a call of its job whose effect is unknown asks (#571).
             policy = await self._guard(

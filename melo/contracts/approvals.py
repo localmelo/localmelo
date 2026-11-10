@@ -33,6 +33,7 @@ module, so the executor can use it without an import cycle.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
@@ -416,6 +417,53 @@ WINDOW_READ: Final = "window-read:"
 # The card that asks the person to take over a page of melo's browser (a sign-in,
 # a code, a QR code, a human check): only the person answers it, never a review.
 TAKEOVER: Final = "takeover:"
+# The question the browser provider asks before it presses inside a human check
+# (#583), only where code proves the press is in one: in Ask and in Auto, only
+# the person answers it, and "Always in this chat" keeps it. Its name holds what
+# a kept answer covers (:func:`check_scope`): ``browser-check:<page origin>`` for
+# a frame the browser itself proves is a known check provider's (a kept answer
+# covers such checks on every site), and ``browser-check:<page origin>#<frame
+# origin>`` for a box whose address the browser gives and which names a check
+# without being a known provider's (a kept answer covers that box on that page).
+HUMAN_CHECK: Final = "browser-check:"
+# An origin as a check question's name holds it: an http(s) scheme and a host
+# with no path, query, user name or space (``sites.origin_of`` writes them so).
+_ORIGIN: Final = re.compile(r"https?://[a-z0-9.\-\[\]:]+")
+# The questions only the person answers whose answer a chat may keep: another app's
+# window, and a human check.
+PERSON_KEPT: Final = (WINDOW_READ, HUMAN_CHECK)
+
+
+def check_question(page: str, box: str = "") -> str:
+    """The name of the human-check question on the page of origin *page*: for a known provider's frame, or for the box of origin *box*."""
+    return f"{HUMAN_CHECK}{page}#{box}" if box else f"{HUMAN_CHECK}{page}"
+
+
+def check_scope(name: str) -> tuple[str, str] | None:
+    """What the human-check question *name* is about: (page origin, box origin), ``""`` as the box of a known provider's frame.
+
+    ``None`` for any other name, and for one whose parts are not plain origins:
+    such a name is no check question and nothing it keeps covers anything.
+    """
+    if not name.startswith(HUMAN_CHECK):
+        return None
+    page, mark, box = name[len(HUMAN_CHECK) :].partition("#")
+    if not _ORIGIN.fullmatch(page) or (mark and not _ORIGIN.fullmatch(box)):
+        return None
+    return page, box
+
+
+def check_covers(kept: str, name: str) -> bool:
+    """Whether a kept answer to the human-check question *kept* covers the question *name* (#583).
+
+    A known provider's frame (no box) is covered by a kept answer to any such
+    question, on every site; a box no known provider's is covered only by a
+    kept answer to that very box on that very page. Nothing else.
+    """
+    held, asked = check_scope(kept), check_scope(name)
+    if held is None or asked is None:
+        return False
+    return held == asked or not (held[1] or asked[1])
 
 
 def window_question(request: ApprovalRequest) -> bool:
@@ -423,15 +471,20 @@ def window_question(request: ApprovalRequest) -> bool:
     return request.tool_name.startswith(WINDOW_READ) and request.outside is None
 
 
-def window_grant(request: ApprovalRequest) -> bool:
-    """Whether a chat's grant of the app's window question lets its later windows through unasked.
+def person_grant(request: ApprovalRequest) -> bool:
+    """Whether a chat's kept answer to a question only the person answers covers *request*.
 
-    Only for that question, as asked in Ask (no review) or as Auto shows it to the person
-    (a ``high`` review of the one category ``opaque``): nothing else is covered.
+    Another app's window (``window-read:<app>``) and a human check
+    (:data:`HUMAN_CHECK`, a name :func:`check_scope` reads), as asked in Ask (no
+    review) or as Auto shows them to the person (a ``high`` review of the one
+    category ``opaque``): nothing else is covered.
     """
     review = request.review
-    return window_question(request) and (
-        review is None or review.categories == ("opaque",)
+    return (
+        request.outside is None
+        and request.tool_name.startswith(PERSON_KEPT)
+        and not never_kept(request)
+        and (review is None or review.categories == ("opaque",))
     )
 
 
@@ -445,12 +498,15 @@ def never_kept(request: ApprovalRequest) -> bool:
 
     The one list the offer (:func:`grant_offered`), Auto's keep
     (:func:`stays_for_chat`) and the grants table's check read: a question of
-    :data:`NEVER_GRANTED`, or a step of a card-only kind (:data:`CARD_ONLY`:
-    paying, an account's settings, opening an app).
+    :data:`NEVER_GRANTED`, a human check's whose name :func:`check_scope` does
+    not read, or a step of a card-only kind (:data:`CARD_ONLY`: paying, an
+    account's settings, opening an app).
     """
-    review = request.review
-    return never_granted(request.tool_name) or (
-        review is not None and bool(set(review.categories) & CARD_ONLY)
+    name, review = request.tool_name, request.review
+    return (
+        never_granted(name)
+        or (name.startswith(HUMAN_CHECK) and check_scope(name) is None)
+        or (review is not None and bool(set(review.categories) & CARD_ONLY))
     )
 
 
@@ -489,6 +545,15 @@ def site_covers(kept: str, name: str) -> bool:
         and site == whole_site(kept)
         and name.partition("://")[0] == kept.partition("://")[0]
     )
+
+
+def kept_covers(kept: str, name: str) -> bool:
+    """Whether the person's kept answer to the question *kept* covers the question *name* of another name.
+
+    Another host of its site (:func:`site_covers`, #577) or another human check
+    (:func:`check_covers`, #583); a name of its own is covered by its own row.
+    """
+    return site_covers(kept, name) or check_covers(kept, name)
 
 
 def site_grant(request: ApprovalRequest) -> bool:
@@ -570,7 +635,7 @@ def grant_offered(request: ApprovalRequest) -> bool:
     """
     if request.outside is not None or never_kept(request):
         return False
-    return offers_grant(request.review) or site_grant(request) or window_grant(request)
+    return offers_grant(request.review) or site_grant(request) or person_grant(request)
 
 
 def kept_offered(request: ApprovalRequest) -> bool:
@@ -803,6 +868,8 @@ class AutoPolicy:
     (origin ``auto``). A stopped call that a person may allow
     (:func:`asks_in_auto`) goes to *asking*, the policy that asks a person
     (the chat's card, #465), and the answer comes back as :class:`Chosen`.
+    First, *asking*'s optional ``kept(request)`` says what the chat kept: an
+    allow there runs the call whether or not anybody watches (#583).
     With a *watch*, it asks only while a person sees the chat, and a card
     nobody answers did not run its step and is not a no (:data:`AUTO_ASK_WAIT_S`). Without
     *asking* (nobody can be asked: a schedule, a benchmark), with nobody
@@ -912,6 +979,12 @@ class AutoPolicy:
                     keep(request.tool_name)
             return ApprovalDecision(True, origin="auto")
         asking, watch = self.asking, self.watch
+        kept = getattr(asking, "kept", None) if asks_in_auto(review) else None
+        found = kept(request) if callable(kept) else None
+        if isinstance(found, ApprovalDecision) and found.allow:
+            # What the chat kept decides alike whether anybody watches (#583): the
+            # person's answer holds while they are away too.
+            return found
         if (
             asking is not None
             and asks_in_auto(review)

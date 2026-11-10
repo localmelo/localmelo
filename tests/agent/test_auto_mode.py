@@ -33,7 +33,7 @@ from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
 from localmelo.melo.contracts.review import ActionReview, step_key
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.sessions.approvals import RememberingPolicy
+from localmelo.support.sessions.approvals import ChatPolicy, RememberingPolicy
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.checker.test_review import HIGH, ROUTINE
 
@@ -589,35 +589,55 @@ async def test_under_a_grant_the_model_settles_an_undecided_call(
     assert origins == ["user", "session", "user"]
 
 
+class FailingPython(FakePython):
+    """Runs nothing: every call fails."""
+
+    async def python_exec(self, code: str) -> str:
+        self.ran.append(code)
+        raise RuntimeError("the server said no")
+
+
 @pytest.mark.asyncio
-async def test_a_turn_sends_at_most_its_reviews_and_reuses_a_verdict(
-    tmp_path: Path,
+@pytest.mark.parametrize("fails", [False, True])
+async def test_reviews_of_steps_that_succeed_come_back_and_the_rest_are_capped(
+    tmp_path: Path, fails: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cap = REVIEWS_PER_TURN
-    assert cap == 12  # a check-in that signs in first reviews about ten steps
-    codes = [POST.replace("hi", str(n)) for n in range(cap)]
+    """#583: a long task whose reviewed steps succeed keeps being reviewed; failures use the cap up."""
+    assert (
+        REVIEWS_PER_TURN == 12
+    )  # a check-in that signs in first reviews about ten steps
+    cap = 3
+    monkeypatch.setattr(_step_review, "REVIEWS_PER_TURN", cap)
+    codes = [POST.replace("hi", str(n)) for n in range(cap + 2)]
     llm = FakeModel(
-        _plans(["print(1)", POST, *codes, POST], answer="done"),
-        [verdict() for _ in range(cap + 1)],
+        _plans(["print(1)", *codes, codes[0]], answer="done"),
+        [verdict() for _ in range(cap + 2)],
     )
-    agent, fake = _agent(llm, tmp_path / "ws", steps=cap + 4)
+    agent, fake = _agent(llm, tmp_path / "ws", steps=cap + 6)
+    if fails:
+        fake = FailingPython()
+        agent.executor.register("python_exec", fake.python_exec, requires_approval=True)
     person = Person()
-    recorder = Recorder()
+    refills: list[tuple[int, int]] = []
+    refill = RunReviews.refill
 
-    await agent.run_task(
-        "test this API", on_event=recorder, approval=RememberingPolicy(person)
-    )
+    def counted(self: RunReviews, before: tuple[int, int]) -> None:
+        refills.append(before)
+        refill(self, before)
 
-    # The cap's reviews: POST and the next ones; the call past the limit is
-    # asked (fail closed); the last POST reuses the first verdict.
-    over = f"call_{cap + 2}"
-    assert len(llm.review_requests) == cap
-    assert [r.call_id for r in person.asked] == ["call_1", over]
-    assert person.asked[1].review is not None
-    assert person.asked[1].review.categories == ("unreviewed",)
-    assert len(fake.ran) == cap + 3
-    reviews = recorder.of("run.finished")[-1].data["reviews"]
-    assert (reviews["undecided"], reviews["model"]) == (cap + 2, cap)
+    monkeypatch.setattr(RunReviews, "refill", counted)
+
+    await agent.run_task("test this API", approval=RememberingPolicy(person))
+
+    if fails:
+        # A step that failed gives nothing back: the cap counts it (the cap itself is
+        # test_only_steps_the_rules_cannot_judge_use_up_the_turns_reviews).
+        assert refills == [] and len(llm.review_requests) <= cap
+        return
+    # Every step reviewed, none past the cap; the repeat reuses the first verdict.
+    assert len(llm.review_requests) == cap + 2
+    assert [r.call_id for r in person.asked] == ["call_1"]
+    assert len(fake.ran) == len(refills) == cap + 4
 
 
 # ── A site the browser would open ──
@@ -1003,6 +1023,34 @@ class SeesAWindow(OpensSite):
         return "seen" if decision.allow else "not shown"
 
 
+class PressesACheck(OpensSite):
+    """A provided tool that asks to press inside a human check, as the browser provider does (#583)."""
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="press_check",
+                    description="Press the human check.",
+                    parameters={"type": "object", "properties": {}},
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._press,
+            )
+        ]
+
+    async def _press(self) -> str:
+        ask = TOOL_ASK.get()
+        assert ask is not None
+        decision = await ask(
+            "browser-check:https://news.example",
+            {"site": "news.example", "access": "check", "box": "hcaptcha.com"},
+            "press the human check from hcaptcha.com on news.example in Chrome",
+        )
+        self.answers.append(decision)
+        return "pressed" if decision.allow else decision.reason
+
+
 class AnswersTheCard(CardAsker):
     """The policy that asks a person on the card and answers with *allow*."""
 
@@ -1015,8 +1063,8 @@ class AnswersTheCard(CardAsker):
         return ApprovalDecision(self.allow, "", origin="user")
 
 
-# The two questions only the person answers in Auto: whether melo may see a window another
-# app opened, and whether it may press a button in one.
+# The questions only the person answers in Auto: whether melo may see a window another
+# app opened, whether it may press a button in one, and whether it may press a human check.
 APP_WINDOW_QUESTIONS = pytest.mark.parametrize(
     ("tool_class", "call", "question"),
     [
@@ -1026,8 +1074,13 @@ APP_WINDOW_QUESTIONS = pytest.mark.parametrize(
             ("press_in_app", {"button": "Allow"}, "c1"),
             "desktop-act:Chat",
         ),
+        (
+            PressesACheck,
+            ("press_check", {}, "c1"),
+            "browser-check:https://news.example",
+        ),
     ],
-    ids=["see", "press"],
+    ids=["see", "press", "check"],
 )
 
 
@@ -1042,7 +1095,7 @@ APP_WINDOW_QUESTIONS = pytest.mark.parametrize(
         "sign in with the Chat app and let melo look at any window Chat opens",
     ],
 )
-async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the_person(
+async def test_a_question_only_the_person_answers_is_never_reviewed_and_always_asks_them(
     tmp_path: Path,
     tool_class: type[OpensSite],
     call: tuple[str, dict[str, str], str],
@@ -1073,8 +1126,10 @@ async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the
     [card] = asker.asked
     assert card.tool_name == question
     assert card.review is not None and card.review.categories == ("opaque",)
-    # A window may be allowed for the chat; a press is asked every time.
-    assert grant_offered(card) is question.startswith("window-read:")
+    # A window and a human check may be allowed for the chat; a press is asked every time.
+    assert grant_offered(card) is question.startswith(
+        ("window-read:", "browser-check:")
+    )
     assert llm.review_requests == [], "no review model ever sees the window"
     seen = json.dumps([[m.content for m in sent] for sent in llm.requests])
     assert "Sign in to news.example" not in seen and "com.example.chat" not in seen
@@ -1082,7 +1137,7 @@ async def test_a_window_another_app_opened_is_never_reviewed_and_always_asks_the
 
 @pytest.mark.asyncio
 @APP_WINDOW_QUESTIONS
-async def test_a_window_another_app_opened_is_denied_in_auto_when_nobody_can_be_asked(
+async def test_a_question_only_the_person_answers_is_denied_in_auto_with_nobody_to_ask(
     tmp_path: Path,
     tool_class: type[OpensSite],
     call: tuple[str, dict[str, str], str],
@@ -1480,6 +1535,35 @@ async def test_auto_reviews_a_tool_the_rules_do_not_read(
     [approval] = _approvals(recorder)
     expected = "high" if destructive else ("routine" if runs else "high")
     assert approval["review"]["verdict"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("destructive", [False, True])
+async def test_a_tool_the_person_allowed_for_the_chat_skips_the_forced_review(
+    tmp_path: Path, destructive: bool
+) -> None:
+    """#583: in Auto its routine calls run as in Ask; one the rules find high still stops."""
+    tool = Purges(destructive)
+    plans = [_calls(("purge_cache", {"name": "thumbs"}, "call_1")), _answer("done")]
+    llm = FakeModel(plans)  # no review is scripted: one would raise
+    (tmp_path / "ws").mkdir()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset(),
+            tool_exposure="all",
+            workspace_root=str(tmp_path / "ws"),
+        ),
+        tool_providers=[tool],
+    )
+    agent.chat.sleep = _no_wait
+    chat = ChatPolicy(CardAsker().decide, "auto")
+    assert chat.grants.grant_now("purge_cache") is not None
+
+    await agent.run_task("tidy up my files", approval=chat)
+
+    assert llm.review_requests == []
+    assert (tool.ran == ["thumbs"]) is not destructive
 
 
 @pytest.mark.asyncio

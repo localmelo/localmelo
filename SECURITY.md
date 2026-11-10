@@ -211,6 +211,22 @@ those tools can do.
   "Allow for this chat" only where the server says the answer may be kept,
   and the server refuses a kept answer sent for any other call: the card
   still asks.
+- **A human check asks once per chat.** A press inside a human check asks
+  its own question (`browser-check:<site>`), in Ask and in Auto; only the
+  person answers it, never a model. It is raised only where code proves the
+  press is in a check, by the frame's address as the browser itself gives it
+  and never by words on the page: a frame from a known check provider's
+  address (checked again at the pressed pixel right before the press), or a
+  frame of another site whose address the browser gives and whose host names
+  a check (checked again the same way). "Always in this chat" is a grant like the others (kept, listed,
+  revocable). For a known provider's frame it covers such checks on every
+  site of the chat; for any other box, that box on that page only. It holds
+  in the chat in Ask and in Auto (also while nobody watches), in the chat's
+  tasks and in its chores, and nowhere else. It never covers a press outside
+  a check, a press melo cannot check, a password, code or card field, a
+  consent control, a payment or any other step the rules call high impact,
+  and it does not lift the limit on presses and tries in one check. Don't
+  allow leaves the check to the person.
 - **A task uses its chat's grants, and nothing else kept.** In the web
   console, a task's approval goes through the chat that started it. A tool
   allowed for that chat (or in the main chat) covers the task's routine calls
@@ -220,7 +236,8 @@ those tools can do.
   when that start cannot be read, no tool or site grant of the chat applies
   and the step asks (a folder the chat allowed for reading still holds, as
   it does for the chat). A chore, or a task another agent, a channel or melo itself started,
-  uses no chat's grant. A task created with your gateway token (`POST
+  uses no chat's grant, except that a chore follows its chat's answer to a
+  human check. A task created with your gateway token (`POST
   /api/tasks`, `melo task new`) counts as yours and belongs to the main
   chat, so it uses the main chat's grants: a token holder acts as you.
 - **No model decides what is allowed.** melo's explanation on an approval

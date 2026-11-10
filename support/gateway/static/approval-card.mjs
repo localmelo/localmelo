@@ -262,6 +262,20 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
     rule = t("approval.rule.pointOnce");
     why = t(args.browser === "chrome" ? "approval.pointContentChrome" : "approval.pointContent", { site });
     content = `${String(args.how || "click")} ${String(args.on || "a point of the page")}`;
+  } else if (tool.startsWith("browser-check:")) {
+    // A press inside a human check (#583), asked only where code proves the press is in one: only the person answers
+    // it, in Ask and in Auto. A kept answer covers human checks on every site when the browser proved the box a known
+    // check provider's (`known`), else this box on this page only.
+    const site = String(args.site || "");
+    const box = String(args.box || "");
+    const kind = args.known === true ? "check" : "checkBox";
+    what = t("approval.willDo");
+    title = t("approval.checkTitle", { site });
+    caption = t("approval.checkCaption");
+    keptRule = t(`approval.rule.${kind}${everywhere ? "Main" : ""}`, { site, box, scope });
+    why = t(args.browser === "chrome" ? "approval.checkContentChrome" : "approval.checkContent", { site, box });
+    content = "";
+    noBox = true;
   } else if (tool.startsWith("desktop-act:")) {
     // A button in another app's window that appeared after melo's own step in the browser: asked every
     // time, and the card names the app, the window and what is pressed.
@@ -309,7 +323,8 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   // about code, and its sentence is English), so the card keeps its own words in Ask and in Auto.
   const takeover = tool.startsWith("takeover:");
   const pointing = tool.startsWith("browser-point:");
-  const personOnly = takeover || pointing || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
+  const checking = tool.startsWith("browser-check:");
+  const personOnly = takeover || pointing || checking || tool.startsWith("window-read:") || tool.startsWith("desktop-act:");
   const stopped = review?.verdict === "high" && !personOnly;
   const siteChoice = stopped && request.offers_chat === true;
   const high = stopped && !siteChoice;
@@ -411,15 +426,18 @@ export function approvalCard({ doc, request, view, asked = "", states, openWorks
   const sessionWords = outside ? (everywhere ? t("approval.outside.everywhere") : t("approval.outside.chat", { scope }))
     : seeing ? (everywhere ? t("approval.seeEverywhere", { app: seeApp })
       : t(view.scope === "task" ? "approval.seeTask" : "approval.seeChat", { app: seeApp }))
+      : checking ? (everywhere ? t("approval.checkEverywhere") : t("approval.checkFor", { scope }))
       : everywhere ? t("approval.allowEverywhere") : t("approval.allowFor", { scope });
   const session = button("outline-button", sessionWords, () => view.answer(request, state, "session"));
   session.dataset.approvalFocus = "session";
   const always = button("outline-button", t("approval.outside.always"), () => view.answer(request, state, "always"));
   always.dataset.approvalFocus = "always";
   always.dataset.approvalAlways = "";
-  const deny = button(high ? "primary-button" : "quiet-button", takeover ? t("approval.takeoverNo") : t("common.deny"), () => {
-    if (takeover) {
-      // "Not now" needs no reason: melo carries on without the page.
+  const denyWords = takeover ? t("approval.takeoverNo") : checking ? t("approval.checkNo") : t("common.deny");
+  const deny = button(high ? "primary-button" : "quiet-button", denyWords, () => {
+    if (takeover || checking) {
+      // "Not now" needs no reason: melo carries on without the page. "Don't allow" on a check leaves it to the
+      // person: melo says so and waits.
       view.answer(request, state, "deny");
       return;
     }

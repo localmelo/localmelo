@@ -45,7 +45,9 @@ MAX_RECALLED_CHARS: Final = 1_500
 # Reviews one turn may send for a step the rules cannot judge (an undecided
 # one), and how long one request may take. A check-in that signs in first
 # reviews about ten steps in one turn (open, sign in, the sign-in page, the
-# quick login, the choice, the line, the send). A high-impact step the rules
+# quick login, the choice, the line, the send). A step that runs and succeeds
+# gives back the reviews it used (#583), so the count limits the steps that
+# were stopped or failed, not a long task's length. A high-impact step the rules
 # did judge, whose review only reads the user's words, has a count of its own.
 REVIEWS_PER_TURN: Final = 12
 REVIEW_TIMEOUT_S: Final = 20.0

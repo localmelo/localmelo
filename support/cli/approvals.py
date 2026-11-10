@@ -34,6 +34,7 @@ from typing import Any, Final, Literal
 from localmelo.melo.checker.review.gist import request_gist
 from localmelo.melo.contracts.approvals import (
     DESKTOP_ACT,
+    HUMAN_CHECK,
     WINDOW_READ,
     ApprovalDecision,
     ApprovalPolicy,
@@ -41,6 +42,7 @@ from localmelo.melo.contracts.approvals import (
     AskWatch,
     AutoPolicy,
     DenyAllPolicy,
+    check_scope,
     kept_offered,
     whole_site,
 )
@@ -239,10 +241,13 @@ def panel_text(
     if (
         review is None
         or not title
-        or request.tool_name.startswith((WINDOW_READ, DESKTOP_ACT, "browser-point:"))
+        or request.tool_name.startswith(
+            (WINDOW_READ, DESKTOP_ACT, "browser-point:", HUMAN_CHECK)
+        )
     ):
-        # Another app's window, a press in one and a click melo cannot check are asked the
-        # same way in Ask and in Auto: their own words, never a review's title.
+        # Another app's window, a press in one, a click melo cannot check and a human
+        # check are asked the same way in Ask and in Auto: their own words, never a
+        # review's title.
         return text
     note, changed = escape_arguments(f"melo asks because this call {because(review)}.")
     return dataclasses.replace(
@@ -361,6 +366,28 @@ def _tool_panel(
         if background
         else "in Safari's automation window"
     )
+    if tool.startswith(HUMAN_CHECK):
+        # A press inside a human check (#583): the page, the box, and what a kept
+        # answer covers, by what the browser proved of the box.
+        site = shown(str(arguments.get("site") or "a page"))
+        box = shown(str(arguments.get("box") or "another site"))
+        said = (
+            f"{site} shows a human check (a box from {box} that asks whether you "
+            f"are human). melo wants to press it {window}, as you would."
+        )
+        note = (
+            "Kept for the chat, the answer covers human checks on every site."
+            if arguments.get("known") is True
+            else f"Kept for the chat, the answer covers this check box on {site} only."
+        ) + " Sign-ins, payments and a check's pictures keep their own rules."
+        body = [("", row) for row in _wrapped([said], width)]
+        body += [("muted", row) for row in _wrapped([note], width)]
+        return PanelText(
+            "Press a human check?",
+            f"{site}{mark} · a human check on a web page",
+            body,
+            escaped_any,
+        )
     if tool.startswith(
         ("browser-act:", "browser-type:", "browser-submit:", "browser-point:")
     ):
@@ -700,6 +727,11 @@ def session_option(request: ApprovalRequest, *, everywhere: bool = False) -> str
     if request.tool_name.startswith("window-read:"):
         app, _ = escape_arguments(str(request.arguments.get("app") or "this app"))
         return f"Yes, and allow {app} {'everywhere' if everywhere else 'in this chat'}"
+    if request.tool_name.startswith(HUMAN_CHECK):
+        if request.arguments.get("known") is True:
+            return f"Yes, and press human checks on every site {rest}"
+        page, _ = escape_arguments(site)
+        return f"Yes, and press this check box on {page} {rest}"
     where = "in every chat" if everywhere else "for the rest of this chat"
     return f"Yes, and allow every {request.tool_name} call {where}"
 
@@ -973,6 +1005,13 @@ def grant_words(name: str) -> str:
         return _GRANT_WORDS[name]
     if name.startswith("handoff:"):
         return f"opening {name[len('handoff:') :]}: addresses in their app"
+    if (scope := check_scope(name)) is not None:
+        page, box = scope
+        return (
+            f"pressing the check box on {url_site(page) or page}"
+            if box
+            else ("pressing human checks")
+        )
     for prefix, words in _SITE_GRANT_WORDS:
         if name.startswith(prefix):
             return words.format(site=grant_site(name))

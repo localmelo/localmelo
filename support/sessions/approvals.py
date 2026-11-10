@@ -46,11 +46,11 @@ from localmelo.melo.contracts.approvals import (
     grant_offered,
     holds_grant,
     never_kept,
+    person_grant,
     review_mode,
     revoke_site,
     site_grant,
     stays_for_chat,
-    window_grant,
 )
 from localmelo.melo.contracts.folders import covers
 from localmelo.melo.contracts.review import covered_by_grant
@@ -96,8 +96,9 @@ def kept_answer(
     """What a chat's kept answers decide about *request*: an allow, or ``None`` (ask).
 
     The one rule for a chat and for the tasks it owns. The person's grant of
-    the question (or of another host of its site) covers a routine call, a
-    site Auto stopped only as not asked for, and an app's window. A site Auto
+    the question (or of another host of its site, or another human check it
+    covers) covers a routine call, a site Auto stopped only as not asked for,
+    an app's window and a human check (#583). A site Auto
     let the chat read covers its plain reads only, never a click, an address
     that can carry data, a card-only kind or a step Auto stopped
     (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`). Nothing
@@ -108,7 +109,7 @@ def kept_answer(
     if never_kept(request) or request.outside is not None:
         return None
     if grants.covers(request.tool_name) and (
-        covered_by_grant(request.review) or site_grant(request) or window_grant(request)
+        covered_by_grant(request.review) or site_grant(request) or person_grant(request)
     ):
         return ApprovalDecision(True, origin="session")
     if (
@@ -280,6 +281,10 @@ class RememberingPolicy:
     def silent_for(self, request: ApprovalRequest) -> bool:
         """Whether a grant would let *request* run unasked (:func:`grant_silences`)."""
         return grant_silences(self.grants, request)
+
+    def kept(self, request: ApprovalRequest) -> ApprovalDecision | None:
+        """What this chat's kept answers decide about *request* (:func:`kept_answer`), for Auto (#583)."""
+        return kept_answer(self.grants, request)
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
         if request.outside is not None:
@@ -652,14 +657,19 @@ class OwnedTaskPolicy:
     Allow once is never kept: each call the grants do not cover asks. In
     Auto, *inner* decides (it asks nobody) and the chat's grants are not
     used. *book* holds every grant; *owner* gives the chat that owns the
-    task now, and *started* when a chat began. A task the person did not
-    start is never wrapped.
+    task now, and *started* when a chat began. Of the tasks the person did
+    not start, only a chore (a task on a schedule the person set) is
+    wrapped, without *started*: it uses none of its chat's grants but its
+    answers to the questions only the person answers (#583).
 
     The chat's grants are used only after :meth:`review_window` read the
     owner chat's start, and only while that chat still owns the task: the
     task's steps are then reviewed with every file changed since that chat
     began, so code an earlier task of the chat planted is read before the
-    chat's grant covers a step. Without that start, the person is asked.
+    chat's grant covers a step. Without that start, the person is asked. A
+    question only the person answers that the chat may keep (another app's
+    window, a human check) runs no code: the chat's answer to it holds in
+    either mode, from the first step.
 
     A path outside the workspace (#405) is asked about through *folders*
     (the task's asking policy, also in Auto, which asks nobody), or the
@@ -738,12 +748,21 @@ class OwnedTaskPolicy:
         """Whether the steps were reviewed from *chat*'s start."""
         return bool(chat) and self._window is not None and chat == self._window_chat
 
-    def _chat_grants(self) -> SessionGrants | None:
+    def _chat_grants(
+        self, request: ApprovalRequest | None = None
+    ) -> SessionGrants | None:
         """The grants of the chat that owns the task, read as that chat reads them.
 
-        ``None`` in Auto, and unless the steps were reviewed from that chat's start.
+        ``None`` in Auto, and unless the steps were reviewed from that chat's
+        start. A question only the person answers whose answer the chat may
+        keep (:func:`~localmelo.melo.contracts.approvals.person_grant`: another
+        app's window, a human check) runs no code and no review decides it, so
+        the chat's answer to it holds in either mode and from the first step
+        (#583).
         """
         chat = self._chat or ""
+        if chat and request is not None and person_grant(request):
+            return self._book.view(chat, "side")
         if self._auto() or not self._reviewed_since(chat):
             return None
         return self._book.view(chat, "side")
@@ -765,15 +784,18 @@ class OwnedTaskPolicy:
         """A refusal of a site: what the task kept goes, and what it holds from its chat (#577).
 
         Both at once, so a write held up in one does not leave the other
-        holding. Whether all of that is saved.
+        holding. A chore holds no site answer of its chat, so it takes back
+        its own only. Whether all of that is saved.
         """
         taken: list[Awaitable[bool]] = [revoke_site(self.inner, key, by)]
-        if self._chat:
+        if self._chat and self._started is not None:
             taken.append(self._book.take_back_site(self._chat, key, by))
         return all(await asyncio.gather(*taken))
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
-        self._chat = await self._owner()
-        grants = self._chat_grants()
+        if self._started is not None or person_grant(request):
+            # A chore reads its chat only for what it may use of it (#583).
+            self._chat = await self._owner()
+        grants = self._chat_grants(request)
         kept = None if grants is None else kept_answer(grants, request)
         return kept if kept is not None else await self.inner.decide(request)

@@ -21,15 +21,17 @@ from localmelo.melo.contracts.approvals import (
     Chosen,
     Withdrawal,
     block_note,
+    check_covers,
+    check_question,
     denial_text,
     find_auto,
     grant_offered,
     kept_offered,
     never_kept,
+    person_grant,
     review_mode,
     site_grant,
     wait_words,
-    window_grant,
     window_question,
 )
 from localmelo.melo.contracts.folders import OutsideAccess
@@ -434,6 +436,41 @@ async def test_with_nobody_watching_auto_blocks_at_once_and_asks_nobody() -> Non
     assert asking.asked == [] and watch.asked == []
 
 
+class _Keeps(_Asking):
+    """An asking policy whose chat kept an answer: *kept* is what ``kept(request)`` says."""
+
+    def __init__(self, kept: ApprovalDecision | None) -> None:
+        super().__init__(ApprovalDecision(True))
+        self.held = kept
+
+    def kept(self, request: ApprovalRequest) -> ApprovalDecision | None:
+        return self.held
+
+
+async def test_what_the_chat_kept_holds_in_auto_whether_or_not_anybody_watches() -> (
+    None
+):
+    """#583: an "Always in this chat" holds while the person is away; nothing else changes."""
+    keeps = _Keeps(ApprovalDecision(True, origin="session"))
+    check = _check(review=ActionReview("high", ("opaque",), ("A human check.",)))
+    for seen in (False, True):
+        watch = _Watch(seen=seen)
+        decided = await AutoPolicy(asking=keeps, watch=watch).decide(check)
+        assert decided == ApprovalDecision(True, origin="session")
+        assert watch.asked == [] and keeps.asked == [], "no card"
+    # Nothing kept: nobody watching blocks as before, and a kept refusal is no allow.
+    for held in (None, ApprovalDecision(False, "no")):
+        decided = await AutoPolicy(asking=_Keeps(held), watch=_Watch(False)).decide(
+            check
+        )
+        assert (decided.allow, decided.origin) == (False, "auto")
+    # A step Auto never asks about is not looked up at all: it stays blocked.
+    blocked = await AutoPolicy(asking=keeps).decide(
+        _request(review=ActionReview("high", ("system",), ("Changes settings.",)))
+    )
+    assert (blocked.allow, blocked.origin) == (False, "auto")
+
+
 async def test_with_someone_watching_auto_asks_through_the_watch() -> None:
     asking = _Asking(ApprovalDecision(True))
     watch = _Watch(seen=True)
@@ -553,6 +590,26 @@ def test_no_note_or_answer_sends_the_person_to_type_a_permission() -> None:
 # ── A choice lasts: what a chat's grant may cover in Auto (#465) ──
 
 
+PAGE = "https://shop.example"
+BOX = "https://captcha.boxes.example"
+
+
+def _check(
+    name: str = check_question(PAGE), review: ActionReview | None = None
+) -> ApprovalRequest:
+    """The question a press inside a human check asks (#583)."""
+    return ApprovalRequest(
+        request_id="r4",
+        run_id="run-1",
+        call_id="call_4",
+        tool_name=name,
+        arguments={"site": "shop.example", "access": "check", "box": "x"},
+        preview="press the human check from x on shop.example in Chrome",
+        workspace_root="/ws",
+        review=review,
+    )
+
+
 def _site(
     name: str = "browser-act:https://news.example",
     review: ActionReview | None = BEYOND,
@@ -592,6 +649,13 @@ def _site(
         (_request("x", INSTALL), False, False),
         # A card-only kind is never kept, whatever its verdict.
         (_request("print(1)", ActionReview("routine", ("money",))), False, False),
+        # A human check (#583), as Ask asks it and as Auto shows it: the chat may keep
+        # it; never with a card-only kind, nor under a name that is no plain check.
+        (_check(), False, True),
+        (_check(review=ActionReview("high", ("opaque",), ("A check.",))), False, True),
+        (_check(check_question(PAGE, BOX)), False, True),
+        (_check(review=ActionReview("high", ("money",), ("Pays.",))), False, False),
+        (_check(f"browser-check:{PAGE}/pay"), False, False),
         # Ask's own questions keep their rule: unreviewed and routine may be kept.
         (_site(review=None), False, True),
         (_request("print(1)", ActionReview("routine")), False, True),
@@ -663,28 +727,74 @@ def _window(
         (_window(ActionReview("high", ("send_out",), ("Sends.",))), False),
         (_window(ActionReview("high", ("opaque", "send_out"), ("x",))), False),
         (_window(name="desktop-act:Chat"), False),
+        # A human check (#583): a known provider's frame, and a box of its own.
+        (_check(), True),
+        (_check(check_question(PAGE, BOX)), True),
+        (_check(review=ActionReview("high", ("opaque",), ("A human check.",))), True),
+        # Never with any other review, nor a name that is no plain check question.
+        (_check(review=ActionReview("high", ("money",), ("Pays.",))), False),
+        (_check(review=ActionReview("high", ("opaque", "send_out"), ("x",))), False),
+        (_check("browser-check:"), False),
+        (_check("browser-check:shop.example"), False),
+        (_check(f"browser-check:{PAGE}#"), False),
+        (_check(f"browser-check:{PAGE}/pay"), False),
+        (_check(f"browser-check:{PAGE}#{BOX}/x"), False),
+        (_check(f"browser-check:{PAGE} {BOX}"), False),
+        (_check(f"browser-point:{PAGE}"), False),
     ],
 )
-def test_a_chat_may_keep_the_window_question_of_an_app(
+def test_a_chat_may_keep_a_question_only_the_person_answers(
     request_: ApprovalRequest, kept: bool
 ) -> None:
-    assert window_grant(request_) is kept
+    assert person_grant(request_) is kept
     assert grant_offered(request_) is kept
     assert window_question(request_) is request_.tool_name.startswith("window-read:")
+
+
+@pytest.mark.parametrize(
+    ("kept", "asked", "covers"),
+    [
+        # A known provider's frame: a kept answer covers such checks on every site.
+        (check_question(PAGE), check_question("https://other.example"), True),
+        (check_question(PAGE), check_question("http://shop.example:8443"), True),
+        # A box no known provider's: only that box on that page.
+        (check_question(PAGE, BOX), check_question(PAGE, BOX), True),
+        (
+            check_question(PAGE, BOX),
+            check_question("https://other.example", BOX),
+            False,
+        ),
+        (
+            check_question(PAGE, BOX),
+            check_question(PAGE, "https://captcha.x.example"),
+            False,
+        ),
+        (check_question(PAGE, BOX), check_question(PAGE), False),
+        (check_question(PAGE), check_question(PAGE, BOX), False),
+        # Never another kind of question, nor a name that is no plain check question.
+        (check_question(PAGE), f"browser-point:{PAGE}", False),
+        (check_question(PAGE), f"browser-act:{PAGE}", False),
+        (f"browser-act:{PAGE}", check_question(PAGE), False),
+        ("browser-check:garbage", check_question(PAGE), False),
+        (check_question(PAGE), "browser-check:garbage", False),
+    ],
+)
+def test_what_a_kept_human_check_covers(kept: str, asked: str, covers: bool) -> None:
+    assert check_covers(kept, asked) is covers
 
 
 def test_a_routine_review_of_the_window_question_is_not_this_grants_to_give() -> None:
     # The question is never reviewed, so no routine review is attached to it; if one were, the
     # general grant rule (not this one) would decide.
     routine = _window(ActionReview("routine"))
-    assert not window_grant(routine)
+    assert not person_grant(routine)
 
 
 def test_the_window_question_outside_the_workspace_is_never_kept() -> None:
     outside = dataclasses.replace(
         _window(), outside=OutsideAccess("/x/a.txt", "/x", "read", True)
     )
-    assert not window_question(outside) and not window_grant(outside)
+    assert not window_question(outside) and not person_grant(outside)
 
 
 def test_a_site_question_without_a_site_or_outside_the_workspace_is_never_kept() -> (

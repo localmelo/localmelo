@@ -31,6 +31,7 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_ALIKE,
     BLOCKED_EARLIER,
     DESKTOP_ACT,
+    HUMAN_CHECK,
     NOBODY_TO_ASK,
     REFUSAL_NOT_SAVED,
     SITE_REFUSED,
@@ -111,7 +112,8 @@ class _ApprovalGate:
     block of the same kind sets ``run.reviews.stop``; the step's later
     calls are then blocked unreviewed. A tool the rules do not read
     (:data:`~localmelo.melo.checker.review.RULED_TOOLS`) that is not
-    read-only is undecided in auto mode, so the user's model reviews it.
+    read-only is undecided in auto mode, so the user's model reviews it,
+    unless the person allowed that tool for the chat (#583).
     While a site is refused in the task (#433), a ``shell_exec`` or
     ``python_exec`` call the rules find routine that reaches a host melo
     cannot read (:func:`~localmelo.melo.contracts.review.reaches_unread_site`)
@@ -225,6 +227,9 @@ class _ApprovalGate:
             and self.review.verdict == "routine"
             and request.tool_name not in RULED_TOOLS
             and self._tier != "read"
+            # A tool the person allowed for the chat runs its routine calls as in
+            # Ask: no forced review (#583).
+            and not holds_grant(self._policy, request.tool_name)
         ):
             self.review = ActionReview(
                 "undecided",
@@ -685,11 +690,13 @@ _SITE_DOUBT = {
 _HANDOFF = "Opens {app}, an app on this Mac, because a page on {site} asked for it."
 # The questions only the person answers, in Ask and in Auto alike: no model sees them, so no
 # review decides them. In Auto each is stopped for a card with these words (nobody else sees
-# them): a window another app put up, a press in one, and a page that needs the person.
+# them): a window another app put up, a press in one, a page that needs the person, and a
+# press inside a human check (#583).
 _PERSON_WORDS = {
     WINDOW_READ: "Another app put up a window right after a step; only you decide whether melo sees it.",
     DESKTOP_ACT: "Pressing a button in another app's window is yours to decide, every time.",
     TAKEOVER: "melo needs you on this page (a sign-in or a check only you can do); only you can take it over.",
+    HUMAN_CHECK: "A human check on this page: only you decide whether melo presses it.",
 }
 _TYPING_DOUBT = (
     "Types text on {site}, which needs its own review: the text is the model's own."
@@ -937,8 +944,10 @@ class _ToolAsk:
 
         The card that asks the person to take over a page of melo's browser
         (``takeover:<site>``) goes the same way: only the person can sign in or
-        pass a check, so no review decides it. *words* are the card's own, per
-        kind (:data:`_PERSON_WORDS`).
+        pass a check, so no review decides it, and so does a press inside a
+        human check (``browser-check:<site>``, #583), whose "Always in this
+        chat" the policy keeps. *words* are the card's own, per kind
+        (:data:`_PERSON_WORDS`).
         """
         request = self._request(tool_name, arguments, preview)
         if review_mode(self._policy, request) == "auto":

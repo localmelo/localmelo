@@ -15,7 +15,10 @@ A site is the hosts of one registrable domain under one scheme (#577,
 cannot be read that way (an address by number, a local name, a public suffix,
 an unlisted suffix, a port that is not the scheme's own) stays its exact origin.
 Every other answer stays on the exact origin it was asked about: an Allow once,
-typing, a form, a file, a click at a point, a page's box and a take-over. A page
+typing, a form, a file, a click at a point, a page's box and a take-over. A press
+inside a human check asks a question of its own (``browser-check:``, #583): what
+the person keeps for it covers the checks its name says (every site for a known
+provider's frame, one box on one page for any other). A page
 approved earlier is read again unasked until its site is refused: the refusal
 takes the tabs' approval back (:class:`SiteRefusedError`), and only the person's
 newer answer stands over it (:func:`require_not_refused`).
@@ -33,6 +36,7 @@ from localmelo.melo.contracts.approvals import (
     TOOL_ASK,
     WEB_PORTS,
     ApprovalDecision,
+    check_question,
     denial_text,
     is_refusal,
 )
@@ -60,6 +64,12 @@ DIALOG_PREFIX = "browser-dialog:"
 # ``takeover:<site>``, a card that offers to take the page over in the Browser
 # panel. Asked when needed, never kept for the chat, only the person answers it.
 TAKEOVER_PREFIX = "takeover:"
+# What the model reads when the person chose Don't allow on a human check's card.
+CHECK_LEFT = (
+    "The user chose to pass this human check themselves, so melo did not press "
+    "it. Tell them it is theirs to pass in the page, and wait for them to say it "
+    "is done: do not press it, and do not go on with what needs it until then."
+)
 # Every ``browser-`` question, whenever a new one is added, and the two others.
 QUESTIONS = (PREFIX, "browser-", HANDOFF_PREFIX, TAKEOVER_PREFIX)
 TAKEOVER_NEEDS = {
@@ -428,6 +438,45 @@ async def require_point(
         raise BrowserError(
             f"melo did not {how} there on {host}. " + denial_text(decision)
         )
+
+
+async def require_check(origin: str, box: str, *, known: bool) -> None:
+    """Ask about a press inside the human check *box* on *origin*'s page; :class:`BrowserError` if refused (#583).
+
+    Asked only where code proves the press is in a check: *box* is the address
+    of the check's frame as the browser itself gives it, *known* says the
+    browser proved it a known check provider's. The question names the page and
+    the box and says it is a human check; only the person answers it, in Ask and
+    in Auto, and "Always in this chat" keeps it: for every site when *known*,
+    else for this box on this page (its name, ``browser-check:<origin>#<box>``).
+    It has no ``origin`` argument, as a click's question: a Don't allow leaves
+    the check to the person and does not refuse the site. Don't allow is said to
+    the model as :data:`CHECK_LEFT`.
+    """
+    ask = TOOL_ASK.get()
+    if ask is None:
+        return
+    frame = origin_of(box)
+    if frame is None:
+        raise BrowserError(
+            "melo cannot tell whose check this is, so it did not press it."
+        )
+    host, from_ = host_of(origin), host_of(frame)
+    arguments: dict[str, object] = {"site": host, "access": "check", "box": from_}
+    if known:
+        arguments["known"] = True
+    decision = await ask(
+        check_question(origin, "" if known else frame),
+        _browser(arguments),
+        f"press the human check from {from_} on {host} {_in()}",
+    )
+    if decision.allow:
+        return
+    if decision.origin == "user" and is_refusal(decision):
+        raise BrowserError(CHECK_LEFT)
+    raise BrowserError(
+        f"melo did not press the human check on {host}. " + denial_text(decision)
+    )
 
 
 def is_browser_question(tool_name: str) -> bool:
