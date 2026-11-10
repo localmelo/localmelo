@@ -11,7 +11,7 @@ from localmelo.melo.agent._checkpoint import CHECKPOINT_CHARS, _model_size
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import WorkCheckpoint
 from localmelo.support.gateway.handoff import work_standing
-from localmelo.support.gateway.handover import _plain, fenced
+from localmelo.support.gateway.handover import _plain, fenced, no_openers, words_of
 from localmelo.support.gateway.task_endings import paired_calls
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.store import StoredEvent
@@ -73,14 +73,17 @@ def build_park_card(
         standing = work_standing(
             calls,
             kept,
-            goal=str(spec.get("user_words") or spec.get("objective") or ""),
+            goal=str(
+                spec.get("user_words") or words_of(str(spec.get("objective") or ""))
+            ),
             folder=str(spec.get("workspace") or "") or None,
             chars=chars,
             lines=lines,
         )
         inside = dataclasses.replace(standing, goal="").lines(elsewhere=True)
         card = [HEAD, CAUTIONS, *standing.lines()[: 1 if standing.goal else 0]]
-        card.append(fenced("standing", STANDING_HEADER, _plain("\n".join(inside))))
+        body = no_openers(_plain("\n".join(inside)))
+        card.append(fenced("standing", STANDING_HEADER, body))
         return standing, mask_credentials("\n".join(part for part in card if part))
 
     chars, lines = CHECKPOINT_CHARS, COVERED_LINES

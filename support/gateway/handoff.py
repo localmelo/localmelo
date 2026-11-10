@@ -53,7 +53,13 @@ from localmelo.melo.schema import (
     split_thinking,
 )
 from localmelo.support.gateway.auto_blocks import denied_steps
-from localmelo.support.gateway.handover import _flat, _plain, fenced, words_of
+from localmelo.support.gateway.handover import (
+    _flat,
+    _plain,
+    fenced,
+    no_openers,
+    words_of,
+)
 from localmelo.support.gateway.task_endings import TurnCall, turn_calls
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS, TaskSpec
 from localmelo.support.gateway.task_store import TaskRecord
@@ -276,7 +282,7 @@ async def from_task(
         checkpoint=work_standing(
             calls,
             notices,
-            goal=spent(job.words or job.request),
+            goal=spent(job.words or words_of(job.request)),
             folder=session.workspace if session else None,
             state="" if is_no_answer_label(said.strip()) else said,
             earlier=job.checkpoint.get("covered") or (),
@@ -397,7 +403,7 @@ def _checkpoint_of(packet: Mapping[str, Any]) -> WorkCheckpoint:
     remaining = str(packet.get("remaining") or "").strip()
     done = [d for d in packet.get("done") or () if isinstance(d, dict)]
     return WorkCheckpoint(
-        goal=str(packet.get("words") or packet.get("request") or ""),
+        goal=str(packet.get("words") or words_of(str(packet.get("request") or ""))),
         state=str(packet.get("account") or ""),
         next=[remaining] if remaining else [],
         covered=[
@@ -502,4 +508,4 @@ def handoff_block(packet: object) -> str:
             "The chat's note:" if packet.get("by") == "chat" else "melo's note:",
             note,
         ]
-    return fenced("handoff", HANDOFF_HEADER, _plain("\n".join(lines)))
+    return fenced("handoff", HANDOFF_HEADER, no_openers(_plain("\n".join(lines))))
