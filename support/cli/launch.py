@@ -528,12 +528,6 @@ async def main_async(
             web_fetch=session_config.tools.web_fetch is True,
             web_search=session_config.web.search is True,
         )
-        try:
-            agent = await factory.build()
-        except Exception as exc:
-            print(f"melo: could not start the agent: {exc}", file=sys.stderr)
-            return 1, None
-
         approver = TerminalApprover()
         expect_gateway(session_config)
         # Config validation never fails on [cli] (a display preference), and a
@@ -585,6 +579,29 @@ async def main_async(
         main_wanted = not starting and wants_main_chat(
             args, choice, session_config.cli.chat
         )
+        connected: main_chat.Link | main_chat.Offline | None = None
+        if main_wanted:
+            # The main chat lives in the gateway: find it, or start it here.
+            def starting_gateway() -> None:
+                line = Text(
+                    in_symbols("Starting the gateway in the background…", symbols),
+                    style="muted",
+                )
+                loop.call_soon_threadsafe(out.print, line)
+
+            connected = await asyncio.to_thread(
+                main_chat.connect, session_config, on_start=starting_gateway
+            )
+            main_wanted = isinstance(
+                connected, main_chat.Link
+            )  # else the terminal's own chat
+        try:
+            # When the gateway answers, its Agent does: the terminal's own one
+            # is not started (it would run tool servers nothing uses).
+            agent = await factory.build(start=not main_wanted)
+        except Exception as exc:
+            print(f"melo: could not start the agent: {exc}", file=sys.stderr)
+            return 1, None
 
         def draw_banner(selected: SessionInfo | None = None) -> None:
             out.print(
@@ -653,37 +670,21 @@ async def main_async(
             if not choice.checked and factory.listable():
                 session.spawn(session.check_server())
 
-        connected: main_chat.Link | main_chat.Offline | None = None
-        if main_wanted:
-            # The main chat lives in the gateway: find it, or start it here.
-            def starting_gateway() -> None:
-                line = Text(
-                    in_symbols("Starting the gateway in the background…", symbols),
-                    style="muted",
-                )
-                loop.call_soon_threadsafe(out.print, line)
-
-            found = connected = await asyncio.to_thread(
-                main_chat.connect, session_config, on_start=starting_gateway
+        if isinstance(connected, main_chat.Link):
+            found = connected
+            session.remote = main_chat.MainChat(
+                session,
+                main_chat.GatewayClient(found.url),
+                found,
+                new_mode="auto" if session_config.approvals.mode == "auto" else "ask",
             )
-            if isinstance(found, main_chat.Link):
-                session.remote = main_chat.MainChat(
-                    session,
-                    main_chat.GatewayClient(found.url),
-                    found,
-                    new_mode=(
-                        "auto" if session_config.approvals.mode == "auto" else "ask"
-                    ),
+            session.title = main_chat.MAIN_TITLE
+            url = found.url
+            session.work = WorkBeside(
+                GatewayTasks(
+                    connect=lambda timeout: task_cli.connect(url, timeout=timeout)
                 )
-                session.title = main_chat.MAIN_TITLE
-                url = found.url
-                session.work = WorkBeside(
-                    GatewayTasks(
-                        connect=lambda timeout: task_cli.connect(url, timeout=timeout)
-                    )
-                )
-            else:
-                main_wanted = False  # the welcome does not name the main chat
+            )
         if not starting:
             show_banner()
         if isinstance(connected, main_chat.Link):

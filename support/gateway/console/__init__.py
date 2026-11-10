@@ -600,11 +600,10 @@ class Console:
             await asyncio.sleep(SWEEP_INTERVAL_S)
             try:
                 await self.cards.flush()
-                await self.sessions.close_idle()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("The console's idle sweep failed")
+                logger.exception("The console's sweep failed")
 
     def begin_shutdown(self) -> None:
         """End every event stream and stop the setup job; the uvicorn server calls this first."""

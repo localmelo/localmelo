@@ -152,11 +152,15 @@ class AgentFactory:
             self._ollama[url] = await discovery.is_ollama(url)
         return self._ollama[url]
 
-    async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
+    async def build(
+        self, model: str | None = None, *, url: str | None = None, start: bool = True
+    ) -> Agent:
         """A started Agent on the backend, with *model* and on *url* when given.
 
         A configured session keeps its config: on a new *url*, the Agent
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
+        With *start* false its tool servers are not started; its first run
+        starts them.
         """
         followed: BackendInfo | None = None
         if self.backend.follows and url is None and model in (None, self.backend.model):
@@ -168,7 +172,7 @@ class AgentFactory:
             model = model or self.backend.model
         try:
             agent = await self._build(
-                model, url, self.mcp_config if self.mcp_error is None else None
+                model, url, self.mcp_config if self.mcp_error is None else None, start
             )
         except (ValueError, MeloServeError):
             # An invalid mode/provider pair, or a model melo_serve does not
@@ -179,7 +183,7 @@ class AgentFactory:
                 raise
             # A server that did not start: this session runs without MCP.
             self.mcp_error = str(exc) or type(exc).__name__
-            agent = await self._build(model, url, None)
+            agent = await self._build(model, url, None, start)
         # Only now: a failed build leaves the row on the Agent it still has.
         if followed is not None:
             self.backend = followed
@@ -210,7 +214,11 @@ class AgentFactory:
         return replace(self.backend, model=now.model, label=now.label, note=now.note)
 
     async def _build(
-        self, model: str | None, url: str | None, mcp_config: str | None
+        self,
+        model: str | None,
+        url: str | None,
+        mcp_config: str | None,
+        start: bool = True,
     ) -> Agent:
         common: dict[str, Any] = {
             "model": model,
@@ -224,6 +232,7 @@ class AgentFactory:
             "web_fetch": self.web_fetch,
             "web_search": self.web_search,
             "identify": True,
+            "start": start,
         }
         if self._cfg is None:
             return await build_session_agent(

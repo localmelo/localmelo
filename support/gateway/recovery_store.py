@@ -534,6 +534,36 @@ class RecoveryStore:
                 },
             )
 
+    async def fence(self, task_id: str, *, reason: str) -> None:
+        """Interrupt a task whose recovery failed, whatever its recovery rows hold.
+
+        ``prepare`` and ``commit`` refuse a task whose own recovery rows are the
+        problem. This retires any open intent and writes the one state a task
+        gets when it needs the person: it waits there for a safety review.
+        """
+        async with self.store.component_transaction("recovery_fence") as conn:
+            task = await _one(
+                conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+            )
+            if task is None or task[0] in TERMINAL_PHASES:
+                return
+            await conn.execute(
+                "UPDATE recovery_operations SET phase = 'superseded' "
+                "WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",
+                (task_id,),
+            )
+            await conn.execute(
+                "INSERT INTO recovery_provenance (task_id, first_start, unsafe_resume, reason) "
+                "VALUES (?, 'unknown', 1, ?) ON CONFLICT(task_id) DO UPDATE SET "
+                "unsafe_resume = 1, reason = excluded.reason",
+                (task_id, reason),
+            )
+            await conn.execute(
+                "UPDATE tasks SET state = 'interrupted', wait_reason = ?, hold_site = '', "
+                "updated_at = ? WHERE task_id = ?",
+                (reason, time.time(), task_id),
+            )
+
     async def capture_complete(self, task_id: str, *, execution_id: str) -> bool:
         """Missing capture state is unknown, never proof of completeness."""
         _text(execution_id, "execution_id")
