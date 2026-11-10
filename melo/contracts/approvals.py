@@ -452,7 +452,15 @@ def check_scope(name: str) -> str | None:
     """
     if not name.startswith(HUMAN_CHECK):
         return None
-    page = name[len(HUMAN_CHECK) :]
+    return spelt_origin(name[len(HUMAN_CHECK) :])
+
+
+def spelt_origin(page: str) -> str | None:
+    """*page* when it is an origin spelt the one way the browser provider writes it, else ``None``.
+
+    Upper case, a dot at the end of the host, the scheme's own port written
+    out or another host form is no origin here (:data:`_ORIGIN`).
+    """
     found = _ORIGIN.fullmatch(page)
     if found is None:
         return None
@@ -823,6 +831,93 @@ class Allowance(ApprovalDecision):
             raise ValueError("an Allowance is used once and never kept")
 
 
+# The site questions that hold the whole step: the text typed, the form sent and
+# where it goes. Each is reviewed by itself, and its verdict is never kept for
+# the next; only such a question shows a person all it does, so only such a one
+# may be allowed once after Auto blocked it (#617), or kept for a scheduled task
+# (#619). Each question's name, and the kind of step its ``access`` says.
+WHOLE_STEPS: Final = {"browser-type:": "type", "browser-submit:": "submit"}
+
+
+def whole_step(arguments: Mapping[str, Any]) -> bool:
+    """Whether a site question with *arguments* holds all its step does (:data:`WHOLE_STEPS`)."""
+    return arguments.get("access") in WHOLE_STEPS.values()
+
+
+def kept_site(name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None:
+    """The site and kind a scheduled task's kept answer to the question *name* holds (#619), or ``None``.
+
+    The site is the origin the question is asked on (scheme, host and port),
+    read from its name and spelt once (:func:`spelt_origin`); the kind is
+    ``type`` or ``submit`` (:data:`WHOLE_STEPS`), and *arguments* say the same
+    kind. A form sent has a site only when the address it goes to (``to``) is
+    on that same origin: one sent elsewhere, or where the page decides
+    (``to`` empty), has none.
+    """
+    kind = next((k for p, k in WHOLE_STEPS.items() if name.startswith(p)), None)
+    site = None if kind is None else spelt_origin(name.partition(":")[2])
+    if kind is None or site is None or arguments.get("access") != kind:
+        return None
+    to = arguments.get("to")
+    if kind == "submit" and not (
+        isinstance(to, str) and (to == site or to.startswith(site + "/"))
+    ):
+        return None
+    return site, kind
+
+
+def kept_review(review: ActionReview | None) -> bool:
+    """Whether a scheduled task's kept answer may stand for the person's answer after *review* (#619).
+
+    The model reviewed the step and every category it names is ``send_out``
+    ("Send data from this Mac?"): the one question a kept answer answers. A
+    step filed under anything else (passwords or keys, money, an account's
+    settings, something the person did not ask for), one that could not be
+    reviewed, and a routine one (it needs no answer) are not.
+    """
+    return (
+        review is not None
+        and review.verdict == "high"
+        and review.by == "model"
+        and bool(review.categories)
+        and set(review.categories) == {"send_out"}
+    )
+
+
+@dataclass(frozen=True)
+class ScheduledKeep:
+    """What one scheduled task's runs may type and send without asking (#619).
+
+    *chore_id* is the scheduled task; *sites* maps each kept site (an origin)
+    to the kinds kept there (``type``, ``submit``). Trusted code reads it from
+    the scheduled task's store when one of its runs starts; nothing a run
+    says changes it.
+    """
+
+    chore_id: str
+    sites: Mapping[str, frozenset[str]]
+
+    def covers(self, name: str, arguments: Mapping[str, Any]) -> str | None:
+        """The kept site of the question *name* when this keeps its kind there, else ``None``."""
+        found = kept_site(name, arguments)
+        if found is None or found[1] not in self.sites.get(found[0], ()):
+            return None
+        return found[0]
+
+
+# The reason of the decision that runs a step on a scheduled task's kept answer.
+KEPT_FOR_SCHEDULE: Final = "allowed for this scheduled task"
+
+
+class Kept(Allowance):
+    """The decision that runs a typing or sending step on its scheduled task's kept answer (#619).
+
+    The person's own answer, kept by them for that scheduled task and site
+    (origin ``user``): like an :class:`Allowance` it lifts nothing else on
+    the site, and a site refused in the run still stands over it.
+    """
+
+
 # Auto mode (#465): the categories of a stopped step a person may allow from a
 # card: those the user's words can allow, a step melo could not check, a step
 # whose review failed (it timed out, could not be read or ran out of room: the
@@ -921,6 +1016,11 @@ class AutoPolicy:
     category the allowance did not cover. Allowances live in this object
     only; :attr:`given` keeps when each one given runs out, also once it was
     used or ran out, so a surface can tell a step allowed before.
+
+    :attr:`kept` is what a scheduled task's run may type and send without
+    asking (:class:`ScheduledKeep`, #619): set by trusted code for a run of
+    that scheduled task only, and read by the agent's gate for a typing or
+    sending question after its review; ``None`` everywhere else.
     """
 
     def __init__(
@@ -942,6 +1042,7 @@ class AutoPolicy:
         # key -> (until, categories, tool) of each allowance not used yet.
         self._allowed: dict[str, tuple[float, frozenset[str], str]] = {}
         self.given: dict[str, float] = {}
+        self.kept: ScheduledKeep | None = None
 
     def review_mode(self, request: ApprovalRequest) -> ReviewMode:
         return "auto"
@@ -1329,6 +1430,29 @@ ALLOW_IN_CHAT: Final = (
     "that they can allow this step once from the chat, or switch the chat to Ask "
     "so that melo asks them first."
 )
+# The same for a task nobody can be asked for (a scheduled run, a task melo or
+# another agent started, #619): the person decides on the task's page later, so
+# the model is not told to try the step again, nor to ask for a permission.
+# {decide} is what the person can do there (:data:`DECIDE_ON_PAGE`).
+UNATTENDED_NOTE: Final = (
+    "Auto mode blocked this step, so it did not run. {it}{off_goal}\n"
+    "Nobody can be asked during this run: it runs on a schedule, or melo or "
+    "another agent started it. {decide}\n"
+    "Do not try this step again in this run, and do not reach the same result "
+    "another way (another command, a script, another tool). Go on with the work "
+    "that does not need it. A task that cannot finish without it ends with "
+    "Ending: blocked. In your answer, say in plain words what was blocked and why "
+    "the task needed it.\n"
+    "Never ask the user to type a permission."
+)
+# By whether the person can allow the step from the task's page.
+DECIDE_ON_PAGE: Final = {
+    True: "The user will see this step on the task's page and can allow it there.",
+    False: (
+        "The user will see on the task's page that it was blocked; it cannot be "
+        "allowed from the task."
+    ),
+}
 # A step a person may allow on auto mode's card that was blocked because nobody
 # could be asked now (no one had the chat open, or the run has nobody to ask).
 ALLOW_WHEN_OPEN: Final = (
@@ -1495,6 +1619,7 @@ def block_note(
     second: bool = False,
     changed: bool = False,
     allowable: bool = True,
+    unattended: bool = False,
 ) -> str:
     """The text the model reads for a step auto mode blocked.
 
@@ -1503,7 +1628,8 @@ def block_note(
     a chat), else the note says what they can do instead;
     *folder*: the workspace, for a step that can never be allowed; *second*:
     a second block of the same kind in this turn, which stops the run;
-    *changed*: the user allowed a step and this retry differs from it.
+    *changed*: the user allowed a step and this retry differs from it;
+    *unattended*: a task nobody can be asked for (:data:`UNATTENDED_NOTE`).
     """
     it = _it(review, words)
     if second:
@@ -1517,6 +1643,11 @@ def block_note(
     )
     if review is not None and "self" in review.categories:
         allow = ALLOW_NEVER.format(folder=folder)
+    elif task and unattended:
+        note = UNATTENDED_NOTE.format(
+            it=it, off_goal=off_goal, decide=DECIDE_ON_PAGE[allowable]
+        )
+        return note + ALLOWED_EXACTLY if changed else note
     elif task:
         allow = ALLOW_IN_TASK if allowable else BLOCKED_IN_TASK
     elif asks_in_auto(review):

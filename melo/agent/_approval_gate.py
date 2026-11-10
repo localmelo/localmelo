@@ -32,6 +32,7 @@ from localmelo.melo.contracts.approvals import (
     BLOCKED_EARLIER,
     DESKTOP_ACT,
     HUMAN_CHECK,
+    KEPT_FOR_SCHEDULE,
     NOBODY_TO_ASK,
     REFUSAL_NOT_SAVED,
     SITE_REFUSED,
@@ -46,6 +47,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     Chosen,
+    Kept,
     ReviewMode,
     allowance_key,
     ask,
@@ -57,12 +59,14 @@ from localmelo.melo.contracts.approvals import (
     find_folder_asker,
     holds_grant,
     is_refusal,
+    kept_review,
     question_key,
     question_site_key,
     review_mode,
     revoke_site,
     site_covers,
     site_key,
+    whole_step,
 )
 from localmelo.melo.contracts.folders import (
     NAMED_FOLDER,
@@ -532,8 +536,16 @@ class _ApprovalGate:
         """Keep an auto-mode block and return the note the model reads."""
         task = auto is not None and auto.task
         changed = auto is not None and auto.has_allowances(asking.tool_name)
+        # A task nobody can be asked for (#619): the person decides on its page later.
+        unattended = task and auto is not None and auto.asking is None
         if self._reviewer is None:
-            return block_note(self.review, words=words, task=task, changed=changed)
+            return block_note(
+                self.review,
+                words=words,
+                task=task,
+                changed=changed,
+                unattended=unattended,
+            )
         return self._reviewer.blocked(
             self._run.reviews,
             review=self.review,
@@ -544,6 +556,7 @@ class _ApprovalGate:
             task=task,
             workspace=self._workspace_root,
             changed=changed,
+            unattended=unattended,
         )
 
     def _record(
@@ -715,16 +728,6 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # ``credentials`` into no category; a read (its address can hold a key), a
 # search, typing, a form sent, or any access not listed never does.
 _VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
-# The site questions that hold the whole step: the text typed, the form sent and
-# where it goes. Each is reviewed by itself, and its verdict is never kept for
-# the next; only such a question shows a person all it does, so only such a one
-# may be allowed once after Auto blocked it.
-_WHOLE_ACCESS: Final = frozenset({"type", "submit"})
-
-
-def whole_step(arguments: Mapping[str, Any]) -> bool:
-    """Whether a site question with *arguments* holds all its step does (:data:`_WHOLE_ACCESS`)."""
-    return arguments.get("access") in _WHOLE_ACCESS
 
 
 def _personal(
@@ -1136,6 +1139,10 @@ class _ToolAsk:
                         )
                     )
                 request = dataclasses.replace(asked, review=review)
+                if self._kept(request):
+                    # The person kept their answer for this scheduled task and
+                    # site (#619): it stands for their answer to this step.
+                    return Kept(True, KEPT_FOR_SCHEDULE, origin="user")
             return await self._policy.decide(request)
 
         decided = await self._ask(settle, request)
@@ -1152,7 +1159,15 @@ class _ToolAsk:
                 # Auto kept on the way to this answer goes with it.
                 await self._take_back(site, "auto")
                 return refusal
-        if isinstance(decided, Allowance):
+        if isinstance(decided, Kept):
+            # The question runs on the answer kept for the scheduled task: the
+            # run's record says what went where, for the task's page (#619).
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": True, "origin": "user", "allowance": "kept",
+                 "preview": preview, "arguments": copy.deepcopy(arguments)}
+            )  # fmt: skip
+        elif isinstance(decided, Allowance):
             # The question runs on the person's Allow once: the record says so,
             # and the step is shown as allowed and used.
             self.refused.append(
@@ -1196,6 +1211,8 @@ class _ToolAsk:
                 changed=policy is not None
                 and policy.has_allowances(self._call.tool_name),
                 allowable=bool(self.refused and self.refused[-1].get("step_key")),
+                # A task nobody can be asked for (#619).
+                unattended=policy is not None and policy.task and policy.asking is None,
             )
             return dataclasses.replace(decided, reason=note)
         return decided
@@ -1268,9 +1285,7 @@ class _ToolAsk:
         reviews = self._run.reviews
         # A site refused earlier in this task (before this refusal, which may
         # refuse its own site) keeps its steps from an Allow once.
-        on_refused = (question_site_key(name) or "")[len(SITE_KEY) :] in (
-            _refused_sites(self._policy, self._run)
-        )
+        writable = self._writable(request)
         if site is not None:
             if site[len(SITE_KEY) :] not in reviews.refused_sites:
                 reviews.refused_sites.append(site[len(SITE_KEY) :])
@@ -1291,14 +1306,7 @@ class _ToolAsk:
             # secret: then the key and the question whole, for the person to see.
             # Any other keeps no text.
             self.refused[-1].update(mode="auto", review=review.to_json())
-            if (
-                whole_step(arguments)
-                and asks_in_auto(review)
-                and not on_refused
-                # A text that holds a password or a key by melo's own detectors
-                # is kept nowhere, whatever the review filed it under.
-                and not holds_secret(arguments, request.preview)
-            ):
+            if writable:
                 self.refused[-1].update(
                     step_key=allowance_key(request), arguments=copy.deepcopy(arguments)
                 )
@@ -1309,6 +1317,49 @@ class _ToolAsk:
         if await self._take_back(site):
             return decided
         return dataclasses.replace(decided, notice=REFUSAL_NOT_SAVED)
+
+    def _writable(self, request: ApprovalRequest) -> bool:
+        """Whether the person may decide on *request* after Auto stopped it: Allow once (#617), or keep it for a scheduled task (#619).
+
+        The question holds the whole step (a text typed, a form sent: the
+        card shows all of it, :func:`whole_step`), a chat's card would have
+        asked about it (:func:`asks_in_auto`), its site is not refused in this
+        task, and melo's own detectors find no password or key in it
+        (:func:`holds_secret`), whatever the review filed it under.
+        """
+        name, arguments, review = request.tool_name, request.arguments, request.review
+        on_refused = (question_site_key(name) or "")[len(SITE_KEY) :] in (
+            _refused_sites(self._policy, self._run)
+        )
+        return (
+            whole_step(arguments)
+            and asks_in_auto(review)
+            and not on_refused
+            and not holds_secret(arguments, request.preview)
+        )
+
+    def _kept(self, request: ApprovalRequest) -> bool:
+        """Whether the answer kept for this run's scheduled task covers *request* (#619, rules K3).
+
+        All must hold: (a) the run's Auto policy holds a scheduled task's kept
+        answers (:attr:`AutoPolicy.kept`, set by trusted code for that task's
+        runs only) and nobody can be asked in it; (b) the question holds the
+        whole step and the person could decide on it (:meth:`_writable`, the
+        same predicate an Allow once has); (c) its site (and for a form, where
+        it goes) is a kept site for its kind (:meth:`ScheduledKeep.covers`);
+        (d) the model reviewed it and found only ``send_out``
+        (:func:`kept_review`); (e) no secret in it and (f) its site is not
+        refused in this task, both in (b). Anything else is decided as before.
+        """
+        held = find_auto(self._policy)
+        return (
+            held is not None
+            and held.kept is not None
+            and held.asking is None
+            and kept_review(request.review)
+            and held.kept.covers(request.tool_name, request.arguments) is not None
+            and self._writable(request)
+        )
 
     async def _take_back(self, site: str, by: str | None = None) -> bool:
         """:func:`revoke_site` to its end, whatever stops the run: Stop ends only the wait (#577)."""
