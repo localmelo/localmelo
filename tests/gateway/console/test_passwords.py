@@ -17,8 +17,10 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.i18n import t
 from localmelo.tests.agent.test_sign_in import LIKE_HEADING
 
 from .test_ask_owner import Script, answer, ask_console, held, tool_call, until
@@ -31,10 +33,12 @@ SECRETS = {
     "task": "taskSecret-44",
     "queued": "queuedSecret-55",
     "chore": "choreSecret-66",
+    "chore_title": "choreTitleSecret-61",
+    "chore_edit": "choreEditSecret-62",
     "reply": "replySecret-77",
     "title": "titleSecret-88",
-    # Given in a text file attached to the message of the same name.
-    "turn_file": "turnFileSecret-13",
+    # Given in a text file attached to the message of the same name (the turn
+    # route's own file is the reported-case test's).
     "create_file": "createFileSecret-14",
     "task_file": "taskFileSecret-15",
     "queued_file": "queuedFileSecret-16",
@@ -84,9 +88,7 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
         models,
     ):
         # A turn, and a note added to it while it runs.
-        started = await _post_turn(
-            client, str(console.main_id), say("turn"), attachments=files("turn")
-        )
+        started = await _post_turn(client, str(console.main_id), say("turn"))
         assert started.status_code == 202, started.text
         turn_id = started.json()["turn_id"]
         await until(lambda: len(models["main"].requests) == 1)
@@ -157,10 +159,19 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
             "/api/chores",
             json={
                 "request": say("chore"),
+                "title": f"Sign in (password: {SECRETS['chore_title']})",
                 "schedule": {"kind": "weekdays", "at": "08:30"},
             },
         )
         assert chore.status_code == 201, chore.text
+        edited = await client.patch(
+            f"/api/chores/{chore.json()['chore']['id']}",
+            json={
+                "revision": chore.json()["chore"]["revision"],
+                "title": f"Sign in (password: {SECRETS['chore_edit']})",
+            },
+        )
+        assert edited.status_code == 200, edited.text
         renamed = await client.patch(
             f"/api/sessions/{side}", json={"title": say("title")}
         )
@@ -173,6 +184,7 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
             + created.text
             + routed.text
             + chore.text
+            + edited.text
             + renamed.text
             + (await client.get(f"/api/sessions/{side}")).text
             + (await client.get("/api/chores")).text
@@ -251,6 +263,70 @@ async def test_a_password_in_an_attached_file_is_hidden_where_it_is_stored_read_
         assert cancel.json()["submission"]["state"] == "accepted"
         assert len(await console.store.list_turns(main)) == 1
         assert secret not in again.text + cancel.text
+
+
+async def test_a_file_in_a_queued_message_is_data_when_the_turn_it_starts_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queued message's turn keeps the typed words, and the run reads only those as the person's own (#626)."""
+    secret = "quokka-5521"
+    typed = "have a look at the file"
+    text = f"log in at files-only.example\nmy password is {secret}"
+    given: list[Any] = []
+    real = Agent.run_task
+
+    async def run_task(self: Agent, query: str, **kwargs: Any) -> Any:
+        given.append(kwargs.get("user_words"))
+        return await real(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", run_task)
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")], run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        with monkeypatch.context() as spy:
+            spy.setattr(console.asks, "holds", lambda session: True)
+            queued = await _post_turn(
+                client,
+                main,
+                typed,
+                attachments=[{"name": "notes.txt", "text": text, "chars": len(text)}],
+            )
+        assert queued.status_code == 200, queued.text
+        assert queued.json()["echo"]["echo"] == "queued"
+        await until(lambda: console.store.list_turns(main))
+        await _wait_turn(client, main)
+        [turn] = await console.store.list_turns(main)
+        # The file is in the turn's text, its handle is shown; the words are the typed ones.
+        assert "my password is [password-1]" in turn.user_text
+        assert turn.typed_text == typed
+        assert given == [typed]
+        assert secret not in stored(tmp_path / "sessions.db")
+
+
+async def test_a_file_that_a_password_handle_makes_too_long_is_refused_as_a_too_long_file_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name of 200 characters is within its limit until its password is hidden (a handle is one character longer): 400, not a crash, and the same words for a send and its cancel (#626)."""
+    name = f"password: quokka-8842 {'n' * 178}"
+    body = {"text": "look", "attachments": [{"name": name, "text": "x", "chars": 1}]}
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, client, _):
+        main = str(console.main_id)
+        sent = await client.post(f"/api/sessions/{main}/turns", json=body)
+        cancel = await client.post(
+            f"/api/sessions/{main}/submissions/long-1/cancel", json=body
+        )
+        for refused in (sent, cancel):
+            assert refused.status_code == 400, refused.text
+            error = refused.json()["error"]
+            assert error["code"] == "invalid_request"
+            assert error["message"] == t(
+                "errors.fileRefused",
+                name=f"password: [password-1] {'n' * 178}"[:80],
+                why="a file name must be 1 to 200 characters",
+            )
+            assert "quokka-8842" not in refused.text
+        assert await console.store.list_turns(main) == []
 
 
 async def _wait_idle(console: Console) -> None:

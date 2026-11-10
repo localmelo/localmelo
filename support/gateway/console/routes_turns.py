@@ -14,6 +14,7 @@ the one gate this gateway shares with the workspace page.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
@@ -161,7 +162,7 @@ def _key(value: str | None) -> str | None:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-def _files(items: list[_Attachment]) -> list[TextAttachment]:
+def _files(items: Sequence[_Attachment | TextAttachment]) -> list[TextAttachment]:
     """The text files of a send, cleaned and checked; 400 for one the checker would refuse."""
     attached: list[TextAttachment] = []
     total = 0
@@ -189,6 +190,18 @@ def _files(items: list[_Attachment]) -> list[TextAttachment]:
     return attached
 
 
+def _hidden(
+    text: str, attached: list[TextAttachment]
+) -> tuple[str, list[TextAttachment]]:
+    """*text* and its files with each password cut out, the files checked again.
+
+    A handle is longer than a short value, so a file or a name that was within
+    its limit can pass it: that is the same 400 as one that was too large (#626).
+    """
+    hidden = hide_message(text, attached)
+    return hidden.text, _files(hidden.attachments)
+
+
 def _compose(request: CancelRequest) -> str:
     """The user text a withdrawn send had: its words (or the stand-in for none) and its files.
 
@@ -200,8 +213,8 @@ def _compose(request: CancelRequest) -> str:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
         )
-    hidden = hide_message(request.text, attached)
-    words, attached = hidden.text.strip(), list(hidden.attachments)
+    words, attached = _hidden(request.text, attached)
+    words = words.strip()
     if not words:
         if not request.images and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
@@ -295,8 +308,7 @@ async def _sent(
     # The one place a message's password is cut out, in its words and in its
     # files: before it is checked, routed, queued, titled, keyed or stored, so
     # no copy of it exists below (#547, #626).
-    hidden = hide_message(request.text, attached)
-    typed, attached = hidden.text, list(hidden.attachments)
+    typed, attached = _hidden(request.text, attached)
     words = typed.strip()
     if not words:
         if not staged and not attached:

@@ -1906,9 +1906,11 @@ Create a session, usually with its first turn.
   `submission_withdrawn`. Two creates racing on one key make one session.
 - `attachments` are the text files the person added: `[{"name": "notes.md", "text": "…", "chars": 1234}]`,
   at most 8, 256 KiB each and 512 KiB together. A file that is binary or too large is 400
-  `invalid_request` with the file named. The gateway cleans each file, redacts secrets in it, cuts a password it gives out as it does in the words (a handle such as
-  `[password-1]` stays) and adds it to the message as an `<attachment>` block, so the turn's `user_text` holds the words and
-  the files.
+  `invalid_request` with the file named, and so is a file or name that is over its limit
+  once a password in it is hidden. The gateway cleans each file, redacts secrets in it,
+  cuts a password it gives out as it does in the words (a handle such as `[password-1]`
+  stays) and adds it to the message as an `<attachment>` block, so the turn's `user_text`
+  holds the words and the files.
 - `images` are the pictures the person added: ids from [`POST /api/uploads`](#post-apiuploads),
   at most 4, none twice. An id that is gone is 400 `picture_gone`; more than 4 is 400 `invalid_request`;
   a chat model known not to read pictures is 409 `model_text_only`. A message with pictures goes to
@@ -2667,9 +2669,8 @@ Each finished turn's run record, newest page first like the turns list.
 
 ## Not in this version
 
-File attachments in `POST /api/sessions` and `POST /api/sessions/{id}/turns`
-and MCP tools in the console are not built yet; the shapes above are the
-ones later changes extend.
+MCP tools in the console are not built yet; the shapes above are the ones
+later changes extend.
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
 reference. Non-loopback binds are refused at startup; see

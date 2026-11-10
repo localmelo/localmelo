@@ -34,6 +34,17 @@ async def test_pending_title_is_saved_with_the_first_message(setup: Setup) -> No
     assert setup.session.status_bar().title == info.title
 
 
+async def test_a_password_in_a_title_is_kept_as_its_handle(setup: Setup) -> None:
+    secret = "quokka-8842"
+    setup.session.enter(f"/title Sign in (password: {secret})")
+    await wait_for(lambda: "Title: Sign in (password: [password-" in setup.out.text())
+    setup.session.enter("the actual typed task")
+    await setup.idle()
+    [info] = await setup.store.list_sessions()
+    assert secret not in info.title and "(password: [password-" in info.title
+    assert secret not in setup.session.status_bar().title
+
+
 async def test_title_validation_keeps_the_command_draft(setup: Setup) -> None:
     text = "/title " + "x" * 201
     setup.session.enter(text)
