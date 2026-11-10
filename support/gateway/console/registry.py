@@ -167,7 +167,14 @@ def chat_options(settings: Config, workspace: str) -> AgentOptions:
             max_extensions=TASK_EXTENSIONS,
         ),
     )
-    return dataclasses.replace(options, attempt_policy="none")
+    # The core's long-term store of a legacy Agent costs a model server its prefix
+    # cache and one unbounded embedding call per tool call, and nothing in a chat
+    # reads it back usefully. The other modes use the option for their own recall.
+    return dataclasses.replace(
+        options,
+        attempt_policy="none",
+        memory=options.memory and options.reasoning != "legacy",
+    )
 
 
 async def default_builder(

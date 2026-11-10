@@ -18,9 +18,10 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.memory.block import strip_block
-from localmelo.support.config import Config
+from localmelo.support.config import Config, LocalBackendConfig
+from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.memory import ChatMemory
 from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions import runner as runner_module
@@ -104,6 +105,13 @@ def stub() -> Any:
                 {"content": "Your trip is planned."},
             ],
         },
+        # A run of two steps whose first is a tool call.
+        "listing": {
+            "replies": [
+                {"tool_calls": [{"name": "list_files", "arguments": {"path": "."}}]},
+                {"content": "Nothing there."},
+            ],
+        },
         # The chat model as the llm retriever meets it: it keeps the first note.
         "pick": {
             "replies": [
@@ -154,11 +162,15 @@ async def chat(
     undo: bool = False,
     inbox: Any = None,
     scenario: str | None = None,
+    built: Agent | None = None,
 ) -> list[dict[str, Any]]:
-    """One turn in a new chat (or *session_id*); returns its stored events."""
+    """One turn in a new chat (or *session_id*); returns its stored events.
+
+    *built* is the chat's Agent when the test made it; the turn closes it.
+    """
     workspace.mkdir(exist_ok=True)
     events: list[StoredEvent] = []
-    agent = await build_session_agent(
+    agent = built or await build_session_agent(
         cfg=None,
         base_url=(
             stub.base_url
@@ -527,3 +539,40 @@ async def test_memory_keeps_nothing_in_a_turn_the_person_did_not_begin(
     await memory.drain()
     assert await memory.records() == []
     assert (await memory.status())["documents"] == 0
+
+
+async def test_a_chat_sends_the_core_embedding_model_nothing_but_memory_still_reads(
+    store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    core, notes = EmbeddingServer().start(), EmbeddingServer().start()
+    memory = ChatMemory(
+        lambda: None,
+        directory=str(tmp_path / "memory"),
+        embedding_url=notes.base_url,
+        embedding_model="Qwen3-Embedding-0.6B",
+    )
+    cfg = Config(
+        chat_backend="vllm",
+        embedding_backend="vllm",
+        vllm=LocalBackendConfig(
+            chat_url=stub.base_url.replace("/v1", "/s/listing/v1"),
+            chat_model="stub-model",
+            embedding_url=core.base_url,
+            embedding_model="embed",
+        ),
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    try:
+        agent = await default_builder(cfg, str(work), None, "chat-a", memory=memory)
+        # An embedding provider is configured; the Agent keeps it, and uses it for nothing.
+        assert agent._embedding is not None
+        await chat(memory, store, stub, work, "What is in this folder?", built=agent)
+        # The run had a first request and a tool call; neither embedded anything.
+        assert [m["role"] for m in stub.requests[-1]["messages"]][-1] == "tool"
+        assert core.inputs == []
+        assert notes.inputs  # memory across chats reads through its own model
+    finally:
+        await memory.aclose()
+        core.close()
+        notes.close()
