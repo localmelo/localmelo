@@ -807,12 +807,15 @@ class Chat:
         )
 
     def _estimator(
-        self, kind: str, accounting: RequestAccounting | None
+        self, kind: str, accounting: RequestAccounting | None, held_as: str = ""
     ) -> Callable[[list[Message], list[ToolDef] | None], int]:
         """The estimate a fit of a request of *kind* reads.
 
-        With *accounting*, the calibrated request proxy in tokens; without it,
-        the prompt cap's characters.
+        With *accounting*, the request proxy in tokens calibrated by the ratio
+        measured for *kind*, else for *held_as*, the kind whose request it
+        repeats (a request that grows the planning request reads as one until a
+        reply of its own kind is measured); without it, the prompt cap's
+        characters.
         """
         # The reasoning counts where the provider sends it.
         replay = bool(getattr(self.llm, "reasoning_field", None))
@@ -821,7 +824,10 @@ class Chat:
             if accounting is None:
                 return prompt_chars(candidate, count_thinking=replay)
             size, _ = request_proxy(candidate, offered, replay=replay)
-            return calibrated(size, accounting.ratios.get((self.llm.model, kind)))
+            ratio = accounting.ratios.get((self.llm.model, kind))
+            if ratio is None:
+                ratio = accounting.ratios.get((self.llm.model, held_as))
+            return calibrated(size, ratio)
 
         return estimate
 
@@ -911,7 +917,7 @@ class Chat:
         overflow_retried = False
         # The reasoning counts where the provider sends it.
         replay = bool(getattr(self.llm, "reasoning_field", None))
-        estimate = self._estimator(kind, accounting)
+        estimate = self._estimator(kind, accounting, held_as)
         given = messages
 
         # The context budget's input tokens, else the prompt cap's characters.

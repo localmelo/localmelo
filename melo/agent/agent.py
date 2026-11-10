@@ -168,6 +168,7 @@ from localmelo.melo.executor.models import (
     ExecutionRequest,
     ExecutionStatus,
 )
+from localmelo.melo.memory.block import strip_block
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo import (
     KINDS,
@@ -943,6 +944,9 @@ class _RunState:
     # carries, and whether this fill has had it.
     early_note: str = ""
     early_sent: bool = False
+    # The person's own words for this run (run_task's user_words, else the query
+    # without its recalled-memory block): a work checkpoint's goal.
+    words: str = ""
     writes: list[tuple[str, dict[str, Any], str]] = dataclasses.field(
         default_factory=list
     )
@@ -3896,6 +3900,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         run = _RunState(
             task_id=task.task_id,
             task_text=query,
+            words=strip_block(query) if user_words is None else user_words,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,

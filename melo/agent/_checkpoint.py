@@ -291,9 +291,14 @@ class _CheckpointLoop:
             asking = CHECKPOINT_PROMPT
             if run.checkpoint is not None and run.checkpoint.written:
                 asking += f"\n\n{CHECKPOINT_CARRY_NOTE}"
+            budget = self.chat.context_budget
             body = {
                 **LLM_REQUEST_EXTRA_BODY.get(),
-                "max_tokens": CHECKPOINT_MAX_TOKENS,
+                # Never more than the room the budget keeps for a reply.
+                "max_tokens": min(
+                    CHECKPOINT_MAX_TOKENS,
+                    budget.output_reserve if budget else CHECKPOINT_MAX_TOKENS,
+                ),
             }
             token = LLM_REQUEST_EXTRA_BODY.set(body)
             try:
@@ -315,10 +320,9 @@ class _CheckpointLoop:
                 call = self.chat.last_call
                 if call is not None:
                     self._note_cues(run, call.dropped)
-        goal = run.task_query_msg.content if run.task_query_msg is not None else query
         return checkpoint_from(
             reply,
-            goal=goal,
+            goal=run.words or query,
             step=run.steps,
             chars=room // 2,
             **self._computed(run, room),
@@ -331,7 +335,7 @@ class _CheckpointLoop:
         (:func:`~localmelo.melo.contracts.task_files.asked_files`) or a file
         tool that writes has succeeded in it; the line names those files.
         """
-        files = asked_files([run.task_text]) or written_paths(
+        files = asked_files([run.words]) or written_paths(
             run.writes, self.executor.workspace_root
         )
         if not files and not any(status == "success" for *_, status in run.writes):
@@ -403,7 +407,19 @@ class _CheckpointLoop:
                 if id(c) in ids and id(m) not in pinned
             }
 
-        if before <= CHECKPOINT_LINE * limit or not leaving():
+        def helps() -> bool:
+            """Whether what can leave frees at least half the room between the
+            line and the target; else a checkpoint call cannot help, and the
+            request is the fit's (its drops still become cues)."""
+            gone = leaving()
+            if not gone:
+                return False
+            window = [m for m in working.get_window() if id(m) not in gone]
+            left = estimate(self._sent_window(window, run.task_query_msg)[0])
+            room_made = (CHECKPOINT_LINE - WINDOW_FIT_TARGET) / 2 * limit
+            return before - left >= room_made
+
+        if before <= CHECKPOINT_LINE * limit or not helps():
             if before > EARLY_LINE * limit and not run.early_sent:
                 # Once in this fill: the next planning request's trailing line.
                 run.early_note = self._early_note(run)

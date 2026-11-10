@@ -23,8 +23,10 @@ from localmelo.melo.agent._checkpoint import (
     EARLY_NOTE,
     _CheckpointLoop,
 )
+from localmelo.melo.agent._request_accounting import request_proxy
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     CHECKPOINT_HEADER,
@@ -72,11 +74,17 @@ class Stub(BaseLLMProvider):
     model = "stub"
 
     def __init__(
-        self, steps: int, notes: str | None = None, overflow_at: int = 0
+        self,
+        steps: int,
+        notes: str | None = None,
+        overflow_at: int = 0,
+        ratio: float | None = None,
     ) -> None:
         self.steps = steps
         self.notes = notes
         self.overflow_at = overflow_at
+        # The server's count of prompt tokens, as a share of the request proxy.
+        self.ratio = ratio
         self.requests: list[list[Message]] = []
         self.plans = 0
         self.asked = 0
@@ -89,23 +97,28 @@ class Stub(BaseLLMProvider):
             raise ProviderError(
                 "context_length_exceeded", status_code=400, context_overflow=True
             )
+        usage = None
+        if self.ratio is not None:
+            proxy, _ = request_proxy(messages, tools, replay=False)
+            usage = {"prompt_tokens": int(proxy * self.ratio)}
         if CHECKPOINT_PROMPT in messages[-1].content:
             self.asked += 1
             text = self.notes if self.notes is not None else _notes(self.asked)
-            return Message("assistant", text)
+            return Message("assistant", text, usage=usage)
         self.plans += 1
         if self.plans > self.steps:
-            return Message("assistant", "done")
+            return Message("assistant", "done", usage=usage)
         call = ToolCall("echo", {"text": f"part {self.plans}"}, id=f"call{self.plans}")
-        return Message("assistant", tool_calls=[call])
+        return Message("assistant", tool_calls=[call], usage=usage)
 
     async def close(self) -> None:
         pass
 
 
 async def _run(
-    llm: Stub, pad: int = PAD, task: str = TASK, **options: Any
+    llm: Stub, pad: int = PAD, task: str = TASK, big: int = 0, **options: Any
 ) -> tuple[RunResult, list[AgentEvent], Agent]:
+    """A run of *task* on *llm*; echo returns *pad* characters, 50,000 for part *big*."""
     agent = Agent(
         llm=llm,
         options=AgentOptions(
@@ -119,7 +132,7 @@ async def _run(
     agent.hippo.register_tool(ECHO)
 
     async def echo(text: str = "") -> str:
-        return text + " " + "e" * pad
+        return text + " " + "e" * (50_000 if text == f"part {big}" else pad)
 
     agent.executor.register("echo", echo)
     events: list[AgentEvent] = []
@@ -160,8 +173,13 @@ def _block(request: list[Message]) -> str:
     return text[text.index(CHECKPOINT_HEADER) :]
 
 
-async def test_the_checkpoint_comes_at_the_line_and_the_window_starts_over() -> None:
-    llm = Stub(steps=40)
+@pytest.mark.parametrize("ratio", [None, 0.7])
+async def test_the_checkpoint_comes_at_the_line_and_the_window_starts_over(
+    ratio: float | None,
+) -> None:
+    # With 0.7 the server counts fewer tokens than the proxy: the checkpoint
+    # request reads the planning requests' ratio, so the fit does not cut it.
+    llm = Stub(steps=40, ratio=ratio)
     result, events, _ = await _run(llm)
     assert result.status == "completed" and result.checkpoints >= 1
     first = next(i for i, r in enumerate(llm.requests) if _asks(r))
@@ -296,9 +314,10 @@ async def test_the_checkpoint_is_the_models_notes_and_nothing_more(
         is_async = inspect.iscoroutinefunction(real)
         monkeypatch.setattr(Hippo, name, spy if is_async else sync_spy)
     llm = Stub(steps=40)
-    _, events, agent = await _run(llm, memory=True)
+    recalled = f"{TASK}\n\n{BLOCK_HEADER}\n- the person likes summary.md"
+    _, events, agent = await _run(llm, task=recalled, memory=True)
     [detail, *_] = _checkpoints(events)
-    # The goal is the task's words, whatever the reply says it is.
+    # The goal is the person's words (no recalled block), whatever the reply says.
     assert detail["checkpoint"]["goal"] == TASK
     assert "something else entirely" not in detail["text"]
     # Never the system message; nothing of it goes to memory or to notes.
@@ -368,3 +387,23 @@ async def test_the_early_line_comes_once_in_each_fill_with_a_file_product(
     # Only the outgoing request carries it: the window does not keep it.
     after = [i + 1 for i, m in enumerate(marks) if m == "early"]
     assert all(early not in str(llm.requests[i]) for i in after if i < len(marks))
+
+
+async def test_a_step_too_large_is_the_fits_with_the_checkpoint_on() -> None:
+    # Part 3 alone passes the limit: what could leave before it frees too little,
+    # so no checkpoint request goes out and the fit previews the newest result.
+    # Once part 3 is old, letting it go makes room, and a checkpoint comes.
+    llm = Stub(steps=4)
+    result, _, _ = await _run(
+        llm,
+        pad=300,
+        big=3,
+        context_window=12000,
+        output_reserve=1000,
+        safety_margin=500,
+    )
+    assert result.status == "completed"
+    after = llm.requests[3]
+    assert not _asks(after) and _calls(after) == ["call3"]
+    assert any("characters omitted" in m.content for m in after if m.role == "tool")
+    assert _asks(llm.requests[4]) and result.checkpoints == 1
