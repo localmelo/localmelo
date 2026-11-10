@@ -520,7 +520,11 @@
             </section>
             <section class="st-section" id="settings-panel-permissions" role="tabpanel" aria-labelledby="settings-head-permissions" hidden>
               <h3 id="settings-head-permissions" data-i18n="settings.section.permissions">Permissions</h3>
-              <p class="st-help" data-i18n="permissions.help">What you allow in the main chat counts everywhere; in a side chat, only there. Spending money, account steps, and typing or sending forms always ask again and never show here.</p>
+              <p class="st-help" data-i18n="permissions.help">What you allow in the main chat counts everywhere; in a side chat, only there. Spending money and account steps always ask and never show here.</p>
+              <details class="st-more">
+                <summary data-i18n="permissions.formsTitle">Typing and sending a form</summary>
+                <p data-i18n="permissions.forms">They are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).</p>
+              </details>
               <div id="s-permissions"></div>
             </section>
             <section class="st-section" id="settings-panel-scheduled" role="tabpanel" aria-labelledby="settings-head-scheduled" hidden>

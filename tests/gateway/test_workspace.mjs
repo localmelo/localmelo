@@ -4877,6 +4877,42 @@ test('the task list and card name the priority in developer mode only', async ()
   assert.deepEqual(await menus(baseRoutes), [true, true]);
 });
 
+test('a task\'s time reads short, as the rest of the page writes it, with the full stamp as its title', async () => {
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const h = harness(defaultMode({'GET /tasks': {tasks: [taskRow('t1', {updated_at: at})]}}));
+  await h.run('init()');
+  h.context.location.hash = '#/tasks';
+  await h.windowListeners.hashchange[0](); await settle();
+  const line = h.element('task-panel').children.find((node) => node.className.includes('task-row')).children[1];
+  const clock = formatTime(new Date(at * 1000), 'clock');
+  const full = formatTime(new Date(at * 1000), 'full');
+  assert.match(line.textContent, new RegExp(`updated ${clock}`));
+  assert.doesNotMatch(line.textContent, new RegExp(full));
+  assert.equal(line.title, `updated ${full}`);
+});
+
+test('in default mode a task\'s facts are one line under its title; a developer gets the full record', async () => {
+  const at = Math.floor(Date.now() / 1000) - 60;
+  const routes = {'GET /tasks': {tasks: [taskRow('t1', {updated_at: at})]}, 'GET /tasks/t1': {task: taskRow('t1', {updated_at: at})}};
+  const page = async (make) => {
+    const h = harness(make(routes));
+    await h.run('init()');
+    h.context.location.hash = '#/tasks/t1';
+    await h.windowListeners.hashchange[0](); await settle();
+    const panel = h.element('task-panel');
+    const labels = findNodes(panel, (node) => node.tag === 'dt').map((node) => node.textContent);
+    return {facts: findNode(panel, (node) => node.className === 'task-facts'), labels};
+  };
+  const plain = await page(defaultMode);
+  const clock = formatTime(new Date(at * 1000), 'clock');
+  assert.equal(flatten(plain.facts), `paused · updated ${clock} · in ~/w`);
+  assert.equal(findNode(plain.facts, (node) => node.tag === 'time').title, formatTime(new Date(at * 1000), 'full'));
+  assert.deepEqual(plain.labels.filter((label) => ['State', 'Mode', 'Updated', 'Workspace'].includes(label)), []);
+  const dev = await page(baseRoutes);
+  assert.equal(dev.facts, null);
+  for (const label of ['State', 'Mode', 'Updated', 'Workspace']) assert.ok(dev.labels.includes(label), label);
+});
+
 test('Escape closes what is open in Tasks and Workers too, and stops no chat there', async () => {
   for (const view of ['showTask("")', 'showWorkers("")']) {
     const status = {running: {chats: 0, tasks: 1, runs: 0, terminal: 0}, items: [{kind: 'task', id: 't1', title: 'Index the repo'}]};

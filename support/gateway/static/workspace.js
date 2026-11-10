@@ -3234,6 +3234,7 @@ const panel = setupPanel({
   hasTasks: () => sections.tasks,
   live: followOptions,
   replying: (id) => id === S.activeId && replying(),
+  folder: () => S.view?.session?.workspace_label ?? "",
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 

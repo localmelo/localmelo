@@ -1223,8 +1223,10 @@ dialog.picture-box {
 .folder-path input[aria-invalid="true"] { border-color: var(--error); }
 .folder-path .field-hint { flex: 1 0 100%; margin: 0; }
 .starters { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); max-width: 800px; margin: var(--space-3) auto 0; }
-.starters button { padding: 6px var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-pill); color: var(--ink-2); font-size: var(--text-small); }
-.starters button:hover { background: var(--raised); }
+/* Starters sit one step below the composer: no fill and no edge until a pointer or the keyboard reaches one; the accent
+   colour, as the page's other boxless things you can press have, says they can be pressed. */
+.starters button { padding: 6px var(--space-3); background: none; border: 1px solid transparent; border-radius: var(--radius-pill); color: var(--accent); font-size: var(--text-small); }
+.starters button:hover, .starters button:focus-visible { border-color: var(--line); background: var(--raised); }
 .send-button {
   flex: none;
   width: 32px;
@@ -2450,6 +2452,23 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .panel .task-panel .worker-row:hover { background: var(--tint); }
 .panel .task-panel .worker-row strong { font-weight: 500; }
 .panel .task-panel .worker-row .muted { color: var(--ink-3); font-size: var(--text-small); }
+/* The list of tasks: rows on the panel's ground with a hairline between them, as the panel's own rows; the task that
+   waits for the person is the one row that asks, so it alone keeps a box, amber as a waiting row in the panel. */
+.panel .task-panel .task-row { position: relative; margin: 0; border: 0; background: none; }
+.panel .task-panel .task-row + .task-row::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 1px; background: var(--line); }
+.panel .task-panel .task-row[data-awaited="person"] { margin: 4px 0; background: var(--wait-fill); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent); }
+.panel .task-panel .task-row[data-awaited="person"]::before,
+.panel .task-panel .task-row[data-awaited="person"] + .task-row::before,
+.panel .task-panel .task-row:hover::before,
+.panel .task-panel .task-row:hover + .task-row::before { content: none; }
+.panel .task-panel .task-row[data-awaited="person"]:hover { background: var(--wait-fill); }
+/* A task's facts in default mode: one quiet line under its title, its state coloured as in the full record. */
+.panel .task-panel .task-facts { margin: 0 0 8px; color: var(--ink-3); font-size: var(--text-small); }
+.task-facts [data-ending], .task-facts [data-awaited="person"] { font-weight: 600; }
+.task-facts [data-ending="ready"] { color: var(--ok); }
+.task-facts [data-ending="draft"], .task-facts [data-ending="blocked"], .task-facts [data-awaited="person"] { color: var(--warn); }
+.task-facts [data-ending="failed"] { color: var(--error); }
+.task-facts time { color: inherit; }
 .panel .task-panel :is(.task-missing, .task-note) { font-size: var(--text-small); }
 .panel .task-panel .task-dialog h2 { margin: 0; font-size: var(--text-title); font-weight: 600; }
 .task-level { max-width: 100%; min-height: 32px; padding: 0 6px; border: 1px solid var(--control); border-radius: var(--radius-control); background: transparent; color: var(--ink); font-size: var(--text-small); }
@@ -2511,6 +2530,12 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .st-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-6) var(--space-7) var(--space-7); }
 .st-section h3 { margin: 0; padding-right: var(--space-7); font-size: var(--text-heading); font-weight: 500; line-height: 30px; letter-spacing: -0.4px; }
 .st-help { max-width: 62ch; margin: var(--space-1) 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+/* The rest of a section's help, folded under the two sentences that matter first. */
+.st-help:has(+ .st-more) { margin-bottom: var(--space-2); }
+.st-more { max-width: 62ch; margin: 0 0 var(--space-5); color: var(--ink-3); font-size: var(--text-small); line-height: 20px; }
+.st-more > summary { width: fit-content; color: var(--accent); cursor: pointer; }
+.st-more > p { margin: var(--space-1) 0 0; }
+@media (pointer: coarse), (max-width: 700px) { .st-more > summary { padding-block: 12px; } }
 .st-group-title { margin: var(--space-6) 0 var(--space-2); color: var(--ink-2); font-size: var(--text-small); font-weight: 600; }
 .st-group { margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-card); list-style: none; }
 .st-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-5); min-height: 56px; margin: 0; padding: var(--space-3) var(--space-4); border: 0; }

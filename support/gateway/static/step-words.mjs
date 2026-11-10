@@ -27,6 +27,26 @@ function quoted(text) {
   return words ? `“${words.length > SHOWN ? `${words.slice(0, SHOWN - 1)}…` : words}”` : '…';
 }
 
+// The tools whose step, said with no call to name, would not say what the tool does (a search with no words, a keep
+// that reads as failed, two memory tools that read alike): their own line in the details panel.
+const TOOL_LINES = {
+  remember: 'steps.ask.keep',
+  web_search: 'steps.tool.webSearch',
+  search_files: 'steps.tool.searchFiles',
+  search_memory: 'steps.tool.searchMemory',
+  open_memory: 'steps.tool.openMemory',
+  task_control: 'steps.tool.taskControl',
+};
+
+/**
+ * What a tool does for the person, as the details panel lists it (`Read a file`, `Run a command`): a step of it as it
+ * would ask (`stepWords`, with no call to name), or its own line in `TOOL_LINES`.
+ */
+export function toolWords(name) {
+  const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
+  return TOOL_LINES[tool] ? closeUp(t(TOOL_LINES[tool])) : stepWords(tool, {}, 'ask');
+}
+
 /** A task tool's own check turned the call down, so it did nothing (the server's `refused_step`). */
 export function refusedStep(output) {
   return /^Not done/.test(String(output ?? '').trim());
@@ -38,6 +58,16 @@ export function refusedStep(output) {
  * a note was not kept ("Not remembered"), a message to a finished task started a new one ("Started task").
  */
 export function stepWords(name, args, done = false, output = '') {
+  return closeUp(phrase(name, args, done, output));
+}
+
+// A catalog phrase keeps a space around its `{what}` so a file name or a host stands apart ("读取 notes.md"); between
+// two Chinese or Japanese characters that space is a gap a reader stops at ("编辑 一个文件"), so it goes.
+const WIDE = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u3000-\\u303f\\uff00-\\uffef“”';
+const GAP = new RegExp(`([${WIDE}]) +(?=[${WIDE}])`, 'gu');
+const closeUp = (text) => String(text).replace(GAP, '$1');
+
+function phrase(name, args, done, output) {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
   const a = args && typeof args === 'object' ? args : {};
   // `steps.now.<verb>` while it runs, `steps.done.<verb>` once done; `what` is a name or `steps.<thing>`.
