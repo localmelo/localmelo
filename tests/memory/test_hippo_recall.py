@@ -40,6 +40,7 @@ from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     ITEM_LIST_GUIDE,
     LIST_GUIDE,
+    OLDER,
     OLDER_ITEM,
     PREMISE_GUIDE,
     Corpus,
@@ -65,6 +66,7 @@ from localmelo.support.memory.service import (
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.agent.test_tool_exposure import FakeLLM
 from localmelo.tests.memory.hippo_helpers import StubEncoder, relate
+from localmelo.tests.memory.test_context_pack import note
 from localmelo.tests.memory.test_recall_bars import (
     FAR_QUESTION,
     MODEL,
@@ -848,6 +850,120 @@ async def test_a_replaced_item_reads_as_older_and_its_replacement_leads(
         ]
         assert listed[-1].endswith(f"({OLDER_ITEM})")
         assert OLDER_ITEM == "older; replaced by a newer item"
+    finally:
+        await memory.aclose()
+
+
+async def book_club(
+    memory: ChatMemory, store: SessionStore, said: str
+) -> tuple[int, int, int]:
+    """Two memory items about one book club, the first (turn 2 of chat A) replaced by
+    the second (turn 2 of chat C), and a note of chat A's turn 2 that says *said*: the
+    numbers of the new item and of the note, then of the old item."""
+    now = time.time()
+    a, _ = await add_turn(memory, store, "Club?", "Noted.", at=now - 5 * DAY, title="A")
+    c, _ = await add_turn(
+        memory, store, "Moved?", "Noted.", at=now - 2 * DAY, title="C"
+    )
+    old = await put(
+        memory, a, "Club day", "The book club meets on Tuesdays.", turns=(2,)
+    )
+    new = await put(
+        memory, c, "Club day", "The book club now meets on Thursdays.", turns=(2,)
+    )
+    await relate(memory.stores()[1], replace=(old, new))
+    kept = await note(
+        memory, said, "My book club meets on Tuesdays.", "about", session_id=a, turn=2
+    )
+    return new, kept, old
+
+
+async def test_a_note_of_a_replaced_items_turn_reads_as_older_and_stays_in_the_block(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        new, kept, old = await book_club(
+            memory, store, "Your book club meets on Tuesdays."
+        )
+        found = await ask(memory, store, "when does the book club meet?")
+        # The newer item first, then the note, marked; the old item is left out.
+        assert [i.key for i in found.used] == [f"m:{new}", f"r:{kept}"]
+        newer, said = (
+            line for line in found.block.split("\n") if line.startswith("- ")
+        )
+        assert "Thursdays" in newer and "older" not in newer
+        assert "Tuesdays" in said and said.endswith(f"({OLDER_ITEM})")
+        # The search tool lists the same marks, on the old item and on the note.
+        reply = await MemoryTools(memory).search(query="when does the book club meet?")
+        lines = reply.split("\n")
+        assert len(lines) == 3 and "older" not in lines[0]
+        assert all(line.endswith(f"({OLDER_ITEM})") for line in lines[1:])
+        assert sum("the user said" in line for line in lines[1:]) == 1
+        # Asked about the past too, the old item joins the note, both marked.
+        past = await ask(memory, store, "when did the book club meet before?")
+        assert past.used[0].key == f"m:{new}"
+        assert {i.key for i in past.used[1:]} == {f"m:{old}", f"r:{kept}"}
+        assert past.block.count(f"({OLDER_ITEM})") == 2
+    finally:
+        await memory.aclose()
+
+
+async def test_the_newer_item_comes_in_when_the_search_finds_only_the_note(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        new, kept, _ = await book_club(
+            memory, store, "Your book club meets on Tuesdays in the library hall."
+        )
+        found = await ask(memory, store, "which library hall?")
+        assert [i.key for i in found.used] == [f"m:{new}", f"r:{kept}"]
+        assert "Thursdays" in found.block and found.block.endswith(f"({OLDER_ITEM})")
+    finally:
+        await memory.aclose()
+
+
+async def test_an_item_whose_turns_a_note_replaced_is_left_out_unless_asked_about_the_past(
+    tmp_path: Path, store: SessionStore
+) -> None:
+    cfg = config(recall_source="items")
+    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))
+    try:
+        now = time.time()
+        a, _ = await add_turn(
+            memory, store, "Sync?", "Noted.", at=now - 5 * DAY, title="A"
+        )
+        c, _ = await add_turn(
+            memory, store, "Moved?", "Noted.", at=now - 2 * DAY, title="C"
+        )
+        # Chat C's note replaces chat A's: it replaced what chat A's turn 3 said.
+        await note(
+            memory,
+            "Your weekly sync is on Wednesday.",
+            "",
+            "about",
+            session_id=a,
+            turn=3,
+        )
+        kept = await note(
+            memory, "Your weekly sync is on Friday.", "", "about", session_id=c, turn=1
+        )
+        only = await put(
+            memory, a, "Sync day", "The weekly sync is on Wednesday.", turns=(3,)
+        )
+        # The second item cites a turn that still stands, so it stays.
+        both = await put(
+            memory, a, "Sync room", "The weekly sync is in room 4.", turns=(3, 4)
+        )
+        found = await ask(memory, store, "when is the weekly sync?")
+        assert {i.key for i in found.used} == {f"r:{kept}", f"m:{both}"}
+        assert "older" not in found.block
+        past = await ask(memory, store, "when was the weekly sync before?")
+        assert [i.key for i in past.used][-1] == f"m:{only}"
+        assert past.block.endswith(f"({OLDER})")
     finally:
         await memory.aclose()
 

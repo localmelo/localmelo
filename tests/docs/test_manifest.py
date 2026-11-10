@@ -313,6 +313,7 @@ def test_manifest_schema_and_inventory() -> None:
             "id",
             "section",
             "order",
+            "summary",
             "en_source",
             "zh_source",
             "en_output",
@@ -323,6 +324,9 @@ def test_manifest_schema_and_inventory() -> None:
         assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", page["id"])
         assert page["section"] in section_ids
         assert isinstance(page["order"], int)
+        assert page["summary"] is None or (
+            isinstance(page["summary"], str) and "\n" not in page["summary"]
+        )
         ids.append(page["id"])
         orders.append((page["section"], page["order"]))
         assert page["en_source"] or page["zh_source"]
@@ -478,49 +482,26 @@ def test_local_links_and_anchors() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "docs/start/quickstart.md",
-        "docs/guides/configure.md",
-        "docs/guides/model-servers.md",
-        "docs/guides/embedding.md",
-        "docs/guides/api-client.md",
-        "docs/guides/python.md",
-        "docs/guides/tools-mcp.md",
-        "docs/guides/memory.md",
-        "docs/guides/offline-retrieval.md",
-        "docs/guides/terminal.md",
-        "docs/guides/sessions.md",
-        "docs/guides/gateway.md",
-        "docs/guides/web-console.md",
-        "docs/guides/macos-app.md",
-        "docs/guides/art-pack.md",
-        "docs/guides/web-search.md",
-        "docs/guides/scheduler.md",
-        "docs/concepts/how-it-works.md",
-        "docs/concepts/memory.md",
-        "docs/concepts/procedures.md",
-        "docs/concepts/retrieval.md",
-        "docs/reference/tools.md",
-        "docs/reference/procedures.md",
-        "docs/reference/http-v1.md",
-        "docs/reference/python-api.md",
-        "docs/reference/run-results.md",
-        "docs/reference/configuration.md",
-        "docs/reference/sessions.md",
-        "docs/reference/scheduler.md",
-        "docs/reference/cli.md",
-        "docs/reference/api-v2.md",
-        "docs/reference/troubleshooting.md",
-        "docs/reference/events.md",
-        "docs/reference/retrieval.md",
-        "docs/reference/memory.md",
-        "docs/README.md",
-        "docs/project/evaluations.md",
-        "docs/project/documentation.md",
-    ],
-)
+# Only the start pages have Chinese Markdown twins (the website's pages: above).
+TWINS = ("docs/README.md", "docs/start/quickstart.md")
+
+
+def test_the_chinese_twins_are_the_start_pages() -> None:
+    pages = json.loads(MANIFEST.read_text())["pages"]
+    twinned = {
+        p["en_source"]
+        for p in pages
+        if (p["zh_source"] or "").endswith(".md") and p["id"] != "style"
+    }
+    assert twinned == set(TWINS)
+    chinese = {p for p in tracked_docs() if p.startswith("docs/zh-CN/")}
+    assert {p for p in chinese if p.endswith(".md")} == {
+        *(s.replace("docs/", "docs/zh-CN/", 1) for s in TWINS),
+        "docs/zh-CN/STYLE.md",
+    }
+
+
+@pytest.mark.parametrize("source", TWINS)
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:
     pages = json.loads(MANIFEST.read_text())["pages"]
     page = next(p for p in pages if p["en_source"] == source)

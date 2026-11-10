@@ -218,7 +218,7 @@
             在 <code>tests/executor/</code> 中添加测试。
           </li>
           <li>
-            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">docs/tools.md</a>；智能体需要知道时，也更新 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>。
+            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">docs/tools.md（英文）</a>。
           </li>
         </ol>
       </section>
@@ -263,7 +263,7 @@
             行为改动需要测试。不要为了让改动通过而削弱或删除已有的测试；如果确实要改测试，请在 pull request 里说明原因。
           </li>
           <li>
-            在同一个 pull request 中更新文档：英文页面、对应的中文版本（<code>README.zh-CN.md</code> 和 <code>docs/zh-CN/</code>）、智能体依赖的行为所对应的 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>，以及 <code>CHANGELOG.md</code> 的 Unreleased 一节：写上 pull request 的编号，如 <code>([#NN])</code>，并在文件末尾加上对应的链接。
+            在同一个 pull request 中更新文档：你改动的那一页（入门页和网站还有对应的中文版本）；只有面向智能体的约定改变时才更新 <code>docs/for-agents.md</code>；一个人能察觉到的改动，在 <code>CHANGELOG.md</code> 里写一行。
           </li>
           <li>
             改动终端里 <code>melo</code> 的显示内容或网站时，请在 pull request 中附上截图。
@@ -302,7 +302,7 @@
         </ul>
         <!-- usage:art-pack --><figure class="usage" aria-label="替换 Melo 的美术" data-copy="uv run --with pillow==13.0.0 python scripts/art_pack.py check melo-pack.zip&#10;uv run --with pillow==13.0.0 python scripts/art_pack.py apply melo-pack.zip"><div class="usage-bar"><span class="usage-title">替换 Melo 的美术</span><button class="usage-copy" type="button" hidden aria-live="polite" data-done="已复制" data-fail="复制失败">复制</button></div><pre class="usage-body"><code><span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">check</span> <span class="a">melo-pack.zip</span></span>
 <span class="ln cmd"><span class="p">$</span> <span class="c">uv</span> <span class="s">run</span> <span class="f">--with</span> <span class="a">pillow==13.0.0</span> <span class="c">python</span> <span class="a">scripts/art_pack.py</span> <span class="a">apply</span> <span class="a">melo-pack.zip</span></span></code></pre></figure><!-- /usage -->
-        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/art-pack.md">美术包指南</a>有美术包的结构、六个动作和检查项。</p>
+        <p class="more-link"><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/art-pack.md">美术包指南（英文）</a>有美术包的结构、六个动作和检查项。</p>
       </section>
 
       <section class="section" id="design">
