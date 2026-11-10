@@ -340,9 +340,36 @@ calibration. The proxy is an estimate, not a bound: templates and vision models 
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
-down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs and the latest
-reflection; images, failed checks and older reflections go only when nothing else is left. It leaves
-history and the retained conversation unchanged.
+down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs, the latest
+reflection and the latest work checkpoint; images, failed checks and older reflections go only
+when nothing else is left. It leaves history and the retained conversation unchanged.
+
+With a token budget, long work does not wait for the fit. Before a planning request that would pass
+85% of the input limit, the run writes a work checkpoint: one extra request (of kind `reflect`, on
+the same prefix as the planning request, with the same tools) asks the model for short notes, each
+with its size in words (about 650 words in all): where its results are, the next steps, what failed,
+what works, and where the work stands, with only the findings the next steps need. Notes over their
+size keep where the results are and the next steps whole; the state is cut first. Then the oldest
+units leave the working window for good, oldest first, down to 50% of the limit, keeping the fit's
+pins, and the checkpoint stands right after the task's message in their place: `[Work checkpoint:
+...]` with the task's words, the model's notes, the files the run wrote, and the results that left
+the context (one line per source, such as a page and the parts read; every other result is still in
+the context). The next request extends that one until the window fills again; a later checkpoint
+replaces the block. Notes that cannot be read are asked for once more. When none come (a reply still
+unreadable, a request that failed or timed out after its retries, or no request left, `max_calls`),
+the block keeps the last checkpoint's notes, or, with none, the units stay while the request fits
+and go with the computed lines alone once it does not. The request's output limit (4,096 tokens)
+keeps it well inside a client's read timeout on a slow local model. A checkpoint comes only when
+what can leave, less the most the block puts back, frees at least half the room between 85% and 50%;
+otherwise (a single step too large) the fit acts as before, and the units it drops, like those the
+window's message cap drops, are added to the block's list at the next request, so no drop goes
+unsaid. In a chat, earlier turns that leave the context are listed there too. Each checkpoint is a
+`checkpoint` notice (see [Events](events.md)) and counts in the result's `checkpoints`. Earlier,
+once in each fill, the first planning request past 60% of the limit (after a checkpoint: halfway
+from where the window was left to 85%) in work whose result goes into a file (your words ask for a
+file, or a file was written) ends with one line that asks the model to write what it has to that
+file now, while the results are still in context; the line is on that request only, not in the
+window. Without a token budget nothing of this happens.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at

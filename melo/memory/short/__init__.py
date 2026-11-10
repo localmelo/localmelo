@@ -251,6 +251,27 @@ class WorkingMemory:
         self._buf = deque(kept)
         return dropped
 
+    def put_after(
+        self, anchor: Message | None, msg: Message, *, replacing: Message | None = None
+    ) -> None:
+        """Put *msg* right after the unit that holds *anchor*, in place of *replacing*.
+
+        Both are matched by identity. *replacing*, when the window holds it,
+        leaves first (a stand-in for the window's own message, not a drop: no
+        one is told). Without *anchor* in the window, *msg* comes first.
+        """
+        if replacing is not None:
+            self._buf = deque(m for m in self._buf if m is not replacing)
+            self._forget_aliases(replacing)
+        units = group_turns(self._buf, empty_prefix=self._empty_prefix)
+        start = next(
+            (i + 1 for i, unit in enumerate(units) if any(m is anchor for m in unit)),
+            0,
+        )
+        before = [m for unit in units[:start] for m in unit]
+        after = [m for unit in units[start:] for m in unit]
+        self._buf = deque([*before, msg, *after])
+
     def _leading_unit_size(self) -> int:
         """Messages in the oldest unit of the buffer (see :func:`group_turns`)."""
         unit = [self._buf[0]]
