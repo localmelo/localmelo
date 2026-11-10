@@ -1197,9 +1197,14 @@ def test_the_settings_carry_how_new_chats_start_and_save_it_only_when_sent(
 
 
 def test_the_settings_carry_whether_melo_may_browse_and_save_it_only_when_sent(
-    client: TestClient, isolated_config: Path
+    client: TestClient, isolated_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``/browser on`` and ``/browser off`` in the console save ``[browser] driver``."""
+    from localmelo.support.browser import chrome
+
+    monkeypatch.setattr(
+        chrome, "chrome_installed", lambda: False
+    )  # on: Safari's windows
     _saved_cfg()
     loaded = client.get("/api/settings").json()
     assert loaded["browser"] is False
@@ -1239,7 +1244,7 @@ def test_the_browser_choice_names_the_driver_and_says_whether_chrome_is_installe
     assert picked.json()["browser_driver"] == "chrome"
     assert picked.json()["browser"] is True and picked.json()["chrome_installed"]
     assert 'driver = "chrome"' in isolated_config.read_text()
-    # On again after off keeps nothing: on is Safari's windows, the default.
+    # On again after off is Chrome, the default while it is installed.
     off = client.put(
         "/api/settings", json=_put_body(picked.json()["revision"], browser=False)
     )
@@ -1247,7 +1252,7 @@ def test_the_browser_choice_names_the_driver_and_says_whether_chrome_is_installe
     again = client.put(
         "/api/settings", json=_put_body(off.json()["revision"], browser=True)
     )
-    assert again.json()["browser_driver"] == "safari-automation"
+    assert again.json()["browser_driver"] == "chrome"
     # /browser on while a driver is chosen keeps it.
     chosen = client.put(
         "/api/settings",

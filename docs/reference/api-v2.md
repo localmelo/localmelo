@@ -2450,42 +2450,28 @@ panel uses these routes.
 - With `[memory] sleep` not `off`, the gateway also runs a sleep by itself and adds a `sleep` echo to the main
   chat ([Echoes](#echoes-in-the-main-chat) has Undo); see [Memory across chats](../concepts/memory.md#tidying-notes-while-you-are-away).
 - `POST /api/memory/sleep` (developer mode, `[ui] mode = "developer"`; else 404 `not_found`) runs one sleep and
-  answers its report. The optional body `{"variant": "rules"}` names the variant (`off`, `rules`, `model` or
-  `model+tags`; anything else is 400); without it `[memory] sleep` decides, and `off` does nothing.
-  The report is `{"run_id", "variant", "started", "ended", "model_calls", "refused", "refusals", "ms", "selected", "processed", "proposals", "skipped", "aborted", "capped", "changes": [{"op",
-  "before_ids", "after_id", "text", "source_turn", "quote", "before_texts", "verdict", "proposal", "guard", "replaces_before", "replaces_after"}]}`: `quote` is the evidence span;
+  answers its report. The optional body `{"variant": "rules"}` names the variant (`off` or `rules`; anything else,
+  `model` and `model+tags` included, is 400); without it `[memory] sleep` decides, and `off` does nothing.
+  The report is `{"run_id", "variant", "started", "ended", "ms", "skipped", "aborted", "capped", "changes": [{"op",
+  "before_ids", "after_id", "text", "source_turn", "quote", "before_texts", "guard", "replaces_before", "replaces_after"}]}`: `quote` is the evidence span;
   `before_texts` snapshots the superseded texts in `before_ids` order. `op` is `O1` (duplicates merged: `before_ids` superseded by
   `after_id`), `O2` (a newer typed value written and superseding `before_ids`), `O2b` (the older note of a subject
-  superseded by the newer active note `after_id`, which is kept; nothing is written; by the rules or, with a model, by an update), `O3` (a lost fact written),
-  `ADD`, `UPDATE`, `RETIRE` (no replacement, `after_id` null) or `O4` (a pronoun resolved to a named person).
-  Model variants default to twelve requests; `refused` counts invalid proposals, `ms` is elapsed time,
-  and `processed` lists completed `[session_id, turn]` ids. `selected` lists those ids in actual
-  request order (a pronoun rewrite can select a turn again), including failed requests.
-  `proposals` holds `{session_id, turn, op, note_id, target_text, text, quote, verdict, guard}` per returned operation;
-  `target_text` is the text of the note `note_id` names (empty for none), text and quote are at most 200 characters and
-  sensitive fields are replaced by `[redacted]`. `guard` is null, or for an `ADD` or an update the numbers of the existing-fact
-  check: `{note_id, coverage, subject_same, polarity_same, cosine, overlap, held}` (`cosine` null when the vectors are not comparable).
+  superseded by the newer active note `after_id`, which is kept; nothing is written) or `O3` (a lost fact written). `ms` is elapsed time.
   `skipped` holds `{session_id, turn, text, quote, guard}` for each fact a rule did not write because an active note held it (at most 100);
-  a written `O2` or `O3` change carries its `guard` too, null for any other. A proposal about a note an `O2b` of the same run retired is `noop`.
+  `guard` is the numbers of the existing-fact check: `{note_id, coverage, subject_same, polarity_same, cosine, overlap, held}` (`cosine` null when the vectors are not comparable).
+  A written `O2` or `O3` change carries its `guard` too, null for any other.
   A note that kept its place (`O1`, `O2b`) also counts as having replaced the exchanges of the notes it superseded, as a written update does:
   their `[session_id, turn]` join its provenance `replaces`, which recall reads. `replaces_before` and `replaces_after` are that list before
-  and after the change; `replaces_after` is null when the change left it as it was. A written `O2` or `UPDATE` note carries `replaces` from the start.
-  `verdict` is `applied`, `noop`, or `refused:<check>`: `quote_not_in_text`, `sensitive`,
-  `unsupported`, `first_person` (the text says "I", "me" or "my" outside quotes), `wrong_owner`, `stale`, `decide_mismatch`, `not_newer`, `self_target` (the note
-  named was written from the turn's own words), `no_negation`, `no_shared_term`, `edited`, or `parse`. `noop` also covers operations left unapplied after
-  the change cap (`capped=true`). A malformed reply/timeout has a synthetic `PARSE` entry;
-  a malformed operation has `op: "INVALID"`. A change's `verdict` is `applied`; its `proposal`
-  is the identical model label, or null for a rule change. Unselected turns remain pending.
-  An unreadable reply or timeout stays pending once; a second failure completes it and adds
-  `{"session_id", "turn", "reason": "parse"}` to `refusals` (plus `note_id` for a pronoun rewrite).
+  and after the change; `replaces_after` is null when the change left it as it was. A written `O2` note carries `replaces` from the start.
   `capped` is true when the change limit was reached (at most 20 per run). There is no turn to carry a
   `memory.sleep` event, so the report is this answer; the run's ids are kept in the memory folder for the undo,
   also when the run is cancelled or stops early (none when it changed nothing). `aborted` is empty, `sleep is off`,
   `stopped: gpu_lock` (another holder took the lock), `stopped: user_active` (a turn started during the run), or the error that ended it.
 - `DELETE /api/memory/sleep/{run_id}` (developer mode) puts that run back: what it superseded is current again
   and what it wrote is removed, `{"run_id", "restored", "removed", "kept"}` (`kept`: a note a later note replaced or
-  you reworded, left as it is). An unknown or undone run is 404. The undo sticks: the notes it separated, a retired
-  note it brought back and a note it removed are not merged, replaced, retired or written again by a later run.
+  you reworded, left as it is). An unknown or undone run is 404. The undo sticks: the notes it separated and a note
+  it removed are not merged, replaced or written again by a later run. A log saved by an older version, with its
+  model-written changes, is undone the same way.
 
 ## Bring in memory from other assistants
 

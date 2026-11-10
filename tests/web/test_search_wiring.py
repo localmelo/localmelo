@@ -131,7 +131,8 @@ async def test_with_the_browser_on_the_search_may_use_it() -> None:
     try:
         assert {"web_search", "browser_open"} <= set(_tools(agent))
         assert any(
-            n.startswith(NOTE) and "Safari" in n for n in agent.chat.system_notes
+            n.startswith(NOTE) and "melo's browser" in n
+            for n in agent.chat.system_notes
         )
     finally:
         await agent.close()

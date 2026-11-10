@@ -24,8 +24,9 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
 
   const {node, button} = maker(doc);
   const heading = node('h2', '', t('drawer.title'));
-  const closeButton = button('', t('drawer.close'), () => close());
-  const tabs = node('div', 'drawer-tabs');
+  // The way back and the tabs look as they do on a task's page and above the panel.
+  const closeButton = button('task-back', t('tasks.back'), () => close());
+  const tabs = node('div', 'drawer-tabs panel-tabs');
   const content = node('div', 'drawer-content');
   const message = node('p', 'drawer-message');
   message.setAttribute('role', 'status');
@@ -33,12 +34,12 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   root.setAttribute('role', 'region');
   root.setAttribute('aria-label', t('drawer.label'));
   root.hidden = true;
-  root.replaceChildren(heading, closeButton, tabs, message, content);
+  root.replaceChildren(closeButton, heading, tabs, message, content);
   const tabButtons = {};
   const TABS = ['tools', 'memory', 'runs', 'events'];
   const available = (name) => name !== 'events' || developer();
   for (const name of TABS) {
-    const item = button('', t(`drawer.tab.${name}`), () => selectTab(name));
+    const item = button('panel-tab', t(`drawer.tab.${name}`), () => selectTab(name));
     tabButtons[name] = item;
     tabs.append(item);
   }

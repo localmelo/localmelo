@@ -55,7 +55,7 @@ class Anywhere(FakeDriver):
 
     async def page(self, tab: str | None, whole: bool = False) -> RawPage:
         self.calls.append(("page", tab or ""))
-        return self.shown(self._url(tab))
+        return self.viewed(tab, self.shown(self._url(tab)))
 
     async def wait(
         self,

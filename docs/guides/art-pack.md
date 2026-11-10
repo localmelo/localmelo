@@ -1,6 +1,6 @@
 # Art pack: replace every picture of Melo
 
-One command checks a folder or a zip of Melo's art and replaces every picture of Melo in the repository with it: the desktop pet, the console's portrait, the faces, the tab icons, the app icon and the menu-bar logo. This guide is for whoever draws or sources the art and builds localmelo from a checkout.
+One command checks a folder or a zip of Melo's art and replaces every picture of Melo in the repository with it: the desktop pet, the console's portrait, the faces, the tab icons, the app icon and the menu-bar mark. This guide is for whoever draws or sources the art and builds localmelo from a checkout.
 
 ![The poster of each of Melo's six states, with the state's name: startup, thinking, working, attention, idle_rest and idle_play.](../assets/img/art-pack-moves.webp)
 
@@ -24,7 +24,7 @@ Art pack: melo-pack
 
 Missing -> uses instead
   brand/app-icon.png: AppIcon.icns stays as it is
-  brand/menubar.png: MenuBarLogo.png, MenuBarLogo@2x.png and the website's round logo stay as they are
+  brand/menubar.png: docs/assets/icon_small.png (the website's round logo) stays as it is
   brand/emblem.png: docs/assets/melo.png (the README emblem) stays as it is
 
 Problems (2)
@@ -84,7 +84,7 @@ melo-pack/
   heads/head-smile.png           optional: the head for small sizes
   heads/head-neutral.png         optional: the calm head for small sizes
   brand/app-icon.png             optional: the macOS app icon
-  brand/menubar.png              optional: the menu-bar logo and the website's round logo
+  brand/menubar.png              optional: the website's round logo
   brand/emblem.png               optional: the README emblem
 ```
 
@@ -144,12 +144,12 @@ The stills and the heads are optional. Each is one transparent picture on the pa
 | `stills/error.png` | Ears back, head low | A run that just failed or a model server that cannot be reached; the face on that reply |
 | `stills/offline.png` | Curled up | Nothing known yet: connecting, or localmelo does not answer |
 | `heads/head-smile.png` | A front-facing, smiling head | The reply avatar, the Main chat and the phone's panel chip |
-| `heads/head-neutral.png` | A calm head, ears up | The sidebar and the sign-in screen, the browser tab at 16, 32 and 64 px, and the terminal welcome's mark |
+| `heads/head-neutral.png` | A calm head, ears up | The sidebar and the sign-in screen, the browser tab at 16, 32 and 64 px, the terminal welcome's mark and the menu-bar mark |
 
 - The faces that the activity pill, the approval bar and the replies show are cut from the posters and stills by fixed boxes; a head replaces the cut where it is given.
 - A head is the bust fitted in the head box (see [The canvas](#the-canvas)): 464 px square of a 512 px canvas, its bottom on the anchor line.
 - The tab icon is cut closer from the calm head, with the neck left out, so it still reads at 16 px.
-- The terminal welcome's mark is computed from the calm head, so `support/cli/mark.py` changes with it.
+- The terminal welcome's mark and the menu-bar mark (the head as lines) are computed from the calm head, so `support/cli/mark.py` and `macos/assets/MenuBarMark*.png` change with it.
 
 ## Brand pictures
 
@@ -158,7 +158,7 @@ The brand pictures are optional and are not on the canvas. They are PNG files of
 | File | Must be | Becomes |
 |---|---|---|
 | `brand/app-icon.png` | Square, 1024 px or more (512 px is a warning) | `macos/assets/AppIcon.icns`, every size |
-| `brand/menubar.png` | Square | `MenuBarLogo.png` (18 px), `MenuBarLogo@2x.png` (36 px) and the website's round logo, 64 px |
+| `brand/menubar.png` | Square | The website's round logo, 64 px |
 | `brand/emblem.png` | Under 2 MB | `docs/assets/melo.png`, the README emblem; also the app icon when there is no `brand/app-icon.png` |
 
 - Draw the app icon as a full square with a flat paper-coloured background: the build lays it on a rounded tile of the macOS icon grid and fades its edges into the tile's colour.
@@ -183,7 +183,7 @@ The brand pictures are optional and are not on the canvas. They are PNG files of
 | `heads/head-smile.png` | The reply face is cut from the `startup` poster |
 | `heads/head-neutral.png` | The brand face is the reply face, and the tab icons are cut from the `startup` poster |
 | `brand/app-icon.png` | The app icon is drawn from `brand/emblem.png`, else `AppIcon.icns` stays as it is |
-| `brand/menubar.png` | `MenuBarLogo.png`, `MenuBarLogo@2x.png` and the website's round logo stay |
+| `brand/menubar.png` | The website's round logo stays |
 | `brand/emblem.png` | `docs/assets/melo.png` stays |
 
 - The moves folder always holds all nine posters, so the console and the app never find a hole.
@@ -230,13 +230,13 @@ Each finding starts with the rule in plain words. A problem stops `apply`; a war
 | `head box` | A head draws outside its box and is cut off |
 | `stills`, `heads` | A file is given at the root and in its folder |
 | `colour profile`, `emblem`, `app icon`, `menu-bar logo` | A profile that is not sRGB, a heavy emblem, an icon under 1024 px or with transparent pixels, a logo under 64 px |
-| `terminal mark`, `encoder` | The mark cannot be made; Pillow is not the pinned version, so the bytes may differ from the committed ones |
+| `terminal mark`, `menu-bar mark`, `encoder` | A mark cannot be made, or the menu-bar mark's fur needs other colours in the app's palette; Pillow is not the pinned version, so the bytes may differ from the committed ones |
 
 ## What apply writes
 
 - The moves folder, `support/gateway/static/moves`, is replaced whole: the sheets, the posters, the stills, the faces, the tab icons and `manifest.json`. A file that is not in the new set is removed.
-- `support/cli/mark.py`, the terminal welcome's mark, is computed from the new calm face.
-- With brand pictures: `macos/assets/AppIcon.icns`, `MenuBarLogo.png`, `MenuBarLogo@2x.png`, `docs/assets/melo.png` and `docs/assets/icon_small.png`.
+- `support/cli/mark.py`, the terminal welcome's mark, and `macos/assets/MenuBarMark*.png`, the menu-bar mark, are computed from the new calm face.
+- With brand pictures: `macos/assets/AppIcon.icns`, `docs/assets/melo.png` and `docs/assets/icon_small.png`.
 - The two pictures of this guide, `docs/assets/img/art-pack-moves.webp` and `art-pack-canvas.webp`, are drawn again from the new posters. `art_pack.py figures` redraws them alone.
 
 Nothing from the pack is copied except the brand pictures it names. The pack itself stays outside the repository.

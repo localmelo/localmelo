@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 import uuid
 
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.recovery_store import RecoveryStore
-from localmelo.support.gateway.task_store import TaskRecord, TaskStore
+from localmelo.support.gateway.task_store import TaskRecord, TaskStore, TaskStoreError
 from localmelo.support.scheduler.model import TERMINAL_PHASES
-from localmelo.support.sessions.store import RUN_STATUSES, SessionStore, StoredEvent
+from localmelo.support.sessions.store import (
+    RUN_STATUSES,
+    SessionStore,
+    SessionStoreError,
+    StoredEvent,
+)
+
+log = logging.getLogger(__name__)
+
+FENCED_REASON = (
+    "this task could not be restored after the restart; "
+    "check its work before resuming it"
+)
+
+
+def _store_failed(exc: Exception) -> bool:
+    """Whether *exc* says the store itself failed, not one task's rows."""
+    if isinstance(exc, SessionStoreError):
+        return not isinstance(exc, TaskStoreError)
+    return isinstance(exc, sqlite3.Error | OSError)
 
 
 class StartupRecovery:
@@ -24,25 +45,37 @@ class StartupRecovery:
         self.recovery = RecoveryStore(store)
 
     async def run(self) -> None:
+        """Classify every open task; one that cannot be classified is fenced.
+
+        A failure of the store itself still stops the whole stage.
+        """
         for task in await self.tasks.list_tasks():
-            intent = await self.recovery.active_intent(task.task_id)
-            if intent is not None:
-                receipt = await self.recovery.receipt(task.task_id, intent[0])
-                if receipt is None:
-                    raise RuntimeError("prepared recovery receipt is missing")
-                if receipt[1] and task.state not in TERMINAL_PHASES:
-                    await self.recovery.commit(task.task_id, operation_id=intent[0])
-                else:
-                    generation, previous = await self.tasks.park_identity(task.task_id)
-                    await self.recovery.supersede(
-                        task.task_id,
-                        intent[0],
-                        expected_generation=generation,
-                        expected_operation_id=previous,
-                    )
-                task = await self.tasks.get_task(task.task_id)
-            if task.state in TERMINAL_PHASES:
-                continue
+            try:
+                await self._recover(task)
+            except Exception as exc:
+                if _store_failed(exc):
+                    raise
+                log.exception("Task %s could not be recovered at startup", task.task_id)
+                await self.recovery.fence(task.task_id, reason=FENCED_REASON)
+
+    async def _recover(self, task: TaskRecord) -> None:
+        intent = await self.recovery.active_intent(task.task_id)
+        if intent is not None:
+            receipt = await self.recovery.receipt(task.task_id, intent[0])
+            if receipt is None:
+                raise RuntimeError("prepared recovery receipt is missing")
+            if receipt[1] and task.state not in TERMINAL_PHASES:
+                await self.recovery.commit(task.task_id, operation_id=intent[0])
+            else:
+                generation, previous = await self.tasks.park_identity(task.task_id)
+                await self.recovery.supersede(
+                    task.task_id,
+                    intent[0],
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                )
+            task = await self.tasks.get_task(task.task_id)
+        if task.state not in TERMINAL_PHASES:
             await self._classify(task)
 
     async def _classify(self, task: TaskRecord) -> None:

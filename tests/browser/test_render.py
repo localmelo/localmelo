@@ -153,3 +153,56 @@ def test_a_run_of_three_brackets_cannot_rebuild_a_marker() -> None:
         cleaned = render.clean(text)
         assert "<<" not in cleaned and ">>" not in cleaned
         assert cleaned.replace(" ", "") == text.replace(" ", "")
+
+
+def _node(label: str, node: str, context: str = "", frame: str = "") -> Element:
+    """A button that is the page's node *node* (told by ``fp``, which no identity reads)."""
+    return Element("button", label, fp=node, context=context, frame=frame)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(
+            [_node("Delete", "n1", "h:Inbox"), _node("Delete", "n2", "h:Inbox")],
+            [_node("Delete", "n2", "h:Inbox")],
+            id="two-alike",
+        ),
+        pytest.param(
+            [_node("Remove", "n1", "r:Milk"), _node("Remove", "n2", "r:Eggs")],
+            [_node("Remove", "n2", "r:Eggs"), _node("Remove", "n1", "r:Milk")],
+            id="reordered",
+        ),
+        pytest.param([_node("Approve", "n1")], [_node("Approve", "n2")], id="next-row"),
+        pytest.param(
+            [_node("Continue", "n1")], [_node("Continue", "n2")], id="replaced"
+        ),
+        pytest.param(
+            [_node("Sign in", "n1", frame="1")],
+            [_node("Sign in", "n2", frame="1")],
+            id="frames",
+        ),
+    ],
+)
+def test_a_kept_ref_never_names_another_element(
+    before: list[Element], after: list[Element]
+) -> None:
+    url = "https://a.example/x"
+    old = render.make_snapshot(
+        page(url, "", *before),
+        sid="s1",
+        tab="t1",
+        origin="https://a.example",
+        first_ref=1,
+    )
+    new = render.make_snapshot(
+        page(url, "", *after),
+        sid="s2",
+        tab="t1",
+        origin="https://a.example",
+        first_ref=10,
+        before=old,
+    )
+    # A ref in both readings is the same node; any other element has a new ref.
+    for ref in old.elements.keys() & new.elements.keys():
+        assert old.elements[ref].fp == new.elements[ref].fp, ref
