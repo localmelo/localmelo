@@ -297,6 +297,45 @@ precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 10, 
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
+def test_the_window_has_no_title_band_and_its_strip_moves_it_from_the_gateway_page() -> (
+    None
+):
+    run_policy(
+        r"""
+import AppKit
+_ = NSApplication.shared
+// The window keeps its title for the Window menu and VoiceOver, but shows no band: the page reaches the top edge.
+let window = consoleWindow()
+precondition(window.styleMask.isSuperset(of: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]))
+precondition(window.titleVisibility == .hidden && window.titlebarAppearsTransparent && window.title == "localmelo")
+precondition(window.contentView!.frame.height == window.frame.height)
+// The strip's size comes from the system's title bar, not from a number in the page.
+let bar = WindowBar(titleBarOf: window)
+precondition(bar.height > 0 && bar.buttons > 0 && bar.buttons < 200, "\(bar)")
+let script = windowBarScript(WindowBar(height: 31.5, buttons: 69))
+precondition(script.contains("'--window-bar', '32px'") && script.contains("'--window-buttons', '69px'"), script)
+precondition(windowBarScript(WindowBar()).contains("'--window-bar', '0px'"))
+precondition(windowBarScript(WindowBar(height: .nan, buttons: -4)).contains("'--window-buttons', '0px'"))
+// The page asks with exactly these messages.
+precondition(windowRequest(["action": "drag"]) == .drag && windowRequest(["action": "double-click"]) == .doubleClick)
+let refused: [Any] = [["action": "drag", "x": 1], ["action": "zoom"], ["action": 1], [String: Any](), "drag", ["drag"], 7]
+precondition(refused.allSatisfy { windowRequest($0) == nil })
+// Only the gateway's own page is heard: its main frame, not a frame inside it.
+precondition(acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: true, gatewayPort: 9))
+precondition(!acceptsBridgeMessage(scheme: "http", host: "127.0.0.1", port: 9, isMainFrame: false, gatewayPort: 9))
+// A double click does what the system setting says.
+precondition(doubleClickAction(setting: nil, minimizes: false) == .zoom)
+precondition(doubleClickAction(setting: nil, minimizes: true) == .minimize)
+precondition(doubleClickAction(setting: "Maximize", minimizes: true) == .zoom)
+precondition(doubleClickAction(setting: "Fill", minimizes: false) == .zoom)
+precondition(doubleClickAction(setting: "Minimize", minimizes: false) == .minimize)
+precondition(doubleClickAction(setting: "None", minimizes: true) == .none)
+""",
+        "ConsoleWindow.swift",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Swift AppKit host is macOS-only")
 def test_the_browser_bridge_takes_one_message_from_the_gateway_page_and_the_pop_out_stays_on_the_gateway() -> (
     None
 ):

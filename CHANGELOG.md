@@ -77,6 +77,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - After an update, a browser tab or the app's window shows the new console at once instead of an old copy.
 - One command builds and installs the macOS development app.
 - The console reads in plain words, is easier on a phone and is readable in light and dark.
+- The app's window has no title band, and the menu-bar item is Melo's head drawn in the bar's own colour.
+- The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 
 ### Terminal
 
