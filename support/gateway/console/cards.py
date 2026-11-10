@@ -386,7 +386,7 @@ class MainChatCards:
             if not isinstance(found, dict):
                 found = default_ending(str(data.get("state")), note)
             if found is not None:
-                keys = ("state", "proposed", "reasons", "question", "notes")
+                keys = ("state", "proposed", "reasons", "question", "notes", "missing")
                 card["ending"] = {key: found[key] for key in keys if key in found}
             # Which end this is: a follow-up's row names the end it follows, so the
             # page orders the two by end and not by when each was written (#431).

@@ -394,7 +394,9 @@ export function echoActions(echo, done, plain = false) {
     return [[word.charAt(0).toUpperCase() + word.slice(1), "apply"]];
   }
   // "When should I remind you?" is answered by typing a time.
-  if (echo.kind === "ask") return echo.ask === "when" ? [] : [[t("mainChat.echo.start"), "start"], [t("mainChat.echo.notNow"), "dismiss"]];
+  // A "Start this as a task?" card kept from an older version starts nothing now: a chat
+  // hands its own work on (#571). It can only be put away.
+  if (echo.kind === "ask") return echo.ask === "when" ? [] : [[t("mainChat.echo.notNow"), "dismiss"]];
   return [];
 }
 
@@ -453,7 +455,7 @@ export function echoNodes({doc, echo, done = false, act, plain = false}) {
   body.append(...askNodes({el, echo, done, act}));
   const buttons = el("span", "echo-actions");
   for (const [label, does] of echoActions(echo, done, plain)) {
-    const button = el("button", ["start", "save"].includes(does) ? "outline-button" : "link-button", label);
+    const button = el("button", does === "save" ? "outline-button" : "link-button", label);
     button.type = "button";
     button.addEventListener("click", () => {
       if (does !== "level") return act(echo, does);

@@ -8,12 +8,15 @@ that a note is written to the user, so "you" in it is the user.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from localmelo.support.memory import records
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
     OLDER,
+    OLDER_ITEM,
     OLDER_TURN,
     Item,
     asks_about_past,
@@ -58,6 +61,62 @@ def test_a_turn_a_newer_turn_replaced_stays_out_too() -> None:
     ordered = newer_first([old], {("a", 1): new})
     assert ordered[-1].older == OLDER_TURN
     assert current_only(ordered, "Where do I live?") == [new]
+
+
+def _item(key: str, text: str, session: str, turn: int, **extra: Any) -> Item:
+    """A note (``r:``) or a memory item (``m:``) of chat *session*'s turn *turn*."""
+    return Item(key, text, f"chat {session}", session, turn, 1.0, **extra)
+
+
+def test_a_note_follows_a_replaced_item_that_says_the_same_in_its_own_turn() -> None:
+    said = "Your book club meets on Tuesdays."
+    club = "The book club meets on Tuesdays."
+    old = _item("m:1", club, "a", 2, sources=(("a", 2),), replaced_by="m:2")
+    new = _item("m:2", "The book club meets on Thursdays.", "c", 2)
+    kept = _item("r:1", said, "a", 2)
+    others = [
+        _item("r:2", "Your cat is called Miso.", "a", 2),  # another fact of the turn
+        _item("r:3", said, "b", 4),  # the same words, another turn
+        _item("r:4", said, "", 0),  # an import: no turn
+        _item("r:5", "Your chess club meets on Fridays.", "a", 3),
+        # The note above is of an item that is not replaced.
+        _item("m:3", "Your chess club meets on Fridays.", "a", 3, sources=(("a", 3),)),
+    ]
+    followed = records.notes_of_replaced([old, new, kept, *others])
+    assert followed == {"r:1": old}
+    # The note reads as older after the newer item, which comes in, and stays in the block.
+    known = {"m:1": old, "m:2": new}
+    ordered = newer_first([kept], {}, known=known, followed=followed)
+    assert [(i.key, i.older) for i in ordered] == [("m:2", ""), ("r:1", OLDER_ITEM)]
+    assert current_only(ordered, "When does the book club meet?") == ordered
+    # Without the newest replacement known, or without the map, it reads as it did.
+    assert newer_first([kept], {}, known={"m:1": old}, followed=followed) == [kept]
+    assert newer_first([kept], {}, known=known) == [kept]
+
+
+def test_a_note_that_reads_as_older_already_keeps_its_mark_beside_a_newer_one() -> None:
+    marked = _item("r:1", "Your weekly sync is on Friday.", "a", 2, older=OLDER_ITEM)
+    other = _item("r:2", "Your weekly sync is on Monday.", "b", 3)
+    assert records.newer_values_first([other, marked]) == [other, marked]
+
+
+def test_an_item_follows_its_turns_only_when_a_note_replaced_all_of_them() -> None:
+    note = _item("r:3", "Your weekly sync is on Friday.", "c", 1)
+    only = _item("m:1", "The weekly sync is on Wednesday.", "a", 3, sources=(("a", 3),))
+    both = _item("m:2", "The weekly sync is in room 4.", "a", 3)
+    both.sources = (("a", 3), ("a", 4))
+    ordered = newer_first([only, both], {("a", 3): note})
+    # The note comes in ahead of the old item; the item with a turn that stands stays.
+    assert [(i.key, i.older) for i in ordered] == [
+        ("r:3", ""),
+        ("m:2", ""),
+        ("m:1", OLDER),
+    ]
+    assert current_only(ordered, "When is the weekly sync?") == ordered[:2]
+    assert current_only(ordered, "When was the weekly sync before?") == ordered
+    # A turn a newer turn replaced is not a note: the item reads as it did.
+    turn = _item("d:9", "User: The weekly sync is on Friday.", "c", 1)
+    assert newer_first([only], {("a", 3): turn}) == [only]
 
 
 @pytest.mark.parametrize(

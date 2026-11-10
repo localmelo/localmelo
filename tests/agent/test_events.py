@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
     ApprovalRequest,
+    call_key,
 )
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import (
@@ -467,6 +468,8 @@ class TestSequence:
             "name": "echo",
             "arguments": {"text": "hi"},
             "preview": '{"text":"hi"}',
+            # The live call's key (#571).
+            "run_key": call_key("echo", {"text": "hi"}, None),
         }
         assert {k: v for k, v in finished.data.items() if k != "duration_s"} == {
             "step": 1,
@@ -525,7 +528,14 @@ class TestFields:
                 "prefix",
                 "duration_s",
             },
-            "tool.started": {"step", "call_id", "name", "arguments", "preview"},
+            "tool.started": {
+                "step",
+                "call_id",
+                "name",
+                "arguments",
+                "preview",
+                "run_key",
+            },
             "tool.finished": {
                 "step",
                 "call_id",
