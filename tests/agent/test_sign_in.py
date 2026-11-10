@@ -17,7 +17,9 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._step_review import StepReviewer
 from localmelo.melo.contracts import review
 from localmelo.melo.contracts.approvals import TOOL_ASK, AutoPolicy
+from localmelo.melo.contracts.sign_in import HANDLE, hide_passwords
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.tests.agent.test_approvals import Recorder, _answer, _calls, _no_wait
 from localmelo.tests.agent.test_auto_mode import FakeModel, verdict
@@ -221,28 +223,106 @@ async def test_a_password_after_a_line_like_the_memory_heading_is_hidden(
     assert "my password is [password-" in sent
 
 
+# What a caller appends after the person's text (a task's context block, a note): melo's.
+BLOCK = "\n\n[project notes]\nthe line of the file says password: other-Secret9"
+OTHER_SECRET = "other-Secret9"
+# A recalled block as memory made it, holding a password-shaped string.
+RECALLED = f"\n\n{BLOCK_HEADER}\n- the line of the file says password: block-Secret1"
+BLOCK_SECRET = "block-Secret1"
+TYPED = f"sign in to forum.example, my password is {PASSWORD}"
+
+
 @pytest.mark.asyncio
-async def test_a_password_shaped_string_in_the_appended_part_gives_no_handle(
+async def test_a_password_in_a_block_after_the_persons_text_is_hidden_and_never_typable(
     tmp_path: Path,
 ) -> None:
     llm = FakeModel([_answer("signed in")], [])
     agent = _agent(tmp_path, llm, PasswordBox())
-    typed = f"sign in to forum.example, my password is {PASSWORD}"
-    appended = "\n\n[project notes]\nthe line of the file says password: other-Secret9"
 
-    await agent.run_task(typed + appended, own_chars=len(typed), approval=AutoPolicy())
+    # No block named in `recalled`: all that follows the person's text is hidden.
+    await agent.run_task(
+        TYPED + BLOCK, own_chars=len(TYPED), recalled="", approval=AutoPolicy()
+    )
 
     sent = _sent(llm)
-    assert PASSWORD not in sent and sent.endswith(appended), "melo's part is as given"
+    assert PASSWORD not in sent and OTHER_SECRET not in sent
+    person, appended = HANDLE.findall(sent)  # in reading order
+    reviewer = agent._reviewer
+    # The handle of the person's words can be typed; the one made after them cannot.
+    assert reviewer.sign_in_value(person, "forum.example") == PASSWORD
+    assert reviewer.sign_in_value(appended, "forum.example") is None
+    assert appended not in reviewer._live
 
 
-def test_a_note_the_person_sends_mid_run_is_hidden() -> None:
-    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
-    reviewer.reset()
+@pytest.mark.asyncio
+async def test_the_block_named_in_recalled_stays_as_given_when_it_stands_right_after(
+    tmp_path: Path,
+) -> None:
+    llm = FakeModel([_answer("signed in")], [])
+    agent = _agent(tmp_path, llm, PasswordBox())
+
+    await agent.run_task(
+        TYPED + RECALLED + BLOCK,
+        own_chars=len(TYPED),
+        recalled=RECALLED,
+        approval=AutoPolicy(),
+    )
+
+    sent = _sent(llm)
+    assert RECALLED in sent, "the block is as memory made it"
+    assert PASSWORD not in sent and OTHER_SECRET not in sent, "the next block is hidden"
+    assert sent.count("[password-") == 2  # the person's, and the block after
+    assert agent._reviewer._recalled == RECALLED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "after",
+    [
+        BLOCK + RECALLED,  # another block stands between
+        RECALLED[1:],  # not the block as it was given
+    ],
+    ids=["after another block", "not as given"],
+)
+async def test_a_recalled_that_does_not_stand_right_after_the_text_is_hidden_with_the_rest(
+    tmp_path: Path, after: str
+) -> None:
+    llm = FakeModel([_answer("signed in")], [])
+    agent = _agent(tmp_path, llm, PasswordBox())
+
+    await agent.run_task(
+        TYPED + after, own_chars=len(TYPED), recalled=RECALLED, approval=AutoPolicy()
+    )
+
+    sent = _sent(llm)
+    assert BLOCK_SECRET not in sent and OTHER_SECRET not in sent
+    # The review's notes follow: hidden the same way, never the string as given.
+    assert BLOCK_SECRET not in agent._reviewer._recalled
+
+
+@pytest.mark.asyncio
+async def test_a_run_the_person_did_not_begin_hides_nothing(tmp_path: Path) -> None:
+    llm = FakeModel([_answer("done")], [])
+    agent = _agent(tmp_path, llm, PasswordBox())
+
+    await agent.run_task(
+        TYPED + BLOCK,
+        own_chars=len(TYPED),
+        from_person=False,
+        approval=AutoPolicy(),
+    )
+
+    assert _sent(llm) == TYPED + BLOCK
+
+
+@pytest.mark.asyncio
+async def test_a_note_the_person_sends_mid_run_is_hidden(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, FakeModel([]), PasswordBox())
+    reviewer = agent._reviewer
     words = "sign in to forum.example"
-    # All of what the reviewer is given is the person's: a line that starts like
-    # the memory block's heading ends nothing, and what follows it is hidden too.
-    text = reviewer.hide_passwords(f"{words}\n{LIKE_HEADING}\nmy password: mine-12345")
+    # All of what an agent is given to hide is read: a line that starts like the
+    # memory block's heading ends nothing, and what follows it is hidden too.
+    text = agent.hide_passwords(f"{words}\n{LIKE_HEADING}\nmy password: mine-12345")
     assert "mine-12345" not in text and LIKE_HEADING in text
     reviewer.user_message(text)
     assert reviewer.sign_in_value("[password-1]", "forum.example") == "mine-12345"
@@ -278,7 +358,7 @@ def test_one_site_adds_nothing_to_where_a_password_goes(
     reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
     reviewer.reset()
     reviewer.user_message(
-        reviewer.hide_passwords("sign in to www.forum.com, password: mine-12345")
+        hide_passwords("sign in to www.forum.com, password: mine-12345")
     )
     found = reviewer.sign_in_value("[password-1]", site)
     assert found == ("mine-12345" if typed else None)

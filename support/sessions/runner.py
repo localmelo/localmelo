@@ -918,10 +918,10 @@ class SessionRunner:
                     kwargs["chat_started"] = min(
                         since, kwargs.get("chat_started", since)
                     )
-            # Everything appended to the person's message below is melo's own:
-            # the run is told where the person's part ends (own_chars) and which
-            # notes were put in the message (recalled), never left to find out
-            # from the text.
+            # Everything appended to the turn's own text below (the person's
+            # message for a chat, the request its code built for a task) is melo's:
+            # the run is told where that text ends (own_chars) and which notes were
+            # put in the message (recalled), never left to find out from the text.
             text = turn.text
             recalled = ""
             if self._memory is not None and not self._index_only:

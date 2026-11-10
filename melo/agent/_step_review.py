@@ -97,7 +97,7 @@ from localmelo.melo.contracts.review import (
     named_by,
     step_key,
 )
-from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in, hide_passwords
+from localmelo.melo.contracts.sign_in import HANDLE, VAULT, handles_in
 from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import Message
 
@@ -530,19 +530,6 @@ class StepReviewer:
             self._add(text)
 
     # ── Sign-in details the person gives (#547) ──
-
-    def hide_passwords(self, text: str) -> str:
-        """*text*, the person's message, with each password it gives replaced by its handle.
-
-        Called where a message of the person's comes in (a session's runner,
-        :meth:`~localmelo.melo.agent.Agent.run_task`, a note read mid-run),
-        before any model, record, log or memory sees it: the value stays in
-        this process's vault and the handle (``[password-1]``) takes its
-        place (see :mod:`localmelo.melo.contracts.sign_in`). All of *text* is
-        the person's words: a caller that appended notes of melo's leaves them
-        out of what it passes. The same text hidden again changes nothing.
-        """
-        return hide_passwords(text)
 
     def begin_run(self) -> None:
         """A run starts: no password can be typed in it until the person's message of the run holds one (#547).

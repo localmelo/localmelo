@@ -22,6 +22,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.digest import DIGEST_HEAD
 from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.agents import build_session_agent
@@ -329,6 +330,29 @@ async def test_the_run_is_told_the_block_and_where_the_persons_text_ends(
     assert user == person + block + "\n\n" + context
     # The review holds the block the runner put in, as memory made it, and only it.
     assert call["notes"] == block
+
+
+async def test_the_other_chats_digest_is_in_the_message_and_not_in_the_notes(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    await chat(memory, store, stub, tmp_path / "a", SAYS)
+    await chat(
+        memory, store, stub, tmp_path / "m", "What else could Alex do?", kind="front"
+    )
+    stub.requests.clear()
+    # A chat's first turn: the message gets the block, then the digest of the others.
+    calls: list[dict[str, Any]] = []
+    await chat(memory, store, stub, tmp_path / "b", ASKS, calls=calls)
+    (call,) = calls
+    (request,) = stub.requests
+    user = request["messages"][-1]["content"]
+    block = call["recalled"]
+    digest = user[len(ASKS) + len(block) :]
+    assert user == ASKS + block + digest
+    assert block.startswith(f"\n\n{BLOCK_HEADER}\n- the user said")
+    assert digest.startswith("\n\n" + DIGEST_HEAD.format(minutes=30))
+    # The review's notes are the block alone: the digest is no recalled note.
+    assert call["notes"] == block and DIGEST_HEAD.format(minutes=30) not in block
 
 
 async def test_a_task_runner_gives_the_review_no_notes_whatever_the_text_holds(

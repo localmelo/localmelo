@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from localmelo.melo.checker.review.model import (
+    MAX_RECALLED_CHARS,
     MAX_REQUEST_CHARS,
     SYSTEM_PROMPT,
     ReviewInputs,
@@ -207,6 +208,21 @@ def test_the_review_is_told_which_sites_were_refused_and_nothing_else() -> None:
         ReviewInputs(workspace="/ws", requests=["x"], tool="t", action="a"), "n0"
     )
     assert "refused" not in plain
+
+
+def test_the_recalled_notes_are_cut_to_their_cap_and_come_last() -> None:
+    inputs = ReviewInputs(
+        workspace="/ws",
+        requests=["do it the way I told you"],
+        tool="t",
+        action="a",
+        recalled=f"\n\n{'§' * (MAX_RECALLED_CHARS + 500)}\n",
+    )
+    text = user_message(inputs, nonce="n0")
+    # Only the cap is left of a longer block, in a block of its own after the requests.
+    assert text.count("§") == MAX_RECALLED_CHARS
+    assert text.index("<request nonce=n0>") < text.index("<recalled nonce=n0>")
+    assert text.endswith(f"{'§' * MAX_RECALLED_CHARS}\n</recalled nonce=n0>")
 
 
 def test_each_message_draws_a_new_nonce() -> None:

@@ -132,6 +132,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
 from localmelo.melo.contracts.tools import (
     CALL_HANDS_OFF,
@@ -1501,11 +1502,12 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         code that checked the site and the turn, types the value. A caller
         that stores or shows the person's message calls this first (a
         session's runner does); :meth:`run_task` does it again, which changes
-        nothing. All of *text* is the person's: a caller that appended anything
-        of melo's passes only the part before it. See
-        :mod:`localmelo.melo.contracts.sign_in`.
+        nothing. All of *text* is read for passwords, whoever wrote it: a
+        caller that put text of melo's after the person's message passes only
+        the person's part here (see *own_chars* of :meth:`run_task`, which
+        hides what follows it too). See :mod:`localmelo.melo.contracts.sign_in`.
         """
-        return self._reviewer.hide_passwords(text)
+        return hide_passwords(text)
 
     async def run_tool(
         self,
@@ -3708,17 +3710,27 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         carries more (attachments, task news, a task's objective another
         model wrote): a step review reads only them as the user's words.
         Without it, the person's part of the query is (see *own_chars*).
-        *own_chars* is how many leading characters of the query are the
-        person's message, their words and attachments: the caller that
-        appended anything after it (recalled notes, other chats, context
-        blocks, news) says so, and nothing is found by searching the text.
-        ``None`` means all of it, for a caller that appended nothing (a
-        direct run, a worker). Passwords are hidden in that part only: what
-        follows is passed on untouched and gives no handle. *recalled* is the
-        recalled-memory block the caller put in the query, as memory made it:
-        the notes a step review reads for the run's request are that string
-        and nothing else, so a run whose caller gives none has none, whatever
-        the query holds.
+        *own_chars* is how many leading characters of the query are the turn's
+        own text as its caller made it: the person's message (words and
+        attachments) for a chat's turn; for a task the request its code built
+        (the objective, reading or card, and on a restart melo's check note
+        before it). A caller that appended anything after it (recalled notes,
+        other chats, context blocks, news) says so, and nothing is found by
+        searching the text; a caller that gives none (a direct run, a worker)
+        has all of the query counted as its own text. In a run the person
+        began (*from_person*), passwords are hidden in that part, in
+        *user_words*, and in all that follows the part except *recalled* when
+        it stands right after the part; a password there gives a handle melo
+        cannot type, because the step review takes the handles it accepts from
+        the person's words only. *recalled* is the recalled-memory block the
+        caller put in the query, as memory made it. A *recalled* that does not
+        stand right after the person's part is not left out: all that follows
+        is hidden, and the review's notes are *recalled* hidden the same way
+        (fail closed). The notes a step review reads for the run's request
+        are that string and nothing else, so in a run the person began a
+        caller that gives none has none, whatever the query holds; a run the
+        person did not begin hides nothing and leaves the review's notes as
+        they were, those of the person's newest message.
         *chat_started* is when the chat began (wall-clock seconds, the
         session's stored start): a step review counts the files changed
         since then as written in this chat. With *from_person* false, the
@@ -3765,33 +3777,46 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         *observe* is not callable or is a coroutine function, when both
         are given, when *approval* has no ``async def decide``, when
         *earlier_turns* is not a sequence of pairs of ``str``, when
-        *chat_first*, *routine* or *recalled* is not a ``str``, or *own_chars*
-        is neither ``None`` nor an ``int``, and ``ValueError`` when *routine*
-        is blank or *own_chars* is negative: no event is emitted, no task
-        record is written, and working memory is left as it is.
+        *query*, *chat_first*, *routine* or *recalled* is not a ``str``, or
+        *own_chars* is neither ``None`` nor an ``int`` (a ``bool`` is not one),
+        and ``ValueError`` when *routine* is blank or *own_chars* is negative:
+        no event is emitted, no task record is written, and working memory is
+        left as it is.
         """
         check_sink(on_event)
         check_sink(observe, "observe")
         if on_event is not None and observe is not None:
             raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
+        if not isinstance(query, str):
+            raise TypeError("query must be a str")
         if not isinstance(recalled, str):
             raise TypeError("recalled must be a str")
         if own_chars is not None:
-            if not isinstance(own_chars, int):
+            if isinstance(own_chars, bool) or not isinstance(own_chars, int):
                 raise TypeError("own_chars must be an int")
             if own_chars < 0:
                 raise ValueError("own_chars must not be negative")
         # The person's part of the query: all of it unless the caller says more
         # was appended. Its position comes from the caller, never from the text.
-        own = query if own_chars is None else query[:own_chars]
-        if from_person and isinstance(query, str):
+        own = query[:own_chars]
+        if from_person:
             # A password the person gave is cut out before any model, record,
             # log or memory sees the message (#547): a handle stands for it.
-            # Only the person's part is read for one; the rest has no handle.
-            hidden = self.hide_passwords(own)
-            query = hidden + query[len(own) :]
-            own = hidden
+            # In reading order: the person's part, then the block the caller
+            # named in `recalled` as memory made it, only when it stands right
+            # after that part (judged on the text as it came), then all the
+            # rest. What follows the person's part is melo's, but it may carry
+            # text a password could hide in (a task's context blocks, a note), so
+            # it is hidden too; no handle made there can be typed, since
+            # `StepReviewer.user_message` takes the live handles from the
+            # person's words only.
+            rest = query[len(own) :]
+            kept = recalled if rest.startswith(recalled) else ""
+            if not kept:
+                recalled = self.hide_passwords(recalled)  # the notes follow suit
+            own = self.hide_passwords(own)
+            query = own + kept + self.hide_passwords(rest[len(kept) :])
             if isinstance(user_words, str):
                 user_words = self.hide_passwords(user_words)
         person_words = own if user_words is None else user_words

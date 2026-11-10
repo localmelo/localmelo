@@ -112,16 +112,24 @@ def test_the_earlier_words_are_not_cut() -> None:
     reviewer.earlier_words([earlier])
     reviewer.user_message("go on")
     assert reviewer.requests == (earlier, "go on")
+    # The chat's first message, given as `first`, is not cut either.
+    reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.earlier_words(["a", "b"], first=earlier)
+    reviewer.user_message("go on")
+    assert reviewer.earlier == (earlier,)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("kwargs", "error"),
     [
+        ({"query": 7}, TypeError),
         ({"own_chars": "3"}, TypeError),
+        ({"own_chars": True}, TypeError),
         ({"own_chars": -1}, ValueError),
         ({"recalled": None}, TypeError),
     ],
+    ids=["query", "own_chars str", "own_chars bool", "own_chars negative", "recalled"],
 )
 async def test_a_wrong_argument_is_refused_before_the_run(
     tmp_path: Path, kwargs: dict[str, Any], error: type[Exception]
@@ -133,5 +141,5 @@ async def test_a_wrong_argument_is_refused_before_the_run(
         options=AgentOptions(builtins=frozenset(), workspace_root=str(tmp_path / "ws")),
     )
     with pytest.raises(error):
-        await agent.run_task("read this", **kwargs)
+        await agent.run_task(**{"query": "read this", **kwargs})
     assert llm.requests == []
