@@ -102,9 +102,10 @@ def kept_answer(
     that can carry data, a card-only kind or a step Auto stopped
     (:func:`~localmelo.melo.contracts.approvals.stays_for_chat`). Nothing
     covers what may never be kept (:func:`~localmelo.melo.contracts.approvals.never_kept`),
-    whatever the review says.
+    whatever the review says, nor a path outside the workspace, which only
+    the folder's own question decides.
     """
-    if never_kept(request):
+    if never_kept(request) or request.outside is not None:
         return None
     if grants.covers(request.tool_name) and (
         covered_by_grant(request.review) or site_grant(request) or window_grant(request)

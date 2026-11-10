@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,6 +18,7 @@ from localmelo.melo.contracts.approvals import (
     find_auto,
     review_mode,
 )
+from localmelo.melo.contracts.folders import OutsideAccess
 from localmelo.melo.contracts.review import ActionReview, step_key
 from localmelo.support.sessions.approvals import OwnedTaskPolicy, RememberingPolicy
 from localmelo.support.sessions.grants import GrantBook
@@ -161,6 +163,10 @@ async def test_the_owner_chats_grant_covers_its_tasks_routine_calls(
     assert (await policy.decide(request(folder, review=HIGH))).origin == "user"
     money = ActionReview("routine", ("money",))
     assert (await policy.decide(request(folder, review=money))).origin == "user"
+    # A path outside the workspace has its own question: no tool grant covers it.
+    outside = OutsideAccess("/x/a.py", "/x", "read", True)
+    away = dataclasses.replace(request(folder), outside=outside)
+    assert (await policy.decide(away)).origin == "policy"
     assert len(person.asked) == 2
     # Another chat's grant covers nothing here; in Auto the chat's grants are not used.
     other = await owned(book, RememberingPolicy(person), chat="chat-2")
