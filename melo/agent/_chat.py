@@ -171,16 +171,6 @@ _SYSTEM_BASE = (
 
 SYSTEM_PROMPT = _SYSTEM_BASE + "Think step by step. Be concise."
 
-# SYSTEM_PROMPT under ``AgentOptions.lean_output``: its last line gives way to
-# hints that cut a direct run's output tokens.
-LEAN_SYSTEM_PROMPT = _SYSTEM_BASE + (
-    "Write no text between tool calls, and keep the final answer to three "
-    "lines at most.\n"
-    "Use relative paths: code runs in the working directory, so do not edit "
-    "sys.path.\n"
-    "If the task names files, read them first instead of listing folders."
-)
-
 _REFLECTION_INTRO = (
     "The current attempt has ended without a final answer. "
     "Reflect on what happened and decide how to proceed.\n\n"
@@ -216,14 +206,6 @@ _REFLECTION_KEYS = _REFLECTION_INTRO + (
 REFLECTION_PROMPT = _REFLECTION_KEYS + (
     '"the final answer if done, else the best partial answer so far, or empty '
     'string"\n'
-    "}"
-)
-
-# REFLECTION_PROMPT under ``AgentOptions.lean_output``: the same keys, with the
-# answer asked for only with ``done`` or ``stop``.
-LEAN_REFLECTION_PROMPT = _REFLECTION_KEYS + (
-    '"only with done or stop: the final answer if done, else the best partial '
-    'answer so far"\n'
     "}"
 )
 
@@ -732,10 +714,9 @@ class Chat:
     :func:`~localmelo.melo.memory.short.tail_turns`, for the compress
     modes' empty-reply label that carries a note. *system_prompt* and
     *reflection_prompt* take the places of ``SYSTEM_PROMPT`` and
-    ``REFLECTION_PROMPT`` in every request (``AgentOptions.lean_output``
-    passes the lean ones). *identity*, when not empty, is the paragraph
-    that comes right after *system_prompt* in every planning request and in
-    the fixed prefix of a reflection request.
+    ``REFLECTION_PROMPT`` in every request. *identity*, when not empty, is the
+    paragraph that comes right after *system_prompt* in every planning request
+    and in the fixed prefix of a reflection request.
 
     A request that fails with a retryable :class:`ProviderError` is sent
     again after each delay in *retry_delays* (default

@@ -1432,7 +1432,6 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--window-messages",
             "--developer",
             "--captured-history",
-            "--brief-items",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1581,13 +1580,6 @@ def _build_parser(
         "--captured-history",
         choices=["on", "off"],
         help="Store bounded, redacted captured tool results (default off)",
-    )
-    direct.add_argument(
-        "--brief-items",
-        choices=["on", "off"],
-        help="With --brief, name the brief's numbered items that no edit has "
-        "touched yet in each reflection request and before the budget ends "
-        "(default off)",
     )
     direct.add_argument(
         "--window-eviction",
@@ -2361,10 +2353,6 @@ def _build_direct_mode_agent(
     memory directory that *options* name is created just before the Agent is
     built, after every refusal, so a refused run leaves no directory behind
     (see :func:`_make_memory_dir`).
-
-    A task given on the command line runs with ``lean_output`` when the config
-    (``[agent] lean_output``, or ``-X agent.lean_output=true``) says so; the
-    ``melo ""`` loop does not.
     """
     if parser is None:
         parser = _build_parser()
@@ -2379,7 +2367,6 @@ def _build_direct_mode_agent(
         configured_context_options,
         configured_fallback_options,
         configured_image_options,
-        with_quiet_steps,
     )
 
     def config_value_error(message: str) -> NoReturn:
@@ -2426,11 +2413,6 @@ def _build_direct_mode_agent(
     )
     if "captured_history" not in flagged and budget_cfg.agent.captured_history:
         options = dataclasses.replace(options, captured_history=True)
-    if "brief_items" not in flagged and budget_cfg.agent.brief_items:
-        options = dataclasses.replace(options, brief_items=True)
-    # A task given on the command line (--brief included), not the `melo ""` loop.
-    if budget_cfg.agent.lean_output and "".join(args.query):
-        options = dataclasses.replace(options, lean_output=True)
     if options.answer_on_stop != budget_cfg.agent.answer_on_stop:
         options = dataclasses.replace(
             options, answer_on_stop=budget_cfg.agent.answer_on_stop
@@ -2477,7 +2459,6 @@ def _build_direct_mode_agent(
         # Asked last, so a usage error never costs a request.
         model = args.chat_model or _direct_model(args)
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
-        with_quiet_steps(llm, None, options)
         if options is not None and options.memory_dir is not None:
             _make_memory_dir(options.memory_dir)
         return Agent(
@@ -2641,7 +2622,6 @@ def _build_direct_mode_agent(
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     llm_provider, embedding_provider = providers_for(cfg, options.reasoning)
-    with_quiet_steps(llm_provider, cfg.chat_backend, options)
     if (
         options.reasoning != "legacy"
         and options.retriever == "embedding"

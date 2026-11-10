@@ -97,7 +97,6 @@ EVERYDAY_OLD = (
 # decides it.
 EXPERIMENTAL_ISSUES: dict[str, str] = {
     "--attempt-policy": "#185",
-    "--brief-items": "#185",
     "--window-eviction": "#183",
     "--reasoning": "#183",
     "--reasoning-field": "#183",
@@ -117,13 +116,8 @@ EXPERIMENTAL_ISSUES: dict[str, str] = {
 
 # Experimental settings that have no option: the issue that decides each.
 EXPERIMENTAL_KEYS: dict[str, str] = {
-    "agent.lean_output": "#183",
-    "agent.confine_direct_runs": "#183",
     "agent.answer_on_stop": "#185",
-    "agent.max_calls": "#185",
-    "agent.thinking_steps": "#551",
     "agent.steps_per_attempt": "#185",
-    "agent.tool_images": "#280",
     "agent.tool_images_keep": "#280",
     "agent.tool_images_retire": "#280",
     "memory.retriever": "#299",
@@ -176,7 +170,6 @@ SETTINGS = (
     Setting("agent.attempt_policy", "--attempt-policy", False, "reflect"),
     Setting("agent.window_eviction", "--window-eviction"),
     Setting("agent.window_messages", "--window-messages"),
-    Setting("agent.brief_items", "--brief-items"),
     Setting("agent.reasoning", "--reasoning"),
     Setting("agent.replay_turns", "--replay-turns"),
     Setting("agent.note_writer", "--note-writer"),
@@ -217,6 +210,9 @@ REMOVED_SETTINGS: dict[str, str] = {
         "a message with no content of its own is searched with what you typed in "
         "the chat's last turns"
     ),
+    "agent.thinking_steps": "the model thinks on every planning step",
+    "agent.lean_output": "a run always uses the standard prompts",
+    "agent.brief_items": "a brief run never lists the brief's numbered items",
 }
 
 # The two settings whose option takes no value: the option means the key has this one.
