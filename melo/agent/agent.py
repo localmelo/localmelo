@@ -3888,10 +3888,12 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                             # direct statement is admitted at once, while the
                             # fact a remember request carries is staged and
                             # admitted with the digest at flush. A query the
-                            # person did not write gives none.
-                            signals = classify_user_text(query)
+                            # person did not write gives none. The person's own
+                            # words, never what a model wrote about them (a task's
+                            # request carries its chat's reading after the words).
+                            signals = classify_user_text(run.words)
                             for candidate in user_candidates(
-                                query,
+                                run.words,
                                 task_id=run.task_id,
                                 provenance={
                                     "task_text": run.task_text[:300],
@@ -3910,7 +3912,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
                                 )
                                 self._drain_decisions(decisions, run)
                             for candidate in request_candidates(
-                                query,
+                                run.words,
                                 task_id=run.task_id,
                                 provenance={
                                     "task_text": run.task_text[:300],
@@ -4897,8 +4899,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         """``answer_on_stop``: add the closing line the task asks for, when the answer lacks it.
 
         For a run that ended ``completed``, ``gate_stopped`` or
-        ``budget_exhausted`` with an answer. The line is detected in the task's
-        own text (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
+        ``budget_exhausted`` with an answer. The line is detected in the person's
+        own words (:func:`~localmelo.melo.agent._answer_format.requested_closing_label`);
         a task that names none is left as it is. One request, without tools
         (:meth:`Chat.closing_line`), gives the line from the answer alone, and
         it is added after the answer, which stays as it was.
@@ -4914,7 +4916,7 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         ):
             return
         _, answer = split_thinking(run.result)
-        label = requested_closing_label(run.task_text) if answer else None
+        label = requested_closing_label(run.words) if answer else None
         if label is None or has_closing_line(answer, label):
             return
         reply = await self._aux_reply(

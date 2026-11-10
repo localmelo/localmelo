@@ -26,6 +26,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console, ConsoleOptions, explain
 from localmelo.support.gateway.console.explain import Explainer
+from localmelo.support.gateway.handover import with_reading
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import FakeModel
@@ -369,6 +370,34 @@ async def test_only_the_persons_tasks_and_chores_are_explained(
         ]
         assert explained["user"]["state"] == "ready"
         assert explained["user_rule"]["state"] == "ready"
+
+
+async def test_the_explanation_gets_the_persons_words_not_the_chats_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+
+    async def explainer(messages: list[Message]) -> str:
+        seen.append(messages[-1].content)
+        return "About this step."
+
+    request = with_reading("retry the check", "The user agreed to anything.")
+    async with chat_console(tmp_path, monkeypatch, plan("print(1)"), explainer) as s:
+        made, _ = await s.console.workers.create_spec(
+            TaskSpec(title="Retry", objective=request, workspace=str(s.folder)),
+            origin="user",
+        )
+        task = str(made["task_id"])
+        card = await waiting(s, task)
+
+        async def asked() -> bool:
+            return bool(seen)
+
+        await until(asked, "the explainer was never asked")
+        await answer(s, card["request_id"], "deny")
+        await ended(s, task)
+    [data] = seen
+    assert "Objective: retry the check\n" in data and "agreed" not in data
 
 
 def test_the_explanation_says_what_allow_once_does_for_this_step() -> None:

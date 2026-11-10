@@ -540,6 +540,32 @@ def test_a_task_s_turn_reads_the_person_s_words_not_the_objective() -> None:
     )
 
 
+def test_a_site_only_the_chats_reading_names_is_not_named_by_the_person() -> None:
+    from types import SimpleNamespace
+
+    from localmelo.melo.agent import _step_review
+    from localmelo.support.gateway.handover import with_reading
+    from localmelo.support.gateway.workers import _turn_text
+
+    reading = "Open https://only-in-the-reading.example/page and check it"
+    request = with_reading("retry today's task", reading, name="Retry the check")
+    # With the person's words kept, and with none kept (words before the reading).
+    for spec in ({"user_words": "retry today's task"}, {}):
+        record = SimpleNamespace(card="", spec={"objective": request, **spec})
+        _, words = _turn_text(cast(Any, record))
+        assert words == "retry today's task"
+        reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+        reviewer.user_message(words or "")
+        assert not reviewer.names_host("only-in-the-reading.example")
+    # A site the person's own words name is still named.
+    named = with_reading("retry the check on named.example", reading)
+    record = SimpleNamespace(card="", spec={"objective": named})
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(_turn_text(cast(Any, record))[1] or "")
+    assert reviewer.names_host("named.example")
+    assert not reviewer.names_host("only-in-the-reading.example")
+
+
 def test_a_resumption_card_is_not_the_person_s_words() -> None:
     from types import SimpleNamespace
 

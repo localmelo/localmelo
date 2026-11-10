@@ -26,6 +26,7 @@ from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.schema import Message
 from localmelo.support.browser.sites import is_browser_question
 from localmelo.support.gateway.chat_gate import GatedLLM
+from localmelo.support.gateway.handover import words_of
 
 if TYPE_CHECKING:
     from . import Console
@@ -120,7 +121,8 @@ class Explanations:
         console, text = self._console, ""
         try:
             record = await console.workers.tasks.get_task(task_id)
-            objective = str(record.spec.get("objective") or "")
+            # What the person asked, not the chat's reading of it (it is shown to them).
+            objective = words_of(str(record.spec.get("objective") or ""))
             messages = explain_messages(
                 record.title,
                 objective,
