@@ -50,10 +50,11 @@ never allowed; a test that genuinely needs the real home is marked
 ## Pull request checklist
 
 - [ ] One focused change, with tests for a behaviour change.
-- [ ] The docs updated: the English page and its Chinese twin
-      (`README.zh-CN.md`, `docs/zh-CN/`), plus `docs/for-agents.md` and
-      `docs/llms.txt` when agent-facing behaviour changes.
-- [ ] A `CHANGELOG.md` entry under Unreleased, with the pull request number.
+- [ ] The page about what changed is updated (a start page or the website
+      with its Chinese twin); `docs/for-agents.md` only when the contract for
+      agents changes (then `uv run python scripts/agent_docs.py sync`).
+- [ ] One `CHANGELOG.md` line under its area when a person would notice the
+      change: what they see, with no pull request number.
 - [ ] Screenshots for a change to the terminal UI or the website.
 - [ ] A new `melo` option has a tier in `support/option_tiers.py` and in the
       [CLI reference](docs/reference/cli.md#default-and-developer-mode). An option that

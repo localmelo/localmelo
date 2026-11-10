@@ -36,7 +36,8 @@ lists, with no PR or issue numbers in their prose.
 - A guide that renames or removes a heading keeps the old one as an anchor (`<a id="old-heading"></a>`) so links and the manifest still resolve.
 - Pictures live in `docs/assets/img/` as WebP, at most 1280 pixels wide, with alt text; a page's pictures stay under 3 MB. Both languages show the same pictures, except that a screenshot of the console has a Chinese version (the name ends in `-zh`) for the Chinese pages.
 - No PR or issue numbers on these pages; where a reader may want detail, add a small "What changed" link to the changelog.
-- `docs/for-agents.md`, `docs/llms.txt` and the changelog stay exact and terse, and keep their PR numbers.
+- `docs/for-agents.md` is the contract for agents, at most 32 KB: it links to the reference pages instead of repeating them. `docs/llms.txt` is generated from the manifest.
+- The changelog has one line per change a person notices, under its area, at most 240 characters, with no PR numbers; a release cuts its own section.
 
 ## Examples and safety
 
@@ -51,12 +52,10 @@ Never hide that tools run with the user's permissions without a sandbox.
 
 Use meaningful link labels and stable headings; preserve existing URLs and
 fragment identifiers. Write short paragraphs, consistent terms and accurate
-platform caveats. The English page is the source; update its Chinese twin in
-the same PR, or add a visible dated stale notice naming the English revision,
-affected sections, owner and follow-up issue. Keep code, options, IDs and URLs
+platform caveats. The English page is the source; only the start pages and
+the website have Chinese twins, and a change updates the twin in the same PR. Keep code, options, IDs and URLs
 identical. A second
 reviewer checks meaning, terminology and missing or added facts;
 a maintainer spot-checks. The glossary in [Maintaining the docs](project/documentation.md)
 records the established terms; the console's and the app's Chinese words follow the
-[interface glossary](zh-CN/STYLE.md#interface-glossary) of the Chinese style guide. Every twin must be reviewed before Docs-1
-closes.
+[interface glossary](zh-CN/STYLE.md#interface-glossary) of the Chinese style guide.

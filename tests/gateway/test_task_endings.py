@@ -1183,7 +1183,7 @@ async def test_a_file_tool_edit_outside_the_folder_counts_outside_git(
 
 
 async def test_what_a_snapshot_cannot_see(tmp_path: Path) -> None:
-    """The snapshot's known limits outside git, for unknown commands (docs: for-agents)."""
+    """The snapshot's known limits outside git, for unknown commands (scheduler.md)."""
     folder = folder_of(tmp_path, tests=True)
     (folder / "app.py").write_text("x = 1\n")
     (folder / "venv").mkdir()
