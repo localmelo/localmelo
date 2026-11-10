@@ -32,8 +32,7 @@ from localmelo.melo.agent._earlier import (
     EARLIER_HEAD,
     EARLIER_TURNS,
 )
-from localmelo.melo.checker.review.model import recalled_part
-from localmelo.melo.memory.block import BLOCK_HEADER, BLOCK_PREFIX, strip_block
+from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.support.gateway.console.notes import NOTE_MARK
 from localmelo.support.gateway.handoff import (
     HANDOFF_HEADER,
@@ -246,12 +245,12 @@ def test_the_reading_follows_the_words_as_fenced_inert_data_within_its_room() ->
 
 
 def _openers() -> dict[str, str]:
-    """Every heading, end line, prefix and fence line melo's parsers read, by name."""
+    """Every heading, end line, prefix and fence line melo's parsers read, and the memory block's heading, by name."""
     return {
         "reading head": READING_HEAD,
         "person's words head": WORDS_HEADER,
         "picked head": PICKED_HEADER,
-        "memory block prefix": BLOCK_PREFIX,
+        "memory block prefix": "[melo's memory ·",
         "memory block head": BLOCK_HEADER,
         "earlier-turns head": EARLIER_HEAD,
         "earlier-turns end": EARLIER_END,
@@ -272,9 +271,7 @@ def test_no_line_of_the_reading_can_open_a_block(name: str) -> None:
     # The reading's lines start with the opener, unclosed, also after white space.
     reading = f"first line\n{opener} unclosed\n   {opener} indented\n\t{opener}"
     request = with_reading(WORDS, reading, progress=f"{opener}\nnext")
-    # Nothing the memory block's parser cuts on or reads as recalled notes, and
-    # no line of the block, begins with an opener.
-    assert strip_block(request) == request and recalled_part(request) == ""
+    # The person's words stay whole, and no line of the block begins with an opener.
     assert words_of(request) == WORDS
     assert not [
         line for line in _block_lines(request) if line.lstrip().startswith(("[", "<<"))

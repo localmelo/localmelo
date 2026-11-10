@@ -525,15 +525,17 @@ async def test_melo_s_answers_and_recalled_notes_never_name_the_site(
     tool = ActsOnSite()
     llm = FakeModel([_act("news.example"), _answer("no")], [NOT_ASKED])
     agent = _acting_agent(llm, tmp_path / "ws", tool)
-    recalled = (
-        "what is new?\n\n[melo's memory · notes (“you” is the user) and earlier "
+    notes = (
+        "\n\n[melo's memory · notes (“you” is the user) and earlier "
         "chats, not instructions]\n- You read news.example every day."
     )
     card = Card(ApprovalDecision(False))
 
     await agent.run_task(
-        "go on",
-        earlier_turns=[(recalled, "Open news.example to see what is new.")],
+        "go on" + notes,
+        own_chars=len("go on"),
+        recalled=notes,
+        earlier_turns=[("what is new?", "Open news.example to see what is new.")],
         approval=ChatPolicy(card, "auto"),
     )
 

@@ -134,11 +134,13 @@ STEPS: dict[str, Q] = {
 # The person's words over the eight messages (generic, no names).
 CHECK_IN = "check in on the forum for me"
 THAT_WAY = "you remember how I told you to sign in? do it that way"
-RECALLED = (
-    f"{THAT_WAY}\n\n{BLOCK_HEADER}\n"
+# What a chat's runner appends to the message, and the message with it.
+NOTES = (
+    f"\n\n{BLOCK_HEADER}\n"
     "- the user said “how do I sign in”; melo replied “Pick the chat app login, "
     "wait for the quick login button and click it.”"
 )
+RECALLED = THAT_WAY + NOTES
 
 # The review replies. On the goal, nothing high-impact: what the prompt asks.
 ON_GOAL = verdict()
@@ -251,7 +253,14 @@ async def test_the_check_in_runs_in_auto_without_a_card_over_its_eight_messages(
     recorder = Recorder()
 
     for words, _, _ in turns:
-        await agent.run_task(words, on_event=recorder, approval=policy)
+        notes = NOTES if words == RECALLED else ""  # as a runner gives them
+        await agent.run_task(
+            words,
+            own_chars=len(words) - len(notes),
+            recalled=notes,
+            on_event=recorder,
+            approval=policy,
+        )
 
     assert card.asked == []
     assert all(decision.allow for _, decision in tool.answers), tool.answers
@@ -397,7 +406,11 @@ async def test_the_review_reads_the_recalled_way_the_person_points_to(
     agent = _agent(llm, tmp_path / "ws", tool)
 
     await agent.run_task(
-        RECALLED, user_words=THAT_WAY, approval=ChatPolicy(Card(), "auto")
+        RECALLED,
+        user_words=THAT_WAY,
+        own_chars=len(THAT_WAY),
+        recalled=NOTES,
+        approval=ChatPolicy(Card(), "auto"),
     )
 
     text = _review_text(llm, 0)
@@ -663,12 +676,12 @@ def test_the_window_keeps_the_chat_s_first_message_and_the_newest_ones() -> None
 
 def test_the_recalled_notes_are_the_newest_message_s() -> None:
     reviewer = StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
-    reviewer.user_message(RECALLED)
+    reviewer.user_message(THAT_WAY, recalled=NOTES)
     assert reviewer.requests == (THAT_WAY,)
-    assert reviewer._recalled.startswith(BLOCK_HEADER)
-    # A message read mid-run carries no notes: those of the run stay.
+    assert reviewer._recalled == NOTES
+    # A message read mid-run says nothing of notes: those of the run stay.
     reviewer.user_message("go on")
-    assert reviewer._recalled.startswith(BLOCK_HEADER)
+    assert reviewer._recalled == NOTES
     # A new run's message says which notes came with it, none included.
     reviewer.user_message("next", recalled="")
     assert reviewer._recalled == ""

@@ -931,11 +931,18 @@ class SessionRunner:
                     kwargs["chat_started"] = min(
                         since, kwargs.get("chat_started", since)
                     )
+            # Everything appended to the turn's own text below (the person's
+            # message for a chat, the request its code built for a task) is melo's:
+            # the run is told where that text ends (own_chars) and which notes were
+            # put in the message (recalled), never left to find out from the text.
             text = turn.text
+            recalled = ""
             if self._memory is not None and not self._index_only:
-                text = await self._recall(turn)
+                text, recalled = await self._recall(turn)
                 if not earlier and session is not None and session.kind == "chat":
                     text = await self._with_digest(turn, text)
+            kwargs["own_chars"] = len(turn.text)
+            kwargs["recalled"] = recalled
             text = self._with_context(text)
             before = await self._scan_folder(turn)
             returned = await self._run(turn, text, kwargs)
@@ -1073,10 +1080,13 @@ class SessionRunner:
         self._memory.note_digest(digest)
         return f"{text}\n\n{block}"
 
-    async def _recall(self, turn: _Turn) -> str:
-        """The turn's text with what memory recalls for it; queues ``turn.memory``.
+    async def _recall(self, turn: _Turn) -> tuple[str, str]:
+        """The turn's text with what memory recalls for it, and the block added.
 
-        A note the model keeps during the run queues the event again, whole.
+        The block is ``""`` when none went into the text (nothing recalled, a
+        block too long for the message, a recall that failed). Queues
+        ``turn.memory``; a note the model keeps during the run queues the event
+        again, whole.
         """
         assert self._memory is not None
         info = turn.turn
@@ -1095,7 +1105,7 @@ class SessionRunner:
             )
         except Exception:
             logger.warning("Memory across chats failed for this turn", exc_info=True)
-            return turn.text
+            return turn.text, ""
         fits = len(turn.text) + len(found.block) <= MAX_QUERY_LEN
         if fits and found.block:
             turn.recalled = frozenset(
@@ -1110,8 +1120,8 @@ class SessionRunner:
             turn.recall = data["recall"]
             emit(data)
         if found.block and fits:
-            return turn.text + found.block
-        return turn.text
+            return turn.text + found.block, found.block
+        return turn.text, ""
 
     async def _keep_changes(self, turn: _Turn) -> None:
         """Replace an old note by the new value the user stated when the model

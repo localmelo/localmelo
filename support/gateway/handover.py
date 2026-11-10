@@ -263,8 +263,8 @@ def inert(text: str) -> str:
     return _MARKER.sub(r"(\1)", text.replace("<<", "‹‹"))
 
 
-# A line of a block that starts, after white space, with ``[`` (every heading, end
-# line and block prefix of melo's starts so) is not a line of data.
+# A line of a block that starts, after white space, with ``[`` (every heading and
+# end line of melo's starts so) is not a line of data.
 _LINE_OPENER: Final = re.compile(r"^(\s*)\[")
 
 
@@ -272,12 +272,15 @@ def no_openers(text: str) -> str:
     """*text* made :func:`inert` and with no line that begins, after white space, with
     an opener of one of melo's blocks or fences.
 
-    The openers are ``[`` (a heading, an end line, the memory block's prefix, the
+    The openers are ``[`` (a heading, an end line, the memory block's heading, the
     earlier-turns marker) and ``<<`` (a fence line); a line-leading ``[`` becomes
-    ``(`` whatever follows it, closed on its line or not, because a parser cuts
-    at a line that starts with a block's prefix. A new kind of block must start
-    its lines with one of these or extend this. Lines are those of
-    ``str.splitlines``.
+    ``(`` whatever follows it, closed on its line or not. Some code still reads
+    such a line (:func:`words_of` cuts a request at the reading's heading, and a
+    task's note and card markers are looked for in its text). The memory block's
+    heading is read by no code now, and stays in the list so that a line of data
+    never reads as melo's own heading to whoever reads the message. A new kind
+    of block must start its lines with one of these or extend this. Lines are
+    those of ``str.splitlines``.
     """
     lines = inert(text).splitlines(keepends=True)
     return "".join(_LINE_OPENER.sub(r"\1(", line) for line in lines)

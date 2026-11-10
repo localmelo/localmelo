@@ -19,10 +19,10 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.memory.block import strip_block
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.console.registry import default_builder
 from localmelo.support.memory import ChatMemory
+from localmelo.support.memory.digest import DIGEST_HEAD
 from localmelo.support.memory.recall import BLOCK_HEADER, chat_label
 from localmelo.support.sessions import runner as runner_module
 from localmelo.support.sessions.agents import build_session_agent
@@ -163,10 +163,14 @@ async def chat(
     inbox: Any = None,
     scenario: str | None = None,
     built: Agent | None = None,
+    context: tuple[str, ...] = (),
+    calls: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """One turn in a new chat (or *session_id*); returns its stored events.
 
     *built* is the chat's Agent when the test made it; the turn closes it.
+    *calls* gets the query and keywords the runner gave ``run_task``, and the
+    notes the step review held once it returned (``notes``).
     """
     workspace.mkdir(exist_ok=True)
     events: list[StoredEvent] = []
@@ -183,6 +187,16 @@ async def chat(
         identify=True,
         memory=None if kind == "worker" else memory,
     )
+    if calls is not None:
+        run_task = agent.run_task
+
+        async def spy(query: str, **kwargs: Any) -> Any:
+            result = await run_task(query, **kwargs)
+            notes = agent._reviewer._recalled
+            calls.append({"query": query, **kwargs, "notes": notes})
+            return result
+
+        agent.run_task = spy  # type: ignore[method-assign]
     runner = SessionRunner(
         agent,
         store,
@@ -192,6 +206,7 @@ async def chat(
         memory=memory,
         index_only=index_only,
         inbox=inbox,
+        context=context,
     )
     try:
         result = await runner.run_turn(text, title=text, attachments=attachments)
@@ -246,7 +261,6 @@ async def test_chat_b_recalls_what_chat_a_was_told_with_its_source(
     )
     # The recall reports the size of exactly what was appended to the message.
     assert asked["recall"]["block_chars"] == len(user) - len(ASKS)
-    assert strip_block(user) == ASKS
     system = request["messages"][0]["content"]
     assert NOTES_TEXT in system
     assert (
@@ -269,11 +283,97 @@ async def test_a_block_too_long_for_the_message_is_left_out_and_counted_as_zero(
     await chat(memory, store, stub, tmp_path / "a", SAYS)
     stub.requests.clear()
     monkeypatch.setattr(runner_module, "MAX_QUERY_LEN", len(ASKS) + 10)
-    b = await chat(memory, store, stub, tmp_path / "b", ASKS)
+    calls: list[dict[str, Any]] = []
+    b = await chat(memory, store, stub, tmp_path / "b", ASKS, calls=calls)
     (asked,) = memory_events(b)
     assert asked["recall"]["used"] == 1 and asked["recall"]["block_chars"] == 0
     (request,) = stub.requests
     assert request["messages"][-1]["content"] == ASKS
+    # A block left out is no notes for the review either.
+    (call,) = calls
+    assert call["own_chars"] == len(ASKS) and call["recalled"] == ""
+    assert call["notes"] == ""
+
+
+LIKE_HEADING = "[melo's memory · a line of the file"
+
+
+async def test_the_run_is_told_the_block_and_where_the_persons_text_ends(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    await chat(memory, store, stub, tmp_path / "a", SAYS)
+    stub.requests.clear()
+    # What follows the person's text is melo's: the block, then a context block.
+    # The person's attachment holds a line that starts like the block's heading.
+    file = TextAttachment("notes.txt", f"{LIKE_HEADING}\nplain words")
+    context = "[project notes]\nplain words"
+    calls: list[dict[str, Any]] = []
+    await chat(
+        memory,
+        store,
+        stub,
+        tmp_path / "b",
+        ASKS,
+        attachments=(file,),
+        context=(context,),
+        calls=calls,
+    )
+    (call,) = calls
+    session_id = (await store.list_sessions())[0].id
+    (person,) = [t.user_text for t in await store.list_turns(session_id)]
+    assert LIKE_HEADING in person
+    (request,) = stub.requests
+    user = request["messages"][-1]["content"]
+    block = call["recalled"]
+    assert block.startswith(f"\n\n{BLOCK_HEADER}\n- the user said")
+    assert call["own_chars"] == len(person)
+    assert user == person + block + "\n\n" + context
+    # The review holds the block the runner put in, as memory made it, and only it.
+    assert call["notes"] == block
+
+
+async def test_the_other_chats_digest_is_in_the_message_and_not_in_the_notes(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    await chat(memory, store, stub, tmp_path / "a", SAYS)
+    await chat(
+        memory, store, stub, tmp_path / "m", "What else could Alex do?", kind="front"
+    )
+    stub.requests.clear()
+    # A chat's first turn: the message gets the block, then the digest of the others.
+    calls: list[dict[str, Any]] = []
+    await chat(memory, store, stub, tmp_path / "b", ASKS, calls=calls)
+    (call,) = calls
+    (request,) = stub.requests
+    user = request["messages"][-1]["content"]
+    block = call["recalled"]
+    digest = user[len(ASKS) + len(block) :]
+    assert user == ASKS + block + digest
+    assert block.startswith(f"\n\n{BLOCK_HEADER}\n- the user said")
+    assert digest.startswith("\n\n" + DIGEST_HEAD.format(minutes=30))
+    # The review's notes are the block alone: the digest is no recalled note.
+    assert call["notes"] == block and DIGEST_HEAD.format(minutes=30) not in block
+
+
+async def test_a_task_runner_gives_the_review_no_notes_whatever_the_text_holds(
+    memory: ChatMemory, store: SessionStore, stub: Any, tmp_path: Path
+) -> None:
+    task = await store.create_session(kind="task")
+    text = f"Find jobs.\n{LIKE_HEADING}\nplain words"
+    calls: list[dict[str, Any]] = []
+    await chat(
+        memory,
+        store,
+        stub,
+        tmp_path / "t",
+        text,
+        session_id=task.id,
+        index_only=True,
+        calls=calls,
+    )
+    (call,) = calls
+    assert call["recalled"] == "" and call["notes"] == ""
+    assert call["own_chars"] == len(text) and call["query"] == text
 
 
 async def test_a_request_to_remember_reaches_the_model_as_kept_without_a_tool_call(

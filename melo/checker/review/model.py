@@ -27,7 +27,6 @@ from typing import Any, Final
 
 from localmelo.melo.contracts import shell_lexer
 from localmelo.melo.contracts.review import ModelAnswer
-from localmelo.melo.memory.block import strip_block
 
 # A call longer than this is not reviewed: it counts as unreviewed.
 MAX_ACTION_CHARS: Final = 6_000
@@ -177,23 +176,6 @@ class ReviewInputs:
 def _data(text: str) -> str:
     """*text* that cannot open or close a block: every ``<`` escaped."""
     return text.replace("<", "&lt;")
-
-
-def own_words(text: str) -> str:
-    """*text* without the recalled notes and chats a turn may carry after it
-    (:func:`~localmelo.melo.memory.block.strip_block`)."""
-    return strip_block(text).rstrip()
-
-
-def recalled_part(text: str) -> str:
-    """The recalled notes and chats *text* carries after the user's own words, or ``""``.
-
-    What :func:`own_words` cuts off, cut to :data:`MAX_RECALLED_CHARS`.
-    """
-    own = strip_block(text)
-    if len(own) == len(text):
-        return ""
-    return text[len(own) :].strip()[:MAX_RECALLED_CHARS]
 
 
 def action_text(tool_name: str, arguments: Mapping[str, Any]) -> str:
@@ -477,9 +459,7 @@ __all__ = [
     "ReviewInputs",
     "action_text",
     "names",
-    "own_words",
     "parse_reply",
-    "recalled_part",
     "shares_a_name",
     "step_names",
     "user_message",
