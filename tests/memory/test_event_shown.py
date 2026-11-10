@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.support.memory import ChatMemory
+from localmelo.support.memory import ChatMemory, service
 from localmelo.support.memory.index import Document, document_text
 from localmelo.support.memory.recall import (
     BLOCK_HEADER,
@@ -214,6 +214,26 @@ async def test_an_item_found_again_keeps_the_line_of_its_first_search(
         assert emitted[-1]["searched"] == first
     finally:
         CHAT_TURN.set(None)
+        await memory.aclose()
+
+
+async def test_an_item_left_out_of_the_block_has_no_entry(
+    tmp_path: Path, store: SessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The notes and turns one message recalls (at most 3 and 2, a turn up to 900
+    # characters) never reach the shipped 4000 characters, so the bound is made
+    # smaller here: the note fits and the two long turns do not.
+    monkeypatch.setattr(service, "BLOCK_CHARS", 900)
+    memory = await build(tmp_path, store, config())
+    try:
+        found = await memory.before_turn(store, await _turn(store, "Ask"), QUESTION)
+        data = found.event()
+        assert data is not None
+        assert [e["kind"] for e in data["used"]] == ["record"]
+        assert body(found.block) == read_back(data["used"], False)
+        assert len(found.used) == 1
+        assert found.recall is not None and found.recall.used == 1
+    finally:
         await memory.aclose()
 
 

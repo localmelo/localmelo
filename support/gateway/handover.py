@@ -406,7 +406,7 @@ async def _opened(
         found_item = await memory.open_item(int(entry["item"]))
         if isinstance(found_item, str):
             return None
-        raw = found_item.item
+        raw = found_item
         item = _named(raw)
         text = _flat(item.text)
         body = f"“{_flat(item.title)}”: {text}" if item.title else text

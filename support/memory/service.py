@@ -405,13 +405,6 @@ class Opened(NamedTuple):
     text: str
 
 
-class OpenedItem(NamedTuple):
-    """A memory item the model opened (:meth:`ChatMemory.open_item`): the item the
-    id names, worded for the chat that asks."""
-
-    item: Item
-
-
 @dataclass
 class Compressed:
     """What :meth:`ChatMemory.compress_chat` did for one chat: what the encoder
@@ -1509,8 +1502,9 @@ class ChatMemory:
         *,
         exclude_session: str = "",
         keep_from_turn: int | None = None,
-    ) -> OpenedItem | str:
-        """The memory item *item_id*, or the line that says why it is not opened.
+    ) -> Item | str:
+        """The memory item *item_id*, worded for the chat that asks, or the line that
+        says why it is not opened.
 
         The rules are the turn's (:meth:`open_turn`): an item of a chat the user
         deleted is gone, an item whose turns the chat *exclude_session* still shows
@@ -1544,7 +1538,7 @@ class ChatMemory:
             )
             if other.key == item.key
         )
-        return OpenedItem(this_chat(marked, exclude_session))
+        return this_chat(marked, exclude_session)
 
     async def source_turns(
         self,
@@ -2033,8 +2027,8 @@ class ChatMemory:
 
         "My weekly sync is on Friday." after a note "Your weekly sync is on
         Wednesday." replaces it even when the model only asked whether to change
-        it. A statement of a subject no note holds is left to the model. Nothing outside the turn under way or
-        with memory off.
+        it. A statement of a subject no note holds is left to the model. Nothing
+        outside the turn under way or with memory off.
         """
         turn = CHAT_TURN.get()
         if (
@@ -2265,9 +2259,9 @@ class ChatMemory:
         """Keep the lasting facts *typed* states (:func:`records.statements`) as
         notes of the turn *info*, stamped *at*; how many were written.
 
-        The rule path alone, as the chat path keeps a user statement: no model
-        call, no vector (``reindex(None)`` adds them), never a secret. For a
-        turn written after the fact (``melo memory ingest``).
+        The rule path, used only for a turn written after the fact (``melo memory
+        ingest``): the chat path keeps no statement by code. No model call, no
+        vector (``reindex(None)`` adds them), never a secret.
         """
         found = records.statements(typed)
         if not found:
@@ -2547,9 +2541,8 @@ class ChatMemory:
                 )
             )
             size += len(typed) + len(answer)
-            if (
-                size >= COMPRESS_AT_CHARS
-            ):  # the first window is closed: no need to read on
+            # The first window is closed: no need to read on.
+            if size >= COMPRESS_AT_CHARS:
                 break
         if not turns:
             return None
@@ -3561,13 +3554,12 @@ def source_pointer(ids: Sequence[int]) -> str:
     return f"From turns {named}: open one for what was said word for word."
 
 
-def _item_text(opened: OpenedItem, chars: int, pointer: str = "") -> str:
+def _item_text(item: Item, chars: int, pointer: str = "") -> str:
     """An opened memory item as the model reads it, in at most *chars* characters:
     its heading (id, date, chat, older and conflict marks), its title and text, then
     the *pointer* line (:func:`source_pointer`) that names the turns it came from.
     The item's own text is cut only when it alone would not fit (with the pointer's
     room kept)."""
-    item = opened.item
     head = item.opened_heading()
     room = chars - len(head) - 1 - (len(pointer) + 1 if pointer else 0)
     body = cut_at_sentence(f"{item.title}\n{item.text}", max(room, 1))
@@ -3745,10 +3737,10 @@ class MemoryTools(BaseToolProvider):
                 if isinstance(reply, str):
                     blocks.append(f"m{number}: {reply}")
                     continue
-                opened.append(reply.item)
+                opened.append(reply)
                 pointer = source_pointer(
                     await self._memory.source_turns(
-                        reply.item,
+                        reply,
                         exclude_session=own.info.session_id if own else "",
                         keep_from_turn=own.keep_from_turn if own else None,
                     )

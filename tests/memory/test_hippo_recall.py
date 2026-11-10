@@ -621,7 +621,7 @@ async def test_the_pointer_leaves_out_turns_the_chat_would_not_show(
         found = await memory.open_item(number)
         assert not isinstance(found, str)
         assert await memory.source_turns(
-            found.item, exclude_session="elsewhere", keep_from_turn=0
+            found, exclude_session="elsewhere", keep_from_turn=0
         ) == [ids[0] for ids in docs]
         # No source left to name: no line (outside the chat's own view).
         CHAT_TURN.set(None)
@@ -710,11 +710,11 @@ async def test_a_chat_that_shows_the_sources_does_not_open_the_item(
             number, exclude_session=info.session_id, keep_from_turn=4
         )
         assert not isinstance(past, str)
-        assert past.item.where.startswith("this chat, ")
+        assert past.where.startswith("this chat, ")
         other = await memory.open_item(
             number, exclude_session="elsewhere", keep_from_turn=0
         )
-        assert not isinstance(other, str) and other.item.where.startswith("chat “")
+        assert not isinstance(other, str) and other.where.startswith("chat “")
     finally:
         await memory.aclose()
 

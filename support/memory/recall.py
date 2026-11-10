@@ -118,8 +118,8 @@ ITEM_LIST_GUIDE: Final = (
     "Memory items that may hold the answer, closest first. Open the ones you "
     "need with open_memory before you answer from them; a title is not the content."
 )
-# With ``[memory] gather = "guide"``: the sentence that follows the list's guide line
-# when the message asks to count, total or compare (:func:`asks_to_gather`).
+# The sentence that follows the list's guide line when the message asks to count,
+# total or compare (:func:`asks_to_gather`).
 GATHER_GUIDE: Final = (
     "This asks for a count, total or comparison: open every listed item that may "
     "belong, search again with other words for each kind not listed yet, and count "
@@ -1266,9 +1266,9 @@ def block(
     a copy that holds the line the model reads (:attr:`Item.shown`).
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
-    Items are added while the block stays within *chars*
-    (:data:`BLOCK_CHARS` unless the settings say otherwise); *show* says how much
-    of each turn they hold (:class:`Shown`).
+    Items are added while the block stays within *chars* (:data:`BLOCK_CHARS` for a
+    message's recall); *show* says how much of each turn they hold
+    (:class:`Shown`).
 
     With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
     the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),

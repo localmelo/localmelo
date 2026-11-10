@@ -31,6 +31,7 @@ from localmelo.support.memory.recall import (
     WHOLE,
     Item,
     Shown,
+    block,
     day,
     snippet,
     turn_excerpt,
@@ -233,6 +234,29 @@ def test_a_line_with_an_id_reads_as_the_line_without_it_otherwise() -> None:
     )
     assert memory_item.excerpt(now, show=show) == (memory_item.line(now), False)
     assert not memory_item.line(now, show=show).startswith("[")
+
+
+def test_the_guide_line_counts_toward_the_size_bound_of_the_block() -> None:
+    show = Shown.of(234, None, True)
+
+    def turn(n: int, text: str) -> Item:
+        return Item(f"d:{n}", text, "chat “Garden”, Oct 30", "s", n, 1.0)
+
+    whole = turn(1, "User: Where is the shed key?\nmelo: On the hook by the door.")
+    cut = turn(2, "User: Where?\nmelo: " + numbered(900))
+    # With room for everything, the block holds both lines and the guide under them.
+    text, used = block([whole, cut], show=show)
+    assert [item.key for item in used] == ["d:1", "d:2"]
+    assert text.count(CUT_GUIDE) == 1 and text.endswith(CUT_GUIDE)
+    # Room for the header and the two lines but not for the guide that the line with
+    # an id brings: the block stays within it and the cut turn is left out.
+    chars = len(text) - len(CUT_GUIDE) - 1
+    tight, kept = block([whole, cut], chars=chars, show=show)
+    assert len(tight) <= chars and CUT_GUIDE not in tight
+    assert [item.key for item in kept] == ["d:1"]
+    # The same room holds both when no line has an id, so the guide decided it.
+    plain, both = block([whole, cut], chars=chars, show=HEADS)
+    assert len(plain) <= chars and [item.key for item in both] == ["d:1", "d:2"]
 
 
 # ── The block and the tools ──
