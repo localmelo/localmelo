@@ -4,6 +4,7 @@ import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {allowState, blockCard, blockFacts} from './blocked.mjs';
 import {canFinish, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
+import {shortTime} from './main-chat.mjs';
 
 const RESUMABLE = new Set(['parked', 'interrupted']);
 const FINISHED = new Set(['done', 'failed', 'cancelled', 'expired']);
@@ -156,9 +157,11 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
 
   const {node, button} = maker(doc);
   const path = (id) => `/tasks/${encodeURIComponent(id)}`;
-  const when = (value) => {
+  // A time as the rest of the page writes it (`6:09 PM` today, `Yesterday`, a date); `full` is the stamp for its title.
+  const when = (value, full = false) => {
     const date = value == null ? null : new Date(value * 1000);
-    return date && !Number.isNaN(date.getTime()) ? formatTime(date, 'full') : '—';
+    if (!date || Number.isNaN(date.getTime())) return '—';
+    return full ? formatTime(date, 'full') : shortTime(value, Date.now() / 1000) || '—';
   };
   const errorText = (error) => error?.message || t('tasks.requestFailed');
   // A started task without a card cannot resume; the server refuses it too.
@@ -197,9 +200,12 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     for (const task of rows) {
       const link = node('a', 'worker-row task-row');
       link.href = `#/tasks/${encodeURIComponent(task.task_id)}`;
-      link.append(node('strong', '', task.title || task.task_id),
-        node('span', 'muted', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : '',
-          openBlocks(task).length ? t('tasks.blocked.count', {n: openBlocks(task).length}) : ''].filter(Boolean).join(' · ')));
+      // A task that waits for the person is the one row that asks: it keeps a box of its own.
+      if (task.stage?.awaited === 'person') link.dataset.awaited = 'person';
+      const line = node('span', 'muted', [stateText(task), developer() ? levelCode(task.level_eff ?? task.level) : '', t('tasks.updated', {when: when(task.updated_at)}), task.workspace_label ? t('tasks.in', {name: task.workspace_label}) : '',
+        openBlocks(task).length ? t('tasks.blocked.count', {n: openBlocks(task).length}) : ''].filter(Boolean).join(' · '));
+      line.title = t('tasks.updated', {when: when(task.updated_at, true)});
+      link.append(node('strong', '', task.title || task.task_id), line);
       nodes.push(link);
     }
     return nodes;
@@ -214,10 +220,20 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       meta.append(node('dt', '', label), cell);
       return cell;
     };
-    const stateCell = row(t('tasks.row.state'), stateText(task));
+    // Default mode says the state, the time and the folder in one quiet line under the title; the developer mode keeps
+    // them, and the mode it ran in, as rows of the full record.
+    const full = developer();
+    const facts = full ? null : node('p', 'task-facts');
+    const stateCell = full ? row(t('tasks.row.state'), stateText(task)) : node('span', '', stateText(task));
     const ending = readEnding(task.ending);
     if (endingOf(task)) stateCell.dataset.ending = ending.state;
     else if (task.stage?.awaited === 'person') stateCell.dataset.awaited = 'person';
+    if (facts) {
+      const time = node('time', '', t('tasks.updated', {when: when(task.updated_at)}));
+      time.title = when(task.updated_at, true);
+      const folder = task.workspace_label ? [node('span', '', t('tasks.in', {name: task.workspace_label}))] : [];
+      facts.append(...[stateCell, time, ...folder].flatMap((part, index) => (index ? [node('span', 'task-facts-gap', ' · '), part] : [part])));
+    }
     // Why it is not ready, and the tests its run ran (from its own calls, never from its report).
     if (ending && endingWhy(ending)) row(t('ending.row'), endingWhy(ending));
     if (ending?.tests.length) {
@@ -232,13 +248,14 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       row(t('ending.tests')).append(tests);
     }
     // Fixed when the task was made: the mode of its chat then.
-    row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
-    if (developer()) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
-    row(t('tasks.row.updated'), when(task.updated_at));
+    if (full) row(t('tasks.row.mode'), t(`auto.mode.${task.approvals === 'auto' ? 'auto' : 'ask'}`));
+    if (full) row(t('common.priority'), levelLabel(task.level_eff ?? task.level));
+    if (full) row(t('tasks.row.updated'), when(task.updated_at, true));
     // The start continued it by itself after a restart: one quiet line, with the time,
     // and a note when its turn was asked to look at a step that may be half done.
     if (task.continued_at != null) {
       const continued = row(t('tasks.row.continued'), when(task.continued_at));
+      continued.title = when(task.continued_at, true);
       if (task.continued_check) continued.append(node('p', 'muted', t('tasks.row.continuedCheck')));
     }
     // A refused folder says why in its own box below, in words.
@@ -246,13 +263,13 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     if ((task.stage?.why || task.stage?.need === 'resume') && task.wait_reason && !task.folder_problem) row(t('tasks.row.waiting'), whyText(task));
     // What the run says is left, from its stop answer.
     if (isStopped(task) && task.left) row(t('tasks.row.left'), task.left);
-    if (task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);
+    if (full && task.workspace_label) row(t('tasks.row.workspace'), task.workspace_label);
     // Evidence is shown when there is some to show, never as "not needed".
     const evidence = evidenceText(task);
     if (evidence) row(t('tasks.row.evidence'), evidence);
-    const nodes = [];
+    const nodes = facts ? [facts] : [];
     if (live) { drawLive(); nodes.push(answerBox); }
-    nodes.push(meta);
+    if (meta.children.length) nodes.push(meta);
     if (task.folder_problem) nodes.push(folderBox(task));
     if (task.not_committed) nodes.push(node('p', 'task-note', task.not_committed));
     if (statusRow) nodes.push(statusRow.element);

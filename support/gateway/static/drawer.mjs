@@ -1,5 +1,6 @@
 import {maker} from './dom.mjs';
 import {formatTime, t} from './i18n.mjs';
+import {toolWords} from './step-words.mjs';
 import {formatDuration, statusText} from './turns.mjs';
 
 /**
@@ -61,17 +62,23 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   function line(parent, label, value) {
     parent.append(node('p', '', t('drawer.line', {label, value})));
   }
+  // Default mode lists each tool by what it does for the person and whether it is allowed; the developer mode adds its
+  // name, where it comes from and the model's own instructions for it.
   function toolView(data) {
-    content.append(node('p', '', t('drawer.tools.opens')));
+    const full = developer();
+    if (full) content.append(node('p', '', t('drawer.tools.opens')));
     const tools = data.tools || [];
     if (!tools.length) content.append(node('p', '', t('drawer.tools.none')));
     for (const tool of tools) {
       const row = node('div', 'drawer-tool');
-      row.append(node('strong', '', tool.name), node('span', '', ` ${tool.source || ''} · ${t(tool.granted ? 'drawer.tools.allowed' : 'drawer.tools.notAllowed')}`));
-      if (tool.description) row.append(node('p', '', tool.description));
+      const allowed = t(tool.granted ? 'drawer.tools.allowed' : 'drawer.tools.notAllowed');
+      const named = full ? tool.name : toolWords(tool.name);
+      if (full) row.append(node('strong', '', tool.name), node('span', '', ` ${tool.source || ''} · ${allowed}`));
+      else row.append(node('span', '', named), node('span', 'drawer-tool-state', ` · ${allowed}`));
+      if (full && tool.description) row.append(node('p', '', tool.description));
       if (tool.granted) {
         const revoke = button('', t('drawer.tools.revoke'), () => revokeGrants(tool.name));
-        revoke.setAttribute('aria-label', t('drawer.tools.revokeOne', {tool: tool.name}));
+        revoke.setAttribute('aria-label', t('drawer.tools.revokeOne', {tool: named}));
         row.append(revoke);
       }
       content.append(row);

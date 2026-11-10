@@ -63,7 +63,7 @@ test('the main chat, the panel, the Scheduled tab and Settings draw their words 
     const card = {state: 'waiting', sourceKind: 'task', title: '整理照片', line: ''};
     assert.deepEqual(cardWords(card), {mark: '!', heading: '需要你批准：整理照片', action: '查看'});
     assert.equal(stepWords('file_read', {path: '/tmp/notes.md'}), '正在读取 notes.md');
-    assert.equal(stepWords('shell_exec', {command: 'pytest -q'}, true), '运行了 测试');
+    assert.equal(stepWords('shell_exec', {command: 'pytest -q'}, true), '运行了测试');
     assert.equal(headline({status: {running: {task: 2}}}).text, '正在做 2 件事');
     assert.equal(phaseWords('Explore'), '查看情况');
     assert.equal(t('failure.http.server'), '模型服务出了问题，没能回答。再试一次；如果一直这样，请重启服务。');

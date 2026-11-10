@@ -112,6 +112,7 @@ function harness({rows = [], turns = null, storage = null, failActivity = false,
     root, chip, backdrop, api, cover: () => [chat], chat: () => h.open, developer: () => developer, storage: storage ?? {getItem: () => null, setItem: () => {}},
     clock, ...(moves ? {moves} : {}), ...(wait ? {wait, cancelWait: () => {}} : {}),
     wide, tasks, hasTasks: () => hasTasks, home: () => `#/s/${h.open || 'main'}`, navigate: (hash) => h.went.push(hash),
+    folder: () => h.folder ?? '',
     live: {
       doc,
       open: (url) => { const source = new FakeSource(url); h.sources.push(source); return source; },
@@ -454,7 +455,7 @@ test('Workers lists the tasks and runs of the scope, running first, each with it
   assert.deepEqual(actions.children.map((node) => [node.tagName, node.href]), [['A', '#/workers/r1']]);
 });
 
-test('a task names its folder in Activity and in Workers; a row without one adds nothing', async () => {
+test('a task names its folder in Activity and in Workers unless it is the open chat\'s; a row without one adds nothing', async () => {
   const h = harness({rows: [
     task({id: 't1', title: 'Sort photos', state: 'failed', result: 'Could not use its folder', icon: 'failed', at: 2000, folder: '/Volumes/Photos'}),
     task({id: 't2', title: 'Notes', state: 'done', result: 'Done.', at: 1000, folder: '~/notes'}),
@@ -465,6 +466,10 @@ test('a task names its folder in Activity and in Workers; a row without one adds
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
   h.tabs()[1].click();
   assert.deepEqual(folders(), ['In /Volumes/Photos', 'In ~/notes']);
+  // In a chat of its own folder a row does not repeat it; only the one that works elsewhere names its folder.
+  h.folder = '~/notes';
+  h.tabs()[0].click();
+  assert.deepEqual(folders(), ['In /Volumes/Photos']);
 });
 
 test('a task a side chat started says so in the whole day\'s list', async () => {
