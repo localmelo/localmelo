@@ -898,6 +898,9 @@ button:hover:not(:disabled) {
   background: var(--raised);
   padding: 1px 4px;
   border-radius: var(--radius-control);
+  /* Code that wraps keeps its padding and round ends on each line. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 /* Code wider than its box scrolls inside it; a shade at the right edge says there is more, and goes at the end. */
 .answer pre {
