@@ -19,7 +19,7 @@ from localmelo.support.browser.driver import (
 )
 from localmelo.support.browser.provider import PAGE_NOTE, TOOLS, parse_point
 from localmelo.tests.browser.fakes import button, link, page
-from localmelo.tests.browser.test_acting import HOME, OTHER, Asks, asking, world
+from localmelo.tests.browser.test_acting import DONE, HOME, OTHER, Asks, asking, world
 from localmelo.tests.browser.test_local_addresses import CONSOLE, assert_refused
 from localmelo.tests.browser.test_native_input import DAILY, native, opened
 from localmelo.tests.browser.test_provider import run, tools_of
@@ -86,23 +86,81 @@ async def test_a_point_on_a_drawing_is_clicked_and_looked_at_again() -> None:
     driver = point_world(PointHit("canvas", canvas))
     out = await pointed(driver)
     assert not out.is_error
-    assert out.text.startswith(
-        "Clicked a drawing or picture at (500, 300) (via point). Nothing on the page changed."
-    )
+    head, said = out.text.split("\n")[:2]
+    assert head.startswith("No change seen on the page in 2 s after a point click")
+    assert said == "Clicked the point (500, 300) (via point)."
+    # What the point was on is page words: inside a block, never on the first lines.
+    assert "the point was on: a drawing or picture" in out.text.split("<<page", 1)[1]
     assert driver.acts[0].point == (500, 150) and driver.acts[0].view is not None
     # It looks again: a new picture, with the point drawn on it.
     assert out.images and driver.marks[-1] == (driver.acts[0].view, 500, 150)
 
 
-async def test_a_point_needs_a_picture_first_and_a_point_on_nothing_is_refused() -> (
-    None
-):
+async def test_a_point_from_a_reading_needs_no_picture() -> None:
+    canvas = Element("button", "", at=-1, fp="canvas|1")
+    driver = point_world(PointHit("canvas", canvas))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        out = await run(tools, "browser_click_point", x=500, y=300)
+    # The reading's view is the one coordinate space: the point lands as on a picture.
+    assert not out.is_error and driver.acts[0].point == (500, 150)
+    # A driver that cannot say what was in view gives no space to read a point in.
+    blind = point_world(PointHit("canvas", canvas))
+    blind.shot_view = None
+    tools = await tools_of(blind)
+    await run(tools, "browser_open", url=HOME)
+    out = await run(tools, "browser_click_point", x=500, y=300)
+    assert out.is_error and not blind.acts
+    assert out.text.startswith("melo has no view of this tab to read a point on")
+
+
+async def test_numbers_given_for_one_view_are_never_read_on_a_newer_one() -> None:
+    driver = world(button("Pay"), button("Keep"))
+    driver.via = "page-script"
+    # Measuring an element's centre scrolls it into view, as an act does.
+    driver.centres["Pay"], driver.scrolls["Pay"] = (500.0, 200.0), 300.0
+    driver.centres["Keep"], driver.scrolls["Keep"] = (300.0, 250.0), 900.0
+    driver.hits[(500, 200)] = PointHit("control", button("Keep"))
+    driver.hits[(300, 250)] = PointHit("control", button("Keep"))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        pay = await run(tools, "browser_click", ref="e1")
+        keep = await run(tools, "browser_click", ref="e2")
+        assert "x=500 y=400" in pay.text and "x=300 y=500" in keep.text
+        # Pay's numbers belong to the view Pay was scrolled into: the page has
+        # scrolled on since, so they are refused, not read on Keep's view.
+        old = await run(tools, "browser_click_point", x=500, y=400)
+        assert old.is_error and "scrolled" in old.text
+        assert not any(act.point for act in driver.acts)
+        # Keep's numbers are on the view the page is at: they press Keep.
+        new = await run(tools, "browser_click_point", x=300, y=500)
+    assert not new.is_error and driver.acts[-1].point == (300, 250)
+
+
+async def test_numbers_given_on_one_page_are_read_on_a_new_pages_picture() -> None:
+    driver = world(button("Pay"), link("Done", DONE))
+    driver.via = "page-script"
+    driver.centres["Pay"] = (500.0, 200.0)
+    driver.hits[(500, 200)] = PointHit("control", button("Again"))
+    tools = await tools_of(driver)
+    with asking(Asks()):
+        await run(tools, "browser_open", url=HOME)
+        pay = await run(tools, "browser_click", ref="e1")
+        assert "x=500 y=400" in pay.text
+        await run(tools, "browser_click", ref="e2")  # the tab moves to another page
+        await run(tools, "browser_screenshot")
+        # The same numbers, read off the new page's picture, are pressed there.
+        out = await run(tools, "browser_click_point", x=500, y=400)
+    assert not out.is_error and driver.acts[-1].element.label == "Again"
+    assert driver.acts[-1].url == DONE
+
+
+async def test_a_point_on_nothing_is_refused() -> None:
     driver = point_world(PointHit("none", tag="p", words=True))
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
-    first = await run(tools, "browser_click_point", x=500, y=300)
-    assert first.is_error and "browser_screenshot of this tab first" in first.text
-    await run(tools, "browser_screenshot")
     out = await run(tools, "browser_click_point", x=500, y=300)
     assert out.is_error and not driver.acts
     # What is there is told; a point on the 0-1000 scale is never doubted.
@@ -222,7 +280,7 @@ async def test_a_point_in_a_box_from_elsewhere_never_says_nothing_changed() -> N
     out = await pointed(driver, Asks())
     assert not out.is_error and out.images
     first = out.text.split("\n", 1)[0]
-    assert "Nothing on the page changed" not in first
+    assert "No change seen" not in first
     assert "inside the box shows only in the new picture" in first
 
 
@@ -255,7 +313,7 @@ async def test_the_point_tool_asks_for_itself_and_the_note_names_the_order() -> 
         "destructiveHint": False,
         "idempotentHint": False,
     }
-    assert "browser_screenshot, then browser_click_point" in PAGE_NOTE
+    assert "the same in a picture, a reading and a step's result" in PAGE_NOTE
 
 
 async def test_a_point_on_a_label_clicks_its_field_where_the_field_is() -> None:

@@ -49,7 +49,7 @@ MAX_QUERY_CHARS = 200
 # The browser way loads this page: DuckDuckGo's page without scripts.
 BROWSER_URL = "https://html.duckduckgo.com/html/?q={q}"
 BROWSER = "browser"
-BROWSER_ENGINE = "DuckDuckGo in Safari"
+BROWSER_ENGINE = "DuckDuckGo in melo's browser"
 # The longest the browser way waits for a page, in seconds.
 BROWSER_S = 25.0
 BROWSER_OWN = frozenset({"duckduckgo.com"})

@@ -32,8 +32,13 @@ from localmelo.support.browser.desktop import (
 )
 from localmelo.support.browser.driver import Changes, Element, PointHit
 from localmelo.support.browser.provider import BrowserToolProvider
-from localmelo.tests.browser.fakes import FakeDriver, button, forget_helper_status
-from localmelo.tests.browser.test_acting import HOME, Asks, asking, world
+from localmelo.tests.browser.fakes import (
+    FakeDriver,
+    button,
+    forget_helper_status,
+    page,
+)
+from localmelo.tests.browser.test_acting import DONE, HOME, Asks, asking, world
 from localmelo.tests.browser.test_other_windows import (
     FAKE,
     SIGN_IN,
@@ -233,25 +238,41 @@ async def test_a_click_that_changed_the_page_does_not_wait(screen: Screen) -> No
 async def test_the_wait_stops_when_the_page_changes_by_itself(screen: Screen) -> None:
     driver = world(button("Quick sign-in"))
     provider, tools = await opened(driver, watch(screen))
-    real = driver.location
-    moved = ""
-
-    async def location(tab: str | None) -> str:
-        # The page sends the browser on one second after the click.
-        if screen.clock.now >= 1001.0 and moved:
-            return moved
-        return await real(tab)
-
-    driver.location = location  # type: ignore[method-assign]
     try:
         with asking(Asks()):
-            moved = HOME + "elsewhere"
+            # The page sends the browser on one second after the click.
+            screen.clock.at(1.0, lambda: driver.tabs_["t1"].append(DONE))
             out = await run(tools, "browser_click", ref="e1")
     finally:
         await provider.close()
     assert not out.is_error
     # One poll (half a second) passed before the page was seen to move on.
     assert sum(screen.clock.slept) <= 1.0
+    # The click did something after all: the page it led to is read, and the
+    # result never says that nothing changed.
+    assert "No effect" not in out.text and "No change" not in out.text
+    assert "Checked in." in out.text
+
+
+async def test_a_page_that_loads_again_at_its_address_during_the_wait_is_read(
+    screen: Screen,
+) -> None:
+    driver = world(button("Send"))
+    provider, tools = await opened(driver, watch(screen))
+
+    def reload() -> None:
+        # The form posts and the site answers with a new page at the same address.
+        driver.docs["t1"] = "d2"
+        driver.pages[HOME] = page(HOME, "Thanks, it was sent.", title="Home")
+
+    try:
+        with asking(Asks()):
+            screen.clock.at(1.0, reload)
+            out = await run(tools, "browser_click", ref="e1")
+    finally:
+        await provider.close()
+    assert not out.is_error
+    assert "No change seen" not in out.text and "Thanks, it was sent." in out.text
 
 
 async def test_the_address_of_an_app_hands_the_act_off_and_the_window_is_waited_for(

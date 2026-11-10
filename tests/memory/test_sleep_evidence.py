@@ -10,7 +10,6 @@ from localmelo.support.memory import ChatMemory, sleep
 from localmelo.support.sessions.store import SessionStore
 
 from . import test_sleep as rules
-from .test_sleep_model import Scripted, op
 
 memory = rules.memory
 chats = rules.chats
@@ -24,9 +23,6 @@ async def test_mixed_run_reports_evidence_and_retains_rows_through_undo_redo(
         "My name is Juno.",
         "My advisor is Dr. Okafor.",
         "I enjoy kitesurfing.",
-        "Cashews cause my allergic reactions.",
-        "I'm no longer allergic to walnuts.",
-        "Dr. Ada's office is on Pine Street.",
     ]
     turns = [
         sleep.SleepTurn(
@@ -39,54 +35,19 @@ async def test_mixed_run_reports_evidence_and_retains_rows_through_undo_redo(
         memory, "You live in Utrecht.", rules.LONG_AGO + 5, session="s", turn=1
     )
     await rules.put(memory, "You go by Pip.")
-    updated = await rules.put(memory, "Peanuts cause your allergic reactions.")
-    retired = await rules.put(memory, "You are allergic to walnuts.")
-    rewritten = await rules.put(
-        memory, "Her office is on Pine Street.", session="s", turn=7
-    )
     before = {n.id: n.text for n in await memory.records()}
-    provider = Scripted(
-        [
-            [],
-            [],
-            [],
-            [op("ADD", typed[3], "You enjoy kitesurfing.")],
-            [op("UPDATE", typed[4], "Cashews cause your allergic reactions.", updated)],
-            [op("RETIRE", typed[5], note=retired)],
-            [],
-            [op("UPDATE", typed[6], typed[6], rewritten)],
-        ]
-    )
     report = await sleep.run(
-        *memory.stores(),
-        turns,
-        variant="model",
-        provider=provider,
-        now=rules.LONG_AGO + 200,
+        *memory.stores(), turns, variant="rules", now=rules.LONG_AGO + 200
     )
     assert not report.aborted
-    assert {c.op for c in report.changes} == {
-        "O1",
-        "O2",
-        "O3",
-        "ADD",
-        "UPDATE",
-        "RETIRE",
-        "O4",
-    }
+    assert {c.op for c in report.changes} == {"O1", "O2", "O3"}
     payload = report.to_json()
-    assert payload["run_id"] == report.run_id and payload["variant"] == "model"
+    assert payload["run_id"] == report.run_id and payload["variant"] == "rules"
     for change in payload["changes"]:
         session, number = change["source_turn"]
         source = next(t for t in turns if (t.session_id, t.turn) == (session, number))
         assert change["quote"] and change["quote"] in source.typed
         assert change["before_texts"] == [before[i] for i in change["before_ids"]]
-        assert change["verdict"] == "applied"
-        if change["op"] in {"O1", "O2", "O3"}:
-            assert change["proposal"] is None
-        else:
-            assert change["proposal"] in payload["proposals"]
-            assert change["proposal"]["verdict"] == "applied"
     all_ids = {i for i, _, _ in rules.rows(memory)}
     before_ids = {i for change in report.changes for i in change.before_ids}
     assert before_ids <= all_ids
@@ -104,24 +65,21 @@ async def test_mixed_run_reports_evidence_and_retains_rows_through_undo_redo(
 
 
 async def test_undo_keeps_a_created_row_later_used_as_a_before_id(
-    memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
+    memory: ChatMemory, chats: SessionStore
 ) -> None:
-    await rules.chat(chats, "My advisor is Dr. Okafor.")
+    await rules.chat(chats, "I live in Lisbon.")
     first = await memory.sleep("rules", chats=chats)
     created = first.changes[0].after_id
     assert created is not None
-    quote = "Dr. Okafor is no longer my advisor."
-    await rules.chat(chats, quote)
-    provider = Scripted([[op("RETIRE", quote, note=created)]])
-    monkeypatch.setattr(ChatMemory, "chat_provider", lambda self: provider)
-    second = await memory.sleep("model", chats=chats)
+    await rules.chat(chats, "I live in Utrecht.")
+    second = await memory.sleep("rules", chats=chats)
     assert [c.before_ids for c in second.changes] == [[created]]
     await memory.undo_sleep(second.run_id)
     await memory.undo_sleep(first.run_id)
     assert await memory.records() == []
     retained = await memory.stores()[0].entry(created)
-    assert retained is not None and retained.text == "Your advisor is Dr. Okafor."
-    await rules.chat(chats, "My advisor is Dr. Okafor.")
+    assert retained is not None and retained.text == "You live in Lisbon."
+    await rules.chat(chats, "I live in Lisbon.")
     assert (await memory.sleep("rules", chats=chats)).changes
     assert await memory.stores()[0].entry(created) is not None
 

@@ -49,7 +49,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - melo clicks, types and chooses on pages, and finishes web forms from what you told it.
 - A go-ahead such as "I authorize you" starts the work in your name; a sign-in is a step you take, not a stop.
 - A window another app opens after melo's click asks you first; until you allow it, nothing about it reaches the model.
-- Safari's automation windows work too (`/browser on`), one tab per chat.
+- `/browser on` and the Settings switch use Chrome in the background when it is installed, and Safari's automation windows (one tab per chat) otherwise; a browser you chose before is kept.
+- When a click changes nothing on a page, melo is told so and tries another way; after it acts on a page it reads only what changed.
 - The hosts of one site count as one site, so one allow covers them.
 - The browser tools never open this computer, its local network or melo's own console.
 

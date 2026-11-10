@@ -55,6 +55,8 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "exit_code",
                 "tool_asks",
                 "allowed_local",
+                "phases",
+                "effect",
             }
         ),
         "note": frozenset(
@@ -160,8 +162,10 @@ OPTIONAL_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         # The questions the call's tool asked and was refused (#431): a site
         # web_fetch or the browser would open. Only when there is one. And
         # allowed_local, true only for a web_fetch call that read a test server
-        # on this computer that the developer setting lists.
-        "tool.finished": frozenset({"tool_asks", "allowed_local"}),
+        # on this computer that the developer setting lists. And phases, where
+        # a browser call's time went (seconds by phase), and effect, "none" for
+        # a browser act after which no change was seen.
+        "tool.finished": frozenset({"tool_asks", "allowed_local", "phases", "effect"}),
         # The live call's key (#571): a call stored before it was kept has none.
         "tool.started": frozenset({"run_key"}),
         "reflection": frozenset(
