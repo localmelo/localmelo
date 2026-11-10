@@ -169,12 +169,16 @@ test('a reply being written grows in place, starts over from 0, and its stored r
   assert.equal(turn.live, null, 'a step whose stored reply came takes no more live text');
 });
 
-test('a reply stopped while it was written keeps the words it showed', () => {
-  const {view, turn, push} = fullTurn();
-  applyEvent(view, {turn: 1, type: 'reply.live', data: {turn: 1, step: 1, attempt: 1, at: 0, text: 'Half a rep'}});
-  push('run.finished', {result: {status: 'cancelled', result: '', error: 'Cancelled by the user'}});
-  assert.equal(turn.live, null);
-  assert.deepEqual(turn.items.filter((item) => item.kind === 'assistant_text').map((item) => item.text), ['Half a rep']);
+test('only a reply stopped while it was written keeps the words it showed', () => {
+  const words = (status) => {
+    const {view, turn, push} = fullTurn();
+    applyEvent(view, {turn: 1, type: 'reply.live', data: {turn: 1, step: 1, attempt: 1, at: 0, text: 'Half a rep'}});
+    push('run.finished', {result: {status, result: '', error: 'It ended'}});
+    assert.equal(turn.live, null);
+    return turn.items.filter((item) => item.kind === 'assistant_text').map((item) => item.text);
+  };
+  assert.deepEqual(words('cancelled'), ['Half a rep']);
+  assert.deepEqual(words('provider_error'), [], 'a failure leaves no words that read as its reply');
 });
 
 // #278: the agent stores a reply that is only unfinished thinking with its text as thinking and no content.
@@ -1505,6 +1509,20 @@ test('a reply shows in its bubble as it is written, and the answer takes its pla
   assert.equal(bubble(), null);
   const answers = findNodes(h.element('messages'), (node) => node.className === 'answer');
   assert.equal(answers.at(-1).innerHTML, first.innerHTML, 'the finished answer reads as the last live words did');
+});
+
+test('with /stream off a reply shows only when it ends, and a stopped one leaves no words', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.run('prefs.stream = false');
+  const stream = h.stream();
+  stream.emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'Say hello'}});
+  stream.emit({session_id: 'a', turn: 2, type: 'reply.live', data: {turn: 2, turn_id: 'turn-2', step: 1, attempt: 1, at: 0, text: 'Half a rep\n'}});
+  h.timers.filter((timer) => timer.ms === 40 && !timer.cleared).forEach((timer) => timer.handler());
+  assert.equal(findNode(h.element('messages'), (node) => node.dataset?.live === 'true'), null);
+  stream.emit({id: 21, turn: 2, ts: 51, type: 'run.finished', data: {result: {status: 'cancelled', result: '', steps: 1}}});
+  stream.emit({id: 22, turn: 2, ts: 52, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'cancelled', cause: 'user_stop'}});
+  assert.ok(!flatten(h.element('messages')).includes('Half a rep'));
 });
 
 test('approval bar navigates to the card only on request', async () => {

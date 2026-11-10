@@ -1970,7 +1970,9 @@ function workGroup(turn) {
     });
   }
   // /stream off: a turn shows when it ends (an approval it waits on still shows).
-  const steps = prefs.stream || turn.finishedAt ? shownItems(turn) : shownItems(turn).filter((item) => item.pendingRequestId);
+  // Words a stopped reply showed as it was written stay only where replies stream.
+  const items = shownItems(turn).filter((item) => prefs.stream || !item.shownLive);
+  const steps = prefs.stream || turn.finishedAt ? items : items.filter((item) => item.pendingRequestId);
   for (const item of steps) {
     group.append(itemNode(item, turn, { inline }));
     const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);

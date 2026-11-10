@@ -1151,7 +1151,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
     case "run.finished": {
       turn.result = isObject(data.result) ? data.result : null;
       flushUnstarted(turn);
-      keepLive(turn);
+      keepLive(turn, turn.result?.status);
       const [, answer] = splitThinking(turn.result?.result ?? "");
       if (turn.heldText && turn.heldText.trim() !== answer.trim()) {
         turn.items.push({kind: "assistant_text", text: turn.heldText});
@@ -1161,7 +1161,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       break;
     }
     case "turn.finished": {
-      keepLive(turn);
+      keepLive(turn, data.status);
       turn.status = String(data.status ?? "");
       turn.cause = String(data.cause ?? "run");
       turn.runningHere = false;
@@ -1197,9 +1197,15 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
   return {};
 }
 
-/** A reply stopped while it was written keeps the words it showed, as the turn's partial reply. */
-function keepLive(turn) {
-  if (turn.live?.text.trim()) turn.items.push({kind: "assistant_text", text: turn.live.text});
+/**
+ * The end of a reply being written. Only a stopped one (*status* `cancelled`) keeps the words it showed, as
+ * the turn's partial reply marked `shownLive` (a page that does not stream leaves it out); any other end drops
+ * them, so a failure never leaves words that read as its reply.
+ */
+function keepLive(turn, status) {
+  if (status === "cancelled" && turn.live?.text.trim()) {
+    turn.items.push({kind: "assistant_text", text: turn.live.text, shownLive: true});
+  }
   turn.live = null;
 }
 
