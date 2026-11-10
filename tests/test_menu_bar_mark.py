@@ -60,10 +60,14 @@ import AppKit
 _ = NSApplication.shared
 NSApp.setActivationPolicy(.prohibited)
 let mark = MenuBarMark(folder: URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true))!
+var keys = Set<String>()
 for name in [NSAppearance.Name.aqua, .darkAqua] {
     let appearance = NSAppearance(named: name)!
     for badge in [false, true] {
         let image = mark.image(for: appearance, badge: badge)
+        // The key names the image and the item's face: each bar and dot has its own, and one key gives one image.
+        keys.insert(MenuBarMark.key(for: appearance, badge: badge))
+        precondition(mark.image(for: appearance, badge: badge) === image)
         let rep = image.representations.compactMap { $0 as? NSBitmapImageRep }.first { $0.pixelsHigh == 36 }!
         // A pixel the line mask covers and one the fur mask covers, as the bytes of the sRGB bitmap hold them
         // (premultiplied; given back unpremultiplied).
@@ -79,6 +83,7 @@ for name in [NSAppearance.Name.aqua, .darkAqua] {
               at(Int(args[4])!, Int(args[5])!))
     }
 }
+precondition(keys.count == 4)
 """
 
 
