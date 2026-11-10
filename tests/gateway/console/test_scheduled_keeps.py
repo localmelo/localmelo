@@ -18,6 +18,7 @@ from localmelo.support.gateway.chore_store import ChoreStore
 from localmelo.tests.agent.test_allow_question import NOTE, SENDS, SITE, typing
 from localmelo.tests.agent.test_approvals import _answer
 
+from .conftest import all_events
 from .test_allow_typing import console_with, scheduled_task, settled
 
 BLOCKED = "It needs the note.\nEnding: blocked: may it type the note?"
@@ -56,6 +57,16 @@ async def test_a_kept_answer_is_made_from_the_block_used_by_the_next_run_and_end
         await settled(console, run)
         [block] = (await client.get(f"/api/tasks/{run}")).json()["task"]["blocked"]
         assert (block["keep_site"], block["kept"]) == (SITE, False)
+        # The chat's cards of the run offer it too: the blocked step and the end.
+        await console.cards.flush()
+        cards = [
+            e.event["data"]
+            for e in await all_events(console.store, console.main_id)
+            if e.event["type"] == "attention.card"
+        ]
+        [shown] = [c for c in cards if c.get("state") == "blocked"]
+        [end] = [c["block"] for c in cards if "block" in c]
+        assert shown["keep_site"] == end["keep_site"] == SITE
 
         # K1: a request that names no stored block keeps nothing.
         missing = await client.post(f"/api/tasks/{run}/blocks/not-a-block/keep")

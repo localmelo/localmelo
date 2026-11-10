@@ -1286,7 +1286,7 @@ function mainNodes(view, turns, placed) {
       const card = item.card;
       const step = stepState(card, { given: S.cardAllows, busy: S.allowing, echoes });
       return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
-        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block) } })];
+        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block), onKeep: () => allowCardBlock(card, card.block, "keep") } })];
     }
     if (item.kind === "echo") {
       const echo = item.echo;
@@ -1529,7 +1529,10 @@ async function allowCardBlock(card, facts, how = "allow") {
   try {
     const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
-    if (block?.kept) card.kept = true;
+    if (block?.kept) {
+      card.kept = true;
+      if (card.block) card.block.kept = true;
+    }
     S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
     delete S.allowing[facts.requestId];
     panel.refresh();

@@ -2374,6 +2374,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 /* What a chore's runs may do without asking: lines that hang under its row, space only. */
 .sched-keeps { display: grid; gap: var(--space-1); margin: var(--space-1) 0 0; padding: 0; list-style: none; }
 .sched-keep { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.sched-keep > button { flex: none; white-space: nowrap; }
 .sched-switch { position: relative; flex: none; width: 40px; height: 24px; padding: 0; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); }
 .sched-switch::after { content: ""; position: absolute; inset: -10px -6px; }
 .sched-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
@@ -2689,7 +2690,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-kept-row { display: grid; gap: var(--space-1); }
 .task-kept-row + .task-kept-row { padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .task-kept-row > p { margin: 0; color: var(--ink-2); font-size: var(--text-small); }
-.task-kept-row > .block-step { margin: 0; }
+.task-kept-row > .block-step { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }

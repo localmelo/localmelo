@@ -526,6 +526,26 @@ test('a card that needs the person allows its one blocked step, then says what i
   }
 });
 
+test('a scheduled task\'s card also offers to keep the answer for its next runs on the step\'s site', () => {
+  const row = {id: 12, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'May I type the note?'},
+    block: {request_id: 'r1', step_key: 'k1', name: 'browser_type', preview: 'type', review: {categories: ['send_out']},
+      keep_site: 'https://notes.example', kept: false}}};
+  const card = readCard(row);
+  const kept = [];
+  const doc = fakeDoc();
+  cardNode({doc, card, open: () => {}, step: {...mainChat.stepState(card), onKeep: () => kept.push('r1')}});
+  const foot = doc.made.find((item) => item.className === 'main-card-foot');
+  assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent),
+    ['Allow this step', 'Always allow for this scheduled task on notes.example', 'Open task']);
+  doc.made.find((item) => item.textContent.startsWith('Always allow')).listeners.click();
+  assert.deepEqual(kept, ['r1']);
+  // Kept: the card says so, with no button.
+  const after = fakeDoc();
+  cardNode({doc: after, card: {...card, block: {...card.block, kept: true}}, open: () => {}, step: {state: 'allowed'}});
+  assert.ok(after.made.some((item) => item.textContent === 'Allowed for this scheduled task on notes.example'));
+});
+
 test('a suggestion to send keeps its Send, in the page\'s language, after its task ended', async () => {
   const cards = [readCard({id: 1, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
     ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}, follow_up: true, end_id: 1}})];
