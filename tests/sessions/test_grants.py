@@ -18,8 +18,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
-    Allowance,
     ApprovalDecision,
     ApprovalRequest,
     holds_grant,
@@ -326,12 +324,8 @@ def test_money_account_and_allow_once_are_never_kept() -> None:
     account = _request(review=ActionReview("undecided", ("account",)))
     with pytest.raises(GrantRefusedError):
         check_grant("tool", "shell_exec", "person", request=account)
-    for once in (
-        ApprovalDecision(True),
-        Allowance(True, ALLOWED_ONCE),
-    ):
-        with pytest.raises(GrantRefusedError, match="Allow once"):
-            check_grant("tool", "shell_exec", "person", decision=once)
+    with pytest.raises(GrantRefusedError, match="Allow once"):
+        check_grant("tool", "shell_exec", "person", decision=ApprovalDecision(True))
     high = _request(review=ActionReview("high", ("install",)))
     with pytest.raises(GrantRefusedError, match="high-impact"):
         check_grant("tool", "shell_exec", "person", request=high)

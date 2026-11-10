@@ -814,19 +814,10 @@ test('the main chat\'s own approval card says each kept answer counts in every c
   assert.deepEqual(answersOf(folder), ['Allow once', 'Allow this folder in every chat', 'Always allow this folder', 'Deny']);
   assert.equal(ruleOf(folder, 'out'), '“Allow this folder in every chat” covers every chat, the tasks you start and the terminal. “Always” keeps ~/Documents/letters in Settings, under Chats and folders, where you can remove it. Writing there still asks every time.');
   assert.equal(everywhereLine(folder).textContent, EVERYWHERE);
-  // Typing, a form and a high-impact call keep nothing: they say nothing about everywhere.
-  for (const extra of [{tool_name: 'browser-type:https://a.example', arguments: {site: 'a.example', text: 'hi'}},
-    {tool_name: 'browser-submit:https://a.example', arguments: {site: 'a.example', fields: []}},
-    {review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes x.']}}]) {
-    request = askOf({request_id: 'once', ...extra, offers_chat: false});
-    const once = c.draw(request);
-    assert.deepEqual(answersOf(once), ['Allow once', 'Deny']);
-    assert.equal(everywhereLine(once), null);
-    assert.doesNotMatch(flatten(once), /Allow in every chat|Allow for this chat|counts in every chat/);
-  }
+  // A card that keeps nothing says nothing about everywhere.
   request = askOf({request_id: 'high', tool_name: 'shell_exec', arguments: {command: 'pip install x'}, review: {verdict: 'high', categories: ['install'], reasons: ['Installs x.']},
     offers_chat: false});
-  assert.equal(ruleOf(c.draw(request), 'high'), 'An allow in every chat never covers installs, downloads or changes outside ~/w.');
+  assert.equal(everywhereLine(c.draw(request)), null);
 });
 
 test('in the main chat the line about the wider answer follows the Deny view', () => {

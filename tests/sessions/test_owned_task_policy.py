@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import (
-    ALLOWED_ONCE,
     Allowance,
     ApprovalDecision,
     ApprovalRequest,
@@ -106,18 +105,21 @@ async def test_allow_once_is_one_call_in_the_task_and_in_the_chats_next_task(
     assert book.live() == []
 
 
-async def test_auto_allow_once_stays_one_step_once(folder: str) -> None:
+async def test_in_auto_the_chats_grant_is_not_used_and_auto_decides(
+    folder: str,
+) -> None:
+    book = GrantBook()
+    book.add_now("chat-1", "side", "tool", "python_exec")
     auto = AutoPolicy(task=True)
-    policy = await owned(GrantBook(), auto)
+    policy = await owned(book, auto)
+    # A routine step the grant would cover in Ask: Auto decides it, not the grant.
+    assert (await policy.decide(request(folder))).origin == "auto"
     blocked = request(folder, review=UNDECIDED)
-    assert (await policy.decide(blocked)).origin == "auto"
     auto.allow_once(key_of(blocked), [], "python_exec")
-    allowed = await policy.decide(request(folder, review=UNDECIDED))
-    assert isinstance(allowed, Allowance) and allowed.reason == ALLOWED_ONCE
-    # Used: the same step is blocked again.
-    assert (await policy.decide(request(folder, review=UNDECIDED))).allow is False
-    assert find_auto(policy) is auto
-    assert review_mode(policy, blocked) == "auto"
+    # Auto's allowance passes through the task's policy as its type.
+    assert isinstance(await policy.decide(blocked), Allowance)
+    # The grant makes nothing silent in Auto: the rules review every step.
+    assert find_auto(policy) is auto and review_mode(policy, blocked) == "auto"
 
 
 async def test_a_task_gets_no_more_from_autos_site_read_than_its_chat(

@@ -272,6 +272,29 @@ async def test_a_chats_allow_once_stays_in_the_chat_and_its_grant_covers_its_tas
         assert s.ran.codes == ["print(7)", "print(8)", "print(9)", "print(10)"]
 
 
+async def test_a_chore_never_uses_its_chats_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plans = plan("print(1)") + plan(  # a chore of the chat: it asks, denied
+        "print(2)"
+    )  # the person's task of the chat: the grant covers it
+    async with chat_console(tmp_path, monkeypatch, plans) as s:
+        created = await s.client.post(
+            "/api/sessions", json={"workspace": str(s.folder)}
+        )
+        side = str(created.json()["session"]["id"])
+        assert await s.console.grants.view(side, "side").grant("python_exec")
+        assert s.console.sessions.grants(side) == {"python_exec"}
+        chore = await start(s, "a chore run", origin="user_rule", front_id=side)
+        await answer(s, (await waiting(s, chore))["request_id"], "deny")
+        await ended(s, chore)
+        assert [a["origin"] for a in await approvals_of(s, chore)] == ["user"]
+        task = await start(s, "the person's own run", front_id=side)
+        await ended(s, task)
+        assert [a["origin"] for a in await approvals_of(s, task)] == ["session"]
+        assert s.ran.codes == ["print(2)"]
+
+
 async def test_a_chore_run_waiting_on_an_approval_asks_in_the_chat_that_saved_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
