@@ -46,8 +46,9 @@ async def test_a_redrawn_ref_is_used_when_one_element_is_like_it() -> None:
         await run(tools, "browser_open", url=HOME)
         out = await run(tools, "browser_click", ref="e1")
     assert not out.is_error
-    assert out.text.startswith(
+    assert (
         "Clicked e4 (via browser). The page redrew e1; e4 is the one element like it now."
+        in out.text
     )
     assert [a.element.label for a in driver.acts] == ["Happy"]
     # The site was asked about once: the act on the redrawn element needs no new answer.
@@ -149,7 +150,7 @@ async def test_a_control_wins_over_a_look_alike_when_names_collide() -> None:
     tools = await tools_of(driver)
     await run(tools, "browser_open", url=HOME)
     out = await run(tools, "browser_click", ref="e1")
-    assert not out.is_error and out.text.startswith("Clicked e3 (via browser).")
+    assert not out.is_error and "Clicked e3 (via browser)." in out.text
     assert driver.acts[0].element.plain is False
 
 

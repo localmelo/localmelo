@@ -81,7 +81,9 @@ class FakeFactory(AgentFactory):
         self.saved: list[tuple[str, str]] = []
         self.fail: set[str] = set()
 
-    async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
+    async def build(
+        self, model: str | None = None, *, url: str | None = None, start: bool = True
+    ) -> Agent:
         model = model or self.backend.model
         if model in self.fail:
             raise RuntimeError("the model is not loaded")

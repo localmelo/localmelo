@@ -23,6 +23,7 @@ from localmelo.support.browser.driver import (
     Upload,
     View,
 )
+from localmelo.support.browser.pagescript import STALE
 from localmelo.support.browser.sites import origin_of
 
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kg"
@@ -102,13 +103,19 @@ class FakeDriver:
     ``docs`` maps a tab to the document id its page shows. ``popups``
     maps a label to an address that opens in a new tab. ``lose`` forgets a tab
     as the real helper does when it loses one. ``via`` is the way an act says
-    it used (``refuse_native`` makes it the page script, with the browser's own
-    input failed for the site), ``changes`` maps a label to what an act on it
+    it used (``refuse_native`` makes it the page script, the browser's own
+    input having missed), ``changes`` maps a label to what an act on it
     changed, and ``redraw`` maps a label to the address whose page an act on it
     finds redrawn (stale, once). ``hits`` maps a rounded point to what is there.
     ``covers`` maps a label to what the browser says when something stands over
     it (the click is stopped and nothing is done). ``held_already`` is what
     ``holds`` answers (a condition that held before any waiting).
+    ``becomes`` maps a label to the page its address shows after an act on it,
+    in the same document; ``centres`` maps a label to the middle of that
+    element in the view (page pixels), as ``centre`` says it, and ``scrolls``
+    to how far down ``centre`` scrolls the page to bring it into view.
+    ``scroll`` is how far the page is scrolled now: every view is read there,
+    and ``hit`` refuses a view scrolled otherwise, as the page script does.
     """
 
     name = "fake"
@@ -150,6 +157,10 @@ class FakeDriver:
         self.hits: dict[tuple[int, int], PointHit] = {}
         self.marks: list[tuple[View, float, float] | None] = []
         self.shot_view: View | None = View("", "d1", 1000.0, 500.0)
+        self.becomes: dict[str, RawPage] = {}
+        self.centres: dict[str, tuple[float, float]] = {}
+        self.scrolls: dict[str, float] = {}
+        self.scroll = (0.0, 0.0)
 
     def _new_tab(self) -> str:
         self.made += 1
@@ -203,7 +214,20 @@ class FakeDriver:
             self.calls.append(("whole", tab or ""))
         here = tab or self.current or ""
         raw = self.pages[self._url(tab)]
-        return dataclasses.replace(raw, doc=self.docs.get(here, raw.doc))
+        return self.viewed(
+            tab, dataclasses.replace(raw, doc=self.docs.get(here, raw.doc))
+        )
+
+    def viewed(self, tab: str | None, raw: RawPage) -> RawPage:
+        """*raw* with the view it is read in (the picture's size, on its address and document)."""
+        view = self.shot_view and dataclasses.replace(
+            self.shot_view,
+            url=self._url(tab),
+            doc=raw.doc,
+            x=self.scroll[0],
+            y=self.scroll[1],
+        )
+        return dataclasses.replace(raw, view=view)
 
     async def back(self, tab: str | None) -> TabInfo:
         self.calls.append(("back", tab or ""))
@@ -235,6 +259,10 @@ class FakeDriver:
         self.tabs_.pop(tab)
         if self.current == tab:
             self.current = None
+
+    async def document(self, tab: str | None) -> str:
+        here = tab or self.current or ""
+        return self.docs.get(here, self.pages[self._url(tab)].doc)
 
     async def location(self, tab: str | None) -> str:
         here = tab or self.current or ""
@@ -270,14 +298,37 @@ class FakeDriver:
         self.marks.append(mark)
         view = self.shot_view
         if view is not None:
-            view = dataclasses.replace(view, url=self._url(tab))
+            view = dataclasses.replace(
+                view, url=self._url(tab), x=self.scroll[0], y=self.scroll[1]
+            )
         return Shot("image/png", PNG, view)
 
     async def hit(self, tab: str | None, view: View, x: float, y: float) -> PointHit:
         self.calls.append(("hit", f"{x:g},{y:g}"))
         if self._url(tab) != view.url:
             raise StaleElementError("The page is not the one that was read.", "page")
+        if (view.x, view.y) != self.scroll:
+            raise StaleElementError(STALE["scrolled"], "scrolled")
         return self.hits.get((round(x), round(y)), PointHit("none"))
+
+    async def centre(
+        self, tab: str | None, act: Act
+    ) -> tuple[View, float, float] | None:
+        self.calls.append(("centre", act.element.label))
+        at = self.centres.get(act.element.label)
+        if at is None or self.shot_view is None:
+            return None
+        here = tab or self.current or ""
+        if act.element.label in self.scrolls:
+            self.scroll = (0.0, self.scrolls[act.element.label])
+        view = dataclasses.replace(
+            self.shot_view,
+            url=self._url(tab),
+            doc=self.docs.get(here, "d1"),
+            x=self.scroll[0],
+            y=self.scroll[1],
+        )
+        return view, at[0], at[1]
 
     async def blank(self, tab: str | None) -> None:
         self.calls.append(("blank", tab or ""))
@@ -316,17 +367,14 @@ class FakeDriver:
         self.acts.append(act)
         key = ("enter:" if act.enter else "") + label
         via = "point" if act.point is not None else self.via
-        failed = False
-        if self.refuse_native and act.native and act.point is None:
-            via, failed = "page-script", True
-        elif not act.native and act.point is None:
+        failed = self.refuse_native and act.point is None
+        if failed:
             via = "page-script"
         result = ActResult(
             self.stopped,
             via,  # type: ignore[arg-type]
             "the browser's own input did not reach it" if failed else "",
             self.changes.get(label, Changes()),
-            native_failed=failed,
         )
         if label in self.fails:
             self.tabs_[here].append(self.fails[label])
@@ -337,6 +385,8 @@ class FakeDriver:
                 self.current = self._new_tab()
                 self.tabs_[self.current].append(address)
             return result
+        if label in self.becomes:
+            self.pages[self._url(tab)] = self.becomes.pop(label)
         landed = self.lands.get(key)
         if landed is None and act.kind == "click" and act.element.kind == "link":
             landed = act.element.href

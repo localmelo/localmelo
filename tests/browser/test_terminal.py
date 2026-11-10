@@ -69,7 +69,9 @@ class BrowsingFactory(FakeFactory):
         super().__init__(root, {"m1": [answer("ok")]})
         self.driver = driver
 
-    async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
+    async def build(
+        self, model: str | None = None, *, url: str | None = None, start: bool = True
+    ) -> Agent:
         providers = (
             [] if self.browser_driver == "off" else [BrowserToolProvider(self.driver)]
         )
@@ -318,3 +320,16 @@ async def test_a_new_chat_starts_with_no_page_approved(chat: Any) -> None:
     session.enter("/new")
     await _until(lambda: "New chat" in out.text() and session.state == "idle")
     assert not provider._origins and not provider._snaps and provider._tab is None
+
+
+async def test_browser_on_picks_chrome_when_it_is_installed(
+    chat: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support.browser import chrome
+
+    session, _, _, factory = chat
+    monkeypatch.setattr(chrome, "chrome_installed", lambda: True)
+    session.enter("/browser on")
+    await _until(lambda: _tools(session) != [] and session.state == "idle")
+    # The browser that keeps sign-ins; Safari's windows only without it.
+    assert factory.browser_driver == "chrome"

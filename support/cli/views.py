@@ -312,10 +312,15 @@ def banner(
         rows.append(
             ("model" if number == 0 else "", text, "" if number == 0 else "muted")
         )
+    rows.append(("workspace", clean_output(home_label(workspace)), ""))
+    if chat is None:
+        # With the main chat, the gateway's Agent answers: these two rows
+        # would describe the terminal's own one, which is not used.
+        rows += [
+            ("tools", tools_text(tools), ""),
+            ("memory", memory_text(backend, memory=memory), ""),
+        ]
     rows += [
-        ("workspace", clean_output(home_label(workspace)), ""),
-        ("tools", tools_text(tools), ""),
-        ("memory", memory_text(backend, memory=memory), ""),
         (
             "session",
             (

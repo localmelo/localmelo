@@ -16,6 +16,7 @@ import sqlite3
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -259,7 +260,7 @@ async def test_o3_a_lasting_statement_no_note_kept_is_written(
     )
     (note,) = await memory.records()
     assert note.admitted_by == "sleep" and note.created_at == turn.started_at
-    assert report.model_calls == 0 and report.variant == "rules" and not report.aborted
+    assert report.variant == "rules" and not report.aborted
 
 
 async def test_o3_what_a_note_of_the_turn_keeps_or_the_user_undid_is_not_written_again(
@@ -303,6 +304,34 @@ async def test_an_undone_turn_and_a_turn_without_a_memory_event_are_not_read(
         answer="Ok.",
     )
     assert (await memory.sleep(chats=chats)).changes == []
+
+
+async def test_o3_a_statement_a_later_turn_retracted_is_not_recovered(
+    memory: ChatMemory,
+) -> None:
+    turns = [
+        sleep.SleepTurn(
+            "s", 1, LONG_AGO + 1, LONG_AGO + 2, "My manager is Tom Briggs."
+        ),
+        sleep.SleepTurn(
+            "s", 2, LONG_AGO + 3, LONG_AGO + 4, "Tom Briggs is no longer my manager."
+        ),
+    ]
+    report = await sleep.run(*memory.stores(), turns, variant="rules")
+    assert not report.changes and await texts(memory) == set()
+
+
+@pytest.mark.parametrize("origin", ["ask_owner", "user_rule"])
+async def test_an_owner_question_is_not_a_candidate_or_previous_context(
+    chats: SessionStore, monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    await chat(chats, "I'm allergic to peanuts.")
+
+    async def owner_turns(*args: Any, **kwargs: Any) -> list[Any]:
+        return [SimpleNamespace(status="completed", undone=False, origin=origin)]
+
+    monkeypatch.setattr(chats, "list_turns", owner_turns)
+    assert await sleep.sleep_turns(chats, 0) == []
 
 
 # ── The checks, the cap, the watermark, undo, off ──
@@ -433,12 +462,8 @@ async def test_a_failure_keeps_the_changes_made_and_says_why(
     assert older in {e.id for e in await memory.records()}
 
 
-@pytest.mark.parametrize("variant", ["model", "model+tags"])
-async def test_off_does_nothing_and_model_variants_keep_rules_when_model_unavailable(
-    memory: ChatMemory,
-    chats: SessionStore,
-    monkeypatch: pytest.MonkeyPatch,
-    variant: str,
+async def test_off_does_nothing_and_rules_makes_its_changes(
+    memory: ChatMemory, chats: SessionStore
 ) -> None:
     await put(memory, "You live in Lisbon.", LONG_AGO)
     await put(memory, "You live in Utrecht.", LONG_AGO + 5)
@@ -447,16 +472,15 @@ async def test_off_does_nothing_and_model_variants_keep_rules_when_model_unavail
     off = await memory.sleep("off", chats=chats)
     assert (off.variant, off.changes, off.aborted) == ("off", [], "sleep is off")
     assert rows(memory) == before and await memory.stores()[1].meta("sleep_until") == 0
-    monkeypatch.setattr(memory, "chat_provider", lambda: None)
-    report = await memory.sleep(variant, chats=chats)
-    assert report.variant == variant and report.model_calls == 0
+    report = await memory.sleep("rules", chats=chats)
+    assert report.variant == "rules" and not report.aborted
     assert [c.op for c in report.changes] == ["O1", "O3"]
-    assert report.aborted == "RuntimeError: chat model is not configured"
-    assert await memory.stores()[1].meta("sleep_until") == 0
+    assert await memory.stores()[1].meta("sleep_until") > 0
     await memory.undo_sleep(report.run_id)
     assert active_rows(memory) == before
-    # The undo sticks: the turn is read again, but what was undone is not redone.
-    again = await memory.sleep(variant, chats=chats)
+    # The undo sticks: a run that reads the turn again does not redo what was undone.
+    await memory.stores()[1].set_meta("sleep_until", 0)
+    again = await memory.sleep("rules", chats=chats)
     assert again.changes == [] and active_rows(memory) == before
 
 

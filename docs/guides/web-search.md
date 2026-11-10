@@ -43,7 +43,7 @@ melo tries the ways below in order and stops at the first one that gives results
 | Order | Way | When it is used |
 |---|---|---|
 | 1 | Bing's result feed, a plain request | Always. Fast, about a fifth of a second. |
-| 2 | DuckDuckGo in Safari's automation window | Only when [browsing](browsing.md) is on. The best answers; a plain request is turned away. |
+| 2 | DuckDuckGo in melo's browser | Only when [browsing](browsing.md) is on. The best answers; a plain request is turned away. |
 | 3 | Baidu, a plain request | Always. Works for Chinese and English words, about two seconds. |
 
 - A way that asks for a check (a captcha, a wait page, an error) is skipped, and the next one is tried.

@@ -4,9 +4,10 @@
 to turn browsing on or off or to switch browser; ``/browser on`` and
 ``/browser off`` do it at once, and ``/browser chrome`` and ``/browser safari``
 choose Chrome in the background or Safari's automation windows. ``on`` is
-Safari's windows, the default. Switching builds a new Agent (the tools are
-registered when it starts), keeps the chat, and saves ``[browser] driver`` in
-the config file.
+Chrome, which keeps sign-ins, when it is installed, else Safari's windows
+(:func:`~localmelo.support.browser.driver_for_on`). Switching builds a new
+Agent (the tools are registered when it starts), keeps the chat, and saves
+``[browser] driver`` in the config file.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from localmelo.support import config
-from localmelo.support.browser import chrome
+from localmelo.support.browser import chrome, driver_for_on
 from localmelo.support.browser.driver import BrowserError, BrowserSetupError
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.sites import PREFIX
@@ -22,10 +23,10 @@ from localmelo.support.browser.sites import PREFIX
 if TYPE_CHECKING:
     from localmelo.support.cli.session import CliSession
 
-ON = "safari-automation"
+SAFARI = "safari-automation"
 CHROME = "chrome"
 # The words /browser takes for a browser, and the driver each names.
-DRIVER_WORDS = {"chrome": CHROME, "safari": ON}
+DRIVER_WORDS = {"chrome": CHROME, "safari": SAFARI}
 USAGE = "✗ Use /browser, /browser on, /browser off, /browser chrome or /browser safari."
 
 
@@ -50,8 +51,12 @@ async def status(session: CliSession) -> None:
     if driver == "off":
         out.print(
             session._text(
-                "Browsing is off. /browser on lets melo read web pages in Safari; "
-                "/browser chrome, in Chrome in the background."
+                "Browsing is off. /browser on lets melo read web pages in Chrome, "
+                "in the background, where sign-ins stay; /browser safari, in "
+                "Safari's windows."
+                if driver_for_on() == CHROME
+                else "Browsing is off. /browser on lets melo read web pages in "
+                "Safari; /browser chrome, in Chrome in the background."
             )
         )
         return
@@ -97,7 +102,8 @@ async def command(session: CliSession, arguments: str) -> None:
     word = arguments.strip().lower()
     if word in ("on", "off"):
         now = session.factory.browser_driver
-        await switch(session, (now if now != "off" else ON) if word == "on" else "off")
+        on = now if now != "off" else driver_for_on()
+        await switch(session, on if word == "on" else "off")
         return
     if word in DRIVER_WORDS:
         await switch(session, DRIVER_WORDS[word])
@@ -109,7 +115,7 @@ async def command(session: CliSession, arguments: str) -> None:
     if session.app is None:
         return
     now = session.factory.browser_driver
-    other = ON if now == CHROME else CHROME
+    other = SAFARI if now == CHROME else CHROME
     switch_to = (
         "Switch to Chrome in the background"
         if other == CHROME
@@ -119,12 +125,14 @@ async def command(session: CliSession, arguments: str) -> None:
         drivers = ["off", other, now]
         choices = ["Turn browsing off", switch_to, "Leave it on"]
     else:
-        drivers = [ON, CHROME, "off"]
-        choices = [
-            "Turn browsing on: Safari windows (they come to the front)",
-            "Turn browsing on: Chrome in the background",
-            "Leave it off",
-        ]
+        # The browser on would pick comes first.
+        words = {
+            SAFARI: "Turn browsing on: Safari windows (they come to the front)",
+            CHROME: "Turn browsing on: Chrome in the background",
+        }
+        first = driver_for_on()
+        drivers = [first, CHROME if first == SAFARI else SAFARI, "off"]
+        choices = [*(words[d] for d in drivers[:2]), "Leave it off"]
     last = len(choices) - 1
     picked = await session.app.pick("Browsing", choices, default=last, escape=last)
     if picked != last:

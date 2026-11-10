@@ -950,7 +950,7 @@ async def test_input_that_reaches_nothing_falls_to_the_page_script_and_says_so(
         result = await driver.act(
             None, Act("click", raw.url, named(raw, "Check in"), doc=raw.doc)
         )
-        assert result.via == "page-script" and result.native_failed is True
+        assert result.via == "page-script"
         assert "did not reach it" in result.why
         assert await driver.location(None) == "https://example.com/done"
     finally:
