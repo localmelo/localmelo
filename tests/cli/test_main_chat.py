@@ -40,8 +40,8 @@ from localmelo.support.cli.theme import UNICODE
 from localmelo.tests.fixtures.http_stub import HttpStub
 
 from .test_session import Setup, _until
-from .test_stream_render import _rows
 from .test_session import setup as setup
+from .test_stream_render import _rows
 
 MAIN = "main00000001"
 
@@ -1393,7 +1393,9 @@ async def test_a_reply_shows_as_it_is_written_from_the_gateway_frames(
     live(18, "\x1b[2J\x1b]0;title\x07red\n")
     await _until(lambda: shown().endswith("red\n"))
     assert session.renderer.live is not None
-    assert "\x1b" not in _rows(session.renderer.live) and "red" in _rows(session.renderer.live)
+    assert "\x1b" not in _rows(session.renderer.live) and "red" in _rows(
+        session.renderer.live
+    )
     gateway.emit(MAIN, "assistant.message", {"step": 1, "content": "Hello\nworld\nagain",
                  "tool_calls": []}, number)  # fmt: skip
     gateway.finish(MAIN, number, "completed", "Hello\nworld\nagain")

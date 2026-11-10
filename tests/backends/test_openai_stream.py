@@ -8,8 +8,7 @@ import httpx
 import pytest
 
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
-from localmelo.melo.schema import Message, ToolDef
-from localmelo.melo.schema import RAW_ARGUMENTS_KEY
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY, Message, ToolDef
 from localmelo.support.providers.llm._sse import sse_data
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -230,7 +229,11 @@ async def test_cancellation_closes_response() -> None:
 async def test_streamed_calls_are_read_as_a_whole_replys_are(
     name: str, arguments: str, finish: str, read: dict
 ) -> None:
-    delta = {"tool_calls": [{"index": 0, "id": "a", "function": {"name": name, "arguments": arguments}}]}
+    delta = {
+        "tool_calls": [
+            {"index": 0, "id": "a", "function": {"name": name, "arguments": arguments}}
+        ]
+    }
     raw = frame({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
     provider = OpenAICompatLLM(
         "http://example.test/v1",
@@ -483,7 +486,9 @@ async def test_error_frames_and_incomplete_calls(raw: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_stream_asks_for_usage_and_a_server_that_refuses_it_answers_whole() -> None:
+async def test_a_stream_asks_for_usage_and_a_server_that_refuses_it_answers_whole() -> (
+    None
+):
     requests: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -493,7 +498,9 @@ async def test_a_stream_asks_for_usage_and_a_server_that_refuses_it_answers_whol
             return httpx.Response(400, json={"error": "unknown field: stream_options"})
         message = {"role": "assistant", "content": "whole"}
         usage = {"prompt_tokens": 2, "completion_tokens": 3}
-        return httpx.Response(200, json={"choices": [{"message": message}], "usage": usage})
+        return httpx.Response(
+            200, json={"choices": [{"message": message}], "usage": usage}
+        )
 
     provider = OpenAICompatLLM(
         "http://example.test/v1", "test", transport=httpx.MockTransport(handler)

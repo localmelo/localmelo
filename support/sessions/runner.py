@@ -44,7 +44,7 @@ from localmelo.melo.contracts.events import (
     json_safe_payload,
 )
 from localmelo.melo.contracts.inbox import InboxSource
-from localmelo.melo.contracts.streaming import STREAM_DISPLAY
+from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.schema import (
     ImagePart,
     Message,
@@ -101,8 +101,9 @@ EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
 ResumeLoader = Callable[[], Awaitable[int]]
 BeforeTurn = Callable[[ResumeLoader], Awaitable[None]]
-# Makes the stream display of one turn: its reply's live text (.live).
-LiveFactory = Callable[[TurnInfo], LiveReply]
+# Makes the stream display of one turn: its reply's live text (.live), or the
+# terminal's own display; None for a turn that shows nothing live.
+LiveFactory = Callable[[TurnInfo], StreamDisplay | None]
 
 # Seconds an awaitable on_event result may take; a slower one is cut off.
 SINK_TIMEOUT_S: Final = 5.0
@@ -350,8 +351,8 @@ class SessionRunner:
     out, whole, and a warning says how many. With *live*, each turn's run
     streams its replies to the display *live* makes for the turn
     (:class:`~.live.LiveReply`), and the turn's ``result`` has
-    ``first_word_s`` once a word showed; the caller that sets its own
-    display (the terminal) passes none.
+    ``first_word_s`` once a word showed; the terminal's *live* gives its own
+    display. A runner without *live* shows nothing live.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -955,7 +956,7 @@ class SessionRunner:
             return await turn.agent.run_task(text, **kwargs)
         finally:
             STREAM_DISPLAY.reset(token)
-            if display is not None:
+            if isinstance(display, LiveReply):
                 display.close()
                 turn.first_word_s = display.first_word_s
 

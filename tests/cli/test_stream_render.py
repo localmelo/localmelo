@@ -358,10 +358,10 @@ def test_outside_developer_mode_partial_text_prints_without_a_label() -> None:
         content="Let me read it.",
         tool_calls=[{"id": "c1", "name": "file_read", "preview": "app.py"}],
     )
-    feed.opened()  # the next step starts, as a retry of a broken stream would
+    feed.opened()  # the next step's stream breaks and the turn ends
     feed.content("First try\n")
     feed.closed()
-    renderer.stream_opened()
+    renderer.end_turn(None, None)
     text = out.text()
     assert text.count("Let me read it.") == 1 and text.count("First try") == 1
     assert "partial reply" not in text

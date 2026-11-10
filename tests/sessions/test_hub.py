@@ -189,7 +189,14 @@ async def test_only_a_stream_opened_as_a_viewer_counts_as_one(tmp_path: Path) ->
 
 
 def _live(session_id: str, turn: int, at: int, text: str) -> StoredEvent:
-    data = {"turn": turn, "turn_id": "t", "step": 1, "attempt": 1, "at": at, "text": text}
+    data = {
+        "turn": turn,
+        "turn_id": "t",
+        "step": 1,
+        "attempt": 1,
+        "at": at,
+        "text": text,
+    }
     return live_frame(session_id, turn, data)
 
 
@@ -223,7 +230,9 @@ async def test_live_text_goes_only_to_viewers_of_its_own_chat(tmp_path: Path) ->
     await store.aclose()
 
 
-async def test_a_viewer_that_does_not_read_costs_a_bounded_buffer(tmp_path: Path) -> None:
+async def test_a_viewer_that_does_not_read_costs_a_bounded_buffer(
+    tmp_path: Path,
+) -> None:
     store = SessionStore(tmp_path / "s.db", writer="gateway")
     hub = SessionHub(store, queue_size=4)
     turn = await running(store)

@@ -154,6 +154,7 @@ class SessionNavigation:
             progress=True,
             resume_mode=self.mode,
             before_turn=s._prepare_turn,
+            live=s._display_for,
         )
         previous = s.agent.conversation()
         try:

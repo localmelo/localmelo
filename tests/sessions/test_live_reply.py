@@ -65,7 +65,14 @@ def stub() -> Iterator[StubServer]:
             "cut": {
                 "sequential": True,
                 "replies": [
-                    {"content": REPLY, "stream": {"reasoning": ["Hm."], "chunks": ["Cut sho", "rt.\n", "Gone.\n"], "drop": True}},
+                    {
+                        "content": REPLY,
+                        "stream": {
+                            "reasoning": ["Hm."],
+                            "chunks": ["Cut sho", "rt.\n", "Gone.\n"],
+                            "drop": True,
+                        },
+                    },
                     slow(0.01)["replies"][0],
                 ],
             },
@@ -221,7 +228,9 @@ async def test_a_stream_cut_in_the_middle_is_asked_again_and_shows_only_the_retr
     seen: list[StoredEvent] = []
     await asyncio.wait_for(follow(hub, turn.session_id, seen), 30)
     result = await runner.wait()
-    assert result is not None and result.status == "completed" and result.result == REPLY
+    assert (
+        result is not None and result.status == "completed" and result.result == REPLY
+    )
     assert len(stub.requests) == 2
     live = [e.event["data"] for e in seen if e.event["type"] == LIVE_EVENT]
     assert live[0]["attempt"] == 1 and live[0]["text"].startswith("Cut")

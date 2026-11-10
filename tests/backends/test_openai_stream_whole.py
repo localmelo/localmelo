@@ -500,7 +500,7 @@ async def test_a_stream_that_breaks_after_part_of_a_reply_keeps_its_error(
 
 
 @pytest.mark.asyncio
-async def test_a_body_cut_after_part_of_a_reply_keeps_its_error() -> None:
+async def test_a_body_cut_after_part_of_a_reply_is_asked_again() -> None:
     class Cut(Bytes):
         async def __aiter__(self) -> AsyncIterator[bytes]:
             yield frame({"choices": [{"index": 0, "delta": {"content": "Part"}}]})
@@ -514,7 +514,7 @@ async def test_a_body_cut_after_part_of_a_reply_keeps_its_error() -> None:
     finally:
         await llm.close()
     assert str(failure.value) == "Streaming request failed: RemoteProtocolError"
-    assert not failure.value.retryable
+    assert failure.value.retryable  # the caller's displays start the reply again
     assert server.streams == [True]
 
 

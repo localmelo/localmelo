@@ -202,13 +202,27 @@ async def test_separate_reasoning_never_reaches_content() -> None:
         ),
         # A think block in the content although reasoning has a field of its own.
         (
-            [StreamFragment(kind="reasoning", text="Plan."), "<think>\n", "secret\n", "</think>\n", "Hi\n"],
+            [
+                StreamFragment(kind="reasoning", text="Plan."),
+                "<think>\n",
+                "secret\n",
+                "</think>\n",
+                "Hi\n",
+            ],
             "<think>\nsecret\n</think>\nHi\n",
         ),
         # A second block after the first, which the declared framing parsed.
-        (["<think>a</think>\n", "<think>\n", "b\n", "</think>\n"], "<think>a</think>\n<think>\nb\n</think>\n"),
+        (
+            ["<think>a</think>\n", "<think>\n", "b\n", "</think>\n"],
+            "<think>a</think>\n<think>\nb\n</think>\n",
+        ),
     ],
-    ids=["tool-call-as-text", "reasoning-again", "think-in-content", "later-think-block"],
+    ids=[
+        "tool-call-as-text",
+        "reasoning-again",
+        "think-in-content",
+        "later-think-block",
+    ],
 )
 async def test_text_a_whole_reply_check_hides_is_never_shown(
     fragments: list[object], content: str
@@ -238,7 +252,7 @@ ECHO = ToolDef(
     ("lines", "shown"),
     [
         # A call written as JSON over several lines: held until it is known.
-        (['{\n', '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], ""),
+        (["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"], ""),
         (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], ""),
         # Prose, and a code block of a language, still stream.
         (["Sure.\n", "{ is a brace.\n"], "Sure.\n{ is a brace.\n"),
@@ -253,7 +267,13 @@ async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
     seen: list[str] = []
     content = "".join(lines)
     llm = StreamLLM(
-        [[*lines, lambda: seen.append(display.text()), Message(role="assistant", content=content)]]
+        [
+            [
+                *lines,
+                lambda: seen.append(display.text()),
+                Message(role="assistant", content=content),
+            ]
+        ]
     )
     token = STREAM_DISPLAY.set(display)
     try:

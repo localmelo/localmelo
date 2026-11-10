@@ -370,8 +370,12 @@ async def test_a_task_the_chat_starts_never_streams_into_the_chat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reply = "Started it as a task.\nIts result comes back here.\n"
-    main: list[Reply] = [creates("Plan the trip"), answer(reply), answer("It is ready.\n")]
-    workers = [[answer("The task's own words.\nEnding: ready")]]
+    main: list[Reply] = [
+        creates("Plan the trip"),
+        answer(reply),
+        answer("It is ready.\n"),
+    ]
+    workers: list[list[Reply]] = [[answer("The task's own words.\nEnding: ready")]]
     async with owner_console(
         tmp_path, monkeypatch, main=main, workers=workers, follow_up=False, streams=True
     ) as (console, client, _, _ran):
