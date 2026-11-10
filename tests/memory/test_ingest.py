@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
+from localmelo.melo.contracts.sign_in import HANDLE
 from localmelo.support.memory import ChatMemory, ingest
 from localmelo.support.memory.index import DOC_CHARS, MAX_CHUNKS, document_chunks
 from localmelo.support.memory.ingest import Chat, Exchange, IngestError, Message
@@ -73,7 +74,13 @@ async def ingest_file(
     memory = ChatMemory(lambda: None, directory=str(tmp_path / "memory"))
     if embedding is not None:
         memory.embedding = lambda: (embedding, embedding.model)  # type: ignore[method-assign]
-    report = await ingest.run(memory, chats, pin, ingest.parse(data), notes=notes)
+    try:
+        report = await ingest.run(memory, chats, pin, ingest.parse(data), notes=notes)
+    except BaseException:
+        # A run that raises leaves nothing open: the test fails, it does not hang.
+        await memory.aclose()
+        await chats.aclose()
+        raise
     return report, chats, memory
 
 
@@ -435,6 +442,115 @@ async def test_a_user_message_over_the_stores_limit_is_trimmed_and_counted(
         assert (report.turns, report.trimmed) == (1, 1)
         (session,) = await chats.list_sessions(limit=10, kinds=None)
         assert len((await chats.list_turns(session.id))[0].user_text) == MAX_QUERY_LEN
+    finally:
+        await close(chats, memory)
+
+
+PASSWORD = "plain-Word7"
+
+
+def holding(folder: Path, value: str) -> list[str]:
+    """The files under *folder* whose bytes hold *value*."""
+    return [
+        path.name
+        for path in folder.rglob("*")
+        if path.is_file() and value.encode() in path.read_bytes()
+    ]
+
+
+async def test_a_password_in_a_message_or_a_title_reaches_no_record(
+    tmp_path: Path,
+) -> None:
+    # The cues "pw" and "pwd" are ones the index and the notes do not leave out by
+    # themselves, so each store is seen to rely on the hiding, not on its own filter.
+    data = {
+        "sessions": [
+            chat(
+                "pw",
+                "2023-05-20T13:40:00",
+                ("user", f"Sign in to forum.example. My pw is {PASSWORD}."),
+                ("assistant", "Signed in."),
+                ("user", "I live in Pittsburgh."),
+                ("assistant", "Noted."),
+                title=f"Forum pwd: {PASSWORD}",
+            ),
+            # No title: the store names the chat after its first message.
+            chat(
+                "untitled",
+                "2023-06-01T09:00:00",
+                ("user", f"password: {PASSWORD}"),
+                ("assistant", "ok"),
+            ),
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data)
+    try:
+        assert (report.sessions, report.turns) == (2, 3)
+        for session in await chats.list_sessions(limit=10, kinds=None):
+            turns = await chats.list_turns(session.id)
+            kept = [session.title, *(t.user_text for t in turns)]
+            kept += [t.typed_text or "" for t in turns]
+            assert not [text for text in kept if PASSWORD in text]
+        first = (await chats.list_turns(report.ids["pw"]))[0]
+        assert HANDLE.search(first.user_text), "a handle stands where the value was"
+        # The rest of what was said is kept: a lasting fact still becomes a note.
+        notes = [n.text for n in await memory.records()]
+        assert "You live in Pittsburgh." in notes
+    finally:
+        await close(chats, memory)
+    # No file the run wrote holds the value: the chat store, the index, the notes.
+    assert holding(tmp_path, PASSWORD) == []
+
+
+@pytest.mark.parametrize("left", [3, 6])
+async def test_a_password_at_the_stores_limit_is_hidden_before_the_cut(
+    tmp_path: Path, left: int
+) -> None:
+    # The store's limit falls *left* characters into the value. Cut first, three
+    # characters of it would stay as they are (too short to count as a value) and
+    # six would be hidden into a handle that passes the limit. Hidden first, the
+    # cut can only fall in the handle.
+    lead = " my password is "
+    text = "x" * (MAX_QUERY_LEN - len(lead) - left) + lead + PASSWORD + " and more"
+    data = {
+        "sessions": [
+            chat("a", "2023-05-20T13:40:00", ("user", text), ("assistant", "ok"))
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data, notes="none")
+    try:
+        assert (report.turns, report.trimmed) == (1, 1)
+        (session,) = await chats.list_sessions(limit=10, kinds=None)
+        stored = (await chats.list_turns(session.id))[0].user_text
+        assert len(stored) == MAX_QUERY_LEN
+        assert PASSWORD[:3] not in stored[-30:]
+    finally:
+        await close(chats, memory)
+    assert holding(tmp_path, PASSWORD[:3] + PASSWORD[3]) == []
+
+
+async def test_a_title_that_hiding_lengthens_is_cut_to_the_stores_limit(
+    tmp_path: Path,
+) -> None:
+    # A handle is longer than a short value: 200 characters as given, more hidden.
+    ending = " pwd: abcd1"
+    title = "t" * (200 - len(ending)) + ending
+    data = {
+        "sessions": [
+            chat(
+                "a",
+                "2023-05-20T13:40:00",
+                ("user", "I live in Pittsburgh."),
+                ("assistant", "ok"),
+                title=title,
+            )
+        ]
+    }
+    report, chats, memory = await ingest_file(tmp_path, data, notes="none")
+    try:
+        assert (report.sessions, report.turns) == (1, 1)
+        (session,) = await chats.list_sessions(limit=10, kinds=None)
+        assert len(session.title) == 200 and "abcd1" not in session.title
     finally:
         await close(chats, memory)
 
