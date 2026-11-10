@@ -10,6 +10,7 @@ import socket
 import stat
 import sys
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TextIO
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ import httpx
 
 from localmelo.support.loopback import is_loopback
 from localmelo.support.task_follow import FollowError, follow
+from localmelo.support.task_stage import task_stage
 from localmelo.support.words import t_in
 
 # How code decided a task ended, and the reasons worth saying beside it.
@@ -232,15 +234,23 @@ def _level_label(task: dict[str, Any]) -> str:
     return f"P{level}"
 
 
-def _state_word(task: dict[str, Any]) -> str:
-    """The task's state for a person: ``stopped`` when its run ran out of steps (#341).
+def stage_word(task: Mapping[str, Any]) -> str:
+    """The task's stage in the console's words, lower case: ``waiting for your approval``.
 
-    ``--json`` keeps the stored state, ``failed``, and says ``out_of_steps``.
+    The stage table decides it: the gateway's ``stage``, else
+    :func:`~localmelo.support.task_stage.task_stage` on the same facts.
+    ``--json`` keeps the stored state, and says ``stage``.
     """
-    if task.get("out_of_steps") is True:
-        return "stopped"
-    label = ending_words(task.get("ending"))[0]
-    return label.lower() if label else str(task.get("state", ""))
+    sent = task.get("stage")
+    label = sent.get("label") if isinstance(sent, Mapping) else None
+    ask = task.get("ask")
+    chat = ask.get("chat_title") if isinstance(ask, Mapping) else None
+    words = t_in(
+        "en",
+        label if isinstance(label, str) else task_stage(task).label,
+        chat=chat or "its chat",
+    )
+    return words[:1].lower() + words[1:]
 
 
 def ending_words(ending: Any) -> tuple[str, str]:
@@ -401,7 +411,7 @@ def execute(
                 (
                     _safe(task.get("task_id", "")),
                     _level_label(task),
-                    _safe(_state_word(task)),
+                    _safe(stage_word(task)),
                     _safe(title),
                     _safe(_waiting_approval(task) or ""),
                 )
@@ -417,7 +427,7 @@ def execute(
     else:
         task = data["task"]
         print(
-            f"{_safe(task.get('task_id', ''))}  {_safe(_state_word(task))}",
+            f"{_safe(task.get('task_id', ''))}  {_safe(stage_word(task))}",
             file=out,
             flush=True,
         )

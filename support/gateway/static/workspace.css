@@ -2158,6 +2158,8 @@ dialog::backdrop {
 .worker-meta dd[data-ending="draft"], .worker-meta dd[data-ending="blocked"] { color: var(--warn); }
 .worker-meta dd[data-ending="failed"] { color: var(--error); }
 .worker-meta dd[data-ending="dropped"] { color: var(--ink-3); }
+/* A task that waits for the person (an approval, an answer, a Resume) says so in the warning colour. */
+.worker-meta dd[data-awaited="person"] { font-weight: 600; color: var(--warn); }
 .ending-tests { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .ending-tests li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
 .ending-tests code { overflow-wrap: anywhere; font: var(--text-caption)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -2392,6 +2394,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .panel .task-panel .worker-meta dd[data-ending="draft"], .panel .task-panel .worker-meta dd[data-ending="blocked"] { color: var(--warn); }
 .panel .task-panel .worker-meta dd[data-ending="failed"] { color: var(--error); }
 .panel .task-panel .worker-meta dd[data-ending="dropped"] { color: var(--ink-3); }
+.panel .task-panel .worker-meta dd[data-awaited="person"] { font-weight: 600; color: var(--warn); }
 .panel .task-panel :is(h2, h3):not(.task-title) { margin: 22px 0 6px; font-size: var(--text-body); font-weight: 600; }
 .panel .task-panel .task-steps { margin: 18px 0 6px; }
 .panel .task-panel .task-steps > summary { font-size: var(--text-body); }

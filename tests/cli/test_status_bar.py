@@ -332,9 +332,9 @@ def test_each_state_offers_only_what_it_allows() -> None:
 
 def test_the_rows_line_up_priority_state_and_title() -> None:
     assert task_rows(TASKS[:3]) == [
-        "P2  running  Bench the cache",
-        "P1  queued   Write the changelog",
-        "P5  paused   Old idea",
+        "P2  working           Bench the cache",
+        "P1  waiting to start  Write the changelog",
+        "P5  paused            Old idea",
     ]
 
 
@@ -476,7 +476,7 @@ async def test_each_action_goes_to_the_gateway_once_chosen() -> None:
         app = ScriptedApp([0, index])
         await WorkBeside(tasks).open(app)  # type: ignore[arg-type]
         assert app.asked[0][0] == "Tasks beside this chat"
-        assert app.asked[1][0] == "Bench the cache · P2 · running"
+        assert app.asked[1][0] == "Bench the cache · P2 · working"
         assert tasks.acted == [("t1", Action(label, command, level))]
     assert app.hints[-1] == "Bench the cache is now P3"
 
@@ -492,10 +492,10 @@ def test_the_bar_and_the_list_read_levels_as_p_codes() -> None:
     labels = [action.label for action in actions(TASKS[0])]
     assert labels == ["Pause", "Raise to P1", "Lower to P3", "Stop"]
     assert task_rows(TASKS) == [
-        "P2  running  Bench the cache",
-        "P1  queued   Write the changelog",
-        "P5  paused   Old idea",
-        "P0  held     Waits for an answer",
+        "P2  working                Bench the cache",
+        "P1  waiting to start       Write the changelog",
+        "P5  paused                 Old idea",
+        "P0  waiting for the model  Waits for an answer",
     ]
     words = ("Now", "Today", "Normal", "Whenever", "If idle", "Later")
     assert not any(word in " ".join(task_rows(TASKS)) for word in words)
@@ -505,8 +505,8 @@ async def test_ctrl_t_reads_levels_as_p_codes_in_every_mode() -> None:
     tasks = FakeTasks(TASKS)
     app = ScriptedApp([0, 1])
     await WorkBeside(tasks).open(app)  # type: ignore[arg-type]
-    assert app.asked[0][1][0] == "P2  running  Bench the cache"
-    assert app.asked[1][0] == "Bench the cache · P2 · running"
+    assert app.asked[0][1][0].split() == ["P2", "working", "Bench", "the", "cache"]
+    assert app.asked[1][0] == "Bench the cache · P2 · working"
     assert app.asked[1][1] == ["Pause", "Raise to P1", "Lower to P3", "Stop"]
     assert tasks.acted == [("t1", Action("Raise to P1", "level", "P1"))]
     assert app.hints == ["Bench the cache is now P1"]
@@ -565,10 +565,10 @@ async def test_ctrl_t_opens_the_list_and_enter_acts_on_a_task() -> None:
         controller.app = app.ui
         app.type("\x14")  # ctrl+t
         await app.wait(lambda: "Tasks beside this chat" in app.text())
-        assert "P2  running  Bench the cache" in app.text()
+        assert "P2  working" in app.text() and "Bench the cache" in app.text()
         app.type(ENTER)
         await app.wait(lambda: "1. Pause" in app.text())
-        assert "Bench the cache · P2 · running" in app.text()
+        assert "Bench the cache · P2 · working" in app.text()
         app.type(ENTER)
         await app.wait(lambda: tasks.acted == [("t1", Action("Pause", "pause"))])
         await app.wait(lambda: "Paused: Bench the cache" in app.text())

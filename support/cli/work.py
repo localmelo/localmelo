@@ -61,7 +61,8 @@ class WorkTask:
 
     @property
     def state_word(self) -> str:
-        return "paused" if self.state == "parked" else self.state
+        """Its stage in the console's words (the stage table decides): ``paused``."""
+        return task_cli.stage_word({"state": self.state})
 
     @property
     def level_text(self) -> str:
