@@ -29,9 +29,11 @@ characters is cut there and counted as ``trimmed``.
 
 A password a user message or a session's title gives is replaced by its handle
 before anything is stored, indexed, kept as a note or read by a model, as at a
-chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): the
-file's value reaches no record. An assistant message is stored as it came; what
-counts as a password given is decided from the person's text only.
+chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): a
+value a user message or a title gives reaches no record. An assistant message is
+stored as it came; what counts as a password given is decided from the person's
+text only. A handle can be longer than the value it stands for, so the message
+is cut after the hiding, and a title is cut to the store's limit.
 
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
@@ -69,6 +71,7 @@ from localmelo.support.memory.hippo_route import Router
 from localmelo.support.memory.index import is_cut
 from localmelo.support.memory.service import Compressed
 from localmelo.support.sessions.store import (
+    _MAX_TITLE_CHARS,
     NewSession,
     SessionStore,
     process_holder,
@@ -431,7 +434,9 @@ async def run(
                 session_id = info.session_id
                 report.sessions += 1
                 report.ids[chat.label] = session_id
-                title = hide_passwords(chat.title)
+                # Hidden, then cut to the store's limit: a handle can be longer than
+                # its value, and a title over the limit would stop the run.
+                title = hide_passwords(chat.title).strip()[:_MAX_TITLE_CHARS].rstrip()
                 if title:
                     await chats.rename_session(session_id, title)
                 session = await chats.get_session(session_id)

@@ -318,6 +318,40 @@ async def test_each_item_is_embedded_when_an_embedding_model_is_set(
 # ── Secrets ──
 
 
+async def test_a_password_the_index_would_not_leave_out_reaches_no_window_and_no_file(
+    tmp_path: Path,
+) -> None:
+    # "pw" and "pwd" say a password is given, and the index's own filter does not
+    # know them: only the hiding before the store keeps the value out.
+    value = "plain-Word7"
+    data = {
+        "sessions": [
+            {
+                "id": "forum",
+                "title": f"Forum pwd: {value}",
+                "date": "2023-05-22T10:00:00",
+                "turns": [
+                    {"role": "user", "text": f"My pw is {value}. I like tea."},
+                    {"role": "assistant", "text": "Signed in. Tea it is."},
+                ],
+            }
+        ]
+    }
+    stub = StubEncoder(says([item("Tea", TEA, "profile", [0])]))
+    report, chats, memory = await compress(tmp_path, data, stub)
+    try:
+        assert report.items == 1 and stub.prompts
+        assert not [prompt for prompt in stub.prompts if value in prompt]
+    finally:
+        await close(chats, memory)
+    held = [
+        path.name
+        for path in tmp_path.rglob("*")
+        if path.is_file() and value.encode() in path.read_bytes()
+    ]
+    assert held == []
+
+
 @pytest.mark.parametrize("parallel", [1, 2])
 async def test_a_password_and_a_card_number_reach_the_encoder_as_the_index_keeps_them(
     tmp_path: Path, parallel: int
