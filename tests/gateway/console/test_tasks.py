@@ -14,6 +14,7 @@ from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.finishing import OUT_OF_STEPS
 from localmelo.support.gateway.task_policy import WorkspaceError
 from localmelo.support.gateway.task_store import TaskConflictError, TaskNotFoundError
+from localmelo.support.task_stage import Stage
 
 from .conftest import HOLDER, all_events, core_event, run_result
 
@@ -22,6 +23,9 @@ class FakeWorkers:
     def __init__(self) -> None:
         self.payloads: list[dict[str, Any]] = []
         self.changes: list[tuple[str, Any, Any]] = []
+
+    def stopping(self, task_id: str) -> bool:
+        return False
 
     async def create(self, payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         self.payloads.append(payload)
@@ -71,7 +75,12 @@ def test_create_task_and_idempotent_response(
     response = client.post("/api/tasks", json={"prompt": "summarize", "level": "P1"})
     assert response.status_code == 202
     assert response.json() == {
-        "task": {"task_id": "task1", "state": "queued", "pending_approvals": []}
+        "task": {
+            "task_id": "task1",
+            "state": "queued",
+            "pending_approvals": [],
+            "stage": Stage("queued", "slot").as_json(),
+        }
     }
     assert workers.payloads[-1] == {"prompt": "summarize", "level": "P1"}
     repeated = client.post(
@@ -82,10 +91,21 @@ def test_create_task_and_idempotent_response(
 
 def test_get_and_filter_tasks(client: TestClient, workers: FakeWorkers) -> None:
     assert client.get("/api/tasks?state=running&level=1").json() == {
-        "tasks": [{"state": "running", "level": 1, "pending_approvals": []}]
+        "tasks": [
+            {
+                "state": "running",
+                "level": 1,
+                "pending_approvals": [],
+                "stage": Stage("running").as_json(),
+            }
+        ]
     }
     assert client.get("/api/tasks/task1").json() == {
-        "task": {"task_id": "task1", "pending_approvals": []}
+        "task": {
+            "task_id": "task1",
+            "pending_approvals": [],
+            "stage": Stage("running").as_json(),
+        }
     }
     missing = client.get("/api/tasks/missing")
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"

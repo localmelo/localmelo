@@ -176,6 +176,7 @@ from localmelo.support.sessions.store import (
     TurnInfo,
 )
 from localmelo.support.task_cli import ending_words
+from localmelo.support.task_stage import task_stage
 
 from .asks import ASK_ORIGIN, ASK_STEPS, FOLLOWUP_ORIGIN, PERSON_PARTS
 from .bodies import Body
@@ -260,17 +261,24 @@ TASKS_PER_TURN: Final = 1
 # Stopped tasks "continue the … task" offers at most, when several match.
 MAX_PICKS: Final = 4
 _DONE_WORDS: Final = {"stop": "Stopped", "pause": "Paused", "resume": "Resumed"}
-_STATE_WORDS: Final = {
-    "queued": "waiting to start",
+# A task's stage for the model, by the stage table's key; a finished one says
+# how it ended.
+_STAGE_WORDS: Final = {
     "running": "working",
-    "held": "waiting its turn",
-    "waiting": "waiting for you",
-    "parked": "paused",
-    "interrupted": "stopped by a restart",
+    "stopping": "stopping",
+    "approval": "waiting for you",
+    "answer": "waiting for you",
+    "asked": "waiting for its chat",
+    "model": "waiting its turn",
+    "slot": "waiting its turn",
+    "queued": "waiting to start",
+    "paused": "paused",
+    "resume": "stopped by a restart",
+}
+_ENDED_WORDS: Final = {
     "done": "done",
     "failed": "did not finish",
     "cancelled": "stopped",
-    "expired": "expired",
 }
 # The note a chat keeps of the news it has told (its floor, and the endings and
 # side chats told since): `attention.news` in that chat, newest wins.
@@ -1207,8 +1215,15 @@ def _summary(line: str) -> str:
 
 
 def _row(record: TaskRecord) -> str:
-    state = _STATE_WORDS.get(record.state, record.state)
     ending = shown(record)
+    stage = task_stage(
+        {
+            "state": record.state,
+            "wait_reason": record.wait_reason,
+            "ending": ending,
+        }
+    )
+    state = _STAGE_WORDS.get(stage.key) or _ENDED_WORDS.get(record.state, record.state)
     if is_out_of_steps(record.state, record.wait_reason):
         state = "stopped (ran out of steps; it can continue)"
     elif ending is not None:

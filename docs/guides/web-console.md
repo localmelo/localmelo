@@ -434,7 +434,9 @@ the approval card. One row is open at a time, and its steps follow the session's
 
 **Workers** (developer mode) lists the workers of the scope above: the tasks the open chat started, running ones first, then those
 that finished today. Each row has the title, its state in words (`Working`, `Waiting for your approval`, `Waiting to
-start`, `Paused`, `Done`, `Failed`, `Stopped`), the time and, for a finished worker, its result line. Select a task
+start`, `Paused`, `Waiting for you`, `Done`, `Failed`, `Stopped`), the same words the task's own page and the terminal
+use, the time and, for a finished worker, its result line. A task that waits for your Resume after a restart reads
+`Waiting for you`, and its page says why in your language. Select a task
 to open it in the panel, as in Activity; a worker run opens in place. The main chat's Workers also lists the worker runs recorded as sessions, such as `melo
 worker`. With none, the tab says when they appear (`This chat has not started any workers. When it hands a task to
 one, the worker is listed here, running first.`). **All tasks** at its foot opens the list of every task, today's and earlier, in the panel; **All worker runs** opens the Workers view.

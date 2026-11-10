@@ -3743,6 +3743,9 @@ function taskRow(id, extra = {}) {
     workspace_label: '~/w', ...extra,
   };
 }
+// The stage the gateway's table decided, as the task JSON carries it.
+const stageOf = (key, label, extra = {}) => ({key, awaited: 'nobody', need: '', ending: '', why: '', label, ...extra});
+const APPROVAL_STAGE = stageOf('approval', 'panel.state.waiting', {awaited: 'person', need: 'approval'});
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const labelled = (h, text) => findNode(h.element('task-panel'), (node) => node.tag === 'button' && node.textContent === text);
 const taskError = (status, code, message, details) => ({status, body: {error: {code, message, details}}});
@@ -3923,14 +3926,14 @@ test('a task that ran out of steps reads stopped with what is left, and Continue
   const calls = [];
   const h = await openTask({
     'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: true, wait_reason: 'Out of steps',
-      left: 'run the tests and commit.'})},
+      left: 'run the tests and commit.', stage: stageOf('finished', 'ending.state.dropped', {awaited: 'person', need: 'continue', ending: 'dropped'})})},
     'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', out_of_steps: false}), message: 'continued'}}; },
   });
   const text = flatten(h.element('task-panel'));
-  assert.match(text, /State\s*stopped/);
+  assert.match(text, /State\s*Stopped/);
   assert.match(text, /What is left\s*run the tests and commit\./);
   assert.doesNotMatch(text, /Out of steps/, 'the stored reason is not shown as a wait');
-  assert.doesNotMatch(text, /failed/);
+  assert.doesNotMatch(text, /State\s*failed/, 'the stored state is only a developer\'s note');
   assert.equal(labelled(h, 'Stop'), null, 'a finished task cannot be stopped');
   labelled(h, 'Continue').click(); await settle();
   assert.deepEqual(calls, ['continue']);
@@ -3958,7 +3961,7 @@ test('a task code found not finished says why, lists its own tests, and Finish i
   const ending = {state: 'draft', proposed: 'ready', reasons: ['tests_unverified', 'commit_missing'], question: '',
     tests: [{command: "subprocess.run(['pytest', '-q'])", exit_code: 0, outcome: 'unknown'}]};
   const h = await openTask({
-    'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending})},
+    'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending, stage: stageOf('finished', 'ending.state.draft', {ending: 'draft'})})},
     [TURNS_T1]: {turns: [turnRow({user_text: 'Objective of t1', answer: 'Rounded the mean.\nEnding: ready'})], has_earlier: false},
     'POST /tasks/t1/continue': () => { calls.push('continue'); return {status: 202, body: {task: taskRow('t1', {state: 'queued', ending: null}), message: 'continued'}}; },
   });
@@ -3975,11 +3978,13 @@ test('a task code found not finished says why, lists its own tests, and Finish i
 });
 
 test('a ready task and one that needs you read as such, with no Finish it', async () => {
-  const ready = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: {state: 'ready', reasons: [], tests: []}})}});
+  const ready = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: {state: 'ready', reasons: [], tests: []},
+    stage: stageOf('finished', 'ending.state.ready', {ending: 'ready'})})}});
   assert.match(flatten(ready.element('task-panel')), /State\s*Ready/);
   assert.doesNotMatch(flatten(ready.element('task-panel')), /How it ended/);
   const asks = {state: 'blocked', reasons: ['question'], question: 'Which port should it use?', tests: []};
-  const blocked = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: asks})}});
+  const blocked = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'done', card: '', ending: asks,
+    stage: stageOf('finished', 'ending.state.blocked', {awaited: 'person', need: 'review', ending: 'blocked'})})}});
   assert.match(flatten(blocked.element('task-panel')), /State\s*Needs you/);
   assert.match(flatten(blocked.element('task-panel')), /How it ended\s*Which port should it use\?/);
   assert.equal(labelled(blocked, 'Finish it: run the tests'), null);
@@ -3989,6 +3994,22 @@ test('a task that failed for another reason stays failed and offers no Continue'
   const h = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'failed', card: '', out_of_steps: false, wait_reason: 'no disk'})}});
   assert.match(flatten(h.element('task-panel')), /State\s*failed/);
   assert.equal(labelled(h, 'Continue'), null);
+});
+
+test('a task that waits for the person after a restart reads as waiting, with why in words', async () => {
+  const resume = (why, reason) => stageOf('resume', 'panel.head.waiting', {awaited: 'person', need: 'resume', why});
+  const stored = 'A step melo cannot check by itself was running.';
+  const waits = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'interrupted', wait_reason: stored, stage: resume('call')})}});
+  const text = flatten(waits.element('task-panel'));
+  assert.match(text, /State\s*Waiting for you/);
+  assert.match(text, /Waiting\s*A step melo cannot check by itself, such as a command/, 'the key words it');
+  const odd = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'interrupted', wait_reason: 'park not saved', stage: resume('')})}});
+  assert.match(flatten(odd.element('task-panel')), /Waiting\s*park not saved/, 'no key: the stored sentence');
+  // A hold says why in its stage; it has no Waiting row of its own.
+  const slot = stageOf('slot', 'activity.held.Resources', {awaited: 'slot', need: 'Resources'});
+  const held = await openTask({'GET /tasks/t1': {task: taskRow('t1', {state: 'held', wait_reason: 'Resources', stage: slot})}});
+  assert.match(flatten(held.element('task-panel')), /State\s*Waiting for a free model slot/);
+  assert.doesNotMatch(flatten(held.element('task-panel')), /Waiting\s*Resources/);
 });
 
 test('a task whose commit is all that is left says so with the command', async () => {
@@ -4306,7 +4327,7 @@ test('an open task card picks up an approval that arrives later, and redraws onl
   };
   let pending = [];
   const h = await openTask({
-    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: pending})}),
+    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: pending, stage: APPROVAL_STAGE})}),
   });
   const panel = h.element('task-panel');
   assert.equal(findNode(panel, (node) => node.classList.contains('approval-card')), null);
@@ -4347,7 +4368,10 @@ test('a task waiting for approval shows the chat approval card and answers it', 
   };
   let reads = 0;
   const h = await openTask({
-    'GET /tasks/t1': () => ({task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: reads++ ? [] : [request]})}),
+    // Once answered, its run goes on: the gateway reads it running.
+    'GET /tasks/t1': () => (reads++
+      ? {task: taskRow('t1', {state: 'running', pending_approvals: [], stage: stageOf('running', 'panel.state.running')})}
+      : {task: taskRow('t1', {state: 'held', wait_reason: 'approval', pending_approvals: [request], stage: APPROVAL_STAGE})}),
     'POST /approvals/req-t': {outcome: 'allowed'},
   });
   const panel = h.element('task-panel');

@@ -31,6 +31,8 @@ from localmelo.support.sessions.store import (
     SessionStoreError,
     StoredEvent,
 )
+from localmelo.support.task_cli import stage_word
+from localmelo.support.words import t_in
 
 from .conftest import HOLDER, core_event, open_session, run_result, seed_turn
 
@@ -399,7 +401,7 @@ def test_a_held_task_says_why_it_waits(
     assert {row["icon"] for row in rows.values()} == {"held"}
 
 
-def test_a_task_held_on_an_approval_says_so_and_a_slot_wait_keeps_its_words(
+def test_a_task_held_on_an_approval_waits_and_a_slot_wait_keeps_its_words(
     client: TestClient, console: Console, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tasks(
@@ -413,16 +415,17 @@ def test_a_task_held_on_an_approval_says_so_and_a_slot_wait_keeps_its_words(
     reasons = {"t-slot": "Resources", "t-late": "Priority"}
     monkeypatch.setattr(console.gate, "held", lambda task_id: reasons.get(task_id, ""))
     rows = {row["title"]: row for row in activity(client)["rows"]}
-    assert rows["Needs me"]["activity"] == "Needs your approval"
-    assert rows["Wants an answer"]["activity"] == "Needs your approval"
-    assert rows["Needs me"]["icon"] == "wait"
+    # Held on the person's approval, it waits for them, as its page says.
+    assert rows["Needs me"]["activity"] == "Waiting for your approval"
+    assert rows["Wants an answer"]["activity"] == "Waiting for your approval"
+    assert (rows["Needs me"]["icon"], rows["Needs me"]["state"]) == ("wait", "waiting")
     # The scheduler's holds keep the model's words.
     assert rows["No slot"]["activity"] == "Waiting for a free model slot"
     assert rows["Behind another"]["activity"] == "Waiting for a higher-priority task"
-    assert {row["state"] for row in rows.values()} == {"held"}
+    assert rows["No slot"]["state"] == rows["Behind another"]["state"] == "held"
     chinese = client.get("/api/activity", headers={"X-LocalMelo-Language": "zh-Hans"})
     words = {row["title"]: row["activity"] for row in chinese.json()["rows"]}
-    assert words["Needs me"] == "需要你批准"
+    assert words["Needs me"] == "在等你批准"
     assert words["No slot"] == "在等空闲的模型位置"
 
 
@@ -1192,3 +1195,27 @@ async def test_the_main_chat_row_is_named_in_the_readers_language(
     await front_chat(console, workspace, kind="front")
     client.cookies.set("localmelo_language", language)
     assert [row["title"] for row in activity(client)["rows"]] == [title]
+
+
+async def test_a_task_with_an_open_approval_has_one_stage_on_every_surface(
+    client: TestClient, console: Console, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tasks(monkeypatch, console, Task("t-open", "running", "Write it"))
+    body = {"task_id": "t-open", "state": "running", "title": "Write it", "level": 2}
+
+    async def get(task_id: str) -> dict[str, Any]:
+        return dict(body)
+
+    monkeypatch.setattr(console.workers, "get", get)
+    waiting = ask(console, "t-open")
+    try:
+        task = client.get("/api/tasks/t-open").json()["task"]
+        row = {r["title"]: r for r in activity(client)["rows"]}["Write it"]
+    finally:
+        console.broker.withdraw_all(reason="done")
+        await waiting
+    # The task JSON says it, the console's row and the terminal's list word it alike.
+    assert task["stage"]["key"] == "approval"
+    assert row["state"] == "waiting"
+    assert row["activity"] == t_in("en", task["stage"]["label"])
+    assert stage_word(task) == "waiting for your approval"

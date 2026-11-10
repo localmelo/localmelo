@@ -18,11 +18,15 @@ from localmelo.support.gateway.resume_evidence import (
 from localmelo.support.gateway.resume_tokens import ResumeBinding
 from localmelo.support.gateway.task_store import TaskNotFoundError
 from localmelo.support.sessions.store import SessionStoreError
+from localmelo.support.task_stage import Stage
 
 
 class FakeResumeWorkers:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str | None]] = []
+
+    def stopping(self, task_id: str) -> bool:
+        return False
 
     async def resume(
         self,
@@ -74,7 +78,12 @@ def test_resume_accepted_returns_202_task_and_operation(
     )
     assert response.status_code == 202
     assert response.json() == {
-        "task": {"task_id": "task1", "state": "queued", "pending_approvals": []},
+        "task": {
+            "task_id": "task1",
+            "state": "queued",
+            "pending_approvals": [],
+            "stage": Stage("queued", "slot").as_json(),
+        },
         "operation_id": "op-1",
     }
     assert workers.calls[-1] == ("task1", "op-1", "tok")
