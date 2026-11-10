@@ -493,7 +493,7 @@ async def test_a_stream_that_breaks_after_part_of_a_reply_keeps_its_error(
     finally:
         await llm.close()
     assert str(failure.value) == "Streaming response ended before completion"
-    assert not failure.value.retryable
+    assert failure.value.retryable  # the caller asks again, its displays start over
     assert seen and all(fragment.reply is None for fragment in seen)
     assert server.streams == [True]  # not asked again
     assert llm.sends_whole_replies is False

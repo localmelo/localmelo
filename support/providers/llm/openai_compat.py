@@ -892,19 +892,21 @@ class OpenAICompatLLM(BaseLLMProvider):
                             if not isinstance(final, str) or finish:
                                 raise ProviderError("Malformed SSE finish reason")
                             finish = final
+        # A transport error, before or after part of the reply, is retried as
+        # the whole-reply call's is: the caller's displays start the reply again.
         except httpx.ConnectError as exc:
-            raise unreachable(self._http, exc, retryable=not emitted) from exc
+            raise unreachable(self._http, exc, retryable=True) from exc
         except httpx.RemoteProtocolError as exc:
             if emitted or not opened:
                 raise ProviderError(
                     f"Streaming request failed: {type(exc).__name__}",
-                    retryable=not emitted,
+                    retryable=True,
                 ) from exc
             # The server cut the body before anything reached the caller: a
             # stream that ended, handled below.
         except httpx.TransportError as exc:
             raise ProviderError(
-                f"Streaming request failed: {type(exc).__name__}", retryable=not emitted
+                f"Streaming request failed: {type(exc).__name__}", retryable=True
             ) from exc
         except (httpx.RequestError, httpx.StreamError) as exc:
             raise ProviderError(
@@ -912,7 +914,10 @@ class OpenAICompatLLM(BaseLLMProvider):
             ) from exc
         if whole is None and (not done or not finish):
             if emitted:
-                raise ProviderError("Streaming response ended before completion")
+                # Cut in the middle: asked again, as a cut whole reply is.
+                raise ProviderError(
+                    "Streaming response ended before completion", retryable=True
+                )
             # Nothing reached the caller, so the request can be sent again: ask
             # for the whole reply. This raises its own error if it fails.
             whole = await self._complete(messages, tools)
@@ -922,32 +927,23 @@ class OpenAICompatLLM(BaseLLMProvider):
                 kind="reply", reply=whole[0], finish_reason=whole[1], whole=True
             )
             return
-        if bool(calls) != (finish == "tool_calls"):
-            raise ProviderError("Tool calls were not completed")
-        raw_calls = []
-        for index in sorted(calls):
-            call = calls[index]
-            try:
-                args = (
-                    json.loads(call["arguments"], parse_constant=_reject_nonfinite)
-                    if call["arguments"].strip()
-                    else {}
-                )
-            except ValueError as exc:
-                raise ProviderError("Malformed completed tool arguments") from exc
-            if not isinstance(args, dict) or not call["name"]:
-                raise ProviderError("Malformed completed tool call")
-            raw_calls.append(
+        # The calls are read as a whole reply's are (parse_tool_calls): arguments
+        # that are not a JSON object are kept as text for the model to hear
+        # about, and a call without a name is left for the plan check.
+        tool_calls = parse_tool_calls(
+            [
                 {
                     "id": call["id"],
-                    "function": {"name": call["name"], "arguments": args},
+                    "function": {"name": call["name"], "arguments": call["arguments"]},
                 }
-            )
+                for _, call in sorted(calls.items())
+            ]
+        )
         reply = Message(
             role="assistant",
             content="".join(content),
             thinking="".join(thinking),
-            tool_calls=parse_tool_calls(raw_calls),
+            tool_calls=tool_calls,
             usage=usage,
         )
         self.last_reasoning_key = reason_key

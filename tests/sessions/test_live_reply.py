@@ -61,6 +61,14 @@ def stub() -> Iterator[StubServer]:
             "slow": slow(0.05),
             "stoppable": slow(0.3),
             "ignored": {"replies": [{"content": REPLY, "stream_ignored": True}]},
+            # The first request's stream is cut after two lines; the retry is whole.
+            "cut": {
+                "sequential": True,
+                "replies": [
+                    {"content": REPLY, "stream": {"reasoning": ["Hm."], "chunks": ["Cut sho", "rt.\n", "Gone.\n"], "drop": True}},
+                    slow(0.01)["replies"][0],
+                ],
+            },
         },
         default="slow",
     ).start()
@@ -196,6 +204,26 @@ async def test_a_stop_in_the_middle_closes_the_model_server_request(
     await asyncio.wait_for(following, 20)
     shown = live_text(seen)
     assert shown and REPLY.startswith(shown) and shown != REPLY
+    await runner.close()
+
+
+async def test_a_stream_cut_in_the_middle_is_asked_again_and_shows_only_the_retry(
+    store: SessionStore, stub: StubServer, tmp_path: Path
+) -> None:
+    hub = SessionHub(store)
+    runner = await chat(store, hub, stub, tmp_path, "cut")
+    turn = await runner.start_turn("say hello")
+    seen: list[StoredEvent] = []
+    await asyncio.wait_for(follow(hub, turn.session_id, seen), 30)
+    result = await runner.wait()
+    assert result is not None and result.status == "completed" and result.result == REPLY
+    assert len(stub.requests) == 2
+    live = [e.event["data"] for e in seen if e.event["type"] == LIVE_EVENT]
+    assert live[0]["attempt"] == 1 and live[0]["text"].startswith("Cut")
+    # The retry starts the text over from nothing, then only its own words.
+    restart = next(i for i, d in enumerate(live) if d["attempt"] == 2)
+    assert live[restart]["at"] == 0 and live[restart]["text"] == ""
+    assert live_text(seen) == REPLY
     await runner.close()
 
 

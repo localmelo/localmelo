@@ -13,7 +13,9 @@ and ``run.finished``, as without a stream).
 A frame's ``data``: ``turn`` and ``turn_id``; ``step``, the planning step;
 ``attempt``, 1 for the step's first request and more for a retry, whose text
 starts over; ``at``, where ``text`` starts in that request's text so far
-(``0`` starts it, or gives all of it again to a listener that joins late).
+(``0`` starts it, or gives all of it again to a listener that joins late). A
+retry after words showed sends one empty frame from ``at`` 0 for its new
+attempt, so every viewer starts the reply again from nothing.
 """
 
 from __future__ import annotations
@@ -97,8 +99,12 @@ class LiveReply:
         if self._closed:
             return
         self._flush()
+        again = self._step in self._attempts and self._sent > 0
         self._attempts[self._step] = self._attempts.get(self._step, 0) + 1
         self._sent = 0
+        if again:
+            # A retry after words showed: every viewer starts the reply over.
+            self._publish(self._frame(0, ""))
 
     def held(self) -> None:
         """Text the core does not release yet: nothing to show."""
@@ -133,18 +139,19 @@ class LiveReply:
         if self.first_word_s is None and text.strip():
             started = self._turn.started_at
             self.first_word_s = round(max(0.0, self._clock() - started), 3)
+        self._publish(self._frame(at, text))
+
+    def _frame(self, at: int, text: str) -> StoredEvent:
         info = self._turn
-        self._publish(
-            live_frame(
-                info.session_id,
-                info.turn,
-                {
-                    "turn": info.turn,
-                    "turn_id": info.id,
-                    "step": self._step,
-                    "attempt": self._attempts.get(self._step, 1),
-                    "at": at,
-                    "text": text,
-                },
-            )
+        return live_frame(
+            info.session_id,
+            info.turn,
+            {
+                "turn": info.turn,
+                "turn_id": info.id,
+                "step": self._step,
+                "attempt": self._attempts.get(self._step, 1),
+                "at": at,
+                "text": text,
+            },
         )

@@ -9,6 +9,7 @@ import pytest
 
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
 from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY
 from localmelo.support.providers.llm._sse import sse_data
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -217,55 +218,34 @@ async def test_cancellation_closes_response() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "arguments,finish",
+    "name,arguments,finish,read",
     [
-        ('{"x":', "tool_calls"),
-        ("[]", "tool_calls"),
-        ('{"x":1}', "length"),
-        ('{"x":NaN}', "tool_calls"),
+        ("read", '{"x":', "tool_calls", {RAW_ARGUMENTS_KEY: '{"x":'}),
+        ("read", "[]", "tool_calls", {RAW_ARGUMENTS_KEY: "[]"}),
+        ("", '{"x":1}', "tool_calls", {"x": 1}),
+        ("read", '{"x":1}', "stop", {"x": 1}),
     ],
+    ids=["bad-json", "not-an-object", "no-name", "stop-finish"],
 )
-async def test_incomplete_tools_are_never_returned(arguments: str, finish: str) -> None:
-    raw = (
-        frame(
-            {
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": 0,
-                                    "id": "a",
-                                    "function": {
-                                        "name": "read",
-                                        "arguments": arguments,
-                                    },
-                                }
-                            ]
-                        },
-                        "finish_reason": finish,
-                    }
-                ]
-            }
-        )
-        + b"data: [DONE]\n\n"
-    )
-    stream = Bytes([raw])
+async def test_streamed_calls_are_read_as_a_whole_replys_are(
+    name: str, arguments: str, finish: str, read: dict
+) -> None:
+    delta = {"tool_calls": [{"index": 0, "id": "a", "function": {"name": name, "arguments": arguments}}]}
+    raw = frame({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
     provider = OpenAICompatLLM(
         "http://example.test/v1",
         "test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=stream)),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw + b"data: [DONE]\n\n"]))
+        ),
     )
-    seen = []
     try:
-        with pytest.raises(ProviderError):
-            async for event in provider.stream_chat([]):
-                seen.append(event)
-        assert all(event.reply is None for event in seen)
-        assert stream.closed == 1
+        events = [event async for event in provider.stream_chat([])]
     finally:
         await provider.close()
+    reply = events[-1].reply
+    assert reply is not None
+    assert [(c.tool_name, c.arguments) for c in reply.tool_calls] == [(name, read)]
 
 
 @pytest.mark.asyncio
@@ -311,7 +291,7 @@ async def test_transport_failure_closes_stream(error: httpx.TransportError) -> N
     try:
         with pytest.raises(ProviderError) as failure:
             _ = [event async for event in provider.stream_chat([])]
-        assert not failure.value.retryable
+        assert failure.value.retryable  # asked again, as a whole reply's would be
         assert stream.closed == 1
     finally:
         await provider.close()
@@ -484,8 +464,6 @@ async def test_interleaved_tools_and_repeated_identifiers() -> None:
     "raw",
     [
         frame({"error": {"message": "failed"}}),
-        frame({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
-        + b"data: [DONE]\n\n",
         b'data: {"choices":',
     ],
 )

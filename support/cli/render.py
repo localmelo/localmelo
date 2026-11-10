@@ -832,10 +832,9 @@ class TurnRenderer:
     def stream_opened(self) -> None:
         """A provider stream or its complete-reply fallback started."""
         # An earlier attempt of this step that no reply claimed ended in an
-        # error: close it here, as its retry event may still be on its way.
-        self._flush_stream(
-            "retrying", since=self._stream_step, upto=self._stream_step + 1
-        )
+        # error: a retry starts the reply again from nothing, so its text goes
+        # (its retry event may still be on its way).
+        self._drop_attempt()
         self._stream_open = True
         self._stream_chunks = 0
         if self.live is not None:
@@ -879,6 +878,12 @@ class TurnRenderer:
         if key == self._stream_step and self.live is not None:
             self.live.stream_text = ""
         return bool(text.strip())
+
+    def _drop_attempt(self) -> None:
+        """Drop the provisional text of the step now streaming: its request is asked again."""
+        self._stream_texts.pop(self._stream_step, None)
+        if self.live is not None:
+            self.live.stream_text = ""
 
     def _clear_stream(self) -> None:
         """Drop all provisional text without printing it."""
@@ -1214,8 +1219,8 @@ class TurnRenderer:
         kind = str(data.get("kind") or "")
         message = plain(str(data.get("message") or ""))
         if kind == "retry":
-            if not self._stream_open:  # else the next attempt already closed it
-                self._flush_stream("retrying")
+            if not self._stream_open:  # else the next attempt already dropped it
+                self._drop_attempt()
             detail = data.get("detail")
             delay = (
                 _float(detail.get("delay_s")) if isinstance(detail, Mapping) else 0.0

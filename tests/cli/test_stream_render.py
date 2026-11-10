@@ -173,15 +173,15 @@ def test_a_tool_call_preamble_is_closed_and_labelled() -> None:
     assert text.count("Let me read it.") == 1
 
 
-def test_a_retry_closes_and_labels_the_partial_text() -> None:
+def test_a_retry_starts_the_reply_again_from_nothing() -> None:
     out, renderer = _renderer({"stub-model": "none"})
     feed = renderer.stream_feed()
     feed.opened()
     feed.content("First try\n")
     feed.closed()
     _event(renderer, "notice", kind="retry", message="retrying")
-    text = out.text()
-    assert "partial reply (retrying)" in text and "First try" in text
+    assert "First try" not in out.text()
+    assert "First try" not in _rows(renderer.live)  # type: ignore[arg-type]
 
 
 def test_a_step_end_drops_the_held_copy_of_the_same_text() -> None:
@@ -312,8 +312,7 @@ def test_a_late_retry_notice_does_not_cut_the_next_attempt() -> None:
     feed.content("Second try\n")
     _event(renderer, "notice", kind="retry", message="retrying")
     text = out.text()
-    assert text.count("partial reply (retrying)") == 1
-    assert "First try" in text and "Second try" not in text
+    assert "First try" not in text and "Second try" not in text
     assert "Second try" in _rows(renderer.live)  # type: ignore[arg-type]
 
 
