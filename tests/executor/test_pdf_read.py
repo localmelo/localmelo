@@ -239,8 +239,10 @@ async def test_a_child_that_hangs_is_killed_and_one_that_crashes_is_named(
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid_file.read_text()), 0)
 
+    # Any child that dies of a signal is read the same way; SIGSEGV would also
+    # write a system crash report on every run.
     crash = _child(
-        tmp_path, f"import os, signal\nos.kill(os.getpid(), {signal.SIGSEGV})"
+        tmp_path, f"import os, signal\nos.kill(os.getpid(), {signal.SIGKILL})"
     )
     monkeypatch.setattr(pdf, "_CHILD", crash)
     outcome = await _read(root, "cv.pdf")
