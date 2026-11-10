@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.schema import INTERRUPT_LABEL, NO_ANSWER_LABEL, split_thinking
 from localmelo.support.cli import memory_import, memory_notes, terminal
 from localmelo.support.cli.session_views import memory_view, usage_view
@@ -88,7 +89,7 @@ class SessionTools:
         if text:
             if not 1 <= len(text.strip()) <= 200:
                 raise ValueError("A title has 1 to 200 characters.")
-            text = check_title(text)
+            text = check_title(hide_passwords(text))
             self.pending_title = text
             s.title = text
             await self.apply_title()

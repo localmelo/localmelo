@@ -956,8 +956,14 @@ class OwnerAsks:
             return
         front = self.console.front_for(chat_id)
         try:
+            # The message was composed with its files when it was queued: only
+            # the words the person typed are theirs (#626).
             await self.console.sessions.start_turn(
-                chat_id, item.typed, item.composed, client_request_id=item.key
+                chat_id,
+                item.typed,
+                item.composed,
+                client_request_id=item.key,
+                words=item.typed,
             )
         except SessionBusyError:
             return

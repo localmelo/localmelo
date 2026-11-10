@@ -3,7 +3,8 @@
 The runner is where every surface's text comes in (the terminal calls
 ``run_turn(text, title=text)``): the title, the stored text, the next turn's
 earlier turns and what a review reads after a reload hold the handle, never the
-value. The prompt's history file keeps the handle too.
+value. The prompt's history file keeps the handle too. A file the terminal
+attaches to a turn goes through the same door (#626).
 """
 
 from __future__ import annotations
@@ -11,8 +12,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.cli.app import open_history
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.sessions.test_runner_earlier import (  # noqa: F401
     Chat,
@@ -44,6 +48,48 @@ async def test_the_title_the_stored_text_and_the_next_turns_context_hold_the_han
         assert VAULT.value("[password-1]") == PASSWORD
         # The earlier turns the next turn's run is given hold the handle too.
         assert chat.kwargs[-1]["earlier_turns"][0][0].endswith("[password-1]")
+    finally:
+        await chat.close()
+
+
+async def test_a_password_in_a_file_a_turn_carries_is_hidden_as_a_typed_one_is(
+    store: SessionStore, tmp_path: Path  # noqa: F811
+) -> None:
+    """What the terminal's ``/attach`` stages reaches the runner as a snapshot (#626)."""
+    chat = Chat(store, None, tmp_path / "w")
+    try:
+        chat.model.plans.append(_reply("Read it."))
+        # The file's name is the person's text too: it is hidden first, as it reads first.
+        file = TextAttachment(
+            "login, password: nameSecret-5 backup.txt",
+            f"forum.example\nmy password is {PASSWORD}\n",
+        )
+        result = await chat.runner.run_turn(
+            "use the login in the file",
+            title="use the login in the file",
+            attachments=(file,),
+        )
+        assert result.status == "completed"
+        assert chat.runner.session_id is not None
+        [turn] = await store.list_turns(chat.runner.session_id)
+        assert turn.attachments == (
+            TextAttachment(
+                "login, password: [password-1] backup.txt",
+                "forum.example\nmy password is [password-2]\n",
+            ),
+        )
+        assert turn.typed_text == "use the login in the file"
+        assert "my password is [password-2]" in turn.user_text
+        # The model read the very text that is stored: the run's own hiding finds nothing left.
+        assert "nameSecret-5" not in dump(tmp_path / "sessions.db")
+        assert PASSWORD not in dump(tmp_path / "sessions.db")
+        assert turn.user_text in chat.last_message()
+        assert PASSWORD not in repr(chat.kwargs)
+        # A turn the person did not begin carries no file, whatever its text.
+        with pytest.raises(ValueError, match="no attachments"):
+            await chat.runner.start_turn(
+                "a task's words", origin="followup", attachments=(file,)
+            )
     finally:
         await chat.close()
 

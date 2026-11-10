@@ -14,6 +14,7 @@ the one gate this gateway shares with the workspace page.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
@@ -37,6 +38,7 @@ from localmelo.support.sessions.attachments import (
     MAX_TOTAL_BYTES,
     TextAttachment,
     compose_user_text,
+    hide_message,
     snapshot,
 )
 from localmelo.support.sessions.display import short_title
@@ -160,7 +162,7 @@ def _key(value: str | None) -> str | None:
         raise ApiError(400, "invalid_request", str(exc)) from exc
 
 
-def _files(items: list[_Attachment]) -> list[TextAttachment]:
+def _files(items: Sequence[_Attachment | TextAttachment]) -> list[TextAttachment]:
     """The text files of a send, cleaned and checked; 400 for one the checker would refuse."""
     attached: list[TextAttachment] = []
     total = 0
@@ -188,6 +190,18 @@ def _files(items: list[_Attachment]) -> list[TextAttachment]:
     return attached
 
 
+def _hidden(
+    text: str, attached: list[TextAttachment]
+) -> tuple[str, list[TextAttachment]]:
+    """*text* and its files with each password cut out, the files checked again.
+
+    A handle is longer than a short value, so a file or a name that was within
+    its limit can pass it: that is the same 400 as one that was too large (#626).
+    """
+    hidden = hide_message(text, attached)
+    return hidden.text, _files(hidden.attachments)
+
+
 def _compose(request: CancelRequest) -> str:
     """The user text a withdrawn send had: its words (or the stand-in for none) and its files.
 
@@ -199,7 +213,8 @@ def _compose(request: CancelRequest) -> str:
         raise ApiError(
             400, "invalid_request", t("errors.tooManyPictures", n=MAX_PICTURES)
         )
-    words = hide_passwords(request.text).strip()
+    words, attached = _hidden(request.text, attached)
+    words = words.strip()
     if not words:
         if not request.images and not attached:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
@@ -245,7 +260,8 @@ class _Sent:
 
     ``typed`` is the person's text as it is kept and shown (the chat's title,
     the message, a queued message, a routed echo, a task's words): a password
-    in it is already cut out, once, where it came in (:func:`_sent`).
+    in it, or in a file it carries, is already cut out, once, where it came in
+    (:func:`_sent`).
     """
 
     def __init__(
@@ -289,9 +305,10 @@ async def _sent(
     """
     attached = _files(request.attachments)
     staged = await _staged(console, request.images)
-    # The one place a message's password is cut out: before it is checked,
-    # routed, queued, titled or stored, so no copy of it exists below (#547).
-    typed = hide_passwords(request.text)
+    # The one place a message's password is cut out, in its words and in its
+    # files: before it is checked, routed, queued, titled, keyed or stored, so
+    # no copy of it exists below (#547, #626).
+    typed, attached = _hidden(request.text, attached)
     words = typed.strip()
     if not words:
         if not staged and not attached:

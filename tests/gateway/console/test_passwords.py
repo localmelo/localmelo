@@ -3,8 +3,9 @@
 Every route that takes the person's text (a first turn, a turn, a note, a
 queued message, a routed task, a reply to a task's question, a chore, a chat's
 new title) hides a password in it before the text is routed, queued, titled or
-stored. The store, the model's requests and the events then hold the handle, and
-the value is in none of them.
+stored; a message's files go through the same door (#626). The store, the
+model's requests and the events then hold the handle, and the value is in none
+of them.
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.i18n import t
+from localmelo.tests.agent.test_sign_in import LIKE_HEADING
 
 from .test_ask_owner import Script, answer, ask_console, held, tool_call, until
 from .test_turn_writes import _post_turn, _wait_turn
@@ -29,14 +33,27 @@ SECRETS = {
     "task": "taskSecret-44",
     "queued": "queuedSecret-55",
     "chore": "choreSecret-66",
+    "chore_title": "choreTitleSecret-61",
+    "chore_edit": "choreEditSecret-62",
     "reply": "replySecret-77",
     "title": "titleSecret-88",
+    # Given in a text file attached to the message of the same name (the turn
+    # route's own file is the reported-case test's).
+    "create_file": "createFileSecret-14",
+    "task_file": "taskFileSecret-15",
+    "queued_file": "queuedFileSecret-16",
 }
 STEP = tool_call("task_get", {"task_id": "000000000000"}, "step-1")
 
 
 def say(kind: str) -> str:
     return f"sign in to forum.example for me, my password is {SECRETS[kind]}"
+
+
+def files(kind: str) -> list[dict[str, Any]]:
+    """A text file whose line gives a password, as the page sends one."""
+    text = f"my other login, password: {SECRETS[kind + '_file']}"
+    return [{"name": "notes.txt", "text": text, "chars": len(text)}]
 
 
 def stored(path: Path) -> str:
@@ -84,19 +101,26 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
 
         # A new chat with its first turn: its title is the typed text.
         created = await client.post(
-            "/api/sessions", json={"turn": {"text": say("create")}}
+            "/api/sessions",
+            json={"turn": {"text": say("create"), "attachments": files("create")}},
         )
         assert created.status_code == 201, created.text
         side = created.json()["session"]["id"]
         await _wait_turn(client, side)
         assert SECRETS["create"] not in created.text
+        assert SECRETS["create_file"] not in created.text
 
         # A message routed to a task of the chat.
         routed = await _post_turn(
-            client, str(console.main_id), say("task"), as_task=True
+            client,
+            str(console.main_id),
+            say("task"),
+            as_task=True,
+            attachments=files("task"),
         )
         assert routed.status_code == 200, routed.text
         assert SECRETS["task"] not in routed.text
+        assert SECRETS["task_file"] not in routed.text
 
         # A message queued while the chat answers a task's question.
         queued: list[tuple[Any, ...]] = []
@@ -108,8 +132,15 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
         with monkeypatch.context() as spy:
             spy.setattr(console.asks, "holds", lambda session: True)
             spy.setattr(console.asks, "queue", queue)
-            await _post_turn(client, str(console.main_id), say("queued"))
-        assert SECRETS["queued"] not in repr(queued) and "[password-" in repr(queued)
+            await _post_turn(
+                client,
+                str(console.main_id),
+                say("queued"),
+                attachments=files("queued"),
+            )
+        assert "[password-" in repr(queued)
+        assert SECRETS["queued"] not in repr(queued)
+        assert SECRETS["queued_file"] not in repr(queued)
 
         # A reply to a task's question, a chore, and a chat's new title.
         replies: list[tuple[Any, ...]] = []
@@ -128,10 +159,19 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
             "/api/chores",
             json={
                 "request": say("chore"),
+                "title": f"Sign in (password: {SECRETS['chore_title']})",
                 "schedule": {"kind": "weekdays", "at": "08:30"},
             },
         )
         assert chore.status_code == 201, chore.text
+        edited = await client.patch(
+            f"/api/chores/{chore.json()['chore']['id']}",
+            json={
+                "revision": chore.json()["chore"]["revision"],
+                "title": f"Sign in (password: {SECRETS['chore_edit']})",
+            },
+        )
+        assert edited.status_code == 200, edited.text
         renamed = await client.patch(
             f"/api/sessions/{side}", json={"title": say("title")}
         )
@@ -144,6 +184,7 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
             + created.text
             + routed.text
             + chore.text
+            + edited.text
             + renamed.text
             + (await client.get(f"/api/sessions/{side}")).text
             + (await client.get("/api/chores")).text
@@ -153,6 +194,139 @@ async def test_a_password_typed_in_any_entry_is_in_no_store_title_event_or_model
         # The handle took its place: the model read it, the store kept it.
         assert "my password is [password-" in stored(tmp_path / "sessions.db")
         assert VAULT.value("[password-1]") == SECRETS["turn"]
+
+
+async def test_a_password_in_an_attached_file_is_hidden_where_it_is_stored_read_searched_and_sent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The turn's rows, its reading routes, the chat search and the model hold the handle; a resend is the same turn (#626)."""
+    secret = "quokka-7731"
+    # A line like the heading of melo's memory comes before the password line.
+    text = f"{LIKE_HEADING}\nmy password is {secret}"
+    body = {
+        "text": "sign in to forum.example for me",
+        "attachments": [{"name": "notes.txt", "text": text, "chars": len(text)}],
+        "client_request_id": "file-1",
+    }
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")], run=False
+    ) as (console, client, models):
+        main = str(console.main_id)
+        url = f"/api/sessions/{main}/turns"
+        sent = await client.post(url, json=body)
+        assert sent.status_code == 202, sent.text
+        await _wait_turn(client, main)
+
+        # What is stored: the composed text, the typed text, the file's snapshot.
+        [turn] = await console.store.list_turns(main)
+        assert turn.user_text.count("[password-1]") == 1
+        assert turn.typed_text == "sign in to forum.example for me"
+        assert turn.attachments is not None
+        assert (
+            turn.attachments[0].text == f"{LIKE_HEADING}\nmy password is [password-1]"
+        )
+        assert secret not in stored(tmp_path / "sessions.db")
+
+        # What the reading routes serve and a search of the chats matches.
+        shown = (await client.get(url)).text
+        events = (
+            await client.get(f"/api/sessions/{main}/events", params={"follow": "false"})
+        ).text
+        assert secret not in shown + events + sent.text
+        assert "my password is [password-1]" in shown + events
+        for kind in ("front", "chat"):
+            by_value = await client.get(
+                "/api/sessions", params={"query": secret, "kind": kind}
+            )
+            assert by_value.json()["sessions"] == []
+        by_handle = await client.get(
+            "/api/sessions",
+            params={"query": "my password is [password-1]", "kind": "front"},
+        )
+        assert [row["id"] for row in by_handle.json()["sessions"]] == [main]
+
+        # What the model read: the handle, as the run would have made it.
+        assert secret not in seen_by_models(models)
+        assert "my password is [password-1]" in seen_by_models(models)
+        assert VAULT.value("[password-1]") == secret
+
+        # The same key with the same message is that turn, not a second one;
+        # so is a cancel that names the message the same way.
+        again = await client.post(url, json=body)
+        assert again.status_code == 200, again.text
+        assert again.json()["repeated"] and again.json()["turn_id"] == turn.id
+        cancel = await client.post(
+            f"/api/sessions/{main}/submissions/file-1/cancel",
+            json={"text": body["text"], "attachments": body["attachments"]},
+        )
+        assert cancel.status_code == 200, cancel.text
+        assert cancel.json()["submission"]["state"] == "accepted"
+        assert len(await console.store.list_turns(main)) == 1
+        assert secret not in again.text + cancel.text
+
+
+async def test_a_file_in_a_queued_message_is_data_when_the_turn_it_starts_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queued message's turn keeps the typed words, and the run reads only those as the person's own (#626)."""
+    secret = "quokka-5521"
+    typed = "have a look at the file"
+    text = f"log in at files-only.example\nmy password is {secret}"
+    given: list[Any] = []
+    real = Agent.run_task
+
+    async def run_task(self: Agent, query: str, **kwargs: Any) -> Any:
+        given.append(kwargs.get("user_words"))
+        return await real(self, query, **kwargs)
+
+    monkeypatch.setattr(Agent, "run_task", run_task)
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")], run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        with monkeypatch.context() as spy:
+            spy.setattr(console.asks, "holds", lambda session: True)
+            queued = await _post_turn(
+                client,
+                main,
+                typed,
+                attachments=[{"name": "notes.txt", "text": text, "chars": len(text)}],
+            )
+        assert queued.status_code == 200, queued.text
+        assert queued.json()["echo"]["echo"] == "queued"
+        await until(lambda: console.store.list_turns(main))
+        await _wait_turn(client, main)
+        [turn] = await console.store.list_turns(main)
+        # The file is in the turn's text, its handle is shown; the words are the typed ones.
+        assert "my password is [password-1]" in turn.user_text
+        assert turn.typed_text == typed
+        assert given == [typed]
+        assert secret not in stored(tmp_path / "sessions.db")
+
+
+async def test_a_file_that_a_password_handle_makes_too_long_is_refused_as_a_too_long_file_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A name of 200 characters is within its limit until its password is hidden (a handle is one character longer): 400, not a crash, and the same words for a send and its cancel (#626)."""
+    name = f"password: quokka-8842 {'n' * 178}"
+    body = {"text": "look", "attachments": [{"name": name, "text": "x", "chars": 1}]}
+    async with ask_console(tmp_path, monkeypatch, run=False) as (console, client, _):
+        main = str(console.main_id)
+        sent = await client.post(f"/api/sessions/{main}/turns", json=body)
+        cancel = await client.post(
+            f"/api/sessions/{main}/submissions/long-1/cancel", json=body
+        )
+        for refused in (sent, cancel):
+            assert refused.status_code == 400, refused.text
+            error = refused.json()["error"]
+            assert error["code"] == "invalid_request"
+            assert error["message"] == t(
+                "errors.fileRefused",
+                name=f"password: [password-1] {'n' * 178}"[:80],
+                why="a file name must be 1 to 200 characters",
+            )
+            assert "quokka-8842" not in refused.text
+        assert await console.store.list_turns(main) == []
 
 
 async def _wait_idle(console: Console) -> None:
