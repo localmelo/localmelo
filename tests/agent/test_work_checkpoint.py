@@ -575,5 +575,7 @@ def test_where_work_stands_without_a_model_call(case: str) -> None:
     # What failed and what works come from the run's last checkpoint; the
     # freshest words take the place of its state.
     assert (found.failed, found.works) == (last["failed"], last["works"])
-    assert found.state == ("Wrote sections 1-4." if case == "ended task" else last["state"])
+    assert found.state == (
+        "Wrote sections 1-4." if case == "ended task" else last["state"]
+    )
     assert found.next == last["next"] and found.written

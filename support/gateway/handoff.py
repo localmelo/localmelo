@@ -343,7 +343,9 @@ def work_standing(
                 str(call.start),
                 call.name,
                 call.arguments,
-                outcome={"failed": "failed", "unknown": "unknown"}.get(_status(call), ""),
+                outcome={"failed": "failed", "unknown": "unknown"}.get(
+                    _status(call), ""
+                ),
                 exit_code=call.exit_code,
             )
             for call in calls
@@ -515,5 +517,8 @@ def handoff_block(packet: object) -> str:
         lines += [f"- {b.get('tool') or ''} · {b.get('what')}" for b in unknown]
     note = str(packet.get("note") or "").strip()
     if note:
-        lines += ["The chat's note:" if packet.get("by") == "chat" else "melo's note:", note]
+        lines += [
+            "The chat's note:" if packet.get("by") == "chat" else "melo's note:",
+            note,
+        ]
     return fenced("handoff", HANDOFF_HEADER, _plain("\n".join(lines)))

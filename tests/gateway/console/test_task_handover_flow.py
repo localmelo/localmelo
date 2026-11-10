@@ -28,8 +28,8 @@ from localmelo.support.gateway.handoff import (
 )
 from localmelo.support.gateway.handover import PICKED_HEADER
 from localmelo.support.gateway.task_store import TaskStoreError
-from localmelo.support.sessions.store import SessionStore
 from localmelo.support.gateway.workers import TASK_PACK_HEADER
+from localmelo.support.sessions.store import SessionStore
 from localmelo.tests.checker.test_redaction import AWS, GITHUB
 from localmelo.tests.memory.test_recall_list import add_turn
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -520,7 +520,7 @@ async def test_a_hand_off_carries_the_persons_words_and_what_failed_and_works(
     await store.open()
     try:
         info = await store.create_session(workspace=str(tmp_path))
-        turn = await store.begin_turn(info.session_id, TYPED, holder=HOLDER)
+        turn = await store.begin_turn(info.id, TYPED, holder=HOLDER)
         notes = {
             "state": "Two files listed.",
             "failed": ["missing.md is not there"],
@@ -538,7 +538,7 @@ async def test_a_hand_off_carries_the_persons_words_and_what_failed_and_works(
                        attempt=1, detail={"units": 1, "checkpoint": notes}),
         ]  # fmt: skip
         await store.append_events(
-            info.session_id,
+            info.id,
             turn.turn,
             [{**event, "run_id": turn.run_id} for event in events],
             holder=HOLDER,

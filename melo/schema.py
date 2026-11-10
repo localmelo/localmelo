@@ -1284,7 +1284,11 @@ class WorkCheckpoint:
         there are none). The model's words are its own notes (the header says
         so)."""
         lines = self.lines()
-        return "\n".join([CHECKPOINT_HEADER, *lines, CHECKPOINT_END] if lines else [CHECKPOINT_HEADER])
+        return "\n".join(
+            [CHECKPOINT_HEADER, *lines, CHECKPOINT_END]
+            if lines
+            else [CHECKPOINT_HEADER]
+        )
 
     def lines(self) -> list[str]:
         """The block's lines under its header, each field after its label with

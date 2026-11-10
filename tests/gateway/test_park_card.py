@@ -19,7 +19,11 @@ def event(
 
 def test_the_card_is_where_the_work_stands_and_claims_no_more_than_the_record() -> None:
     spec = TaskSpec(title="Example", objective="Update the file")
-    notes = {"state": "parts 1-40 read", "failed": ["a.md is locked"], "works": ["write b.md"]}
+    notes = {
+        "state": "parts 1-40 read",
+        "failed": ["a.md is locked"],
+        "works": ["write b.md"],
+    }
     events = [
         event("notice", {"kind": "checkpoint", "detail": {"checkpoint": notes}}),
         event("tool.started", {"name": "file_write", "call_id": "1",
