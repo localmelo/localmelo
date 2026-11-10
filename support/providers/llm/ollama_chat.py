@@ -18,12 +18,17 @@ from localmelo.support.providers._http import (
     malformed_body,
     post_json,
 )
+from localmelo.support.providers.llm._model_server import (
+    Replies,
+    as_length,
+    server_context_length,
+    server_takes_images,
+)
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
     raw_tool_arguments,
 )
-from localmelo.support.providers.llm._vision import server_takes_images
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -217,6 +222,8 @@ class OllamaNativeChat(BaseLLMProvider):
             transport=transport,
             follow_redirects=False,
         )
+        # What the server said about the model (see takes_images, context_length).
+        self._server_replies: Replies = {}
 
     async def chat(
         self,
@@ -266,8 +273,39 @@ class OllamaNativeChat(BaseLLMProvider):
     async def takes_images(self) -> bool | None:
         """Whether ``/api/show`` lists ``vision`` among the model's capabilities."""
         return await server_takes_images(
-            self._http, self.model, status=None, show="/api/show"
+            self._http,
+            self.model,
+            status=None,
+            show="/api/show",
+            replies=self._server_replies,
         )
+
+    def _plan_options(self) -> Mapping[str, Any]:
+        """The ``options`` a planning request sends, or an empty mapping."""
+        body = {**self.extra_body, **self.extra_body_by_kind.get("plan", {})}
+        options = body.get("options")
+        return options if isinstance(options, Mapping) else {}
+
+    async def context_length(self) -> int | None:
+        """The ``num_ctx`` the requests send, else the length ``/api/ps`` gives the running model; else None.
+
+        Never the model's maximum from ``/api/show``: the server runs it with less
+        unless a request or its own setting asks for more.
+        """
+        sent = as_length(self._plan_options().get("num_ctx"))
+        if sent is not None:
+            return sent
+        return await server_context_length(
+            self._http,
+            self.model,
+            listing=None,
+            running="/api/ps",
+            replies=self._server_replies,
+        )
+
+    def output_limit(self) -> int | None:
+        """``options.num_predict`` of a planning request, if it is set."""
+        return as_length(self._plan_options().get("num_predict"))
 
     async def close(self) -> None:
         await self._http.aclose()

@@ -428,19 +428,20 @@ def test_the_log_is_private(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 # ── Review fixes: whatever ends the session, the store closes ──
 
 
-async def test_a_cancel_while_the_agent_starts_closes_the_store(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import asyncio
+def _quiet_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A temporary HOME and a terminal that draws into a string, for main_async."""
     import io
 
     from prompt_toolkit.data_structures import Size
     from prompt_toolkit.output.vt100 import Vt100_Output
 
-    from localmelo.support.cli.agents import AgentFactory, url_backend
-    from localmelo.support.sessions import store as store_module
+    from localmelo.support.cli import theme
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv(launch.CHAT_ENV, raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")  # no terminal to ask for its colours
+    # main_async activates a palette for the whole process; give it back after.
+    monkeypatch.setattr(theme, "_active", theme.active())
     monkeypatch.setattr(
         Vt100_Output,
         "from_pty",
@@ -450,6 +451,17 @@ async def test_a_cancel_while_the_agent_starts_closes_the_store(
             )
         ),
     )
+
+
+async def test_a_cancel_while_the_agent_starts_closes_the_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from localmelo.support.cli.agents import AgentFactory, url_backend
+    from localmelo.support.sessions import store as store_module
+
+    _quiet_terminal(monkeypatch, tmp_path)
     stores: list[store_module.SessionStore] = []
 
     class Store(store_module.SessionStore):
@@ -486,6 +498,47 @@ async def test_a_cancel_while_the_agent_starts_closes_the_store(
     finally:
         for opened in stores:  # an open store's thread would keep pytest alive
             await opened.aclose()
+
+
+@pytest.mark.parametrize("gateway_answers", [True, False])
+async def test_bare_melo_connects_before_it_builds_the_agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gateway_answers: bool
+) -> None:
+    from localmelo.support.cli import main_chat
+    from localmelo.support.cli.agents import AgentFactory, url_backend
+
+    _quiet_terminal(monkeypatch, tmp_path)
+    order: list[Any] = []
+    answer = (
+        main_chat.Link("http://127.0.0.1:1", 1)
+        if gateway_answers
+        else main_chat.Offline("no gateway")
+    )
+
+    def connect(cfg: Any, on_start: Any = None) -> Any:
+        order.append("connect")
+        return answer
+
+    async def build(
+        self: AgentFactory, *args: Any, start: bool = True, **kw: Any
+    ) -> Any:
+        order.append(("build", start))
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(main_chat, "connect", connect)
+    monkeypatch.setattr(AgentFactory, "build", build)
+    choice = Choice(backend=url_backend(URL, "m", source="config"), cfg=_configured())
+    code = await launch.main_async(
+        choice,
+        args=_args(),
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+        log_path=str(tmp_path / "cli.log"),
+    )
+    assert code == (1, None)
+    # The gateway's Agent answers when it is there: the terminal's own one does
+    # not start its tool servers.
+    assert order == ["connect", ("build", not gateway_answers)]
 
 
 def test_a_malformed_config_is_one_line_not_a_traceback(

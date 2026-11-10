@@ -15,6 +15,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import RunResult
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.fixtures.chat_routes import chat_only
 
 ANSWER = {
     "choices": [{"message": {"role": "assistant", "content": "42"}}],
@@ -62,7 +63,7 @@ async def _run(server: FakeServer, memory_dir: Path) -> tuple[RunResult, Sleeps]
     llm = OpenAICompatLLM(
         base_url="http://llm.test/v1",
         model="m",
-        transport=httpx.MockTransport(server.handler),
+        transport=httpx.MockTransport(chat_only(server.handler)),
     )
     # answer_on_stop (on by default) would send one more request after a refusal
     # that says a budget is used; these tests count the requests of the failure.

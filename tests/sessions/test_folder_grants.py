@@ -25,11 +25,11 @@ from localmelo.support import config
 from localmelo.support.sessions.approvals import (
     FOLDER_FOR_CHAT,
     FOLDER_SAVED,
-    ApprovalLedger,
     ChatPolicy,
     OwnedTaskPolicy,
     RememberingPolicy,
 )
+from localmelo.support.sessions.grants import GrantBook
 
 
 class Asker:
@@ -281,18 +281,19 @@ async def test_policies_that_cannot_ask_are_never_found(letters: Path) -> None:
 async def test_a_task_uses_its_chats_folder_grants_and_asks_through_its_asker(
     letters: Path,
 ) -> None:
-    ledger = ApprovalLedger()
     chat_grants = {"chat-1": (str(letters),)}
-    ledger.folders_of = lambda chat: chat_grants.get(chat, ())
+
+    class Book(GrantBook):
+        def folders_for(self, session_id: str | None) -> tuple[str, ...]:
+            return chat_grants.get(session_id or "", ())
+
     task_asker = Asker(ApprovalDecision(True))
     asking = RememberingPolicy(task_asker, folders=True)
 
     async def owner() -> str | None:
         return "chat-1"
 
-    task = OwnedTaskPolicy(
-        AutoPolicy(task=True), ledger, "task-1", owner, folders=asking
-    )
+    task = OwnedTaskPolicy(AutoPolicy(task=True), Book(), owner, folders=asking)
 
     assert task.asks_folders and find_folder_asker(task) is task
     read = await task.decide_folder(_request("file_read", letters / "cover-letter.md"))
@@ -303,24 +304,14 @@ async def test_a_task_uses_its_chats_folder_grants_and_asks_through_its_asker(
 
 
 async def test_a_task_without_an_asker_cannot_ask() -> None:
-    ledger = ApprovalLedger()
-
     async def owner() -> str | None:
         return None
 
     task = OwnedTaskPolicy(
-        RememberingPolicy(Asker(), folders=False), ledger, "task-1", owner
+        RememberingPolicy(Asker(), folders=False), GrantBook(), owner
     )
     assert not task.asks_folders
     assert find_folder_asker(task) is None
-
-
-async def test_the_ledger_never_keeps_an_outside_call(letters: Path) -> None:
-    ledger = ApprovalLedger()
-    request = _request("file_write", letters / "x.md")
-
-    assert ledger.record("chat-1", request) is None
-    assert ledger.match("chat-1", request) is None
 
 
 async def test_a_failed_save_still_allows_the_call(

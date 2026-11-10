@@ -34,7 +34,7 @@ from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.streaming import STREAM_DISPLAY
-from localmelo.melo.schema import RunResult
+from localmelo.melo.schema import WINDOW_MESSAGES_MAX, RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery, model_offer
 from localmelo.support.backends.openai_compat import normalize_url
@@ -1485,8 +1485,10 @@ class CliSession:
             + (f" · {len(provided)} MCP" if provided else ""),
         )
         messages = len(self.agent.conversation())
-        window = self.agent.options.window_messages
-        if window == config.default_window_messages(backend.key):
+        window = self.agent.window_messages
+        if self.agent.options.window_messages is None and window == WINDOW_MESSAGES_MAX:
+            window_text = f"{window} (token budget)"
+        elif window == config.default_window_messages(backend.key):
             window_text = f"{window} ({config.window_reason(backend.key)})"
         else:
             window_text = str(window)

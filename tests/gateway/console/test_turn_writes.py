@@ -538,74 +538,78 @@ async def test_an_approval_answers_the_waiting_turn(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("review", "remember"),
-    [
-        (None, True),
-        (ActionReview("routine"), True),
-        (ActionReview("undecided"), True),
-        (ActionReview("high", ("install",), ("Installs x with pip.",)), False),
-    ],
-    ids=["unreviewed", "routine", "undecided", "high"],
+    "review",
+    [None, ActionReview("routine"), ActionReview("undecided")],
+    ids=["unreviewed", "routine", "undecided"],
 )
-async def test_a_chat_wide_answer_to_a_high_impact_call_allows_only_that_call(
-    tmp_path: Path, review: ActionReview | None, remember: bool
+async def test_a_chat_wide_answer_keeps_the_grant_where_the_server_offers_it(
+    tmp_path: Path, review: ActionReview | None
 ) -> None:
     async with console_with(tmp_path) as (console, client, _):
         request = ApprovalRequest(
-            request_id="req-high",
+            request_id="req-kept",
             run_id="",
             call_id="call_1",
             tool_name="shell_exec",
-            arguments={"command": "pip install x"},
-            preview="pip install x",
+            arguments={"command": "make test"},
+            preview="make test",
             workspace_root=str(tmp_path / "ws"),
             review=review,
         )
         waiting = console.broker.begin("s1", request)
 
         response = await client.post(
-            "/api/approvals/req-high", json={"choice": "session"}
+            "/api/approvals/req-kept", json={"choice": "session"}
         )
 
         assert response.json() == {
-            "request_id": "req-high",
+            "request_id": "req-kept",
             "outcome": "allowed",
-            "remember": remember,
+            "remember": True,
             "always": False,
         }
-        assert await waiting == ApprovalDecision(True, remember=remember)
+        assert await waiting == ApprovalDecision(True, remember=True)
 
 
 @pytest.mark.parametrize(
-    "tool", ["browser-submit:https://example.com", "browser-type:https://example.com"]
+    ("tool", "review"),
+    [
+        ("shell_exec", ActionReview("high", ("install",), ("Installs x with pip.",))),
+        ("browser-submit:https://example.com", ActionReview("undecided")),
+        ("browser-type:https://example.com", ActionReview("undecided")),
+        ("browser-dialog:https://example.com", None),
+        ("browser-attach:https://example.com", None),
+    ],
+    ids=["high", "submit", "type", "dialog", "attach"],
 )
-async def test_a_chat_wide_answer_to_a_form_send_or_typing_allows_only_that_one(
-    tmp_path: Path, tool: str
+async def test_a_chat_wide_answer_the_server_does_not_offer_is_refused_and_still_asks(
+    tmp_path: Path, tool: str, review: ActionReview | None
 ) -> None:
     async with console_with(tmp_path) as (console, client, _):
         request = ApprovalRequest(
-            request_id="req-form",
+            request_id="req-once",
             run_id="",
             call_id="call_1",
             tool_name=tool,
-            arguments={
-                "site": "example.com",
-                "access": "submit",
-                "to": "",
-                "how": "click",
-            },
-            preview="send a form from example.com",
+            arguments={"site": "example.com", "command": "pip install x"},
+            preview="one step",
             workspace_root=str(tmp_path / "ws"),
-            review=ActionReview("undecided"),
+            review=review,
         )
         waiting = console.broker.begin("s1", request)
 
-        response = await client.post(
-            "/api/approvals/req-form", json={"choice": "session"}
+        refused = await client.post(
+            "/api/approvals/req-once", json={"choice": "session"}
         )
 
-        assert response.json()["remember"] is False
-        assert await waiting == ApprovalDecision(True, remember=False)
+        # The answer is not changed into another one: it is refused, and the card still asks.
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["error"]["code"] == "not_offered"
+        assert not waiting.done()
+        assert console.broker.request("req-once") is not None
+        once = await client.post("/api/approvals/req-once", json={"choice": "once"})
+        assert once.json()["remember"] is False
+        assert await waiting == ApprovalDecision(True)
 
 
 async def test_stopping_a_turn_while_an_approval_waits(tmp_path: Path) -> None:

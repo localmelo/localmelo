@@ -72,7 +72,7 @@ class SessionTools:
                 memory_view(
                     s.agent.conversation(),
                     s.factory.backend,
-                    window_max=s.agent.options.window_messages,
+                    window_max=s.agent.window_messages,
                     memory=s.factory.memory,
                     loaded=loaded,
                     width=s.out.width,

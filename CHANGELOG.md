@@ -25,6 +25,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A thinking model's answer is no longer lost, and a reply that is only unfinished thinking or a broken tool call is never shown as the answer.
 - A question that asks for a short answer gets one in at most two steps.
 - A chat with an embedding model set up answers faster: the model server no longer reads the whole conversation again on most turns.
+- Chats and tasks use the context the model server says it runs the model with, up to 131,072 tokens, so work that fits it is no longer cut at a fixed 100,000 characters and read again; work larger than that context still reads parts again.
 
 ### Tasks
 
@@ -34,10 +35,11 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task that is stuck asks the chat that started it instead of stopping.
 - A task starts with what its chat knows about you and the project, and reads the project's own instruction file.
 - A task works in its chat's folder and asks before it reads or writes outside it.
-- A task's approvals go through the chat that started it, and the same approved step is not asked twice.
+- A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
+- One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
 - Worker runs (`melo worker BRIEF`) run their `Check:` lines when the model is done, and a failed check exits 4.
 
 ### Browser
@@ -73,8 +75,11 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Settings is organized by subject; Settings → Permissions lists every allow, Everywhere and Per chat, with Revoke.
 - Every slash command of the terminal works in the console and the app.
 - The console follows every session live: chats, tasks, worker runs and terminal chats.
+- After an update, a browser tab or the app's window shows the new console at once instead of an old copy.
 - One command builds and installs the macOS development app.
 - The console reads in plain words, is easier on a phone and is readable in light and dark.
+- The app's window has no title band, and the menu-bar item is Melo's head drawn in the bar's own colour.
+- The console has one look for its chips, labels and code, and a calmer first screen in a narrow window.
 
 ### Terminal
 
@@ -86,6 +91,8 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every question with fixed answers is a list you move through and confirm with Enter.
 - Colour tells kinds of output apart, and `NO_COLOR` or `LOCALMELO_ASCII=1` lose nothing.
 - Attach a text file with `/attach`, and run a shell command with `!`.
+- The terminal keeps a running turn when its connection to the gateway breaks, and shows the rest of it when the connection is back.
+- `melo` no longer starts tool servers it will not use when the gateway is already running.
 
 ### Setup
 
@@ -102,6 +109,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Direct runs and console chats offer no shell by default.
 - A worker's shell and Python write only inside its workspace on macOS.
 - High-impact calls (installing, downloading, changes outside the folder) always ask, even inside an allow.
+- Allow once allows that one call, in chats, tasks and the terminal; only Allow for this chat is kept, and a card offers it only where melo may keep it.
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
@@ -114,4 +122,5 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Every direct run is recorded, so the console's Workers view lists it.
 - `melo-retrieve` and `melo-procedures` compare memory retrievers and replay recorded runs offline.
 - The Python API (experimental) has events, stopping, approvals and sessions.
+- `GET /api/sessions/{id}/browser/picture` gives a script one picture of the page a chat's browser is on, while the live view is on.
 - The MIT license.

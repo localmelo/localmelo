@@ -174,6 +174,22 @@ def configured_context_options(
     return dataclasses.replace(options, **fields)
 
 
+def configured_run_options(cfg: Config | None, options: AgentOptions) -> AgentOptions:
+    """*options* for a run that is not a person's chat: a task's worker, the gateway's plain session.
+
+    The config's context budget, cache settings, reflection switch and attempt
+    length, as a chat gets them (:func:`configured_session_options`). A budget
+    the config leaves unset is the model server's (``Agent`` asks it).
+    """
+    if cfg is None:
+        return options
+    try:
+        options = configured_context_options(cfg, options, {})
+    except ValueError as exc:
+        raise ValueError(f"[agent] {exc}") from None
+    return configured_attempt_options(cfg, configured_cache_options(cfg, options))
+
+
 def configured_session_options(
     cfg: Config | None,
     options: AgentOptions | None = None,
@@ -350,6 +366,7 @@ async def build_session_agent(
     tools: Sequence[BaseToolProvider] = (),
     agent_class: type[Agent] | None = None,
     chat_id: str | None = None,
+    start: bool = True,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -358,8 +375,9 @@ async def build_session_agent(
     when *embedding_base_url* names one. Otherwise the backends of *cfg*, on
     a copy whose chat model is *model* when one is given and whose
     ``request_timeout_s`` is *request_timeout_s* when that is set; *cfg*
-    itself is not changed. ``agent.start()`` is awaited; when it raises, the
-    Agent is closed and the exception propagates.
+    itself is not changed. ``agent.start()`` is awaited, unless *start* is
+    false (its first run starts it); when it raises, the Agent is closed and
+    the exception propagates.
 
     If *options* is omitted, the config's agent/retrieval defaults are used;
     an explicit options object takes precedence. *reasoning_field* overrides
@@ -571,6 +589,8 @@ async def build_session_agent(
                 with contextlib.suppress(Exception):
                     await provider.close()
         raise
+    if not start:
+        return agent
     try:
         await agent.start()
     except BaseException:

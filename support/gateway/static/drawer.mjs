@@ -1,4 +1,3 @@
-import {stepLine} from './blocked.mjs';
 import {maker} from './dom.mjs';
 import {formatTime, t} from './i18n.mjs';
 import {formatDuration, statusText} from './turns.mjs';
@@ -24,8 +23,9 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
 
   const {node, button} = maker(doc);
   const heading = node('h2', '', t('drawer.title'));
-  const closeButton = button('', t('drawer.close'), () => close());
-  const tabs = node('div', 'drawer-tabs');
+  // The way back and the tabs look as they do on a task's page and above the panel.
+  const closeButton = button('task-back', t('tasks.back'), () => close());
+  const tabs = node('div', 'drawer-tabs panel-tabs');
   const content = node('div', 'drawer-content');
   const message = node('p', 'drawer-message');
   message.setAttribute('role', 'status');
@@ -33,12 +33,12 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
   root.setAttribute('role', 'region');
   root.setAttribute('aria-label', t('drawer.label'));
   root.hidden = true;
-  root.replaceChildren(heading, closeButton, tabs, message, content);
+  root.replaceChildren(closeButton, heading, tabs, message, content);
   const tabButtons = {};
   const TABS = ['tools', 'memory', 'runs', 'events'];
   const available = (name) => name !== 'events' || developer();
   for (const name of TABS) {
-    const item = button('', t(`drawer.tab.${name}`), () => selectTab(name));
+    const item = button('panel-tab', t(`drawer.tab.${name}`), () => selectTab(name));
     tabButtons[name] = item;
     tabs.append(item);
   }
@@ -79,7 +79,6 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
     const folders = Array.isArray(data.folders) ? data.folders : [];
     if (tools.some((tool) => tool.granted) || folders.length) content.append(button('', t('drawer.tools.revokeAll'), () => revokeGrants()));
     foldersView(folders);
-    approvalsView(data.approvals || []);
     if (data.mcp_config_label) content.append(node('p', '', data.mcp_config_label));
     if (data.mcp_error) content.append(node('p', '', data.mcp_error));
   }
@@ -95,22 +94,6 @@ export function setupDrawer({api, currentId, root, trigger, developer = () => fa
       const revoke = button('', t('drawer.tools.revoke'), () => revokeAt(`folders?path=${encodeURIComponent(String(folder.path ?? ''))}`));
       revoke.setAttribute('aria-label', t('drawer.folders.revokeOne', {folder: label}));
       row.append(where, revoke);
-      content.append(row);
-    }
-  }
-  // The steps the person allowed in this chat, which its tasks run again without asking (#369).
-  function approvalsView(approvals) {
-    if (!approvals.length) return;
-    content.append(node('h3', 'drawer-subhead', t('drawer.approvals.title')), node('p', '', t('drawer.approvals.note')));
-    for (const entry of approvals) {
-      const row = node('div', 'drawer-tool drawer-approval');
-      const step = node('code', 'drawer-approval-step', stepLine(entry.preview));
-      step.title = String(entry.preview ?? '');
-      const at = formatTime(new Date(entry.at * 1000), 'clock');
-      row.append(step, node('p', '', t('drawer.approvals.when', {tool: entry.tool, time: at})));
-      const revoke = button('', t('approvals.revoke'), () => revokeAt(`approvals/${encodeURIComponent(entry.id)}`));
-      revoke.setAttribute('aria-label', t('approvals.revokeStep', {step: stepLine(entry.preview, 60)}));
-      row.append(revoke);
       content.append(row);
     }
   }

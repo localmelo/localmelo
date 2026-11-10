@@ -15,9 +15,10 @@ folder that it removes (the size budget needs them), and prints a report: what t
 what is used instead, the problems that make `apply` refuse, and the warnings. The exit code is 0 without problems.
 
 `apply` checks, then replaces in one run: the moves folder (support/gateway/static/moves, the same bytes for the same
-pack), the terminal welcome's mark (support/cli/mark.py), the brand pictures when the pack has them (the app icon, the
-menu-bar logo, the README emblem and the website's round logo) and the two pictures of the guide. It writes a preview
-sheet of everything to a temporary folder (or `-o DIR`) and prints it with the changed files and the next steps.
+pack), the terminal welcome's mark (support/cli/mark.py) and the menu-bar mark (macos/assets/MenuBarMark*.png), both
+computed from the new face-brand.png, the brand pictures when the pack has them (the app icon, the README emblem and
+the website's round logo) and the two pictures of the guide. It writes a preview sheet of everything to a temporary
+folder (or `-o DIR`) and prints it with the changed files and the next steps.
 `-r ROOT` writes under ROOT instead of this checkout.
 
 The pack is a folder, or a zip whose root is the pack or holds it as its one top folder:
@@ -48,6 +49,7 @@ from typing import Any
 
 import build_moves  # type: ignore[import-not-found]
 import make_app_icons  # type: ignore[import-not-found]
+import make_menu_bar_mark  # type: ignore[import-not-found]
 import make_terminal_mark  # type: ignore[import-not-found]
 import pack_sheets  # type: ignore[import-not-found]
 import pack_zip  # type: ignore[import-not-found]
@@ -440,7 +442,7 @@ def instead_for(
         lines.append(
             (
                 "brand/menubar.png",
-                "MenuBarLogo.png, MenuBarLogo@2x.png and the website's round logo stay as they are",
+                f"{LOGO} (the website's round logo) stays as it is",
             )
         )
     if "emblem" not in brand:
@@ -595,6 +597,7 @@ def build_stage(
             "terminal mark",
             f"cannot be made from face-brand.png ({error}); {MARK} stays as it is",
         )
+    make_mark(moves / "face-brand.png", stage, report)
     make_brand(pack, brand, stage, report)
     pack_sheets.figures(moves, stage / FIGURES)
     report.replaces += [
@@ -603,8 +606,34 @@ def build_stage(
     ]
 
 
+def make_mark(face: Path, stage: Path, report: Report) -> None:
+    """The menu-bar mark's masks, computed from the new head (scripts/make_menu_bar_mark.py)."""
+    try:
+        (stage / ICONS).mkdir(parents=True, exist_ok=True)
+        written = make_menu_bar_mark.write(stage / ICONS, face)
+    except (ValueError, OSError) as error:
+        report.warn(
+            "menu-bar mark",
+            f"cannot be made from face-brand.png ({error}); the MenuBarMark files stay as they are",
+        )
+        return
+    report.replaces += [
+        (f"{ICONS}/{path.name}", "moves/face-brand.png (the menu-bar mark, computed)")
+        for path in written
+    ]
+    # The app colours the fur lines with a pair of its palette; a new picture can need other colours.
+    wanted = make_menu_bar_mark.fur_colours(face)
+    palette = make_menu_bar_mark.palette_fur()
+    if palette != wanted:
+        light, dark = ("0x" + bytes(wanted[name]).hex() for name in ("light", "dark"))
+        report.warn(
+            "menu-bar mark",
+            f"the fur lines need other colours: set `fur = pair({light}, {dark})` in {make_menu_bar_mark.PALETTE}",
+        )
+
+
 def make_brand(pack: Pack, brand: dict[str, Path], stage: Path, report: Report) -> None:
-    """The app icon, the menu-bar logo, the README emblem and the website's logo, from the brand pictures."""
+    """The app icon, the README emblem and the website's round logo, from the brand pictures."""
     if "emblem" in brand:
         (stage / EMBLEM).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(brand["emblem"], stage / EMBLEM)
@@ -628,11 +657,9 @@ def make_brand(pack: Pack, brand: dict[str, Path], stage: Path, report: Report) 
             f"{make_app_icons.ICONUTIL} is part of macOS and is missing: AppIcon.icns is not made",
         )
         art = None
-    written = make_app_icons.build_icons(stage / ICONS, art, logo)
-    for name in written:
-        source = icon_source if name == "AppIcon.icns" else brand["menubar"]
-        assert source is not None
-        report.replaces.append((f"{ICONS}/{name}", rel(source, pack.root)))
+    for name in make_app_icons.build_icons(stage / ICONS, art):
+        assert icon_source is not None
+        report.replaces.append((f"{ICONS}/{name}", rel(icon_source, pack.root)))
     if logo is not None:
         small = Image.fromarray(logo).resize(
             (LOGO_PIXELS, LOGO_PIXELS), Image.Resampling.LANCZOS
@@ -680,8 +707,8 @@ def promote(stage: Path, root: Path) -> tuple[list[Change], int]:
 
 
 def icon_pictures(stage: Path) -> tuple[Any, Any, Any]:
-    """The brand pictures a stage holds, as pictures for the preview: the icon, the menu-bar logo at 18 and 36 px,
-    and the emblem (each None when the pack gave none)."""
+    """The pictures a stage holds for the preview's brand row: the icon, the menu-bar mark at 18 and 36 px on a light
+    and a dark bar, and the emblem (each None when the stage has none)."""
 
     def opened(relative: str) -> Any:
         path = stage / relative
@@ -695,12 +722,15 @@ def icon_pictures(stage: Path) -> tuple[Any, Any, Any]:
     if icns.is_file():
         with Image.open(icns) as image:
             icon = image.convert("RGBA")
-    one, two = opened(f"{ICONS}/MenuBarLogo.png"), opened(f"{ICONS}/MenuBarLogo@2x.png")
-    return (
-        icon,
-        (one, two) if one is not None and two is not None else None,
-        opened(EMBLEM),
-    )
+    marks = None
+    face = stage / MOVES / "face-brand.png"
+    if all((stage / ICONS / name).is_file() for name in make_menu_bar_mark.NAMES):
+        one, two = (
+            Image.fromarray(make_menu_bar_mark.on_bars(scale, stage / ICONS, face))
+            for scale in (1, 2)
+        )
+        marks = (one.convert("RGBA"), two.convert("RGBA"))
+    return icon, marks, opened(EMBLEM)
 
 
 def refuse(error: Exception, source: Path) -> Report:

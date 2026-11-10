@@ -746,7 +746,7 @@ _UNREACHABLE = (
             "1.2k tokens over",
             "⚠",
             "Context budget exceeded: 1.2k tokens over.",
-            "Reduce the task or increase the configured context window; then /retry.",
+            "Reduce the task or use a longer context; then /retry.",
         ),
         (
             "setup_error",
@@ -1061,6 +1061,7 @@ def _banner(
     version: str = "0.1.0",
     yolo: bool = False,
     symbols: Symbols = UNICODE,
+    chat: str | None = None,
     **backend: Any,
 ) -> str:
     out = RecordingOut(width)
@@ -1075,6 +1076,7 @@ def _banner(
             width=width,
             symbols=symbols,
             developer=developer,
+            chat=chat,
         )
     )
     return out.text()
@@ -1100,6 +1102,12 @@ def test_the_banner_box() -> None:
     assert "│ session    new" in lines[5]
     assert all(cells(line) == 80 for line in lines[:7])
     assert lines[7] == "  / commands · esc stop · ctrl+d quit"
+
+
+def test_the_banner_describes_the_gateway_not_the_unused_local_agent() -> None:
+    text = _banner(source="config", chat="Main chat")
+    assert "│ session    Main chat (the gateway's)" in text
+    assert "tools" not in text and "memory" not in text
 
 
 def test_the_welcome_is_three_rows_that_start_the_conversation() -> None:

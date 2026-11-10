@@ -2,8 +2,9 @@
 
 ``melo --base-url URL --chat-model MODEL "task"`` is what the benchmark runs.
 Naming a server (``oMLX`` in a banner, a status row or the web console) reads
-what a model listing already says, so a direct run, which lists nothing,
-sends the chat requests and nothing else. The server here answers like oMLX
+what a model listing already says, so a direct run, which lists nothing for
+that, asks only the context the server runs the model with, once before its
+first request, and then sends the chat requests. The server here answers like oMLX
 does (``owned_by``, a status route), on a free port of this machine.
 """
 
@@ -100,8 +101,14 @@ def test_a_direct_run_sends_only_its_chat_request(
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout == "done\n"
-    # No listing, no status lookup, no version check, no key: one chat request.
-    [(method, path, has_key, body)] = server.requests
+    # The context questions (the listing, oMLX's status, Ollama's running models),
+    # no version check, no key; then one chat request.
+    *questions, (method, path, has_key, body) = server.requests
+    assert [(m, p, k) for m, p, k, _ in questions] == [
+        ("GET", "/v1/models", False),
+        ("GET", "/v1/models/status", False),
+        ("GET", "/api/ps", False),
+    ]
     assert (method, path, has_key) == ("POST", "/v1/chat/completions", False)
     sent = json.loads(body)
     assert sent["model"] == "Qwen3-8B-4bit"

@@ -117,7 +117,7 @@ test('errors expose retry and failed revokes preserve controls', async () => {
   assert.match(h.text(), /offline/);
   h.find('Retry').focus();
   await h.find('Retry').click();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   await h.find('Revoke').click();
   assert.match(h.text(), /denied/);
   assert.equal(h.find('Revoke').disabled, false);
@@ -212,9 +212,9 @@ test('focus stays in the drawer across removal, external focus, and close', asyn
   h.find('Revoke').focus();
   const refresh = h.find('Revoke').click();
   await Promise.resolve();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   h.trigger.focus();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
   h.drawer.close();
   assert.equal(h.doc.handlers.focusin, undefined);
   const outside = h.doc.createElement('button');
@@ -229,7 +229,7 @@ test('rendering an appended page restores focus removed with the old content', a
   await h.drawer.open('runs');
   h.find('Earlier runs').focus();
   await h.find('Earlier runs').click();
-  assert.equal(h.doc.activeElement, h.find('Close details'));
+  assert.equal(h.doc.activeElement, h.find('Back to Melo'));
 });
 
 test('empty filtered page with earlier turns explains unavailable cursor', async () => {
@@ -269,22 +269,6 @@ test('developer mode adds the Events tab, memory internals and run counters; off
   await h.drawer.modeChanged();
   assert.equal(h.find('Events').hidden, true);
   assert.match(h.text(), /No tools available/);
-});
-
-test('the Tools tab lists the steps the person approved in this chat, and Revoke takes one back', async () => {
-  let listed = [{id: 'e1', tool: 'python_exec', folder: '/w', verdict: 'routine', categories: [], preview: 'print(1)\nprint(2)', at: 1_800_000_000}];
-  const h = harness({
-    'GET /sessions/s%2F1/tools': () => ({...emptyTools, approvals: listed}),
-    'DELETE /sessions/s%2F1/approvals/e1': () => { listed = []; return {}; },
-  });
-  await h.drawer.open();
-  assert.match(h.text(), /Steps you approved here.*run these exact steps again in the same folder without asking.*High-impact steps always ask/);
-  assert.match(h.text(), /print\(1\) print\(2\).*python_exec · approved at/);
-  const revoke = h.find('Revoke');
-  assert.equal(revoke.attributes['aria-label'], 'Revoke your approval of print(1) print(2)');
-  await revoke.click();
-  assert.deepEqual(h.calls.slice(1), [['/sessions/s%2F1/approvals/e1', 'DELETE'], ['/sessions/s%2F1/tools', 'GET']]);
-  assert.doesNotMatch(h.text(), /Steps you approved here/);
 });
 
 test('a folder the main chat allowed is taken back everywhere, and the drawer says so', async () => {

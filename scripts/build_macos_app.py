@@ -90,12 +90,14 @@ NO_SWIFT = (
     "The app needs Apple's Swift compiler. Install it with: xcode-select --install"
 )
 LAUNCHER_PATH = "Contents/Resources/runtime/bin/melo"
-# The icon and the menu-bar logo are committed files in macos/assets, made by scripts/make_app_icons.py
-# when the art changes. The build copies them, under the names they have in the bundle.
+# The icon and the menu-bar mark are committed files in macos/assets, made by scripts/make_app_icons.py and
+# scripts/make_menu_bar_mark.py when the art changes. The build copies them, under the names they have in the bundle.
 ASSETS = {
     "AppIcon.icns": "LocalMelo.icns",
-    "MenuBarLogo.png": "MenuBarLogo.png",
-    "MenuBarLogo@2x.png": "MenuBarLogo@2x.png",
+    "MenuBarMark.png": "MenuBarMark.png",
+    "MenuBarMark@2x.png": "MenuBarMark@2x.png",
+    "MenuBarMarkFur.png": "MenuBarMarkFur.png",
+    "MenuBarMarkFur@2x.png": "MenuBarMarkFur@2x.png",
 }
 # Melo's moves (the desktop pet's animated states, its stills, the start window's portrait and the activity pill's
 # faces) are the console's files, made by scripts/build_moves.py. The bundle holds them once, inside the package the
@@ -413,7 +415,7 @@ def build(output: Path) -> None:
         for (
             asset,
             name,
-        ) in ASSETS.items():  # the app icon, and the logo of the menu-bar item
+        ) in ASSETS.items():  # the app icon, and the mark of the menu-bar item
             shutil.copy2(ROOT / "macos/assets" / asset, contents / "Resources" / name)
         languages = write_localizations(contents / "Resources")
         verify_links(python)
