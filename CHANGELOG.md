@@ -34,7 +34,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A task that is stuck asks the chat that started it instead of stopping.
 - A task starts with what its chat knows about you and the project, and reads the project's own instruction file.
 - A task works in its chat's folder and asks before it reads or writes outside it.
-- A task's approvals go through the chat that started it, and the same approved step is not asked twice.
+- A task's approvals go through the chat that started it, and an Allow for this chat given there covers the task too.
 - Priorities read P0 to P5 everywhere.
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
