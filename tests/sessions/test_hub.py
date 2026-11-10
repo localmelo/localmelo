@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.live import LIVE_EVENT, live_frame
 from localmelo.support.sessions.store import (
     NewSession,
     SessionStore,
@@ -185,3 +186,58 @@ async def test_only_a_stream_opened_as_a_viewer_counts_as_one(tmp_path: Path) ->
         await script.aclose()
         await hub.aclose()
         await store.aclose()
+
+
+def _live(session_id: str, turn: int, at: int, text: str) -> StoredEvent:
+    data = {"turn": turn, "turn_id": "t", "step": 1, "attempt": 1, "at": at, "text": text}
+    return live_frame(session_id, turn, data)
+
+
+async def _next_or_none(events: AsyncIterator[StoredEvent]) -> StoredEvent | None:
+    try:
+        return await asyncio.wait_for(anext(events), 0.2)
+    except TimeoutError:
+        return None
+
+
+async def test_live_text_goes_only_to_viewers_of_its_own_chat(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    hub = SessionHub(store)
+    mine, other = await running(store), await running(store)
+    viewer = hub.subscribe(mine.session_id, viewer=True)
+    script = hub.subscribe(mine.session_id)  # a stream opened without watch
+    elsewhere = hub.subscribe(other.session_id, viewer=True)
+    for events in (viewer, script, elsewhere):
+        await take(events, 2)  # the replay: turn.started and session.title
+    hub.live(_live(mine.session_id, mine.turn, 0, "Hello\n"))
+    got = await _next_or_none(viewer)
+    assert got is not None and got.id is None and got.event["data"]["text"] == "Hello\n"
+    assert await _next_or_none(script) is None
+    assert await _next_or_none(elsewhere) is None
+    # A one-shot read (follow=false) reads the store, which holds no live frame.
+    stored = await store.list_events(mine.session_id)
+    assert all(event.event["type"] != LIVE_EVENT for event in stored)
+    for events in (viewer, script, elsewhere):
+        await events.aclose()
+    await hub.aclose()
+    await store.aclose()
+
+
+async def test_a_viewer_that_does_not_read_costs_a_bounded_buffer(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    hub = SessionHub(store, queue_size=4)
+    turn = await running(store)
+    idle = hub.subscribe(turn.session_id, viewer=True)
+    await take(idle, 2)
+    text = ""
+    for n in range(200):  # the run never waits for it
+        piece = f"line {n}\n"
+        hub.live(_live(turn.session_id, turn.turn, len(text), piece))
+        text += piece
+    # Its queue overflowed and was emptied: when it reads again it gets the
+    # text so far once, from the start, not the 200 frames.
+    first = await anext(idle)
+    assert (first.event["data"]["at"], first.event["data"]["text"]) == (0, text)
+    await idle.aclose()
+    await hub.aclose()
+    await store.aclose()
