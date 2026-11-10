@@ -389,8 +389,9 @@ async def test_a_clean_stop_then_a_start_continues_the_task(
     record = await again.tasks.get_task(task_id)
     assert record.state == "running"
     # The continued turn starts from the card of where the run stopped.
+    # The continued turn is where the work stands, from melo's records.
     assert runs.texts[-1].startswith("Where stopped")
-    assert "file_write" in runs.texts[-1]
+    assert "Goal: " in runs.texts[-1] and "- file_write" in runs.texts[-1]
     resumed = await _resumed(again.store, task_id)
     assert [data.get("reason") for data in resumed] == ["restart"]
     assert (await again.get(task_id))["continued_at"] is not None

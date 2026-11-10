@@ -35,11 +35,12 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._brief_aids import (
     COVERED_LINES,
+    Dropped,
     covered_lines,
     dropped_calls,
 )
@@ -246,6 +247,51 @@ def checkpoint_from(
     )
     fitted = _trimmed(written, min(chars, CHECKPOINT_CHARS), _model_size, CUT_ORDER)
     return dataclasses.replace(fitted, cut=cut or fitted is not written)
+
+
+def standing(
+    *,
+    goal: str,
+    calls: Sequence[Dropped],
+    files: Sequence[str],
+    last: Mapping[str, Any] | None = None,
+    earlier: Sequence[str] = (),
+    state: str = "",
+    then: str = "",
+    chars: int = CHECKPOINT_CHARS,
+    lines: int = COVERED_LINES,
+) -> WorkCheckpoint:
+    """Where a run or a task stands now, for whoever goes on with it; no model call.
+
+    The model's fields are those of *last*, the fields of the last checkpoint
+    the run made (as its ``checkpoint`` notice keeps them), when it made one.
+    The model's freshest words, when the caller has them, take the place of
+    that state (*state*) and of its next steps (*then*): they are newer. The
+    computed fields are as of now: *goal* (the request's own words), *files*
+    (what the run wrote or edited) and every call it made (*calls*, after the
+    lines of the work before it, *earlier*), none of whose results the reader
+    holds. Within the sizes of a checkpoint (or *chars* of the model's fields
+    and *lines* of calls), cut as one is (:data:`CUT_ORDER`).
+    """
+    notes = last or {}
+
+    def items(key: str) -> list[str]:
+        return [str(item) for item in notes.get(key) or () if str(item).strip()]
+
+    found = WorkCheckpoint(
+        goal=goal,
+        state=state.strip() or str(notes.get("state") or ""),
+        results=str(notes.get("results") or ""),
+        failed=items("failed"),
+        works=items("works"),
+        next=[then.strip()] if then.strip() else items("next"),
+        files=list(files),
+        covered=[*earlier, *covered_lines(calls, lines)][-lines:],
+        step=int(notes.get("step") or 0),
+        written=bool(state.strip() or then.strip() or notes.get("written")),
+    )
+    fitted = _trimmed(found, chars, _model_size, CUT_ORDER)
+    return dataclasses.replace(fitted, cut=fitted is not found)
 
 
 def _room(limit: int) -> int:

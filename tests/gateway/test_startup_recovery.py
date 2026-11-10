@@ -167,7 +167,7 @@ async def test_new_evidence_replaces_old_card_on_interruption(
         )
         await StartupRecovery(store, tasks).run()
         card = (await tasks.get_task(task.task_id)).card
-        assert "file_write started" in card and "without a recorded finish" in card
+        assert "- file_write a.txt (effect unknown)" in card
         assert card != "old card"
     finally:
         await store.aclose()

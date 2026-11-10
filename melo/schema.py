@@ -1219,7 +1219,6 @@ class ReflectionDecision:
     next_step_is_novel: bool = False
     recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"
     rationale: str = ""
-    handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
 
@@ -1275,12 +1274,18 @@ class WorkCheckpoint:
     cut: bool = False
 
     def render(self) -> str:
-        """The block that stands in the window for what left it.
+        """The block that stands in the window for what left it: :meth:`lines`
+        between the block's header and its end line (the header alone when
+        there are none). The model's words are its own notes (the header says
+        so)."""
+        lines = self.lines()
+        return "\n".join([CHECKPOINT_HEADER, *lines, CHECKPOINT_END] if lines else [CHECKPOINT_HEADER])
 
-        The model's words are its own notes (the header says so), each field
-        after its label with its other lines indented (see :func:`_indented`).
-        """
-        lines = [CHECKPOINT_HEADER]
+    def lines(self) -> list[str]:
+        """The block's lines under its header, each field after its label with
+        its other lines indented (see :func:`_indented`); a block that goes on
+        in another task carries them under its own header."""
+        lines: list[str] = []
         if self.goal:
             lines.append(f"Goal: {shorten(collapse(self.goal), GOAL_CHARS)}")
         if self.state:
@@ -1313,9 +1318,7 @@ class WorkCheckpoint:
                 "part:"
             )
             lines.extend(f"- {collapse(line)}" for line in self.covered)
-        if len(lines) == 1:
-            return lines[0]
-        return "\n".join([*lines, CHECKPOINT_END])
+        return lines
 
     def to_dict(self) -> dict[str, Any]:
         """A plain dict of every field, as a stored event keeps it."""

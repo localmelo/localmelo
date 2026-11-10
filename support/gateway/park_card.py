@@ -1,109 +1,68 @@
-"""Build a bounded, evidence-only resumption card from committed events."""
+"""The card a parked or cut-off task goes on with, from committed events."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.agent._checkpoint import CUE_LINE_CHARS
 from localmelo.melo.memory.procedures.mask import mask_credentials
-from localmelo.melo.schema import broken_tool_call
+from localmelo.melo.schema import GOAL_CHARS
+from localmelo.support.gateway.handoff import work_standing
+from localmelo.support.gateway.task_endings import paired_calls
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.store import StoredEvent
 
+# The longest card the stores keep: a stop writes no more than this.
 MAX_CARD_CHARS = 2_000
 # How every card begins: a turn whose text starts so is melo's card, not words
 # the person typed.
 CARD_START = "Where stopped: "
-
-
-def _text(value: object, limit: int) -> str:
-    if not isinstance(value, str):
-        return ""
-    value = mask_credentials(redact_secrets(value)[0])
-    value = " ".join(value.split())
-    return value if len(value) <= limit else value[: limit - 1] + "…"
+HEAD = (
+    f"{CARD_START}the task stopped before it finished; where its work stands, "
+    "from melo's records:"
+)
+CAUTIONS = (
+    "Cautions: Work may have been interrupted; check for side effects before "
+    "repeating any action. Recorded reports are not proof of completion."
+)
 
 
 def build_park_card(
     spec: TaskSpec | Mapping[str, Any], events: Iterable[StoredEvent]
 ) -> str:
-    """Return a deterministic card from a task spec and ordered stored events.
+    """Where the task of *spec* stands, from its stored *events*, as its next turn reads it.
 
-    Only events with a persisted ID are used. Tool arguments and outputs are
-    not generally redacted by the event store, so only a file tool's path is
-    extracted and redacted here; all other arguments and outputs are omitted.
-    Missing or malformed fields are treated as unknown, never as success.
+    The lines of its :class:`~localmelo.melo.schema.WorkCheckpoint`
+    (:func:`~localmelo.support.gateway.handoff.work_standing`: the request's
+    words, the files written, every call with a failure or an unknown effect
+    named as such, the last work checkpoint's notes and the model's newest
+    words after it), under the line every card starts with and its
+    cautions, within :data:`MAX_CARD_CHARS`. No model call; only events the
+    store kept count, and a credential is masked wherever it shows.
     """
     if isinstance(spec, TaskSpec):
         spec = spec.to_dict()
     if not isinstance(spec, Mapping):
         spec = {}
-    objective = _text(spec.get("objective"), 350) or "Unknown"
-    done = spec.get("done_when")
-    items = [_text(item, 100) for item in done[:5]] if isinstance(done, list) else []
-    items = [item for item in items if item]
-    tools: list[str] = []
-    pending: dict[tuple[str, str], str] = {}
-    reflection = reply = ""
-    for stored in events if isinstance(events, Iterable) else ():
-        if not isinstance(stored, StoredEvent) or stored.id is None:
-            continue
-        event = stored.event
-        if not isinstance(event, Mapping) or not isinstance(event.get("data"), Mapping):
-            continue
-        data = event["data"]
-        kind = event.get("type")
-        if kind == "assistant.message":
-            said = data.get("content")
-            # A tool call written as text is not what the task last said.
-            if not (isinstance(said, str) and broken_tool_call(said)):
-                reply = _text(said, 250) or reply
-        elif kind == "reflection":
-            reflection = _text(data.get("summary"), 250)
-        elif kind in ("tool.started", "tool.finished"):
-            name = _text(data.get("name"), 60) or "unknown tool"
-            call_id = data.get("call_id")
-            run_id = event.get("run_id")
-            key = (
-                (run_id, call_id)
-                if isinstance(run_id, str) and isinstance(call_id, str) and call_id
-                else None
-            )
-            if kind == "tool.started":
-                if key:
-                    pending[key] = name
-                args = data.get("arguments")
-                path = (
-                    _text(args.get("path"), 120)
-                    if name in ("file_read", "file_write") and isinstance(args, Mapping)
-                    else ""
-                )
-                tools.append(f"{name} started" + (f" (path: {path})" if path else ""))
-            else:
-                if key:
-                    pending.pop(key, None)
-                status = _text(data.get("status"), 40) or "unknown"
-                code = data.get("exit_code")
-                suffix = (
-                    f", exit code {code}"
-                    if isinstance(code, int) and not isinstance(code, bool)
-                    else ""
-                )
-                tools.append(f"{name}: {status}{suffix}")
-    stopped = _text("; ".join(tools[-4:]), 400) or "No recorded tool activity"
-    if pending:
-        stopped += "; tool call without a recorded finish"
-    left = _text("; ".join(items), 300) or "Completion criteria not recorded"
-    card = (
-        f"{CARD_START}{stopped}\n"
-        f"Objective: {objective}\n"
-        f"Last reflection (reported): {reflection or 'Not recorded'}\n"
-        f"Last reply (reported): {reply or 'Not recorded'}\n"
-        f"What is left: {left} (completion unverified)\n"
-        "Next action: If resuming, inspect the recorded evidence and current state "
-        "before deciding what to do.\n"
-        "Cautions: Work may have been interrupted; check for side effects before "
-        "repeating any action. Recorded reports are not proof of completion."
+    kept = [
+        e
+        for e in events or ()
+        if isinstance(e, StoredEvent)
+        and e.id is not None
+        and isinstance(e.event, dict)
+        and isinstance(e.event.get("data"), dict)
+    ]
+    goal = str(spec.get("user_words") or spec.get("objective") or "")
+    # Half of the room the goal leaves for the model's notes, half for the calls.
+    room = MAX_CARD_CHARS - len(HEAD) - len(CAUTIONS) - min(len(goal), GOAL_CHARS)
+    standing = work_standing(
+        paired_calls(kept),
+        kept,
+        goal=goal,
+        folder=str(spec.get("workspace") or "") or None,
+        chars=max(room // 2, 0),
+        lines=max(room // 2 // CUE_LINE_CHARS, 1),
     )
-    return card[:MAX_CARD_CHARS]
+    card = mask_credentials("\n".join([HEAD, CAUTIONS, *standing.lines()]))
+    return card if len(card) <= MAX_CARD_CHARS else card[: MAX_CARD_CHARS - 1] + "…"

@@ -1129,12 +1129,22 @@ async def test_a_call_whose_effect_is_unknown_asks_the_person_again_down_the_cha
                     "tool.finished", seq=5 + 2 * n, step=2 + n, call_id=f"r-{n}"
                 ),
             ]
+        # The task's last work checkpoint: what failed and what works go on.
+        notes = {"failed": ["deploy timed out"], "works": ["read a.txt first"]}
+        events.append(
+            core_event("notice", seq=60, kind="checkpoint", message="Noted.", step=3,
+                       attempt=1, detail={"checkpoint": notes})
+        )  # fmt: skip
         await stop_run(console, task_id, INTERRUPT_LABEL, events=events)
         del console.workers._schedule  # tasks run from here on
         body, how = await console.workers.continue_stopped(task_id)
         fresh = str(body["task_id"])
         record = await console.workers.tasks.get_task(fresh)
-        assert record.spec["handoff"]["account"] == "", "no placeholder carried"
+        assert record.spec["handoff"]["checkpoint"]["state"] == "", "no placeholder"
+        said = handoff_block(record.spec["handoff"])
+        assert "Did not work: deploy timed out" in said
+        assert "Works: read a.txt first" in said
+        assert "(effect unknown)" in said and f"Goal: {REPORT}" in said
         fenced = [b["tool"] for b in record.spec["handoff"]["blocks"]]
         assert fenced == ["python_exec", "shell_exec"]
         await until(lambda: console.broker.pending(fresh), timeout=15.0)

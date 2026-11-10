@@ -118,8 +118,7 @@ async def test_pause_waits_for_executing_tool_then_resumes_card(
         events = await store.list_events(task_id)
         assert any(e.event["type"] == "tool.started" for e in events)
         assert any(e.event["type"] == "tool.finished" for e in events)
-        assert "file_write:" in card
-        assert "tool call without a recorded finish" not in card
+        assert "- file_write" in card and "(effect unknown)" not in card
         await workers.update(task_id, state="resume")
         async with asyncio.timeout(3):
             while (

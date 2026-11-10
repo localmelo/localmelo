@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._brief_aids import covered_lines, dropped_calls
+from localmelo.melo.agent._brief_aids import covered_lines, cue, dropped_calls
 from localmelo.melo.agent._checkpoint import (
     CHECKPOINT_AGAIN_NOTE,
     CHECKPOINT_CARRY_NOTE,
@@ -24,6 +24,7 @@ from localmelo.melo.agent._checkpoint import (
     EARLY_NOTE,
     _CheckpointLoop,
     checkpoint_from,
+    standing,
 )
 from localmelo.melo.agent._context_fit import units_to_leave
 from localmelo.melo.agent._request_accounting import request_proxy
@@ -535,3 +536,44 @@ def test_reads_whose_words_look_like_failures_leave_oldest_first() -> None:
     kept = [messages[0], *(m for u in units[4:] for m in u)]
     gone, _ = units_to_leave(messages, target=size(kept), estimate=size)
     assert [id(m) for m in gone] == [id(m) for u in units[:4] for m in u]
+
+
+@pytest.mark.parametrize("case", ["no checkpoint", "checkpoint", "ended task"])
+def test_where_work_stands_without_a_model_call(case: str) -> None:
+    last = {
+        "state": "parts 1-40 read",
+        "results": "notes.md holds 1-3",
+        "failed": ["part 0 does not exist"],
+        "works": ["three parts a step"],
+        "next": ["read part 41"],
+        "step": 9,
+        "written": True,
+    }
+    fetch = {"url": "https://a.test/doc", "part": 41}
+    calls = [
+        cue("c1", "web_fetch", fetch),
+        cue("c2", "shell_exec", {"command": "make"}, exit_code=2),
+        cue("c3", "file_write", {"path": "notes.md"}, outcome="unknown"),
+    ]
+    found = standing(
+        goal=TASK,
+        calls=calls,
+        files=["notes.md"],
+        last=last if case != "no checkpoint" else None,
+        state="Wrote sections 1-4." if case == "ended task" else "",
+    )
+    assert (found.goal, found.files) == (TASK, ["notes.md"])
+    # Every call, a failure and an unknown effect named as such.
+    assert found.covered == [
+        "web_fetch https://a.test/doc part 41",
+        "shell_exec `make` (exit 2)",
+        "file_write notes.md (effect unknown)",
+    ]
+    if case == "no checkpoint":
+        assert not found.written and not (found.state or found.failed or found.next)
+        return
+    # What failed and what works come from the run's last checkpoint; the
+    # freshest words take the place of its state.
+    assert (found.failed, found.works) == (last["failed"], last["works"])
+    assert found.state == ("Wrote sections 1-4." if case == "ended task" else last["state"])
+    assert found.next == last["next"] and found.written
