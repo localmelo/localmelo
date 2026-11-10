@@ -1286,10 +1286,14 @@ class ConsoleSessions:
         *,
         client_request_id: str | None = None,
         extras: TurnExtras | None = None,
+        words: str | None = None,
     ) -> tuple[TurnInfo, ResumeInfo | None]:
         """Start a turn in *session_id*; return it and the open's resume.
 
-        *extras* are the files and pictures the message carries.
+        *extras* are the files and pictures the message carries. *words* are
+        the person's own words when *composed* holds more than they typed (a
+        queued message's files are already part of its text): the run reads
+        these as theirs, never a file's text (#626).
 
         The resume is the ``ResumeInfo`` of an open this call made, for the
         route's 202, else ``None``. The key is checked before the session is
@@ -1314,6 +1318,7 @@ class ConsoleSessions:
                 title=typed,
                 client_request_id=client_request_id,
                 attachments=extras.attachments,
+                words=words,
                 images=extras.images,
             )
             entry.last_used = self._clock()

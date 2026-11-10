@@ -1,4 +1,4 @@
-"""Compose structured snapshots and read legacy trailing attachment blocks."""
+"""Compose structured snapshots, hide the passwords in a message's parts and read legacy trailing attachment blocks."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.sign_in import hide_passwords
 
 _BLOCK = re.compile(
     r'\n\n<attachment name="([^"\n]{1,200})" chars="([0-9]+)"'
@@ -58,6 +60,52 @@ def snapshot(name: str, text: str) -> TextAttachment:
         raise ValueError("a file name must be 1 to 200 characters")
     body, _ = redact_secrets(clean_text(text))
     return TextAttachment(safe_name, body)
+
+
+@dataclass(frozen=True)
+class HiddenMessage:
+    """A message's parts as :func:`hide_message` returns them."""
+
+    text: str
+    attachments: tuple[TextAttachment, ...] = ()
+    words: str | None = None
+    title: str | None = None
+
+
+def hide_message(
+    text: str,
+    attachments: Sequence[TextAttachment] = (),
+    *,
+    words: str | None = None,
+    title: str | None = None,
+) -> HiddenMessage:
+    """The parts of a message the person sent, with each password cut out (#547, #626).
+
+    The one door for a message with parts: its typed text, each file's name and
+    text, the person's *words* when they are not the text, and the *title*. A
+    handle (``[password-1]``) stands in the place of a value, in the order the
+    message reads, and hiding a hidden message changes nothing. A part that is
+    not a string is passed on as it is, for the checks after the door to refuse.
+    The console's routes call it before a message is checked, queued, composed or
+    keyed, and a session's runner calls it again before it stores the turn.
+    """
+
+    def cut(part: Any) -> Any:
+        return hide_passwords(part) if isinstance(part, str) else part
+
+    return HiddenMessage(
+        cut(text),
+        tuple(
+            (
+                TextAttachment(cut(item.name), cut(item.text))
+                if isinstance(item, TextAttachment)
+                else item
+            )
+            for item in attachments
+        ),
+        cut(words),
+        cut(title),
+    )
 
 
 def encode_attachments(attachments: Sequence[TextAttachment]) -> str:
