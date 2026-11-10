@@ -60,6 +60,7 @@ from localmelo.support.sessions.attachments import (
     TextAttachment,
     compose_user_text,
     hide_message,
+    is_stand_in,
 )
 from localmelo.support.sessions.live import LiveReply
 from localmelo.support.sessions.store import (
@@ -86,6 +87,7 @@ from localmelo.support.sessions.store import (
     check_attachment_submission,
     process_holder,
     redacted_event,
+    typed_words,
 )
 from localmelo.support.sessions.submissions import check_submission
 from localmelo.support.sessions.window import WINDOW_CODEC_VERSION, decode_window
@@ -308,7 +310,7 @@ async def earlier_turns(
         page = await store.list_turns(session_id, limit=page_size, before=cursor)
         for past in reversed(page):  # newest first
             read += 1
-            words = past.typed_text or past.user_text
+            words = typed_words(past)
             if (
                 past.status == "running"
                 or past.undone
@@ -331,7 +333,7 @@ async def earlier_turns(
 
 def earlier_pair(turn: TurnInfo) -> tuple[str, str]:
     """*turn* as ``(the person's words, the answer as kept)`` for an earlier-turns block."""
-    words = turn.typed_text or turn.user_text
+    words = typed_words(turn)
     return words, answer_text(turn.status, split_thinking(turn.answer)[1])
 
 
@@ -751,6 +753,12 @@ class SessionRunner:
         from_person: bool = True,
         composed: bool = False,
     ) -> _Turn:
+        # The row says what was typed whenever the words are given apart from the
+        # text (a task's request, a queued message of an older row): with files
+        # it is the typed text, which holds none of them (#626).
+        said: str | None = typed_text if attachments else None
+        if said is None and words is not None and words != text:
+            said = redact_worker(words) if self._worker else words
         try:
             # The last turn's end must be stored before the next turn: in a
             # CLI file, this process's own lease never lapses while it lives.
@@ -764,7 +772,7 @@ class SessionRunner:
                 new_session=self._new_session if self._session_id is None else None,
                 create_scope=self._create_scope_key,
                 attachments=attachments,
-                typed_text=typed_text if attachments else None,
+                typed_text=said,
                 origin=origin,
                 images=images,
                 composed=composed,
@@ -905,7 +913,9 @@ class SessionRunner:
                 kwargs["images"] = turn.images
             if self._inbox is not None:
                 kwargs["inbox"] = self._inbox
-            kwargs["user_words"] = turn.typed if turn.words is None else turn.words
+            said = turn.typed if turn.words is None else turn.words
+            # The stand-in melo wrote for a message with no words is none of theirs.
+            kwargs["user_words"] = "" if is_stand_in(said) else said
             if turn.origin or not turn.from_person:
                 # Not the person's message: no consent, and no note of theirs.
                 kwargs["from_person"] = False
@@ -1051,7 +1061,7 @@ class SessionRunner:
         except Exception:
             logger.warning("Could not read this chat's first turn", exc_info=True)
             return ""
-        return "" if found is None else found.typed_text or found.user_text
+        return "" if found is None else typed_words(found)
 
     async def _with_digest(self, turn: _Turn, text: str) -> str:
         """*text* with the digest of the user's other chats, on a chat's first turn.

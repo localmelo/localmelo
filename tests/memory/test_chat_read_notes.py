@@ -219,10 +219,11 @@ def test_the_picture_lines_of_a_note_are_not_the_persons_words() -> None:
 
 
 async def test_the_picture_lines_memory_drops_are_the_ones_the_console_writes() -> None:
+    from localmelo.support.sessions.attachments import stand_in
+
     notes = pytest.importorskip("localmelo.support.gateway.console.notes")
-    routes = pytest.importorskip("localmelo.support.gateway.console.routes_turns")
     for count in (1, 2, 4):
-        assert with_read_notes("", [f"{LEAD}{routes._marker(count, [])}"]) == ""
+        assert with_read_notes("", [f"{LEAD}{stand_in(count, 0)}"]) == ""
         line = notes.withheld_line(count)
         assert with_read_notes("", [f"{LEAD}words\n{line}"]) == f"{ADDED_MARK}\nwords"
 

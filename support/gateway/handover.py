@@ -54,6 +54,7 @@ from localmelo.support.memory.recall import (
     turn_said,
 )
 from localmelo.support.memory.service import ChatTurn, is_owner_question
+from localmelo.support.sessions.attachments import words_before_files
 from localmelo.support.sessions.runner import earlier_pair, earlier_turns
 from localmelo.support.sessions.store import SessionStore, TurnInfo
 
@@ -221,8 +222,11 @@ def with_reading(
 
 def words_of(request: str) -> str:
     """The person's words of a request :func:`with_reading` made: what comes before
-    the block, or the request itself when it has none."""
-    return request.partition(f"\n\n{READING_HEAD}")[0]
+    the block, or the request itself when it has none, cut at its first text file's
+    block: a file's text is data, never their words (#626). The heading is cut
+    first, so a file that holds its text cannot leave part of its block here.
+    """
+    return words_before_files(request.partition(f"\n\n{READING_HEAD}")[0])
 
 
 def own_words(words: str, objective: str) -> str:

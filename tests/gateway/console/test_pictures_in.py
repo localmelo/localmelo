@@ -27,7 +27,11 @@ from localmelo.melo.schema import PICTURES_REFUSED_ERROR
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.vision import Vision
 from localmelo.support.gateway.guard import UPLOAD_BYTES_LIMIT, LoopbackGuard
-from localmelo.support.sessions.attachments import compose_user_text, snapshot
+from localmelo.support.sessions.attachments import (
+    compose_user_text,
+    snapshot,
+    stand_in,
+)
 from localmelo.support.sessions.picture_input import (
     LONG_SIDE,
     MAX_PICTURES,
@@ -648,6 +652,8 @@ def test_the_composed_text_is_what_the_pages_parser_reads() -> None:
         compose_user_text(fixture["with_words"]["words"], files)
         == fixture["with_words"]["composed"]
     )
+    # The stand-in is how many files, never their names (#626).
+    assert fixture["stand_in"]["words"] == stand_in(0, len(files))
     assert (
         compose_user_text(fixture["stand_in"]["words"], files)
         == fixture["stand_in"]["composed"]
