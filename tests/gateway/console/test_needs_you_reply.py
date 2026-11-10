@@ -7,6 +7,7 @@ melo follows up on it. Each test runs the console on scripted models (see
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +17,9 @@ import pytest
 from localmelo.support.gateway.console import Console
 from localmelo.tests.sessions.helpers import answer, tool_call
 
-from .test_ask_owner import Reply, rows, start, tool_results
+from .test_ask_owner import Reply, held, rows, start, tool_results
 from .test_chat_owns_tasks import (
-    INSTALL_KEYS,
+    INSTALL,
     _is,
     calls_of,
     creates,
@@ -28,14 +29,19 @@ from .test_chat_owns_tasks import (
     started_task,
     until,
 )
-from .test_turn_writes import _post_turn
+from .test_turn_writes import _post_turn, _wait_turn
 
-ASKED = "type the note in the check-in box"
-# The task's run: the step Auto blocks, then a report that needs the person.
+ASKED = "may I install the package the check-in script needs?"
+REPORT = (
+    f"The check-in script needs a package I may not install.\nEnding: blocked: {ASKED}"
+)
+# The task's run: an install Auto blocks (a kind of step words may allow), then a
+# report that needs the person.
 BLOCKED: list[Reply] = [
-    tool_call("python_exec", {"code": INSTALL_KEYS}, "w-1"),
-    answer(f"Opened the page; the note was blocked.\nEnding: blocked: {ASKED}"),
+    tool_call("python_exec", {"code": INSTALL}, "w-1"),
+    answer(REPORT),
 ]
+OTHER = INSTALL.replace("requests", "httpx")
 
 
 async def typed(client: httpx.AsyncClient, console: Console, text: str) -> Any:
@@ -177,7 +183,7 @@ async def test_a_plain_yes_allows_the_one_blocked_step_once(
     workers: list[list[Reply]] = [
         BLOCKED,
         [
-            tool_call("python_exec", {"code": INSTALL_KEYS}, "w-2"),
+            tool_call("python_exec", {"code": INSTALL}, "w-2"),
             answer("Typed the note.\nEnding: ready"),
         ],
     ]
@@ -194,14 +200,15 @@ async def test_a_plain_yes_allows_the_one_blocked_step_once(
             block["request_id"],
             "允许",
         )
-        assert echo["said"]["key"] == "cards.allowedOnce"
+        assert echo["said"]["key"] == "cards.allowedOnceStep"
+        assert echo["said"]["params"]["what"]["key"] == "auto.title.install"
         await until(lambda: len(models["workers"]) == 2)
         head = await console.workers.newest(
             await console.workers.tasks.get_task(task_id)
         )
         await until(lambda: _is(console, head.task_id, "done"))
         await settled(console)
-        assert ran.codes == [INSTALL_KEYS], "the step ran once, on its allowance"
+        assert ran.codes == [INSTALL], "the step ran once, on its allowance"
         # A second yes finds no task asking: it is a message to the chat, and
         # allows nothing more.
         assert "echo" not in await typed(client, console, "好")
@@ -212,3 +219,112 @@ async def test_a_plain_yes_allows_the_one_blocked_step_once(
             "check in on the site and write a note",
             "好",
         ]
+
+
+async def nothing_allowed(console: Console, task_id: str, ran: Any) -> None:
+    """The task's step is still blocked and never ran; the chat allowed nothing."""
+    assert len(await console.workers.open_blocks(task_id)) == 1
+    assert ran.codes == []
+    kinds = [r.get("how") for r in await rows(console, console.main_id)]
+    assert "allowed" not in kinds
+
+
+async def test_a_card_that_came_during_the_persons_turn_is_not_what_a_yes_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = asyncio.Event()
+    main: list[Reply] = [
+        creates("Install check"),
+        # The turn's reply ends with its own question, after the task's card came.
+        held(release, answer("Started it. Shall I also check the logs?")),
+        answer("I will check the logs."),
+    ]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[BLOCKED], approvals="auto",
+        follow_up=False,
+    ) as (console, client, _, ran):  # fmt: skip
+        chat = str(console.main_id)
+        assert (await _post_turn(client, chat, "check the install")).status_code == 202
+        await until(lambda: rows(console, chat))
+        task_id = await started_task(console)
+        await until(lambda: _is(console, task_id, "done"))
+        await console.cards.flush()
+        release.set()
+        await _wait_turn(client, chat)
+        # The person answers the reply's question, not the card above it.
+        assert "echo" not in await typed(client, console, "好")
+        await settled(console)
+        assert (await typed_turns(console))[-1] == "好"
+        await nothing_allowed(console, task_id, ran)
+
+
+async def test_a_yes_allows_only_the_step_the_card_offers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with owner_console(
+        tmp_path, monkeypatch, main=follows_up(), workers=[BLOCKED], approvals="auto"
+    ) as (console, client, _, ran):
+        task_id = await needs_you(client, console)
+        await console.cards.flush()  # the card the person sees offers the real step
+        live = console.workers.open_blocks
+
+        # The one open step is not the one the card shows: the yes answers the task.
+        async def another(task: str) -> list[dict[str, Any]]:
+            return [{**block, "request_id": "another"} for block in await live(task)]
+
+        monkeypatch.setattr(console.workers, "open_blocks", another)
+        echo = (await typed(client, console, "ok"))["echo"]
+        assert (echo["echo"], echo.get("task_id")) == ("answer_sent", task_id), echo
+        monkeypatch.setattr(console.workers, "open_blocks", live)
+        await nothing_allowed(console, task_id, ran)
+
+
+async def test_a_lookup_that_fails_leaves_the_message_to_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main = [*follows_up(), answer("Which step do you mean?")]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=[BLOCKED], approvals="auto"
+    ) as (console, client, _, ran):
+        task_id = await needs_you(client, console)
+
+        async def broken() -> list[Any]:
+            raise RuntimeError("the store is gone")
+
+        monkeypatch.setattr(console.front, "_shown", broken)
+        assert "echo" not in await typed(client, console, "好")
+        await settled(console)
+        assert (await typed_turns(console))[-1] == "好"
+        await nothing_allowed(console, task_id, ran)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [],
+        [
+            tool_call("python_exec", {"code": INSTALL}, "w-1"),
+            tool_call("python_exec", {"code": OTHER}, "w-2"),
+        ],
+    ],
+    ids=["no step", "two steps"],
+)
+async def test_a_yes_with_no_single_open_step_is_an_ordinary_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, steps: list[Reply]
+) -> None:
+    async with owner_console(
+        tmp_path, monkeypatch, main=follows_up(), workers=[[*steps, answer(REPORT)]],
+        approvals="auto",
+    ) as (console, client, _, ran):  # fmt: skip
+        await say(client, console, "check in on the site and write a note")
+        task_id = await started_task(console)
+        await until(lambda: _is(console, task_id, "done"))
+        await settled(console)
+        assert len(await console.workers.open_blocks(task_id)) == len(steps)
+        echo = (await typed(client, console, "允许"))["echo"]
+        assert (echo["echo"], echo["task_id"], echo["typed"]) == (
+            "answer_sent",
+            task_id,
+            "允许",
+        )
+        assert ran.codes == []

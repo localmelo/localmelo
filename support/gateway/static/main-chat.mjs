@@ -74,7 +74,14 @@ export function readCard(row) {
     // The start continued its task by itself after a restart: when.
     ...(Number(data.continued_at) > 0 ? {continuedAt: Number(data.continued_at)} : {}),
     // An end that needs the person while exactly one step Auto blocked can still be allowed once: that step.
-    ...(state === "done" && data.block?.request_id ? {block: {requestId: String(data.block.request_id), stepKey: String(data.block.step_key ?? "")}} : {}),
+    // It holds what the step's own card shows, so the card says which step its button allows.
+    ...(state === "done" && data.block?.request_id ? {block: {
+      requestId: String(data.block.request_id),
+      stepKey: String(data.block.step_key ?? ""),
+      name: String(data.block.name ?? ""),
+      preview: String(data.block.preview ?? ""),
+      review: data.block.review && typeof data.block.review === "object" ? data.block.review : {},
+    }} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
     ...(state === "blocked" ? {
       stepKey: String(data.step_key ?? ""),
@@ -90,14 +97,17 @@ export function readCard(row) {
 /** What a blocked card's block says (`blocked.mjs`), or null; Allow once only where the server offers it. */
 export function cardBlock(card) {
   if (card?.state !== "blocked") return null;
-  const facts = blockFacts({
-    approval: {origin: "auto", allowed: false, request_id: card.requestId, step_key: card.stepKey, review: card.review},
-    name: card.name,
-    preview: card.preview,
-  });
+  const facts = stepFacts({requestId: card.requestId, stepKey: card.stepKey, name: card.name, preview: card.preview, review: card.review});
   if (!facts || !facts.category) return null;
   return card.canAllow ? facts : {...facts, allow: false, finished: card.finished};
 }
+
+/** What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review; null if unusable. */
+const stepFacts = ({requestId, stepKey, name, preview, review}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review},
+  name,
+  preview,
+});
 
 /**
  * *cards* as the person reads them: a waiting card whose approval was answered becomes an answered
@@ -252,7 +262,7 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   action.dataset.focusKey = `card:${card.id}`;
   action.addEventListener("click", () => open(card));
   const foot = el("div", "main-card-foot");
-  if (card.block && step) foot.append(...stepNodes(el, step));
+  if (card.block && step) foot.append(...stepNodes(el, step, stepFacts(card.block)));
   if (words.more && resume) {
     const more = el("button", "outline-button", words.more);
     more.type = "button";
@@ -264,16 +274,20 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
   return node;
 }
 
-/** The Allow this step of a card that needs the person: the button, what it did once clicked, or why it did not. */
-function stepNodes(el, {state = "open", error = "", onAllow = null}) {
-  if (state === "allowed") return [el("span", "main-card-note", t("cards.allowedOnce"))];
+/**
+ * The Allow this step of a card that needs the person: the step it allows in the words of its own card (*facts*),
+ * then the button, what it did once clicked, or why it did not.
+ */
+function stepNodes(el, {state = "open", error = "", onAllow = null}, facts = null) {
+  const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
+  if (state === "allowed") return [...what, el("span", "main-card-note", t("cards.allowedOnce"))];
   const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
   allow.type = "button";
   allow.disabled = state === "allowing";
   if (onAllow) allow.addEventListener("click", onAllow);
   const problem = error ? el("span", "main-card-note", t("auto.blocked.failed", {problem: error})) : null;
   if (problem) problem.setAttribute("role", "alert");
-  return problem ? [allow, problem] : [allow];
+  return [...what, allow, ...(problem ? [problem] : [])];
 }
 
 /**

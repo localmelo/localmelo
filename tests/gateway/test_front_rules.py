@@ -30,6 +30,7 @@ from localmelo.support.gateway.front_rules import (
     title_matches,
     triage,
     work_request,
+    yes_step,
 )
 from localmelo.tests.linear import assert_linear
 
@@ -599,3 +600,36 @@ def test_a_plain_yes_is_the_whole_message_and_one_of_a_short_list(
     typed: str, yes: bool
 ) -> None:
     assert plain_yes(typed) is yes
+
+
+def _block(request_id: str = "r1", *kinds: str) -> dict[str, object]:
+    return {
+        "request_id": request_id,
+        "review": {"categories": list(kinds or ["install"])},
+    }
+
+
+@pytest.mark.parametrize(
+    ("typed", "offered", "blocks", "allows"),
+    [
+        ("ok", "r1", [_block()], True),
+        ("go ahead", "r1", [_block("r1", "download", "install")], True),
+        # Not a yes, or no step offered: an ordinary answer.
+        ("ok then", "r1", [_block()], False),
+        ("ok", "", [_block()], False),
+        # Not exactly one open step, or not the one the card offers.
+        ("ok", "r1", [], False),
+        ("ok", "r1", [_block(), _block("r2")], False),
+        ("ok", "r1", [_block("r2")], False),
+        # A kind of step only a click allows, or one with no review.
+        ("ok", "r1", [_block("r1", "install", "credentials")], False),
+        ("ok", "r1", [_block("r1", "app_control")], False),
+        ("ok", "r1", [{"request_id": "r1"}], False),
+        ("ok", "r1", [{"request_id": "r1", "review": {"categories": []}}], False),
+    ],
+)
+def test_a_yes_allows_only_the_offered_step_of_a_kind_words_may_allow(
+    typed: str, offered: str, blocks: list[dict[str, object]], allows: bool
+) -> None:
+    found = yes_step(typed, offered, blocks)
+    assert found is (blocks[0] if allows else None)

@@ -1298,8 +1298,10 @@ Its `data`:
   files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`).
   Every `blocked` card is shown: none folds into a newer card of its task.
   A task's `done` card whose `ending` is `blocked` (it needs the person) has
-  `block` (`request_id`, `step_key`) when exactly one step Auto blocked in it
-  can still be allowed once: its Allow this step calls the same route. `source_kind` is `chat` or `task`,
+  `block` (`request_id`, `step_key`, `name`, `preview`, `review`, as in the
+  task's `blocked`) when exactly one step Auto blocked in it can still be
+  allowed once and it is a step of the run that end closed: its Allow this
+  step calls the same route. `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
   columns: a title the person or the main chat gave stays, a longer one is cut
   at a word. `at` is when it happened.
@@ -1350,7 +1352,7 @@ with the echo.
   `ask` (`Start this as a task?`, only on a card already stored, which takes no tap
   now: a chat hands its own work on; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
   `queued` for its next step or `continued` as a new turn of a task from the tasks page that stopped before finishing,
-  or `allowed` with `request_id`: a plain yes allowed that blocked step once, `line` `Allowed once: the task goes on with this step`;
+  or `allowed` with `request_id`: a plain yes allowed that blocked step once, `line` `Allowed once: Install software; the task goes on with this step`;
   `line` `Sent to: <title>` or `Continued: <title>`; a chat's ended task gives a `started` echo with
   `follows`, the ended task, for the fresh task that goes on with its job), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
@@ -1445,14 +1447,19 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
   an `undone` echo, the task keeps waiting and the message starts as a turn
   (409 `already_answered` after delivery). With no question open, the same
   holds for the one task of the chat the task table has waiting for the person
-  (it ended needing the person, or ran out of steps) when what the chat showed
-  last is that task's request (its card, its blocked step, or melo's follow-up
-  on it), no message of the person's came after it and the words name no other
-  task: the message goes to it as a named message does. A plain yes (the whole
+  when that task asked (it ended needing the person; one that ran out of steps
+  takes none) and what the chat showed last is that task's request (its card,
+  its blocked step, or melo's follow-up on it): no message of the person's
+  (counted at the end of its turn) came after it and the words name no other
+  task. The message goes to it as a named message does. A plain yes (the whole
   message one of `允许`, `可以`, `好`, `好的`, `同意`, `行`, `yes`, `ok`,
-  `okay`, `allow`, `go ahead`, `do it`) to such a task that waits on exactly
-  one step Auto blocked allows that step once instead (a `sent` echo, `how`
-  `allowed`; a `failed` echo when it could not). `/answer TASK TEXT` answers a
+  `okay`, `allow`, `go ahead`, `do it`) allows a step once instead (a `sent`
+  echo, `how` `allowed`; a `failed` echo when it could not) only when exactly
+  one step Auto blocked in the task can still be allowed, it is the step the
+  task's newest card offers (`block`), and every kind its review named is one
+  the person's words may allow; any other yes is an ordinary answer. A
+  message that could not be delivered gets a `failed` echo (`of` the
+  `answer_sent`) instead of `answer_delivered`. `/answer TASK TEXT` answers a
   waiting task by its title at once (the `ask_end`); with several waiting and
   no title, or none waiting, a `failed` echo says so.
 - A repeated `client_request_id` while its message is being queued waits for

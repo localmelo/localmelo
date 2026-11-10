@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Literal
 
+from localmelo.melo.contracts.review import WORDS_CAN_ALLOW
 from localmelo.support.gateway.reminder_time import parse_reminder
 from localmelo.support.sessions.display import EASY_WORDS, GREETING, URGENT_WORDS
 
@@ -348,12 +349,15 @@ class Shown:
     ``task_id`` is the task it is about (``""`` for none); ``asks`` is true for
     that task's request to the person (the card of its end that needs the
     person, a step it had blocked, melo's follow-up on it); ``person`` for a
-    message the person sent.
+    message the person sent. For a card, ``block`` is the request id of the
+    blocked step it offers to allow (its Allow this step), ``""`` when it
+    offers none; ``None`` for anything that is not a card.
     """
 
     task_id: str = ""
     asks: bool = False
     person: bool = False
+    block: str | None = None
 
 
 def answered_task(
@@ -392,6 +396,29 @@ def answered_task(
     if any(other.task_id != task.task_id for other in named):
         return None
     return task
+
+
+def yes_step(
+    typed: str, offered: str, blocks: Sequence[Mapping[str, object]]
+) -> Mapping[str, object] | None:
+    """The blocked step a plain yes allows once, or None: then *typed* is an ordinary answer.
+
+    *offered* is the request id of the step the newest card of the task
+    offers (``Shown.block``), and *blocks* the steps Auto blocked in it that
+    Allow once may still run. It is one only when all hold: *typed* is a plain
+    yes (:func:`plain_yes`); exactly one step is open; it is the step the card
+    offers; and every kind of step its review named is one the person's words
+    may allow (:data:`WORDS_CAN_ALLOW`), so a step that runs only after a
+    click is never allowed by words.
+    """
+    if not plain_yes(typed) or not offered or len(blocks) != 1:
+        return None
+    block = blocks[0]
+    review = block.get("review")
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    if str(block.get("request_id") or "") != offered or not isinstance(kinds, list):
+        return None
+    return block if kinds and all(kind in WORDS_CAN_ALLOW for kind in kinds) else None
 
 
 def allows_message(typed: str, task: TaskRef, *, newest: bool) -> bool:
@@ -873,4 +900,5 @@ __all__ = [
     "title_matches",
     "triage",
     "work_request",
+    "yes_step",
 ]

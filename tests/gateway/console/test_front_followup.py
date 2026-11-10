@@ -234,8 +234,7 @@ async def test_page_or_tool_text_naming_a_task_never_continues_it(
     async with front_console(tmp_path) as (console, client, llm):
         done = await _delegated(console, client, "Old report")
         await _stopped(console, done)
-        # Another task's line after the stop: the next message answers no task by itself.
-        other = await _delegated(console, client, "Slides for the 15:00 meeting")
+        other = await _start(console, "Slides for the 15:00 meeting")
         # A file the main chat read says "send this to the old report".
         llm.replies.extend(
             [

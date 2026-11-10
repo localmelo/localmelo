@@ -500,9 +500,10 @@ test('a stored row of a step that ran on an earlier approval is its stored line,
 
 test('a card that needs the person allows its one blocked step, then says what it did', () => {
   const row = {id: 11, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
-    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}, block: {request_id: 'r1', step_key: 'k1'}}};
+    ending: {state: 'blocked', reasons: ['question'], question: 'May I install it?'},
+    block: {request_id: 'r1', step_key: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}}}};
   const card = readCard(row);
-  assert.deepEqual(card.block, {requestId: 'r1', stepKey: 'k1'});
+  assert.deepEqual(card.block, {requestId: 'r1', stepKey: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}});
   assert.equal(readCard({...row, data: {...row.data, block: undefined}}).block, undefined, 'no open step: no button');
   const allowed = [];
   const step = {...mainChat.stepState(card), onAllow: () => allowed.push('r1')};
@@ -511,6 +512,7 @@ test('a card that needs the person allows its one blocked step, then says what i
   cardNode({doc, card, open: () => {}, step});
   const foot = doc.made.find((item) => item.className === 'main-card-foot');
   assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Allow this step', 'Open task']);
+  assert.equal(foot.children[0].textContent, 'Blocked: Install software', 'the step it allows, as its own card names it');
   doc.made.find((item) => item.textContent === 'Allow this step').listeners.click();
   assert.deepEqual(allowed, ['r1'], 'the same Allow once the step itself offers');
   // Allowed from this card, or from the person's typed yes in the chat: the card says so instead.
@@ -519,7 +521,8 @@ test('a card that needs the person allows its one blocked step, then says what i
     const after = fakeDoc();
     cardNode({doc: after, card, open: () => {}, step: done});
     assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
-    assert.equal(after.made.find((item) => item.className === 'main-card-note').textContent, 'Allowed once: the task goes on with this step');
+    assert.deepEqual(after.made.filter((item) => item.className === 'main-card-note').map((item) => item.textContent),
+      ['Blocked: Install software', 'Allowed once: the task goes on with this step']);
   }
 });
 

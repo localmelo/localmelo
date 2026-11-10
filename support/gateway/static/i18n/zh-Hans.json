@@ -509,6 +509,7 @@
   "browser.untitled": "无标题页面",
   "browser.viewOnly": "仅查看",
   "cards.allowedOnce": "已允许一次：任务继续这一步",
+  "cards.allowedOnceStep": "已允许一次：{what}；任务继续这一步",
   "cards.answer.allowedAutomatically": "已自动允许",
   "cards.answer.allowedForChat": "这个对话已允许",
   "cards.answer.allowedForTask": "这个任务已允许",
