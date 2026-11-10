@@ -157,9 +157,12 @@ async def test_a_task_that_continues_and_ends_again_is_news_again(
         await _say(client, console, "one")
         await _wait_turn(client, str(console.main_id))
         assert f"First result {NEWS_ROWS}." in _asked(models["main"])
-        # A follow-up continues the newest in its own session, and it ends again.
-        await console.workers.message(tasks[-1], "and the summary too")
-        await _finished(console, tasks[-1], "Second result.")
+        # The newest goes on in a fresh task (#571), which ends in its turn.
+        record = await console.workers.tasks.get_task(tasks[-1])
+        fresh, _ = await console.workers.successor(
+            record, "and the summary too", by="person"
+        )
+        await _finished(console, fresh["task_id"], "Second result.")
         await _say(client, console, "two")
         await _wait_turn(client, str(console.main_id))
         asked = _asked(models["main"])

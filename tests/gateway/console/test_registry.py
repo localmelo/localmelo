@@ -12,7 +12,7 @@ from localmelo.melo.contracts import work_folder
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
-from localmelo.support.gateway.console.registry import ConsoleSessions
+from localmelo.support.gateway.console.registry import ConsoleSessions, chat_options
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStoreError
 
@@ -565,3 +565,18 @@ async def test_delete_store_failure_keeps_open_session(
     assert entry is not None
     assert entry.agent is agent and not agent.closed
     assert await console.store.get_session(turn.session_id) is not None
+
+
+@pytest.mark.parametrize(
+    ("mode", "kept"),
+    [(None, False), ("legacy", False), ("drop", True), ("compress", True)],
+)
+def test_only_a_legacy_chat_runs_without_the_cores_long_term_memory(
+    workspace: str, mode: str | None, kept: bool
+) -> None:
+    cfg = make_cfg()
+    if mode is not None:
+        cfg.agent.reasoning = mode
+    options = chat_options(cfg, workspace)
+    assert options.memory is kept
+    assert options.reasoning == (mode or "legacy")

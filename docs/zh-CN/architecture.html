@@ -93,15 +93,15 @@
             </a>
             <a class="node worker" id="f-w1" href="#c-workers" style="left:40px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 1 · 主对话</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node worker" id="f-w2" href="#c-workers" style="left:290px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 2 · 主对话</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node worker" id="f-w3" href="#c-workers" style="left:540px;top:444px;width:220px;min-height:72px">
               <span class="node-title">后台任务 3 · 旁支对话 1</span>
-              <span class="node-sub">完成一项工作</span>
+              <span class="node-sub">一项工作，只跑一次</span>
             </a>
             <a class="node approval" id="f-appr" href="#c-checker" style="left:280px;top:568px;width:240px;min-height:72px">
               <span class="node-title">审批</span>
@@ -124,10 +124,10 @@
           <li>你和主对话交流。旁支对话能力相同，共享记忆，从第一条消息起就是如此。</li>
           <li>对话自己替你做事，就在它自己的运行里，用的是和后台任务相同的智能体、相同的检查和审批；大多数工作不会开任务。中间没有词表拦着：模型读你说的话，然后动手，或者说明为什么不做。</li>
           <li>对话工作时你发的话是一条补充：它在下一步读到。停止会结束这一轮；旁支对话可以同时做别的事。</li>
-          <li>任务是单独的一次运行：你要求开任务，或对话把长工作分出去，定时事项也会按时启动。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
+          <li>任务是单独的一次运行：你要求开任务，或对话把长工作剩下的部分交出去（它的回合就此结束，任务从它做过的和剩下的开始），定时事项也会按时启动。调度器按级别（P0 到 P5）和模型槽位给任务排序，再启动后台任务；后台任务的名字说明它为哪个对话工作。</li>
           <li>任务属于启动它的对话：进展和结果回到那里；旁支对话会给主对话留一份已完成工作的总结。</li>
           <li>对话可以查看后台任务的状态，也可以在它运行时给它发消息。后台任务向所属对话求助；只有对话会来问你。</li>
-          <li>一个后台任务只完成一项工作。针对已完成工作的新要求会交给新的后台任务，旧任务的记录作为背景带过去；没做完就停下的后台任务可以继续做同一项工作。</li>
+          <li>一个后台任务只运行一次：新的上下文、一项工作，然后保存结果。之后关于这项工作的事，不管是新的要求、没做完的部分、继续还是收尾，都交给新的后台任务，旧任务的记录作为背景带过去；旧任务不会再运行。</li>
           <li>对话启动的任务开始时带着你的原话、所属对话挑选的内容，以及一份上下文包：关于你、你的偏好和这个项目的笔记。</li>
         </ul>
 
@@ -389,7 +389,7 @@
               <li>运行命令和写文件之前先询问；文件工具只在当前文件夹内工作。</li>
               <li>通过 App 使用的同一个网关打开主对话；<code>-u</code>、<code>-c</code>、<code>-r</code> 和 <code>--yolo</code> 会保留终端自己的对话。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md">命令行参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">命令行参考（英文）</a>
           </div>
           <div class="comp-card" id="c-gateway">
             <h3>网关</h3>
@@ -399,7 +399,7 @@
               <li>网关要求 bearer 令牌或浏览器会话，并且只监听回环地址。</li>
               <li>持有令牌者能以你的权限操作；同一用户的进程之间没有隔离。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/api-v2.md">API v2 参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2 参考（英文）</a>
           </div>
           <div class="comp-card" id="c-endpoint">
             <h3>端点文件</h3>
@@ -409,7 +409,7 @@
               <li>终端和 App 都先读它，所以后启动的那个会用已在运行的网关。</li>
               <li>里面只有端口，没有凭据。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/terminal.md#the-main-chat">终端的主对话</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-main-chat">终端的主对话（英文）</a>
           </div>
           <div class="comp-card" id="c-chats">
             <h3>对话</h3>
@@ -421,7 +421,7 @@
               <li>它工作时你发的话会作为补充加入这一轮，在下一步读到；停止会结束这一轮。</li>
               <li>你仍然可以要求开任务，每个对话都能启动任务；旁支对话结束工作时，主对话会读到一行说明，记忆会保留它的总结。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/sessions.md">会话参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">会话参考（英文）</a>
           </div>
           <div class="comp-card" id="c-scheduler">
             <h3>调度器</h3>
@@ -431,7 +431,7 @@
               <li>经批准后回来的任务按级别排队等待；没有轮次在运行的对话会把它的名额让给任务。</li>
               <li>可选的模型调用闸门（先到先得或按类别）会读取共享的 GPU 锁和电池状态。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/scheduler.md">调度器指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md">调度器指南（英文）</a>
           </div>
           <div class="comp-card" id="c-chores">
             <h3>定时事项</h3>
@@ -443,7 +443,7 @@
               <li>每 30 分钟，check-in 告诉主对话什么做完了或在等你；没有可说的就不调用模型。</li>
               <li>提醒是只运行一次的事项：<code class="wrap">提醒我明天九点给导师发邮件</code> 会显示它理解的日期，你点“提醒我”之前不会保存任何东西。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#chores-that-repeat">会重复的事项</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#chores-that-repeat">会重复的事项（英文）</a>
           </div>
           <div class="comp-card" id="c-workers">
             <h3>Worker</h3>
@@ -452,10 +452,11 @@
               <li>网关按优先级启动排队的任务，每次几个，各在所属对话的文件夹里。</li>
               <li><code>melo worker</code> 根据任务说明文件运行一个任务，返回 JSON 结果。</li>
               <li>控制台的 Workers 视图列出每一次运行。</li>
-              <li>Worker 自己没有长期记忆；所属对话可以查看它的状态，也可以给它发消息。</li>
+              <li>Worker 自己没有长期记忆；它运行时，所属对话可以查看它的状态，也可以给它发消息。</li>
+              <li>对话开始的 worker 只运行一次：结束以后它的记录作为背景保留，之后的工作交给新的 worker。</li>
               <li>它开始时带一份来自所属对话的上下文包，遇到阻碍时向该对话求助。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/cli.md#worker-histories">Worker 参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">Worker 参考（英文）</a>
           </div>
           <div class="comp-card" id="c-agent">
             <h3>智能体</h3>
@@ -465,7 +466,7 @@
               <li>模型只能调用这一步提供的工具。</li>
               <li>由反思决定是否开始下一次尝试。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/how-it-works.md">工作原理</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/how-it-works.md">工作原理（英文）</a>
           </div>
           <div class="comp-card" id="c-checker">
             <h3>检查器</h3>
@@ -477,7 +478,7 @@
               <li>在“自动”下，由审查而不是一次点击来决定每一步；被拦下的步骤会得到解释，“允许一次”只让那一步运行一次。</li>
               <li>你为某个对话允许的事会保存为授权。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md#what-the-checks-do">检查的作用</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查的作用（英文）</a>
           </div>
           <div class="comp-card" id="c-grants">
             <h3>授权</h3>
@@ -488,7 +489,7 @@
               <li>在主对话里允许的，在每个对话里都算；在旁支对话里允许的，只在那里算。</li>
               <li>设置 → 授权列出它们，收回立即生效。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/web-console.md#permissions">授权指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#permissions">授权指南（英文）</a>
           </div>
           <div class="comp-card" id="c-executor">
             <h3>执行器</h3>
@@ -498,7 +499,7 @@
               <li>按权限级别请求审批。</li>
               <li>在 macOS 上，worker 运行、保存的任务和“自动”下的步骤只能在自己的文件夹内写文件，“自动”下的步骤也碰不到 melo 自己的登录信息。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/tools.md">工具参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">工具参考（英文）</a>
           </div>
           <div class="comp-card" id="c-mcp">
             <h3>工具：MCP 和浏览器</h3>
@@ -508,7 +509,7 @@
               <li>它们的工具名为 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>。</li>
               <li>打开浏览功能后，melo 在后台的 Chrome 或 Safari 的自动化窗口里读网页，并在网页上操作。没打开时，对话会说明一次，并告诉你怎么打开。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/tools-mcp.md">工具和 MCP 指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md">工具和 MCP 指南（英文）</a>
           </div>
           <div class="comp-card" id="c-browser">
             <h3>后台浏览器</h3>
@@ -519,7 +520,7 @@
               <li>浏览器面板实时显示网页；接管让你自己登录。</li>
               <li>其他应用在点击之后打开的窗口，会先问你。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/browsing.md#chrome-in-the-background">浏览指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/browsing.md#chrome-in-the-background">浏览指南（英文）</a>
           </div>
           <div class="comp-card" id="c-memory">
             <h3>记忆</h3>
@@ -529,7 +530,7 @@
               <li>关于你的笔记和所有对话的索引，召回时注明来源。</li>
               <li>历史记录和长期记忆，开启持久化后保存在 SQLite 中。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/concepts/memory.md">记忆概念</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md">记忆概念（英文）</a>
           </div>
           <div class="comp-card" id="c-config">
             <h3>配置和设置</h3>
@@ -539,7 +540,7 @@
               <li>首次运行会查找模型服务器，并推荐找到的那个。</li>
               <li>之后用 <code>melo setup</code> 和 <code>melo config</code> 修改。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/reference/configuration.md">配置参考</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">配置参考（英文）</a>
           </div>
           <div class="comp-card" id="c-providers">
             <h3>提供方</h3>
@@ -548,7 +549,7 @@
               <li>OpenAI 兼容的对话、Ollama 的 <code>/api/chat</code> 和 OpenAI 兼容的嵌入。</li>
               <li>对每个请求应用对话请求超时。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md">模型服务器指南</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md">模型服务器指南（英文）</a>
           </div>
           <div class="comp-card" id="c-backends">
             <h3>模型服务器</h3>
@@ -558,7 +559,7 @@
               <li>OpenAI、Anthropic、Google 和 NVIDIA 的 API。</li>
               <li>localmelo 自己不提供模型；在 Mac 上，首次运行可以在你同意一次后设置 melo_serve 和一个模型。</li>
             </ul>
-            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/zh-CN/guides/model-servers.md#backends">后端</a>
+            <a class="more-link" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">后端（英文）</a>
           </div>
         </div>
       </section>
@@ -640,9 +641,9 @@
         "svg-flow": [
           { from: "f-main", fs: "right", ff: 0.3, to: "f-side", ts: "left", tf: 0.3, bidi: true, label: "共享记忆" },
           { from: "f-side", fs: "left", ff: 0.75, to: "f-main", ts: "right", tf: 0.75, label: "已完成工作的总结" },
-          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "需要时开任务", lt: 0.72 },
+          { from: "f-main", fs: "bottom", ff: 0.97, to: "f-sched", ts: "top", tf: 0.12, label: "需要时交出工作", lt: 0.72 },
           { from: "f-chores", fs: "bottom", to: "f-sched", ts: "top", label: "到期的事项" },
-          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "需要时开任务", lt: 0.28 },
+          { from: "f-side", fs: "bottom", ff: 0.55, to: "f-sched", ts: "top", tf: 0.88, label: "需要时交出工作", lt: 0.28 },
           { from: "f-sched", fs: "bottom", ff: 0.15, to: "f-w1", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.5, to: "f-w2", ts: "top" },
           { from: "f-sched", fs: "bottom", ff: 0.85, to: "f-w3", ts: "top" },

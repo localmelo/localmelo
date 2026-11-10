@@ -26,9 +26,11 @@ Code holds the limits, not the prompt:
   that fails or stops again after its chat continued it gets a follow-up that
   may only report and ask (``meta.followup`` on the task). A Ready answer is
   told once per ending, outside that count, and never continues the task;
-- a task its chat continued never runs a step blocked earlier in it (see
+- the chat's continue never reopens the task: a fresh task goes on with its
+  job (#571, ``TaskWorkers.successor``), keeps this count of the job, and never
+  runs a step blocked earlier in it (see
   :class:`~localmelo.melo.contracts.approvals.EarlierBlocks` and
-  ``TaskWorkers.message(automatic=True)``);
+  ``TaskWorkers._guard``);
 - a follow-up approves nothing and widens nothing: it has the chat's mode and
   only the task tools, the run refuses every other call (``acts=False``), and
   its continue goes as the chat's words, not the person's;
@@ -759,6 +761,7 @@ class TaskFollowups:
             if (
                 record.state not in FINISHED
                 or float(record.finished_at or 0.0) != item.finished_at
+                or (await self.console.workers.newest(record)).task_id != task_id
             ):
                 return (
                     "Not done: the task changed since it stopped (it runs again, or "
@@ -778,15 +781,15 @@ class TaskFollowups:
                 text += "\n".join(f"- {block}" for block in blocks)
             await self._keep(task_id, {**kept, "continued": True})
             echo = await front.follow(record, text, typed="", turn=turn, automatic=True)
-            if echo.get("echo") != "sent":
+            if echo.get("echo") != "started":
                 await self._keep(task_id, kept)  # it did not go: as it was
                 return f"Not done: {echo.get('line', '')}"
         item.continued = True
         return (
-            f"Continued task {task_id} once with your note; a step blocked before, or "
-            "one like it, does not run again, and its result comes back to this chat "
-            "as a card. Now tell the user in one or two lines what got done and what "
-            "did not."
+            f"Continued the work of task {task_id} once with your note, in a fresh "
+            f"task {echo['task_id']}; a step blocked before, or one like it, does not "
+            "run again, and its result comes back to this chat as a card. Now tell "
+            "the user in one or two lines what got done and what did not."
         )
 
     async def _kept(self, task_id: str) -> dict[str, Any]:

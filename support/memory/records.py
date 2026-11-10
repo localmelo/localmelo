@@ -1359,6 +1359,34 @@ def newer_turns(items: Iterable[Item]) -> dict[tuple[str, int], Item]:
     return out
 
 
+def notes_of_replaced(items: Iterable[Item]) -> dict[str, Item]:
+    """The notes that say what a replaced memory item says, each note's key to
+    that item.
+
+    A note is of an item when the note's own turn (its session and turn, a
+    turn of 1 or later) is one of the item's sources and most of the note's
+    content words are the item's (:data:`SUPERSEDE_OVERLAP`, the test of
+    :func:`covered`). A note of another fact of that turn, one of the same words
+    from another turn, an import or a sleep result (no turn) is not. No model
+    call.
+    """
+    items = list(items)
+    notes: dict[tuple[str, int], list[Item]] = {}
+    for item in items:
+        if item.is_record and item.session_id and item.turn >= 1:
+            notes.setdefault((item.session_id, item.turn), []).append(item)
+    out: dict[str, Item] = {}
+    for old in items:
+        if not (old.is_memory and old.replaced_by):
+            continue
+        said = content_tokens(old.text)
+        for source in old.sources:
+            for note in notes.get(source, ()):
+                if overlap(content_tokens(note.text), said) >= SUPERSEDE_OVERLAP:
+                    out.setdefault(note.key, old)
+    return out
+
+
 def newer_values_first(items: Sequence[Item]) -> list[Item]:
     """*items* with the records of one subject (:func:`subject_key`) that state
     different values listed newest first, each older one marked
@@ -1367,12 +1395,13 @@ def newer_values_first(items: Sequence[Item]) -> list[Item]:
     about the past too.
 
     The records of a subject take the places they had, the newest in the first;
-    a record that says the newest value again is not marked. Other items stay
-    where they were.
+    a record that says the newest value again is not marked. A record that reads
+    as older already (:func:`~localmelo.support.memory.recall.newer_first`) is
+    left as it is. Other items stay where they were.
     """
     groups: dict[str, list[int]] = {}
     for at, item in enumerate(items):
-        if item.is_record and (key := subject_key(item.text)):
+        if item.is_record and not item.older and (key := subject_key(item.text)):
             groups.setdefault(key, []).append(at)
     out = list(items)
     for slots in groups.values():
