@@ -368,7 +368,7 @@
   "auto.blocked.failed": "Could not allow it: {problem}",
   "auto.blocked.finished": "The task finished without this step. To have it done, ask for it in the chat: that is new work.",
   "auto.blocked.keep": "Always allow for this scheduled task on {site}",
-  "auto.blocked.keepNote": "Still stops: passwords and keys, your phone, address or name, steps that don't fit the task, other sites.",
+  "auto.blocked.keepNote": "Still stops: passwords and keys, text where melo finds your phone, address or name, steps that don't fit the task, other sites.",
   "auto.blocked.keeping": "Keeping…",
   "auto.blocked.kept": "Allowed for this scheduled task on {site}.",
   "auto.blocked.keptLater": "Allowed for this scheduled task on {site}. Its later runs use it.",

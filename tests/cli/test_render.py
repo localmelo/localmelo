@@ -377,12 +377,24 @@ def test_an_empty_output_says_so() -> None:
             {"allowed": True, "origin": "user", "remember": False, "allowance": "once"},
             "allowed once",
         ),
+        # A scheduled task's kept answer (#619), in the words of the task's page.
+        (
+            {
+                "allowed": True,
+                "origin": "user",
+                "remember": False,
+                "allowance": "kept",
+                "tool": "browser-type:https://notes.example",
+            },
+            "Allowed to type on notes.example without asking: you allow this for this scheduled task",
+        ),
     ],
 )
 def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
     status = "success" if approval["allowed"] else "blocked"
     text = (
-        Turn()
+        # Wide enough for the longest tag, the kept answer's, whole.
+        Turn(width=160)
         .tool("file_write", "todo.md (68 chars)", status=status, approval=approval)
         .text()
     )

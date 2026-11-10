@@ -1465,23 +1465,26 @@ class TaskWorkers:
             policy.withdraw(key)
             raise
 
-    async def _kept_for(self, record: TaskRecord) -> ScheduledKeep | None:
-        """What *record*'s run may type and send without asking (#619), or ``None``.
+    async def _kept_for(
+        self, record: TaskRecord
+    ) -> tuple[str, ScheduledKeep | None] | None:
+        """The chore *record*'s run may use a kept answer of, and what it may type and send without asking (#619).
 
-        Read from the store, for the scheduled task and the request of the run
-        :meth:`_scheduled_run` names, as that request is now; a store that
-        cannot be read keeps nothing.
+        ``None`` for a task that is no such run. Read from the store, for the
+        scheduled task and the request of the run :meth:`_scheduled_run`
+        names, as that request is now. Any error in reading it keeps nothing
+        (``None``), logged once: a task never fails to start for it.
         """
-        found = await self._scheduled_run(record)
-        if found is None:
-            return None
-        chore_id, run = found
         try:
-            return await ChoreStore(self.store).live_keep(
+            found = await self._scheduled_run(record)
+            if found is None:
+                return None
+            chore_id, run = found
+            return chore_id, await ChoreStore(self.store).live_keep(
                 chore_id, str(run.spec.get("user_words") or "")
             )
         except Exception:
-            log.exception("Could not read what chore %s keeps", chore_id)
+            log.exception("Could not read what task %s may keep", record.task_id)
             return None
 
     async def _scheduled_run(self, record: TaskRecord) -> tuple[str, TaskRecord] | None:
@@ -1490,25 +1493,28 @@ class TaskWorkers:
         A run the chore runner started (:func:`run_chore`, by the stored origin
         and request key): itself. The fresh task a keep's go-ahead started for
         that run's job (:meth:`keep_block`): the run it follows, tied by stored
-        ids (its packet's source, the create key it was admitted under, the
-        source's request key). Every other task, any other successor among
-        them, holds nothing.
+        facts (its packet's source and that melo asked for it, the create key
+        it was admitted under, the source's request key). Every other task,
+        any other successor among them (one the person's message or the
+        chat's follow-up started), holds nothing.
         """
         chore_id = run_chore(record.origin, record.request_key)
         if chore_id is not None:
             return chore_id, record
         packet = Handoff.read(record.spec)
-        if record.origin != "user_rule" or packet.origin != "task" or not packet.source:
+        if (
+            record.origin != "user_rule"
+            or packet.origin != "task"
+            or packet.by != "melo"
+            or not packet.source
+        ):
             return None
         key = successor_key(packet.source)
         chore_id = self._keep_goes_on.get(key)
         if chore_id is None:
             return None
-        try:
-            source = await self.tasks.get_task(packet.source)
-            admitted = await self.tasks.by_create_key(key)
-        except TaskStoreError:
-            return None
+        source = await self.tasks.get_task(packet.source)
+        admitted = await self.tasks.by_create_key(key)
         if (
             admitted is None
             or admitted.task_id != record.task_id
@@ -1521,13 +1527,15 @@ class TaskWorkers:
         """Give *auto*, *record*'s Auto policy, what its run may type and send without asking (#619).
 
         A Remove, a new request or a delete that lands while the store is read
-        wins: checked again once assigned (:meth:`drop_kept`).
+        wins: checked again once read (:meth:`drop_kept`).
         """
-        found = await self._scheduled_run(record)
-        epoch = None if found is None else self._kept_epoch.get(found[0], 0)
-        auto.kept = await self._kept_for(record)
-        if found is not None and self._kept_epoch.get(found[0], 0) != epoch:
-            auto.kept = None
+        epochs = dict(self._kept_epoch)
+        found = await self._kept_for(record)
+        auto.kept = None
+        if found is not None and self._kept_epoch.get(found[0], 0) == epochs.get(
+            found[0], 0
+        ):
+            auto.kept = found[1]
 
     async def keep_offers(
         self, record: TaskRecord, blocks: builtins.list[dict[str, Any]]
@@ -1540,7 +1548,8 @@ class TaskWorkers:
         ``can_allow`` off: a finished run's answer can still be kept for the next.
         """
         scheduled = run_chore(record.origin, record.request_key) is not None
-        held = await self._kept_for(record) if scheduled else None
+        found = await self._kept_for(record) if scheduled else None
+        held = found[1] if found is not None else None
         for block in blocks:
             site = keep_site(block) if scheduled else None
             block["keep_site"] = site
@@ -1613,8 +1622,10 @@ class TaskWorkers:
         if how != "successor":
             self._keep_goes_on.pop(mark, None)
         held = self._auto.get(task_id)
-        if how == "queued" and held is not None:
-            # The run reads the message at its next step: it holds the answer now.
+        if how in ("queued", "answered") and held is not None:
+            # The run goes on in place (it reads the message at its next step, or
+            # it waited and this is the answer): it holds the answer now. A run
+            # that continues starts again, and its launch reads it.
             await self._hold_kept(held, record)
         return body, how
 
@@ -3609,11 +3620,9 @@ class TaskWorkers:
         # A scheduled task's run (#619): the site a block's answer may be kept on
         # for the next runs, and the steps that ran on such an answer.
         await self.keep_offers(record, body["blocked"])
-        body["kept_uses"] = (
-            await kept_uses(self.store, record.task_id)
-            if run_chore(record.origin, record.request_key) is not None
-            else []
-        )
+        # Only the gate writes such a record, and only for a step a kept
+        # answer its policy held let run (`_ToolAsk._kept`).
+        body["kept_uses"] = await kept_uses(self.store, record.task_id)
         if job_finished(record):
             # A worker is one-time: its finished job has no step left to allow.
             body["blocked"] = [

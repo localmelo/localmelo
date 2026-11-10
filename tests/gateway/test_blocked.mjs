@@ -141,7 +141,7 @@ test('a scheduled task\'s blocked step offers to keep the answer on its site, an
   const keep = byClass(card, 'block-keep');
   assert.equal(keep.textContent, 'Always allow for this scheduled task on notes.example');
   assert.ok(byClass(card, 'block-allow'), 'beside Allow once');
-  assert.match(text(card), /Still stops: passwords and keys, your phone, address or name, steps that don't fit the task, other sites\./);
+  assert.match(text(card), /Still stops: passwords and keys, text where melo finds your phone, address or name, steps that don't fit the task, other sites\./);
   keep.click();
   assert.equal(kept, 1);
   // Kept already: it says so, with no second button; any other task's block has none at all.

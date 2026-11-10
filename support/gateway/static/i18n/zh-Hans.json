@@ -356,7 +356,7 @@
   "auto.blocked.failed": "无法允许：{problem}",
   "auto.blocked.finished": "任务已经完成，没有运行这一步。想做的话在对话里说：这是新的工作。",
   "auto.blocked.keep": "这个定时任务在 {site} 上以后都允许",
-  "auto.blocked.keepNote": "仍会拦下：密码和密钥、你的电话、地址或姓名、不符合任务的步骤、其他网站。",
+  "auto.blocked.keepNote": "仍会拦下：密码和密钥、melo 认出含有你电话、地址或姓名的文字、不符合任务的步骤、其他网站。",
   "auto.blocked.keeping": "正在保留…",
   "auto.blocked.kept": "已为这个定时任务允许 {site}。",
   "auto.blocked.keptLater": "已为这个定时任务允许 {site}。以后的运行会用上。",

@@ -900,11 +900,12 @@ on which the person's answer may be kept for the chore's next runs, or `null`.
 It is set only for a block that a kept answer would have let run: one that can
 be allowed, that the model found fits the request and reviewed as sending data
 out and nothing else, whose text melo's detector found none of the person's
-phone number, address or real name in (the block's `personal` is `false`), on
+phone number, street address or account name in (the block's `personal` is
+`false`; it matches written shapes and the Mac account's name only), on
 the site its question names (a form sent to that same site). `kept` says the
 chore keeps that site now. The task body
 also has `kept_uses`: each step that ran on a kept answer, as `{"question",
-"arguments", "ts"}` (`[]` for any other task). `POST
+"arguments", "ts"}` (`[]` when none ran so, as in any task no kept answer held). `POST
 /api/tasks/{task_id}/blocks/{request_id}/keep` takes no body: the chore and the
 site come from the stored block. It keeps typing and sending on that site for
 the chore, then allows the step once as `/allow` does; the answer is 202 with

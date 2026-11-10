@@ -15,11 +15,12 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.contracts.approvals import EarlierBlocks
+from localmelo.melo.contracts.approvals import AutoPolicy, EarlierBlocks
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chore_schedule import Schedule
 from localmelo.support.gateway.chore_store import Chore, ChoreStore
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.handoff import successor_key
 from localmelo.tests.agent.test_allow_question import NOTE, SENDS, SITE, typing
 from localmelo.tests.agent.test_approvals import _answer, _calls
 from localmelo.tests.agent.test_auto_mode import verdict
@@ -124,7 +125,10 @@ async def test_a_kept_answer_is_made_from_the_block_used_by_the_next_run_and_end
         assert types.typed == [NOTE, NOTE]
         typed, sent = [c["tool_asks"][0] for c in await finished_calls(console, going)]
         assert (typed["allowance"], sent["allowance"]) == ("once", "kept")
-        assert (await console.workers.get(going))["blocked"] == []
+        went = await console.workers.get(going)
+        assert went["blocked"] == []
+        # K5: that task's page lists the send that ran on the kept answer.
+        assert [u["question"] for u in went["kept_uses"]] == [f"browser-submit:{SITE}"]
 
         # K5: the next run types another note on the kept answer, and its page says so.
         run2 = (await runner.run_now(await runner.store.get(chore.chore_id)))["task_id"]
@@ -140,7 +144,9 @@ async def test_a_kept_answer_is_made_from_the_block_used_by_the_next_run_and_end
         listed = (await client.get("/api/chores")).json()["chores"][0]["keeps"]
         assert [(k["site"], k["dropped"]) for k in listed] == [(SITE, False)]
 
-        # B1: a task the person's message moves the run on in holds nothing kept.
+        # B1: a task the person's message moves the run on in holds nothing kept,
+        # also while a keep of that run is under way (its mark is set).
+        console.workers._keep_goes_on[successor_key(run2)] = chore.chore_id
         moved, how = await console.workers.successor(
             await console.workers.tasks.get_task(run2), "Type a hello too.", by="person"
         )
@@ -338,6 +344,63 @@ async def test_a_run_going_on_stops_using_an_answer_removed_while_it_runs(
 
         [block] = (await settled(console, run))["blocked"]
         assert types.typed == [] and block["can_allow"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_launch_holds_nothing_when_the_answer_is_removed_while_it_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B2: the store read is held; a Remove lands meanwhile; the run holds nothing."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    async with console_with(tmp_path, monkeypatch, [_answer("Checked in.")], []) as (
+        console,
+        *_,
+    ):
+        chore = await kept_on(console, await a_chore(console))
+        run = (await console.chore_runner.run_now(chore))["task_id"]
+        await settled(console, run)
+        record = await console.workers.tasks.get_task(run)
+        read = ChoreStore.live_keep
+        held = Held()
+
+        async def reading(*args: Any, **kwargs: Any) -> Any:
+            held.reached.set()
+            await held.wait()
+            return await read(*args, **kwargs)
+
+        auto = AutoPolicy(task=True)
+        await console.workers._hold_kept(auto, record)
+        assert auto.kept is not None and auto.kept.keeps(SITE, "submit")
+        monkeypatch.setattr(ChoreStore, "live_keep", reading)
+        launch = asyncio.ensure_future(console.workers._hold_kept(auto, record))
+        await asyncio.wait_for(held.reached.wait(), 10)
+        console.workers.drop_kept(chore.chore_id)  # the store still says kept
+        held.set()
+        await launch
+        assert auto.kept is None
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_waited_and_is_answered_holds_the_kept_answer_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C: the click's go-ahead answers a run that waited; it goes on holding the answer."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    plans = [typing(), _answer(BLOCKED)]
+    async with console_with(tmp_path, monkeypatch, plans, [SENDS]) as (console, *_):
+        chore = await a_chore(console)
+        run = (await console.chore_runner.run_now(chore))["task_id"]
+        [block] = (await settled(console, run))["blocked"]
+        held = console.workers._auto.setdefault(run, AutoPolicy(task=True))
+
+        async def answered(task_id: str, request_id: str) -> tuple[dict, str]:
+            return await console.workers.get(task_id), "answered"
+
+        monkeypatch.setattr(console.workers, "allow_once", answered)
+        _, how = await console.workers.keep_block(run, block["request_id"])
+
+        assert how == "answered"
+        assert held.kept is not None and held.kept.keeps(SITE, "submit")
 
 
 @pytest.mark.asyncio

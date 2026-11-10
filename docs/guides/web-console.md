@@ -1081,10 +1081,13 @@ commands and file changes.
   ahead (it ran already, or its job has finished); opened later, the step
   says `Allowed for this scheduled task on example.com.` Each step is
   still reviewed; what still stops, as before:
-  passwords and keys (a secret in the text too), your phone number, address
-  or name in the text, a step the review finds does not fit the task (or is
-  unsure of), a form sent to another site or where the page decides, a site
-  refused in the run and every other site. A call that types and then
+  passwords and keys (a secret in the text too), a text in which melo finds
+  your phone number, address or name, a step the review finds does not fit
+  the task (or is unsure of), a form sent to another site or where the page
+  decides, a site refused in the run and every other site. melo finds a
+  phone number or a street address only by its written shape, and your name
+  only as your Mac account spells it, in the text the step shows: other
+  details of yours, or these written another way, it does not see. A call that types and then
   sends runs when both questions pass. The run's page lists what it was
   allowed this way (`Allowed to type on example.com without asking: you
   allow this for this scheduled task`), and so does the terminal. The
