@@ -25,7 +25,7 @@ line, its id, date, chat, title and similarity (:meth:`Item.listed`), under a li
 that tells the model to open the turns it needs with ``open_memory``; the list is
 not bound by the chats' cap or the block's room (:func:`block`, :func:`pick`), and
 :func:`whole_turn` and :func:`cut_at_sentence` give a turn the model opens.
-With ``[memory] excerpt_open = "on"`` an excerpt that shows less than the whole turn
+In the excerpt form an excerpt that shows less than the whole turn
 (it was cut, or the line is a piece of a longer turn) starts with the turn's id,
 ``[t123]``, under a line that says to open such a turn with ``open_memory``
 (:data:`CUT_GUIDE`); a line that shows the whole turn has no id (:meth:`Item.excerpt`).
@@ -58,16 +58,15 @@ from localmelo.melo.memory.notes import split_sentences
 RRF_K: Final = 60
 MIN_COVERAGE: Final = 0.6
 MIN_COSINE: Final = 0.55
-# The vector bar of a question that counts, totals or compares, when ``[memory]
-# gather`` is ``wide`` or ``guide`` (``gather_min_cosine``, 0.20-0.55): a category
-# question sits further from each item that answers it than a single-fact one does.
+# The vector bar of a question that counts, totals or compares: a category question
+# sits further from each item that answers it than a single-fact one does.
 GATHER_COSINE: Final = 0.40
 HALF_LIFE_DAYS: Final = 30.0
 PER_SESSION: Final = 2
 # What one turn recalls by itself, and the room its block may take. The last two are
-# the shipped defaults of ``[memory] recall_chars`` (the block) and
-# ``recall_item_chars`` (one recalled turn): a larger room answered more questions
-# from earlier chats (#349). They are not the head :data:`TURN_CHARS` of a turn.
+# the room of the block and of one recalled turn: a larger room answered more
+# questions from earlier chats (#349). They are not the head :data:`TURN_CHARS` of
+# a turn.
 AUTO_RECORDS: Final = 3
 AUTO_DOCS: Final = 2
 BLOCK_CHARS: Final = 4_000
@@ -119,24 +118,23 @@ ITEM_LIST_GUIDE: Final = (
     "Memory items that may hold the answer, closest first. Open the ones you "
     "need with open_memory before you answer from them; a title is not the content."
 )
-# With ``[memory] gather = "guide"``: the sentence that follows the list's guide line
-# when the message asks to count, total or compare (:func:`asks_to_gather`).
+# The sentence that follows the list's guide line when the message asks to count,
+# total or compare (:func:`asks_to_gather`).
 GATHER_GUIDE: Final = (
     "This asks for a count, total or comparison: open every listed item that may "
     "belong, search again with other words for each kind not listed yet, and count "
     "only what the items say."
 )
-# With ``[memory] premise_check = "on"`` (the default): the sentence that ends the
-# list's guide line, after the gather sentence when there is one: check what the
-# question names against the lines.
+# The sentence that ends the list's guide line, after the gather sentence when there
+# is one: check what the question names against the lines.
 PREMISE_GUIDE: Final = (
     "If the question names a person, thing, place or role that none of these "
     "mention, say first that you have no record of it, and do not answer it from "
     "something similar."
 )
 CUT_MARK: Final = "… (cut)"
-# With ``[memory] excerpt_open = "on"``: the line under the excerpts when one of them
-# starts with its turn's id, because it shows less than the whole turn.
+# The line under the excerpts when one of them starts with its turn's id, because it
+# shows less than the whole turn.
 CUT_GUIDE: Final = (
     "A line that starts with an id such as [t123] is cut; open it with open_memory "
     "when the answer may be in the rest."
@@ -188,7 +186,7 @@ class Shown(NamedTuple):
     had). With *terms*, the question's content
     terms (``[memory] recall_excerpt = "match"``), each part of a turn shows the
     sentences that hold most of them rather than its head (:func:`turn_said`).
-    With *ids* (``[memory] excerpt_open = "on"``) a turn's line that shows less than
+    With *ids* (the excerpt form of turns) a turn's line that shows less than
     the whole turn starts with the turn's id (:meth:`Item.excerpt`), the id counted
     in the room. The defaults are the head of every turn, as it always was.
     """
@@ -354,7 +352,7 @@ class Item:
     ) -> tuple[str, bool]:
         """:meth:`line`, and whether it starts with the turn's id (``[t123] …``).
 
-        That is only with ``show.ids`` (``[memory] excerpt_open = "on"``), for a
+        That is only with ``show.ids`` (the excerpt form of turns), for a
         chat turn whose line shows less than the whole turn: :func:`turn_excerpt`
         cut what the user said or melo replied (or left the reply out), or the
         document is a piece of a longer turn (:attr:`chunk` above 0, or :attr:`more`).
@@ -1268,9 +1266,9 @@ def block(
     a copy that holds the line the model reads (:attr:`Item.shown`).
 
     The *kept* lines (:func:`kept_lines`) come first, with or without recall.
-    Items are added while the block stays within *chars*
-    (:data:`BLOCK_CHARS` unless the settings say otherwise); *show* says how much
-    of each turn they hold (:class:`Shown`).
+    Items are added while the block stays within *chars* (:data:`BLOCK_CHARS` for a
+    message's recall); *show* says how much of each turn they hold
+    (:class:`Shown`).
 
     With *listing* (``[memory] recall_form = "list"``) the notes are added so, and
     the turns follow as :data:`LIST_GUIDE` and one line each (:meth:`Item.listed`),
@@ -1278,7 +1276,7 @@ def block(
     *query* is the message the recall ran for, which a turn's title follows
     (:func:`listed_title`).
 
-    With ``show.ids`` (``[memory] excerpt_open = "on"``) a turn whose excerpt shows
+    With ``show.ids`` (the excerpt form of turns) a turn whose excerpt shows
     less than the whole turn starts with its id (:meth:`Item.excerpt`), and
     :data:`CUT_GUIDE` follows the excerpts when at least one line has an id. That
     line counts toward *chars* as the others do, so the block stays within it.

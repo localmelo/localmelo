@@ -120,33 +120,17 @@ EXPERIMENTAL_KEYS: dict[str, str] = {
     "agent.steps_per_attempt": "#185",
     "agent.tool_images_keep": "#280",
     "agent.tool_images_retire": "#280",
-    "memory.retriever": "#299",
-    "memory.keep_statements": "#299",
     "memory.sleep": "#363",
     "memory.sleep_lock": "#363",
-    "memory.recall_records": "#349",
-    "memory.recall_docs": "#349",
-    "memory.recall_chars": "#349",
-    "memory.recall_notes": "#349",
-    "memory.search_when_empty": "#349",
     "memory.recall_min_cosine": "#349",
     "memory.recall_min_coverage": "#349",
-    "memory.recall_item_chars": "#349",
     "memory.recall_excerpt": "#349",
     "memory.recall_form": "#428",
     "memory.recall_list_max": "#428",
     "memory.recall_open_chars": "#428",
-    "memory.excerpt_open": "#428",
     "memory.recall_source": "#428",
-    "memory.open_sources": "#428",
-    "memory.premise_check": "#428",
-    "memory.compress_at_chars": "#428",
-    "memory.compress_parallel": "#428",
-    "memory.compress_cache": "#428",
     "memory.note_gate": "#442",
     "memory.note_min_cosine": "#442",
-    "memory.gather": "#428",
-    "memory.gather_min_cosine": "#428",
 }
 
 # Long option name -> tier, for every option the parser has.
@@ -213,6 +197,22 @@ REMOVED_SETTINGS: dict[str, str] = {
     "agent.thinking_steps": "the model thinks on every planning step",
     "agent.lean_output": "a run always uses the standard prompts",
     "agent.brief_items": "a brief run never lists the brief's numbered items",
+    "memory.recall_records": "recall holds at most 3 notes",
+    "memory.recall_docs": "recall holds at most 2 chat turns",
+    "memory.recall_chars": "the recall block holds at most 4000 characters",
+    "memory.recall_item_chars": "a recalled chat turn takes at most 900 characters",
+    "memory.compress_at_chars": "the encoder reads a chat in windows of 12000 characters",
+    "memory.gather_min_cosine": "a question that counts or compares uses a bar of 0.40",
+    "memory.excerpt_open": "a cut excerpt starts with its turn's id and can be opened",
+    "memory.premise_check": "the list guide asks to say first when no line mentions it",
+    "memory.gather": (
+        "a question that counts, totals or compares looks wider and its list guide "
+        "says to open every item"
+    ),
+    "memory.search_when_empty": "a message that recalls nothing gets no extra line",
+    "memory.recall_notes": "recall carries notes",
+    "memory.open_sources": "an opened item shows its title and text and names its turns",
+    "memory.keep_statements": "code keeps no fact the model did not keep with remember",
 }
 
 # The two settings whose option takes no value: the option means the key has this one.

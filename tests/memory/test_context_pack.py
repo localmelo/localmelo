@@ -13,7 +13,6 @@ import dataclasses
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -466,7 +465,6 @@ async def test_a_task_question_remembers_nothing(
     assert wanted == NOT_THE_USER + TRY_ONCE_MORE
     assert await memory.keep_claims(ask, "Noted: your weekly sync is on Friday.") == []
     assert await memory.keep_changes(ask) == []
-    assert await memory.keep_statements(ask) == []
     chat = CHAT_TURN.get()
     assert chat is not None and not chat.unsaved_claim
     assert [e.text for e in await memory.records()] == [
@@ -528,32 +526,6 @@ async def test_a_task_question_is_not_indexed_and_not_evidence(
     assert (await memory.remember("Your gate for Faro is 9.", "about")).startswith(
         "Remembered"
     )
-
-
-async def test_keep_statements_skips_a_task_question(
-    tmp_path: Path, store: SessionStore
-) -> None:
-    cfg = SimpleNamespace(
-        memory=SimpleNamespace(
-            across_chats=True, keep_statements=True, retriever="auto"
-        ),
-        has_embedding=False,
-        is_configured=False,
-    )
-    memory = ChatMemory(lambda: cfg, directory=str(tmp_path / "memory"))  # type: ignore[arg-type,return-value]
-    said = "I live in Faro and I work on compilers."
-    try:
-        person = await begin(store, said)
-        await memory.before_turn(store, person, said)
-        assert await memory.keep_statements(person)  # the same words, a person's turn
-        for note_ in await memory.records():
-            await memory.delete_record(note_.id)
-        ask = as_owner(await begin(store, said))
-        await memory.before_turn(store, ask, said)
-        assert await memory.keep_statements(ask) == []
-        assert await memory.records() == []
-    finally:
-        await memory.aclose()
 
 
 async def chat_in(store: SessionStore, typed: str, folder: Path | None) -> TurnInfo:

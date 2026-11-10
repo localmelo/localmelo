@@ -529,7 +529,6 @@ async def test_memory_keeps_nothing_in_a_turn_the_person_did_not_begin(
     found = await memory.before_turn(store, info, ASKED)
     assert found.remembered == () and await memory.records() == []
     assert (await memory.remember(KEPT[1], "about")).startswith("Not remembered")
-    assert await memory.keep_statements(info) == []
     assert await memory.keep_changes(info) == []
     assert (
         await memory.keep_claims(info, "I noted that your meeting is on Thursdays.")

@@ -74,9 +74,6 @@ class FixedEmbedding(BaseEmbeddingProvider):
 
 
 def config(**memory: object) -> Config:
-    # These tests are about bars, rooms and excerpt shapes, not ids on cut lines
-    # (tests/memory/test_excerpt_open.py): they pin excerpt_open off unless told.
-    memory.setdefault("excerpt_open", "off")
     cfg = Config(chat_backend="vllm", embedding_backend="none")
     cfg.memory = MemoryConfig(**memory)  # type: ignore[arg-type]
     return cfg
@@ -292,7 +289,7 @@ async def test_the_search_tool_honours_the_cosine_bar(
 async def test_half_the_question_words_join_the_block_only_under_a_lower_coverage(
     tmp_path: Path, store: SessionStore
 ) -> None:
-    cfg = config(recall_records=3, recall_docs=3)
+    cfg = config()
     memory = await memory_with(tmp_path, store, cfg, note=True)
     asked = f"which {HALF_QUESTION}?"
     try:

@@ -6,10 +6,11 @@ turns it came from. This module is the model half; the rules that route a new
 item against the ones kept are :mod:`.hippo_route`, and the pure policy they
 call is :mod:`localmelo.melo.memory.hippo.policy`.
 
-A chat's exchanges are packed in order into windows of at most ``[memory]
-compress_at_chars`` characters (:func:`pack`; one exchange longer than that is read
-in up to :data:`MAX_PARTS` consecutive parts of that size, each part after the first
-starting ``[n] (continued) ``). Each window is one request to the chat model,
+A chat's exchanges are packed in order into windows of at most
+:data:`~localmelo.support.memory.service.COMPRESS_AT_CHARS` characters
+(:func:`pack`; one exchange longer than that is read in up to :data:`MAX_PARTS`
+consecutive parts of that size, each part after the first starting
+``[n] (continued) ``). Each window is one request to the chat model,
 temperature 0, at most :data:`MAX_OUTPUT_TOKENS` tokens out, asking for JSON only
 (:data:`SYSTEM_PROMPT`). An unreadable reply is asked for once more and then the
 window has failed, unless the reply *ran out of room* (:func:`_ran_out`: its JSON

@@ -53,7 +53,7 @@ def test_a_bad_memory_value_is_a_configuration_error(
 def test_the_table_round_trips_only_when_set(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     cfg = Config(chat_backend="vllm", embedding_backend="none")
-    cfg.memory = MemoryConfig(keep_statements=True)
+    cfg.memory = MemoryConfig(recall_form="list")
     with (
         mock.patch.object(config, "CONFIG_PATH", str(path)),
         mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
@@ -62,7 +62,7 @@ def test_the_table_round_trips_only_when_set(tmp_path: Path) -> None:
     assert "[memory]" in path.read_text()
     with mock.patch.object(config, "CONFIG_PATH", str(path)):
         loaded = config.load()
-    assert loaded.memory == MemoryConfig(keep_statements=True)
+    assert loaded.memory == MemoryConfig(recall_form="list")
 
     with (
         mock.patch.object(config, "CONFIG_PATH", str(path)),
@@ -132,9 +132,10 @@ def test_x_sets_the_memory_retriever_and_only_the_developer_help_lists_it(
     assert config_cli.main(["keys", "retriever", "-X", f"{key}=llm"]) == 0
     rows = [line.split() for line in capsys.readouterr().out.splitlines()[1:]]
     assert [key, '"llm"', '"auto"', "-X"] in rows
+    # An ordinary advanced setting now: the developer help lists it, with no issue.
     developer = cli._build_parser(developer=True).format_help()
     assert any(
-        line.startswith(f"  {key} ") and line.endswith("(#299)")
+        line.startswith(f"  {key} ") and not line.endswith(")")
         for line in developer.splitlines()
     )
     assert key not in cli._build_parser(developer=False).format_help()

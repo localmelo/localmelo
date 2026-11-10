@@ -479,12 +479,12 @@ async def test_with_memory_items_the_lines_are_items_and_carry_no_id(
         found = await memory.open_item(item_id)
         assert not isinstance(found, str)
         handover = Handover(
-            opened=({"item": item_id, "sources": [["s1", 1]]},), used=(found.item,)
+            opened=({"item": item_id, "sources": [["s1", 1]]},), used=(found,)
         )
         lines, kept, *_ = await picked_lines(memory, handover)
         assert lines.splitlines() == [
             f"- “Alex's search”: Alex wants a staff role at a large company. "
-            f"({found.item.where})"
+            f"({found.where})"
         ]
         assert f"m{item_id}" not in lines and "m4" not in lines and kept == set()
     finally:

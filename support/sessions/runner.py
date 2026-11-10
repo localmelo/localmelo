@@ -351,10 +351,9 @@ class SessionRunner:
     names, as one ``turn.pictures`` event (:mod:`~.pictures`). With *memory*,
     each turn of a chat recalls what matches its typed text and keeps what it
     asks to remember (a ``turn.memory`` event, queued again whole when the
-    model keeps a note with ``remember``, or when, after a completed run with
-    ``[memory] keep_statements`` on, code keeps a lasting fact the user stated
-    that no note kept, or, whatever that says, a new value the user gave a
-    subject an active note holds), and a completed turn is indexed; *index_only* (a
+    model keeps a note with ``remember``, or when, after a completed run, code
+    keeps a new value the user gave a subject an active note holds), and a
+    completed turn is indexed; *index_only* (a
     task's runner) only indexes. *context*, when given, is one block or
     several, highest first: they end the text each turn sends the model, after
     any recalled block, and are in neither the stored turn nor the person's
@@ -945,7 +944,6 @@ class SessionRunner:
         if before is not None:
             await self._note_pictures(turn, before, returned)
         if returned is not None and returned.status == "completed":
-            await self._keep_statements(turn)
             await self._keep_changes(turn)
             await self._keep_claims(turn, split_thinking(returned.result)[1])
         cancelled = (
@@ -1114,21 +1112,6 @@ class SessionRunner:
         if found.block and fits:
             return turn.text + found.block
         return turn.text
-
-    async def _keep_statements(self, turn: _Turn) -> None:
-        """Keep the lasting facts the user stated that the model kept no note of.
-
-        It queues ``turn.memory`` again, whole, when it keeps one. A cancel
-        does not stop a write under way.
-        """
-        if self._memory is None or self._index_only:
-            return
-        try:
-            await asyncio.shield(self._memory.keep_statements(turn.turn))
-        except asyncio.CancelledError:
-            return  # the turn's own cancel counter still ends the run as cancelled
-        except Exception:
-            logger.warning("Could not keep what the user stated", exc_info=True)
 
     async def _keep_changes(self, turn: _Turn) -> None:
         """Replace an old note by the new value the user stated when the model

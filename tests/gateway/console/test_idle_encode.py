@@ -24,6 +24,7 @@ from localmelo.support.backends.openai_family import CLOUD_BACKENDS
 from localmelo.support.gateway.console.idle_encode import MAX_FAILURES
 from localmelo.support.gateway.console.idle_gates import IdleOptions
 from localmelo.support.gateway.task_policy import TaskSpec
+from localmelo.support.memory import service as memory_service
 from localmelo.support.memory.hippo_encode import CHECKED_ENCODERS
 from localmelo.support.memory.service import MemoryTools
 from localmelo.support.sessions.store import NewSession
@@ -86,6 +87,12 @@ async def chat(
     return session_id
 
 
+@pytest.fixture(autouse=True)
+def small_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A small window, so that two of the exchanges ``padded`` makes fill one."""
+    monkeypatch.setattr(memory_service, "COMPRESS_AT_CHARS", WINDOW)
+
+
 def padded(count: int) -> list[tuple[str, str]]:
     """*count* exchanges of a size that makes two of them fill a window."""
     return [(f"turn {n}", PAD) for n in range(1, count + 1)]
@@ -96,7 +103,6 @@ def arm(w: World, answers: Any = reply, *, poll_s: float = 1e9) -> StubEncoder:
     stub chat model, and the idle sleep's fake machine for the gates."""
     memory = w.console.cfg.memory
     memory.recall_source = "items"
-    memory.compress_at_chars = WINDOW
     stub = StubEncoder(answers)
     w.console.memory.chat_provider = lambda: stub  # type: ignore[method-assign]
     w.console.idle_encode.options = IdleOptions(

@@ -230,9 +230,9 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     }
 )
 # Session event keys an event may lack: turn.started's origin is only on a
-# turn the person did not begin (#369), turn.memory's search_hint only when
-# the recall block carried the hint, and its digest only on the turn whose
-# message carried the other chats' digest (#452).
+# turn the person did not begin (#369), turn.memory's search_hint only in events
+# an earlier version stored (nothing writes it now), and its digest only on the
+# turn whose message carried the other chats' digest (#452).
 OPTIONAL_SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         # images: the pictures the person added, as references into blobs.

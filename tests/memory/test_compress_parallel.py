@@ -25,6 +25,7 @@ from localmelo.melo.schema import Message, ToolDef
 from localmelo.support import config
 from localmelo.support.config import Config, MemoryConfig, save
 from localmelo.support.memory import hippo_encode as hippo
+from localmelo.support.memory import service
 from localmelo.support.memory.hippo_encode import Cache, Stats, Turn
 from localmelo.tests.memory.hippo_helpers import (
     CAP,
@@ -553,12 +554,13 @@ def report_shape(report: Any) -> dict[str, Any]:
 
 
 async def test_ingest_in_parallel_gives_the_serial_reports_items_and_routes(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(service, "COMPRESS_AT_CHARS", 4000)
     made: dict[str, dict[str, Any]] = {}
     for mode, parallel in (("serial", 1), ("parallel", 4)):
         model = Slow(facts)
-        cfg = settings(tmp_path, compress_at_chars=4000, compress_parallel=parallel)
+        cfg = settings(tmp_path, compress_parallel=parallel)
         cfg.memory.compress_cache = str(tmp_path / f"cache-{mode}.jsonl")
         report, chats, memory = await compress(
             tmp_path, data(), model, sub=mode, cfg=cfg
@@ -594,15 +596,16 @@ async def test_ingest_in_parallel_gives_the_serial_reports_items_and_routes(
 
 
 async def test_ingest_cache_hits_make_no_request_and_a_parallel_cache_serves_a_serial_run(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(service, "COMPRESS_AT_CHARS", 4000)
     filler = Slow(facts)
     report, chats, memory = await compress(
         tmp_path,
         data(),
         filler,
         sub="fill",
-        cfg=settings(tmp_path, compress_at_chars=4000, compress_parallel=4),
+        cfg=settings(tmp_path, compress_parallel=4),
     )
     await close(chats, memory)
     assert (report.stats.calls, report.stats.cache_hits) == (17, 0)
@@ -613,7 +616,7 @@ async def test_ingest_cache_hits_make_no_request_and_a_parallel_cache_serves_a_s
             data(),
             model,
             sub=sub,
-            cfg=settings(tmp_path, compress_at_chars=4000, compress_parallel=parallel),
+            cfg=settings(tmp_path, compress_parallel=parallel),
         )
         await close(chats, memory)
         assert model.prompts == []  # no window, and no judge request either
@@ -761,8 +764,10 @@ def facts_by_label(prompt: str) -> str:
 
 
 async def test_ingest_splits_windows_that_run_out_the_same_in_both_modes(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(service, "COMPRESS_AT_CHARS", 4000)
+
     def runs_out_here(prompt: str) -> bool:
         return len(prompt) > 2700
 
@@ -772,7 +777,7 @@ async def test_ingest_splits_windows_that_run_out_the_same_in_both_modes(
             lambda p: CUT_OFF if runs_out_here(p) else facts_by_label(p),
             usage=lambda p: (len(p) // 4, CAP if runs_out_here(p) else 90),
         )
-        cfg = settings(tmp_path, compress_at_chars=4000, compress_parallel=parallel)
+        cfg = settings(tmp_path, compress_parallel=parallel)
         cfg.memory.compress_cache = str(tmp_path / f"cache-{mode}.jsonl")
         report, chats, memory = await compress(
             tmp_path, data(), model, sub=mode, cfg=cfg

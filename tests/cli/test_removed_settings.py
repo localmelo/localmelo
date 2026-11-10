@@ -25,6 +25,20 @@ brief_items = true
 [memory]
 admit_on_outcome = true
 followup_query = "message"
+recall_records = 5
+recall_docs = 4
+recall_chars = 3000
+recall_item_chars = 600
+compress_at_chars = 8000
+gather_min_cosine = 0.3
+excerpt_open = "off"
+premise_check = "off"
+gather = "wide"
+search_when_empty = "hint"
+recall_notes = "off"
+open_sources = "on"
+keep_statements = true
+recall_form = "list"
 """
 
 
@@ -42,6 +56,7 @@ def test_a_file_that_holds_removed_keys_loads(config_home: Path) -> None:
     agent = config.load().agent
     assert agent.window_messages == 32  # the keys that stay are read as before
     assert agent.window_eviction == "chunk"  # "slide" reads as the one way left
+    assert config.load().memory.recall_form == "list"  # a [memory] key that stays
     for name in REMOVED_SETTINGS:
         section, _, key = name.partition(".")
         assert not hasattr(getattr(config.load(), section), key)

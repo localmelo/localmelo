@@ -1,10 +1,11 @@
 """The note gate: where a note the chat's model keeps with ``remember`` may come from.
 
-Developer setting ``[memory] note_gate`` (#442), four cumulative levels. A note is
+Developer setting ``[memory] note_gate`` (#442), three cumulative levels. A note is
 kept when something the chat shows supports it, and the gate tags the note with that
 source (source monitoring): what the user typed (``typed``), material the user
-pointed to (``pointed``), a finished task's result (``result``) or the model's own
-inference from what the user typed (``inferred``), in that order of trust.
+pointed to (``pointed``) or a finished task's result (``result``), in that order of
+trust. A note kept by an earlier version may also carry ``inferred`` (the model's own
+inference), which no level writes now and recall still reads.
 
 - ``typed``, the default, is the rule that always was: the note's words are in what
   the user typed in this chat or in a finished task's result shown in it
@@ -19,9 +20,6 @@ inference from what the user typed (``inferred``), in that order of trust.
   the rest of it may say the same in other words or another language, judged by the
   cosine between its embedding and the best window of the sources
   (:func:`windows`). Without an embedding model that is the ``typed`` word check.
-- ``model`` adds the model's own judgement: a note about the user that no source
-  supports, whose key tokens are all found and whose meaning is close to what the user
-  typed (the bar less :data:`INFERRED_SLACK`), is kept as ``inferred``.
 
 Every level but ``typed`` also refuses a note that is an instruction to the assistant
 (:func:`is_instruction`), not a fact about the user. Secrets are refused at every
@@ -75,10 +73,8 @@ POINTED: Final = "pointed"
 RESULT: Final = "result"
 INFERRED: Final = "inferred"
 
-# The default bar for the meaning of a note against its source, and how much lower the
-# bar for a note the model infers is.
+# The default bar for the meaning of a note against its source.
 MIN_COSINE: Final = 0.55
-INFERRED_SLACK: Final = 0.15
 # A window of a source, in characters, and the most that one call compares: the user's
 # newest typed windows, the pointed material's windows that hold most key tokens, and
 # the results'.
