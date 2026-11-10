@@ -21,6 +21,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.sign_in import VAULT
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.i18n import t
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.tests.agent.test_sign_in import LIKE_HEADING
 
 from .test_ask_owner import Script, answer, ask_console, held, tool_call, until
@@ -265,13 +266,8 @@ async def test_a_password_in_an_attached_file_is_hidden_where_it_is_stored_read_
         assert secret not in again.text + cancel.text
 
 
-async def test_a_file_in_a_queued_message_is_data_when_the_turn_it_starts_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The queued message's turn keeps the typed words, and the run reads only those as the person's own (#626)."""
-    secret = "quokka-5521"
-    typed = "have a look at the file"
-    text = f"log in at files-only.example\nmy password is {secret}"
+def spy_on_words(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """The person's words each run is given (``Agent.run_task``'s ``user_words``)."""
     given: list[Any] = []
     real = Agent.run_task
 
@@ -280,28 +276,100 @@ async def test_a_file_in_a_queued_message_is_data_when_the_turn_it_starts_runs(
         return await real(self, query, **kwargs)
 
     monkeypatch.setattr(Agent, "run_task", run_task)
+    return given
+
+
+def a_file(name: str, text: str) -> dict[str, Any]:
+    return {"name": name, "text": text, "chars": len(text)}
+
+
+async def test_a_queued_message_keeps_its_files_apart_and_its_turn_starts_as_a_sent_one_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Words and files wait apart and start the turn stored apart, with no file text among the person's words; a resend is that turn (#626)."""
+    typed = "have a look at the file"
+    text = "log in at files-only.example\nmy password is quokka-5521"
+    given = spy_on_words(monkeypatch)
     async with ask_console(
-        tmp_path, monkeypatch, main=[answer("Done.")], run=False
+        tmp_path, monkeypatch, main=[answer("Done."), answer("Done.")], run=False
     ) as (console, client, _):
         main = str(console.main_id)
         with monkeypatch.context() as spy:
             spy.setattr(console.asks, "holds", lambda session: True)
-            queued = await _post_turn(
-                client,
-                main,
-                typed,
-                attachments=[{"name": "notes.txt", "text": text, "chars": len(text)}],
-            )
-        assert queued.status_code == 200, queued.text
-        assert queued.json()["echo"]["echo"] == "queued"
-        await until(lambda: console.store.list_turns(main))
+            with_words = {
+                "attachments": [a_file("notes.txt", text)],
+                "client_request_id": "q-1",
+            }
+            queued = await _post_turn(client, main, typed, **with_words)
+            # A file and no words.
+            file_only = {
+                "attachments": [a_file("other.txt", "my password is quokka-5522")],
+                "client_request_id": "q-2",
+            }
+            alone = await _post_turn(client, main, "", **file_only)
+        for response in (queued, alone):
+            assert response.status_code == 200, response.text
+            assert response.json()["echo"]["echo"] == "queued"
+        info = await console.store.get_session(main)
+        assert info is not None and info.meta["queued"][0]["attachments"]
+        await until(lambda: len(given) == 2)
         await _wait_turn(client, main)
-        [turn] = await console.store.list_turns(main)
-        # The file is in the turn's text, its handle is shown; the words are the typed ones.
-        assert "my password is [password-1]" in turn.user_text
-        assert turn.typed_text == typed
-        assert given == [typed]
-        assert secret not in stored(tmp_path / "sessions.db")
+        first, second = await console.store.list_turns(main)
+        # The turn has its typed words and the file stored apart, the handle in the file.
+        assert first.typed_text == typed
+        assert first.attachments == (
+            TextAttachment(
+                "notes.txt", "log in at files-only.example\nmy password is [password-1]"
+            ),
+        )
+        # With no words the stand-in is the turn's words, as for a message that did not wait.
+        assert second.typed_text == "[attached: other.txt]"
+        assert second.attachments == (
+            TextAttachment("other.txt", "my password is [password-2]"),
+        )
+        # The run is given those words, never a file's text.
+        assert given == [typed, "[attached: other.txt]"]
+        assert "quokka" not in stored(tmp_path / "sessions.db")
+        # The same key with the same message is that turn, not a second one.
+        again = await _post_turn(client, main, typed, **with_words)
+        assert again.status_code == 200, again.text
+        assert again.json()["repeated"] and again.json()["turn_id"] == first.id
+
+
+async def test_a_turn_tried_again_twice_holds_its_typed_words_and_files_and_runs_on_the_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each retry sends the typed words and the stored files again as the message was sent; no run reads a file's text as words (#626)."""
+    typed = "sign in to forum.example for me"
+    text = "my other login, password: quokka-5531"
+    given = spy_on_words(monkeypatch)
+    async with ask_console(
+        tmp_path, monkeypatch, main=[answer("Done.")] * 3, run=False
+    ) as (console, client, _):
+        main = str(console.main_id)
+        sent = await _post_turn(
+            client,
+            main,
+            typed,
+            attachments=[a_file("notes.txt", text)],
+            client_request_id="retry-1",
+        )
+        assert sent.status_code == 202, sent.text
+        turn = await _wait_turn(client, main)
+        for _ in range(2):
+            retried = await client.post(
+                f"/api/sessions/{main}/retry", json={"turn_id": turn["id"]}
+            )
+            assert retried.status_code == 202, retried.text
+            turn = await _wait_turn(client, main)
+        original, *retries = [t for t in await console.store.list_turns(main)]
+        assert len(retries) == 2
+        for row in retries:
+            assert row.typed_text == typed and row.user_text == original.user_text
+            assert row.attachments == original.attachments
+            assert row.attachments and "[password-1]" in row.attachments[0].text
+        assert given == [typed] * 3
+        assert "quokka" not in stored(tmp_path / "sessions.db")
 
 
 async def test_a_file_that_a_password_handle_makes_too_long_is_refused_as_a_too_long_file_is(

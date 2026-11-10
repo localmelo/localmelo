@@ -58,7 +58,11 @@ from localmelo.support.sessions.approvals import (
     ChatPolicy,
     chat_mode,
 )
-from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    parse_user_text,
+)
 from localmelo.support.sessions.grants import (
     STORED_KINDS,
     Grant,
@@ -1387,13 +1391,22 @@ class ConsoleSessions:
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
             self._note_turn_start(session_id)
-            # The person's words, not the attachments the text carries; the
-            # pictures they added go with the words again.
+            # The same message again, as it was sent: its typed words and its files
+            # apart, and the pictures they added (#626). A turn stored before files
+            # were kept apart has them in its text: the words are what comes before
+            # them, never the files' text, however many times it is tried again.
             pictures = await self._store.turn_images(session_id, undone.turn)
+            text, words = undone.user_text, None
+            if undone.attachments:
+                text = undone.typed_text
+            else:
+                head, blocks = parse_user_text(undone.user_text)
+                words = head if blocks else None
             turn = await entry.runner.start_turn(
-                undone.user_text,
+                text,
                 approval=entry.policy,
-                words=undone.typed_text or None,
+                attachments=undone.attachments or (),
+                words=words,
                 images=pictures,
             )
             entry.last_used = self._clock()

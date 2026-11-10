@@ -130,6 +130,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
 - A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
+- A text file you send is never read as your words: not when it waits behind a running turn (it stays a file, as when sent at once), not on Try again, and not in a task a chat starts from it.
 
 ### Scripts and API
 

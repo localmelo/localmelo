@@ -566,6 +566,27 @@ def test_a_site_only_the_chats_reading_names_is_not_named_by_the_person() -> Non
     assert not reviewer.names_host("only-in-the-reading.example")
 
 
+def test_a_site_only_a_file_names_is_not_named_by_the_person() -> None:
+    from localmelo.melo.agent import _step_review
+    from localmelo.support.gateway.handover import with_reading
+    from localmelo.support.gateway.workers import _turn_text
+    from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
+
+    typed = "sign in for me"
+    file = TextAttachment(
+        "notes.txt", "log in at only-in-the-file.example, [password-1]"
+    )
+    request = with_reading(compose_user_text(typed, (file,)), "the chat's reading")
+    # No words kept (a retried turn has none typed): the words before the reading
+    # and before the file, never the file's text (#626).
+    record = SimpleNamespace(card="", spec={"objective": request})
+    _, words = _turn_text(cast(Any, record))
+    assert words == typed
+    reviewer = _step_review.StepReviewer(lambda: None)  # type: ignore[arg-type,return-value]
+    reviewer.user_message(words or "")
+    assert not reviewer.names_host("only-in-the-file.example")
+
+
 def test_a_resumption_card_is_not_the_person_s_words() -> None:
     from types import SimpleNamespace
 

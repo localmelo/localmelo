@@ -1155,6 +1155,13 @@ def _live_lines(front: Front, task_id: str) -> list[str]:
     return lines
 
 
+def _retried(turn: TurnInfo) -> bool:
+    """Whether Try again made *turn*: it has no typed text, or it holds files that were sent again without the key a typed message has (#626)."""
+    return not turn.typed_text.strip() or bool(
+        turn.attachments and turn.client_request_id is None
+    )
+
+
 def _receipt(typed: str, title: str | None) -> str:
     """The answer of a turn that handed its work on to the task *title*, in the
     language of *typed*; with ``None``, the line for a hand-off whose task melo
@@ -2384,7 +2391,7 @@ class Front:
     async def _accepted(self, turn: TurnInfo) -> TurnInfo:
         """The turn *turn*'s words were accepted in: itself, or the one its retries go back to."""
         accepted = turn
-        while not accepted.typed_text.strip():
+        while _retried(accepted):
             earlier = await self.console.store.list_turns(
                 turn.session_id, before=accepted.turn, limit=RETRIES_READ
             )
@@ -2392,7 +2399,7 @@ class Front:
                 if not row.undone or row.user_text != turn.user_text:
                     return accepted
                 accepted = row
-                if row.typed_text.strip():
+                if not _retried(row):
                     return accepted
             if len(earlier) < RETRIES_READ:
                 return accepted

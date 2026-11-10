@@ -394,7 +394,9 @@ async def _while_running(
     if sent.extras.images:
         # A queued message keeps words; these pictures wait in the composer.
         raise ApiError(409, "chat_answering", t("errors.picturesWhileAnswering"))
-    echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
+    echo = await console.asks.queue(
+        session_id, sent.typed, sent.words, key, sent.extras.attachments
+    )
     return JSONResponse(status_code=200, content={"echo": echo})
 
 
@@ -643,7 +645,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
                     )
                 # The chat is answering a task's question: the message waits,
                 # shown as queued, and runs as the chat's next turn (#369).
-                echo = await console.asks.queue(session_id, sent.typed, sent.whole, key)
+                echo = await console.asks.queue(
+                    session_id, sent.typed, sent.words, key, sent.extras.attachments
+                )
                 return JSONResponse(status_code=200, content={"echo": echo})
         elif body.as_task:
             raise ApiError(400, "invalid_request", "as_task: tasks start from a chat")

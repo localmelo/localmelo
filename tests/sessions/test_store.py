@@ -40,8 +40,10 @@ from localmelo.support.sessions.store import (
     SessionStore,
     SessionStoreError,
     StoredEvent,
+    TurnInfo,
     cli_host_id,
     default_path,
+    typed_words,
 )
 from localmelo.support.sessions.submissions import (
     SubmissionConflict,
@@ -2634,3 +2636,56 @@ async def test_latest_finished_turn_finds_the_newest_among_many_sessions(
     found = await store.latest_finished_turn(("chat",))
     assert found is not None and found.session_id == newest
     assert found.finished_at == clock.now
+
+
+FILE = TextAttachment("notes.txt", "my password is hunter2")
+
+
+@pytest.mark.parametrize(
+    ("row", "typed"),
+    [
+        ({"user_text": "melo wrote this", "typed_text": "hi", "composed": True}, ""),
+        (
+            {
+                "user_text": compose_user_text("sign in", (FILE,)),
+                "typed_text": "sign in",
+                "attachments": (FILE,),
+            },
+            "sign in",
+        ),
+        ({"user_text": "a request melo built", "typed_text": "chart it"}, "chart it"),
+        (
+            {"user_text": "a plain retried turn", "typed_text": ""},
+            "a plain retried turn",
+        ),
+        # A row from before files were stored as attachments: the blocks are not words.
+        (
+            {"user_text": compose_user_text("sign in", (FILE,)), "attachments": ()},
+            "sign in",
+        ),
+    ],
+    ids=["composed", "files", "words given", "plain", "legacy blocks"],
+)
+def test_the_typed_words_of_a_turn_are_never_a_files_text(
+    row: dict[str, Any], typed: str
+) -> None:
+    turn = TurnInfo(
+        **{
+            "id": "t",
+            "session_id": "s",
+            "turn": 1,
+            "run_id": "",
+            "status": "completed",
+            "cause": "run",
+            "answer": "",
+            "result": None,
+            "holder": "h",
+            "undone": False,
+            "started_at": 0.0,
+            "finished_at": 1.0,
+            "client_request_id": None,
+            "typed_text": "",
+            **row,
+        }
+    )
+    assert typed_words(turn) == typed
