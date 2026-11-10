@@ -424,10 +424,12 @@ async def test_a_turn_given_a_password_keeps_its_work_here(
 async def test_no_part_of_a_secret_reaches_the_packet(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A key the model wrote in its progress, or one a call read, never reaches
-    the packet; the call is named by what it read."""
+    """A key the model wrote in its progress, one a call read, or one in a call's
+    argument where its line is cut, never reaches the packet, whole or in part."""
+    across = f"{'notes/' * 10}{GITHUB}.txt"  # the key lies across the cut
     main: list[Reply] = [
         tool_call("file_read", {"path": "keys.txt"}, "read-1"),
+        tool_call("file_read", {"path": across}, "read-2"),
         tool_call(
             "task_create",
             {
@@ -452,7 +454,9 @@ async def test_no_part_of_a_secret_reaches_the_packet(
         kept = json.dumps(record.spec["handoff"])
         pieces = {GITHUB[at : at + 8] for at in range(len(GITHUB) - 7)}
         assert not [piece for piece in pieces if piece in kept]
-        assert record.spec["handoff"]["checkpoint"]["covered"] == ["file_read keys.txt"]
+        assert (
+            record.spec["handoff"]["checkpoint"]["covered"][0] == "file_read keys.txt"
+        )
 
 
 async def test_a_stop_as_the_task_is_admitted_shows_it_and_it_runs(

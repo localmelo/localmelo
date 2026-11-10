@@ -482,7 +482,7 @@ def handoff_block(packet: object) -> str:
         f"This work began {where}"
         + (f", which ended: {ended}." if ended else ".")
         + " Go on from where it stands; do not redo what succeeded.",
-        *_checkpoint_of(packet).lines(),
+        *_checkpoint_of(packet).lines(elsewhere=True),
     ]
     unknown = [
         b

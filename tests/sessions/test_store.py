@@ -188,6 +188,37 @@ async def test_a_version_2_file_gains_turn_origins(tmp_path: Path) -> None:
     assert columns["origin"][4] == "''"
 
 
+async def test_a_version_3_file_gains_composed_turns_at_the_same_version(
+    tmp_path: Path,
+) -> None:
+    """A file from before ``turns.composed`` opens and gets it, still version 3,
+    so a build from before it opens the file too."""
+    path = tmp_path / "v3.db"
+    with sqlite3.connect(path) as conn:
+        for statement in store_mod._SCHEMA:
+            conn.execute(
+                statement.replace("    composed    INTEGER NOT NULL DEFAULT 0,\n", "")
+            )
+        conn.execute("INSERT INTO store_info VALUES ('writer', 'gateway')")
+        conn.execute("PRAGMA user_version = 3")
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('old', 1, 1)"
+        )
+        conn.execute(
+            "INSERT INTO turns (session_id, turn, id, user_text, holder, started_at, "
+            "status) VALUES ('old', 1, 'oldturn', 'legacy', 'h', 1, 'completed')"
+        )
+    assert "composed" not in {row[1] for row in rows(path, "PRAGMA table_info(turns)")}
+    store = gateway(path)
+    [old] = await store.list_turns("old")
+    card = await store.begin_turn(
+        "old", "Where stopped: …", holder=HOLDER, composed=True
+    )
+    assert (old.composed, card.composed) == (False, True)
+    await store.aclose()
+    assert rows(path, "PRAGMA user_version") == [(3,)]
+
+
 async def test_an_internal_turn_gives_a_new_session_no_title(tmp_path: Path) -> None:
     store = gateway(tmp_path / "sessions.db")
     info = await store.create_session()

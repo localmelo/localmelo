@@ -57,11 +57,12 @@ def _key_arg(arguments: dict[str, object]) -> tuple[str, str]:
 
 
 def _describe(name: str, arguments: dict[str, object]) -> str:
-    """The tool name and its key argument, shortened and redacted."""
+    """The tool name and its key argument, redacted whole and then shortened, so
+    that no cut leaves a piece of a secret no pattern matches."""
     key, value = _key_arg(arguments)
     if not key:
         return name
-    arg = redact_secrets(_shorten(value, ARG_LIMIT))[0]
+    arg = _shorten(redact_secrets(value)[0], ARG_LIMIT)
     return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
 
 

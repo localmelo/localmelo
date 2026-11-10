@@ -264,10 +264,11 @@ def standing(
     """Where a run or a task stands now, for whoever goes on with it; no model call.
 
     The model's fields of *last* (the run's last checkpoint, as its notice
-    keeps them), with its freshest words, when given, in place of the state and
-    the next steps; *goal*, *files* and every call (after the lines of the work
-    before it, *earlier*) as of now. Cut as a checkpoint is (:data:`CUT_ORDER`),
-    to *chars* of the model's fields and *lines* of calls.
+    keeps them), with its freshest words, *state*, in place of the state when
+    given, and *then* in place of the next steps when given; *goal*, *files* and
+    every call (after the lines of the work before it, *earlier*) as of now. Cut
+    as a checkpoint is (:data:`CUT_ORDER`), to *chars* of the model's fields and
+    *lines* of calls.
     """
     notes = last or {}
 

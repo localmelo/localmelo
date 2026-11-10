@@ -125,16 +125,21 @@ class Gate:
             self.memory.embedding = lambda: (provider, MODEL)  # type: ignore[method-assign]
         self.emitted: list[dict[str, Any]] = []
 
-    async def turn(self, typed: str, session_id: str | None = None) -> TurnInfo:
-        """A turn of *typed* that runs, in a new chat or in *session_id*."""
+    async def turn(
+        self, typed: str, session_id: str | None = None, *, composed: bool = False
+    ) -> TurnInfo:
+        """A turn of *typed* that runs, in a new chat or in *session_id*; one
+        *composed* is melo's text, and the run hands memory no typed words."""
         info = await self.store.begin_turn(
             session_id,
             typed,
             holder=HOLDER,
             title="Planning",
             new_session=None if session_id else NewSession(),
+            composed=composed,
         )
-        await self.memory.before_turn(self.store, info, typed, emit=self.emitted.append)
+        words = "" if composed else typed
+        await self.memory.before_turn(self.store, info, words, emit=self.emitted.append)
         return info
 
     async def finish(self, info: TurnInfo) -> None:
@@ -315,6 +320,18 @@ async def test_typed_keeps_a_typed_statement_without_a_source_and_says_nothing_n
     assert (await gate.remember("Always answer in French.", "preferences")).startswith(
         "Remembered:"
     )
+
+
+async def test_a_card_melo_wrote_is_no_statement_of_the_persons(make: Any) -> None:
+    gate = make("typed")
+    card = "Where stopped: the task stopped.\nState: I prefer short answers."
+    first = await gate.turn(card, composed=True)
+    await gate.finish(first)
+    # Resumed again: neither this card nor the earlier one is the person's words.
+    await gate.turn(card, first.session_id, composed=True)
+    reply = await gate.remember("You prefer short answers.", "preferences")
+    assert reply.startswith(OLD_REFUSAL)
+    assert await gate.notes() == []
 
 
 # ── pointed ──

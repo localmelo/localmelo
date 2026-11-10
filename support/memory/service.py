@@ -814,7 +814,10 @@ async def window_start(
 
 def _typed_words(turn: TurnInfo) -> str:
     """What the user typed in *turn*: with attachments the typed text, which holds
-    none of the attached text, else the turn's text."""
+    none of the attached text, else the turn's text; ``""`` for a turn whose text
+    melo composed (``TurnInfo.composed``)."""
+    if turn.composed:
+        return ""
     return turn.typed_text if turn.attachments else turn.user_text
 
 
@@ -2123,9 +2126,7 @@ class ChatMemory:
             if earlier.turn < turn.info.turn and not (
                 earlier.undone or is_owner_question(earlier)
             ):
-                typed[earlier.turn] = (
-                    earlier.typed_text if earlier.attachments else earlier.user_text
-                )
+                typed[earlier.turn] = _typed_words(earlier)
         typed[turn.info.turn] = turn.typed
         events: list[tuple[int | None, dict[str, Any]]] = []
         started: set[tuple[int | None, str]] = set()

@@ -65,6 +65,7 @@ async def _turn(
     attachments: tuple[TextAttachment, ...] = (),
     typed_text: str | None = None,
     answer: str = ANSWER,
+    composed: bool = False,
 ) -> TurnInfo:
     """A finished turn: *read* notes have an ``inbox.accepted`` event (one per step
     from step 2), *unread* ones only the ``turn.note`` event the page stores."""
@@ -77,6 +78,7 @@ async def _turn(
         origin=origin,
         attachments=attachments,
         typed_text=typed_text,
+        composed=composed,
     )
     events = [
         core_event(
@@ -273,13 +275,21 @@ async def test_the_live_index_and_a_rebuild_give_the_same_documents(
         session_id=plain.session_id,
     )
     other = await _turn(store, read=("my seat is 4A",))
+    # A resumed task's turn: its text is melo's card, never the person's words.
+    card = "Where stopped: the task stopped.\nState: my seat is 9C"
+    resumed = await _turn(
+        store, card, kind="task", title="Seats", answer="Seat changed.", composed=True
+    )
     for info, answer in (
         (plain, "Hi."),
         (noted, long_answer),
         (filed, ANSWER),
         (other, ANSWER),
+        (resumed, "Seat changed."),
     ):
+        # As the runner hands the run's typed text to memory.
         typed = info.typed_text if info.attachments else info.user_text
+        typed = "" if info.composed else typed
         memory.after_turn(store, info, typed, answer)
     await memory.drain()
     live = await _documents(memory)
@@ -287,8 +297,11 @@ async def test_the_live_index_and_a_rebuild_give_the_same_documents(
     assert any(f"{ADDED_MARK}\nkeep it short" in text for *_, text in live)
     assert not any("ATTACHED BODY" in text for *_, text in live)
     assert any(len(text) > 1000 and ADDED_MARK in text for *_, text in live)
+    [held] = [text for sid, *_, text in live if sid == resumed.session_id]
+    assert "Seat changed." in held and "Where stopped" not in held
+    assert "9C" not in held
     # Documents keep the id order of an index that is rebuilt; compare the text.
-    assert await memory.reindex(store) == (0, 4)
+    assert await memory.reindex(store) == (0, 5)
     assert await _documents(memory) == live
 
 
