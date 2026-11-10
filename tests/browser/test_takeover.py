@@ -1402,7 +1402,8 @@ async def test_each_press_is_proved_again_and_a_frame_no_longer_the_check_s_asks
     None
 ):
     """#583: a later press (one a kept answer would cover) runs its own proof: the check
-    question and its proof only while the browser still names the provider's frame there."""
+    question and its proof only while the browser still names the provider's frame there.
+    """
     inside = Element("button", "", at=-1, fp="bare")
     driver = Solving(check_page())
     driver.shot_view = View("", "d1", 1000.0, 500.0)
@@ -1419,7 +1420,10 @@ async def test_each_press_is_proved_again_and_a_frame_no_longer_the_check_s_asks
     asked = [
         n for n in asks.names if n.startswith(("browser-check:", "browser-point:"))
     ]
-    assert asked == ["browser-check:https://example.com", "browser-point:https://example.com"]
+    assert asked == [
+        "browser-check:https://example.com",
+        "browser-point:https://example.com",
+    ]
     assert [act.proof for act in driver.acts] == [CHECK, ""]
     await provider.close()
 
@@ -1429,7 +1433,10 @@ async def test_each_press_is_proved_again_and_a_frame_no_longer_the_check_s_asks
     [
         ("https://newassets.hcaptcha.com/captcha/v1/other", True),
         ("https://newassets.hcaptcha.com:443/x", True),
-        ("http://newassets.hcaptcha.com/x", False),  # the same host and port, another scheme
+        (
+            "http://newassets.hcaptcha.com/x",
+            False,
+        ),  # the same host and port, another scheme
         ("https://newassets.hcaptcha.com:8443/x", False),
         ("https://other.hcaptcha.com/x", False),
         ("", False),
@@ -1440,7 +1447,10 @@ def test_the_proof_right_before_the_press_compares_the_whole_origin(
     there: str | None, same: bool
 ) -> None:
     """#583: scheme, host and port, as the first proof (one function, ``sites.same_origin``)."""
-    assert chrome._same_frame(there, "https://newassets.hcaptcha.com/captcha/v1/checkbox") is same
+    assert (
+        chrome._same_frame(there, "https://newassets.hcaptcha.com/captcha/v1/checkbox")
+        is same
+    )
 
 
 async def test_dont_allow_leaves_the_check_to_the_person_and_presses_nothing() -> None:

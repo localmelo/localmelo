@@ -1185,7 +1185,8 @@ async def test_a_task_that_asks_nobody_tells_the_truth_about_a_human_check(
     tmp_path: Path, task: bool
 ) -> None:
     """#583: a task nobody can be asked for (a chore, one melo or another agent started)
-    shows no card even with its chat open, so the model is never told to keep it open."""
+    shows no card even with its chat open, so the model is never told to keep it open.
+    """
     tool = PressesACheck()
     llm = FakeModel([_calls(("press_check", {}, "c1")), _answer("done")])
     (tmp_path / "ws").mkdir()
