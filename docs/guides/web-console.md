@@ -166,7 +166,7 @@ come back to that side chat ([below](#side-chats-start-tasks-too)). Cards and th
 thin line under melo's replies, apart from the talk; only a card that asks you something is a box. A card reads:
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
-- `Did not finish: Fix CI` with why it ended.
+- `Did not finish: Fix CI` with why it ended, in a few words in the page's language (`Could not get an answer from the model server`, `Timed out`); the server's own text stays on the task's page.
 - `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question, and, when one step Auto blocked in its run can still run once, that step (`Blocked: Install software`) with **Allow this step**; after the tap the card reads `Allowed once: the task goes on with this step`.
 - `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows; **Continue** is on its page. A task that failed for another reason stays `Did not finish`.
 - `Needs your approval: Fix CI` with what it asks: the step's one-sentence summary (`Needs your OK: Close the extra Safari tabs`) when it has one. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
@@ -600,17 +600,20 @@ sheet. After **Back to Melo**, the browser's Back button does not bring up a tas
 phone's sheet opens for it, also when the window was made narrower while the task was shown. A waiting task's approval
 card is drawn on its page while the panel shows it, and in the task's card in the chat otherwise, never in both.
 
-The page shows the task's state, the saved recovery card (shown as plain text), the evidence status when there is
-some and the actions its state allows, and the same status row as a chat (a task has no row until it has run). A task
+The page shows the task's state, when it was updated and its folder on one line under the title (`Ready · updated
+6:09 PM · in ~/notes`; the full date and time show on hover), the saved recovery card (shown as plain text), the
+evidence status when there is some and the actions its state allows, and the same status row as a chat (a task has no row until it has run). A task
 that runs or waits to run can be paused (**Pause**) and, in developer mode, given another priority (`P0` to `P4`, each with its meaning;
 P5 is Pause), as the terminal's task list offers. A task that is running stops at its next safe point, so after
 **Pause** the page says `Pausing…` until it is parked, and then `Paused.`, as the Activity row reads; a paused one
 offers **Resume**. In default mode the page leaves out
-the scheduler's words and an empty recovery card; developer mode adds them, with the priority line.
+the scheduler's words and an empty recovery card; developer mode adds them, with the priority line, and lists the
+state, mode, time and folder as rows of the full record instead of the one line.
 
 **All tasks**, at the foot of the panel's Activity tab (once a task exists) and Workers tab (developer mode), opens the list of every
 task in the same place: newest update first, with state, priority (developer mode only), title and time, the earlier
-days too, which Activity does not list. Select one to open it. `#/tasks` in the address opens that list. There is no
+days too, which Activity does not list. Rows are set apart by a thin line; a task that waits for you has an amber box.
+A time reads as the rest of the page writes it (`6:09 PM`, `Yesterday`, a date), with the full stamp on hover. Select one to open it. `#/tasks` in the address opens that list. There is no
 Tasks link in the sidebar, and the task page is not a view of its own.
 
 - A task that ended opens with its answer, set as in a chat, above its facts. A task that
@@ -663,7 +666,8 @@ Tasks link in the sidebar, and the task page is not a view of its own.
 
 - **Its folder.** A task works in the folder of the chat that started it (the
   default for the main chat, a side chat's own) unless your request names one.
-  The list, the panel and the Workers tab name it (`In ~/notes`).
+  The list and the Workers tab name it (`In ~/notes`); a row in the panel names it only when it is not the open
+  chat's folder.
 - **A folder melo may not use.** Outside your home folder, hidden or under
   `~/Library`: the task does not start and never runs somewhere else. Its card
   says why, and **Choose a folder** starts it again in the folder you pick.
@@ -701,7 +705,9 @@ In developer mode, **Details** opens the session's details in the [panel](#the-p
 its tabs: its tools and the grants that hold in it (a side chat shows the main chat's too, open or not), the working
 window and the embedding model, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
-revoked there, and a main chat grant revoked there is revoked everywhere; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
+revoked there, and a main chat grant revoked there is revoked everywhere; the tools view may open a paused session.
+In default mode (a failure's **Show tools** opens it) the tools view names each tool by what it does and whether it is
+allowed (`Read a file · Not allowed`); developer mode adds its name, where it comes from and the model's instructions. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.
 
 <a id="language"></a>
@@ -1065,7 +1071,8 @@ Everything you allow "for this chat" is a grant: a tool, a site, a folder outsid
 - **The card says so:** in the main chat the button that keeps a grant reads **Allow in every chat** (**Allow this folder in every chat**, **Allow Chat everywhere** for another app's window), with a line saying it counts in every chat, the tasks you start and the terminal until you revoke it here. A side chat's card says **this chat**, a task's **this task**.
 - **In a side chat:** the chat's menu marks a grant that came from the main chat, **From the main chat**; removing it takes it away everywhere, and the chat says so. Clearing a side chat's grants (`/approvals forget`) takes back only its own, and says how many of the main chat's still hold there.
 - **Only there:** a side chat's grant holds in that chat. A task's **Allow for this task** holds in that task. A site Auto let the chat read holds in that chat only, even in the main chat.
-- **The page:** two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
+- **The page:** the rule above and the steps that always ask, in two sentences; how typing and sending a form are
+  handled is folded under **Typing and sending a form**. Then two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
 - **`/grants`** lists the same rows with numbers (everywhere first, newest first, then each chat, the one with the newest grant first); `/grants revoke N` takes the N-th back.
 - **Never kept, never listed:** **Allow once**, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).
 
