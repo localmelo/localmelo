@@ -230,6 +230,19 @@ class BaseLLMProvider(ABC):
         """
         return None
 
+    async def context_length(self) -> int | None:
+        """The context length, in tokens, the server runs :attr:`model` with; ``None`` when unknown.
+
+        Never the model's own maximum where the server may run it with less. The
+        agent asks once, before its first run, when nothing sets its context
+        budget (``AgentOptions.context_window``). The default does not know.
+        """
+        return None
+
+    def output_limit(self) -> int | None:
+        """The most output tokens a planning request asks for, when the provider sends a limit; else ``None``."""
+        return None
+
     @abstractmethod
     async def close(self) -> None:
         """Release underlying resources (HTTP connections, etc.)."""

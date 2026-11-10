@@ -8,7 +8,13 @@ import zlib
 from dataclasses import dataclass
 from typing import Any
 
-from localmelo.melo.schema import ImagePart, Message, ToolDef, decode_base64
+from localmelo.melo.schema import (
+    DEFAULT_CONTEXT_CAP,
+    ImagePart,
+    Message,
+    ToolDef,
+    decode_base64,
+)
 
 PROXY_VERSION = "utf8-bytes-v2"
 # Allowance is an estimate, not a guarantee: vision tokenization is model-specific.
@@ -98,11 +104,29 @@ def _image_allowance(image: ImagePart) -> int:
     return min(IMAGE_TOKENS, ((width + 27) // 28) * ((height + 27) // 28))
 
 
+# A budget from the server's length keeps 1/RESERVE_SHARE of the context for the
+# reply when the requests send no output limit, and 1/MARGIN_SHARE for the
+# estimate's error (it is calibrated by the first measured reply).
+RESERVE_SHARE = 8
+MARGIN_SHARE = 64
+# A reported length below this is not a context: no budget comes from it.
+MIN_REPORTED = 4
+# The least a measured ratio (the server's prompt tokens over the proxy) scales
+# the proxy by: 0.6 is five bytes per token, more than a tokenizer packs into
+# ordinary text. A lower ratio more likely comes from a count that leaves part of
+# the prompt out than from the text, and a server that cuts a prompt silently
+# would get one too long; the safety margin and the retry after a refusal for
+# length are the net above this floor.
+MIN_RATIO = 0.6
+
+
 @dataclass(frozen=True)
 class ContextBudget:
     context_window: int
     output_reserve: int
     safety_margin: int
+    # The length the model server reported, when the budget comes from it.
+    reported: int | None = None
 
     def __post_init__(self) -> None:
         values = (self.context_window, self.output_reserve, self.safety_margin)
@@ -114,6 +138,55 @@ class ContextBudget:
     @property
     def input_limit(self) -> int:
         return self.context_window - self.output_reserve - self.safety_margin
+
+    def too_small(self) -> str | None:
+        """What a person reads when the server's own context cannot hold the request; else None.
+
+        Only for a budget that is the server's whole length: a capped one
+        (:data:`~localmelo.melo.schema.DEFAULT_CONTEXT_CAP`) or a set one is not
+        the server's to raise.
+        """
+        if self.reported is None or self.reported != self.context_window:
+            return None
+        return (
+            f"The model server runs this model with a context of {self.reported:,} "
+            "tokens, too small for melo's instructions, tools, this task and room "
+            "for the reply; load the model with a longer context and try again."
+        )
+
+
+def context_budget(
+    window: int | None,
+    reserve: int | None,
+    margin: int | None,
+    *,
+    reported: int | None = None,
+    output_limit: int | None = None,
+) -> ContextBudget | None:
+    """The budget an agent fits its requests to; None fits to the prompt cap's characters.
+
+    A set *window* (with its *reserve* and *margin*: ``AgentOptions`` holds the
+    three together) always wins, smaller or larger than the server says. Else a
+    length the server *reported* gives ``min(reported, DEFAULT_CONTEXT_CAP)``
+    tokens, with:
+
+    - reserve: *output_limit*, the most output tokens a planning request asks
+      for, when the provider sends one; else 1/:data:`RESERVE_SHARE` of the
+      context;
+    - margin: 1/:data:`MARGIN_SHARE` of the context, at least one token;
+    - together at most half the context, so a small one keeps a positive input
+      limit (the reserve gives way).
+    """
+    if window is not None:
+        assert reserve is not None and margin is not None
+        return ContextBudget(window, reserve, margin)
+    if reported is None or reported < MIN_REPORTED:
+        return None
+    size = min(reported, DEFAULT_CONTEXT_CAP)
+    margin = max(1, size // MARGIN_SHARE)
+    reserve = output_limit or size // RESERVE_SHARE
+    reserve = max(1, min(reserve, size // 2 - margin))
+    return ContextBudget(size, reserve, margin, reported=reported)
 
 
 def request_proxy(
@@ -158,6 +231,13 @@ def request_proxy(
     ) // 3 + image_allowance, image_allowance
 
 
+def calibrated(proxy: int, ratio: float | None) -> int:
+    """*proxy* scaled by the measured *ratio*, up or down to :data:`MIN_RATIO`; the proxy without one."""
+    if ratio is None:
+        return proxy
+    return math.ceil(proxy * max(MIN_RATIO, ratio))
+
+
 class RequestAccounting:
     """Per-run calibration and telemetry; no prompt content is retained."""
 
@@ -178,13 +258,13 @@ class RequestAccounting:
     ) -> tuple[dict[str, Any], int]:
         proxy, image_allowance = request_proxy(messages, tools, replay=replay)
         ratio = self.ratios.get((model, kind))
-        estimate = math.ceil(proxy * max(1.0, ratio)) if ratio is not None else proxy
+        estimate = calibrated(proxy, ratio)
         record = {
             "kind": kind,
             "model": model,
             "attempt": attempt,
             "proxy_version": PROXY_VERSION,
-            "source": "calibrated" if ratio is not None and ratio > 1 else "proxy",
+            "source": "calibrated" if estimate != proxy else "proxy",
             "estimate": estimate,
             "measured_prompt_tokens": None,
             "input_limit": self.budget.input_limit,

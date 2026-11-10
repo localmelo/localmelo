@@ -44,6 +44,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, RunResult
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.tests.fixtures.chat_routes import chat_only
 
 # Set to "1" to write the golden files instead of comparing them.
 RECORD_ENV = "LOCALMELO_RECORD_GOLDENS"
@@ -434,7 +435,7 @@ async def record_run(
     memory_dir = str(tmp_path / "memory")
     server = ScriptedServer(_bodies(provider, scenario.replies))
     agent = Agent(
-        llm=_llm(provider, httpx.MockTransport(server.handler)),
+        llm=_llm(provider, httpx.MockTransport(chat_only(server.handler))),
         options=AgentOptions(memory_dir=memory_dir, **scenario.options),
     )
     try:

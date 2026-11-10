@@ -21,10 +21,17 @@ SHORT_TERM_MAX = 20
 # retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
+# The largest context a budget from the model server's own length uses (when
+# nothing sets AgentOptions.context_window). Above it a personal computer pays
+# twice for every token: the server's prompt cache holds it in memory, and once
+# that cache is lost the next reply waits for the whole prompt to be read again.
+# A person who wants more sets ``[agent] context_window``.
+DEFAULT_CONTEXT_CAP = 131072
 # The working window's message cap (``window_messages``): any value in this
-# range. The default is LOCAL_WINDOW_MESSAGES, except on a cloud vendor's
-# backend, where the CLI, the console and the gateway keep SHORT_TERM_MAX (see
-# ``support.config.default_window_messages``).
+# range. Unset, it is LOCAL_WINDOW_MESSAGES, or WINDOW_MESSAGES_MAX while a token
+# budget is in force, so that the budget's fit is the limit that acts; a cloud
+# vendor's backend keeps SHORT_TERM_MAX in the CLI, the console and the gateway
+# (see ``support.config.default_window_messages``).
 LOCAL_WINDOW_MESSAGES = 64
 WINDOW_MESSAGES_MIN = 8
 WINDOW_MESSAGES_MAX = 256

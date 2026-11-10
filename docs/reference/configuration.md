@@ -46,7 +46,7 @@ before the run with a plain message (see
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` takes `auto` or `thinking` instead. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
-| `context_window`, `output_reserve`, `safety_margin` | `[agent]` | not set | Opt-in context request accounting; all three positive integers must resolve, with a positive input limit. See [Context accounting](#context-accounting). |
+| `context_window`, `output_reserve`, `safety_margin` | `[agent]` | not set: the model server's context | An override of the context budget; all three positive integers must resolve, with a positive input limit. Unset, the budget is the context length the model server reports, up to 131,072 tokens. See [Context accounting](#context-accounting). |
 | `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the saved default for direct runs, the interactive UI and API v2 console sessions. See [Reasoning](#reasoning). |
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
@@ -64,7 +64,7 @@ before the run with a plain message (see
 | `lean_output` | `[agent]` | `false` | Experimental. `true` makes a task given on the command line ask for fewer output tokens; there is no flag, and `-X agent.lean_output=true` sets it for one run. The interactive UI and the gateway ignore it. See [Context accounting](#context-accounting). |
 | `tool_images` | `[agent]` | `"auto"` | Whether the pictures tools return reach the model: `on` sends the newest ones as `image_url` parts in each planning request, `off` names them only, and `auto` is `on` when the server says the model reads images or, for a hosted service, when its preset names the model as reading images (see [Hosted models](../guides/hosted-models.md#pictures)). A server says it in the model's own entry of `GET /v1/models` (`vision` true, `image` among `input_modalities` or `vision` among `capabilities`; `vision` false, or `input_modalities` without `image`, says no), else in oMLX's `model_type` `vlm`, else in Ollama's `vision` capability. When a picture is not sent (`off`, or a server that does not say), its tool message ends with a line that tells the model it cannot see the picture. There is no flag; `-X agent.tool_images=on` sets it for one run. See [Pictures that tools return](../guides/tools-mcp.md#pictures-that-tools-return). |
 | `tool_images_keep`, `tool_images_retire` | `[agent]` | `3`, `2` | With `tool_images` on: the newest `tool_images_keep` pictures keep their pixels, and the oldest `tool_images_retire` lose them together once more arrive, so a request carries 3 to 4 pictures by default. |
-| `window_messages` | `[agent]` | `64` on a local server or a URL, `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
+| `window_messages` | `[agent]` | `64` on a local server or a URL (`256` with a token budget), `20` on a cloud vendor | The working window's message cap, 8 to 256; `20` sends the earlier cap. See [Context accounting](#context-accounting). |
 | `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](../concepts/memory.md#recall-in-the-loop). |
 | `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
@@ -309,11 +309,25 @@ put secret values in TOML.
 
 ## Context accounting
 
-Set `[agent] context_window`, `output_reserve` and `safety_margin` to positive integers; the window
-must be greater than their sum. Direct and interactive flags override individual values; API v2
-console sessions use the config.
+Every run fits its planning and reflection requests to a token budget when it has one. With
+nothing set, the budget comes from the model server: before its first run each chat, task and
+direct run asks the server once for the context length it runs the model with (the model's entry
+in `GET /v1/models`, oMLX's model status, or the context Ollama loaded the running model with)
+and uses up to 131,072 tokens of it. Above that size a personal computer pays twice for every
+token: the server's prompt cache holds it in memory, and when the cache is lost the next reply
+waits for the whole prompt to be read again. Of that context, the reply keeps the output limit the
+requests send (`max_tokens`, or Ollama's `num_predict`, in `extra_body`), else one eighth, and the
+estimate keeps one sixty-fourth; together never more than half, so a small context keeps room for
+the request. A server that reports no length, or cannot be reached, leaves the 100,000-character
+cap as before, and the next chat or task asks again. A context too small for melo's instructions,
+tools and the task ends the run with a sentence that names the server's length.
 
-Legacy `/v1` is unchanged. When unset, no accounting is recorded.
+To override the budget, set `[agent] context_window`, `output_reserve` and `safety_margin` to
+positive integers; the window must be greater than their sum. A budget you set always wins, also
+one larger than the server's (that is your risk). Direct and interactive flags override individual
+values; API v2 console sessions and their tasks use the config.
+
+Legacy `/v1` sessions read the config's budget too.
 
 For each planning or reflection attempt, `utf8-bytes-v2` estimates the assembled message and tool
 schema representation at UTF-8 bytes divided by three, rounded up. Each image adds
@@ -321,8 +335,9 @@ schema representation at UTF-8 bytes divided by three, rounded up. Each image ad
 unknown dimensions use the cap.
 
 The last positive prompt-token count for the same model and request
-kind calibrates the proxy upward; missing or zero usage resets that calibration. The proxy is an
-estimate, not a bound: templates and vision models differ.
+kind calibrates the proxy, up or down (never below 0.6 of it, five bytes per token), so a budget
+is used up to what the server counts; missing or zero usage, or a refusal, resets that
+calibration. The proxy is an estimate, not a bound: templates and vision models differ.
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
@@ -336,8 +351,9 @@ most one smaller request retry without re-running tools; other provider errors k
 retry policy.
 
 Events and JSON results report the estimate, actual prompt count if available, and
-pruning counts without storing prompt text. The output reserve is not a provider generation cap;
-the independent character guard still applies.
+pruning counts without storing prompt text, and `/status` shows how full the context is. The
+output reserve is not a provider generation cap; the 100,000-character guard applies only to a
+run without a token budget.
 
 Every direct, interactive and API v2 console run sends a fixed system prefix
 (`fixed-prefix-v2`). It snapshots the local date and UTC offset at each run's start, including across
@@ -416,8 +432,10 @@ before `window_eviction` drops some. A cloud vendor's backend keeps 20 for now: 
 caching, a longer window costs input tokens on every request.
 
 A value you set stays as you set
-it, on any backend.
-With a large cap, the prompt-size fit does the dropping: past the 100,000-character cap it shortens
+it, on any backend. Unset on a local server, it is 256 while a token budget is in force (see
+[Context accounting](#context-accounting)), so the budget's fit is the limit that drops history.
+With a large cap, the prompt-size fit does the dropping: past its limit (the token budget, or the
+100,000-character cap) it shortens
 old tool results, then drops old thinking, old recall and whole units (a tool call with its results,
 never split), down to 70% of the cap, so the history holds for several steps.
 
@@ -439,7 +457,8 @@ for `window_eviction` and for `window_messages`; a file without the key has the 
 saving writes a key only when it differs from the default (`window_messages` is written
 whenever it is set). `melo --developer --help` lists `--window-eviction` under Experimental.
 API v2 console sessions, console workers and the legacy `/v1` sessions read these two keys
-from the config; the legacy `/v1` API does not read the other `[agent]` keys or `[retrieval]`.
+from the config, and the context budget keys; the legacy `/v1` API does not read the other `[agent]`
+keys or `[retrieval]`.
 
 Five settings that decided between layouts were removed, each with its option: `[agent]
 fixed_prefix`, `reflect_tool_guard`, `cache_layout` and `reflection_gate`, and `[memory]

@@ -137,6 +137,15 @@ class WorkingMemory:
         self.on_drop: Callable[[list[Message]], None] | None = None
 
     @property
+    def max_len(self) -> int:
+        """The most messages the window keeps."""
+        return self._max_len
+
+    def widen(self, max_len: int) -> None:
+        """Keep up to *max_len* messages from now on; a smaller cap changes nothing."""
+        self._max_len = max(self._max_len, max_len)
+
+    @property
     def empty_prefix(self) -> bool:
         """Whether an empty reply's label is matched by prefix (compress modes)."""
         return self._empty_prefix

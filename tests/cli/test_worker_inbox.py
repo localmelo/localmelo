@@ -7,6 +7,7 @@ import pytest
 
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.support.cli.worker_inbox import MAX_INBOX_BYTES, Inbox, InboxError
+from localmelo.tests.fixtures.chat_routes import chat_only
 
 
 def test_missing_then_complete_messages_and_partial_utf8(tmp_path: Path) -> None:
@@ -231,7 +232,9 @@ async def test_inbox_batch_that_cannot_fit_is_not_acknowledged(
     path = tmp_path / "inbox"
     path.write_bytes((b"x" * 11000 + b"\n") * 10)
     events: list[AgentEvent] = []
-    transport = httpx.MockTransport(lambda request: pytest.fail("model must not run"))
+    transport = httpx.MockTransport(
+        chat_only(lambda request: pytest.fail("model must not run"))
+    )
     agent = Agent(
         llm=OpenAICompatLLM(
             base_url="http://llm.test/v1", model="stub", transport=transport
@@ -265,7 +268,7 @@ async def test_inbox_is_not_acknowledged_if_context_budget_rejects_request(
             base_url="http://llm.test/v1",
             model="stub",
             transport=httpx.MockTransport(
-                lambda request: pytest.fail("model must not run")
+                chat_only(lambda request: pytest.fail("model must not run"))
             ),
         ),
         options=AgentOptions(
@@ -594,7 +597,7 @@ def test_invalid_inbox_is_a_clean_setup_error(
             base_url="http://llm.test/v1",
             model="stub",
             transport=httpx.MockTransport(
-                lambda request: pytest.fail("model must not run")
+                chat_only(lambda request: pytest.fail("model must not run"))
             ),
         ),
         options=AgentOptions(memory=False),

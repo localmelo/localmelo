@@ -17,6 +17,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.schema import Message, ToolInfo
+from localmelo.support import config
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions import display
 from localmelo.support.sessions.store import TurnInfo
@@ -161,11 +162,14 @@ def add_routes(app: FastAPI, console: Console) -> None:
         entry = console.sessions.get(session_id)
         messages: list[Message] = []
         # Open sessions show their agent's cap; closed ones, the setting's cap.
-        window_max = console.cfg.agent.window_for(console.cfg.chat_backend)
+        chat_backend = console.cfg.chat_backend
+        window_max = console.cfg.agent.window_for(chat_backend) or (
+            config.default_window_messages(chat_backend)
+        )
         if entry is not None:
             if entry.agent is not None:
                 messages = entry.agent.conversation()
-                window_max = entry.agent.options.window_messages
+                window_max = entry.agent.window_messages
             elif entry.kept is not None:
                 messages = entry.kept
         backend = getattr(console.cfg, "embedding_backend", "") or "none"

@@ -27,6 +27,7 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.runner import RESUME_BUDGET_CHARS, SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStore
+from localmelo.tests.fixtures.chat_routes import chat_only
 
 from .helpers import (
     DAY,
@@ -191,7 +192,7 @@ def recording_transport(
         bodies.append(request.content)
         return httpx.Response(200, json=replies.pop(0))
 
-    return httpx.MockTransport(handle)
+    return httpx.MockTransport(chat_only(handle))
 
 
 def openai_reply(

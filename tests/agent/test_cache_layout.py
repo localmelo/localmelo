@@ -310,7 +310,7 @@ async def test_the_boundary_mode_drops_the_attempt_and_keeps_only_the_block() ->
 
 
 def test_window_messages_is_validated() -> None:
-    assert AgentOptions().window_messages == 64
+    assert AgentOptions().window_messages is None  # the agent's default
     for bad in (7, 257):
         with pytest.raises(ValueError):
             AgentOptions(window_messages=bad)
