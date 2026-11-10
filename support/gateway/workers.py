@@ -673,6 +673,7 @@ class TaskWorkers:
         self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
+        self._recovered = False
         # The main chat a task created here belongs to (its ``front_id``).
         self.front_id: str | None = None
         # The HOME folders made for running tasks' tools (see task_home).
@@ -712,9 +713,16 @@ class TaskWorkers:
         if not self._opened:
             await self.tasks.open()
             try:
-                await StartupRecovery(
-                    self.store, self.tasks, verifier=self._process_verifier
-                ).run()
+                if not self._recovered:
+                    # Once per process: a retry of open after a failure below
+                    # finds the tasks it started live, not cut off.
+                    await StartupRecovery(
+                        self.store,
+                        self.tasks,
+                        verifier=self._process_verifier,
+                        workspace_valid=self._resume_workspace,
+                    ).run()
+                    self._recovered = True
                 self._restart_fenced = set()
                 self._eligible.difference_update(self._restart_first)
                 self._restart_first.clear()
@@ -1542,6 +1550,8 @@ class TaskWorkers:
             self._ready[task_id].clear()
         if state == "stop" and task_id in self._runs:
             self._stopping.add(task_id)
+            # The person's Stop wins over a gateway stop that cut the run off.
+            self._cut.discard(task_id)
             self._ready[task_id].clear()
             runner = self._runners.get(task_id)
             if runner is not None:
@@ -2560,8 +2570,10 @@ class TaskWorkers:
     ) -> AsyncIterator[None]:
         """Name a call that can change something for as long as it runs.
 
-        The row is closed however the call returns, a stop's cancel included;
-        a close that fails leaves it open, which a restart reads as in flight.
+        The row is closed however the call returns, except when the gateway's
+        stop cuts the call off: it may be half done, so its row stays and the
+        restart leaves the task waiting, as it does after a kill. A close that
+        fails leaves the row too.
         """
         recovery = RecoveryStore(self.store)
         call_id = uuid.uuid4().hex
@@ -2571,18 +2583,24 @@ class TaskWorkers:
                 task_id, execution_id=execution_id, call_id=call_id, tool=tool
             )
 
+        cut = False
         try:
             await self._evidence(task_id, write)
-            yield
-        finally:
             try:
-                await asyncio.shield(
-                    recovery.close_call(
-                        task_id, execution_id=execution_id, call_id=call_id
+                yield
+            except asyncio.CancelledError:
+                cut = task_id in self._cut
+                raise
+        finally:
+            if not cut:
+                try:
+                    await asyncio.shield(
+                        recovery.close_call(
+                            task_id, execution_id=execution_id, call_id=call_id
+                        )
                     )
-                )
-            except Exception:
-                log.warning("Task %s: a call's record stays open", task_id)
+                except Exception:
+                    log.warning("Task %s: a call's record stays open", task_id)
 
     async def _capture_process(self, task_id: str, execution_id: str, pid: int) -> None:
         try:
@@ -3099,25 +3117,14 @@ class TaskWorkers:
                         current = await self.tasks.get_task(task_id)
                         if current.state not in TERMINAL_PHASES:
                             card = current.card or await self._park_card(task_id)
-                            generation, previous = await self.tasks.park_identity(
-                                task_id
-                            )
-                            operation_id = uuid.uuid4().hex
                             assert execution_id is not None
-                            recovery = RecoveryStore(self.store)
-                            await recovery.prepare(
+                            await RecoveryStore(self.store).interrupt(
                                 task_id,
-                                operation_id=operation_id,
                                 execution_id=execution_id,
-                                expected_generation=generation,
-                                expected_operation_id=previous,
-                                outcome="interrupted",
                                 card=card,
                                 reason="launch failed before the turn; safety review required",
                                 crash=True,
-                                unsafe_resume=True,
                             )
-                            await recovery.commit(task_id, operation_id=operation_id)
                             self.gate.update_task(
                                 task_id, phase="interrupted", paused=True
                             )
@@ -3246,21 +3253,13 @@ class TaskWorkers:
         provenance = await recovery.provenance(task_id)
         if provenance.execution_id is None:
             return  # no execution to name: the next start treats it as a crash
-        generation, previous = await self.tasks.park_identity(task_id)
-        operation_id = uuid.uuid4().hex
-        await recovery.prepare(
+        await recovery.interrupt(
             task_id,
-            operation_id=operation_id,
             execution_id=provenance.execution_id,
-            expected_generation=generation,
-            expected_operation_id=previous,
-            outcome="interrupted",
             card=current.card,
             reason=STOPPED_REASON,
             crash=False,
-            unsafe_resume=True,
         )
-        await recovery.commit(task_id, operation_id=operation_id)
 
     def _card_watch(self, task_id: str) -> CardWatch:
         """Who sees the card Auto shows for *task_id*, and how long it waits (#465).

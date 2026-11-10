@@ -271,7 +271,11 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _resume_request(
-    generation: int | None, previous: str | None, actor: str, next_turn: int
+    generation: int | None,
+    previous: str | None,
+    actor: str,
+    next_turn: int,
+    at: float | None = None,
 ) -> str:
     return json.dumps(
         {
@@ -280,6 +284,8 @@ def _resume_request(
             "previous": previous,
             "actor": actor,
             "next_turn": next_turn,
+            # When the start continued the task by itself (its page shows it).
+            **({} if at is None else {"at": at}),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -712,27 +718,24 @@ class TaskStore:
         """When the start last continued *task_id* by itself, or ``None``.
 
         Only while that is the newest Resume of the task: one the person made
-        since is not a restart's.
+        since is not a restart's. One read of the newest Resume's receipt.
         """
-        async with self._store.component_transaction("task_continued_at") as conn:
+        async with self._store.component_read() as conn:
             row = await _first(
                 conn,
-                "SELECT event FROM events WHERE session_id = ? AND type = 'sched.resumed' "
-                "ORDER BY id DESC LIMIT 1",
+                "SELECT request FROM recovery_operations WHERE task_id = ? "
+                "AND kind = 'resume' AND phase = 'committed' "
+                "ORDER BY rowid DESC LIMIT 1",
                 (task_id,),
             )
-        if row is None:
+        try:
+            request = json.loads(row[0]) if row is not None else None
+        except (TypeError, ValueError):
             return None
-        event = json.loads(row[0])
-        data = event.get("data")
-        ts = event.get("ts")
-        if (
-            isinstance(data, dict)
-            and data.get("reason") == RESTART
-            and isinstance(ts, int | float)
-        ):
-            return float(ts)
-        return None
+        if not isinstance(request, dict) or request.get("actor") != RESTART:
+            return None
+        at = request.get("at")
+        return float(at) if isinstance(at, int | float) else None
 
     async def resume_waiting_turn(self, task_id: str) -> bool:
         """Whether the newest committed Resume still waits for its first turn."""
@@ -1647,6 +1650,28 @@ class TaskStore:
             if _guard and await self._is_retry(conn, current, _guard[2], request or {}):
                 return current
             if current.state == "parked" and current.level == 5 and not _guard:
+                if actor != "scheduler":
+                    # Parked already, by the scheduler perhaps: the person's
+                    # pause is still written, so a restart never continues it.
+                    row = await _first(
+                        conn,
+                        "SELECT generation FROM park_priority WHERE task_id = ?",
+                        (task_id,),
+                    )
+                    await self._store.append_component_event(
+                        conn,
+                        events,
+                        task_id,
+                        "sched.pause_requested",
+                        {
+                            "generation": row[0] if row else None,
+                            "operation_id": uuid.uuid4().hex,
+                            "pending_operation_id": None,
+                            "pause_pending": False,
+                            "task_request": {"kind": "pause", "actor": actor},
+                            "state": "parked",
+                        },
+                    )
                 return current
             if _guard and current.state not in ("queued", "running", "held"):
                 raise TaskStoreError("task cannot accept a pending pause")
@@ -2010,6 +2035,7 @@ class TaskStore:
                 expected_operation_id,
                 actor,
                 await _next_turn_number(conn, task_id),
+                at=now if actor == RESTART else None,
             )
             await conn.execute(
                 "INSERT INTO recovery_operations VALUES "

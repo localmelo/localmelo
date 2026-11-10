@@ -1,6 +1,7 @@
 """A task cut off by a restart continues by itself when nothing is in flight."""
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,11 @@ from typing import Any, cast
 
 import pytest
 
+from localmelo.melo.agent import Agent
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
+from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway import workers as worker_module
 from localmelo.support.gateway.chat_gate import ChatGate
@@ -24,6 +30,7 @@ from localmelo.support.gateway.startup_recovery import (
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import TaskStore
 from localmelo.support.gateway.workers import TaskWorkers
+from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import Cause, SessionStore
 from localmelo.tests.gateway.conftest import seed_process
@@ -63,6 +70,13 @@ from localmelo.tests.sessions.helpers import core_event, run_result
         (
             RestartFacts(state="interrupted", crashed_before=True, in_flight=False),
             "continue",
+        ),
+        # A run that ended with no complete record of how is not run again.
+        (RestartFacts(state="running", crash=True, finished=False), "wait"),
+        # A folder missing at start waits; it does not end the task.
+        (
+            RestartFacts(state="interrupted", in_flight=False, workspace_valid=False),
+            "wait",
         ),
     ],
 )
@@ -220,11 +234,16 @@ async def test_one_bad_record_costs_that_task_and_a_retry_continues_none_twice(
 
 
 class _Runs:
-    """What the fake runner saw: each turn's text, and when one started."""
+    """What the fake runner saw: each turn's text, and when one started.
+
+    With *in_call* the held reply comes inside a call that can change
+    something.
+    """
 
     def __init__(self) -> None:
         self.texts: list[str] = []
         self.started = asyncio.Event()
+        self.in_call = False
 
 
 def _fakes(monkeypatch: pytest.MonkeyPatch, runs: _Runs) -> None:
@@ -268,10 +287,25 @@ def _fakes(monkeypatch: pytest.MonkeyPatch, runs: _Runs) -> None:
                 holder="worker",
             )
             runs.texts.append(text)
-            runs.started.set()
+            if not runs.in_call:
+                runs.started.set()
+
+        async def held(self) -> None:
+            if runs.in_call:
+                entry = TOOL_ENTRY.get()
+                assert entry is not None
+                async with entry("shell_exec"):
+                    runs.started.set()
+                    await asyncio.Event().wait()
+            await asyncio.Event().wait()
 
         async def wait(self) -> SimpleNamespace:
-            await self.ended.wait()  # the model's reply is held until a stop
+            # The model's reply is held until a stop, which cancels what the
+            # run was in the middle of.
+            held = asyncio.create_task(self.held())
+            await self.ended.wait()
+            held.cancel()
+            await asyncio.gather(held, return_exceptions=True)
             await self.store.finish_turn(
                 self.task_id,
                 self.turn,
@@ -362,20 +396,125 @@ async def test_a_clean_stop_then_a_start_continues_the_task(
     assert (await again.get(task_id))["continued_at"] is not None
 
 
+async def test_a_stop_in_the_middle_of_a_changing_call_waits_as_a_kill_does(
+    gateway: tuple[Callable[[], TaskWorkers], Path, _Runs],
+) -> None:
+    start, workspace, runs = gateway
+    runs.in_call = True
+    first = start()
+    task_id = await _a_running_task(first, workspace, runs)
+    await first.aclose()
+    # The call may be half done: its record stays.
+    assert await RecoveryStore(first.store).open_calls(
+        task_id, execution_id=str(await _execution(first, task_id))
+    ) == ["shell_exec"]
+    again = start()
+    await again.open()
+    record = await again.tasks.get_task(task_id)
+    assert record.state == "interrupted" and record.wait_reason == IN_FLIGHT_REASON
+    assert not again.is_active(task_id) and len(runs.texts) == 1
+
+
+async def test_a_restart_never_carries_an_approval_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+
+    class Writes(BaseLLMProvider):
+        """A model that asks to write a file until it exists."""
+
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            if (workspace / "out.txt").exists():
+                return Message(role="assistant", content="written")
+            call = ToolCall(
+                tool_name="file_write",
+                arguments={"path": str(workspace / "out.txt"), "content": "x"},
+                id="write-call",
+            )
+            return Message(role="assistant", content="", tool_calls=[call])
+
+        async def close(self) -> None:
+            pass
+
+    async def build(**kwargs: Any) -> Agent:
+        agent = Agent(
+            llm=kwargs["wrap_llm"](Writes()),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        return agent
+
+    monkeypatch.setattr(worker_module, "build_session_agent", build)
+    made: list[tuple[TaskWorkers, ChatGate, SessionHub]] = []
+
+    async def opened() -> TaskWorkers:
+        gate, hub = ChatGate(policy="off"), SessionHub(store)
+        workers = TaskWorkers(store, gate, lambda: config, hub)
+        made.append((workers, gate, hub))
+        await workers.open()
+        return workers
+
+    try:
+        first = await opened()
+        body, _ = await first.create(
+            {"objective": "write", "workspace": str(workspace)}
+        )
+        task_id = str(body["task_id"])
+        [before] = [r.request_id for r in await _card(first, task_id)]
+        await first.aclose()
+        again = await opened()
+        # The continued run asks again, with a card of its own.
+        [asked] = [r.request_id for r in await _card(again, task_id)]
+        assert asked != before
+        # An answer for the card from before the stop allows nothing.
+        allow = ApprovalDecision(True, origin="user")
+        assert again.broker.answer(before, allow) == "unknown"
+        assert [r.request_id for r in again.broker.pending(task_id)] == [asked]
+        assert not (workspace / "out.txt").exists()
+    finally:
+        for workers, gate, hub in made:
+            await workers.aclose()
+            await hub.aclose()
+            await gate.close()
+        await store.aclose()
+
+
 async def test_the_persons_stop_survives_a_restart(
     gateway: tuple[Callable[[], TaskWorkers], Path, _Runs],
 ) -> None:
     start, workspace, runs = gateway
     first = start()
     task_id = await _a_running_task(first, workspace, runs)
-    await first.update(task_id, state="stop")
-    async with asyncio.timeout(5):
-        while task_id in first._runs:
-            await asyncio.sleep(0.01)
-    await first.aclose()
+    # The person's Stop lands while the gateway's stop has cut the run off.
+    closing = asyncio.ensure_future(first.aclose())
+    await asyncio.sleep(0)
+    assert task_id in first._cut and task_id in first._runs
+    with contextlib.suppress(Exception):  # the closing gateway may refuse the rest
+        await first.update(task_id, state="stop")
+    await closing
     assert (await first.tasks.get_task(task_id)).state == "cancelled"
     again = start()
     await again.open()
     assert (await again.tasks.get_task(task_id)).state == "cancelled"
     assert not again.is_active(task_id)
     assert len(runs.texts) == 1  # nothing ran again
+
+
+async def _execution(workers: TaskWorkers, task_id: str) -> str | None:
+    return (await RecoveryStore(workers.store).provenance(task_id)).execution_id
+
+
+async def _card(workers: TaskWorkers, task_id: str) -> list[ApprovalRequest]:
+    """The approval cards of *task_id* that wait, once there is one."""
+    async with asyncio.timeout(5):
+        while not workers.broker.pending(task_id):
+            await asyncio.sleep(0.01)
+    return workers.broker.pending(task_id)

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from localmelo.support.gateway.task_store import (
     TaskConflictError,
     TaskNotFoundError,
+    TaskStore,
     TaskStoreError,
     compare_park_identity,
 )
@@ -443,6 +445,36 @@ class RecoveryStore:
             )
         return True
 
+    async def interrupt(
+        self,
+        task_id: str,
+        *,
+        execution_id: str,
+        card: str,
+        reason: str,
+        crash: bool,
+        outcome: str = "interrupted",
+    ) -> None:
+        """Write *execution_id*'s run down as *outcome*: prepare and commit, against the identity now.
+
+        A transition between the read of the identity and the write conflicts.
+        """
+        generation, previous = await TaskStore(self.store).park_identity(task_id)
+        operation_id = uuid.uuid4().hex
+        await self.prepare(
+            task_id,
+            operation_id=operation_id,
+            execution_id=execution_id,
+            expected_generation=generation,
+            expected_operation_id=previous,
+            outcome=outcome,
+            card=card,
+            reason=reason,
+            crash=crash,
+            unsafe_resume=True,
+        )
+        await self.commit(task_id, operation_id=operation_id)
+
     async def commit(self, task_id: str, *, operation_id: str) -> None:
         """Commit a prepared task outcome, receipt and crash count together."""
         _text(operation_id, "operation_id")
@@ -583,7 +615,7 @@ class RecoveryStore:
         expected_generation: int | None,
         expected_operation_id: str | None,
     ) -> None:
-        """Irreversibly mark this execution incomplete before an untracked call."""
+        """Irreversibly mark this execution incomplete: one of its processes has no record."""
         await self._capture_change(
             task_id, execution_id, expected_generation, expected_operation_id
         )

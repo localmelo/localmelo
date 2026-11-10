@@ -874,9 +874,12 @@ nothing in flight (no call that can change something open, every recorded
 process group verified gone) continues by itself: it is `queued` again with a
 resumed turn, the same id, level and rank, and one `sched.resumed` event with
 `data.reason` `"restart"`; its task JSON then has `continued_at`, the time of
-that event (`null` otherwise). A task with something in flight, or cut off by a
-crash twice in a row with no finished turn between, stays `interrupted` with its
-reason and waits for the person; a person's pause stays paused. The decision
+that continue (`null` otherwise, or once the person resumes it). A task with
+something in flight (a stop in the middle of a call that can change something
+included), whose folder is missing at start, or cut off by a crash for the
+second time since it last ended `done` or `failed` (`crashes` is reset then),
+stays `interrupted` with its reason and waits for the person; a person's pause
+stays paused. A task's turns carry `client_request_id`, its execution id. The decision
 table is in the [scheduler reference](scheduler.md). Every create records a
 durable never-started proof inside the create transaction, before any launch;
 a runnable queued task with that proof may run once after a start fence.

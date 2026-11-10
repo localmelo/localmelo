@@ -192,8 +192,8 @@ async def _shell_exec(
     return text
 
 
-def _require_incomplete_entry() -> None:
-    """Refuse a launch whose entry marker may not have committed."""
+def _require_recorded_call() -> None:
+    """Refuse a launch outside a call whose record committed."""
     if not _ENTRY_MARKED.get():
         raise RuntimeError(
             "execution evidence could not be recorded; the call was not run"
@@ -205,7 +205,7 @@ async def _spawn(argv: list[str], **kwargs: Any) -> asyncio.subprocess.Process:
 
     A run that records its processes (``PROCESS_RECORD``) releases the child
     only once its record is written. Where the gate cannot run, the child
-    starts only inside a recorded call (see :func:`_require_incomplete_entry`)
+    starts only inside a recorded call (see :func:`_require_recorded_call`)
     and is recorded once it runs: the record says what it is, or that this
     execution has a process without one. A child it cannot record is killed.
     """
@@ -217,7 +217,7 @@ async def _spawn(argv: list[str], **kwargs: Any) -> asyncio.subprocess.Process:
             pass
     if record is not None:
         # Only Executor can establish that the call's record committed.
-        _require_incomplete_entry()
+        _require_recorded_call()
     proc = await asyncio.create_subprocess_exec(*argv, start_new_session=True, **kwargs)
     if record is not None:
         try:

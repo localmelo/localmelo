@@ -110,7 +110,7 @@
   "app.quit.stop": "退出",
   "app.quit.stopsOne": "退出会停止 {what}。",
   "app.quit.tasks": "{n} 个任务",
-  "app.quit.tasksContinue": "{what}会在 localmelo 再次打开时继续。",
+  "app.quit.tasksContinue": "{what}会在 localmelo 再次打开时继续；在某一步中途被停下的任务会等你处理。",
   "app.quit.terminal": "{n} 个终端对话",
   "app.quit.unknown": "无法检查正在运行什么。{generic}",
   "app.start.label": "正在启动 localmelo",

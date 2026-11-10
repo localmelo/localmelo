@@ -1272,6 +1272,12 @@ class SessionStore:
                 yield conn
 
     @contextlib.asynccontextmanager
+    async def component_read(self) -> AsyncIterator[aiosqlite.Connection]:
+        """The connection for a component's reads: no transaction, nothing written."""
+        async with self._lock:
+            yield await self._ready()
+
+    @contextlib.asynccontextmanager
     async def component_event_transaction(
         self, label: str
     ) -> AsyncIterator[tuple[aiosqlite.Connection, list[StoredEvent]]]:

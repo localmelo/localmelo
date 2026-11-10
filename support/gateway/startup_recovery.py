@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -46,10 +46,14 @@ STOPPED_REASON = "localmelo stopped; this task continues when it opens again"
 IN_FLIGHT_REASON = "gateway restarted; earlier effects or processes may still be active"
 # The person asked for a pause that had not settled when localmelo stopped.
 PAUSED_REASON = "paused before localmelo stopped; resume it to go on"
-# The run was cut off by a crash the time before too, with no turn finished since.
+# The run was cut off by a crash the time before too, since it last ended done or failed.
 CRASHED_REASON = (
     "localmelo stopped unexpectedly twice while this task ran; "
     "check its work before continuing it"
+)
+# The task's folder could not be used at start (a disk not mounted yet).
+WORKSPACE_REASON = (
+    "its folder was not there when localmelo started; resume it once it is back"
 )
 
 Outcome = Literal["keep", "reconcile", "continue", "wait"]
@@ -65,8 +69,11 @@ class RestartFacts:
     still pending), ``settled`` when it parked with the card the park wrote.
     ``finished``: its last run finished completely. ``crash``: it was found
     live, so no stop wrote it down.
-    ``crashed_before``: a crash cut it before, with no finished turn since.
-    ``in_flight``: something may be half done (see ``resume_evidence.in_flight``).
+    ``crashed_before``: a crash cut it before, since it last ended ``done`` or
+    ``failed`` (the ``crashes`` count).
+    ``in_flight``: something may be half done (see ``resume_evidence.in_flight``),
+    or its last turn ended without a complete record of how.
+    ``workspace_valid``: its folder can be used now.
     """
 
     state: str
@@ -79,6 +86,7 @@ class RestartFacts:
     crash: bool = False
     crashed_before: bool = False
     in_flight: bool = True
+    workspace_valid: bool = True
 
 
 def restart_outcome(facts: RestartFacts) -> Outcome:
@@ -92,7 +100,11 @@ def restart_outcome(facts: RestartFacts) -> Outcome:
     if facts.by_person:
         # The person paused it, or asked to: it never goes on by itself.
         return "keep" if facts.settled else "wait"
-    if facts.in_flight or (facts.crash and facts.crashed_before):
+    if (
+        facts.in_flight
+        or not facts.workspace_valid
+        or (facts.crash and facts.crashed_before)
+    ):
         return "wait"
     return "continue"
 
@@ -119,11 +131,13 @@ class StartupRecovery:
         tasks: TaskStore,
         *,
         verifier: Callable[[Process, str], bool] = gone,
+        workspace_valid: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         self.store = store
         self.tasks = tasks
         self.recovery = RecoveryStore(store)
         self.verifier = verifier
+        self.workspace_valid = workspace_valid
 
     async def run(self) -> None:
         """Decide every open task; one that cannot be decided is fenced.
@@ -213,12 +227,15 @@ class StartupRecovery:
             and data.get("card") == task.card
         )
         turns = await self.store.list_turns(task.task_id, limit=1)
-        finished = (
+        # The run of this execution ended by itself; finished when its record
+        # is complete. One ended without it (a lost batch) is not run again.
+        ended = (
             task.state in {"running", "held"}
             and bool(turns)
             and provenance.execution_id is not None
-            and _finished(turns[0], events, provenance.execution_id)
+            and _ended(turns[0], provenance.execution_id)
         )
+        finished = ended and _recorded(turns[0], events)
         crash = task.state in {"running", "held"}
         facts = RestartFacts(
             state=task.state,
@@ -233,7 +250,10 @@ class StartupRecovery:
             finished=finished,
             crash=crash,
             crashed_before=task.crashes > 0,
-            in_flight=await self._in_flight(task),
+            in_flight=(ended and not finished) or await self._in_flight(task),
+            workspace_valid=(
+                self.workspace_valid is None or await self.workspace_valid(task.task_id)
+            ),
         )
         outcome = restart_outcome(facts)
         if outcome == "keep":
@@ -245,8 +265,8 @@ class StartupRecovery:
                 if turn.status == "completed"
                 else ("cancelled" if turn.status == "cancelled" else "failed")
             )
-            await self._commit(
-                task,
+            await self.recovery.interrupt(
+                task.task_id,
                 execution_id=provenance.execution_id or "",
                 outcome=phase,
                 card=task.card,
@@ -286,16 +306,19 @@ class StartupRecovery:
             reason = STOPPED_REASON
         elif facts.by_person:
             reason = PAUSED_REASON
-        elif facts.crash and facts.crashed_before and not facts.in_flight:
+        elif facts.in_flight:
+            reason = IN_FLIGHT_REASON
+        elif not facts.workspace_valid:
+            reason = WORKSPACE_REASON
+        elif facts.crash and facts.crashed_before:
             reason = CRASHED_REASON
         else:
             reason = IN_FLIGHT_REASON
         if not (outcome == "continue" and settled):
             # A settled park continues from its own card.
-            await self._commit(
-                task,
+            await self.recovery.interrupt(
+                task.task_id,
                 execution_id=execution_id,
-                outcome="interrupted",
                 card=card,
                 reason=reason,
                 crash=crash,
@@ -314,35 +337,21 @@ class StartupRecovery:
                 because=RESTART,
             )
 
-    async def _commit(
-        self,
-        task: TaskRecord,
-        *,
-        execution_id: str,
-        outcome: str,
-        card: str,
-        reason: str,
-        crash: bool,
-    ) -> None:
-        generation, previous = await self.tasks.park_identity(task.task_id)
-        operation_id = uuid.uuid4().hex
-        await self.recovery.prepare(
-            task.task_id,
-            operation_id=operation_id,
-            execution_id=execution_id,
-            expected_generation=generation,
-            expected_operation_id=previous,
-            outcome=outcome,
-            card=card,
-            reason=reason,
-            crash=crash,
-            unsafe_resume=True,
-        )
-        await self.recovery.commit(task.task_id, operation_id=operation_id)
+
+def _ended(turn: TurnInfo, execution_id: str) -> bool:
+    """Whether *turn* is a run of *execution_id* that ended by itself (no stop cut it)."""
+    return (
+        turn.client_request_id == execution_id
+        and bool(turn.run_id)
+        and not turn.undone
+        and turn.status in RUN_STATUSES
+        and turn.cause in {"run", "crash", "user_stop"}
+        and bool(turn.result)
+    )
 
 
-def _finished(turn: TurnInfo, events: list[StoredEvent], execution_id: str) -> bool:
-    """Whether *turn* is a run of *execution_id* that finished completely."""
+def _recorded(turn: TurnInfo, events: list[StoredEvent]) -> bool:
+    """Whether the ended *turn*'s ``run.finished`` event agrees with it."""
     found = [
         event
         for event in events
@@ -352,13 +361,7 @@ def _finished(turn: TurnInfo, events: list[StoredEvent], execution_id: str) -> b
         return False
     data = found[-1].event.get("data")
     return (
-        turn.client_request_id == execution_id
-        and bool(turn.run_id)
-        and not turn.undone
-        and turn.status in RUN_STATUSES
-        and turn.cause in {"run", "crash", "user_stop"}
-        and bool(turn.result)
-        and found[-1].event.get("run_id") == turn.run_id
+        found[-1].event.get("run_id") == turn.run_id
         and isinstance(data, dict)
         and isinstance(data.get("result"), dict)
         and data["result"].get("status") == turn.status

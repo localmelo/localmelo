@@ -139,7 +139,9 @@ record a launch's process group through that gate before releasing the child.
 Each call that can change something (`changes_nothing` says no; a tool the run
 does not know counts as changing) writes a `recovery_calls` row naming the
 execution, the call and the tool before it starts, and deletes it when the call
-returns, however it returns, a stop's cancel included; a read writes none. A
+returns, however it returns, except when a gateway stop cuts the call off: then
+the row stays, so the restart waits as it does after a kill (the call may be half
+done). A person's Stop still deletes it; a read writes none. A
 store outage retries the row for up to 10 seconds, then refuses that one call. A
 capture is complete while every process the execution started has a record: an
 identity or record failure marks it incomplete before the child is released,
@@ -264,17 +266,20 @@ write is found `running` or `held`, which counts as a crash. At the next start
 | Paused by the person (parked, or the pause still pending) | Stays parked; an unsettled park waits as `interrupted` |
 | Its last run finished completely for this execution | Reconciled to `done`, `cancelled` or `failed` |
 | Cut off, nothing in flight: no `recovery_calls` row, the capture complete, every recorded group verified gone | Continues by itself: the same store operation as Resume (`resume_recovered`, actor `restart`), back to `queued` with a resumed turn, same id, level and rank; `sched.resumed` carries `reason: "restart"` |
-| Cut off with something in flight, or an unknown or contradictory record | Waits as `interrupted` ("gateway restarted; earlier effects or processes may still be active") |
-| Cut off by a crash twice in a row with no finished turn between (the `crashes` count, reset when a task ends `done` or `failed`) | Waits as `interrupted`, whatever was in flight |
+| Cut off with something in flight (a gateway stop in the middle of a changing call included), its last run ended without a complete record, or an unknown or contradictory record | Waits as `interrupted` ("gateway restarted; earlier effects or processes may still be active") |
+| Its folder cannot be used at start (a disk not mounted yet) | Waits as `interrupted` ("its folder was not there when localmelo started; resume it once it is back") |
+| Cut off by a crash for the second time since it last ended `done` or `failed` (the `crashes` count, reset then) | Waits as `interrupted`, whatever was in flight |
 | A record that cannot be read | That task alone is fenced as `interrupted` with its reason |
 
 A cut-off task means running, held, waiting for an approval or an answer, parked
 by the scheduler to make room (its pause request's actor is `scheduler`), or
 queued after an earlier start. The resume receipt makes the decision happen once:
 a second start, or the open's retry loop, sees the queued task whose resumed turn
-waits and only admits it. Budgets start fresh, an unanswered approval was
-withdrawn and is asked again, an Allow once does not survive; grants in the store
-apply as always. Only tasks that wait for the person are fenced in memory: their
+waits and only admits it. Recovery runs once per process, even when the open is
+retried. Budgets start fresh after each stop (steps, extensions, asks), with no
+cap on how many stops; an unanswered approval was withdrawn and is asked again,
+an answer given before the stop applies to nothing, an Allow once does not
+survive; grants in the store apply as always. Only tasks that wait for the person are fenced in memory: their
 priority changes are refused, and `PATCH` resume is the
 [controlled Resume](#controlled-resume-s3b2-pr3b-1); Stop remains available.
 Proved-never-started runnable queued tasks can start after a durable launch fence
