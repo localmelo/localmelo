@@ -893,6 +893,11 @@ that cannot be allowed (also on a task whose job went on in a newer one), 409 `a
 allowance or while one waits, 409 `invalid_transition` for a job that finished
 (`can_allow` is `false` then, and the block and its card carry `finished: true`:
 the step is new work for the chat). A task's allowances go when it finishes.
+On a task whose job went on in a newer one (`successor`), each block reads
+where its Allow once stands from that task: `allowances` adds that task's
+allowance of the block's `step_key`, and `used_at` is when the step ran
+there. The page and the chat's cards read a block's state from this object
+only.
 
 A scheduled task's run (a chore's timed run or Run now, by its stored request
 key) also has, on each block, `keep_site`: the origin (`https://notes.example`)
@@ -1021,7 +1026,7 @@ that address API v2 by its version; other task routes use the `/api` prefix.
 Saved requests that run on a schedule (see [Chores that repeat](../guides/web-console.md#chores-that-repeat)); the panel's Scheduled tab uses these routes. A run is a task with origin `user_rule`, owned by the chat the chore belongs to (`front_id`: the main chat, or a side chat), and works for that chat as a task the person asked for does: it has the browser (`[browser] driver`), and the chat follows up on how it ended. Every run of a chore works in the same folder, `chore-<id>` under the workspace, made at the first run and deleted with the chore; what is in it is plain data for a run to read, never project instructions. A reminder's run has a folder of its own, no browser and no follow-up. Every run of a chore that repeats carries that to the posting review from code (`AgentOptions.repeats`), so what it posts in the person's name asks each time whatever the request says. A password handle in the saved request (`[password-1]`) is alive only in the run of the message that gave it; a later run does not get it. A run's approvals are the same cards as a task's in the owner chat; it does not use the chat's grants, and, as in a task the person started, it works through a picture check itself, with nobody at its side. Every chore carries a `revision` that each change bumps.
 
 ```json
-{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
+{"chore": {"id": "2ab01e8df4f1", "title": "brief me on my calendar", "request": "brief me on my calendar", "schedule": {"kind": "weekdays", "at": "08:30"}, "when": "every weekday at 8:30", "when_said": {"key": "schedule.weekdays", "params": {"time": {"clock": 510}}}, "level": 2, "level_word": "Normal", "enabled": true, "revision": 2, "front_id": "51742917baa0", "next_run": 1793262630.0, "next_at": 1793262600.0, "last_run": 1793176260.0, "last": {"state": "done", "ending": {"state": "ready", "reasons": []}, "line": "Three meetings today.", "task_id": "edb413a9ca6d", "at": 1793176260.0}, "created_at": 1793170800.0, "late_min": null}}
 ```
 
 - A chore's `level` (1 to 4) is its priority: the console shows it as `P` plus the number. `level_word` (`Today`, `Normal`, …) is kept for existing clients and is never what the console shows.
@@ -1040,7 +1045,7 @@ A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 3
 
 A one-time chore whose `request` starts with `Reminder: ` is a reminder. Its run's objective is that request plus a note that tells the model to say the reminder in one short sentence and not to do the task; the task's `reason` is `Reminder`, and its card in the main chat has `reminder: true` (the console words it `Reminder: <title>`, and for a failed run the card's line is the full words).
 
-`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time (the owner chat gets one `notice` row for that run, `said` key `chores.skipped`), unless that run has waited on the person for an hour or more (an approval, an answer, a pause) and its page is not held: it is then stopped, the chat gets a `notice` row (`chores.waitedOut`) and the time's run starts, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
+`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `ending` how it ended, as the task's own `ending`, or null while it has not ended; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time (the owner chat gets one `notice` row for that run, `said` key `chores.skipped`), unless that run has waited on the person for an hour or more (an approval, an answer, a pause) and its page is not held: it is then stopped, the chat gets a `notice` row (`chores.waitedOut`) and the time's run starts, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
 
 ## GET /api/sessions
 

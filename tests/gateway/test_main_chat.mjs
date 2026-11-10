@@ -8,6 +8,7 @@ import {
   byDay, cardNode, cardWords, dayLabel, foldAnswers, isMain, mergeCards, readCard, shortTime, timeline,
 } from '../../support/gateway/static/main-chat.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
+import {taskBlock} from '../../support/gateway/static/blocked.mjs';
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 // Noon on a fixed day, on this computer's clock, so the day maths never crosses midnight.
@@ -453,18 +454,26 @@ const blockedRow = (id, request, at = NOON) => ({id, ts: at, data: {
   request_id: request, step_key: `key-${request}`, name: 'python_exec', preview: "import shutil\nshutil.rmtree('.git')",
   review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes .git.']}, can_allow: true,
 }});
+// A task's body as `GET /tasks/{id}` gives it, with one stored block (`blocked`) and its allowances: what every
+// screen reads a block's state from (`taskBlock`).
+const bodyOf = (block, allowances = {}) => ({task_id: 't', allowances, blocked: [{name: 'python_exec', preview: '', can_allow: true,
+  used_at: null, question: null, arguments: null, keep_site: null, kept: false, ...block}]});
+const readOf = (block, allowances, now = NOON) => taskBlock(bodyOf(block, allowances), block.request_id, now);
 
 test('a step Auto blocked in a task is a card of its own, with the block and Allow once', () => {
   const card = readCard(blockedRow(9, 'r9'));
-  assert.deepEqual([card.state, card.requestId, card.stepKey, card.name, card.canAllow], ['blocked', 'r9', 'key-r9', 'python_exec', true]);
+  assert.deepEqual([card.state, card.requestId, card.stepKey, card.name], ['blocked', 'r9', 'key-r9', 'python_exec']);
+  assert.equal(card.canAllow, undefined, 'whether it may be allowed is its task\'s to say');
   // Every block stays between turns, each with its own Allow once; a later card of the task does not fold them.
   const done = readCard({id: 11, ts: NOON + 2, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Tidy the repo', at: NOON + 2}});
   const cards = [card, readCard(blockedRow(10, 'r10', NOON + 1)), done];
   assert.deepEqual(timeline([], cards, NOON + 5).filter((item) => item.kind === 'card').map((item) => item.card.id), [9, 10, 11]);
   assert.deepEqual(cardWords(card), {mark: '⊘', heading: 'A step was blocked: Tidy the repo', action: 'Open task'});
+  const stored = {request_id: 'r9', step_key: 'key-r9', preview: "import shutil\nshutil.rmtree('.git')", review: blockedRow(9, 'r9').data.review};
+  const read = readOf(stored);
   const doc = fakeDoc();
   const allowed = [];
-  const node = cardNode({doc, card, open: () => {}, block: {onAllow: () => allowed.push(card.requestId)}});
+  const node = cardNode({doc, card, open: () => {}, block: {facts: mainChat.cardBlock(card, read), allowing: read.allowing, onAllow: () => allowed.push(card.requestId)}});
   assert.equal(node.dataset.state, 'blocked');
   // The block says what and why; the stored line is for the list and the terminal.
   assert.equal(doc.made.find((item) => item.className === 'main-card-line'), undefined);
@@ -473,11 +482,13 @@ test('a step Auto blocked in a task is a card of its own, with the block and All
   const allow = doc.made.find((item) => item.tag === 'button' && item.textContent === 'Allow once');
   allow.listeners.click();
   assert.deepEqual(allowed, ['r9']);
-  // Where the server offers no Allow once, there is none.
-  assert.equal(mainChat.cardBlock({...card, canAllow: false}).allow, false);
-  const none = fakeDoc();
-  cardNode({doc: none, card: {...card, canAllow: false}, open: () => {}});
-  assert.equal(none.made.some((item) => item.textContent === 'Allow once'), false);
+  // Until its task is read, and where the task offers no Allow once, there is none: the card holds no state of its own.
+  for (const facts of [mainChat.cardBlock(card), mainChat.cardBlock(card, readOf({...stored, can_allow: false}))]) {
+    assert.equal(facts.allow, false);
+    const none = fakeDoc();
+    cardNode({doc: none, card, open: () => {}, block: {facts}});
+    assert.equal(none.made.some((item) => item.textContent === 'Allow once'), false);
+  }
   assert.equal(mainChat.cardBlock(done), null);
 });
 
@@ -514,31 +525,39 @@ test('a stored row of a step that ran on an earlier approval is its stored line,
 
 // ── An answer to "this needs you" (the card's Allow this step, the suggestion's Send) ──
 
-test('a card that needs the person allows its one blocked step, then says what it did', () => {
+test('a card that needs the person allows its one blocked step, then says how it was answered, as its task reads it', () => {
   const row = {id: 11, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
     ending: {state: 'blocked', reasons: ['question'], question: 'May I install it?'},
     block: {request_id: 'r1', step_key: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}}}};
   const card = readCard(row);
   assert.deepEqual(card.block, {requestId: 'r1', stepKey: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}});
   assert.equal(readCard({...row, data: {...row.data, block: undefined}}).block, undefined, 'no open step: no button');
+  const stored = {request_id: 'r1', step_key: 'k1', preview: 'pip install requests', review: {categories: ['install']}};
+  // Until its task's body is read, the card offers nothing it could not stand behind.
+  assert.deepEqual(mainChat.stepState(card), {state: 'reading'});
   const allowed = [];
-  const step = {...mainChat.stepState(card), onAllow: () => allowed.push('r1')};
+  const step = {...mainChat.stepState(card, {read: readOf(stored)}), onAllow: () => allowed.push('r1')};
   assert.equal(step.state, 'open');
   const doc = fakeDoc();
   cardNode({doc, card, open: () => {}, step});
   const foot = doc.made.find((item) => item.className === 'main-card-foot');
   assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Allow this step', 'Open task']);
   assert.equal(foot.children[0].textContent, 'Blocked: Install software', 'the step it allows, as its own card names it');
+  // The question restates the step the card shows: it is not said twice.
+  assert.equal(doc.made.some((item) => item.textContent === 'May I install it?'), false);
   doc.made.find((item) => item.textContent === 'Allow this step').listeners.click();
   assert.deepEqual(allowed, ['r1'], 'the same Allow once the step itself offers');
-  // Allowed from this card, or from the person's typed yes in the chat: the card says so instead.
-  const typed = [{kind: 'sent', how: 'allowed', request_id: 'r1'}];
-  for (const done of [mainChat.stepState(card, {given: {r1: {until: NOON}}}), mainChat.stepState(card, {echoes: typed})]) {
+  // Allowed anywhere (this card, the task's page, the person's typed yes): its task's body says so, and so does the card,
+  // in the line the task's page shows, with no button and no amber box.
+  for (const [read, said] of [[readOf(stored, {k1: NOON + 1800}), /^Allowed once · melo can run it until /],
+    [readOf({...stored, used_at: NOON + 60}), /^Allowed once · ran at /], [readOf(stored, {k1: NOON - 1}), /^Allowance expired$/]]) {
     const after = fakeDoc();
-    cardNode({doc: after, card, open: () => {}, step: done});
+    const node = cardNode({doc: after, card, open: () => {}, step: mainChat.stepState(card, {read})});
     assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
-    assert.deepEqual(after.made.filter((item) => item.className === 'main-card-note').map((item) => item.textContent),
-      ['Blocked: Install software', 'Allowed once: the task goes on with this step']);
+    const notes = after.made.filter((item) => item.className === 'main-card-note').map((item) => item.textContent);
+    assert.equal(notes[0], 'Blocked: Install software');
+    assert.match(notes[1], said);
+    assert.equal(node.dataset.answered, 'true');
   }
 });
 
@@ -548,20 +567,22 @@ test('a scheduled task\'s card also offers to keep the answer for its next runs 
     block: {request_id: 'r1', step_key: 'k1', name: 'browser_type', preview: 'type', review: {categories: ['send_out']},
       keep_site: 'https://notes.example', kept: false}}};
   const card = readCard(row);
+  const stored = {request_id: 'r1', step_key: 'k1', name: 'browser_type', preview: 'type', review: {categories: ['send_out']},
+    keep_site: 'https://notes.example'};
   const kept = [];
   const doc = fakeDoc();
-  cardNode({doc, card, open: () => {}, step: {...mainChat.stepState(card), onKeep: () => kept.push('r1')}});
+  cardNode({doc, card, open: () => {}, step: {...mainChat.stepState(card, {read: readOf(stored)}), onKeep: () => kept.push('r1')}});
   const foot = doc.made.find((item) => item.className === 'main-card-foot');
   assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent),
     ['Allow this step', 'Always allow for this scheduled task on notes.example', 'Open task']);
   doc.made.find((item) => item.textContent.startsWith('Always allow')).listeners.click();
   assert.deepEqual(kept, ['r1']);
-  // Kept: the card says so, with no button: the click's answer says whether this run goes on now or only later runs use it.
-  for (const [now, said] of [[true, 'This run goes on now.'], [false, 'Its later runs use it.']]) {
+  // Kept: the card says so, with no button; this run goes on now when the step was allowed with it.
+  for (const [allowances, said] of [[{k1: NOON + 1800}, ' This run goes on now.'], [{}, '']]) {
     const after = fakeDoc();
-    const step = mainChat.stepState(card, {given: {r1: {until: null, used: null, now}}});
-    cardNode({doc: after, card: {...card, block: {...card.block, kept: true}}, open: () => {}, step});
-    assert.ok(after.made.some((item) => item.textContent === `Allowed for this scheduled task on notes.example. ${said}`));
+    cardNode({doc: after, card, open: () => {}, step: mainChat.stepState(card, {read: readOf({...stored, kept: true}, allowances)})});
+    assert.ok(after.made.some((item) => item.textContent === `Allowed for this scheduled task on notes.example.${said}`));
+    assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
   }
 });
 
@@ -594,7 +615,9 @@ test('a card that needs the person shows the whole text of a typing step before 
     block: {request_id: 'q1', step_key: 'k9', question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}}};
   const card = readCard(row);
   const doc = fakeDoc();
-  cardNode({doc, card, open: () => {}, step: mainChat.stepState(card)});
+  const read = readOf({request_id: 'q1', step_key: 'k9', name: 'browser_type', review: {categories: ['send_out']},
+    question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}});
+  cardNode({doc, card, open: () => {}, step: mainChat.stepState(card, {read})});
   const shown = doc.made.find((item) => item.className === 'block-step');
   assert.equal(shown.textContent, text, 'the whole text, as text');
   assert.ok(doc.made.some((item) => item.textContent === 'Let melo type on notes.example?'));

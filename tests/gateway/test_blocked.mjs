@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {allowState, blockCard, blockFacts, blockWords, stepText} from '../../support/gateway/static/blocked.mjs';
+import {allowState, answerLine, blockCard, blockFacts, blockWords, stepText, taskBlock} from '../../support/gateway/static/blocked.mjs';
 import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 import {modeOf, setupModeChip} from '../../support/gateway/static/mode.mjs';
 import {approvalTag, toolState} from '../../support/gateway/static/turns.mjs';
@@ -178,6 +178,29 @@ test('after Allow once the button goes: waiting, ran, or run out', () => {
   assert.match(text(busy), /You can allow it when melo finishes\./);
   assert.equal(stepText('shell_exec', {command: ['ls', '-la']}), 'ls -la');
   assert.equal(stepText('open_site', {}, 'open news.example'), 'open news.example');
+});
+
+test('a task\'s blocked step reads one way from its body: asked, allowed in the task its job went on in, ran, kept', () => {
+  const stored = {request_id: 'r1', step_key: 'k1', name: 'python_exec', preview: 'pip install matplotlib', review: INSTALL.review,
+    can_allow: true, used_at: null, question: null, arguments: null, keep_site: null, kept: false};
+  const body = (block = {}, allowances = {}) => ({task_id: 't', allowances, blocked: [{...stored, ...block}]});
+  const asked = taskBlock(body(), 'r1', 100);
+  assert.deepEqual([asked.facts.allow, asked.allowing.state, answerLine(asked.facts, asked.allowing)], [true, 'open', '']);
+  assert.equal(taskBlock(body(), 'other', 100), null);
+  // Its job went on in a newer task: nothing may allow it here, and the newer task's allowance is what it reads.
+  assert.equal(taskBlock(body({can_allow: false}), 'r1', 100).facts.allow, false);
+  const went = taskBlock(body({can_allow: false}, {k1: 200}), 'r1', 100);
+  assert.match(answerLine(went.facts, went.allowing), /^Allowed once · melo can run it until /);
+  const ran = taskBlock(body({can_allow: false, used_at: 150}), 'r1', 300);
+  assert.match(answerLine(ran.facts, ran.allowing), /^Allowed once · ran at /);
+  const kept = taskBlock(body({keep_site: 'https://notes.example', kept: true}), 'r1', 100);
+  assert.equal(answerLine(kept.facts, kept.allowing), 'Allowed for this scheduled task on notes.example.');
+  // Answered, the card says that line and nothing to press; in a fold, its title is the fold's own.
+  const card = blockCard(fakeDoc(), went.facts, {allowing: went.allowing, folded: true});
+  assert.equal(byClass(card, 'block-allow'), null);
+  assert.equal(byClass(card, 'block-title'), null);
+  assert.match(byClass(card, 'block-done').textContent, /^Allowed once · melo can run it until /);
+  assert.equal(card.dataset.state, 'pending');
 });
 
 test('the chip shows the chat\'s mode, its menu picks one, and Escape closes it', async () => {

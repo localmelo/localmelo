@@ -23,7 +23,7 @@ const PROPOSAL = /^[\s>*_`-]*ending[*_`\s]*[:：][*_`\s]*(?:ready|blocked|failed
 /** A task's report without its `Ending:` line: the proposal is for code, the person reads the rest. */
 export const reportText = (answer) => String(answer ?? '').replace(PROPOSAL, '').trimEnd();
 
-/** An ending as the page keeps it, `{state, reasons, question, tests, missing}`, or null when there is none. */
+/** An ending as the page keeps it, `{state, reasons, question, tests, missing, turn}`, or null when there is none. */
 export function readEnding(raw) {
   if (!raw || typeof raw !== 'object' || !STATES.has(raw.state)) return null;
   const list = (value) => (Array.isArray(value) ? value : []);
@@ -37,18 +37,29 @@ export function readEnding(raw) {
     tests: list(raw.tests).filter((test) => typeof test?.command === 'string' && OUTCOMES.has(test.outcome)),
     // The files the words asked it to write that are not in its folder (`file_missing`).
     missing: list(raw.missing).filter((name) => typeof name === 'string'),
+    // The turn of the run that ended so: a step blocked in it is what a Needs you stands on.
+    turn: Number.isInteger(raw.turn) ? raw.turn : null,
   };
 }
 
-/** The ending's name for words: `moot` when the worker dropped the task, else its state. */
-export const endingName = (ending) => (ending.state === 'dropped' && ending.proposed === 'dropped' ? 'moot' : ending.state);
+/**
+ * The ending's name for words: `moot` when the worker dropped the task, `dropped` (Stopped) for a run that used all its
+ * steps (it can continue, as its card and its page say), else its state.
+ */
+export const endingName = (ending) => {
+  if (ending.state === 'dropped' && ending.proposed === 'dropped') return 'moot';
+  return ending.reasons?.includes('out_of_steps') ? 'dropped' : ending.state;
+};
 
-/** "Ready", "Done, not finished", "Needs you", "Failed", "Not needed" or "Stopped". */
+/** "Ready", "Done, not finished", "Needs you", "Did not finish", "Not needed" or "Stopped": every screen's words. */
 export const endingLabel = (ending) => t(`ending.state.${endingName(ending)}`);
 
-/** Why it is not ready, in words: its question, then what code found missing. */
-export function endingWhy(ending) {
-  const asks = ending.state === 'blocked' ? ending.question || t('ending.reason.question') : '';
+/**
+ * Why it is not ready, in words: its question, then what code found missing. `asks: false` leaves the question out
+ * where the blocked step it stands on is shown already (the step's box or card says what it needs).
+ */
+export function endingWhy(ending, {asks: shown = true} = {}) {
+  const asks = ending.state === 'blocked' && shown ? ending.question || t('ending.reason.question') : '';
   const files = (ending.missing ?? []).join(', ');
   const why = ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`, {files}));
   const notes = (ending.notes ?? []).map((note) => t(`ending.note.${note}`));

@@ -59,6 +59,7 @@ from localmelo.support.gateway.auto_blocks import (
     go_ahead_text,
     keep_site,
     kept_uses,
+    ran_once,
 )
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
@@ -3648,10 +3649,20 @@ class TaskWorkers:
         body["successor"] = (
             None if after is None else {"task_id": after.task_id, "title": after.title}
         )
-        if after is not None:
-            body["blocked"] = [{**b, "can_allow": False} for b in body["blocked"]]
         policy = self._auto.get(record.task_id)
         body["allowances"] = dict(policy.given) if policy is not None else {}
+        if after is not None:
+            # A step allowed once here goes on in that task: where its allowance
+            # stands, and when the step ran, are that task's (one record per block).
+            later = self._auto.get(after.task_id)
+            ran = await ran_once(self.store, after.task_id) if body["blocked"] else {}
+            keys = {b["step_key"] for b in body["blocked"]}
+            given = later.given if later is not None else {}
+            body["allowances"].update({k: v for k, v in given.items() if k in keys})
+            body["blocked"] = [
+                {**b, "can_allow": False, "used_at": b["used_at"] or ran.get(b["step_key"])}
+                for b in body["blocked"]
+            ]
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).

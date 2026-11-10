@@ -228,6 +228,22 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
     return out
 
 
+async def ran_once(store: SessionStore, session_id: str) -> dict[str, Any]:
+    """When each step that ran on an Allow once in *session_id* ran, by its step key (the first run of each).
+
+    For a task whose job went on in a newer one (#571): the step allowed in
+    the older task runs in *session_id*, and the older task's blocks read
+    when from here.
+    """
+    out: dict[str, Any] = {}
+    for stored in await store.auto_records(session_id, limit=200):
+        for one in blocks_in(stored.event):
+            key = one.get("step_key")
+            if one.get("allowance") == "once" and isinstance(key, str):
+                out.setdefault(key, stored.event.get("ts"))
+    return out
+
+
 # Who blocked a step, as a follow-up and the refusal of a repeat name them (#411).
 BLOCKERS: dict[str, str] = {
     "auto": "Auto mode",

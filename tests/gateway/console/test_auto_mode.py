@@ -727,6 +727,10 @@ async def test_allow_once_on_a_chats_ended_task_goes_on_in_a_fresh_task(
             assert time.monotonic() < deadline, "the fresh task did not go ahead"
             await asyncio.sleep(0.02)
         assert ran.codes == [KEYS], "the allowed step ran once, in the fresh task"
+        # The ended task's block reads that it ran, from the fresh task's record:
+        # its page and its chat's card say so instead of offering it again.
+        [after] = (await console.workers.get(task_id))["blocked"]
+        assert after["can_allow"] is False and after["used_at"] is not None
         # The ended task was never reopened, and keeps no policy.
         assert await console.store.list_turns(task_id) == turns
         assert task_id not in console.workers._auto

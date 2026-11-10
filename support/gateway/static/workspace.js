@@ -34,7 +34,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { setupWindowBar } from "./window-bar.mjs";
 import { activeSwitch, setupServe } from "./serve.mjs";
-import { allowState, blockCard, blockFacts } from "./blocked.mjs";
+import { allowState, blockCard, blockFacts, taskBlock } from "./blocked.mjs";
 import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
 import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
@@ -111,8 +111,6 @@ const S = {
   defaultMode: "ask", // The mode new chats start in, as `GET /api/settings` says it.
   modeSaving: false,
   allowing: {}, // Allow once under way or failed, by the block's request id: "allowing" or the error.
-  // A task's step Auto blocked, allowed once from its chat's card: `{until, used}` by request id (#369).
-  cardAllows: {},
   drafts: {},
   outbox: {},
   media: {}, // The pictures and files waiting in the composer of each chat that is not open, by slot.
@@ -958,6 +956,8 @@ function startStream(id) {
       // A model that cannot read pictures: the pictures waiting in the composer get the warning now.
       if (frame.type === "turn.finished" && frame.data?.status === "provider_error" && frame.data?.error === PICTURES_REFUSED) media.refusedPictures();
       if (frame.type === "attention.card") holdOrShow(S.view, frame);
+      // A new card or line may follow an answer given elsewhere: the steps still asked are read again.
+      if (frame.type === "attention.card" || frame.type === "attention.echo") rereadAsked();
       if (frame.type === "attention.echo") {
         S.view.echoes = mergeEchoes(S.view.echoes ?? [], [frame]);
         if (frame.data?.note_back) noteBack(frame.data);
@@ -1117,7 +1117,9 @@ function viewSnapshot() {
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
     S.allowing,
-    Object.entries(S.cardAllows).map(([id, {until, used}]) => [id, used, until > nowSeconds()]),
+    // Where each card's blocked step stands, as its task's body says it (`blockTasks`), and each allowance still open.
+    [...blockTasks.entries()].map(([id, read]) => [id, read.task?.blocked ?? null,
+      Object.entries(read.task?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()])]),
     // A task's approval drawn in its chat's card, as last read (#369), unless the panel shows that task.
     showsItems(view) ? [...taskApprovals.entries()] : null,
     panel.state.task,
@@ -1285,7 +1287,7 @@ function mainNodes(view, turns, placed) {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
     if (item.kind === "card") {
       const card = item.card;
-      const step = stepState(card, { given: S.cardAllows, busy: S.allowing, echoes });
+      const step = stepState(card, { read: card.block ? blockOf(card.sourceId, card.block.requestId) : null, busy: S.allowing });
       return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
         step: step && { ...step, onAllow: () => allowCardBlock(card, card.block), onKeep: () => allowCardBlock(card, card.block, "keep") } })];
     }
@@ -1504,14 +1506,73 @@ async function answerTaskApproval(request, state, choice) {
   renderMessages(false, true);
 }
 
-/** What a blocked task step's card needs for Allow once: where it stands, and the request. */
+// ── A task's blocked step on its chat's card: read from the task's own body, as its page reads it ──
+
+// The bodies of the tasks whose blocked steps cards show, by task id: `{task}` once read, `{reading: true}` meanwhile.
+// The body is the one record of whether a step was answered (`taskBlock`); a card keeps no copy of its own.
+const blockTasks = new Map();
+
+/**
+ * Read a card's task body (again); the chat is drawn again when it changed. A task gone reads as none; a read that
+ * failed otherwise keeps what was read before (or is tried again at the next draw).
+ */
+async function readBlockTask(id) {
+  const known = blockTasks.get(id);
+  blockTasks.set(id, { ...(known ?? {}), reading: true });
+  let task = null;
+  try {
+    task = (await api(`/tasks/${encodeURIComponent(id)}`)).task ?? null;
+  } catch (error) {
+    if (error?.status !== 404) {
+      if (known?.task) blockTasks.set(id, known);
+      else blockTasks.delete(id);
+      return;
+    }
+  }
+  const changed = JSON.stringify(task) !== JSON.stringify(known?.task ?? null);
+  blockTasks.set(id, { task });
+  if (changed) renderMessages(false, true);
+}
+
+/** A task body read elsewhere on this page (its page in the panel): a card of the same task reads it too. */
+function seeBlockTask(task) {
+  if (!task?.task_id || !blockTasks.has(task.task_id)) return;
+  const known = blockTasks.get(task.task_id);
+  if (JSON.stringify(known.task) === JSON.stringify(task)) return;
+  blockTasks.set(task.task_id, { task });
+  renderMessages(false, true);
+}
+
+/** The steps whose cards still ask (or whose allowance waits): their tasks are read again. */
+function rereadAsked() {
+  const now = nowSeconds();
+  for (const [id, read] of blockTasks) {
+    if (read.reading || !read.task) continue;
+    const asks = (read.task.blocked ?? []).some((block) => {
+      const found = taskBlock(read.task, block.request_id, now);
+      return found && found.allowing.state !== "used" && !(found.facts.kept && found.facts.keepSite);
+    });
+    if (asks) readBlockTask(id);
+  }
+}
+
+/** Where a card's blocked step stands (`taskBlock`), or null until its task's body is read. */
+function blockOf(taskId, requestId) {
+  const read = blockTasks.get(taskId);
+  if (!read) readBlockTask(taskId);
+  return read?.task ? taskBlock(read.task, requestId, nowSeconds()) : null;
+}
+
+/** What a blocked task step's card needs for Allow once: the step as its task reads it, and the request. */
 function cardAllow(card) {
-  const facts = cardBlock(card);
+  if (card.state !== "blocked") return null;
+  const read = blockOf(card.sourceId, card.requestId);
+  const facts = cardBlock(card, read);
   if (!facts) return null;
-  const given = S.cardAllows[facts.requestId] ?? {};
   const busy = S.allowing[facts.requestId];
   return {
-    allowing: allowState({ until: given.until ?? null, used: given.used ?? null, now: nowSeconds() }),
+    facts,
+    allowing: read?.allowing ?? { state: "open" },
     busy: busy === "allowing" || busy === "keeping" ? busy : false,
     developer: developerMode,
     error: busy && busy !== "allowing" && busy !== "keeping" ? busy : "",
@@ -1522,22 +1583,17 @@ function cardAllow(card) {
 
 /**
  * Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. `keep` also keeps the
- * answer for a scheduled task's next runs on the step's site (#619).
+ * answer for a scheduled task's next runs on the step's site (#619). Where it stands then is read from the task, here
+ * and on its page when the panel shows it.
  */
 async function allowCardBlock(card, facts, how = "allow") {
   S.allowing[facts.requestId] = how === "keep" ? "keeping" : "allowing";
   renderMessages(false, true);
   try {
-    const { task, message } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
-    const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
-    if (block?.kept) {
-      card.kept = true;
-      if (card.block) card.block.kept = true;
-    }
-    // A keep says whether the step goes ahead now (the run, or the fresh task its job goes on in) or only later runs use it.
-    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null,
-      ...(how === "keep" ? { now: message !== "kept" } : {}) };
+    await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     delete S.allowing[facts.requestId];
+    await readBlockTask(card.sourceId);
+    tasks.reread(card.sourceId);
     panel.refresh();
   } catch (error) {
     S.allowing[facts.requestId] = error.message || t("panel.taskChangeFailed");
@@ -2945,6 +3001,8 @@ const tasks = setupTasks({
   // The task is shown in the panel beside the chat; its link back is the chat's own address.
   root: $("task-panel"),
   titleTag: "h2",
+  // A chat's card of the same task reads the body this page read.
+  onTask: (task) => seeBlockTask(task),
   home: homeHash,
   back: () => leaveTask(),
   newId: newClientRequestId,
@@ -3063,13 +3121,18 @@ function turnStatus(turn) {
   return nodes;
 }
 
-function turnWork(turn, sessionId, render, empty) {
-  return [...turnSteps(turn, sessionId, render, empty), ...(turn.answer ? [answerNode(turn.answer)] : []), ...turnStatus(turn)];
+// A turn's work, its answer (as *shown* gives it) and how it ended.
+function turnWork(turn, sessionId, render, empty, shown = (answer) => answer) {
+  return [...turnSteps(turn, sessionId, render, empty), ...(turn.answer ? [answerNode(shown(turn.answer))] : []), ...turnStatus(turn)];
 }
+
+// A task's report as its page shows it: without the `Ending:` line, which is for code (how the task ended is the
+// page's own words, as code decided it); a developer reads the record as written.
+const taskReport = (answer) => (developerMode ? answer : reportText(answer));
 
 // The Live section of a task card: its session's turns that hold work or an answer.
 function taskLiveNodes(view, render) {
-  return view.turns.flatMap((turn) => (turn.items.length || turn.answer ? turnWork(turn, view.id, render, "") : []));
+  return view.turns.flatMap((turn) => (turn.items.length || turn.answer ? turnWork(turn, view.id, render, "", taskReport) : []));
 }
 
 // A task that ended: its newest answer as in a chat (and, when it did not complete, why it ended),
@@ -3078,10 +3141,9 @@ function taskResultNodes(view, render) {
   const turns = view.turns.filter((turn) => turn.items.length || turn.answer);
   const last = turns.findLast((turn) => turn.answer) ?? turns.at(-1);
   const newest = view.turns.at(-1);
-  // The report without its Ending line: how the task ended is the page's State, as code decided it.
-  const answer = [...(last?.answer ? [answerNode(reportText(last.answer))] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
+  const answer = [...(last?.answer ? [answerNode(taskReport(last.answer))] : []), ...(newest && newest.status !== "completed" ? turnStatus(newest) : [])];
   const steps = turns.flatMap((turn) => {
-    if (turn !== last) return turnWork(turn, view.id, render, "");
+    if (turn !== last) return turnWork(turn, view.id, render, "", taskReport);
     return turn.items.length ? turnSteps(turn, view.id, render, "") : [];
   });
   return {answer, steps};

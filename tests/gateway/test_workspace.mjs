@@ -3976,7 +3976,7 @@ test('a task code found not finished says why, lists its own tests, and Finish i
   assert.match(text, /How it ended\s*A test ran, but its result was not checked · The changes are not committed/);
   assert.match(text, /Tests it ran\s*\?\s*subprocess\.run\(\['pytest', '-q'\]\)\s*result not checked/);
   assert.match(flatten(answerBox(h)), /Rounded the mean\./);
-  assert.doesNotMatch(flatten(answerBox(h)), /Ending: ready/, 'the proposal line is for code, not the person');
+  assert.match(flatten(answerBox(h)), /Ending: ready/, 'a developer reads the report as written');
   labelled(h, 'Finish it: run the tests and commit').click(); await settle();
   assert.deepEqual(calls, ['continue']);
   assert.match(flatten(h.element('task-panel')), /State\s*queued/);
@@ -5911,21 +5911,89 @@ test('a task\'s approval is answered in its chat\'s card, and melo\'s explanatio
   assert.equal(findNode(card(), (node) => node.className === 'approval-card'), null);
 });
 
-test('a step Auto blocked in a task shows in its chat, and Allow once there uses the task\'s route', async () => {
+// A task that ended on the step Auto blocked in its run (#617): its body, as `GET /tasks/t` gives it, is the one record
+// of whether that step was answered; the chat's card and the task's page both read it.
+const R9 = {request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: "shutil.rmtree('.git')", reason: 'deletes files',
+  review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes .git.']}, can_allow: true, used_at: null, question: null,
+  arguments: null, keep_site: null, kept: false, turn: 1};
+const blockedTask = (allowances = {}) => taskRow('t', {state: 'done', card: '', title: 'Tidy the repo', blocked: [R9], allowances,
+  ending: {state: 'blocked', reasons: ['question'], question: 'May I delete .git?', turn: 1},
+  stage: stageOf('finished', 'ending.state.blocked', {awaited: 'person', ending: 'blocked'})});
+const TURNS_T = 'GET /sessions/t/turns?limit=50&events=true';
+/** The routes of that task: Allow once (from either screen) gives it an allowance, as the server keeps it. */
+function blockedRoutes(state, cards) {
+  const body = () => blockedTask(state.allowed ? {'key-9': Date.now() / 1000 + 1800} : {});
+  return mainRoutes({
+    'GET /tasks/t': () => ({task: body()}),
+    'POST /tasks/t/blocks/r9/allow': () => { state.allowed = true; state.posts += 1; return {status: 202, body: {task: body(), message: 'going'}}; },
+    [TURNS_T]: {turns: [], has_earlier: false},
+  }, {cards});
+}
+const openPanelTask = async (h) => { h.context.location.hash = '#/tasks/t'; await h.windowListeners.hashchange[0](); await settle(); };
+const cardOf = (h, id) => findNode(h.element('messages'), (node) => node.dataset?.cardId === String(id));
+const hasButton = (node, name) => Boolean(findNode(node, (item) => item.tag === 'button' && (item.textContent === name || item.classList?.contains(name))));
+
+test('a step Auto blocked in a task shows in its chat; Allow once there uses the task\'s route, and its page says the same', async () => {
   const blocked = cardRow(6, {at: NOW - 30, state: 'blocked', source_id: 't', source_kind: 'task', title: 'Tidy the repo', line: 'Blocked: deletes files',
-    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: "shutil.rmtree('.git')", review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes .git.']}, can_allow: true});
-  const h = harness(mainRoutes({
-    'POST /tasks/t/blocks/r9/allow': {status: 202, body: {task: {task_id: 't', allowances: {'key-9': Date.now() / 1000 + 1800}, blocked: [{request_id: 'r9', used_at: null}]}, message: 'going'}},
-    'GET /sessions': () => ({sessions: [], main: mainSession(), machine: null, has_more: false}),
-  }, {cards: [blocked]}));
-  await h.run('init()');
-  const card = () => findNode(h.element('messages'), (node) => node.dataset?.cardId === '6');
-  assert.match(flatten(card()), /A step was blocked: Tidy the repo.*Deletes \.git\..*shutil\.rmtree\('\.git'\).*Allow once.*Open task/);
-  await findNode(card(), (node) => node.classList?.contains('block-allow')).click();
-  await settle();
-  assert.equal(h.net.callsTo('/tasks/t/blocks/r9/allow')[0].method, 'POST');
-  assert.match(flatten(card()), /Allowed once · melo can run it until/);
-  assert.equal(findNode(card(), (node) => node.classList?.contains('block-allow')), null);
+    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: "shutil.rmtree('.git')", review: R9.review, can_allow: true});
+  const state = {allowed: false, posts: 0};
+  const h = harness(blockedRoutes(state, [blocked]));
+  await h.run('init()'); await settle();
+  assert.match(flatten(cardOf(h, 6)), /A step was blocked: Tidy the repo.*Deletes \.git\..*shutil\.rmtree\('\.git'\).*Allow once.*Open task/);
+  await openPanelTask(h);
+  assert.ok(hasButton(h.element('task-panel'), 'block-allow'));
+  await findNode(cardOf(h, 6), (node) => node.classList?.contains('block-allow')).click();
+  await settle(); await settle();
+  assert.equal(state.posts, 1);
+  // Both read the task again: the same quiet line, and no button on either.
+  for (const screen of [cardOf(h, 6), h.element('task-panel')]) {
+    assert.match(flatten(screen), /Allowed once · melo can run it until/);
+    assert.equal(hasButton(screen, 'block-allow'), false);
+  }
+});
+
+test('the chat\'s card of a step allowed on its task\'s page says so, while the page is open and after a reload', async () => {
+  const needsYou = cardRow(7, {at: NOW - 30, state: 'done', source_id: 't', source_kind: 'task', title: 'Tidy the repo', line: 'Opened the repo.',
+    ending: {state: 'blocked', reasons: ['question'], question: 'May I delete .git?', turn: 1},
+    block: {request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: "shutil.rmtree('.git')", review: R9.review}});
+  const state = {allowed: false, posts: 0};
+  const h = harness(blockedRoutes(state, [needsYou]));
+  await h.run('init()'); await settle();
+  assert.ok(hasButton(cardOf(h, 7), 'Allow this step'));
+  await openPanelTask(h);
+  await findNode(h.element('task-panel'), (node) => node.classList?.contains('block-allow')).click();
+  await settle(); await settle();
+  assert.equal(state.posts, 1);
+  const answered = (h) => {
+    const card = cardOf(h, 7);
+    assert.equal(hasButton(card, 'Allow this step'), false);
+    assert.match(flatten(card), /Allowed once · melo can run it until/);
+    assert.equal(card.dataset.answered, 'true', 'it asks nothing more: no amber box');
+  };
+  answered(h);
+  // A reload reads the same record.
+  const again = harness(blockedRoutes(state, [needsYou]));
+  await again.run('init()'); await settle();
+  answered(again);
+});
+
+test('the page of a task that ended on its blocked step says the step once, and how it ended in plain words', async () => {
+  const turns = [turnRow({id: 'turn-1', turn: 1, user_text: 'Objective of t', answer: 'Looked at the repo.\n\nEnding: blocked: May I delete .git?'}),
+    turnRow({id: 'turn-2', turn: 2, user_text: 'Go on', answer: 'Opened the repo; deleting was blocked.\n\nEnding: blocked: May I delete .git?'})];
+  const routes = {'GET /tasks/t': {task: blockedTask()}, [TURNS_T]: {turns, has_earlier: false}};
+  const plain = await openTask({...routes, 'GET /settings': {mode: 'default'}}, 't');
+  const text = flatten(plain.element('task-panel'));
+  assert.match(text, /Needs you/);
+  assert.match(flatten(answerBox(plain)), /Opened the repo; deleting was blocked\./);
+  // The report's own Ending line, the question that restates the step, and a note that the task went on are not shown.
+  assert.doesNotMatch(text, /Ending:/);
+  assert.doesNotMatch(text, /How it ended|May I delete \.git\?/);
+  assert.doesNotMatch(text, /went on without them/);
+  // The step's title is its fold's summary, once.
+  assert.equal(text.split('Blocked: Delete files that cannot be restored').length - 1, 1);
+  // A developer reads the record as written.
+  const developer = await openTask(routes, 't');
+  assert.match(flatten(answerBox(developer)), /Ending: blocked: May I delete \.git\?/);
 });
 
 // ── Slash commands in the composer ──
