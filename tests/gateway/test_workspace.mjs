@@ -1044,7 +1044,7 @@ function harness(routes, {mobile = false, realPanel = false} = {}) {
     // A task is drawn by tasks.mjs, which the real panel owns the place of: the double shows and leaves it the same way.
     setupPanel: realPanel ? realSetupPanel : (options) => ({health: [], state: {task: null}, update(body) { this.health.push(body); }, sheetClosed: 0, opened: 0, remembered: [],
       lost: [], offline(value) { this.lost.push(value); }, stopped: [], stopping(count) { this.stopped.push(count); },
-      closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {},
+      closeSheet() { this.sheetClosed += 1; return false; }, select() {}, openSheet() {}, redraw() {},
       remember(key) { this.remembered.push(key); },
       openTask(id) { this.opened += 1; this.state.task = id; options.tasks.show(id); options.tasks.focus(); },
       closeTask() { if (this.state.task === null) return false; this.state.task = null; options.tasks.leave(); return true; },
@@ -1499,6 +1499,7 @@ test('a reply shows in its bubble as it is written, and the answer takes its pla
   assert.equal(first.className, 'answer', 'with the answer’s own look');
   assert.equal(first.getAttribute('aria-hidden'), 'true', 'a screen reader waits for the finished answer');
   assert.equal(first.innerHTML, '<p>Hello, **wor</p>', 'the line being written stays plain');
+  assert.equal(h.run('replying()'), true, "Melo's panel says the reply is being written too");
   frame(12, 'ld**\nBye.');
   draw();
   assert.equal(bubble(), first, 'more words redraw the same bubble');

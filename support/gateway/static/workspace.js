@@ -1212,6 +1212,7 @@ function renderMessages(forceScroll = false, preserveScroll = false) {
   $("welcome").hidden = nodes.length > 0 || (!!S.activeId && !mainActive());
   if (forceScroll || (nearBottom && !preserveScroll)) scroller.scrollTop = scroller.scrollHeight;
   else scroller.scrollTop = oldTop;
+  drawLive();
   updateApprovalBar();
 }
 
@@ -1762,6 +1763,14 @@ function liveAnswerNode(turn) {
   return node;
 }
 
+/** Whether the open chat shows a reply's words as they are written (/stream on). */
+function replying() {
+  return prefs.stream && Boolean(S.view?.turns.at(-1)?.live?.text.trim());
+}
+
+// What Melo's panel was last told: its row of the open chat says "Writing the reply" while the chat's does.
+let panelReplying = false;
+
 /** Redraw each reply being written with its text now; the view follows only a reader at its bottom. */
 function drawLive() {
   const scroller = $("scroll");
@@ -1775,6 +1784,10 @@ function drawLive() {
     grew = true;
   }
   if (grew && atBottom) scroller.scrollTop = scroller.scrollHeight;
+  if (replying() !== panelReplying) {
+    panelReplying = !panelReplying;
+    panel.redraw();
+  }
 }
 
 /** A reply's live text came: one redraw for the frames of the next moment. */
@@ -3168,6 +3181,7 @@ const panel = setupPanel({
   navigate: leaveTask,
   hasTasks: () => sections.tasks,
   live: followOptions,
+  replying: (id) => id === S.activeId && replying(),
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 
