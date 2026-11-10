@@ -51,6 +51,7 @@ from localmelo.support.browser import configured_driver
 from localmelo.support.config import Config, SavedFolders
 from localmelo.support.gateway.auto_blocks import (
     BlockError,
+    allowed_note,
     block_to_allow,
     blocked_steps,
     denied_steps,
@@ -88,6 +89,7 @@ from localmelo.support.gateway.handover import (
     turn_lines,
     turns_block,
     words_block,
+    words_of,
 )
 from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
@@ -420,18 +422,24 @@ def _melos_card(text: str) -> bool:
 def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     """A task's next turn text, and the person's own words when it differs.
 
-    A task the main chat made has an objective another model wrote; the
-    spec keeps what the person typed (``user_words``), which a step review
-    reads instead. A resumption card is melo's, with the last reply and
-    reflection in it, and so is a note its chat continued it with (#411):
-    the person's words are then those of the request, never the card's.
+    A task the main chat made has an objective another model wrote, or one that
+    carries the chat's reading of the request after the person's words
+    (:func:`~.handover.with_reading`); the spec keeps what the person typed
+    (``user_words``), which a step review reads instead, and with none the
+    words before the reading, never the reading. A resumption card is melo's,
+    with the last reply and reflection in it, and so is a note its chat
+    continued it with (#411): the person's words are then those of the request,
+    never the card's.
     """
     objective = str(record.spec["objective"])
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
+    own = typed or words_of(objective)
     if _melos_card(text):
-        return text, typed or objective
-    return text, (text.replace(objective, typed, 1) if typed else None)
+        return text, own
+    return text, (
+        text.replace(objective, own, 1) if typed or own != objective else None
+    )
 
 
 def _pack_block(spec: Mapping[str, Any]) -> str:
@@ -1444,6 +1452,41 @@ class TaskWorkers:
         except BaseException:
             policy.withdraw(key)
             raise
+
+    async def _allowed_note(self, record: TaskRecord) -> str:
+        """The note of the steps allowed once in *record*'s task and not used, or ``""``.
+
+        Read from the blocks of this task and, for a fresh task its job went on
+        in, of the task it followed; only while the allowance holds.
+        """
+        held = self._auto.get(record.task_id)
+        if held is None or not held.has_allowances():
+            return ""
+        packet = Handoff.read(record.spec)
+        sessions = [record.task_id]
+        if packet.origin == "task" and packet.source:
+            sessions.append(packet.source)
+        try:
+            return await allowed_note(self.store, sessions, held.allowed_once)
+        except Exception:
+            log.exception("Could not read the allowed steps of task %s", record.task_id)
+            return ""
+
+    async def open_blocks(self, task_id: str) -> builtins.list[dict[str, Any]]:
+        """The steps Auto blocked in *task_id* that its Allow once may still run.
+
+        As its page lists them (``blocked``): one it can allow, not run on an
+        allowance since, and with none waiting for its step.
+        """
+        body = await self._body(await self.tasks.get_task(task_id))
+        given = body["allowances"]
+        return [
+            block
+            for block in body["blocked"]
+            if block["can_allow"]
+            and block["used_at"] is None
+            and block["step_key"] not in given
+        ]
 
     async def continue_stopped(self, task_id: str) -> tuple[dict, str]:
         """Continue a task that ran out of steps (#341), or finish one not finished.
@@ -2863,6 +2906,9 @@ class TaskWorkers:
             if chat is not None and self.browsers is not None:
                 self.browsers.attach_task(task_id, agent, chat)
             base = await self._baseline(workspace, record)
+            # A step the person allowed once (#617), as melo's note: a retry can
+            # repeat it exactly.
+            allowed_step = await self._allowed_note(record)
             # A person's task decides by the mode of the chat that owns it, read at
             # each step (#576); known before the first one.
             owner, mode_now = await self._following(record, task_mode)
@@ -2885,6 +2931,7 @@ class TaskWorkers:
                 context=(
                     *_task_blocks(record.spec),
                     *(() if chat is None else (ACTING_NOTE,)),
+                    *((allowed_step,) if allowed_step else ()),
                 ),
                 inbox=self._inboxes.setdefault(task_id, TaskInbox()),
                 observe=lambda event: self._observe(task_id, event),
@@ -3454,13 +3501,15 @@ class TaskWorkers:
     ) -> dict[str, Any] | None:
         """How the run ended, from its own tool calls and the folder: never its claim."""
         typed = str(record.spec.get("user_words") or "")
-        asked = [str(record.spec.get("objective") or ""), typed]
+        # The person's words, never the chat's reading of them (with_reading).
+        asked = [words_of(str(record.spec.get("objective") or "")), typed]
         said: list[str] = []  # what this run was told after its request
         # A continued task's message is asked too (a park's card is not one,
         # nor its chat's own note: only the person's words ask, #411).
         continued = bool(record.card) and not record.card.startswith(CARD_START)
         if continued and NOTE_START not in record.card:
-            said.append(record.card)
+            # The card carries the request when the task never ran: its words only.
+            said.append(_turn_text(record)[1] or record.card)
         # A fresh task that goes on with an ended one's job (#571): melo's note
         # (Finish it, Continue) asks as the person's tap did; the chat's does not.
         packet = record.spec.get("handoff")

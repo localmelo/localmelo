@@ -8,6 +8,7 @@ import {
   byDay, cardNode, cardWords, dayLabel, foldAnswers, isMain, mergeCards, readCard, shortTime, timeline,
 } from '../../support/gateway/static/main-chat.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
+import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 // Noon on a fixed day, on this computer's clock, so the day maths never crosses midnight.
 const NOON = new Date(2026, 9, 30, 12, 0, 0).getTime() / 1000;
@@ -493,4 +494,89 @@ test('a stored row of a step that ran on an earlier approval is its stored line,
   mainChat.echoNodes({doc, echo: used, act: () => assert.fail('a plain line acts on nothing')});
   assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, 'Used your approval from 14:02');
   assert.equal(doc.made.some((item) => item.tag === 'button' || item.className === 'echo-sub'), false);
+});
+
+// ── An answer to "this needs you" (the card's Allow this step, the suggestion's Send) ──
+
+test('a card that needs the person allows its one blocked step, then says what it did', () => {
+  const row = {id: 11, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'May I install it?'},
+    block: {request_id: 'r1', step_key: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}}}};
+  const card = readCard(row);
+  assert.deepEqual(card.block, {requestId: 'r1', stepKey: 'k1', name: 'python_exec', preview: 'pip install requests', review: {categories: ['install']}});
+  assert.equal(readCard({...row, data: {...row.data, block: undefined}}).block, undefined, 'no open step: no button');
+  const allowed = [];
+  const step = {...mainChat.stepState(card), onAllow: () => allowed.push('r1')};
+  assert.equal(step.state, 'open');
+  const doc = fakeDoc();
+  cardNode({doc, card, open: () => {}, step});
+  const foot = doc.made.find((item) => item.className === 'main-card-foot');
+  assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Allow this step', 'Open task']);
+  assert.equal(foot.children[0].textContent, 'Blocked: Install software', 'the step it allows, as its own card names it');
+  doc.made.find((item) => item.textContent === 'Allow this step').listeners.click();
+  assert.deepEqual(allowed, ['r1'], 'the same Allow once the step itself offers');
+  // Allowed from this card, or from the person's typed yes in the chat: the card says so instead.
+  const typed = [{kind: 'sent', how: 'allowed', request_id: 'r1'}];
+  for (const done of [mainChat.stepState(card, {given: {r1: {until: NOON}}}), mainChat.stepState(card, {echoes: typed})]) {
+    const after = fakeDoc();
+    cardNode({doc: after, card, open: () => {}, step: done});
+    assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
+    assert.deepEqual(after.made.filter((item) => item.className === 'main-card-note').map((item) => item.textContent),
+      ['Blocked: Install software', 'Allowed once: the task goes on with this step']);
+  }
+});
+
+test('a suggestion to send keeps its Send, in the page\'s language, after its task ended', async () => {
+  const cards = [readCard({id: 1, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}, follow_up: true, end_id: 1}})];
+  const echoes = mainChat.mergeEchoes([], [
+    {id: 2, ts: NOON + 1, data: {echo: 'followed', task_id: 't', did: 'asked', end_id: 1}},
+    {id: 3, ts: NOON + 2, data: {echo: 'suggest', action: 'send', task_id: 't', text: '允许', line: 'Suggested: send your message to Check-in'}},
+    {id: 4, ts: NOON + 3, data: {echo: 'suggest', action: 'stop', task_id: 't', line: 'Suggested: stop Check-in'}},
+  ]);
+  const ended = mainChat.endedTasks(cards, echoes);
+  assert.ok(ended.has('t'), 'nothing more runs for it on its own');
+  const done = mainChat.answered(echoes);
+  assert.equal(mainChat.echoDone(echoes[1], done, ended), false, 'a message still reaches it');
+  assert.equal(mainChat.echoDone(echoes[2], done, ended), true, 'nothing is left to stop');
+  assert.deepEqual(mainChat.echoActions(echoes[1], false), [['Send', 'apply']]);
+  try {
+    await useLanguage('zh-Hans');
+    assert.deepEqual(mainChat.echoActions(echoes[1], false), [['发送', 'apply']]);
+  } finally {
+    await useLanguage('en');
+  }
+});
+
+test('a card that needs the person shows the whole text of a typing step before its Allow this step', () => {
+  const text = 'Checked in <b>today</b>.\nAll of it shown.';
+  const row = {id: 12, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'},
+    block: {request_id: 'q1', step_key: 'k9', question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}}};
+  const card = readCard(row);
+  const doc = fakeDoc();
+  cardNode({doc, card, open: () => {}, step: mainChat.stepState(card)});
+  const shown = doc.made.find((item) => item.className === 'block-step');
+  assert.equal(shown.textContent, text, 'the whole text, as text');
+  assert.ok(doc.made.some((item) => item.textContent === 'Let melo type on notes.example?'));
+  assert.ok(doc.made.indexOf(shown) < doc.made.findIndex((item) => item.textContent === 'Allow this step'));
+  // A step Auto blocked in a task, on its own card in the chat: the text too.
+  const blocked = readCard({id: 13, ts: NOON, data: {state: 'blocked', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    request_id: 'q1', step_key: 'k9', name: 'browser_type', review: {categories: ['send_out']}, can_allow: true,
+    question: 'browser-type:https://notes.example', arguments: {site: 'notes.example', text}}});
+  assert.equal(mainChat.cardBlock(blocked).step, text);
+});
+
+test('a send says the newest card or line drawn, never one held back while the person types', () => {
+  const card = (id, at) => ({id, ts: at, data: {state: 'done', source_id: `t${id}`, source_kind: 'task', title: 'Check-in', at}});
+  const drawn = mainChat.mergeCards([], [card(5, NOON)]);
+  const echoes = mainChat.mergeEchoes([], [{id: 7, ts: NOON + 2, data: {echo: 'started', task_id: 't9', title: 'Other'}}]);
+  const items = timeline([], drawn, NOON + 10, echoes);
+  // Card 6 came on the stream and waits while the person types: the line after it does not take the send past it.
+  const held = {id: 6, type: 'attention.card', ts: NOON + 1, data: card(6, NOON + 1).data};
+  assert.equal(mainChat.drawnUpTo(items, [held]), 5);
+  // Drawn, it counts.
+  const shown = timeline([], mainChat.mergeCards(drawn, [held]), NOON + 10, echoes);
+  assert.equal(mainChat.drawnUpTo(shown, []), 7);
+  assert.equal(mainChat.drawnUpTo([], []), 0, 'nothing drawn: nothing counts');
 });

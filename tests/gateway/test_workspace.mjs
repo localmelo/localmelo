@@ -4656,7 +4656,53 @@ test('a person sees what melo is doing and how long, never a tool name, a step n
   const card = findNode(done, (node) => node.classList?.contains('tool-card'));
   assert.equal(findNode(card, (node) => node.className === 'tool-words').textContent, 'Wrote notes.md');
   assert.equal(findNode(card, (node) => node.className === 'tool-name'), null);
-  assert.equal(findNode(done, (node) => node.className === 'message-actions').children[0].textContent, '14s', 'the footer gives the time alone');
+});
+
+test('a reply gives its time once: on its steps line when it has steps, else in its footer', async () => {
+  const reply = async (routes, tools) => {
+    const h = harness(routes);
+    await h.run('init()');
+    const {turn, push} = fullTurn();
+    for (let call = 1; call <= tools; call += 1) {
+      push('tool.started', {step: 1, call_id: `call-${call}`, name: 'file_read', arguments: {path: '/tmp/notes.md'}, preview: 'notes.md'});
+      push('tool.finished', {step: 1, call_id: `call-${call}`, name: 'file_read', status: 'success', error_category: 'none', output: 'ok', output_chars: 2, error: '', duration_s: 0.1, images: [], approval: null, exit_code: null});
+    }
+    push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 14, n_tool: tools, steps: 2}});
+    push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+    h.context.turn = turn;
+    const node = h.run('assistantNode(turn, true)');
+    const times = (text) => (text.match(/14s/g) ?? []).length;
+    const summary = findNode(node, (child) => child.className === 'work-summary');
+    const facts = findNode(node, (child) => child.className === 'message-facts');
+    return {summary: summary?.textContent ?? '', foot: facts?.textContent ?? '', all: times(flatten(node))};
+  };
+  const steps = await reply(defaultMode(), 1);
+  assert.deepEqual([steps.summary, steps.foot, steps.all], ['Worked for 14s', '', 1], 'the steps line has it, the footer does not');
+  const plain = await reply(defaultMode(), 0);
+  assert.deepEqual([plain.summary, plain.foot, plain.all], ['', '14s', 1], 'a plain reply has it in its footer');
+  const developer = await reply(baseRoutes(), 1);
+  assert.deepEqual([developer.summary, developer.foot, developer.all], ['Worked for 14s · 1 tool call', '2 steps', 1], 'the developer mode keeps its steps, the time once');
+});
+
+test('copying a reply is an icon button named in words, and it says Copied for a moment, aloud too', async () => {
+  const h = harness(defaultMode());
+  await h.run('init()');
+  const {turn, push} = fullTurn();
+  push('run.finished', {result: {status: 'completed', result: 'Done.', duration_s: 3, n_tool: 0, steps: 1}});
+  push('turn.finished', {turn: 1, turn_id: 'turn-1', status: 'completed', cause: 'run', error: ''});
+  h.context.turn = turn;
+  const node = h.run('assistantNode(turn, true)');
+  const copy = findNode(node, (child) => child.className === 'copy-button');
+  const said = findNode(node, (child) => child.getAttribute?.('role') === 'status');
+  assert.deepEqual([copy.getAttribute('aria-label'), copy.title, copy.textContent], ['Copy response', 'Copy response', ''], 'no words on it: its name and tooltip');
+  assert.equal(copy.children[0].getAttribute('aria-hidden'), 'true', 'the icon is drawn as the panel draws its icons');
+  await copy.click();
+  assert.equal(h.context.copied, 'Done.');
+  assert.deepEqual([copy.dataset.copied, copy.getAttribute('aria-label'), said.textContent], ['true', 'Copied', 'Copied']);
+  const back = h.timers.filter((timer) => !timer.interval && timer.ms === 1500 && !timer.cleared);
+  assert.equal(back.length, 1);
+  back[0].handler();
+  assert.deepEqual([copy.dataset.copied, copy.getAttribute('aria-label'), said.textContent], [undefined, 'Copy response', '']);
 });
 
 test('a note melo kept reads as kept, and one the gate refused as not kept, never as a look at memory', async () => {

@@ -170,6 +170,23 @@ func menuTitle(_ state: MenuBarState) -> String {
     }
 }
 
+/// What the item's button shows: the mark's picture (its key, which names the bar's appearance and the dot; nil without
+/// the mark), the title beside it and the words VoiceOver reads and hovering shows. Setting any of them makes the status
+/// item lay out and draw again, and a layout announces the button's appearance again, so the button is written only when
+/// its face differs from the one it shows.
+struct MenuBarFace: Equatable {
+    let picture: String?
+    let title: String
+    let label: String
+}
+
+func menuBarFace(_ state: MenuBarState, picture: String?) -> MenuBarFace {
+    let count = menuTitle(state)
+    // Without the mark the item must still be there: its name stands in for it.
+    let title = picture != nil ? count : (count.isEmpty ? "localmelo" : "localmelo · \(count)")
+    return MenuBarFace(picture: picture, title: title, label: menuBarLabel(state))
+}
+
 /// What VoiceOver reads for the item, and what hovering shows.
 func menuBarLabel(_ state: MenuBarState) -> String {
     switch state {

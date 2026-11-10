@@ -54,7 +54,7 @@ The page opens in default mode, which leaves out what only a developer needs: th
 level chip, **Details**, the GPU-lock line, the **LOCAL** badge, the cache, step, phase and queue segments of the
 status row, the running chip (the [panel beside the chat](#the-panel-beside-a-chat) shows what runs), and the
 priority line and menu of a task's page. It has no Workers and no priority codes to learn either: the panel's **Workers** tab, the welcome link to worker runs, **Run as a task** and the `P0` to `P5` chips and lists belong to developer mode, a task shows as what melo is doing (in Now and in the chat that asked), and a priority you changed reads in words (`today`). It says things plainly too: a running chat reads
-`Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s`, the line under an answer gives its time, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
+`Working…` beside **Stop**, and the live row says what melo is doing and for how long (`Reading notes.md · 12s`), with no tool name, step number or token count (the work line reads `Worked for 14s` and the time shows nowhere else, a tool card reads `Wrote notes.md`, the run's phase is in words such as `Looking around`, and the panel names the model without the kind of server), and the settings call the server **Model server** and its address
 **Server address**. The header shows a
 model chip (the model's name, `Model offline` or `No model`) that opens settings. With melo_serve it shows the model and its backend and opens the list of models to switch to, as does the model button under the message box ([Switch the model](model-servers.md#switch-the-model)).
 A task opens in the [panel beside the chat](#the-panel-beside-a-chat), from its row in Activity, and has no link of its own in the sidebar; worker runs are a developer-mode view, the
@@ -84,11 +84,12 @@ for you to send or change, and step aside once there is text.
    its own. Answers are rendered as Markdown, with code blocks.
 3. A turn reads like the terminal's: your message, a work group with the
    tool cards it ran, its reasoning, its notices and reflections, the live
-   row while it runs, and the final answer with `Copy response`. Output that
+   row while it runs, and the final answer with its copy button (an icon; it says
+   **Copied** for a moment). Output that
    a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
    GIF, WebP) show inline, and the pictures the turn made show under the answer
    (see [Pictures in the answer](#pictures-in-the-answer)). A turn that answers without tool calls shows its
-   time once, in the line under the answer; its reasoning, when it has some,
+   time once, beside the copy button under the answer; its reasoning, when it has some,
    opens under a `Thought` line. Chats tell the model that it is melo from
    localmelo, which model and server it runs on and what it remembers, so asking
    "who are you?" or "what do you remember?" is answered plainly (see [What melo says about itself](terminal.md#what-melo-says-about-itself)).
@@ -161,11 +162,12 @@ What you allow in the main chat counts everywhere; in a side chat, only there (s
 
 When a side chat's run ends, the main chat shows a card under the day it happened. So does a
 task of the main chat that finishes, fails or waits for your approval; a side chat's own tasks
-come back to that side chat ([below](#side-chats-start-tasks-too)). A card reads:
+come back to that side chat ([below](#side-chats-start-tasks-too)). Cards and the chat's lines about tasks hang on one
+thin line under melo's replies, apart from the talk; only a card that asks you something is a box. A card reads:
 
 - `Done: Fix the list_files test` with the first two lines of the answer: what changed, the tests, the commit.
 - `Did not finish: Fix CI` with why it ended.
-- `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question.
+- `Ready: Fix CI`, `Done, not finished: Fix CI` or `Needs you: Fix CI` for a task that finished: how code found it ended, not what its report says ([how it is checked](scheduler.md#tasks-from-the-main-chat)). A task not finished says why in amber (`No test ran after the last change · The changes are not committed`) and offers **Finish it: run the tests and commit** (or **Finish it: run the tests**), which continues it as **Continue** does. A task that needs you shows its question, and, when one step Auto blocked in its run can still run once, that step (`Blocked: Install software`) with **Allow this step**; after the tap the card reads `Allowed once: the task goes on with this step`.
 - `Stopped: Fix CI` for a task that used all its steps before it was done. It shows the sentence of its answer that says what is left (`Remaining: run the tests and commit.`) and offers **Continue**, which picks the task up where it stopped, with what it did before. The same task reads Stopped on its page and in the panel's Activity and Workers rows; **Continue** is on its page. A task that failed for another reason stays `Did not finish`.
 - `Needs your approval: Fix CI` with what it asks: the step's one-sentence summary (`Needs your OK: Close the extra Safari tabs`) when it has one. Once you answer, the same card says how ("Allowed once", "Allowed for this task", "Denied") and no longer offers **Review**.
 - A title is the one the main chat gave the task, or the first sentence of your request without a "please" or a level word at its start (a first line that is only "Hi" is skipped), a path as its file name, cut at a word.
@@ -212,7 +214,8 @@ worker runs did**. Default mode has neither; Activity shows the same tasks as wh
 
 - **The task asks the chat that started it, not you.** A row appears there: `Task “Fix tests” asks…`. **Show the question** opens what the task wrote: the background, where it stands, the problem, the likely causes, its options, the help it needs, and what to tell you if nobody can solve it. Its card and Activity read `Waiting on Main chat` (or the side chat's name).
 - **melo answers when the chat is free.** It never interrupts your own message. It reads the question as information, can look things up with the chat's reading tools and its memory, and answers: `melo answered “Fix tests”`, with the answer quoted. Several questions to one chat are answered one at a time, oldest first.
-- **Or it asks you.** When only you can decide, a row reads `“Fix tests” needs your answer`: what the task is doing, what happened, what was tried, the choices with their trade-offs, and the question. Type in its box and **Send answer**, or, when only this task waits for you in the chat, just send your answer as a message: it shows `Sent to “Fix tests” as your answer` with **Undo** for 10 seconds, then reaches the task (a question, a request for new work, a command or a control phrase stays the chat's). When several wait, use each box, or `/answer Fix tests: B`. The task waits for you as long as you take; its card reads `Waiting on you`.
+- **Or it asks you.** When only you can decide, a row reads `“Fix tests” needs your answer`: what the task is doing, what happened, what was tried, the choices with their trade-offs, and the question. Type in its box and **Send answer**, or, when only this task waits for you in the chat, just send your answer as a message: it shows `Sent to “Fix tests” as your answer` with **Undo** for 10 seconds, then reaches the task (a question, a request for new work, a command or a control phrase stays the chat's). When several wait, use each box, or `/answer Fix tests: B`.
+- **Answer a task that needs you where you are.** When one task of the chat waits for you because it needs you (one that ran out of steps has **Continue** instead), and its card, its blocked step or melo's follow-up on it is the last thing the chat showed (on your page when you sent: a result held back while you type does not count), your next message goes to it the same way, with **Undo**, without naming it. A plain yes (`allow`, `ok`, `go ahead`, `允许`, `好的` and a few more, as the whole message) allows the step its card offers once instead, as **Allow this step** does, when that step is the one step still blocked and of a kind your words may allow; the chat says `Allowed once: Install software; the task goes on with this step`. A step that only a click allows still needs the click. Two tasks waiting, a message of yours or another task's line since, a question, a command or words that name another task: the chat reads your message as usual. Only what you type counts: a page, a file or a task's report never answers for you. The task waits for you as long as you take; its card reads `Waiting on you`.
 - **A message you send meanwhile waits its turn.** While melo answers a task, you can still type and send: your message shows as `Queued: this runs once melo has answered “Fix tests”` and runs right after, before the next question, even if the gateway restarts first.
 - **No answer in 10 minutes.** If melo neither answers nor asks you within 10 minutes of starting on the question, the task goes on with its best option and says so in its report (`No answer for “Fix tests”; it goes on with its best option`). Stopping the task ends the wait at once and stops melo's work on it; a restart marks the question expired.
 - **Answers never approve.** melo's answer is information for the task. A step that needs your approval still asks you (or Auto's review), as before. The task's words never count as yours: in Auto they allow no step melo blocked, melo never remembers them as something you said, and melo's turn on the question has no Retry.
@@ -1048,7 +1051,18 @@ commands and file changes.
   and lists **Blocked steps**, each opening the same card; the task goes on
   without them, and **Allow once** there sends the message to the task
   while its job is unfinished. Once it finished, the step is new work you
-  ask the chat for.
+  ask the chat for. Typing on a page and sending a form are blocked steps
+  like any other: the card says the site and the box and shows the whole
+  text, or where the form goes and what it holds, and **Allow once** runs
+  that exact text there once; the task is told exactly which step it may
+  repeat. Another text, another box, another site or the form's send is a
+  step of its own and is reviewed again. A text filed under passwords or
+  keys, a step on a site refused earlier in the task, and a click, a choice
+  or a page opened have no **Allow once**. Two boxes described by the same
+  words on one page count as the same box. A step that types and sends in
+  one go (typing, then Enter) needs two allowances today and may not
+  finish: a later change lets a scheduled task keep what it may type and
+  send on its site.
 - An **Allow once** on a blocked step lives in memory: restarting
   localmelo forgets it, and an allowance the retried turn did not use goes
   when that turn ends. Sites allowed for a chat are grants, which are kept

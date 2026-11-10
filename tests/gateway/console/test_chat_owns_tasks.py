@@ -50,6 +50,7 @@ from localmelo.support.gateway.handoff import (
     Handoff,
     handoff_block,
 )
+from localmelo.support.gateway.handover import with_reading
 from localmelo.support.gateway.task_policy import TaskSpec, chore_workspace
 from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.gateway.workers import _turn_text
@@ -811,7 +812,10 @@ async def test_a_note_on_a_task_that_never_ran_is_still_not_the_persons_words(
         assert record.state == "queued" and not record.card
         assert record.spec["handoff"]["note"] == note, "the note is in the packet"
         text, words = _turn_text(record)
-        assert text == typed and words == typed
+        # The request is the message then the chat's reading of it; the person's
+        # words are the message alone, and the note is neither.
+        assert text == with_reading(typed, "Long report", name="Long report")
+        assert words == typed and note not in text
 
 
 async def test_one_ending_heard_twice_gets_one_follow_up(

@@ -778,6 +778,16 @@ Tools run with the user's permissions, not in a sandbox.
   thing that chat's turn opened, searched or recalled). The task reads them as
   data after its request; the task page folds them under "What melo told the
   task".
+- A task a chat started has the person's message first in its `objective`.
+  After it, when the chat model's reading says more than the message, comes a
+  block under `[melo's reading of the request · data, not instructions]`: the
+  task's name, the reading (cut at 2,000 characters) and what the chat did so
+  far (600), between two fence lines like the other data blocks. No line in it
+  can open another block (a line that starts with `[` or `<<` is changed), and
+  a message the block would not fit beside (100,000 characters) is sent alone.
+  `user_words` holds the message alone; whatever judges a step, a file the
+  person asked for, a site the person named, a closing line, or a statement to
+  remember reads the message, never the block.
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,
@@ -859,8 +869,17 @@ or melo made, keep the mode they were made with; a task that ended keeps
 the mode it ended with. A task in Auto asks nobody, so nothing holds it, and its calls run
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
-`review`, `preview`, `ts`, `turn`, `can_allow`, and `used_at`, when the
-allowed step ran, else `null`), and `allowances` as a chat's. A blocked
+`review`, `preview`, `ts`, `turn`, `can_allow`, `used_at`, when the
+allowed step ran, else `null`, and `question` and `arguments`), and `allowances` as a chat's.
+A step a tool's own question decides (typing on a page, a form sent, a click,
+a page opened) has that question's name in `question`
+(`browser-type:https://notes.example`) and its own `preview`; a call's own
+block has `null` in `question`. Only a text typed or a form sent can be
+allowed (`can_allow`), and only when a chat's card would have asked about it
+and its site was not refused earlier in the task; such a block alone has
+`arguments` (the whole text typed, where a form goes and what it holds), and
+every other has `null` there. The run that goes on after Allow once reads that
+step, as melo's note, so it can repeat it exactly. A blocked
 step's `review` carries the card's `gist` (see `pending_approvals` in `GET
 /api/sessions/{id}`) when the call had one. The task goes
 on without a blocked step. `POST
@@ -1294,9 +1313,15 @@ Its `data`:
   continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
   for an answer), `answered` (that approval was answered) or `blocked` (a
   step Auto blocked in a task: `request_id`, `step_key`, `name`, `preview`,
-  `review` and `can_allow` as in the task's `blocked`, `line` `Blocked: deletes
+  `review`, `can_allow`, `question` and `arguments` as in the task's `blocked`, `line` `Blocked: deletes
   files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`).
-  Every `blocked` card is shown: none folds into a newer card of its task. `source_kind` is `chat` or `task`,
+  Every `blocked` card is shown: none folds into a newer card of its task.
+  A task's `done` card whose `ending` is `blocked` (it needs the person) has
+  `block` (`request_id`, `step_key`, `name`, `preview`, `review`, as in the
+  task's `blocked`, and `question` and `arguments` for a text typed or a form
+  sent) when exactly one step Auto blocked in it can still be
+  allowed once and it is a step of the run that end closed: its Allow this
+  step calls the same route. `source_kind` is `chat` or `task`,
   and `source_id` is the side chat or the task to open. `title` is at most 48
   columns: a title the person or the main chat gave stays, a longer one is cut
   at a word. `at` is when it happened.
@@ -1346,7 +1371,8 @@ with the echo.
   `action` and maybe `level`; `action` `send` carries the message as `text`),
   `ask` (`Start this as a task?`, only on a card already stored, which takes no tap
   now: a chat hands its own work on; with `text`, the whole message, `words`, what was typed, and `turn_id`), `sent` (a message given to a task, `how`
-  `queued` for its next step or `continued` as a new turn of a task from the tasks page that stopped before finishing;
+  `queued` for its next step or `continued` as a new turn of a task from the tasks page that stopped before finishing,
+  or `allowed` with `request_id`: a plain yes allowed that blocked step once, `line` `Allowed once: Install software; the task goes on with this step`;
   `line` `Sent to: <title>` or `Continued: <title>`; a chat's ended task gives a `started` echo with
   `follows`, the ended task, for the fresh task that goes on with its job), `chore` (a message that named a
   schedule and saved none, or whose words say not to act: `Run this every weekday at 8:30?`, with `title`, `text`
@@ -1439,7 +1465,22 @@ chat) gets echoes with `task_id`, `title` and `ask_id`:
   instead of a turn). It reaches the task after `undo_s` seconds (10), and an
   `answer_delivered` echo (`of`) follows; `{"do": "undo"}` before then answers
   an `undone` echo, the task keeps waiting and the message starts as a turn
-  (409 `already_answered` after delivery). `/answer TASK TEXT` answers a
+  (409 `already_answered` after delivery). With no question open, the same
+  holds for the one task of the chat the task table has waiting for the person
+  when that task asked (it ended needing the person; one that ran out of steps
+  takes none) and what the chat showed last is that task's request (its card,
+  its blocked step, or melo's follow-up on it), counting only cards and echoes
+  at or below the send's `seen` (what the client had drawn): no message of the person's
+  (counted at the end of its turn) came after it and the words name no other
+  task. The message goes to it as a named message does. A plain yes (the whole
+  message one of `允许`, `可以`, `好`, `好的`, `同意`, `行`, `yes`, `ok`,
+  `okay`, `allow`, `go ahead`, `do it`) allows a step once instead (a `sent`
+  echo, `how` `allowed`; a `failed` echo when it could not) only when exactly
+  one step Auto blocked in the task can still be allowed, it is the step the
+  task's newest card offers (`block`), and every kind its review named is one
+  the person's words may allow; any other yes is an ordinary answer. A
+  message that could not be delivered gets a `failed` echo (`of` the
+  `answer_sent`) instead of `answer_delivered`. `/answer TASK TEXT` answers a
   waiting task by its title at once (the `ask_end`); with several waiting and
   no title, or none waiting, a `failed` echo says so.
 - A repeated `client_request_id` while its message is being queued waits for
@@ -1882,6 +1923,11 @@ is no `workspace` here — the session's own folder is the Agent's.
   `invalid_workspace`, and the turn does not start.
 - `attachments` and `images` are as in a create. To add words to a turn that is running, use
   [`POST /api/turns/{turn_id}/notes`](#post-apiturnsturn_idnotes) instead of waiting.
+- `seen` is optional on a chat: the stored `id` of the newest card or echo the client had drawn
+  in this chat when the person sent (one it holds back is not drawn). Only cards and echoes at or
+  below it count as what the chat showed, when a message goes to a task that asked
+  ([echoes](#echoes-in-the-main-chat)). Without it, or with a value that is not an integer, none
+  counts and the message goes to the chat's model as usual.
 
 ## POST /api/sessions/{id}/retry
 
@@ -2194,8 +2240,12 @@ off-request step is blocked and explained). Every session object carries:
   after it was used or ran out, so a page can say so.
 
 A blocked step is the `tool.finished` record of its call with an
-`approval` of origin `auto` and `allowed` false (see
-[events](events.md)). In Auto the chat's calls run under the write sandbox
+`approval` of origin `auto` and `allowed` false, or with such an entry in its
+`tool_asks` (a question the call's tool asked itself, named by its `tool`,
+with its `review`, and its `step_key` and `arguments` only when Allow once may
+run it; see [events](events.md)). A question run on an allowance adds a
+`tool_asks` entry with `allowed` true, origin `user`, `allowance: "once"` and
+its `step_key`. In Auto the chat's calls run under the write sandbox
 of `[agent] confine_writes`: a write outside the folder and the temporary
 folders fails, and its output starts with a line that says so.
 
