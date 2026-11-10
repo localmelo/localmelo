@@ -187,13 +187,9 @@ _ACROSS: Final = (
     _THIS_CHAT + ". Across chats you remember only what localmelo keeps on this "
     "computer: {kept}. It brings back what matches the user's question."
 )
-# What the long-term store keeps (melo/agent/agent.py): legacy writes a note
-# per tool step and the lessons of failed attempts; the other modes write what
-# the user states or asks to be remembered and what a run found or decided.
-KEPT_LEGACY: Final = (
-    "short notes on what you did with your tools and what you learned from "
-    "failed attempts"
-)
+# What the long-term store keeps (melo/agent/agent.py): the explicit modes write
+# what the user states or asks to be remembered and what a run found or decided;
+# a legacy Agent has no such store.
 KEPT_TYPED: Final = (
     "what the user tells you or asks you to remember, and what you found or decided"
 )
@@ -217,24 +213,23 @@ def host_of(url: str) -> str:
         return ""
 
 
-def kept_across_chats(options: AgentOptions, *, has_embedding: bool) -> str:
+def kept_across_chats(options: AgentOptions) -> str:
     """What an Agent made with *options* keeps for later chats; ``""`` for nothing.
 
     The long-term store outlives the chat only when the Agent persists memory
-    (``memory_dir`` or ``LOCALMELO_PERSIST_MEMORY``), memory is on, and it can
-    recall: legacy needs an embedding provider, the other modes read the store
-    as text unless the retriever is off. Without that the Agent keeps this
-    chat's messages only.
+    (``memory_dir`` or ``LOCALMELO_PERSIST_MEMORY``), memory is on, the
+    reasoning mode is not legacy (a legacy Agent opens no store), and the
+    retriever is not off (the store is read as text). Without that the Agent
+    keeps this chat's messages only.
     """
-    legacy = options.reasoning == "legacy"
     if (
         not options.memory
+        or options.reasoning == "legacy"
         or _resolve_memory_dir(options) is None
-        or not (has_embedding or not legacy)
-        or (not legacy and options.retriever == "off")
+        or options.retriever == "off"
     ):
         return ""
-    return KEPT_LEGACY if legacy else KEPT_TYPED
+    return KEPT_TYPED
 
 
 def identity_text(

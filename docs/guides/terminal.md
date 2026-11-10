@@ -89,7 +89,7 @@ When the model is not the saved default, a row after the folder gives the server
 - Every chat tells its model who it is, so that "who are you?" is answered as melo: melo from localmelo, an open-source agent that works in your folder with tools and acts for you; its approval cards, not the model, ask you before a step changes anything.
 - It names the model it runs on when asked, does not present itself as the model's own assistant, and replies in the language and script you write in.
 - It names the server as the banner does (`oMLX`, `Ollama`, an `OpenAI-compatible server`, or a cloud provider) and says whether it is on this computer; `/model` and `/backend` start the next turn on the new choice.
-- It says what the chat remembers: by default the recent messages of this chat and nothing from other chats; with memory kept between runs (see [Memory](memory.md#keep-memory-between-runs)), also the short notes localmelo keeps on this computer that match your question. Files in your folder are not memory.
+- It says what the chat remembers: the recent messages of this chat and nothing from other chats, or, with [memory across chats](../concepts/memory.md#memory-across-chats) on, also the older parts of this chat, earlier chats and the notes melo keeps about you. Files in your folder are not memory.
 - The web console and the macOS app do the same; direct runs (`melo "task"`), workers and the benchmark send no such paragraph.
 
 ### Keys

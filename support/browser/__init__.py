@@ -21,6 +21,7 @@ from localmelo.support.config import BROWSER_DRIVERS as DRIVERS
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
+    from localmelo.support.web.guard import LocalAllow
 
 
 def configured_driver(cfg: Config) -> str:
@@ -50,6 +51,7 @@ def provider_for(
     live: bool = True,
     live_fps: float = 15.0,
     chat_id: str | None = None,
+    listed: LocalAllow | None = None,
 ) -> BrowserToolProvider | None:
     """The browser tools for *driver*; None for ``off``. ``ValueError`` for an unknown name.
 
@@ -61,7 +63,9 @@ def provider_for(
     person can watch the Chrome browser (:mod:`localmelo.support.browser.live`), its
     pictures held to *live_fps* a second. *chat_id* names the chat's work folder
     (:mod:`localmelo.melo.contracts.work_folder`); without one the folder is the
-    run's own and goes with it.
+    run's own and goes with it. *listed* are the test servers of ``[tools]
+    web_fetch_allow_local`` (:func:`localmelo.support.web_local.allow_of`, from
+    the session's live config); None, the default, reaches none.
     """
     if driver == "off":
         return None
@@ -79,6 +83,7 @@ def provider_for(
             desktop=watch_for(app_windows),
             opens_apps=opens_apps,
             chat_id=chat_id,
+            listed=listed,
         )
     if driver == "chrome":
         from localmelo.support.browser.chrome import ChromeBackgroundDriver
@@ -95,6 +100,7 @@ def provider_for(
             live=live,
             live_fps=live_fps,
             chat_id=chat_id,
+            listed=listed,
         )
     raise ValueError(f"unknown browser driver {driver!r}; use one of {DRIVERS}")
 

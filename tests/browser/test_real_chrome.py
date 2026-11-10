@@ -501,7 +501,7 @@ async def test_a_button_all_under_an_anchored_ad_goes_to_the_page_script_and_the
 ) -> None:
     done, _ = await chosen(driver, base, "/under-ad", "Submit")
     assert done.via == "page-script"
-    assert "an ad (iframe from 127.0.0.1) covers it" in done.why
+    assert "an ad (a frame from another site) covers it" in done.why
 
 
 async def test_a_square_that_slides_over_the_click_is_stopped_and_the_click_tried_again(

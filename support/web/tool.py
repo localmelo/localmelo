@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 from localmelo.melo.contracts.approvals import TOOL_ASK
-from localmelo.melo.contracts.tools import TOOL_MARKS, BaseToolProvider, ProvidedTool
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import pdf
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ImagePart, ToolDef
@@ -254,13 +254,6 @@ class Reading:
     document: tuple[bytes, pdf.PdfText] | None = None
 
 
-def _mark_local() -> None:
-    """Mark the running call's ``tool.finished`` event ``allowed_local``."""
-    marks = TOOL_MARKS.get()
-    if marks is not None:
-        marks["allowed_local"] = True
-
-
 # What a read of a server the person wrote the address of says (#547).
 WRITTEN_NOTE = "[This address is a server on this computer that you wrote.]"
 
@@ -274,7 +267,7 @@ class _Local:
 
     def __call__(self, target: Target) -> None:
         self.used = True
-        _mark_local()
+        web_local.mark()
 
 
 class WebFetchProvider(BaseToolProvider):
@@ -354,7 +347,7 @@ class WebFetchProvider(BaseToolProvider):
                 return ToolOutput(text=text, is_error=True)
             self._keep(address, reading)
         elif reading.local:
-            _mark_local()
+            web_local.mark()
         if number > len(reading.parts):
             return ToolOutput(
                 text=f"The page has {len(reading.parts)} part(s); there is no part {number}.",

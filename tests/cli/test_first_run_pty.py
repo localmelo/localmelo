@@ -129,7 +129,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     text = _text(term)
     # A new process has listed nothing yet; the file alone names the server.
     assert f"chat-b · {label} · {url}" in text
-    assert f"long-term memory · {label} · nomic-embed-text" in text
+    assert f"embedding model · {label} · nomic-embed-text" in text
     assert "Server URL" not in text
 
 

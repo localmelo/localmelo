@@ -12,7 +12,6 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import RETRY_DELAYS_S
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
-    BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
 )
@@ -97,17 +96,6 @@ class BlockingLLM(ScriptedLLM):
         raise AssertionError("not reached")
 
 
-class FailingEmbedding(BaseEmbeddingProvider):
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        raise self.error
-
-    async def close(self) -> None:
-        pass
-
-
 class Sleeps:
     """A sleep that returns at once and records each delay."""
 
@@ -170,7 +158,7 @@ class TestChatRetries:
         llm = ScriptedLLM([_busy(), _busy(429), _answer("ok", usage)])
         sleeps = Sleeps()
         chat = _scoped_chat(llm, sleep=sleeps)
-        reply = await chat.plan_step(context=[], short=_user(), tools=[ECHO], query="q")
+        reply = await chat.plan_step(short=_user(), tools=[ECHO], query="q")
         assert reply.content == "ok"
         assert llm.attempts == [1, 2, 3]
         assert sleeps.delays == [1.0, 4.0]
@@ -319,23 +307,6 @@ class TestProviderErrorStatus:
         assert (result.steps, result.n_tool) == (1, 1)
         assert (result.n_llm, result.n_main, result.n_aux) == (1, 1, 0)
         assert result.llm_errors == 1
-
-    @pytest.mark.asyncio
-    async def test_a_failed_embedding_request_ends_the_run(self) -> None:
-        error = ProviderError(
-            "POST /embeddings failed: ConnectError: refused", retryable=True
-        )
-        llm = ScriptedLLM([_answer("never")])
-        agent = Agent(
-            llm=llm,
-            embedding=FailingEmbedding(error),
-            options=AgentOptions(builtins=frozenset()),
-        )
-        result = await agent.run_task("q")
-        assert (result.status, result.error) == ("provider_error", str(error))
-        # Retrieval embeds the query before the first planning call.
-        assert (result.steps, llm.attempts) == (0, [])
-        assert _only_task(agent).status == "provider_error"
 
     @pytest.mark.asyncio
     async def test_a_provider_error_without_a_message_names_its_type(self) -> None:

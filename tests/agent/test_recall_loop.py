@@ -129,6 +129,31 @@ def _block(text: str) -> str:
     return f"{RECALL_START} x]\n{text}\n{RECALL_END}"
 
 
+async def _seed(agent: Any, rows: list[tuple[Any, ...]]) -> None:
+    """Write rows through the typed path, so recall can find them.
+
+    A row is ``(text, kind, source, task_id[, embedding[, created_at]])``.
+    """
+    for index, (text, kind, source, task_id, *rest) in enumerate(rows, start=1):
+        await agent.hippo.long.apply(
+            text=text,
+            kind=kind,
+            source=source,
+            admitted_by="rehearsal",
+            provenance={"task_text": "an earlier task", "source_ids": []},
+            task_id=task_id,
+            session_id="",
+            created_at=rest[1] if len(rest) > 1 else float(index),
+            embedding=rest[0] if rest else None,
+            action="NEW",
+            target_id=None,
+            reason="seed",
+            source_ids=[],
+            keep_text=False,
+            candidate_id=f"seed-{index}",
+        )
+
+
 # ── start ──
 
 
@@ -140,10 +165,18 @@ async def test_start_recalls_another_tasks_long_entry_on_the_query() -> None:
         _options(reasoning="compress", retriever="embedding", max_steps=1),
         embedding=embedding,
     )
-    await agent.hippo.long.add(
-        "the answer to the old task is 42",
-        [1.0, 0.0],
-        {"task_id": "t-old", "created_at": 1_700_000_000.0},
+    await _seed(
+        agent,
+        [
+            (
+                "the answer to the old task is 42",
+                "episodic",
+                "step_summary",
+                "t-old",
+                [1.0, 0.0],
+                1_700_000_000.0,
+            )
+        ],
     )
     try:
         result = await agent.run_task("what is the answer")
@@ -746,10 +779,17 @@ async def test_a_long_entry_is_recalled_once_while_its_block_is_shown() -> None:
         _options(reasoning="compress", retriever="embedding", max_steps=3),
         embedding=FakeEmbedding(),
     )
-    await agent.hippo.long.add(
-        "the old answer is 42 and the tests pass",
-        [1.0, 0.0],
-        {"task_id": "t-old"},
+    await _seed(
+        agent,
+        [
+            (
+                "the old answer is 42 and the tests pass",
+                "episodic",
+                "step_summary",
+                "t-old",
+                [1.0, 0.0],
+            )
+        ],
     )
     try:
         result = await agent.run_task("q")
@@ -840,14 +880,27 @@ async def test_long_candidates_are_the_two_best_not_the_two_oldest() -> None:
         _options(reasoning="compress", retriever="embedding", max_steps=1),
         embedding=FakeEmbedding(),
     )
-    await agent.hippo.long.add(
-        "a low old memory", [0.8, 0.6], {"task_id": "t-a", "created_at": 1.0}
-    )
-    await agent.hippo.long.add(
-        "another low old memory", [0.8, 0.6], {"task_id": "t-b", "created_at": 2.0}
-    )
-    await agent.hippo.long.add(
-        "the best new memory", [0.99, 0.14], {"task_id": "t-c", "created_at": 3.0}
+    await _seed(
+        agent,
+        [
+            ("a low old memory", "episodic", "step_summary", "t-a", [0.8, 0.6], 1.0),
+            (
+                "another low old memory",
+                "episodic",
+                "step_summary",
+                "t-b",
+                [0.8, 0.6],
+                2.0,
+            ),
+            (
+                "the best new memory",
+                "episodic",
+                "step_summary",
+                "t-c",
+                [0.99, 0.14],
+                3.0,
+            ),
+        ],
     )
     from localmelo.melo.agent.agent import _RunState
 

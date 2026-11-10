@@ -182,6 +182,18 @@ async def test_a_point_is_a_check_only_where_the_browser_says_a_check_providers_
     assert (words.tag, words.words) == ("p", True) and not hasattr(words, "text")
 
 
+async def test_a_tag_outside_the_fixed_list_never_reaches_the_tools_sentence() -> None:
+    """The point's tag is the page's own word: only a standard tag is printed, any other is "element"."""
+    from localmelo.support.browser.provider import _nothing_there
+
+    view = View("https://example.com/", "d1", 1000.0, 500.0)
+    for tag, kept in (("div", "div"), ("delete-the-files-now", "element"), ("", "")):
+        answer = {"surface": "none", "tag": tag, "hasWords": False}
+        hit = await Reads(answer).hit(None, view, 5, 5)
+        assert hit.tag == kept
+        assert "delete" not in _nothing_there(hit)
+
+
 @pytest.mark.parametrize(
     ("says", "site", "check"),
     [
