@@ -44,6 +44,22 @@ test('a card reads from a page row and from a stream frame alike, once each', ()
   assert.deepEqual(merged.map((card) => card.id), [1, 3]);
 });
 
+test('a failed card says why from its kind, in the page\'s language, never the server\'s raw line', async () => {
+  const raw = 'Could not get an answer from the model server: POST /chat/completions failed with HTTP 400: bad request';
+  const failed = (status, cause = 'run') => readCard({id: 7, ts: NOON, state: 'failed', source_id: 't', source_kind: 'task', title: 'Fix', line: raw, failure: {status, cause}}).line;
+  assert.equal(failed('provider_error'), 'Could not get an answer from the model server');
+  assert.equal(failed('timeout'), 'Timed out');
+  assert.equal(failed('cancelled', 'crash'), 'Interrupted: melo stopped unexpectedly');
+  try {
+    await useLanguage('zh-Hans');
+    assert.equal(failed('provider_error'), '没能从模型服务器得到回答');
+  } finally {
+    await useLanguage('en');
+  }
+  // A card without a kind keeps the line it was given.
+  assert.equal(readCard({id: 8, source_id: 't', state: 'failed', line: 'No disk.'}).line, 'No disk.');
+});
+
 test('the timeline orders turns and cards by time, with a divider per day and one card per source between turns', () => {
   const turn = (startedAt) => ({turn: 1, startedAt});
   const card = (id, at, sourceId) => ({id, at, sourceId, state: 'done', sourceKind: 'chat', title: '', line: ''});

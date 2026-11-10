@@ -15,6 +15,7 @@ import {blockCard, blockFacts} from "./blocked.mjs";
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
+import {statusText} from "./turns.mjs";
 
 const DAY_S = 86400;
 
@@ -44,6 +45,9 @@ export function isMain(session) {
   return session?.main === true || session?.kind === "front";
 }
 
+// Why a run did not finish, as the page words its end: "Could not get an answer from the model server", "Timed out".
+const failureLine = (failure) => (failure?.status ? statusText(String(failure.status), String(failure.cause ?? "")).title : null);
+
 /** A card as the page keeps it, from a `cards` row or an `attention.card` frame; null if unusable. */
 export function readCard(row) {
   const data = row?.data && typeof row.data === "object" ? {...row.data, id: row.id, ts: row.ts} : row;
@@ -57,8 +61,9 @@ export function readCard(row) {
     sourceId: String(data.source_id),
     sourceKind: data.source_kind === "task" ? "task" : "chat",
     title: String(data.title || t(data.source_kind === "task" ? "mainChat.aTask" : "mainChat.aSideChat")),
-    // A card the gateway worded keeps its words: it reads in the page's language, whoever stored it.
-    line: saidText(data.said) ?? String(data.line ?? ""),
+    // A card the gateway worded keeps its words: it reads in the page's language, whoever stored it. A run that did not
+    // finish says why from its kind, in the page's language; the server's own line stays on the task's page.
+    line: failureLine(data.failure) ?? saidText(data.said) ?? String(data.line ?? ""),
     // How an approval was answered (`allowedOnce`, `denied`, …), when the card kept its words.
     ...(String(data.said?.key ?? "").startsWith("cards.answer.") ? {answer: data.said.key.slice(13)} : {}),
     // A waiting card and the answer that follows it share this.

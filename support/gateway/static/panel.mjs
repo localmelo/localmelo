@@ -120,6 +120,8 @@ export function setupPanel({
   moves = startMoves,
   // Whether the chat *id* shows a reply's words as they are written (the page's live frames): its row says so too.
   replying = () => false,
+  // The open chat's folder, as rows name theirs: a row in that folder does not repeat it.
+  folder = () => '',
   // The header's own timer (the end of the sitting, a long rest turning still): it never keeps a process alive.
   wait = (fn, ms) => { const id = setTimeout(fn, ms); id?.unref?.(); return id; }, cancelWait = (id) => clearTimeout(id),
 }) {
@@ -365,8 +367,8 @@ export function setupPanel({
     const writing = row.state === 'running' && replying(row.id) ? t('turns.activity.replying') : '';
     const said = ending && ending.state !== 'ready' ? endingLine(ending) : writing || row.activity || row.result || '';
     text.append(node('strong', 'activity-title', row.title), node('span', 'activity-line', worker ? workerLine(row) : said));
-    // A task names the folder it works in (its chat's, unless it was given one).
-    if (row.folder) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
+    // A task names the folder it works in when it is not the open chat's own.
+    if (row.folder && row.folder !== folder()) text.append(node('span', 'activity-folder', t('folder.chip', {name: row.folder})));
     // A task a side chat started says so in the whole day's list.
     if (row.from) text.append(node('span', 'activity-folder activity-from', t('chat.fromChat', {title: row.from})));
     headButton.append(icon(ENDING_ICONS[ending?.state] ?? row.icon), text);

@@ -27,6 +27,15 @@ function quoted(text) {
   return words ? `“${words.length > SHOWN ? `${words.slice(0, SHOWN - 1)}…` : words}”` : '…';
 }
 
+/**
+ * What a tool does for the person, as the details panel lists it (`Read a file`, `Run a command`): a step of it as it
+ * would ask (`stepWords`, with no call to name), except that a note to keep reads as one, not as a failed keep.
+ */
+export function toolWords(name) {
+  const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
+  return tool === 'remember' ? t('steps.ask.keep') : stepWords(tool, {}, 'ask');
+}
+
 /** A task tool's own check turned the call down, so it did nothing (the server's `refused_step`). */
 export function refusedStep(output) {
   return /^Not done/.test(String(output ?? '').trim());
