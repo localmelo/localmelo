@@ -22,6 +22,13 @@ plainly a password given, nothing is cut out and nothing can be typed: the page
 is handed to the person, as before. A card number or a one-time code is never
 cut out or typed: those stay the person's.
 
+Two readers pass text that is not a message of this turn. Memory asks
+:func:`gives_password` whether a sentence gives one, so that it leaves the
+sentence out; nothing is kept for that. The developer command that loads past
+chats from a file hides its messages, the assistant's too, with
+:func:`hide_passwords`; it runs in a process of its own, where no handle it
+makes can be typed.
+
 This module imports only the standard library.
 """
 
@@ -165,6 +172,15 @@ VAULT: Final = Vault()
 def hide_passwords(text: str) -> str:
     """*text*, a message of the person's, with each password it gives replaced by its handle."""
     return VAULT.hide(text)
+
+
+def gives_password(text: str) -> bool:
+    """Whether *text* gives a password, as :func:`hide_passwords` would read it.
+
+    It only reads: nothing is kept and no handle is made. A text already
+    hidden gives none.
+    """
+    return bool(_values(text))
 
 
 def spent(text: str) -> str:

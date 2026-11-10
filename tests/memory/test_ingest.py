@@ -461,15 +461,17 @@ def holding(folder: Path, value: str) -> list[str]:
 async def test_a_password_in_a_message_or_a_title_reaches_no_record(
     tmp_path: Path,
 ) -> None:
-    # The cues "pw" and "pwd" are ones the index and the notes do not leave out by
-    # themselves, so each store is seen to rely on the hiding, not on its own filter.
+    # The chat store and a document's title keep the text they are given, so they
+    # show the hiding. (The index's text and the notes also leave out a sentence
+    # that gives a password by themselves.)
     data = {
         "sessions": [
             chat(
                 "pw",
                 "2023-05-20T13:40:00",
                 ("user", f"Sign in to forum.example. My pw is {PASSWORD}."),
-                ("assistant", "Signed in."),
+                # A file's assistant message can repeat what the person gave.
+                ("assistant", f"Signed in with pw: {PASSWORD}"),
                 ("user", "I live in Pittsburgh."),
                 ("assistant", "Noted."),
                 title=f"Forum pwd: {PASSWORD}",
@@ -490,9 +492,11 @@ async def test_a_password_in_a_message_or_a_title_reaches_no_record(
             turns = await chats.list_turns(session.id)
             kept = [session.title, *(t.user_text for t in turns)]
             kept += [t.typed_text or "" for t in turns]
+            kept += [t.answer or "" for t in turns]
             assert not [text for text in kept if PASSWORD in text]
         first = (await chats.list_turns(report.ids["pw"]))[0]
         assert HANDLE.search(first.user_text), "a handle stands where the value was"
+        assert HANDLE.search(first.answer or ""), "in the answer too"
         # The rest of what was said is kept: a lasting fact still becomes a note.
         notes = [n.text for n in await memory.records()]
         assert "You live in Pittsburgh." in notes

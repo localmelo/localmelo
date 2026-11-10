@@ -27,13 +27,14 @@ user message before it, and a message with no text, are skipped and counted.
 A user message over :data:`~localmelo.melo.checker.validators.MAX_QUERY_LEN`
 characters is cut there and counted as ``trimmed``.
 
-A password a user message or a session's title gives is replaced by its handle
+A password a message or a session's title gives is replaced by its handle
 before anything is stored, indexed, kept as a note or read by a model, as at a
-chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): a
-value a user message or a title gives reaches no record. An assistant message is
-stored as it came; what counts as a password given is decided from the person's
-text only. A handle can be longer than the value it stands for, so the message
-is cut after the hiding, and a title is cut to the store's limit.
+chat's own door (:func:`~localmelo.melo.contracts.sign_in.hide_passwords`): the
+value reaches no record. An assistant message is hidden too: in a file it can
+repeat what the person gave, and a stored answer is read again by search and by
+a model when the chat goes on. The command is a process of its own, so no handle
+it makes can be typed. A handle can be longer than the value it stands for, so a
+user message is cut after the hiding, and a title is cut to the store's limit.
 
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the
@@ -423,6 +424,7 @@ async def run(
             if len(typed) > MAX_QUERY_LEN:
                 typed = typed[:MAX_QUERY_LEN]
                 report.trimmed += 1
+            answer = hide_passwords(exchange.answer)
             pin.at = exchange.asked_at
             info = await chats.begin_turn(
                 session_id or None,
@@ -453,20 +455,18 @@ async def run(
                 status="completed",
                 cause="run",
                 result=None,
-                answer=exchange.answer,
+                answer=answer,
             )
             report.turns += 1
-            report.cut += int(is_cut(typed, exchange.answer))
-            turns.append(
-                (source, info.turn, typed, exchange.answer, exchange.answered_at)
-            )
+            report.cut += int(is_cut(typed, answer))
+            turns.append((source, info.turn, typed, answer, exchange.answered_at))
             mine.append(
                 hippo_encode.Turn(
                     info.turn,
                     exchange.asked_at,
                     exchange.answered_at,
                     typed,
-                    exchange.answer,
+                    answer,
                 )
             )
             if notes == "rules":

@@ -45,6 +45,7 @@ from typing import Any, Final
 import numpy as np
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.contracts.sign_in import gives_password
 from localmelo.melo.memory.bm25 import tokenize
 from localmelo.melo.memory.hippo.policy import (
     STOPWORDS,
@@ -422,8 +423,18 @@ def holds_secret_value(text: str) -> bool:
 
 
 def sensitive(text: str) -> bool:
-    """Whether *text* holds a secret: a key, a password or code, a card or ID number."""
-    return holds_secret_value(text) or _SECRET_WORDS.search(text) is not None
+    """Whether *text* holds a secret: a key, a password or code, a card or ID number.
+
+    A password counts by its word alone, and wherever the sign-in contract reads
+    one as given (:func:`~localmelo.melo.contracts.sign_in.gives_password`): that
+    adds the short words it knows (``pw: …``, ``pwd = …``), which are no secret by
+    themselves (``pwd`` is also a command).
+    """
+    return (
+        holds_secret_value(text)
+        or _SECRET_WORDS.search(text) is not None
+        or gives_password(text)
+    )
 
 
 def _swap(text: str) -> str:

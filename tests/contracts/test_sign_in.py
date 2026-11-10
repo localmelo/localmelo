@@ -8,6 +8,7 @@ from localmelo.melo.contracts.sign_in import (
     HANDLE,
     MAX_KEPT,
     VAULT,
+    gives_password,
     handles_in,
     hide_passwords,
 )
@@ -50,6 +51,14 @@ def test_a_password_the_person_gives_is_cut_out_and_a_handle_stands_in(
 @pytest.mark.parametrize("text", NOT_GIVEN)
 def test_a_text_that_is_not_plainly_a_password_given_is_left_alone(text: str) -> None:
     assert hide_passwords(text) == text and not handles_in(text)
+
+
+def test_asking_whether_a_text_gives_a_password_keeps_nothing() -> None:
+    assert all(gives_password(text) for text, _ in GIVEN)
+    assert not any(gives_password(text) for text in NOT_GIVEN)
+    # Nothing was kept and no handle was made: the next one is the first.
+    assert repr(VAULT) == "Vault(0 password(s))"
+    assert hide_passwords("pw=first-one1") == "pw=[password-1]"
 
 
 def test_the_same_value_has_one_handle_and_the_vault_is_bounded_and_shows_nothing() -> (

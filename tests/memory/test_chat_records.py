@@ -19,7 +19,7 @@ import pytest
 
 from localmelo.melo.memory.long import LongTermSchemaError
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
-from localmelo.support.memory import ChatMemory, records
+from localmelo.support.memory import ChatMemory, index, records
 from localmelo.support.memory.recall import BLOCK_HEADER, NOT_KEPT_LINE
 from localmelo.support.sessions.store import NewSession, SessionStore
 
@@ -213,6 +213,25 @@ def test_a_pin_is_a_secret(text: str) -> None:
     ],
 )
 def test_pin_as_a_verb_is_not_a_secret(text: str) -> None:
+    assert not records.sensitive(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["My pw is plain-Word7.", "forum pwd: abcd1", "pw = 'two words'"],
+)
+def test_a_password_given_after_a_short_word_is_a_secret(text: str) -> None:
+    assert records.sensitive(text)
+    # So the index leaves the sentence out, like one with the word "password".
+    kept = index.cleaned(f"Tea is ready. {text}")
+    assert kept.startswith("Tea is ready.") and text not in kept
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Run pwd to print the folder.", "The pw manager is open.", "My pw is wrong."],
+)
+def test_the_short_words_alone_are_not_a_secret(text: str) -> None:
     assert not records.sensitive(text)
 
 

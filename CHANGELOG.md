@@ -77,6 +77,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A note melo keeps says "you", says who it is about, and melo never claims a save it did not make.
 - melo keeps notes you write in Chinese or Japanese when it words them differently.
 - A note from a page, a file or a task's result is never shown to the model as your words.
+- A password written after a short word such as "pw" or "pwd" is not kept in memory or its search, like one after "password".
 - A run in the default mode no longer sends each tool step to the embedding model or opens its requests with earlier step summaries; notes, recall and search across chats are unchanged, and an existing long_term.db is left as it is.
 
 ### App and web console
