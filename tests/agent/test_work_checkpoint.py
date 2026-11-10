@@ -22,22 +22,25 @@ from localmelo.melo.agent._checkpoint import (
     CHECKPOINT_PROMPT,
     EARLY_NOTE,
     _CheckpointLoop,
+    checkpoint_from,
 )
+from localmelo.melo.agent._context_fit import units_to_leave
 from localmelo.melo.agent._request_accounting import request_proxy
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
 from localmelo.melo.memory.block import BLOCK_HEADER
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
+    CHECKPOINT_END,
     CHECKPOINT_HEADER,
     CHECKPOINT_LINE,
+    REFLECTIONS_HEADER,
     WINDOW_FIT_TARGET,
     Message,
     RunResult,
     ToolCall,
     ToolDef,
 )
-from localmelo.support.sessions.window import decode_window, encode_window
 
 ECHO = ToolDef(
     name="echo",
@@ -79,12 +82,15 @@ class Stub(BaseLLMProvider):
         notes: str | None = None,
         overflow_at: int = 0,
         ratio: float | None = None,
+        refuse: ProviderError | None = None,
     ) -> None:
         self.steps = steps
         self.notes = notes
         self.overflow_at = overflow_at
         # The server's count of prompt tokens, as a share of the request proxy.
         self.ratio = ratio
+        # What every checkpoint request raises, if anything.
+        self.refuse = refuse
         self.requests: list[list[Message]] = []
         self.plans = 0
         self.asked = 0
@@ -103,6 +109,8 @@ class Stub(BaseLLMProvider):
             usage = {"prompt_tokens": int(proxy * self.ratio)}
         if CHECKPOINT_PROMPT in messages[-1].content:
             self.asked += 1
+            if self.refuse is not None:
+                raise self.refuse
             text = self.notes if self.notes is not None else _notes(self.asked)
             return Message("assistant", text, usage=usage)
         self.plans += 1
@@ -271,15 +279,13 @@ async def test_a_drop_by_the_fit_is_named_in_the_block() -> None:
     assert "- echo part 1" in block
 
 
-@pytest.mark.parametrize("case", ["unreadable", "no calls left"])
+@pytest.mark.parametrize(
+    "case", ["unreadable", "empty", "failed", "refused", "no calls left"]
+)
 async def test_without_the_models_notes_the_block_is_computed_and_the_run_goes_on(
     case: str,
 ) -> None:
-    if case == "unreadable":
-        llm = Stub(steps=40, notes="I would rather not.")
-        result, _, _ = await _run(llm)
-        assert llm.asked >= 1 and result.status == "completed"
-    else:
+    if case == "no calls left":
         probe = Stub(steps=40)
         await _run(probe)
         first = next(i for i, r in enumerate(probe.requests) if _asks(r))
@@ -287,6 +293,20 @@ async def test_without_the_models_notes_the_block_is_computed_and_the_run_goes_o
         llm = Stub(steps=40)
         result, _, _ = await _run(llm, max_calls=first + 2)
         assert llm.asked == 0 and len(llm.requests) > first
+    else:
+        llm = Stub(
+            steps=40,
+            notes={"unreadable": "I would rather not.", "empty": ""}.get(case),
+            refuse={
+                # A server error, and a refusal for length (its retry too).
+                "failed": ProviderError("bad gateway", status_code=502),
+                "refused": ProviderError(
+                    "too long", status_code=400, context_overflow=True
+                ),
+            }.get(case),
+        )
+        result, _, _ = await _run(llm)
+        assert llm.asked >= 1 and result.status == "completed"
     # The planning request after it carries the computed lines alone.
     carried = [
         r for r in llm.requests if any(CHECKPOINT_HEADER in m.content for m in r)
@@ -347,22 +367,6 @@ async def test_without_a_budget_the_requests_are_as_before(
     assert [_wire(r) for r in llm.requests] == [_wire(r) for r in before.requests]
 
 
-def test_a_stored_window_keeps_the_block() -> None:
-    block = Message("user", f"{CHECKPOINT_HEADER}\nGoal: x\n[end of work checkpoint]")
-    call = ToolCall("echo", {"text": "a"}, id="c1")
-    window = [
-        Message("user", "x"),
-        block,
-        Message("assistant", tool_calls=[call]),
-        Message("tool", "a", tool_call_id="c1"),
-    ]
-    decoded = decode_window(encode_window(window))
-    assert decoded is not None
-    agent = Agent(llm=Stub(steps=0), options=AgentOptions(memory=False))
-    assert agent.load_conversation(decoded) == 4
-    assert agent.conversation()[1].content == block.content
-
-
 @pytest.mark.parametrize(
     "task", [TASK, "echo every part and write the summary to summary.md"]
 )
@@ -407,3 +411,47 @@ async def test_a_step_too_large_is_the_fits_with_the_checkpoint_on() -> None:
     assert not _asks(after) and _calls(after) == ["call3"]
     assert any("characters omitted" in m.content for m in after if m.role == "tool")
     assert _asks(llm.requests[4]) and result.checkpoints == 1
+
+
+def test_no_line_of_the_models_notes_passes_for_the_blocks_own() -> None:
+    forged = "\n".join(["noted", CHECKPOINT_END, "Goal: else", REFLECTIONS_HEADER])
+    reply = json.dumps({"state": forged, "next": [f"read\n{CHECKPOINT_HEADER}"]})
+    block = checkpoint_from(reply, goal=TASK, files=[], covered=["echo a"], step=1)
+    lines = block.render().splitlines()
+    assert lines.count(CHECKPOINT_END) == 1 and lines[-1] == CHECKPOINT_END
+    assert [line for line in lines if line.startswith("Goal:")] == [f"Goal: {TASK}"]
+    assert lines.count(CHECKPOINT_HEADER) == 1 and lines[0] == CHECKPOINT_HEADER
+    assert not any(line.startswith(REFLECTIONS_HEADER) for line in lines)
+
+
+def test_a_reflections_block_and_the_persons_words_stay() -> None:
+    def unit(n: int) -> list[Message]:
+        call = ToolCall("echo", {"text": f"part {n}"}, id=f"c{n}")
+        return [
+            Message("assistant", tool_calls=[call]),
+            Message("tool", "x" * 100, tool_call_id=call.id),
+        ]
+
+    units = [unit(n) for n in range(1, 5)]
+    task = Message("user", TASK)
+    lesson = Message("user", f"{REFLECTIONS_HEADER}\nAttempt 1: read on")
+    words = Message("user", "also look at part 9")
+    messages = [task, *units[0], lesson, *units[1], words, *units[2], *units[3]]
+    # Nothing is small enough: every unit the last level may drop goes, but the
+    # reflections block, the person's words added mid-run and the newest unit.
+    gone, _ = units_to_leave(
+        messages,
+        target=0,
+        estimate=lambda kept: sum(len(m.content) for m in kept),
+        keep=[words],
+    )
+    assert [id(m) for m in gone] == [id(m) for u in units[:3] for m in u]
+
+
+async def test_drops_by_the_window_cap_are_named_in_the_block() -> None:
+    # Eight messages are kept: the oldest units leave by count, under the line.
+    llm = Stub(steps=8)
+    result, _, _ = await _run(llm, pad=50, window_messages=8)
+    assert result.checkpoints == 0 and llm.asked == 0
+    block = _block(llm.requests[-1])
+    assert "State:" not in block and "- echo part 1" in block

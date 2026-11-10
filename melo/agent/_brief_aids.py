@@ -50,15 +50,22 @@ def _shorten(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-def _describe(name: str, arguments: dict[str, object]) -> str:
-    """The tool name and its key argument, shortened and redacted."""
-    keys = [*_KEY_ARGS, *arguments]
-    for key in keys:
+def _key_arg(arguments: dict[str, object]) -> tuple[str, str]:
+    """A call's key argument and its value, whole; ``("", "")`` without one."""
+    for key in (*_KEY_ARGS, *arguments):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
-            arg = redact_secrets(_shorten(value, ARG_LIMIT))[0]
-            return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
-    return name
+            return key, value
+    return "", ""
+
+
+def _describe(name: str, arguments: dict[str, object]) -> str:
+    """The tool name and its key argument, shortened and redacted."""
+    key, value = _key_arg(arguments)
+    if not key:
+        return name
+    arg = redact_secrets(_shorten(value, ARG_LIMIT))[0]
+    return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
 
 
 # The tools whose results end with an exit status the cue keeps.
@@ -73,7 +80,8 @@ COVERED_LINES = 30
 class Dropped:
     """One tool result that left the context: its call and what came of it.
 
-    *source* is the tool and its key argument (shortened and redacted), *part*
+    *target* is the call's key argument whole, *source* the tool and that
+    argument shortened and redacted, for display; *part*
     the part of a page the call read (``None`` for a tool that reads no parts),
     *status* ``exit N`` for a command, ``failed`` for a call with an error, else
     ``""``.
@@ -81,6 +89,7 @@ class Dropped:
 
     call_id: str
     tool: str
+    target: str
     source: str
     chars: int
     part: int | None
@@ -109,6 +118,7 @@ def dropped_calls(messages: Sequence[Message]) -> list[Dropped]:
             Dropped(
                 call_id=msg.tool_call_id,
                 tool=name,
+                target=_key_arg(arguments)[1],
                 source=_describe(name, arguments),
                 chars=len(msg.content),
                 part=(
@@ -141,17 +151,18 @@ def _spans(parts: Sequence[int]) -> str:
 def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> list[str]:
     """The cue list of a work checkpoint: one line per source, oldest first.
 
-    A source is a tool and its key argument; its line names the parts read of a
+    A source is a tool and its key argument, whole (two long addresses that
+    share their start are two sources), shown shortened; its line names the parts read of a
     page (``web_fetch <url> parts 1-62``) and the last status of a command
     (``shell_exec `ls` (exit 0)``). Past *limit* lines, the oldest sources
     become one line that counts them per tool.
     """
-    order: dict[str, list[Dropped]] = {}
+    order: dict[tuple[str, str], list[Dropped]] = {}
     for entry in dropped:
-        order.setdefault(entry.source, []).append(entry)
+        order.setdefault((entry.tool, entry.target), []).append(entry)
     lines = []
-    for source, entries in order.items():
-        line = source
+    for entries in order.values():
+        line = entries[0].source
         parts = [e.part for e in entries if e.part is not None]
         if parts:
             line += f" part{'s' if len(set(parts)) > 1 else ''} {_spans(parts)}"

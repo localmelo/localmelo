@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
@@ -179,7 +179,20 @@ class _Pins:
             is not None
         ]
 
-    def droppable(self, unit: list[Message], level: int, last: list[Message]) -> bool:
+    def order(self, units: list[list[Message]]) -> Iterator[tuple[int, list[Message]]]:
+        """The units of *units* a fit drops, with their level: oldest first, level
+        by level, each once (the caller drops each unit it is given)."""
+        last = units[-1] if units else None
+        given: set[int] = set()
+        for level in range(3):
+            for unit in units:
+                if id(unit) not in given and self.droppable(unit, level, last):
+                    given.add(id(unit))
+                    yield level, unit
+
+    def droppable(
+        self, unit: list[Message], level: int, last: list[Message] | None
+    ) -> bool:
         """Whether *unit* may go at *level*; *last*, the request's last unit, stays."""
         if unit is last:
             return False
@@ -382,17 +395,14 @@ def fit_request(
     ) = None
     # Each level goes only when the cut cannot reach its target, or fit at
     # all, without it; the cut holds the deepest level it used.
-    for depth in range(3):
-        for unit in list(units):
-            if not droppable(unit, depth):
-                continue
-            units = [candidate for candidate in units if candidate is not unit]
-            counts["units"] += 1
-            level = max(level, depth)
-            if fits(drop_target):
-                return finish()
-            if fitting is None and fits():
-                fitting = (flatten(), dict(counts), held(), level)
+    for depth, unit in pins.order(units):
+        units = [candidate for candidate in units if candidate is not unit]
+        counts["units"] += 1
+        level = max(level, depth)
+        if fits(drop_target):
+            return finish()
+        if fitting is None and fits():
+            fitting = (flatten(), dict(counts), held(), level)
     if fitting is not None:
         if hold is not None:
             if fitting[2] is not None:
@@ -421,37 +431,37 @@ def units_to_leave(
     target: float,
     estimate: Callable[[list[Message]], int],
     history: Sequence[Message] = (),
-) -> list[Message]:
-    """The messages of the oldest units that must leave *messages* for good.
+    keep: Collection[Message] = (),
+) -> tuple[list[Message], int]:
+    """The messages of the oldest units that must leave *messages* for good, and
+    the estimate of what is left.
 
-    The units go as :func:`fit_request` drops them (the same levels, oldest
-    first, and the same pins, see :class:`_Pins`), until *estimate* of what is
-    left is at most *target*: whole units only, nothing shortened, nothing
-    copied. ``[]`` when *messages* is there already; when it cannot get there,
-    every unit the last level may drop. *history* is as for
-    :func:`fit_request`.
+    The units go in the order :func:`fit_request` drops them (:meth:`_Pins.order`:
+    the same levels and pins), whole, nothing shortened or copied, until what is
+    left comes to *target*; when it cannot, every unit the last level may drop
+    goes. A unit whose first message is in *keep* (by identity) stays. *history*
+    is as for :func:`fit_request`. *estimate* is asked once for the whole, once
+    for nothing, once per unit alone, and once for what is left: a unit's share is
+    its estimate alone less the estimate of nothing.
     """
     earlier = {id(m) for m in history}
+    kept_ids = {id(m) for m in keep}
     units = group_turns(messages, empty_prefix=True)
 
     def before_task(unit: list[Message]) -> bool:
         return all(id(m) in earlier for m in unit)
 
-    pins = _Pins(units, before_task)
-    kept = list(units)
-    gone: list[list[Message]] = []
-
-    def fits() -> bool:
-        return estimate([m for unit in kept for m in unit]) <= target
-
-    if fits():
-        return []
-    for depth in range(3):
-        for unit in list(kept):
-            if not pins.droppable(unit, depth, kept[-1]):
-                continue
-            kept = [candidate for candidate in kept if candidate is not unit]
-            gone.append(unit)
-            if fits():
-                return [m for unit in gone for m in unit]
-    return [m for unit in gone for m in unit]
+    size = estimate(messages)
+    if size <= target:
+        return [], size
+    base = estimate([])
+    gone: list[Message] = []
+    for _level, unit in _Pins(units, before_task).order(units):
+        if id(unit[0]) in kept_ids:
+            continue
+        gone.extend(unit)
+        size -= estimate(unit) - base
+        if size <= target:
+            break
+    leaving = {id(m) for m in gone}
+    return gone, estimate([m for m in messages if id(m) not in leaving])

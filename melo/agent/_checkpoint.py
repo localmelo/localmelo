@@ -49,6 +49,7 @@ from localmelo.melo.agent._reflection import (
     _coerce_str,
     _coerce_str_list,
     _json_values,
+    _trimmed,
 )
 from localmelo.melo.contracts.providers import LLM_REQUEST_EXTRA_BODY, ProviderError
 from localmelo.melo.contracts.task_files import asked_files, written_paths
@@ -61,7 +62,6 @@ from localmelo.melo.schema import (
     Message,
     ToolDef,
     WorkCheckpoint,
-    shorten,
     split_thinking,
 )
 
@@ -148,29 +148,6 @@ def _model_size(checkpoint: WorkCheckpoint) -> int:
     )
 
 
-def _fit_model_text(checkpoint: WorkCheckpoint, limit: int) -> WorkCheckpoint:
-    """*checkpoint* with its model text within *limit* characters in all.
-
-    Items go from the end of ``failed``, then ``works``, then ``next``; then
-    ``results`` and last ``state`` are shortened at a word boundary.
-    """
-    fitted = dataclasses.replace(
-        checkpoint,
-        failed=list(checkpoint.failed),
-        works=list(checkpoint.works),
-        next=list(checkpoint.next),
-    )
-    for items in (fitted.failed, fitted.works, fitted.next):
-        while items and _model_size(fitted) > limit:
-            items.pop()
-    for name in ("results", "state"):
-        over = _model_size(fitted) - limit
-        if over > 0:
-            text = getattr(fitted, name)
-            setattr(fitted, name, shorten(text, max(len(text) - over, 0)))
-    return fitted
-
-
 def checkpoint_from(
     reply: str | None,
     *,
@@ -210,7 +187,15 @@ def checkpoint_from(
         next=items("next"),
         written=True,
     )
-    return _fit_model_text(written, min(chars, CHECKPOINT_CHARS))
+    # Items go from the end of failed, works and next, then results and state
+    # are shortened: the reflection's own trim.
+    return _trimmed(
+        written,
+        min(chars, CHECKPOINT_CHARS),
+        _model_size,
+        ("failed", "works", "next"),
+        ("results", "state"),
+    )
 
 
 def _room(limit: int) -> int:
@@ -361,66 +346,58 @@ class _CheckpointLoop:
         """Before a planning request: a work checkpoint when the window is full.
 
         Returns whether the window changed. Nothing happens without a context
-        budget. Under :data:`CHECKPOINT_LINE` of the input limit, or when no unit
-        could leave (a single newest result too large is the fit's to preview),
-        only results that left the context since the last block are added to it
-        (the computed fields alone when there is no checkpoint yet).
+        budget. Over :data:`CHECKPOINT_LINE` of the input limit, the checkpoint
+        comes only when what can leave frees at least half the room between the
+        line and the fit target; otherwise (a single step too large, say) the
+        request is the fit's, whose drops still become cues. Short of a
+        checkpoint, only results that left the context since the last block are
+        added to it (the computed fields alone when there is no checkpoint yet).
         """
         shape = self._plan_shape(run)
         working = self.hippo.working
 
-        def sent() -> list[Message]:
-            return self._sent_window(working.get_window(), run.task_query_msg)[0]
+        def sent(window: list[Message]) -> list[Message]:
+            return self._sent_window(window, run.task_query_msg)[0]
 
-        def measure(window: list[Message]) -> tuple[int, int] | None:
-            return self.chat.plan_size(long_context, window, tools, query, **shape)
+        def estimate(candidate: list[Message]) -> int:
+            measured = self.chat.plan_size(
+                long_context, candidate, tools, query, **shape
+            )
+            return 0 if measured is None else measured[0]
 
-        sized = measure(sent())
+        window = working.get_window()
+        sized = self.chat.plan_size(long_context, sent(window), tools, query, **shape)
         if sized is None or run.task_query_msg is None:
             return False
         before, limit = sized
         room = _room(limit)
-
-        def estimate(candidate: list[Message]) -> int:
-            measured = measure(candidate)
-            return 0 if measured is None else measured[0]
-
-        def leaving() -> set[int]:
-            """The window's messages (by id) that leave for it to come to the target."""
-            window = working.get_window()
-            carried = self._sent_window(window, run.task_query_msg)[0]
-            task = next((i for i, m in enumerate(window) if m is run.task_query_msg), 0)
-            ids = {
-                id(m)
-                for m in units_to_leave(
-                    carried,
-                    target=WINDOW_FIT_TARGET * limit,
-                    estimate=estimate,
-                    history=carried[:task],
-                )
-            }
-            # What the run pinned (the person's words added mid-run) stays.
+        gone: set[int] = set()
+        if before > CHECKPOINT_LINE * limit:
+            # The units that would leave, picked once on the window as it is; the
+            # person's words added mid-run stay.
             pinned = {id(m) for m in run.pinned}
-            return {
-                id(m)
-                for m, c in zip(window, carried, strict=True)
-                if id(c) in ids and id(m) not in pinned
-            }
-
-        def helps() -> bool:
-            """Whether what can leave frees at least half the room between the
-            line and the target; else a checkpoint call cannot help, and the
-            request is the fit's (its drops still become cues)."""
-            gone = leaving()
-            if not gone:
-                return False
-            window = [m for m in working.get_window() if id(m) not in gone]
-            left = estimate(self._sent_window(window, run.task_query_msg)[0])
+            carried = sent(window)
+            task = next((i for i, m in enumerate(window) if m is run.task_query_msg), 0)
+            picked, left = units_to_leave(
+                carried,
+                target=WINDOW_FIT_TARGET * limit,
+                estimate=estimate,
+                history=carried[:task],
+                keep=[
+                    c for m, c in zip(window, carried, strict=True) if id(m) in pinned
+                ],
+            )
             room_made = (CHECKPOINT_LINE - WINDOW_FIT_TARGET) / 2 * limit
-            return before - left >= room_made
-
-        if before <= CHECKPOINT_LINE * limit or not helps():
-            if before > EARLY_LINE * limit and not run.early_sent:
+            if before - left >= room_made:
+                ids = {id(c) for c in picked}
+                gone = {
+                    id(m) for m, c in zip(window, carried, strict=True) if id(c) in ids
+                }
+        if not gone:
+            early = max(
+                EARLY_LINE * limit, (run.fill_start + CHECKPOINT_LINE * limit) / 2
+            )
+            if before > early and not run.early_sent:
                 # Once in this fill: the next planning request's trailing line.
                 run.early_note = self._early_note(run)
                 run.early_sent = bool(run.early_note)
@@ -441,13 +418,9 @@ class _CheckpointLoop:
         checkpoint = await self._make_checkpoint(
             run, query, long_context, tools, ask=True, room=room
         )
-        self._stand_in(run, checkpoint)
-        # (b) the oldest units leave for good, by the fit's rules, (c) with the
-        # block standing in for them (the old block is gone already).
-        window = working.get_window()
-        gone = leaving()
+        # (b) the oldest units leave for good, (c) the block stands in for them
+        # and for the last block.
         working.drop_since(None, keep=[m for m in window if id(m) not in gone])
-        # The block's cue list names what just left too.
         self._note_cues(run, [m for m in window if id(m) in gone])
         self._stand_in(
             run, dataclasses.replace(checkpoint, **self._computed(run, room))
@@ -456,12 +429,13 @@ class _CheckpointLoop:
         # no held cut of the old window may cut it again.
         self.chat.forget_cuts()
         run.checkpoints += 1
-        # A new fill begins: its early line is still to come.
+        # A new fill begins where this one leaves the window.
+        run.fill_start = estimate(sent(working.get_window()))
         run.early_sent, run.early_note = False, ""
         run.events.checkpoint(
             run.checkpoint or checkpoint,
             units=sum(1 for m in window if id(m) in gone and m.role != "tool"),
             before=before,
-            after=estimate(sent()),
+            after=run.fill_start,
         )
         return True

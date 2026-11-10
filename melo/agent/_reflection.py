@@ -17,14 +17,15 @@ import dataclasses
 import itertools
 import json
 import math
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, TypeVar
 
 from localmelo.melo.agent._json_repair import error_line, rejected_objects, repairs
 from localmelo.melo.schema import (
     Message,
     ReflectionDecision,
     ReflectionEntry,
+    WorkCheckpoint,
     shorten,
     strip_code_fences,
 )
@@ -247,6 +248,42 @@ def _reflection_size(entry: ReflectionEntry) -> int:
     return len(_serialize_reflections([entry])[0].content)
 
 
+_Trimmed = TypeVar("_Trimmed", ReflectionEntry, WorkCheckpoint)
+
+
+def _trimmed(
+    entry: _Trimmed,
+    limit: int,
+    size: Callable[[_Trimmed], int],
+    lists: Sequence[str],
+    texts: Sequence[str],
+) -> _Trimmed:
+    """*entry*, trimmed until *size* of it is at most *limit*.
+
+    Items are dropped from the end of each of *lists* in turn, one at a time and
+    only until it fits; then each of *texts* in turn is shortened at a word
+    boundary and ends with "…" (see :func:`shorten`). *entry* itself is not
+    changed: one that fits is returned as it is, any other as a trimmed copy.
+    """
+    if size(entry) <= limit:
+        return entry
+    fitted = dataclasses.replace(entry)
+    for name in lists:
+        items = list(getattr(entry, name))  # a copy: entry keeps its own
+        setattr(fitted, name, items)
+        while items:
+            items.pop()
+            if size(fitted) <= limit:
+                return fitted
+    for name in texts:
+        over = size(fitted) - limit
+        if over <= 0:
+            break
+        text = getattr(fitted, name)
+        setattr(fitted, name, shorten(text, max(len(text) - over, 0)))
+    return fitted
+
+
 def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     """*entry*, trimmed until its serialized form fits in *limit* characters.
 
@@ -259,19 +296,7 @@ def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
     :func:`shorten`). *entry* itself is not changed: one that fits is
     returned as it is, any other as a trimmed copy.
     """
-    if _reflection_size(entry) <= limit:
-        return entry
-    fitted = dataclasses.replace(entry)
-    for name in REFLECTION_TRIM_ORDER:
-        items = list(getattr(entry, name))  # a copy: entry keeps its own
-        setattr(fitted, name, items)
-        while items:
-            items.pop()
-            if _reflection_size(fitted) <= limit:
-                return fitted
-    room = limit - _reflection_size(dataclasses.replace(fitted, summary=""))
-    fitted.summary = shorten(fitted.summary, room)
-    return fitted
+    return _trimmed(entry, limit, _reflection_size, REFLECTION_TRIM_ORDER, ("summary",))
 
 
 # The lists of a reflection that are capped, the most items each keeps and the

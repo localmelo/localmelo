@@ -49,6 +49,7 @@ from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
+    CHECKPOINT_HEADER,
     EMPTY_REPLY_LABEL,
     REFLECTIONS_HEADER,
     UNANSWERED_NOTE,
@@ -309,7 +310,9 @@ def render_transcript(messages: Sequence[Message]) -> str:
     """*messages* written out as plain text, one paragraph per entry.
 
     Tool calls read ``Assistant called <tool>(<JSON arguments>)`` and tool
-    results ``Result of <tool>: <content>``. Images are not shown: a tool
+    results ``Result of <tool>: <content>``; a work checkpoint, the model's own
+    notes, stands as it is, with no role.
+    Images are not shown: a tool
     result's content already names its images, and a line counts the
     images of any other message. Thinking is left out, as in legacy and in
     this transcript; a ``replay`` planning or reflection request carries
@@ -328,6 +331,9 @@ def render_transcript(messages: Sequence[Message]) -> str:
         elif message.role == "tool":
             name = message.tool_result.tool_name if message.tool_result else "a tool"
             paragraphs.append(f"Result of {name}: {message.content}")
+        elif message.content.startswith(CHECKPOINT_HEADER):
+            # A work checkpoint is the model's own notes, never anyone's turn.
+            paragraphs.append(message.content)
         else:
             paragraphs.append(f"{message.role.capitalize()}: {message.content}")
         if message.images and message.role != "tool":
@@ -779,21 +785,26 @@ class Chat:
             except (Exception, asyncio.CancelledError):
                 logger.warning("Context budget callback failed", exc_info=True)
 
-    def check_call_budget(self, closing: bool = False) -> None:
-        """Raise :class:`CallBudgetError` when one more request passes ``max_calls``.
+    def calls_left(self, closing: bool = False) -> int | None:
+        """Requests the run may still send before ``max_calls`` (``None``: no limit).
 
-        The request that closes a stopped run (*closing*) may use the call that
-        ``reserve_answer`` keeps; no other request may.
+        Only the request that closes a stopped run (*closing*) may use the call
+        that ``reserve_answer`` keeps; for any other it is not counted.
         """
         if self.max_calls is None:
-            return
+            return None
         limit = (
             self.max_calls - 1
             if self.reserve_answer and not closing
             else self.max_calls
         )
-        sent = self.stats.n_llm + self.stats.llm_errors
-        if sent >= limit:
+        return max(limit - (self.stats.n_llm + self.stats.llm_errors), 0)
+
+    def check_call_budget(self, closing: bool = False) -> None:
+        """Raise :class:`CallBudgetError` when one more request passes ``max_calls``
+        (see :meth:`calls_left`)."""
+        if self.calls_left(closing) == 0:
+            sent = self.stats.n_llm + self.stats.llm_errors
             raise CallBudgetError(
                 f"Call budget reached: {sent} model requests sent "
                 f"(max_calls {self.max_calls})"
@@ -834,17 +845,6 @@ class Chat:
     def forget_cuts(self) -> None:
         """Forget every held cut: the window they were made on is gone."""
         self._fit_cuts.clear()
-
-    def calls_left(self) -> int | None:
-        """Requests the run may still send before ``max_calls`` (``None``: no limit).
-
-        The call that ``reserve_answer`` keeps for the closing answer is not
-        counted.
-        """
-        if self.max_calls is None:
-            return None
-        limit = self.max_calls - 1 if self.reserve_answer else self.max_calls
-        return max(limit - (self.stats.n_llm + self.stats.llm_errors), 0)
 
     async def _request(
         self,

@@ -355,11 +355,14 @@ by the fit's own rules, and the checkpoint stands right after the task's message
 list of what was already read or run (one line per source, such as a page and the parts read). The
 next request extends that one until the window fills again; a later checkpoint replaces the block.
 When the model's notes cannot be read, or no request is left for them (`max_calls`), the block holds
-the computed lines alone, and the run goes on. The fit stays as the net for a single step too large:
-the units it drops are added to the block's list at the next request, so no drop goes unsaid. Each
+the computed lines alone, and the run goes on. A checkpoint comes only when what can leave frees at
+least half the room between 85% and 70%; otherwise (a single step too large) the fit acts as before,
+and the units it drops, like those the window's message cap drops, are added to the block's list at
+the next request, so no drop goes unsaid. In a chat, earlier turns that leave the context are listed
+there too. Each
 checkpoint is a `checkpoint` notice (see [Events](events.md)) and counts in the result's
-`checkpoints`. Earlier, once in each fill, the first planning request past 60% of the limit in work
-whose result goes into a file (your words ask for a file, or a file was written) ends with one line
+`checkpoints`. Earlier, once in each fill, the first planning request past 60% of the limit (after a
+checkpoint: halfway from where the window was left to 85%) in work whose result goes into a file (your words ask for a file, or a file was written) ends with one line
 that asks the model to write what it has to that file now, while the results are still in context;
 the line is on that request only, not in the window. Without a token budget nothing of this
 happens.

@@ -30,8 +30,10 @@ WINDOW_FIT_TARGET = 0.7
 # everything that is about to leave.
 CHECKPOINT_LINE = 0.85
 # Once in each fill (up to a checkpoint), the first planning request past
-# EARLY_LINE of the input limit asks a task whose result goes into a file to write
-# what it has there now, while the results are still in context.
+# EARLY_LINE of the input limit, or past halfway from where the fill began to
+# CHECKPOINT_LINE when that is later (every fill after a checkpoint), asks a task
+# whose result goes into a file to write what it has there now, while the
+# results are still in context.
 EARLY_LINE = 0.6
 # The largest context a budget from the model server's own length uses (when
 # nothing sets AgentOptions.context_window). Above it a personal computer pays
@@ -1223,17 +1225,14 @@ class ReflectionDecision:
 GOAL_CHARS = 600
 
 
-# Lines of a block's text that are quoted: what could pass for its end, or for
-# a page's own block (a page reader's marks; the notes are a summary, never a page).
-_QUOTED_STARTS = (CHECKPOINT_END, "<<page", "<<end page")
+def _indented(text: str) -> str:
+    """*text* with every line after its first indented.
 
-
-def _quoted(text: str) -> str:
-    """*text* with each line that could pass for the block's end or a page block quoted."""
-    return "\n".join(
-        "> " + line if line.lstrip().startswith(_QUOTED_STARTS) else line
-        for line in text.splitlines()
-    )
+    A field of the model's text follows its label, and its other lines are
+    indented, so that no line of it can start like the block's own labels, its
+    end or any other block's header: only the block's own lines start a line.
+    """
+    return "\n  ".join(text.splitlines())
 
 
 @dataclass
@@ -1272,75 +1271,48 @@ class WorkCheckpoint:
     def render(self) -> str:
         """The block that stands in the window for what left it.
 
-        The model's words are its own notes (the header says so); a line of them
-        that could pass for the block's end, or for a page's block, is quoted.
+        The model's words are its own notes (the header says so), each field
+        after its label with its other lines indented (see :func:`_indented`).
         """
         lines = [CHECKPOINT_HEADER]
         if self.goal:
             lines.append(f"Goal: {shorten(collapse(self.goal), GOAL_CHARS)}")
         if self.state:
-            lines.append(f"State: {self.state}")
+            lines.append(f"State: {_indented(self.state)}")
         results = [
             part
             for part in (
-                f"Results so far: {self.results}" if self.results else "",
-                f"Files written: {', '.join(self.files)}" if self.files else "",
+                f"Results so far: {_indented(self.results)}" if self.results else "",
+                (
+                    f"Files written: {collapse(', '.join(self.files))}"
+                    if self.files
+                    else ""
+                ),
             )
             if part
         ]
         if results:
             lines.append("   ".join(results))
-        for label, items in (
-            ("Did not work", self.failed),
-            ("Works", self.works),
-        ):
+        for label, items in (("Did not work", self.failed), ("Works", self.works)):
             if items:
-                lines.append(f"{label}: " + "; ".join(items))
+                lines.append(f"{label}: " + "; ".join(map(_indented, items)))
         if self.next:
-            lines.append(
-                "Next: " + " ".join(f"{i}. {s}" for i, s in enumerate(self.next, 1))
-            )
+            steps = (f"{i}. {_indented(s)}" for i, s in enumerate(self.next, 1))
+            lines.append("Next: " + " ".join(steps))
         if self.covered:
             lines.append(
                 "Already read or run (the results are gone from context; do not "
                 "repeat them unless you need an exact passage, and then read only "
                 "that part):"
             )
-            lines.extend(f"- {line}" for line in self.covered)
-        body = _quoted("\n".join(lines[1:]))
-        return "\n".join([lines[0], body, CHECKPOINT_END] if body else lines[:1])
+            lines.extend(f"- {collapse(line)}" for line in self.covered)
+        if len(lines) == 1:
+            return lines[0]
+        return "\n".join([*lines, CHECKPOINT_END])
 
     def to_dict(self) -> dict[str, Any]:
         """A plain dict of every field, as a stored event keeps it."""
         return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> WorkCheckpoint:
-        """The checkpoint *data* (:meth:`to_dict`) holds; a field of another type is empty."""
-
-        def text(key: str) -> str:
-            value = data.get(key)
-            return value if isinstance(value, str) else ""
-
-        def items(key: str) -> list[str]:
-            value = data.get(key)
-            if not isinstance(value, list):
-                return []
-            return [item for item in value if isinstance(item, str)]
-
-        step = data.get("step")
-        return cls(
-            goal=text("goal"),
-            state=text("state"),
-            results=text("results"),
-            failed=items("failed"),
-            works=items("works"),
-            next=items("next"),
-            files=items("files"),
-            covered=items("covered"),
-            step=step if type(step) is int else 0,
-            written=data.get("written") is True,
-        )
 
 
 # ── Long-term memory candidates (R6-lite) ──

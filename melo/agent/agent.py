@@ -944,6 +944,9 @@ class _RunState:
     # carries, and whether this fill has had it.
     early_note: str = ""
     early_sent: bool = False
+    # Where the window's fill began: the estimate the last checkpoint left, 0
+    # before the first. The early line comes halfway from it to the line.
+    fill_start: int = 0
     # The person's own words for this run (run_task's user_words, else the query
     # without its recalled-memory block): a work checkpoint's goal.
     words: str = ""
@@ -2091,8 +2094,17 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
             plan_args["on_ready"] = ready
         if on_ready is None and run is not None:
             # Not at a step that carries inbox lines: they must end the request.
+            # A brief run's drops are named once: in the work checkpoint's cue
+            # list while the window holds one, else in its tail line.
+            named = run.checkpoint_msg is not None and self.hippo.working.holds(
+                run.checkpoint_msg
+            )
             tail = [
-                render_dropped(run.dropped, sent) if run.brief and run.dropped else "",
+                (
+                    render_dropped(run.dropped, sent)
+                    if run.brief and run.dropped and not named
+                    else ""
+                ),
                 run.early_note,
             ]
             run.early_note = ""
