@@ -66,3 +66,4 @@
 - [Roadmap and updates](https://localmelo.github.io/localmelo/en/updates.html): the roadmap board and what changed, by day.
 - [Developers](https://localmelo.github.io/localmelo/en/developers.html): the repository layout, setup, tests, and how to add a backend, a tool or a check.
 - [Documentation style guide](https://localmelo.github.io/localmelo/STYLE.md): how documentation is written.
+- [Console design](https://localmelo.github.io/localmelo/project/console-design.md): how the console lays out a screen: reading order, four rules, sizes and cards.

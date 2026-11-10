@@ -27,13 +27,24 @@ function quoted(text) {
   return words ? `“${words.length > SHOWN ? `${words.slice(0, SHOWN - 1)}…` : words}”` : '…';
 }
 
+// The tools whose step, said with no call to name, would not say what the tool does (a search with no words, a keep
+// that reads as failed, two memory tools that read alike): their own line in the details panel.
+const TOOL_LINES = {
+  remember: 'steps.ask.keep',
+  web_search: 'steps.tool.webSearch',
+  search_files: 'steps.tool.searchFiles',
+  search_memory: 'steps.tool.searchMemory',
+  open_memory: 'steps.tool.openMemory',
+  task_control: 'steps.tool.taskControl',
+};
+
 /**
  * What a tool does for the person, as the details panel lists it (`Read a file`, `Run a command`): a step of it as it
- * would ask (`stepWords`, with no call to name), except that a note to keep reads as one, not as a failed keep.
+ * would ask (`stepWords`, with no call to name), or its own line in `TOOL_LINES`.
  */
 export function toolWords(name) {
   const tool = String(name ?? '').startsWith('mcp__') ? String(name).split('__').pop() : String(name ?? '');
-  return tool === 'remember' ? t('steps.ask.keep') : stepWords(tool, {}, 'ask');
+  return TOOL_LINES[tool] ? t(TOOL_LINES[tool]) : stepWords(tool, {}, 'ask');
 }
 
 /** A task tool's own check turned the call down, so it did nothing (the server's `refused_step`). */

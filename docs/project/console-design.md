@@ -15,21 +15,21 @@ A fact shows once, where it is used.
 
 ### 1. Space first
 
-![Before: the starters drawn as outlined pills. After: plain words set apart by space](../assets/img/design-space.webp)
+![Before: the closed steps line in a box. After: a plain line, set apart by space](../assets/img/design-space.webp)
 
 - Turns are apart by space; items of one group by less.
 - No line, box or shadow where space already says it.
 
 ### 2. A line for peers or for a thread
 
-![Before: the panel's tasks with nothing between them. After: a thin line between rows](../assets/img/design-line.webp)
+![Before: a box per task. After: rows with a thin line between them](../assets/img/design-line.webp)
 
 - Rows of one list get a 1 px line between them, inset to the text.
 - What hangs off something sits on one vertical line under it: the tasks under melo's face in the chat.
 
 ### 3. A tinted box only for what asks
 
-![Before: a box around every task. After: only the task that needs you has a box, in amber](../assets/img/design-ask.webp)
+![Before: a box around every task card. After: only the task that needs you keeps its amber box](../assets/img/design-ask.webp)
 
 - An amber box marks the one thing that asks you to act. A fact never gets a box.
 - Content keeps its quiet surface: opened steps, code, a diff.

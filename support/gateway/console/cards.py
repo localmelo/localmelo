@@ -373,7 +373,10 @@ class MainChatCards:
             # The page words the failure's kind in its own language; the line, with the
             # error's first line, is for readers without a catalog (the terminal).
             failure = {"status": last.status, "cause": last.cause}
-            ended = {"line": _reason(last.status, last.cause, last.result), "failure": failure}
+            ended = {
+                "line": _reason(last.status, last.cause, last.result),
+                "failure": failure,
+            }
         elif note == "invalid_workspace":
             problem = await self._console.workers.folder_problem(info.id)
             ended = _words("cards.folderRefused", problem=problem)

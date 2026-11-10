@@ -183,11 +183,12 @@ test('default mode lists each tool by what it does and whether it is allowed, wi
   const h = harness({'GET /sessions/s%2F1/tools': {...tools, tools: [
     {name: 'file_read', source: 'builtin', description: 'Read a file from the workspace.', granted: false},
     {name: 'web_fetch', source: 'builtin', description: 'Fetch a page.', granted: true},
+    {name: 'web_search', source: 'builtin', description: 'Search.', granted: false},
   ]}});
   await h.drawer.open();
   const all = (node) => [node, ...node.children.flatMap(all)];
   const rows = all(h.root).filter((node) => node.className === 'drawer-tool');
-  assert.deepEqual(rows.map((row) => row.children.slice(0, 2).map((part) => part.textContent).join('')), ['Read a file · Not allowed', 'Open a page · Allowed']);
+  assert.deepEqual(rows.map((row) => row.children.slice(0, 2).map((part) => part.textContent).join('')), ['Read a file · Not allowed', 'Open a page · Allowed', 'Search the web · Not allowed']);
   assert.doesNotMatch(h.text(), /Read a file from the workspace|Fetch a page|file_read|builtin|Viewing tools opens the Agent/);
   assert.equal(h.find('Revoke').attributes['aria-label'], 'Revoke Open a page');
 });
