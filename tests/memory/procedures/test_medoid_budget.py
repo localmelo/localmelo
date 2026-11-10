@@ -5,13 +5,21 @@ CPU. The medoid compares each pair of episodes once, at most
 MEDOID_MAX_SEGMENTS segments of each, and past MEDOID_MAX_CELLS compared
 token pairs it is not computed: the new version keeps its parent's
 skeleton, or a first version takes the latest completed episode's.
+
+The tests count the token pairs compared, never the time taken: a clock reads
+the machine's load (a parallel test run once made 0.003 s of work read as
+0.5 s), a count reads the code.
 """
 
 from __future__ import annotations
 
-import time
 import uuid
+from collections.abc import Sequence
+from typing import Any
 
+import pytest
+
+from localmelo.melo.memory.procedures import template
 from localmelo.melo.memory.procedures.normalize import key_for_query
 from localmelo.melo.memory.procedures.store import MemoryProcedures, RunFacts
 from localmelo.melo.memory.procedures.template import (
@@ -65,6 +73,20 @@ def episode(n: int, shift: int = 0, task_id: str | None = None) -> Episode:
     )
 
 
+@pytest.fixture
+def cells(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The token pairs each comparison of two episodes reads, one entry a comparison."""
+    seen: list[int] = []
+    compare = template.edit_distance
+
+    def counted(a: Sequence[Any], b: Sequence[Any]) -> int:
+        seen.append(len(a) * len(b))
+        return compare(a, b)
+
+    monkeypatch.setattr(template, "edit_distance", counted)
+    return seen
+
+
 def test_the_bounds() -> None:
     assert (MEDOID_MAX_SEGMENTS, MEDOID_MAX_CELLS) == (200, 250_000)
 
@@ -87,14 +109,19 @@ def test_the_medoid_is_unchanged_for_small_episodes() -> None:
     assert medoid(eps) is eps[best]
 
 
-def test_eight_long_episodes_are_compared_quickly() -> None:
+def test_eight_long_episodes_are_compared_by_their_first_segments_only(
+    cells: list[int],
+) -> None:
     eps = [episode(1000, shift=k) for k in range(8)]
-    started = time.perf_counter()
     medoid(eps)
-    assert time.perf_counter() - started < 0.5
+    # Each pair once, 200 segments of each: not 1,000 by 1,000.
+    assert cells == [MEDOID_MAX_SEGMENTS**2] * 28
+    assert sum(cells) == medoid_cells(eps)
 
 
-def test_past_the_budget_a_version_keeps_its_parent_s_skeleton() -> None:
+def test_past_the_budget_a_version_keeps_its_parent_s_skeleton(
+    cells: list[int],
+) -> None:
     small = [episode(4, task_id="a"), episode(4, task_id="b")]
     parent = build_version(
         template_id="r:t",
@@ -110,7 +137,7 @@ def test_past_the_budget_a_version_keeps_its_parent_s_skeleton() -> None:
     )
     window = [episode(1000, shift=k) for k in range(8)]
     assert medoid_cells([e for e in window if e.completed]) > MEDOID_MAX_CELLS
-    started = time.perf_counter()
+    cells.clear()
     child = build_version(
         template_id="r:t",
         routine_id="r",
@@ -123,7 +150,7 @@ def test_past_the_budget_a_version_keeps_its_parent_s_skeleton() -> None:
         harness_version="x",
         created_at=1.0,
     )
-    assert time.perf_counter() - started < 0.5
+    assert cells == [], "past the budget no pair of episodes is compared"
     assert (child.skeleton, child.medoid) == (parent.skeleton, parent.medoid)
     assert child.stats.n == 8  # the statistics still come from the window
 
@@ -157,14 +184,16 @@ def _long_run(k: int) -> RunFacts:
     )
 
 
-async def test_learning_long_runs_stays_far_below_the_bound() -> None:
-    # CPU time, not the wall clock: learning is pure computation, and a stall of the
-    # whole machine under a parallel test run once read as 0.64 s.
+async def test_learning_long_runs_never_compares_more_than_the_budget(
+    cells: list[int],
+) -> None:
     store = MemoryProcedures()
-    took: list[float] = []
+    work: list[int] = []
     for k in range(9):
-        facts = _long_run(k)
-        started = time.thread_time()
-        await store.learn(facts)
-        took.append(time.thread_time() - started)
-    assert max(took) < 0.5, [round(t, 3) for t in took]
+        cells.clear()
+        await store.learn(_long_run(k))
+        work.append(sum(cells))
+    # One run's end compares at most the budget, however many long runs came before:
+    # the pairs grow with each run until they would pass it, then none is compared.
+    assert max(work) <= MEDOID_MAX_CELLS, work
+    assert max(work) > 0 and work[-1] == 0, work
