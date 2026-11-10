@@ -186,6 +186,158 @@ async def test_separate_reasoning_never_reaches_content() -> None:
     assert "held" in display.kinds()
 
 
+@pytest.mark.parametrize(
+    ("fragments", "content"),
+    [
+        # A tool call written as text: never shown, though its lines are complete.
+        (["<tool_call>\n", '{"name": "echo"}\n'], '<tool_call>\n{"name": "echo"}\n'),
+        # Unfinished thinking the server sends again as content when it stops.
+        (
+            [
+                StreamFragment(kind="reasoning", text="Let me think about it.\n"),
+                "Let me think\n",
+                " about it.\n",
+            ],
+            "Let me think\n about it.\n",
+        ),
+        # A think block in the content although reasoning has a field of its own.
+        (
+            [
+                StreamFragment(kind="reasoning", text="Plan."),
+                "<think>\n",
+                "secret\n",
+                "</think>\n",
+                "Hi\n",
+            ],
+            "<think>\nsecret\n</think>\nHi\n",
+        ),
+        # A second block after the first, which the declared framing parsed.
+        (
+            ["<think>a</think>\n", "<think>\n", "b\n", "</think>\n"],
+            "<think>a</think>\n<think>\nb\n</think>\n",
+        ),
+    ],
+    ids=[
+        "tool-call-as-text",
+        "reasoning-again",
+        "think-in-content",
+        "later-think-block",
+    ],
+)
+async def test_text_a_whole_reply_check_hides_is_never_shown(
+    fragments: list[object], content: str
+) -> None:
+    first = fragments[0]
+    thinking = first.text if isinstance(first, StreamFragment) else ""
+    display = Display("explicit" if fragments[0] == "<think>a</think>\n" else "none")
+    llm = StreamLLM(
+        [[*fragments, Message(role="assistant", content=content, thinking=thinking)]]
+    )
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await _scoped_chat(llm).plan_step([], [], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert display.text().strip() == ""
+
+
+ECHO = ToolDef(
+    name="echo",
+    description="echo",
+    parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+)
+
+
+@pytest.mark.parametrize(
+    ("lines", "shown", "call"),
+    [
+        # A call written as JSON over several lines: held until it is known.
+        (
+            ["{\n", '  "name": "echo",\n', '  "arguments": {"text": "x"}\n', "}\n"],
+            "",
+            True,
+        ),
+        (["```json\n", '{"name": "echo", "arguments": {}}\n', "```\n"], "", True),
+        # The same after prose: the prose has shown, the call never does.
+        (
+            [
+                "Let me check.\n",
+                "{\n",
+                '  "name": "echo",\n',
+                '  "arguments": {}\n',
+                "}\n",
+            ],
+            "Let me check.\n",
+            True,
+        ),
+        # A call as code in the call's fence.
+        (["```tool_code\n", 'echo(text="x")\n', "```\n"], "", True),
+        # A line that opens with a brace waits for the end, then shows.
+        (["Sure.\n", "{ is a brace.\n"], "Sure.\n", False),
+        # A bracket JSON cannot follow streams: a link, a redaction mark.
+        (
+            ["[The docs](https://x) say so.\n", "[redacted] was cut.\n"],
+            "[The docs](https://x) say so.\n[redacted] was cut.\n",
+            False,
+        ),
+        # A code block of a language streams, braces and all.
+        (
+            ["```python\n", "x = 1\n", "{1: 2}\n", "```\n"],
+            "```python\nx = 1\n{1: 2}\n```\n",
+            False,
+        ),
+    ],
+    ids=[
+        "json-lines",
+        "json-fence",
+        "later-call",
+        "tool-code-fence",
+        "prose",
+        "link",
+        "code-block",
+    ],
+)
+async def test_with_tools_offered_a_reply_that_opens_like_a_call_waits(
+    lines: list[str], shown: str, call: bool
+) -> None:
+    display = Display("none")
+    seen: list[str] = []
+    content = "".join(lines)
+    llm = StreamLLM(
+        [
+            [
+                *lines,
+                lambda: seen.append(display.text()),
+                Message(role="assistant", content=content),
+            ]
+        ]
+    )
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await _scoped_chat(llm).plan_step([], [ECHO], "hi")
+    finally:
+        STREAM_DISPLAY.reset(token)
+    assert seen == [shown]  # what showed before the reply came
+    assert display.text() == (shown if call else content)  # and after it
+
+
+async def test_a_whole_reply_is_not_judged_as_streamed() -> None:
+    display = Display("none")
+    sent = Message(role="assistant", content="It is Paris.", thinking="It is Paris.")
+    llm = StreamLLM([[StreamFragment(kind="reply", reply=sent, whole=True)]])
+    chat = _scoped_chat(llm)
+    token = STREAM_DISPLAY.set(display)
+    try:
+        await chat.plan_step([], [], "hi")
+        # A streamed reply that repeats its reasoning is unfinished thinking; a
+        # whole one is an answer, as without a display.
+        assert not chat.unfinished(sent)
+        chat.streamed = True
+        assert chat.unfinished(sent)
+    finally:
+        STREAM_DISPLAY.reset(token)
+
+
 async def test_no_display_keeps_the_complete_reply_path() -> None:
     llm = StreamLLM([[Message(role="assistant", content="unused")]])
     reply = await _scoped_chat(llm).plan_step([], [], "hi")

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import CALL_RECORDER
 from localmelo.melo.agent._reflection import _coerce_str, _read_reflection
-from localmelo.melo.agent.options import AgentOptions
+from localmelo.melo.agent.options import NOTE_MODES, AgentOptions
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import MemoryCandidatePayload
 from localmelo.melo.memory.coordinator import Hippo
@@ -81,7 +81,7 @@ class _NotesLoop:
     @property
     def _notes_mode(self) -> bool:
         """Whether the run compresses its replies into notes."""
-        return self.options.reasoning in ("compress", "compress+replay")
+        return self.options.reasoning in NOTE_MODES
 
     @staticmethod
     def _last_call_seq() -> int:

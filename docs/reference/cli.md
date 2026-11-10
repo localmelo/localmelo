@@ -449,7 +449,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run, in the reasoning modes other than `legacy`; a `legacy` run has none. |
 | `--memory-dir DIR` | not set | Save history and procedural memory as SQLite files in `DIR`: `history.db` and `procedures.db`, and `long_term.db` in the reasoning modes other than `legacy`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
-| `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
+| `--request-timeout SECONDS` | `300` | How long each chat request may wait for the server. |
 | `--output-format text\|json\|stream-json` | `text` (`json` with `--brief`) | Text, one JSON result, or newline-delimited events and result (`stream-json` requires `--brief`). |
 | `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for the recall of the reasoning modes other than `legacy`; see [Set up an embedding model](../guides/embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
@@ -502,8 +502,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
   variables say. `~` is expanded. See
   [Memory](../guides/memory.md#keep-memory-between-runs).
 - `--request-timeout`: the default is `request_timeout_s` from the config
-  file, else 120 seconds (300 seconds for the `ollama` backend). With
-  `--base-url` it is 120 seconds, also for an Ollama `/v1` URL. It does not
+  file, else 300 seconds, also with `--base-url`. It does not
   change the config file. See
   [Chat request timeout](configuration.md#chat-request-timeout).
 - `--embedding-base-url` is also used exactly as given: include `/v1`, as in
@@ -626,7 +625,7 @@ These options apply to `melo` without a task.
   and so does a server that ignores a streamed request or closes the stream
   before sending anything: melo uses its whole reply, asks it once more without
   streaming when needed, and says so once. Direct mode and stdin-closed runs
-  never stream. See [Streamed replies](../guides/terminal.md#streamed-replies).
+  never stream; the gateway streams a chat's replies and reads the same hint. See [Streamed replies](../guides/terminal.md#streamed-replies).
 - Text attachments in the interactive UI: `/attach PATH` stages one file
   (quote paths with spaces), `/attachments` lists staged files, and `/detach N`
   or `/detach all` removes them. Explicit selection from `@` file completion

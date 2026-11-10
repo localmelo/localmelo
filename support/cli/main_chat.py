@@ -11,7 +11,9 @@ draw as the terminal's own turns do, an approval opens the terminal's
 approval list and is answered through the gateway, and a card is one
 coloured line. So is a task's browser (``attention.browser``): one line each
 time its state changes, with ``melo console`` as the way to open it, and an empty
-Enter is Done for the page the person holds, by the source its card names.
+Enter is Done for the page the person holds, by the source its card names. A
+reply's live text (``reply.live``) feeds the terminal's own stream display, as
+an in-process turn's stream does (``/stream off`` leaves it out).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import asyncio
 import contextlib
 import fcntl
 import json
+import logging
 import os
 import re
 import shutil
@@ -45,6 +48,7 @@ from localmelo.support.cli import hanging
 from localmelo.support.cli.text import cut_cells
 from localmelo.support.sessions.approvals import ChatMode, chat_mode
 from localmelo.support.sessions.display import clean_output, home_label, short_title
+from localmelo.support.sessions.live import LIVE_EVENT
 from localmelo.support.sessions.store import GATEWAY_SESSIONS_DB, StoredEvent
 from localmelo.support.words import t_in
 
@@ -53,6 +57,8 @@ if TYPE_CHECKING:
     from localmelo.support.cli.output import Out
     from localmelo.support.cli.render import TurnRenderer
     from localmelo.support.config import Config
+
+logger = logging.getLogger(__name__)
 
 # The main chat's events that belong to no turn (the gateway's cards.py and front.py).
 CARD_EVENT: Final = "attention.card"
@@ -832,6 +838,8 @@ class Host(Protocol):
     renderer: TurnRenderer
     approver: TerminalApprover
     title: str
+    # Whether a reply shows as it is written (``/stream``).
+    stream: bool
 
     @property
     def state(self) -> str: ...
@@ -882,6 +890,11 @@ class _Turn:
     chat: Chat | None = None
     notes: list[str] = field(default_factory=list)
     sender: asyncio.Task[None] | None = None
+    # The request whose live text the display has (step, attempt), how much of
+    # it, and the newest step whose stored reply came: its live text is done.
+    live: tuple[Any, Any] | None = None
+    live_chars: int = 0
+    replied: int = 0
 
 
 class MainChat:
@@ -1099,11 +1112,10 @@ class MainChat:
                     return
                 now = time.monotonic()
                 gone_since = now if gone_since is None else gone_since
+                logger.debug("The chat's stream broke: %s", exc)
                 if now - gone_since >= QUIET_S and not self._lost:
                     self._lost = True
-                    self._say(
-                        f"The gateway is not answering ({exc}); trying again.", "warn"
-                    )
+                    self._say("The gateway is not answering; trying again.", "warn")
                 if now - gone_since >= GONE_S:
                     self._fail_turn("the gateway stopped answering during this turn")
             await asyncio.sleep(RETRY_S)
@@ -1159,6 +1171,9 @@ class MainChat:
             return
         if turn is None or turn.number is None or number != turn.number:
             return
+        if kind == LIVE_EVENT:
+            self._live(turn, data)
+            return
         stored = {
             k: v for k, v in event.items() if k not in ("id", "session_id", "turn")
         }
@@ -1177,8 +1192,41 @@ class MainChat:
             asked = self._asks.pop(str(data.get("request_id") or ""), None)
             if asked is not None and not asked.done():
                 asked.cancel()  # answered in another window: the list goes away
+        elif kind == "assistant.message" and isinstance(data.get("step"), int):
+            turn.replied = max(turn.replied, data["step"])
         elif kind == "turn.finished" and not turn.done.done():
             turn.done.set_result(str(data.get("status") or ""))
+
+    def _live(self, turn: _Turn, data: Mapping[str, Any]) -> None:
+        """Show a reply's live text with the terminal's stream display.
+
+        The gateway sends each request's text in one run from ``at`` 0; after
+        a reconnect it sends the text so far again, of which only what is new
+        is shown. A step whose stored reply came shows nothing more.
+        """
+        step, at, text = data.get("step"), data.get("at"), data.get("text")
+        if (
+            not self.host.stream
+            or not isinstance(step, int)
+            or not isinstance(at, int)
+            or not isinstance(text, str)
+            or step <= turn.replied
+        ):
+            return
+        renderer = self.host.renderer
+        key = (step, data.get("attempt"))
+        if key != turn.live:
+            if at != 0:
+                return
+            turn.live, turn.live_chars = key, 0
+            renderer.stream_step(step)
+            renderer.stream_opened()
+        if at > turn.live_chars:
+            return  # a gap: the next text so far fills it
+        new = text[turn.live_chars - at :]
+        turn.live_chars = max(turn.live_chars, at + len(text))
+        if new:
+            renderer.stream_content(new)
 
     def _on_browser(
         self, chat_id: str, card: Mapping[str, Any], event_id: object = None

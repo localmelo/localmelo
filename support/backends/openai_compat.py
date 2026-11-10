@@ -41,7 +41,7 @@ def build_openai_chat(
 
     *extra_body* is merged into every chat request (see
     :class:`OpenAICompatLLM`). *timeout* is the HTTP timeout of each chat
-    request in seconds; None keeps the provider's default (120 s).
+    request in seconds; None keeps the provider's default (300 s).
     *reasoning_field* and *requires_reasoning_replay* are the provider's
     reasoning capabilities (see :class:`OpenAICompatLLM`). *thinking_off_body*
     holds the request fields that turn thinking off for one retry. *reads_images*

@@ -2168,6 +2168,7 @@
   "tool.thoughtFor": "思考了 {duration}",
   "turns.activity.approval": "在等你批准",
   "turns.activity.reflecting": "正在反思",
+  "turns.activity.replying": "正在写回复",
   "turns.activity.retrying": "{n} 秒后重试",
   "turns.activity.running": "正在运行 {tool}",
   "turns.activity.starting": "正在开始",

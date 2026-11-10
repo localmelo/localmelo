@@ -33,7 +33,7 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
-from localmelo.melo.contracts.streaming import STREAM_DISPLAY
+from localmelo.melo.contracts.streaming import StreamDisplay
 from localmelo.melo.schema import WINDOW_MESSAGES_MAX, RunResult
 from localmelo.support import config
 from localmelo.support.backends import discovery, model_offer
@@ -762,6 +762,10 @@ class CliSession:
             return await self.approver.ask(request)
         return await self.runner.observe(self.approver.ask)(request)
 
+    def _display_for(self, _turn: TurnInfo) -> StreamDisplay | None:
+        """The display of one turn's run (the runner sets it), when streaming is on."""
+        return self.renderer.stream_feed() if self.stream else None
+
     async def _prepare_turn(self, reload: ResumeLoader) -> None:
         await self.navigation.synchronize(reload)
         await self.session_tools.apply_title()
@@ -797,6 +801,7 @@ class CliSession:
                     progress=True,
                     resume_mode=self.navigation.mode,
                     before_turn=self._prepare_turn,
+                    live=self._display_for,
                 )
             runner = self.runner
             kwargs: dict[str, Any] = (
@@ -809,19 +814,12 @@ class CliSession:
                 else {}
             )
             await self.grants_ready()
-            token = (
-                STREAM_DISPLAY.set(self.renderer.stream_feed()) if self.stream else None
+            result = await runner.run_turn(
+                text,
+                approval=self.approvals.policy(),
+                title=text if typed_text is None else typed_text,
+                **kwargs,
             )
-            try:
-                result = await runner.run_turn(
-                    text,
-                    approval=self.approvals.policy(),
-                    title=text if typed_text is None else typed_text,
-                    **kwargs,
-                )
-            finally:
-                if token is not None:
-                    STREAM_DISPLAY.reset(token)
         except _StoppedBeforeSendError:
             unsent = True
         except UnknownSessionError:

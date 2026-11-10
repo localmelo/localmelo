@@ -127,6 +127,9 @@ The developer setting ``[agent] thinking_steps`` (no flag; ``-X agent.thinking_s
 gives the provider its thinking switch through ``with_quiet_steps`` in ``_build_direct_mode_agent``,
 which has a new hash again; with the default ``all`` the call changes nothing, so the requests are the
 same, as ``tests/cli/test_thinking_steps_config.py`` and the legacy A/B check.
+The chat request timeout's default moved to 300 s; only the comment in
+``_build_direct_mode_agent`` that names it changed, so it has a new hash; the requests are
+the same.
 ``_check_args`` is not pinned.
 """
 
@@ -149,7 +152,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "929522c11ee7309c2d6a55cd663b1049b48456014a3025e1a280635519205db2",
+    "_build_direct_mode_agent": "f89ab7da89f46292e2493eba968b9789d6d7873f20e8f15bab2d3c4c9dd2796b",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

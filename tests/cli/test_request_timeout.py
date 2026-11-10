@@ -80,7 +80,7 @@ def _config(backend: str, request_timeout_s: Any = None) -> Config:
 @pytest.mark.parametrize(
     ("argv", "seconds"),
     [
-        ((), 120.0),
+        ((), 300.0),
         (("--request-timeout", "600"), 600.0),
         (("--request-timeout", "0.5"), 0.5),
     ],
@@ -106,7 +106,7 @@ async def test_base_url_gives_the_provider_the_flag_or_its_default(
 # ── The config file's backends ──────────────────────────────────────────────
 
 BACKENDS = pytest.mark.parametrize(
-    ("backend", "provider_default"), [("vllm", 120.0), ("ollama", 300.0)]
+    ("backend", "provider_default"), [("vllm", 300.0), ("ollama", 300.0)]
 )
 
 

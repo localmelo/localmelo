@@ -17,7 +17,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, NamedTuple, cast
+from typing import Any, Final, NamedTuple
 
 from markdown_it.token import Token as MarkdownToken
 from pygments.token import (  # type: ignore[import-untyped]
@@ -87,6 +87,7 @@ from localmelo.support.sessions.display import (
     status_text,
     step_said,
 )
+from localmelo.support.sessions.live import declared_framing
 from localmelo.support.sessions.store import (
     SessionBusyError,
     StoredEvent,
@@ -812,10 +813,7 @@ class TurnRenderer:
 
     def stream_hint(self) -> ReasoningTags | None:
         """The model's declared framing, or ``None`` for the conservative rule."""
-        hint = self.reasoning_tags.get(self._backend().model)
-        if hint in ("explicit", "closing_only", "none"):
-            return cast(ReasoningTags, hint)
-        return None
+        return declared_framing(self.reasoning_tags, self._backend().model)
 
     def stream_feed(self) -> StreamFeed:
         """A display for one turn's planning streams (set around the run)."""
@@ -834,10 +832,9 @@ class TurnRenderer:
     def stream_opened(self) -> None:
         """A provider stream or its complete-reply fallback started."""
         # An earlier attempt of this step that no reply claimed ended in an
-        # error: close it here, as its retry event may still be on its way.
-        self._flush_stream(
-            "retrying", since=self._stream_step, upto=self._stream_step + 1
-        )
+        # error: a retry starts the reply again from nothing, so its text goes
+        # (its retry event may still be on its way).
+        self._drop_attempt()
         self._stream_open = True
         self._stream_chunks = 0
         if self.live is not None:
@@ -881,6 +878,12 @@ class TurnRenderer:
         if key == self._stream_step and self.live is not None:
             self.live.stream_text = ""
         return bool(text.strip())
+
+    def _drop_attempt(self) -> None:
+        """Drop the provisional text of the step now streaming: its request is asked again."""
+        self._stream_texts.pop(self._stream_step, None)
+        if self.live is not None:
+            self.live.stream_text = ""
 
     def _clear_stream(self) -> None:
         """Drop all provisional text without printing it."""
@@ -962,6 +965,9 @@ class TurnRenderer:
         if result is not None and result.status == "completed":
             self._clear_stream()  # the final answer prints below, once
         else:
+            if error is not None or result is not None and result.status != "cancelled":
+                # A failed request's words are no reply, as on a retry: they go.
+                self._drop_attempt()
             self._flush_stream("stopped")
         if not self._finished:
             if error is not None:
@@ -1216,8 +1222,8 @@ class TurnRenderer:
         kind = str(data.get("kind") or "")
         message = plain(str(data.get("message") or ""))
         if kind == "retry":
-            if not self._stream_open:  # else the next attempt already closed it
-                self._flush_stream("retrying")
+            if not self._stream_open:  # else the next attempt already dropped it
+                self._drop_attempt()
             detail = data.get("detail")
             delay = (
                 _float(detail.get("delay_s")) if isinstance(detail, Mapping) else 0.0

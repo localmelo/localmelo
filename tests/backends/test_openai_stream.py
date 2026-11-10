@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY, Message, ToolDef
 from localmelo.support.providers.llm._sse import sse_data
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -147,7 +147,8 @@ async def test_multiline_comments_and_cr() -> None:
 
 @pytest.mark.asyncio
 async def test_incomplete_stream_and_bad_json() -> None:
-    for raw in (fixture().removesuffix(b"data: [DONE]\n\n"), b"data: not-json\n\n"):
+    cut = frame({"choices": [{"index": 0, "delta": {"content": "Hi"}}]})
+    for raw in (cut, b"data: not-json\n\n"):  # neither end signal; bad JSON
         stream = Bytes([raw])
         provider = OpenAICompatLLM(
             "http://example.test/v1",
@@ -162,6 +163,36 @@ async def test_incomplete_stream_and_bad_json() -> None:
             assert stream.closed == 1
         finally:
             await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        fixture(),  # both signals
+        fixture().removesuffix(b"data: [DONE]\n\n"),  # a finish reason, a clean close
+        frame({"choices": [{"index": 0, "delta": {"content": "Hi"}}]})
+        + b"data: [DONE]\n\n",  # the end marker, no finish reason
+    ],
+    ids=["both", "no-end-marker", "no-finish-reason"],
+)
+async def test_a_stream_that_ends_cleanly_with_either_signal_is_complete(
+    raw: bytes,
+) -> None:
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw]))
+        ),
+    )
+    try:
+        events = [event async for event in provider.stream_chat([])]
+    finally:
+        await provider.close()
+    assert events[-1].kind == "reply" and events[-1].reply is not None
+    assert events[-1].finish_reason in ("stop", "tool_calls")
+    assert not events[-1].whole
 
 
 @pytest.mark.asyncio
@@ -217,55 +248,38 @@ async def test_cancellation_closes_response() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "arguments,finish",
+    "name,arguments,finish,read",
     [
-        ('{"x":', "tool_calls"),
-        ("[]", "tool_calls"),
-        ('{"x":1}', "length"),
-        ('{"x":NaN}', "tool_calls"),
+        ("read", '{"x":', "tool_calls", {RAW_ARGUMENTS_KEY: '{"x":'}),
+        ("read", "[]", "tool_calls", {RAW_ARGUMENTS_KEY: "[]"}),
+        ("", '{"x":1}', "tool_calls", {"x": 1}),
+        ("read", '{"x":1}', "stop", {"x": 1}),
     ],
+    ids=["bad-json", "not-an-object", "no-name", "stop-finish"],
 )
-async def test_incomplete_tools_are_never_returned(arguments: str, finish: str) -> None:
-    raw = (
-        frame(
-            {
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {
-                            "tool_calls": [
-                                {
-                                    "index": 0,
-                                    "id": "a",
-                                    "function": {
-                                        "name": "read",
-                                        "arguments": arguments,
-                                    },
-                                }
-                            ]
-                        },
-                        "finish_reason": finish,
-                    }
-                ]
-            }
-        )
-        + b"data: [DONE]\n\n"
-    )
-    stream = Bytes([raw])
+async def test_streamed_calls_are_read_as_a_whole_replys_are(
+    name: str, arguments: str, finish: str, read: dict
+) -> None:
+    delta = {
+        "tool_calls": [
+            {"index": 0, "id": "a", "function": {"name": name, "arguments": arguments}}
+        ]
+    }
+    raw = frame({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
     provider = OpenAICompatLLM(
         "http://example.test/v1",
         "test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=stream)),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw + b"data: [DONE]\n\n"]))
+        ),
     )
-    seen = []
     try:
-        with pytest.raises(ProviderError):
-            async for event in provider.stream_chat([]):
-                seen.append(event)
-        assert all(event.reply is None for event in seen)
-        assert stream.closed == 1
+        events = [event async for event in provider.stream_chat([])]
     finally:
         await provider.close()
+    reply = events[-1].reply
+    assert reply is not None
+    assert [(c.tool_name, c.arguments) for c in reply.tool_calls] == [(name, read)]
 
 
 @pytest.mark.asyncio
@@ -311,30 +325,51 @@ async def test_transport_failure_closes_stream(error: httpx.TransportError) -> N
     try:
         with pytest.raises(ProviderError) as failure:
             _ = [event async for event in provider.stream_chat([])]
-        assert not failure.value.retryable
+        assert failure.value.retryable  # asked again, as a whole reply's would be
         assert stream.closed == 1
     finally:
         await provider.close()
 
 
 @pytest.mark.asyncio
-async def test_a_streamed_http_error_keeps_the_servers_reason_apart_from_its_words() -> (
-    None
-):
-    """The message stays as it was; the start of the body is there for whoever must tell why."""
-    reason = b'{"error":{"message":"image input is not supported"}}'
-    provider = OpenAICompatLLM(
-        "http://example.test/v1",
-        "test",
-        transport=httpx.MockTransport(
-            lambda _: httpx.Response(400, stream=Bytes([reason]))
+@pytest.mark.parametrize(
+    ("stream_body", "whole_body", "requests", "overflow"),
+    [
+        # Refused twice: the whole call's error, classified as it classifies it.
+        (b'{"error":{"message":"image input is not supported"}}', None, 2, False),
+        (
+            b'{"error":{"message":"bad option"}}',
+            b'{"error":{"code":"context_length_exceeded"}}',
+            2,
+            True,
         ),
+        # A refusal that is already a context overflow is raised at once.
+        (b'{"error":{"code":"context_length_exceeded"}}', None, 1, True),
+    ],
+    ids=["refused-twice", "whole-overflows", "stream-overflows"],
+)
+async def test_a_refused_stream_raises_the_whole_calls_error(
+    stream_body: bytes, whole_body: bytes | None, requests: int, overflow: bool
+) -> None:
+    """The caller sees the whole call's error, so a too-long prompt reaches the refit."""
+    sent: list[bool] = []
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        streamed = json.loads(request.content).get("stream") is True
+        sent.append(streamed)
+        body = stream_body if streamed or whole_body is None else whole_body
+        return httpx.Response(400, stream=Bytes([body]))
+
+    provider = OpenAICompatLLM(
+        "http://example.test/v1", "test", transport=httpx.MockTransport(refuse)
     )
     try:
         with pytest.raises(ProviderError) as failure:
             _ = [part async for part in provider.stream_chat([])]
-        assert str(failure.value) == "POST /chat/completions failed with HTTP 400"
-        assert "image input is not supported" in failure.value.detail
+        assert failure.value.status_code == 400
+        assert failure.value.context_overflow is overflow
+        assert len(sent) == requests and sent[0] is True
+        assert not provider.sends_whole_replies
         assert len(failure.value.detail) <= 500
     finally:
         await provider.close()
@@ -484,8 +519,6 @@ async def test_interleaved_tools_and_repeated_identifiers() -> None:
     "raw",
     [
         frame({"error": {"message": "failed"}}),
-        frame({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
-        + b"data: [DONE]\n\n",
         b'data: {"choices":',
     ],
 )
@@ -505,33 +538,36 @@ async def test_error_frames_and_incomplete_calls(raw: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_usage_opt_in_and_compatible_final_frames() -> None:
+async def test_a_stream_asks_for_usage_and_a_server_that_refuses_it_answers_whole() -> (
+    None
+):
     requests: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
         body = json.loads(req.content)
         requests.append(body)
-        raw = frame({"choices": [{"finish_reason": "stop"}]})
-        if body.get("stream_options", {}).get("include_usage"):
-            raw += frame({"usage": {"prompt_tokens": 2, "completion_tokens": 3}})
-        return httpx.Response(200, stream=Bytes([raw + b"data: [DONE]\n\n"]))
-
-    for options in ({}, {"stream_options": {"include_usage": True}}):
-        provider = OpenAICompatLLM(
-            "http://example.test/v1",
-            "test",
-            extra_body=options,
-            transport=httpx.MockTransport(handler),
+        if body.get("stream"):
+            return httpx.Response(400, json={"error": "unknown field: stream_options"})
+        message = {"role": "assistant", "content": "whole"}
+        usage = {"prompt_tokens": 2, "completion_tokens": 3}
+        return httpx.Response(
+            200, json={"choices": [{"message": message}], "usage": usage}
         )
-        try:
+
+    provider = OpenAICompatLLM(
+        "http://example.test/v1", "test", transport=httpx.MockTransport(handler)
+    )
+    try:
+        for _ in range(2):
             events = [event async for event in provider.stream_chat([])]
             reply = events[-1].reply
-            assert reply is not None
-            assert (reply.usage is not None) == bool(options)
-        finally:
-            await provider.close()
-    assert "stream_options" not in requests[0]
-    assert requests[1]["stream_options"] == {"include_usage": True}
+            assert reply is not None and events[-1].whole
+            assert reply.usage is not None and reply.usage["prompt_tokens"] == 2
+    finally:
+        await provider.close()
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    # The refusal is kept: the second turn asks for the whole reply at once.
+    assert [bool(r.get("stream")) for r in requests] == [True, False, False]
 
 
 @pytest.mark.asyncio

@@ -6,11 +6,12 @@ import contextvars
 import dataclasses
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from localmelo.melo import clock
 from localmelo.melo.agent._call_budget import CallBudgetError
@@ -49,6 +50,7 @@ from localmelo.melo.contracts.streaming import STREAM_DISPLAY, StreamDisplay
 from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import (
+    CALL_FENCE_LABELS,
     CHECKPOINT_HEADER,
     EMPTY_REPLY_LABEL,
     REFLECTIONS_HEADER,
@@ -56,6 +58,7 @@ from localmelo.melo.schema import (
     Message,
     ToolDef,
     answer_from_thinking,
+    broken_tool_call,
     is_no_answer_label,
     unfinished_thinking,
 )
@@ -610,6 +613,128 @@ def _quote_data_delimiter(text: str, delimiter: str) -> str:
     )
 
 
+# A think block's mark anywhere in content, or a spelled-out block at its
+# start: the finished reply's views split these off as thinking.
+_THINK_MARK = re.compile(r"</?think\b|\A\s*<thinking\b", re.IGNORECASE)
+# A fence line: its marker and its label.
+_FENCE_LINE = re.compile(r"[ \t]*(`{3,}|~{3,})[ \t]*([^\s`~]*)")
+# A line that may open JSON: ``{``, or ``[`` that JSON can follow (not
+# ``[redacted]`` or a link's ``[text]``).
+_OPENS_JSON: Final = re.compile(
+    r'[ \t]*(?:\{|\[[ \t]*(?:$|[\[{"\]\d-]|(?:true|false|null)\b))'
+)
+
+
+def _call_opening(lines: str, fence: str | None) -> tuple[str, str | None]:
+    """Whether the complete *lines* open what may be a call written as text.
+
+    *fence* is the marker of the block of ordinary code the text before
+    *lines* is in, or ``None``. Returns ``"hold"`` when a line outside such a
+    block starts, after whitespace, with ``{`` or with ``[`` that JSON can
+    follow (:data:`_OPENS_JSON`), or opens a fence
+    labelled as a call's (:data:`~localmelo.melo.schema.CALL_FENCE_LABELS`) or
+    one whose first content line starts so; ``"wait"`` when a fence's first
+    content line has not come yet; else ``""``; with the fence state after
+    *lines*.
+    """
+    rows = lines.splitlines()
+    for number, line in enumerate(rows):
+        found = _FENCE_LINE.match(line)
+        if fence is not None:
+            closes = (
+                found is not None
+                and found.group(1)[0] == fence[0]
+                and len(found.group(1)) >= len(fence)
+                and not found.group(2)
+            )
+            fence = None if closes else fence
+            continue
+        if found:
+            if found.group(2).lower() in CALL_FENCE_LABELS:
+                return "hold", fence
+            following = next((row for row in rows[number + 1 :] if row.strip()), None)
+            if following is None:
+                return "wait", fence
+            if _OPENS_JSON.match(following):
+                return "hold", fence
+            fence = found.group(1)
+            continue
+        if _OPENS_JSON.match(line):
+            return "hold", fence
+    return "", fence
+
+
+class _Hold:
+    """What of one streamed request's released text may show now, failing closed.
+
+    Text a check of the whole reply would hide is held: a think block in the
+    content (:data:`_THINK_MARK`: any block, also after the first, also when
+    the server sends reasoning in a field of its own); a tool call written as
+    text (:func:`~localmelo.melo.schema.broken_tool_call`, judged on the text
+    so far, so markup on a line is caught before the line shows); while tools
+    are offered, from a line that may open a call written as JSON or in a
+    call's fence (:func:`_call_opening`) to the end of the request, as such a
+    call is only known when it closes; and content that so far repeats the
+    *reasoning* word for word (unfinished thinking a server sends again as
+    content, :func:`~localmelo.melo.schema.unfinished_thinking`). Held text
+    shows when the text that follows clears it, else at the end only if the
+    reply is none of these; a think mark or a call's opening holds for good.
+    The checks run once per released line.
+    """
+
+    def __init__(self, tools: Sequence[ToolDef]) -> None:
+        self.tools = tools
+        self.shown = ""  # what the display has
+        self.kept = ""  # released by the filter, held back here
+        self._reasoning: list[str] = []
+        self._thought: list[str] | None = []
+        self._fence: str | None = None  # the code block the shown text is in
+        self._for_good = False
+
+    def reasoning(self, text: str) -> None:
+        self._reasoning.append(text)
+        self._thought = None  # read again at the next check
+
+    def release(self, delta: str) -> str:
+        """The text that may show after *delta*; ``""`` while it is held."""
+        if not delta:
+            return ""
+        self.kept += delta
+        if self._for_good:
+            return ""
+        opening, fence = (
+            _call_opening(self.kept, self._fence) if self.tools else ("", None)
+        )
+        text = self.shown + self.kept
+        if opening == "hold" or _THINK_MARK.search(text):
+            self._for_good = True
+            return ""
+        if opening or self._may_hide(text):
+            return ""
+        out, self.shown, self.kept = self.kept, text, ""
+        self._fence = fence
+        return out
+
+    def end(self, tail: str, reply: Message, unfinished: bool) -> str:
+        """The text that may show at the end of the request, with its *tail*."""
+        rest = self.kept + tail
+        text = self.shown + rest
+        hidden = (
+            unfinished
+            or _THINK_MARK.search(text) is not None
+            or (not reply.tool_calls and broken_tool_call(text, self.tools))
+        )
+        return "" if hidden else rest
+
+    def _may_hide(self, text: str) -> bool:
+        if broken_tool_call(text, self.tools):
+            return True
+        if self._thought is None:
+            self._thought = "".join(self._reasoning).split()
+        words = text.split()
+        return bool(self._thought) and words == self._thought[: len(words)]
+
+
 class Chat:
     """Builds the agent's LLM requests, retries failed ones, counts them.
 
@@ -701,6 +826,10 @@ class Chat:
         # unfinished), and whether the latest planning reply was unfinished.
         self.framing_seen: str | None = None
         self.last_unfinished = False
+        # Whether the last planning reply came as a stream of pieces (not a
+        # whole reply a stream was asked for): only such a reply is judged as
+        # streamed (:meth:`unfinished`).
+        self.streamed = False
         self._sent: list[tuple[int, str, Fingerprint]] = []
         self._sent_count = 0
         self._plan: _PlanSnapshot | None = None
@@ -1125,7 +1254,8 @@ class Chat:
         """Whether planning *reply* is only unfinished thinking (#278).
 
         See :func:`~localmelo.melo.schema.unfinished_thinking`: a planning
-        reply is streamed when the turn has a stream display; the framing is
+        reply is streamed when the turn has a stream display and its pieces
+        came as a stream (:attr:`streamed`: not a whole reply); the framing is
         the turn's declared one (the display's), else the one this
         provider's replies have shown (:attr:`framing_seen`); the reasoning
         tokens are those of the provider's ``last_usage``, ``None`` when it
@@ -1140,7 +1270,7 @@ class Chat:
             reply.thinking,
             framing=declared or self.framing_seen,
             reasoning_tokens=self._reasoning_tokens(),
-            streamed=display is not None,
+            streamed=display is not None and self.streamed,
             thinking_off=self._thinking_off(),
         )
 
@@ -1208,6 +1338,7 @@ class Chat:
             if display is not None:
                 reply = await self._send_streaming(messages, tools, display)
             else:
+                self.streamed = False
                 reply = await self.llm.chat(messages, tools=tools or None)
             return self._answered(reply) if kind == "plan" else reply
         finally:
@@ -1228,6 +1359,10 @@ class Chat:
         the text and only the ``thinking`` indicator shows. A reply that the
         server sent whole (``StreamFragment.whole``) shows no deltas; a display
         that defines ``whole()`` is told so before it closes.
+
+        Text a check of the whole reply would hide is held, failing closed
+        (:class:`_Hold`). The reply is judged as streamed
+        (:attr:`streamed`) only when its pieces came as a stream.
         """
         display.opened()
         hint = display.reasoning_tags
@@ -1236,6 +1371,9 @@ class Chat:
         reply: Message | None = None
         whole = False
         saw_text = False
+        pieces = False
+        hold = _Hold(tools or ())
+        self.streamed = False
         try:
             async with contextlib.aclosing(
                 self.llm.stream_chat(messages, tools=tools or None)
@@ -1245,6 +1383,7 @@ class Chat:
                         reply = fragment.reply
                         whole = fragment.whole
                         break
+                    pieces = pieces or fragment.kind != "usage"
                     if fragment.kind == "reasoning":
                         saw_text = True
                         if filter is None:
@@ -1254,25 +1393,28 @@ class Chat:
                             )
                         if separate:
                             filter.feed_reasoning(fragment.text)
+                            hold.reasoning(fragment.text)
                         display.held()
                     elif fragment.kind == "content":
                         saw_text = True
                         if filter is None:
                             filter = StreamFilter(hint)
                         _, delta = filter.feed(fragment.text)
-                        if delta:
-                            display.content(delta)
+                        shown = hold.release(delta)
+                        if shown:
+                            display.content(shown)
                         else:
                             display.held()
                     elif fragment.kind == "tool":
                         display.held()
             if reply is None:
                 raise ProviderError("Streaming response ended without a reply")
+            self.streamed = pieces and not whole
             if filter is not None:
                 _, tail = filter.finish()
-                # Held text of a reply that is only unfinished thinking stays held.
-                if saw_text and tail and not self.unfinished(reply):
-                    display.content(tail)
+                rest = hold.end(tail, reply, self.unfinished(reply))
+                if saw_text and rest:
+                    display.content(rest)
             if whole:
                 tell = getattr(display, "whole", None)
                 if tell is not None:

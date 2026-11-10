@@ -324,7 +324,7 @@ def test_a_server_that_does_not_stream_still_answers_every_turn_and_says_so_once
     assert term.quit() == 0
 
 
-def test_a_stream_that_breaks_after_part_of_a_reply_is_not_asked_again(
+def test_a_stream_that_breaks_after_part_of_a_reply_is_asked_again_as_a_stream(
     streamed: Callable[..., Melo], servers: list[StubServer]
 ) -> None:
     term = streamed("stream_drop")

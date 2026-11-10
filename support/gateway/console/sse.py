@@ -1,7 +1,10 @@
 """Server-Sent Events for a session's stored and live events.
 
 One frame per event: ``id: <event id>`` and ``data: <the event JSON>``, on
-one line, then a blank line. The stream announces ``retry: 2000`` once,
+one line, then a blank line. A stream that shows the session to a person
+(``watch=true``) also carries the live text of a reply as it is written
+(``reply.live``): those frames are not stored, so they have no ``id:`` line
+and no ``id`` in their JSON, and a reconnect's cursor never moves past them. The stream announces ``retry: 2000`` once,
 sends ``: keepalive`` every :data:`SSE_KEEPALIVE_S` seconds, and ends when
 the client goes away, the gateway shuts down, or (with ``follow=false``)
 the stored events run out. A worker session lives in a file another process
@@ -46,9 +49,13 @@ logger = logging.getLogger(__name__)
 
 
 def event_data(event: StoredEvent) -> dict[str, Any]:
-    """The JSON object one SSE frame carries, and the one a turn lists."""
+    """The JSON object one SSE frame carries, and the one a turn lists.
+
+    A frame that is not stored (a reply's live text) has no ``id``.
+    """
+    ids = {} if event.id is None else {"id": event.id}
     return {
-        "id": event.id,
+        **ids,
         "session_id": event.session_id,
         "turn": event.turn,
         **event.event,
@@ -56,14 +63,15 @@ def event_data(event: StoredEvent) -> dict[str, Any]:
 
 
 def frame(event: StoredEvent) -> str:
-    """One SSE frame: its id, one data line, and a blank line."""
+    """One SSE frame: its id (a stored event's), one data line, and a blank line."""
     data = json.dumps(
         event_data(event),
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     )
-    return f"id: {event.id}\ndata: {data}\n\n"
+    head = "" if event.id is None else f"id: {event.id}\n"
+    return f"{head}data: {data}\n\n"
 
 
 class EventStream:

@@ -1648,8 +1648,7 @@ def _build_parser(
         type=_seconds,
         metavar="SECONDS",
         help="HTTP timeout of each chat request, in seconds (default: "
-        "request_timeout_s from the config file, else 120; 300 for the ollama "
-        "backend)",
+        "request_timeout_s from the config file, else 300)",
     )
     direct.add_argument(
         "--output-format",
@@ -2452,7 +2451,7 @@ def _build_direct_mode_agent(
         # Generic OpenAI-compatible endpoint
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
-        # Without --request-timeout the provider keeps its default (120 s);
+        # Without --request-timeout the provider keeps its default (300 s);
         # httpx would read timeout=None as no timeout at all.
         llm_options: dict[str, Any] = (
             {} if request_timeout is None else {"timeout": request_timeout}
