@@ -130,6 +130,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Secrets, private keys included, are redacted from tool output, events, logs and stored memory.
 - A commit whose message credits melo or an AI is refused.
 - New memory files are readable only by you.
+- A password inside a text file you attach is cut out of the saved chat like one you type; an older chat may still hold one, and the console guide says how to delete it.
 
 ### Scripts and API
 

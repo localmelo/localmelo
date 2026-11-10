@@ -1501,7 +1501,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         (``[password-1]``) stands for it, and only the browser tool, asked by
         code that checked the site and the turn, types the value. A caller
         that stores or shows the person's message calls this first (a
-        session's runner does); :meth:`run_task` does it again, which changes
+        session's runner hides every part of the message, its files too, with
+        the same function); :meth:`run_task` does it again, which changes
         nothing. All of *text* is read for passwords, whoever wrote it: a
         caller that put text of melo's after the person's message passes only
         the person's part here (see *own_chars* of :meth:`run_task`, which

@@ -113,9 +113,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def create(body: CreateChore) -> JSONResponse:
         console.require_store()
         request = hide_passwords(body.request).strip()
-        spec = _check(
-            TaskSpec.from_payload, {"objective": request, "title": body.title}
-        )
+        title = None if body.title is None else hide_passwords(body.title)
+        spec = _check(TaskSpec.from_payload, {"objective": request, "title": title})
         schedule = _check(Schedule.from_json, body.schedule)
         level = _level(body.level)
         chore = await _call(
@@ -144,7 +143,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             runner.update(
                 chore_id,
                 revision=body.revision,
-                title=body.title,
+                title=None if body.title is None else hide_passwords(body.title),
                 request=None if body.request is None else hide_passwords(body.request),
                 schedule=schedule,
                 level=_level(body.level),
