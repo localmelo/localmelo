@@ -147,7 +147,8 @@ async def test_multiline_comments_and_cr() -> None:
 
 @pytest.mark.asyncio
 async def test_incomplete_stream_and_bad_json() -> None:
-    for raw in (fixture().removesuffix(b"data: [DONE]\n\n"), b"data: not-json\n\n"):
+    cut = frame({"choices": [{"index": 0, "delta": {"content": "Hi"}}]})
+    for raw in (cut, b"data: not-json\n\n"):  # neither end signal; bad JSON
         stream = Bytes([raw])
         provider = OpenAICompatLLM(
             "http://example.test/v1",
@@ -162,6 +163,34 @@ async def test_incomplete_stream_and_bad_json() -> None:
             assert stream.closed == 1
         finally:
             await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        fixture(),  # both signals
+        fixture().removesuffix(b"data: [DONE]\n\n"),  # a finish reason, a clean close
+        frame({"choices": [{"index": 0, "delta": {"content": "Hi"}}]})
+        + b"data: [DONE]\n\n",  # the end marker, no finish reason
+    ],
+    ids=["both", "no-end-marker", "no-finish-reason"],
+)
+async def test_a_stream_that_ends_cleanly_with_either_signal_is_complete(
+    raw: bytes,
+) -> None:
+    provider = OpenAICompatLLM(
+        "http://example.test/v1",
+        "test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+    )
+    try:
+        events = [event async for event in provider.stream_chat([])]
+    finally:
+        await provider.close()
+    assert events[-1].kind == "reply" and events[-1].reply is not None
+    assert events[-1].finish_reason in ("stop", "tool_calls")
+    assert not events[-1].whole
 
 
 @pytest.mark.asyncio

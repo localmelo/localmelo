@@ -942,7 +942,11 @@ class OpenAICompatLLM(BaseLLMProvider):
             raise ProviderError(
                 f"Streaming request failed: {type(exc).__name__}"
             ) from exc
-        if whole is None and (not done or not finish):
+        # A stream that ended cleanly is complete with either signal, as servers
+        # differ: the end marker without a finish reason, or a finish reason and
+        # a clean close without the marker. Only a close with neither is a cut.
+        complete = (done and bool(finish)) or (emitted and (done or bool(finish)))
+        if whole is None and not complete:
             if emitted:
                 # Cut in the middle: asked again, as a cut whole reply is.
                 raise ProviderError(
@@ -954,6 +958,8 @@ class OpenAICompatLLM(BaseLLMProvider):
             # that is a context overflow was raised above, without a second
             # request, so the caller's refit sees it).
             whole = await self._complete(messages, tools)
+        if whole is None and not finish:
+            finish = "tool_calls" if calls else "stop"  # as a whole reply's is
         if whole is not None:
             self.sends_whole_replies = True
             yield StreamFragment(
