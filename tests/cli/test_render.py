@@ -377,7 +377,7 @@ def test_an_empty_output_says_so() -> None:
             {"allowed": True, "origin": "user", "remember": False, "allowance": "once"},
             "allowed once",
         ),
-        # A scheduled task's kept answer (#619), in the words of the task's page.
+        # A scheduled task's kept answer (#619): the page's line, short.
         (
             {
                 "allowed": True,
@@ -386,21 +386,21 @@ def test_an_empty_output_says_so() -> None:
                 "allowance": "kept",
                 "tool": "browser-type:https://notes.example",
             },
-            "Allowed to type on notes.example without asking: you allow this for this scheduled task",
+            "allowed for this scheduled task",
         ),
     ],
 )
 def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
     status = "success" if approval["allowed"] else "blocked"
     text = (
-        # Wide enough for the longest tag, the kept answer's, whole.
-        Turn(width=160)
+        Turn()
         .tool("file_write", "todo.md (68 chars)", status=status, approval=approval)
         .text()
     )
     assert "a file  todo.md (68 chars)" in text
     header = next(line for line in text.split("\n") if "a file  todo.md" in line)
-    assert header.endswith(tag)
+    # The whole tag, and the step's whole preview, on an 80-column line.
+    assert header.endswith(f" · {tag}") and cells(header) <= 80, header
 
 
 def test_a_denial_shows_its_reason() -> None:

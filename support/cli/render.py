@@ -393,7 +393,7 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
         if approval.get("allowance") == "once":
             return "allowed once"
         if approval.get("allowance") == "kept":
-            return kept_words(approval)
+            return KEPT_TAG
         return "allowed for the session" if approval.get("remember") else "allowed"
     if origin == "auto":
         return f"blocked: {reason}" if reason else "blocked"
@@ -406,23 +406,19 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     return ""
 
 
-def kept_words(asked: Mapping[str, Any]) -> str:
-    """What a question that ran on a scheduled task's kept answer says (#619), as the task's page says it."""
-    tool = str(asked.get("tool") or "")
-    site = tool.partition("://")[2]
-    what = "send a form" if tool.startswith("browser-submit:") else "type"
-    return f"Allowed to {what} on {site} without asking: you allow this for this scheduled task"
+# A step that ran on a scheduled task's kept answer (#619): the short form of the
+# page's line, as the once tag is, so it fits beside its step on an 80-column line.
+KEPT_TAG: Final = "allowed for this scheduled task"
 
 
 def kept_tag(data: Mapping[str, Any]) -> str:
-    """The tag of a call whose own questions ran on a scheduled task's kept answer (``tool_asks``), each once; else ``""``."""
+    """:data:`KEPT_TAG` for a call one of whose own questions (``tool_asks``) ran on a kept answer, else ``""``."""
     asks = data.get("tool_asks")
-    found = [
-        kept_words(one)
+    kept = any(
+        isinstance(one, Mapping) and one.get("allowance") == "kept"
         for one in (asks if isinstance(asks, list) else [])
-        if isinstance(one, Mapping) and one.get("allowance") == "kept"
-    ]
-    return "; ".join(dict.fromkeys(found))
+    )
+    return KEPT_TAG if kept else ""
 
 
 # A declined step's status word, by how it was declined (#465).

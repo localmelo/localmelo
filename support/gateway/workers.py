@@ -3612,17 +3612,16 @@ class TaskWorkers:
         body["approvals"] = await self._chat_mode_of(record) or chat_mode(
             session.meta if session else None
         )
+        auto = body["approvals"] == "auto"
         body["blocked"] = (
-            await blocked_steps(self.store, record.task_id)
-            if body["approvals"] == "auto"
-            else []
+            await blocked_steps(self.store, record.task_id) if auto else []
         )
         # A scheduled task's run (#619): the site a block's answer may be kept on
-        # for the next runs, and the steps that ran on such an answer.
-        await self.keep_offers(record, body["blocked"])
-        # Only the gate writes such a record, and only for a step a kept
+        # for the next runs, and the steps that ran on such an answer. Only the
+        # gate writes such a record, only in Auto, and only for a step a kept
         # answer its policy held let run (`_ToolAsk._kept`).
-        body["kept_uses"] = await kept_uses(self.store, record.task_id)
+        await self.keep_offers(record, body["blocked"])
+        body["kept_uses"] = await kept_uses(self.store, record.task_id) if auto else []
         if job_finished(record):
             # A worker is one-time: its finished job has no step left to allow.
             body["blocked"] = [
