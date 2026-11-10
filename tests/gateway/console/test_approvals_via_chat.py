@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from localmelo.melo.agent import Agent
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console, ConsoleOptions, explain
+from localmelo.support.gateway.console.cards import CARD_EVENT
 from localmelo.support.gateway.console.explain import Explainer
 from localmelo.support.gateway.handover import with_reading
 from localmelo.support.gateway.task_policy import TaskSpec
@@ -183,6 +184,30 @@ async def ended(s: Setup, task_id: str) -> dict[str, Any]:
     return dict(await until(check, "the task did not end"))
 
 
+async def task_cards(s: Setup, chat: str, task_id: str) -> list[dict[str, Any]]:
+    """The cards about *task_id* stored in *chat*, after the cards are flushed."""
+    await s.console.cards.flush()
+    return [
+        e.event["data"]
+        for e in await s.console.store.events_of_type(chat, CARD_EVENT)
+        if e.event["data"].get("source_id") == task_id
+    ]
+
+
+async def card_in_state(s: Setup, chat: str, task_id: str, state: str) -> None:
+    """Wait until *chat* holds a card about *task_id* in *state*.
+
+    A pending approval shows before its event is stored (the store writes it
+    a moment later, longer under load), and a flush writes only the cards of
+    events stored by then.
+    """
+
+    async def check() -> Any:
+        return any(c["state"] == state for c in await task_cards(s, chat, task_id))
+
+    await until(check, f"no {state} card of the task in the chat")
+
+
 async def answer(s: Setup, request_id: str, choice: str = "once") -> None:
     body = {"choice": choice, **({"reason": "no"} if choice == "deny" else {})}
     response = await s.client.post(f"/api/approvals/{request_id}", json=body)
@@ -300,8 +325,6 @@ async def test_a_chore_run_waiting_on_an_approval_asks_in_the_chat_that_saved_it
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A saved chore's run asks like any task: a card in the chat that saved it (#570)."""
-    from localmelo.support.gateway.console.cards import CARD_EVENT
-
     async with chat_console(tmp_path, monkeypatch, plan("print(1)")) as s:
         main = s.console.main_id or ""
         created = await s.client.post(
@@ -321,17 +344,9 @@ async def test_a_chore_run_waiting_on_an_approval_asks_in_the_chat_that_saved_it
         assert run.status_code == 202, run.text
         task = str(run.json()["task"]["task_id"])
         request = await waiting(s, task)
-        await s.console.cards.flush()
-        cards = {
-            chat: [
-                e.event["data"]
-                for e in await s.console.store.events_of_type(chat, CARD_EVENT)
-                if e.event["data"].get("source_id") == task
-            ]
-            for chat in (side, main)
-        }
-        assert [c["state"] for c in cards[side]] == ["waiting"]
-        assert cards[main] == []
+        await card_in_state(s, side, task, "waiting")
+        assert [c["state"] for c in await task_cards(s, side, task)] == ["waiting"]
+        assert await task_cards(s, main, task) == []
         await answer(s, request["request_id"])
         await ended(s, task)
         assert [a["origin"] for a in await approvals_of(s, task)] == ["user"]
