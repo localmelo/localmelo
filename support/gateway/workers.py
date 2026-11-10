@@ -1439,6 +1439,22 @@ class TaskWorkers:
             policy.withdraw(key)
             raise
 
+    async def open_blocks(self, task_id: str) -> builtins.list[dict[str, Any]]:
+        """The steps Auto blocked in *task_id* that its Allow once may still run.
+
+        As its page lists them (``blocked``): one it can allow, not run on an
+        allowance since, and with none waiting for its step.
+        """
+        body = await self._body(await self.tasks.get_task(task_id))
+        given = body["allowances"]
+        return [
+            block
+            for block in body["blocked"]
+            if block["can_allow"]
+            and block["used_at"] is None
+            and block["step_key"] not in given
+        ]
+
     async def continue_stopped(self, task_id: str) -> tuple[dict, str]:
         """Continue a task that ran out of steps (#341), or finish one not finished.
 

@@ -8,6 +8,7 @@ import {
   byDay, cardNode, cardWords, dayLabel, foldAnswers, isMain, mergeCards, readCard, shortTime, timeline,
 } from '../../support/gateway/static/main-chat.mjs';
 import * as mainChat from '../../support/gateway/static/main-chat.mjs';
+import {useLanguage} from '../../support/gateway/static/i18n.mjs';
 
 // Noon on a fixed day, on this computer's clock, so the day maths never crosses midnight.
 const NOON = new Date(2026, 9, 30, 12, 0, 0).getTime() / 1000;
@@ -493,4 +494,53 @@ test('a stored row of a step that ran on an earlier approval is its stored line,
   mainChat.echoNodes({doc, echo: used, act: () => assert.fail('a plain line acts on nothing')});
   assert.equal(doc.made.find((item) => item.className === 'echo-text').textContent, 'Used your approval from 14:02');
   assert.equal(doc.made.some((item) => item.tag === 'button' || item.className === 'echo-sub'), false);
+});
+
+// ── An answer to "this needs you" (the card's Allow this step, the suggestion's Send) ──
+
+test('a card that needs the person allows its one blocked step, then says what it did', () => {
+  const row = {id: 11, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}, block: {request_id: 'r1', step_key: 'k1'}}};
+  const card = readCard(row);
+  assert.deepEqual(card.block, {requestId: 'r1', stepKey: 'k1'});
+  assert.equal(readCard({...row, data: {...row.data, block: undefined}}).block, undefined, 'no open step: no button');
+  const allowed = [];
+  const step = {...mainChat.stepState(card), onAllow: () => allowed.push('r1')};
+  assert.equal(step.state, 'open');
+  const doc = fakeDoc();
+  cardNode({doc, card, open: () => {}, step});
+  const foot = doc.made.find((item) => item.className === 'main-card-foot');
+  assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Allow this step', 'Open task']);
+  doc.made.find((item) => item.textContent === 'Allow this step').listeners.click();
+  assert.deepEqual(allowed, ['r1'], 'the same Allow once the step itself offers');
+  // Allowed from this card, or from the person's typed yes in the chat: the card says so instead.
+  const typed = [{kind: 'sent', how: 'allowed', request_id: 'r1'}];
+  for (const done of [mainChat.stepState(card, {given: {r1: {until: NOON}}}), mainChat.stepState(card, {echoes: typed})]) {
+    const after = fakeDoc();
+    cardNode({doc: after, card, open: () => {}, step: done});
+    assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
+    assert.equal(after.made.find((item) => item.className === 'main-card-note').textContent, 'Allowed once: the task goes on with this step');
+  }
+});
+
+test('a suggestion to send keeps its Send, in the page\'s language, after its task ended', async () => {
+  const cards = [readCard({id: 1, ts: NOON, data: {state: 'done', source_id: 't', source_kind: 'task', title: 'Check-in', at: NOON,
+    ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}, follow_up: true, end_id: 1}})];
+  const echoes = mainChat.mergeEchoes([], [
+    {id: 2, ts: NOON + 1, data: {echo: 'followed', task_id: 't', did: 'asked', end_id: 1}},
+    {id: 3, ts: NOON + 2, data: {echo: 'suggest', action: 'send', task_id: 't', text: '允许', line: 'Suggested: send your message to Check-in'}},
+    {id: 4, ts: NOON + 3, data: {echo: 'suggest', action: 'stop', task_id: 't', line: 'Suggested: stop Check-in'}},
+  ]);
+  const ended = mainChat.endedTasks(cards, echoes);
+  assert.ok(ended.has('t'), 'nothing more runs for it on its own');
+  const done = mainChat.answered(echoes);
+  assert.equal(mainChat.echoDone(echoes[1], done, ended), false, 'a message still reaches it');
+  assert.equal(mainChat.echoDone(echoes[2], done, ended), true, 'nothing is left to stop');
+  assert.deepEqual(mainChat.echoActions(echoes[1], false), [['Send', 'apply']]);
+  try {
+    await useLanguage('zh-Hans');
+    assert.deepEqual(mainChat.echoActions(echoes[1], false), [['发送', 'apply']]);
+  } finally {
+    await useLanguage('en');
+  }
 });

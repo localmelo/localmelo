@@ -9,10 +9,13 @@ import pytest
 from localmelo.support.gateway.front_rules import (
     LEVEL_MEANINGS,
     LEVEL_WORDS,
+    YES,
+    Shown,
     TaskRef,
     allows,
     allows_level,
     allows_message,
+    answered_task,
     continue_name,
     is_chinese,
     is_question,
@@ -21,6 +24,7 @@ from localmelo.support.gateway.front_rules import (
     level_menu,
     level_number,
     level_word,
+    plain_yes,
     reply_language,
     route,
     title_matches,
@@ -497,3 +501,101 @@ def test_a_slash_task_carries_all_of_a_long_text() -> None:
 
     assert found.route == "delegate"
     assert found.text == pasted.removeprefix("/task ")
+
+
+# ── A reply to the one task that asked for the person (#617) ──
+
+CHECK_IN = TaskRef("333333333333", "Daily check-in", "done")
+ASKED: Final = Shown(CHECK_IN.task_id, asks=True)
+
+
+@pytest.mark.parametrize(
+    ("typed", "waiting", "takes", "shown", "answers"),
+    [
+        # Delivered: one task waits, a message continues it, it asked last.
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], True),
+        ("write that the day went well", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], True),
+        (
+            "do it",
+            [CHECK_IN],
+            {CHECK_IN.task_id},
+            [ASKED],
+            True,
+        ),  # a yes, not a question
+        (
+            "go on with the daily check-in",
+            [CHECK_IN],
+            {CHECK_IN.task_id},
+            [ASKED],
+            True,
+        ),
+        # Refused: how many wait, and whether a message continues it.
+        ("允许", [], set(), [ASKED], False),
+        ("允许", [CHECK_IN, SLIDES], {CHECK_IN.task_id}, [ASKED], False),
+        ("允许", [CHECK_IN], set(), [ASKED], False),
+        # Refused: its request is not the newest thing the chat showed.
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [], False),
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [ASKED, Shown(person=True)], False),
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [ASKED, Shown(SLIDES.task_id)], False),
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [ASKED, Shown()], False),
+        ("允许", [CHECK_IN], {CHECK_IN.task_id}, [Shown(CHECK_IN.task_id)], False),
+        (
+            "允许",
+            [CHECK_IN],
+            {CHECK_IN.task_id},
+            [Shown(SLIDES.task_id, asks=True)],
+            False,
+        ),
+        # Refused: the words are no plain reply, or name another task.
+        ("/memory", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], False),
+        ("why was it blocked?", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], False),
+        ("thanks", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], False),
+        ("stop the slides", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], False),
+        (
+            "use the dark theme for the slides",
+            [CHECK_IN],
+            {CHECK_IN.task_id},
+            [ASKED],
+            False,
+        ),
+        (
+            "fix tests/cli/test_e2e_pty.py",
+            [CHECK_IN],
+            {CHECK_IN.task_id},
+            [ASKED],
+            False,
+        ),
+        ("", [CHECK_IN], {CHECK_IN.task_id}, [ASKED], False),
+    ],
+)
+def test_a_reply_answers_only_the_one_waiting_task_that_asked_last(
+    typed: str,
+    waiting: list[TaskRef],
+    takes: set[str],
+    shown: list[Shown],
+    answers: bool,
+) -> None:
+    found = answered_task(typed, waiting, takes, shown, [*TASKS, CHECK_IN])
+    assert found == (CHECK_IN if answers else None)
+
+
+@pytest.mark.parametrize(
+    ("typed", "yes"),
+    [
+        *((word, True) for word in sorted(YES)),
+        ("OK!", True),
+        (" 好的。 ", True),
+        ("Go  Ahead", True),
+        ("ok then", False),
+        ("yes please", False),
+        ("allow it", False),
+        ("可以吗", False),
+        ("好的，谢谢", False),
+        ("不允许", False),
+        ("", False),
+    ],
+)
+def test_a_plain_yes_is_the_whole_message_and_one_of_a_short_list(
+    typed: str, yes: bool
+) -> None:
+    assert plain_yes(typed) is yes

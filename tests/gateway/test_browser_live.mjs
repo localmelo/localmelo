@@ -1065,6 +1065,14 @@ test('after a reload an ended card is its words alone: the picture of the page w
   assert.equal(t.cards.nodeOf('s1:run-2').children[1].hidden, true);
 });
 
+test('a task\'s ended card says how the task ended, as its page does: one that needs you never reads as done', () => {
+  const card = readBrowser(row({state: 'done', action: '', source_kind: 'task', owner_chat_id: 'main', source_session_id: 't1', site: 'example.com'}));
+  assert.equal(browserLook(card).word, 'Done', 'with no end card yet: the run is over');
+  const look = browserLook({...card, ending: {state: 'blocked', reasons: ['question'], question: 'Type the note'}});
+  assert.deepEqual([look.word, look.own, look.sub], ['Needs you', 'stopped', 'example.com']);
+  assert.equal(browserLook({...card, ending: {state: 'ready', reasons: []}}).own, 'done');
+});
+
 test('Open browser asks again when the chat was last found unwatchable: it opens if Chrome is watchable now, and does nothing if not', async () => {
   const {browser, els, calls, setApi} = panel({open: false, state: {available: false, open: false}});
   await browser.follow('s1');

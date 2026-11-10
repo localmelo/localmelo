@@ -15,7 +15,9 @@ left on a stopped one (a task that ran out of steps, which can continue), what
 is asked on a waiting one. A task's card also keeps its ``ending`` (``state``,
 ``proposed``, ``reasons``, ``question``): how code found that end ended, as its
 ``sched.finished`` event carries it (:mod:`..task_endings`), which the page reads
-as Ready, Done, not finished or Needs you.
+as Ready, Done, not finished or Needs you. A Needs you card also has ``block``
+(``request_id``, ``step_key``) when exactly one step Auto blocked in its task
+can still be allowed once (``TaskWorkers.open_blocks``): its Allow this step.
 
 A waiting card carries its ``request_id``. When that approval is answered, a
 card with state ``answered``, the same ``request_id`` and the answer in words as
@@ -385,6 +387,8 @@ class MainChatCards:
             if found is not None:
                 keys = ("state", "proposed", "reasons", "question", "notes", "missing")
                 card["ending"] = {key: found[key] for key in keys if key in found}
+            if isinstance(found, dict) and found.get("state") == "blocked":
+                card.update(await self._one_block(info.id))
             # Which end this is: a follow-up's row names the end it follows, so the
             # page orders the two by end and not by when each was written (#431).
             card["end_id"] = stored.id
@@ -482,6 +486,18 @@ class MainChatCards:
             "can_allow": block["can_allow"] and not job_finished(record),
             "finished": job_finished(record),
         }
+
+    async def _one_block(self, task_id: str) -> dict[str, Any]:
+        """``block`` (its ``request_id`` and ``step_key``) when exactly one step Auto
+        blocked in *task_id* can still be allowed once, else nothing (#617)."""
+        try:
+            found = await self._console.workers.open_blocks(task_id)
+        except Exception:
+            logger.debug("No open block read for task %s", task_id, exc_info=True)
+            return {}
+        if len(found) != 1:
+            return {}
+        return {"block": {k: found[0][k] for k in ("request_id", "step_key")}}
 
     async def _reminder_words(self, task_id: str) -> str | None:
         """The person's words of a reminder's task, or ``None`` for any other task."""
