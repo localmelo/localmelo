@@ -876,10 +876,10 @@ resumed turn, the same id, level and rank, and one `sched.resumed` event with
 `data.reason` `"restart"`; its task JSON then has `continued_at`, the time of
 that continue (`null` otherwise, or once the person resumes it), and
 `continued_check` is `true` when that continue followed a cut-off file write or
-local command, whose resumed turn starts with a note to check that step first.
-A task with a call in flight that melo cannot check by itself (one that reaches
-outside, one a person allowed alone, a browser or provided tool, more than one
-open call), whose folder is missing at start, or cut off by a crash for the
+edit inside the task's folder, whose resumed turn starts with a note asking it
+to look at that step first. A task with any other call in flight that can
+change something (a command, a write outside the folder, a browser or provided
+tool, more than one open call), whose folder is missing at start, or cut off by a crash for the
 second time since it last ended `done` or `failed` (`crashes` is reset then),
 stays `interrupted` with its reason and waits for the person; a person's pause
 stays paused. A task's turns carry `client_request_id`, its execution id. The decision

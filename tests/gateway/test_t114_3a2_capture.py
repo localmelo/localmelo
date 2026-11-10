@@ -527,7 +527,7 @@ async def main():
     worker._lock, worker._closed, worker._stopping = asyncio.Lock(), False, set()
     worker._invalid_workspace = set()
     if mode in ("in-call", "after-call"):
-        # A call melo cannot check itself (a command no review let run alone).
+        # A call melo cannot check itself: a command.
         async with TaskWorkers._call_record(
             worker, task.task_id, "run", "shell_exec", False
         ):

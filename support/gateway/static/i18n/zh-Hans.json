@@ -2113,7 +2113,7 @@
   "tasks.resumeTitle": "继续这个任务？",
   "tasks.resuming": "正在继续…",
   "tasks.row.continued": "重启后自动继续",
-  "tasks.row.continuedCheck": "重启后自动继续；先检查可能只做了一半的那一步",
+  "tasks.row.continuedCheck": "已要求它先检查可能做到一半的那一步。",
   "tasks.row.evidence": "依据",
   "tasks.row.left": "还剩下",
   "tasks.row.mode": "模式",

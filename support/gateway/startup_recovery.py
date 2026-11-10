@@ -48,17 +48,19 @@ FENCED_REASON = (
 # A run a stop cut off, written by the stop itself: the next start decides it.
 STOPPED_REASON = "localmelo stopped; this task continues when it opens again"
 # Something of the run may still be going, or its record is not complete: a
-# process of the run may still be running, or the record is unknown.
+# process of the run may still be running, the record is unknown, or more than
+# one call had not returned.
 IN_FLIGHT_REASON = (
     "localmelo stopped before it could tell whether this task's last step "
     "finished: check its work, then resume."
 )
 # A call that can change something had not returned, and its effect is not one
-# melo can look at afterwards (or more than one call had not returned).
+# melo can look at afterwards (a command, or one that reaches outside), or the
+# row does not say. More than one open call waits with IN_FLIGHT_REASON.
 CALL_REASON = (
-    "A step melo cannot check by itself, such as one that reaches outside this "
-    "computer, was running when localmelo stopped: check whether it happened, "
-    "then resume."
+    "A step melo cannot check by itself, such as a command or one that reaches "
+    "outside this computer, was running when localmelo stopped: check whether it "
+    "finished, then resume."
 )
 # The person asked for a pause that had not settled when localmelo stopped.
 PAUSED_REASON = (
@@ -347,7 +349,9 @@ class StartupRecovery:
         elif facts.in_flight:
             reason = IN_FLIGHT_REASON
         elif not checkable(facts.calls):
-            reason = CALL_REASON
+            # A call melo cannot check names it; open calls it could each check,
+            # more than one, get the general sentence.
+            reason = IN_FLIGHT_REASON if all(facts.calls) else CALL_REASON
         elif not facts.workspace_valid:
             reason = WORKSPACE_REASON
         elif facts.crash and facts.crashed_before:
@@ -366,8 +370,15 @@ class StartupRecovery:
         if outcome == "continue":
             # One step whose effect melo can look at may be half done: the
             # continued turn starts with what to check first.
+            cut = (
+                turns[0].turn
+                if evidence is not None
+                and turns
+                and turns[0].client_request_id == evidence.execution_id
+                else None
+            )
             check = (
-                check_note(evidence.open_calls[0][0], steps)
+                check_note(evidence.open_calls[0][0], steps, cut)
                 if evidence is not None and evidence.open_calls
                 else ""
             )

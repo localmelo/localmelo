@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -242,6 +243,47 @@ async def test_one_bad_record_costs_that_task_and_a_retry_continues_none_twice(
     fenced = await tasks.get_task(bad)
     assert fenced.state == "interrupted" and fenced.wait_reason == FENCED_REASON
     assert not await _resumed(tasks.store, bad)
+
+
+async def test_a_store_from_before_the_local_fact_opens_and_its_old_row_waits(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sessions.db"
+    store = SessionStore(path, writer="gateway")
+    await store.open()
+    task_id = await _running(await _opened(store), tmp_path)
+    await store.aclose()
+    # The calls table as the version before made it, with one of its rows open.
+    with contextlib.closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute("ALTER TABLE recovery_calls DROP COLUMN local")
+        conn.execute(
+            "INSERT INTO recovery_calls VALUES (?, 'run', 'old', 'file_write')",
+            (task_id,),
+        )
+    store = SessionStore(path, writer="gateway")
+    await store.open()
+    try:
+        tasks = await _opened(store)
+        recovery = RecoveryStore(store)
+        # A changing call records its row in the upgraded table.
+        await recovery.open_call(
+            task_id, execution_id="run", call_id="new", tool="file_write", local=True
+        )
+        calls = await recovery.open_calls(task_id, execution_id="run")
+        assert calls == [("file_write", None), ("file_write", True)]
+        await recovery.close_call(task_id, execution_id="run", call_id="new")
+        # The old row does not say whether its effect stays local: it waits.
+        await StartupRecovery(store, tasks).run()
+        record = await tasks.get_task(task_id)
+        assert record.state == "interrupted" and record.wait_reason == CALL_REASON
+    finally:
+        await store.aclose()
+
+
+async def _opened(store: SessionStore) -> TaskStore:
+    tasks = TaskStore(store)
+    await tasks.open()
+    return tasks
 
 
 # ── Through the workers, with a held model reply ──

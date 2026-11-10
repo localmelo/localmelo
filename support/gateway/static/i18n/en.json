@@ -2214,7 +2214,7 @@
   "tasks.resumeTitle": "Resume this task?",
   "tasks.resuming": "Resuming…",
   "tasks.row.continued": "Continued after a restart",
-  "tasks.row.continuedCheck": "Continued after a restart; a step that may have been half done is checked first",
+  "tasks.row.continuedCheck": "It was asked to look at a step that may be half done first.",
   "tasks.row.evidence": "Evidence",
   "tasks.row.left": "What is left",
   "tasks.row.mode": "Mode",

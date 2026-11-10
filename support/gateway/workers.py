@@ -2573,10 +2573,12 @@ class TaskWorkers:
     ) -> AsyncIterator[None]:
         """Name a call that can change something for as long as it runs.
 
-        The row is closed however the call returns, except when the gateway's
-        stop cuts the call off: it may be half done, so its row stays and the
-        restart leaves the task waiting, as it does after a kill. A close that
-        fails leaves the row too.
+        The row, written before the call starts, holds whether the executor
+        found its effect *local*. It is closed however the call returns, except
+        when the gateway's stop cuts the call off: it may be half done, so its
+        row stays and the restart decides as after a kill (a local call's task
+        continues and checks it first, any other waits). A close that fails
+        leaves the row too.
         """
         recovery = RecoveryStore(self.store)
         call_id = uuid.uuid4().hex
