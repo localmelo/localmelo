@@ -358,6 +358,7 @@
   "auto.blocked.keep": "这个定时任务在 {site} 上以后都允许",
   "auto.blocked.keepNote": "仍会拦下：密码和密钥、你的电话、地址或姓名、不符合任务的步骤、其他网站。",
   "auto.blocked.keeping": "正在保留…",
+  "auto.blocked.kept": "已为这个定时任务允许 {site}。",
   "auto.blocked.keptLater": "已为这个定时任务允许 {site}。以后的运行会用上。",
   "auto.blocked.keptNow": "已为这个定时任务允许 {site}。这次运行现在继续。",
   "auto.blocked.once": "只运行这一步一次，30 分钟内有效。",

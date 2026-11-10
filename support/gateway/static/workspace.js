@@ -1527,13 +1527,15 @@ async function allowCardBlock(card, facts, how = "allow") {
   S.allowing[facts.requestId] = how === "keep" ? "keeping" : "allowing";
   renderMessages(false, true);
   try {
-    const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
+    const { task, message } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
     if (block?.kept) {
       card.kept = true;
       if (card.block) card.block.kept = true;
     }
-    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
+    // A keep says whether the step goes ahead now (the run, or the fresh task its job goes on in) or only later runs use it.
+    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null,
+      ...(how === "keep" ? { now: message !== "kept" } : {}) };
     delete S.allowing[facts.requestId];
     panel.refresh();
   } catch (error) {

@@ -191,9 +191,10 @@ function keepRow(doc, facts, {allowing, busy, onKeep}) {
   const row = node('div', 'block-foot block-keep-row');
   const site = facts.keepSite.slice(facts.keepSite.indexOf('://') + 3);
   if (facts.kept) {
-    // Kept: this run goes on with the step now (it was allowed once), or only its later runs use it.
+    // Kept: this run goes on with the step now (it was allowed once here); else only that it is kept (whether the
+    // job went on in a fresh task is the click's to say: its notice).
     const now = allowing.state === 'pending' || allowing.state === 'used';
-    row.append(node('span', 'block-done', t(now ? 'auto.blocked.keptNow' : 'auto.blocked.keptLater', {site})));
+    row.append(node('span', 'block-done', t(now ? 'auto.blocked.keptNow' : 'auto.blocked.kept', {site})));
     return row;
   }
   const keep = node('button', 'outline-button block-keep', t(busy === 'keeping' ? 'auto.blocked.keeping' : 'auto.blocked.keep', {site}));

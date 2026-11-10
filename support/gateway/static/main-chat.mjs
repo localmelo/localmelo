@@ -361,9 +361,12 @@ export function stepState(card, {given = {}, busy = {}, echoes = []} = {}) {
   const id = card.block?.requestId;
   if (!id) return null;
   const typed = echoes.some((echo) => echo.kind === "sent" && echo.how === "allowed" && String(echo.request_id) === id);
-  // `now`: the step goes ahead in this run (allowed once here or by the typed yes); a keep that only later runs use has
-  // no allowance.
-  if (typed || given[id]) return {state: "allowed", now: typed || given[id].until != null || given[id].used != null};
+  // `now`: the step goes ahead (allowed once here, by the typed yes, or a keep whose run or fresh task goes on); a keep
+  // that only later runs use says so.
+  if (typed || given[id]) {
+    const {until = null, used = null, now = null} = given[id] ?? {};
+    return {state: "allowed", now: typed || (now ?? (until != null || used != null))};
+  }
   const now = busy[id];
   const going = now === "allowing" || now === "keeping";
   return {state: going ? "allowing" : "open", error: now && !going ? now : ""};

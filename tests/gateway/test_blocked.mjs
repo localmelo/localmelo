@@ -148,7 +148,8 @@ test('a scheduled task\'s blocked step offers to keep the answer on its site, an
   const keptFacts = blockFacts({approval: {...TYPING, keep_site: 'https://notes.example', kept: true}});
   const done = blockCard(fakeDoc(), keptFacts, {});
   assert.equal(byClass(done, 'block-keep'), null);
-  assert.match(text(done), /Allowed for this scheduled task on notes\.example\. Its later runs use it\./);
+  assert.match(text(done), /Allowed for this scheduled task on notes\.example\./);
+  assert.doesNotMatch(text(done), /goes on now|later runs/);
   // Kept as the step goes ahead: this run goes on now.
   const going = blockCard(fakeDoc(), keptFacts, {allowing: {state: 'pending', at: 100}});
   assert.match(text(going), /Allowed for this scheduled task on notes\.example\. This run goes on now\./);

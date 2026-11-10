@@ -1074,10 +1074,13 @@ commands and file changes.
   scheduled task on <site>**. It runs the step once, as **Allow once**
   does, and from then on the rest of that run and the chore's later runs
   type and send on that exact site (scheme, host and port) without asking:
-  a check-in's send right after its note is not asked again. The card then
-  says `Allowed for this scheduled task on example.com. This run goes on
-  now.`, or `… Its later runs use it.` when the run had ended or the step
-  ran already. Each step is still reviewed; what still stops, as before:
+  a check-in's send right after its note is not asked again (a run that
+  had ended goes on in a fresh task, which holds the answer too). The click
+  then says `Allowed for this scheduled task on example.com. This run goes
+  on now.`, or `… Its later runs use it.` when the step can no longer go
+  ahead (it ran already, or its job has finished); opened later, the step
+  says `Allowed for this scheduled task on example.com.` Each step is
+  still reviewed; what still stops, as before:
   passwords and keys (a secret in the text too), your phone number, address
   or name in the text, a step the review finds does not fit the task (or is
   unsure of), a form sent to another site or where the page decides, a site

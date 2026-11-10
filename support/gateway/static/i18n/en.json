@@ -370,6 +370,7 @@
   "auto.blocked.keep": "Always allow for this scheduled task on {site}",
   "auto.blocked.keepNote": "Still stops: passwords and keys, your phone, address or name, steps that don't fit the task, other sites.",
   "auto.blocked.keeping": "Keeping…",
+  "auto.blocked.kept": "Allowed for this scheduled task on {site}.",
   "auto.blocked.keptLater": "Allowed for this scheduled task on {site}. Its later runs use it.",
   "auto.blocked.keptNow": "Allowed for this scheduled task on {site}. This run goes on now.",
   "auto.blocked.once": "Runs this exact step once, within 30 minutes.",
