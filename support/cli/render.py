@@ -965,6 +965,9 @@ class TurnRenderer:
         if result is not None and result.status == "completed":
             self._clear_stream()  # the final answer prints below, once
         else:
+            if error is not None or result is not None and result.status != "cancelled":
+                # A failed request's words are no reply, as on a retry: they go.
+                self._drop_attempt()
             self._flush_stream("stopped")
         if not self._finished:
             if error is not None:
