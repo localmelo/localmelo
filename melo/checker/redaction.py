@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import bisect
 import re
-from typing import Final
+from typing import Any, Final
 
 REDACTED: Final = "[redacted]"
 
@@ -98,6 +98,15 @@ def redact_secrets(text: str) -> tuple[str, int]:
     text, tokens = _BEARER.subn(lambda match: match.group(1) + REDACTED, text)
     text, codes = _redact_codes(text)
     return text, blocks + keys + tokens + codes
+
+
+def redacted(value: Any) -> Any:
+    """*value* with every string in it (and in its lists) redacted."""
+    if isinstance(value, str):
+        return redact_secrets(value)[0]
+    if isinstance(value, list):
+        return [redacted(item) for item in value]
+    return value
 
 
 def _redact_pem(text: str) -> tuple[str, int]:

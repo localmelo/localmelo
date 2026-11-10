@@ -343,7 +343,7 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
 ) -> None:
     from localmelo.support.sessions.attachments import TextAttachment
 
-    s = await setup(tmp_path, [answer("one"), answer("two")])
+    s = await setup(tmp_path, [answer("one"), answer("two"), answer("three")])
     original = s.agent.run_task
     with mock.patch.object(
         s.agent, "run_task", autospec=True, wraps=original
@@ -365,6 +365,15 @@ async def test_a_turn_passes_the_person_s_own_words_to_the_review(
         await s.runner.start_turn("Install matplotlib and chart", words="chart it")
         await s.runner.wait()
         assert run_task.call_args.kwargs["user_words"] == "chart it"
+
+        # A turn whose text melo wrote (a stopped task's card): the review reads the
+        # person's words, memory gets no typed words, and it needs those words.
+        await s.runner.start_turn("Where stopped: …", words="chart it", composed=True)
+        assert s.runner._last is not None and s.runner._last.typed == ""
+        await s.runner.wait()
+        assert run_task.call_args.kwargs["user_words"] == "chart it"
+        with pytest.raises(ValueError, match="needs their words"):
+            await s.runner.start_turn("Where stopped: …", composed=True)
     await s.aclose()
 
 

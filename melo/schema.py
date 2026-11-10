@@ -162,6 +162,14 @@ CHECKPOINT_HEADER = (
     "is still the instruction.]"
 )
 CHECKPOINT_END = "[end of work checkpoint]"
+# The label of a checkpoint's list of calls: in the run that wrote it, and for
+# a task or a turn that goes on with the work, which holds none of their results.
+CALLS_LEFT = (
+    "Results that left the context (only these: every other result of this task "
+    "is still in the context below). Do not read or run them again unless you "
+    "need an exact passage, and then only that part:"
+)
+CALLS_ELSEWHERE = "Calls made so far; their results are not in this context:"
 # The first line of the turn a task continued after a restart starts with when
 # one step of its run may be half done: melo checks that step first.
 RESTART_CHECK_HEADER = (
@@ -1224,7 +1232,6 @@ class ReflectionDecision:
     next_step_is_novel: bool = False
     recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"
     rationale: str = ""
-    handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
 
@@ -1280,12 +1287,23 @@ class WorkCheckpoint:
     cut: bool = False
 
     def render(self) -> str:
-        """The block that stands in the window for what left it.
+        """The block that stands in the window for what left it: :meth:`lines`
+        between the block's header and its end line (the header alone when
+        there are none). The model's words are its own notes (the header says
+        so)."""
+        lines = self.lines()
+        return "\n".join(
+            [CHECKPOINT_HEADER, *lines, CHECKPOINT_END]
+            if lines
+            else [CHECKPOINT_HEADER]
+        )
 
-        The model's words are its own notes (the header says so), each field
-        after its label with its other lines indented (see :func:`_indented`).
-        """
-        lines = [CHECKPOINT_HEADER]
+    def lines(self, elsewhere: bool = False) -> list[str]:
+        """The block's lines under its header, each field after its label with
+        its other lines indented (see :func:`_indented`). *elsewhere*: for a
+        reader that goes on with the work in another task or turn, which holds
+        none of the calls' results, under a header of its own."""
+        lines: list[str] = []
         if self.goal:
             lines.append(f"Goal: {shorten(collapse(self.goal), GOAL_CHARS)}")
         if self.state:
@@ -1311,16 +1329,9 @@ class WorkCheckpoint:
             steps = (f"{i}. {_indented(s)}" for i, s in enumerate(self.next, 1))
             lines.append("Next: " + " ".join(steps))
         if self.covered:
-            lines.append(
-                "Results that left the context (only these: every other result "
-                "of this task is still in the context below). Do not read or run "
-                "them again unless you need an exact passage, and then only that "
-                "part:"
-            )
+            lines.append(CALLS_ELSEWHERE if elsewhere else CALLS_LEFT)
             lines.extend(f"- {collapse(line)}" for line in self.covered)
-        if len(lines) == 1:
-            return lines[0]
-        return "\n".join([*lines, CHECKPOINT_END])
+        return lines
 
     def to_dict(self) -> dict[str, Any]:
         """A plain dict of every field, as a stored event keeps it."""

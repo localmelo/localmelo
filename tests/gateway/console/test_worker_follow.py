@@ -258,6 +258,7 @@ WRITES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("POST", "/api/v2/tasks/{task_id}/resume"): {"operation_id": "op"},
     ("POST", "/api/sessions/{session_id}/blocks/{request_id}/allow"): None,
     ("POST", "/api/tasks/{task_id}/blocks/{request_id}/allow"): None,
+    ("POST", "/api/tasks/{task_id}/blocks/{request_id}/keep"): None,
 }
 
 

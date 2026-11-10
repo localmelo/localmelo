@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.redaction import redact_secrets, redacted
 from localmelo.melo.contracts.approvals import call_key
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
 from localmelo.melo.contracts.providers import ProviderError
@@ -541,14 +541,6 @@ class _Emitter:
         """
         if self._sink is None:
             return
-
-        def redacted(value: object) -> object:
-            if isinstance(value, str):
-                return redact_secrets(value)[0]
-            if isinstance(value, list):
-                return [redacted(item) for item in value]
-            return value
-
         fields = {key: redacted(value) for key, value in checkpoint.to_dict().items()}
         self._notice(
             "checkpoint",

@@ -473,6 +473,7 @@ class MainChatCards:
         if block is None:
             return None
         record = await self._console.workers.tasks.get_task(info.id)
+        await self._console.workers.keep_offers(record, [block])
         review = block["review"] or {}
         words = said("cards.blocked", what=said(f"auto.words.{_first(review)}"))
         return {
@@ -489,6 +490,8 @@ class MainChatCards:
                     "preview",
                     "question",
                     "arguments",
+                    "keep_site",
+                    "kept",
                 )
             },
             "review": review,
@@ -509,7 +512,15 @@ class MainChatCards:
             return {}
         if len(found) != 1 or not _same_turn(found[0].get("turn"), turn):
             return {}
-        keys = ("request_id", "step_key", "name", "preview", "review")
+        keys = (
+            "request_id",
+            "step_key",
+            "name",
+            "preview",
+            "review",
+            "keep_site",
+            "kept",
+        )
         block = {k: found[0][k] for k in keys}
         if found[0].get("question"):
             # A text typed or a form sent: the card shows where and all of it.

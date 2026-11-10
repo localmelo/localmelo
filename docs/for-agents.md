@@ -248,6 +248,7 @@ Every route the gateway serves:
 | `POST /api/chores` | [api-v2](reference/api-v2.md) |
 | `DELETE /api/chores/{chore_id}` | [api-v2](reference/api-v2.md) |
 | `PATCH /api/chores/{chore_id}` | [api-v2](reference/api-v2.md) |
+| `DELETE /api/chores/{chore_id}/keeps` | [api-v2](reference/api-v2.md) |
 | `POST /api/chores/{chore_id}/run` | [api-v2](reference/api-v2.md) |
 | `GET /api/commands` | [api-v2](reference/api-v2.md#get-apicommands) |
 | `POST /api/front/echoes/{echo_id}` | [api-v2](reference/api-v2.md) |
@@ -320,6 +321,7 @@ Every route the gateway serves:
 | `GET /api/tasks/{task_id}` | [api-v2](reference/api-v2.md) |
 | `PATCH /api/tasks/{task_id}` | [api-v2](reference/api-v2.md) |
 | `POST /api/tasks/{task_id}/blocks/{request_id}/allow` | [api-v2](reference/api-v2.md) |
+| `POST /api/tasks/{task_id}/blocks/{request_id}/keep` | [api-v2](reference/api-v2.md) |
 | `POST /api/tasks/{task_id}/continue` | [api-v2](reference/api-v2.md) |
 | `POST /api/tasks/{task_id}/resume` | [api-v2](reference/api-v2.md) |
 | `POST /api/turns/{turn_id}/cancel` | [api-v2](reference/api-v2.md#post-apiturnsturn_idcancel) |

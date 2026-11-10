@@ -566,6 +566,7 @@ class SessionRunner:
         origin: str = "",
         images: Sequence[ImagePart] = (),
         from_person: bool = True,
+        composed: bool = False,
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -577,7 +578,10 @@ class SessionRunner:
         begin (``SessionStore.begin_turn``); *from_person* false marks one
         whose text the person did not send though it has none (a task
         another agent, a channel or melo made): the run counts no message of
-        theirs in it. *images* are the pictures the
+        theirs in it. *composed* marks a turn of the person's whose *text*
+        melo wrote (a stop card): stored as ``TurnInfo.composed``, as is every
+        turn not *from_person*, so that memory reads no words of it; it needs
+        *words*. *images* are the pictures the
         person added: stored with the turn and sent to the model with *text*
         (``Agent.run_task(images=...)``). With *client_request_id*, a
         key already accepted raises ``SubmissionRepeated`` with the stored
@@ -596,6 +600,7 @@ class SessionRunner:
             origin=origin,
             images=tuple(images),
             from_person=from_person,
+            composed=composed,
         )
         return turn.turn
 
@@ -626,8 +631,12 @@ class SessionRunner:
         origin: str = "",
         images: tuple[ImagePart, ...] = (),
         from_person: bool = True,
+        composed: bool = False,
     ) -> _Turn:
         self._check_open()
+        if composed and from_person and not words:
+            # The run would read the empty typed text as the person's words.
+            raise ValueError("a composed turn of the person's needs their words")
         if images and self._worker:
             raise ValueError("worker sessions do not support pictures")
         if attachments and origin:
@@ -694,6 +703,7 @@ class SessionRunner:
                 origin,
                 images,
                 from_person,
+                composed or not from_person,
             )
         )
         self._begin = begin
@@ -739,6 +749,7 @@ class SessionRunner:
         origin: str = "",
         images: tuple[ImagePart, ...] = (),
         from_person: bool = True,
+        composed: bool = False,
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -756,6 +767,7 @@ class SessionRunner:
                 typed_text=typed_text if attachments else None,
                 origin=origin,
                 images=images,
+                composed=composed,
             )
             self._create_scope_key = False
         finally:
@@ -770,8 +782,9 @@ class SessionRunner:
             text=text,
             approval=approval,
             routine=routine,
-            # Another's words are never the person's: memory reads none of them.
-            typed="" if origin or not from_person else typed_text,
+            # Another's words, or melo's, are never the person's: memory reads
+            # none of them.
+            typed="" if origin or info.composed else typed_text,
             words=words,
             origin=origin,
             from_person=from_person,

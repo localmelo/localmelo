@@ -12,9 +12,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Final
 
+from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.memory.procedures.mask import mask_credentials
 from localmelo.melo.schema import RESTART_CHECK_HEADER
 from localmelo.support.gateway.handover import fenced
-from localmelo.support.gateway.park_card import _text
 from localmelo.support.sessions.store import StoredEvent
 
 # What the note asks for after the step: written by melo, never by the run.
@@ -25,6 +26,14 @@ CHECK_ASK: Final = (
 )
 # The longest summary of the step's arguments the note keeps.
 SUMMARY_CHARS: Final = 200
+
+
+def _text(value: object, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = mask_credentials(redact_secrets(value)[0])
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
 def check_note(tool: str, events: Iterable[StoredEvent], turn: int | None) -> str:

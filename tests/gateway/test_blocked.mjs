@@ -133,6 +133,33 @@ test('a blocked question without its key, an old record, has no Allow once', () 
   assert.equal(byClass(card, 'block-step').textContent, TYPED);
 });
 
+// A scheduled task's run (#619): the server names the site its answer may be kept on.
+test('a scheduled task\'s blocked step offers to keep the answer on its site, and says what still stops', () => {
+  let kept = 0;
+  const facts = blockFacts({approval: {...TYPING, keep_site: 'https://notes.example'}, name: 'browser_type'});
+  const card = blockCard(fakeDoc(), facts, {onAllow: () => {}, onKeep: () => { kept += 1; }});
+  const keep = byClass(card, 'block-keep');
+  assert.equal(keep.textContent, 'Always allow for this scheduled task on notes.example');
+  assert.ok(byClass(card, 'block-allow'), 'beside Allow once');
+  assert.match(text(card), /Still stops: passwords and keys, text where melo finds your phone, address or name, steps that don't fit the task, other sites\./);
+  keep.click();
+  assert.equal(kept, 1);
+  // Kept already: it says so, with no second button; any other task's block has none at all.
+  const keptFacts = blockFacts({approval: {...TYPING, keep_site: 'https://notes.example', kept: true}});
+  const done = blockCard(fakeDoc(), keptFacts, {});
+  assert.equal(byClass(done, 'block-keep'), null);
+  assert.match(text(done), /Allowed for this scheduled task on notes\.example\./);
+  assert.doesNotMatch(text(done), /goes on now|later runs/);
+  // Kept as the step goes ahead: this run goes on now.
+  const going = blockCard(fakeDoc(), keptFacts, {allowing: {state: 'pending', at: 100}});
+  assert.match(text(going), /Allowed for this scheduled task on notes\.example\. This run goes on now\./);
+  assert.equal(byClass(blockCard(fakeDoc(), blockFacts({approval: TYPING}), {}), 'block-keep'), null);
+  // A finished run has nothing to allow now, and still offers the next runs.
+  const finished = blockCard(fakeDoc(), {...facts, allow: false, finished: true}, {});
+  assert.equal(byClass(finished, 'block-allow'), null);
+  assert.ok(byClass(finished, 'block-keep'));
+});
+
 test('after Allow once the button goes: waiting, ran, or run out', () => {
   assert.deepEqual(allowState({}), {state: 'open'});
   assert.deepEqual(allowState({until: 100, now: 50}), {state: 'pending', at: 100});

@@ -141,7 +141,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             None if body.schedule is None else _check(Schedule.from_json, body.schedule)
         )
         chore = await _call(
-            runner.store.update(
+            runner.update(
                 chore_id,
                 revision=body.revision,
                 title=body.title,
@@ -161,6 +161,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return JSONResponse(
             content={"deleted": chore_id, **({"folder": left} if left else {})}
         )
+
+    @app.delete("/api/chores/{chore_id}/keeps")
+    async def remove_keep(chore_id: str, site: str) -> JSONResponse:
+        """Take back what a chore's runs may type and send on *site* without asking (#619)."""
+        console.require_store()
+        chore = await _call(runner.remove_keep(chore_id, site))
+        return JSONResponse(content={"chore": await runner.chore_body(chore)})
 
     @app.post("/api/chores/{chore_id}/run")
     async def run_now(chore_id: str) -> JSONResponse:

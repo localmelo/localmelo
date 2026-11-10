@@ -84,6 +84,7 @@ import {
   turnFace,
   UNFINISHED_ANSWER,
   unreachableUrl,
+  withoutFrame,
   workSummary,
 } from "./turns.mjs";
 
@@ -1286,7 +1287,7 @@ function mainNodes(view, turns, placed) {
       const card = item.card;
       const step = stepState(card, { given: S.cardAllows, busy: S.allowing, echoes });
       return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
-        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block) } })];
+        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block), onKeep: () => allowCardBlock(card, card.block, "keep") } })];
     }
     if (item.kind === "echo") {
       const echo = item.echo;
@@ -1511,21 +1512,31 @@ function cardAllow(card) {
   const busy = S.allowing[facts.requestId];
   return {
     allowing: allowState({ until: given.until ?? null, used: given.used ?? null, now: nowSeconds() }),
-    busy: busy === "allowing" ? "allowing" : false,
+    busy: busy === "allowing" || busy === "keeping" ? busy : false,
     developer: developerMode,
-    error: busy && busy !== "allowing" ? busy : "",
+    error: busy && busy !== "allowing" && busy !== "keeping" ? busy : "",
     onAllow: () => allowCardBlock(card, facts),
+    onKeep: () => allowCardBlock(card, facts, "keep"),
   };
 }
 
-/** Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. */
-async function allowCardBlock(card, facts) {
-  S.allowing[facts.requestId] = "allowing";
+/**
+ * Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. `keep` also keeps the
+ * answer for a scheduled task's next runs on the step's site (#619).
+ */
+async function allowCardBlock(card, facts, how = "allow") {
+  S.allowing[facts.requestId] = how === "keep" ? "keeping" : "allowing";
   renderMessages(false, true);
   try {
-    const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/allow`, { method: "POST" });
+    const { task, message } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
-    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
+    if (block?.kept) {
+      card.kept = true;
+      if (card.block) card.block.kept = true;
+    }
+    // A keep says whether the step goes ahead now (the run, or the fresh task its job goes on in) or only later runs use it.
+    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null,
+      ...(how === "keep" ? { now: message !== "kept" } : {}) };
     delete S.allowing[facts.requestId];
     panel.refresh();
   } catch (error) {
@@ -1552,7 +1563,7 @@ function turnNode(turn, newest = false, asked = askTurn(turn)) {
   if (turn.undone) section.classList.add("undone");
   section.dataset.turnId = turn.id || String(turn.turn);
   // A task's question is the row above it, not a message the person typed.
-  if (!asked) section.append(userNode(turn, newest));
+  if (!asked) section.append(turn.composed ? composedNode(turn) : userNode(turn, newest));
   section.append(assistantNode(turn, newest));
   return section;
 }
@@ -1594,6 +1605,18 @@ function entryMedia(items) {
     pictures: items.filter((item) => item.kind === "picture").map((item) => ({ name: item.name, url: item.url, bytes: item.bytes })),
     files: items.filter((item) => item.kind === "file").map((item) => ({ name: item.name })),
   };
+}
+
+// A turn whose text the person did not type (where a stopped task goes on, a task another made):
+// no bubble of theirs, one folded line (the thinking fold) that opens on the text.
+function composedNode(turn) {
+  const fold = el("details", "thinking");
+  fold.open = turn.composedOpen;
+  fold.append(el("summary", "", t("chat.notTyped")), el("div", "thinking-body", withoutFrame(turn.userText)));
+  fold.addEventListener("toggle", () => {
+    turn.composedOpen = fold.open;
+  });
+  return fold;
 }
 
 function userNode(turn, newest = false) {

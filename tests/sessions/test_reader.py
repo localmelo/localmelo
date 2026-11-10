@@ -313,13 +313,19 @@ async def test_a_tasks_question_is_marked_by_its_origin_and_older_files_read_as_
         sid, asked.turn, holder=HOLDER, status="completed", cause="run",
         result=run_result(result="B"), answer="B",
     )  # fmt: skip
+    card = await store.begin_turn(sid, "Where stopped: …", holder=HOLDER, composed=True)
+    await store.finish_turn(
+        sid, card.turn, holder=HOLDER, status="completed", cause="run",
+        result=run_result(result="C"), answer="C",
+    )  # fmt: skip
     await store.aclose()
     out = io.StringIO()
     await export_turns([path], out)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
-    assert [(line["user_text"], line["origin"]) for line in lines] == [
-        ("one", ""),
-        ("[task t1 · Fix asks · data]", "ask_owner"),
+    assert [(line["origin"], line["composed"]) for line in lines] == [
+        ("", False),
+        ("ask_owner", False),
+        ("", True),  # melo's card: not the person's words either
     ]
     # A file a schema-2 localmelo wrote has no origin column: its turns are the person's.
     old = tmp_path / "old.db"
@@ -327,7 +333,9 @@ async def test_a_tasks_question_is_marked_by_its_origin_and_older_files_read_as_
         conn.backup(copy)
     with sqlite3.connect(old) as conn:
         conn.execute("ALTER TABLE turns DROP COLUMN origin")
+        conn.execute("ALTER TABLE turns DROP COLUMN composed")
         conn.execute("PRAGMA user_version = 2")
     reader = SessionReader(old)
-    assert [c.origin for c in await reader.changes()] == ["", ""]
+    changes = await reader.changes()
+    assert [(c.origin, c.composed) for c in changes] == [("", False)] * 3
     await reader.aclose()

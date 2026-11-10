@@ -4,7 +4,9 @@
  * `GET /api/chores` lists the chores (the main chat shows all of them, a side chat its own, by `chat()`) with the
  * check-in's state. The check-in's switch is `PUT /api/checkin`; a chore's switch and "Edit time" are `PATCH
  * /api/chores/{id}` with the revision that was read (a 409 reloads the list); "Run now" is `POST
- * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. `root` is mounted in the panel's body while the
+ * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. Under each chore, one line per site its runs may
+ * type and send on without asking (`keeps`, kept from a blocked step's card), or that one was dropped because the
+ * request changed; its Remove is `DELETE /api/chores/{id}/keeps?site=`. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
 import {formatTime, saidText, t} from './i18n.mjs';
@@ -35,6 +37,13 @@ export function whenWords(at, now) {
 export function lateWords(minutes) {
   if (minutes < 60) return t('sched.late.min', {n: minutes});
   return minutes < 2880 ? t('sched.late.hours', {n: Math.round(minutes / 60)}) : t('sched.late.days', {n: Math.round(minutes / 1440)});
+}
+
+/** What one kept answer of a chore says: the site and since when, or that it was dropped when the request changed. */
+export function keepLine(keep) {
+  const site = String(keep?.host || keep?.site || '');
+  if (keep?.dropped) return t('sched.keep.dropped', {site});
+  return t('sched.keep.line', {site, date: formatTime(new Date(Number(keep?.since) * 1000), 'day')});
 }
 
 /** The lines under a row's title: when it runs next (a one-time chore that ran: when), how late, then how the last run went. */
@@ -204,8 +213,27 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, 
       draw();
     }));
     item.append(head);
+    const keeps = Array.isArray(chore.keeps) ? chore.keeps : [];
+    if (keeps.length) {
+      const list = node('ul', 'sched-keeps');
+      for (const keep of keeps) {
+        const row = node('li', 'sched-keep');
+        row.dataset.dropped = String(keep.dropped === true);
+        row.append(node('span', 'sched-line', keepLine(keep)),
+          button('quiet-button', t('sched.keep.remove'), () => unkeep(chore, keep), {label: t('sched.keep.removeLabel', {title: chore.title, site: keep.host})}));
+        list.append(row);
+      }
+      item.append(list);
+    }
     if (open) item.append(detail(chore));
     return item;
+  }
+  async function unkeep(chore, keep) {
+    const mine = scope;
+    const done = await call(`/chores/${encodeURIComponent(chore.id)}/keeps?site=${encodeURIComponent(keep.site)}`, {method: 'DELETE'}, t('sched.keep.removeFailed'));
+    if (mine !== scope) return;
+    if (done) replace(done.chore);
+    draw();
   }
   async function runNow(chore) {
     const mine = scope;
