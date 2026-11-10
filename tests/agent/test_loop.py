@@ -820,42 +820,12 @@ class TestStepBudget:
 
 
 class TestBuildSystemPrompt:
-    """Unit tests for _build_system_prompt merging logic."""
+    """Unit tests for _build_system_prompt and the plan_step system message."""
 
-    def test_no_context_no_short(self) -> None:
+    def test_no_notes_no_reflections(self) -> None:
         from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
-        prompt, others = _build_system_prompt([], [])
-        assert prompt == SYSTEM_PROMPT
-        assert others == []
-
-    def test_system_messages_merged(self) -> None:
-        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
-
-        short = [Message(role="system", content="extra context info")]
-        prompt, others = _build_system_prompt([], short)
-        assert "extra context info" in prompt
-        assert prompt.startswith(SYSTEM_PROMPT)
-        assert others == []
-
-    def test_mixed_roles_separated(self) -> None:
-        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
-
-        context = [
-            Message(role="system", content="context fact A"),
-        ]
-        short = [
-            Message(role="system", content="extra sys"),
-            Message(role="user", content="hello"),
-            Message(role="assistant", content="hi"),
-        ]
-        prompt, others = _build_system_prompt(context, short)
-        assert prompt.startswith(SYSTEM_PROMPT)
-        assert "extra sys" in prompt
-        assert "context fact A" in prompt
-        assert len(others) == 2
-        assert others[0].role == "user"
-        assert others[1].role == "assistant"
+        assert _build_system_prompt() == SYSTEM_PROMPT
 
     @pytest.mark.asyncio
     async def test_plan_step_single_system_message(self) -> None:

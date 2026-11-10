@@ -213,7 +213,7 @@ async def test_failed_history_write_does_not_persist_raw_result(
     async def sample() -> str:
         return secret + " raw"
 
-    async def fail_write(task_id: str, step: object) -> str:
+    async def fail_write(task_id: str, step: object) -> None:
         raise RuntimeError("injected history failure")
 
     agent.executor.register("sample", sample)

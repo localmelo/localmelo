@@ -247,28 +247,17 @@ class Hippo:
 
     # ── Step recording ──
 
-    async def store_step(self, task_id: str, step: StepRecord) -> str:
-        """Record step in history and return a summary string.
+    async def store_step(self, task_id: str, step: StepRecord) -> None:
+        """Record step in history.
 
         History keeps a copy with the secrets of :func:`redact_secrets`
         replaced, in its thought, tool arguments, tool output and error;
         *step* itself is untouched, because working memory and the model
-        still read it. The summary is built from the stored copy, so it is
-        redacted too.
+        still read it.
 
         Does NOT write to short/long memory.
         """
-        stored = _redacted_step(step)
-        await self.history.add_step(task_id, stored)
-
-        summary = stored.thought
-        if stored.tool_call:
-            summary += f" [called {stored.tool_call.tool_name}]"
-        if stored.tool_result:
-            output = stored.tool_result.output[:200]
-            summary += f" -> {output}"
-
-        return summary
+        await self.history.add_step(task_id, _redacted_step(step))
 
     # ── R6-lite: admission ──
 
