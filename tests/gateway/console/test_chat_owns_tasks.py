@@ -28,6 +28,7 @@ from localmelo.melo.contracts.approvals import (
     call_key,
     find_earlier,
 )
+from localmelo.melo.contracts.providers import StreamFragment
 from localmelo.melo.contracts.review import step_key
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import INTERRUPT_LABEL, Message, ToolDef
@@ -54,6 +55,7 @@ from localmelo.support.gateway.task_store import TaskRecord, TaskStoreError
 from localmelo.support.gateway.workers import _turn_text
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.live import LIVE_EVENT
 from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.checker.test_redaction import GITHUB
 from localmelo.tests.sessions.helpers import answer, tool_call
@@ -82,6 +84,19 @@ INSTALL_KEYS = (
     'print(open(os.path.expanduser("~/.netrc")).read())'
 )
 _FOLLOWUP = re.compile(r"\[localmelo · follow-up on task ([0-9a-f]{12}) · ")
+
+
+class Streamed(Script):
+    """A :class:`Script` whose replies stream: reasoning first, then a line a piece."""
+
+    async def stream_chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Any:
+        reply = await self.chat(messages, tools)
+        yield StreamFragment(kind="reasoning", text="Thinking it over.")
+        for line in reply.content.splitlines(keepends=True):
+            yield StreamFragment(kind="content", text=line)
+        yield StreamFragment(kind="reply", reply=reply)
 
 
 class Ran:
@@ -114,15 +129,18 @@ async def owner_console(
     approvals: str = "ask",
     run: bool = True,
     front_tools: list[BaseToolProvider] | None = None,
+    streams: bool = False,
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, dict[str, Any], Ran]]:
     """A console whose main chat and task runs work on scripted models.
 
     *follow_up* is ``[tasks] follow_up``, *approvals* the mode new chats (and
     the main chat) start in; without *run* no task starts. *front_tools* are
-    the main chat's tools beside its task tools.
+    the main chat's tools beside its task tools; with *streams* every model's
+    replies stream (:class:`Streamed`).
     """
     monkeypatch.setenv("HOME", str(tmp_path))
-    models: dict[str, Any] = {"main": Script(main or []), "workers": []}
+    model = Streamed if streams else Script
+    models: dict[str, Any] = {"main": model(main or []), "workers": []}
     scripts = [list(script) for script in workers or []]
     ran = Ran()
     holder: list[Console] = []
@@ -143,7 +161,7 @@ async def owner_console(
         raise AssertionError("a side chat is not opened here")
 
     async def worker(**kwargs: Any) -> Agent:
-        llm = Script(scripts.pop(0) if scripts else [answer("Done.\nEnding: ready")])
+        llm = model(scripts.pop(0) if scripts else [answer("Done.\nEnding: ready")])
         models["workers"].append(llm)
         agent = Agent(
             llm=kwargs["wrap_llm"](llm),
@@ -346,6 +364,36 @@ async def test_the_models_task_create_starts_a_task_with_one_line_and_stop(
         )
         assert await state(console, started[0]["task_id"]) == "cancelled"
         assert await state(console, started[1]["task_id"]) == "queued"
+
+
+async def test_a_task_the_chat_starts_never_streams_into_the_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reply = "Started it as a task.\nIts result comes back here.\n"
+    main: list[Reply] = [creates("Plan the trip"), answer(reply), answer("It is ready.\n")]
+    workers = [[answer("The task's own words.\nEnding: ready")]]
+    async with owner_console(
+        tmp_path, monkeypatch, main=main, workers=workers, follow_up=False, streams=True
+    ) as (console, client, _, _ran):
+        seen: list[Any] = []
+
+        async def follow() -> None:
+            async for event in console.hub.subscribe(str(console.main_id), viewer=True):
+                seen.append(event)
+
+        following = asyncio.create_task(follow())
+        await say(client, console, "plan my trip as a task")
+        task_id = await started_task(console)
+        await until(lambda: _is(console, task_id, "done"))
+        await settled(console)
+        following.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await following
+    live = [e.event["data"] for e in seen if e.event["type"] == LIVE_EVENT]
+    assert live, "the chat's own reply streams"
+    assert not any("own words" in data["text"] for data in live)
+    first = [d["text"] for d in live if d["turn"] == live[0]["turn"]]
+    assert "".join(first) == reply, "the chat's live text is its own reply's"
 
 
 async def test_an_unclear_request_gets_one_question_and_starts_nothing(

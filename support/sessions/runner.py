@@ -939,19 +939,26 @@ class SessionRunner:
     async def _run(self, turn: _Turn, text: str, kwargs: dict[str, Any]) -> RunResult:
         """The turn's run, with its live display when the runner has one.
 
-        A run that compresses its replies into notes has none: the ``<note>``
-        block a reply ends with is cut off the answer, so it must not show.
+        The display is set for every run, to ``None`` without one: a run
+        started in the context of another run (a task a chat's turn starts)
+        must not stream into that run's display. A run that compresses its
+        replies into notes has none: the ``<note>`` block a reply ends with
+        is cut off the answer, so it must not show.
         """
-        if self._live is None or turn.agent.options.reasoning in _NOTE_MODES:
-            return await turn.agent.run_task(text, **kwargs)
-        display = self._live(turn.turn)
+        live = self._live
+        display = (
+            None
+            if live is None or turn.agent.options.reasoning in _NOTE_MODES
+            else live(turn.turn)
+        )
         token = STREAM_DISPLAY.set(display)
         try:
             return await turn.agent.run_task(text, **kwargs)
         finally:
             STREAM_DISPLAY.reset(token)
-            display.close()
-            turn.first_word_s = display.first_word_s
+            if display is not None:
+                display.close()
+                turn.first_word_s = display.first_word_s
 
     def _with_context(self, text: str) -> str:
         """*text* with the context blocks after it that fit the query limit.

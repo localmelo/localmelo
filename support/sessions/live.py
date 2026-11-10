@@ -62,7 +62,9 @@ class LiveReply:
     *reasoning_tags* is the model's declared framing (``[cli] reasoning_tags``),
     or ``None`` for the core's conservative rule. :attr:`first_word_s` is the
     seconds from the turn's start to the first piece with a visible character,
-    ``None`` while none was shown. Call :meth:`close` once the run is over.
+    ``None`` while none was shown. Call :meth:`close` once the run is over:
+    the display shows nothing after it, also to work that copied the run's
+    context (a task its turn started).
     """
 
     def __init__(
@@ -83,12 +85,17 @@ class LiveReply:
         self._sent = 0  # characters of the open request already published
         self._pending = ""
         self._timer: asyncio.TimerHandle | None = None
+        self._closed = False
 
     def step(self, number: int) -> None:
+        if self._closed:
+            return
         self._flush()
         self._step = number
 
     def opened(self) -> None:
+        if self._closed:
+            return
         self._flush()
         self._attempts[self._step] = self._attempts.get(self._step, 0) + 1
         self._sent = 0
@@ -97,7 +104,7 @@ class LiveReply:
         """Text the core does not release yet: nothing to show."""
 
     def content(self, delta: str) -> None:
-        if not delta:
+        if not delta or self._closed:
             return
         self._pending += delta
         if self._sent == 0:
@@ -111,8 +118,9 @@ class LiveReply:
         self._flush()
 
     def close(self) -> None:
-        """The run is over: what is pending goes out, no timer stays."""
+        """The run is over: what is pending goes out, no timer stays, and nothing more shows."""
         self._flush()
+        self._closed = True
 
     def _flush(self) -> None:
         if self._timer is not None:
