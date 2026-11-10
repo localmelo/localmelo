@@ -461,6 +461,10 @@ class TaskStore:
                     _CREATE_KEYS
                 )  # IF NOT EXISTS: older v6 files lack it
                 await conn.execute(_CALLS_SCHEMA)  # IF NOT EXISTS: and this table
+                # IF NOT EXISTS: a v6 file from before a chore kept answers lacks
+                # chore_keeps, and opens with nothing kept (#619).
+                for statement in CHORE_SCHEMA:
+                    await conn.execute(statement)
                 await self._ensure_local_column(conn)
             elif current > SCHEDULER_VERSION:
                 raise SessionStoreError(

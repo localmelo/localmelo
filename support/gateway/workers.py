@@ -24,6 +24,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
     AutoPolicy,
     EarlierBlocks,
+    ScheduledKeep,
 )
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.pause import no_time_limit
@@ -56,6 +57,8 @@ from localmelo.support.gateway.auto_blocks import (
     blocked_steps,
     denied_steps,
     go_ahead_text,
+    keep_site,
+    kept_uses,
 )
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
@@ -64,7 +67,13 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     SessionClient,
 )
-from localmelo.support.gateway.chore_store import REMINDER_REASON
+from localmelo.support.gateway.chore_store import (
+    REMINDER_REASON,
+    ChoreNotFoundError,
+    ChoreStaleError,
+    ChoreStore,
+    run_chore,
+)
 from localmelo.support.gateway.finishing import (
     OUT_OF_STEPS,
     could_not_continue,
@@ -1439,6 +1448,94 @@ class TaskWorkers:
         except BaseException:
             policy.withdraw(key)
             raise
+
+    async def _kept_for(self, record: TaskRecord) -> ScheduledKeep | None:
+        """What a run of a scheduled task may type and send without asking (#619), or ``None``.
+
+        Only a run the chore runner started for that chore (:func:`run_chore`,
+        by the stored origin and request key), of its request as it is now
+        (the run's own words); a store that cannot be read keeps nothing.
+        """
+        chore_id = run_chore(record.origin, record.request_key)
+        if chore_id is None:
+            return None
+        try:
+            return await ChoreStore(self.store).live_keep(
+                chore_id, str(record.spec.get("user_words") or "")
+            )
+        except Exception:
+            log.exception("Could not read what chore %s keeps", chore_id)
+            return None
+
+    async def keep_offers(
+        self, record: TaskRecord, blocks: builtins.list[dict[str, Any]]
+    ) -> None:
+        """Set each of *record*'s *blocks* ``keep_site`` (where its answer may be kept, #619) and ``kept``.
+
+        Only in a scheduled task's run, from each stored block (:func:`keep_site`);
+        ``kept`` says the scheduled task keeps that site now. Every other task's
+        blocks get ``None`` and ``False``. Read before anything turns a block's
+        ``can_allow`` off: a finished run's answer can still be kept for the next.
+        """
+        scheduled = run_chore(record.origin, record.request_key) is not None
+        held = await self._kept_for(record) if scheduled else None
+        for block in blocks:
+            site = keep_site(block) if scheduled else None
+            block["keep_site"] = site
+            block["kept"] = bool(site and held is not None and site in held.sites)
+
+    def drop_kept(self, chore_id: str) -> None:
+        """Stop what chore *chore_id* kept from holding in its runs that go on now (#619).
+
+        Called when the person removes a kept answer, changes the request or
+        deletes the chore; the next run reads what is left.
+        """
+        for policy in self._auto.values():
+            if policy.kept is not None and policy.kept.chore_id == chore_id:
+                policy.kept = None
+
+    async def keep_block(self, task_id: str, request_id: str) -> tuple[dict, str]:
+        """Keep the person's answer to a step Auto blocked in a scheduled task's run, then allow it once (#619).
+
+        The request names the stored block only: the scheduled task is the
+        run's (:func:`run_chore`) and the site is the block's own
+        (:func:`keep_site`). :class:`BlockError` ``not_keepable`` for a task
+        that is not a scheduled task's run (a chat's task, a one-time task)
+        or a block nothing may be kept for, ``not_found`` for an unknown block
+        or a scheduled task deleted, ``request_changed`` when its request
+        changed since the run. The step then goes ahead as on Allow once; when
+        it cannot (it ran already, its job finished), the answer is kept for
+        the next runs only.
+        """
+        record = await self.tasks.get_task(task_id)
+        chore_id = run_chore(record.origin, record.request_key)
+        if chore_id is None:
+            raise BlockError("not_keepable")
+        found = next(
+            (
+                b
+                for b in await blocked_steps(self.store, task_id)
+                if b["request_id"] == request_id
+            ),
+            None,
+        )
+        if found is None:
+            raise BlockError("not_found")
+        site = keep_site(found)
+        if site is None:
+            raise BlockError("not_keepable")
+        try:
+            await ChoreStore(self.store).keep(
+                chore_id, site, words=str(record.spec.get("user_words") or "")
+            )
+        except ChoreNotFoundError as exc:
+            raise BlockError("not_found") from exc
+        except ChoreStaleError as exc:
+            raise BlockError("request_changed") from exc
+        try:
+            return await self.allow_once(task_id, request_id)
+        except (BlockError, JobFinishedError):
+            return await self._body(await self.tasks.get_task(task_id)), "kept"
 
     async def _allowed_note(self, record: TaskRecord) -> str:
         """The note of the steps allowed once in *record*'s task and not used, or ``""``.
@@ -2974,9 +3071,11 @@ class TaskWorkers:
                 owned.append(policy)
             elif task_mode == "auto":
                 # A task nobody can be asked for (a chore, one melo or another
-                # agent started) has the step blocked and nothing holds it (#339).
+                # agent started) has the step blocked and nothing holds it (#339),
+                # but what the person kept for a chore's runs (#619).
                 auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
                 auto.asking = None
+                auto.kept = await self._kept_for(record)
                 policy = auto
             if record.origin == "user_rule":
                 # A chore follows the chat it came from for a human check (#583):
@@ -3424,6 +3523,14 @@ class TaskWorkers:
         body["blocked"] = (
             await blocked_steps(self.store, record.task_id)
             if body["approvals"] == "auto"
+            else []
+        )
+        # A scheduled task's run (#619): the site a block's answer may be kept on
+        # for the next runs, and the steps that ran on such an answer.
+        await self.keep_offers(record, body["blocked"])
+        body["kept_uses"] = (
+            await kept_uses(self.store, record.task_id)
+            if run_chore(record.origin, record.request_key) is not None
             else []
         )
         if job_finished(record):

@@ -467,6 +467,7 @@ class MainChatCards:
         if block is None:
             return None
         record = await self._console.workers.tasks.get_task(info.id)
+        await self._console.workers.keep_offers(record, [block])
         review = block["review"] or {}
         words = said("cards.blocked", what=said(f"auto.words.{_first(review)}"))
         return {
@@ -483,6 +484,8 @@ class MainChatCards:
                     "preview",
                     "question",
                     "arguments",
+                    "keep_site",
+                    "kept",
                 )
             },
             "review": review,

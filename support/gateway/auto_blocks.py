@@ -16,14 +16,17 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Final
 
-from localmelo.melo.contracts.review import TITLES
+from localmelo.melo.contracts.approvals import kept_review, kept_site
+from localmelo.melo.contracts.review import TITLES, ActionReview
 from localmelo.support.gateway.handover import fenced
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import SessionStore
 
 
 class BlockError(LookupError):
-    """No block to allow: *code* is ``not_found``, ``not_allowable`` or ``already_allowed``."""
+    """No block to allow: *code* is ``not_found``, ``not_allowable``, ``already_allowed``,
+    ``not_keepable`` (nothing may be kept for it, #619) or ``request_changed``
+    (its scheduled task's request changed since its run)."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
@@ -41,6 +44,10 @@ class BlockError(LookupError):
             return t("errors.blockNotFound")
         if self.code == "already_allowed":
             return t("errors.blockAllowedAlready")
+        if self.code == "not_keepable":
+            return t("errors.blockNotKeepable")
+        if self.code == "request_changed":
+            return t("errors.keepStale")
         return t("errors.blockNotAllowable")
 
 
@@ -55,7 +62,8 @@ def blocks_in(event: dict[str, Any]) -> list[dict[str, Any]]:
 
     The call's own ``approval`` first, then its ``tool_asks``: each one whose
     origin is ``auto`` and that is not allowed, or that ran on an Allow once
-    (``allowance`` ``once``). Anything else in the record is none.
+    (``allowance`` ``once``) or on a scheduled task's kept answer
+    (``allowance`` ``kept``, #619). Anything else in the record is none.
     """
     data = event.get("data")
     asks = data.get("tool_asks") if isinstance(data, dict) else None
@@ -65,7 +73,7 @@ def blocks_in(event: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(one, dict)
         and (
             (one.get("origin") == "auto" and one.get("allowed") is False)
-            or one.get("allowance") == "once"
+            or one.get("allowance") in ("once", "kept")
         )
     ]
 
@@ -173,6 +181,8 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
         data: dict[str, Any] = raw if isinstance(raw, dict) else {}
         own = _approval(event)
         for approval in blocks_in(event):
+            if approval.get("allowance") == "kept":
+                continue  # a step that ran on a kept answer was never blocked
             if approval.get("allowance") == "once":
                 for block in out:
                     if block["step_key"] == approval.get("step_key") and not block.get(
@@ -288,6 +298,51 @@ async def denied_steps(
         for block in out:
             if block["turn"] == turn and not block["preview"]:
                 block["preview"] = previews.get(block["call_id"], "")
+    return out
+
+
+def keep_site(block: dict[str, Any]) -> str | None:
+    """The site a scheduled task's kept answer made from the stored *block* holds (#619), or ``None``.
+
+    Only a block Allow once may run as it was written (``can_allow`` from
+    :func:`allowable`: the whole text typed or form sent kept, no secret in
+    it, its site not refused), that the model reviewed as ``send_out`` alone
+    (:func:`kept_review`), on the site its question names (and for a form,
+    sent there: :func:`kept_site`). Whether its task is a scheduled task's
+    run is the caller's to check.
+    """
+    question, arguments = block.get("question"), block.get("arguments")
+    if not (block.get("can_allow") and question and isinstance(arguments, dict)):
+        return None
+    found = block.get("review")
+    review = found if isinstance(found, dict) else {}
+    categories = review.get("categories")
+    read = ActionReview(
+        "high" if review.get("verdict") == "high" else "undecided",
+        tuple(str(c) for c in categories) if isinstance(categories, list) else (),
+        by="model" if review.get("by") == "model" else "rules",
+    )
+    site = kept_site(str(question), arguments) if kept_review(read) else None
+    return None if site is None else site[0]
+
+
+async def kept_uses(store: SessionStore, session_id: str) -> list[dict[str, Any]]:
+    """The steps of *session_id* that ran on its scheduled task's kept answer (#619), oldest first.
+
+    Each as its record has it: the question (``browser-type:<origin>`` or
+    ``browser-submit:<origin>``), what was typed or sent (``arguments``) and
+    when (``ts``), for the task's page to say so.
+    """
+    out: list[dict[str, Any]] = []
+    for stored in await store.auto_records(session_id, limit=200):
+        for one in blocks_in(stored.event):
+            if one.get("allowance") == "kept" and isinstance(
+                one.get("arguments"), dict
+            ):
+                out.append(
+                    {"question": str(one.get("tool") or ""),
+                     "arguments": one["arguments"], "ts": stored.event.get("ts")}
+                )  # fmt: skip
     return out
 
 

@@ -134,7 +134,9 @@ export function pageText(tool, args = {}) {
  * code or command on one line, or for a question its tool asked itself (the block's `tool`) all it puts
  * into the page (`pageText`), under `stepLabel`; `gist` the sentence the card starts with, its warning and the
  * model's note (or null); `allow` whether Allow once may run it (never for `self`, never for a call a
- * stopped turn left unreviewed, never without its key); `words` whether the person's words could allow it too.
+ * stopped turn left unreviewed, never without its key); `words` whether the person's words could allow it too;
+ * `keepSite` the site a scheduled task's run may keep the answer on for its next runs (the server's `keep_site`, only
+ * ever for such a run), and `kept` whether it is kept there already.
  */
 export function blockFacts({approval, name = '', arguments: args = {}, preview = '', requestId = ''} = {}) {
   if (!isBlock(approval)) return null;
@@ -157,7 +159,47 @@ export function blockFacts({approval, name = '', arguments: args = {}, preview =
     self,
     allow: Boolean(first) && !self && Boolean(approval.step_key),
     words: Boolean(first) && !doubts && categories.every((category) => WORDS_ALLOW.has(category)),
+    keepSite: !self && typeof approval.keep_site === 'string' ? approval.keep_site : '',
+    kept: approval.kept === true,
   };
+}
+
+/** Allow once, or where the allowance stands. */
+function allowRow(doc, allowing, {busy, onAllow}) {
+  const {node} = maker(doc);
+  const foot = node('div', 'block-foot');
+  if (allowing.state === 'open') {
+    const allow = node('button', 'outline-button block-allow', t(busy === 'allowing' ? 'auto.blocked.allowing' : 'auto.blocked.allow'));
+    allow.type = 'button';
+    allow.disabled = Boolean(busy);
+    if (onAllow) allow.addEventListener('click', onAllow);
+    foot.append(allow, node('span', 'block-once', t(busy === 'running' ? 'auto.blocked.afterTurn' : 'auto.blocked.once')));
+    return foot;
+  }
+  const words = {
+    pending: () => t('auto.blocked.pending', {time: clock(allowing.at)}),
+    used: () => t('auto.blocked.used', {time: clock(allowing.at)}),
+    expired: () => t('auto.blocked.expired'),
+  }[allowing.state];
+  foot.append(node('span', 'block-done', words ? words() : ''));
+  return foot;
+}
+
+/** The second choice of a scheduled task's blocked step: keep the answer for its next runs on the site, or that it is kept. */
+function keepRow(doc, facts, {busy, onKeep}) {
+  const {node} = maker(doc);
+  const row = node('div', 'block-foot block-keep-row');
+  const site = facts.keepSite.slice(facts.keepSite.indexOf('://') + 3);
+  if (facts.kept) {
+    row.append(node('span', 'block-done', t('auto.blocked.kept', {site})));
+    return row;
+  }
+  const keep = node('button', 'outline-button block-keep', t(busy === 'keeping' ? 'auto.blocked.keeping' : 'auto.blocked.keep', {site}));
+  keep.type = 'button';
+  keep.disabled = Boolean(busy);
+  if (onKeep) keep.addEventListener('click', onKeep);
+  row.append(keep, node('span', 'block-once', t('auto.blocked.keepNote')));
+  return row;
 }
 
 /** A call's code or command on one line, for the card's monospace step. */
@@ -194,9 +236,10 @@ const clock = (seconds) => formatTime(new Date(seconds * 1000), 'clock');
  * The card under a blocked call: what was blocked and why, the step, and Allow once. `allowing` is
  * `{state, at}` from `allowState`; `busy` says a request is under way or a turn runs (the button
  * waits); `developer` adds the tool's name; `onAllow()` sends the Allow once; `error` is the last
- * failure's text.
+ * failure's text. A step of a scheduled task's run (`facts.keepSite`) also offers to keep the answer
+ * for that task's next runs on that site (`onKeep()`), with what still stops; once kept, it says so.
  */
-export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false, developer = false, onAllow = null, error = ''} = {}) {
+export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false, developer = false, onAllow = null, onKeep = null, error = ''} = {}) {
   const {node} = maker(doc);
   const card = node('section', 'block-card');
   card.dataset.state = facts.self ? 'never' : allowing.state;
@@ -228,24 +271,10 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
     fold.append(node('summary', '', facts.stepLabel || t('gist.showCode')), step);
     card.append(fold);
   }
-  if (!facts.allow) return card;
-  const foot = node('div', 'block-foot');
-  if (allowing.state === 'open') {
-    const allow = node('button', 'outline-button block-allow', t(busy === 'allowing' ? 'auto.blocked.allowing' : 'auto.blocked.allow'));
-    allow.type = 'button';
-    allow.disabled = Boolean(busy);
-    if (onAllow) allow.addEventListener('click', onAllow);
-    foot.append(allow);
-    foot.append(node('span', 'block-once', t(busy === 'running' ? 'auto.blocked.afterTurn' : 'auto.blocked.once')));
-  } else {
-    const words = {
-      pending: () => t('auto.blocked.pending', {time: clock(allowing.at)}),
-      used: () => t('auto.blocked.used', {time: clock(allowing.at)}),
-      expired: () => t('auto.blocked.expired'),
-    }[allowing.state];
-    foot.append(node('span', 'block-done', words ? words() : ''));
-  }
-  card.append(foot);
+  if (!facts.allow && !facts.keepSite) return card;
+  // A finished job has nothing to allow now; a scheduled task's next runs are still the person's to decide.
+  if (facts.allow) card.append(allowRow(doc, allowing, {busy, onAllow}));
+  if (facts.keepSite) card.append(keepRow(doc, facts, {busy, onKeep}));
   if (error) {
     const problem = node('p', 'block-error', t('auto.blocked.failed', {problem: error}));
     problem.setAttribute('role', 'alert');

@@ -15,6 +15,14 @@ overwrite each other unseen. ``chore_meta`` holds the check-in's switch.
 A one-time chore (a reminder, schedule kind ``once``) is done after its run:
 the runner switches it off with no next time, and the row stays in the list
 with its last result. A new time on a done one switches it back on.
+
+``chore_keeps`` holds what a chore's runs may type and send without asking
+(#619): one row per chore and site (an origin), made only from a step the
+person saw blocked in one of its runs, with the kinds it covers, when it was
+made and a digest of the chore's request then. It goes with its chore; a new
+request text drops it (``dropped_at``), and a run uses only a row whose digest
+is the request's own (:meth:`ChoreStore.live_keep`). A file from before has
+the table made empty on open: nothing is kept.
 """
 
 from __future__ import annotations
@@ -30,6 +38,11 @@ from dataclasses import dataclass
 from datetime import tzinfo
 from typing import Any, Final
 
+from localmelo.melo.contracts.approvals import (
+    WHOLE_STEPS,
+    ScheduledKeep,
+    spelt_origin,
+)
 from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
 from localmelo.support.gateway.i18n import said
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS, MAX_TITLE_CHARS
@@ -52,7 +65,21 @@ CHORE_SCHEMA: Final = (
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL)""",
     "CREATE TABLE IF NOT EXISTS chore_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    """CREATE TABLE IF NOT EXISTS chore_keeps (
+  chore_id TEXT NOT NULL REFERENCES chores(chore_id) ON DELETE CASCADE,
+  site TEXT NOT NULL,
+  kinds TEXT NOT NULL,
+  request_digest TEXT NOT NULL,
+  made_at REAL NOT NULL,
+  dropped_at REAL,
+  PRIMARY KEY (chore_id, site))""",
 )
+# What one kept answer covers on its site: typing into a page and sending a form.
+KEPT_KINDS: Final = tuple(WHOLE_STEPS.values())
+# The request key of a chore's run (its timed run or its Run now) starts with this
+# and the chore's id: ``chore:<id>:<slot>``, written only by the chore runner.
+RUN_KEY: Final = "chore:"
+
 
 # Chores one file holds: the tick reads every enabled one each 30 s.
 MAX_CHORES: Final = 50
@@ -76,6 +103,29 @@ _COLUMNS: Final = (
     "chore_id, front_id, title, request, schedule, level, enabled, revision, "
     "next_run, last_run, last_task_id, reported_task_id, created_at, updated_at"
 )
+
+
+def run_key(chore_id: str, slot: str) -> str:
+    """The request key of chore *chore_id*'s run in *slot* (a time, or ``now:<ms>``)."""
+    return f"{RUN_KEY}{chore_id}:{slot}"
+
+
+def run_chore(origin: str, request_key: str | None) -> str | None:
+    """The id of the chore whose run a task of *origin* and *request_key* is, or ``None``.
+
+    Only a task the chore runner started (origin ``user_rule``) under a key of
+    :func:`run_key`; a run that went on in a fresh task (it has no such key), a
+    chat's first run of a chore and every other task are none.
+    """
+    if origin != "user_rule" or not request_key or not request_key.startswith(RUN_KEY):
+        return None
+    chore_id, found, _ = request_key[len(RUN_KEY) :].partition(":")
+    return chore_id if found and chore_id else None
+
+
+def request_digest(request: str) -> str:
+    """The digest of a chore's request text a kept answer was made under."""
+    return hashlib.sha256(request.encode()).hexdigest()
 
 
 def chore_id_of(receipt: str) -> str:
@@ -153,6 +203,26 @@ def _level(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4:
         raise ValueError("level: P1 to P4")
     return value
+
+
+@dataclass(frozen=True)
+class ChoreKeep:
+    """One kept answer of a chore: its site, the kinds it covers, when it was made and dropped."""
+
+    chore_id: str
+    site: str
+    kinds: tuple[str, ...]
+    request_digest: str
+    made_at: float
+    dropped_at: float | None
+
+    def holds_for(self, chore: Chore) -> bool:
+        """Whether this answer holds for *chore* as it is now: not dropped, made under its request."""
+        return (
+            self.dropped_at is None
+            and self.chore_id == chore.chore_id
+            and self.request_digest == request_digest(chore.request)
+        )
 
 
 class ChoreStore:
@@ -301,6 +371,13 @@ class ChoreStore:
                 (new.title, new.request, json.dumps(new.schedule.to_json()), new.level,
                  int(new.enabled), next_run, now, chore_id),
             )  # fmt: skip
+            if new.request != chore.request:
+                # What the person kept was for the request they saw blocked (#619).
+                await conn.execute(
+                    "UPDATE chore_keeps SET dropped_at = ? "
+                    "WHERE chore_id = ? AND dropped_at IS NULL",
+                    (now, chore_id),
+                )
             return await self._get(conn, chore_id)
 
     async def delete(self, chore_id: str, *, revision: int | None = None) -> None:
@@ -308,7 +385,80 @@ class ChoreStore:
             chore = await self._get(conn, chore_id)
             if revision is not None and chore.revision != revision:
                 raise ChoreStaleError("This chore changed. Reload it and try again.")
+            await conn.execute(
+                "DELETE FROM chore_keeps WHERE chore_id = ?", (chore_id,)
+            )
             await conn.execute("DELETE FROM chores WHERE chore_id = ?", (chore_id,))
+
+    async def keeps(self, chore_id: str) -> list[ChoreKeep]:
+        """Every kept answer of chore *chore_id*, dropped ones too, oldest first."""
+        async with self._store.component_transaction("chore_keeps") as conn:
+            cursor = await conn.execute(
+                "SELECT chore_id, site, kinds, request_digest, made_at, dropped_at "
+                "FROM chore_keeps WHERE chore_id = ? ORDER BY made_at, site",
+                (chore_id,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            ChoreKeep(row[0], row[1], tuple(json.loads(row[2])), *row[3:])
+            for row in rows
+        ]
+
+    async def keep(self, chore_id: str, site: str, *, words: str) -> ChoreKeep:
+        """Keep the person's answer for chore *chore_id* on *site*: typing and sending there, without asking (#619).
+
+        *words* are the person's words of the run whose blocked step they
+        answered: when the chore's request has changed since, nothing is kept
+        (:class:`ChoreStaleError`). A site not spelt as one origin is refused.
+        A kept answer on that site already is made again, as of now.
+        """
+        if spelt_origin(site) != site:
+            raise ValueError("site must be one origin")
+        now = self._clock()
+        async with self._store.component_transaction("chore_keep") as conn:
+            chore = await self._get(conn, chore_id)
+            if chore.words != words:
+                raise ChoreStaleError(
+                    "This scheduled task's request changed since that run.",
+                    said("errors.keepStale"),
+                )
+            await conn.execute(
+                "INSERT INTO chore_keeps (chore_id, site, kinds, request_digest, made_at, dropped_at) "
+                "VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT(chore_id, site) DO UPDATE SET "
+                "kinds = excluded.kinds, request_digest = excluded.request_digest, "
+                "made_at = excluded.made_at, dropped_at = NULL",
+                (chore_id, site, json.dumps(list(KEPT_KINDS)), request_digest(chore.request), now),
+            )  # fmt: skip
+        return ChoreKeep(
+            chore_id, site, KEPT_KINDS, request_digest(chore.request), now, None
+        )
+
+    async def remove_keep(self, chore_id: str, site: str) -> bool:
+        """Take back the kept answer of chore *chore_id* on *site*, dropped or not; whether there was one."""
+        async with self._store.component_transaction("chore_unkeep") as conn:
+            cursor = await conn.execute(
+                "DELETE FROM chore_keeps WHERE chore_id = ? AND site = ?",
+                (chore_id, site),
+            )
+            return cursor.rowcount == 1
+
+    async def live_keep(self, chore_id: str, words: str) -> ScheduledKeep | None:
+        """What a run of chore *chore_id* with the person's *words* may type and send without asking, or ``None``.
+
+        Only the kept answers that hold for the chore as it is now
+        (:meth:`ChoreKeep.holds_for`), and only for a run of its current
+        request: a chore deleted, or one whose words differ from the run's,
+        keeps nothing for it.
+        """
+        chore = await self.find(chore_id)
+        if chore is None or chore.words != words:
+            return None
+        sites = {
+            keep.site: frozenset(keep.kinds) & frozenset(KEPT_KINDS)
+            for keep in await self.keeps(chore_id)
+            if keep.holds_for(chore)
+        }
+        return ScheduledKeep(chore_id, sites) if sites else None
 
     async def due(self, now: float) -> list[Chore]:
         """The enabled chores whose next run has come, oldest first."""
@@ -398,8 +548,10 @@ __all__ = [
     "REMINDER_NOTE",
     "REMINDER_PREFIX",
     "REMINDER_REASON",
+    "KEPT_KINDS",
     "Chore",
     "ChoreError",
+    "ChoreKeep",
     "ChoreLimitError",
     "ChoreNotFoundError",
     "ChoreStaleError",

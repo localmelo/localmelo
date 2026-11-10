@@ -92,6 +92,9 @@ export function readCard(row) {
       review: data.review && typeof data.review === "object" ? data.review : {},
       canAllow: data.can_allow === true,
       finished: data.finished === true,
+      // A scheduled task's run (#619): the site its answer may be kept on for the next runs, and whether it is.
+      keepSite: typeof data.keep_site === "string" ? data.keep_site : "",
+      kept: data.kept === true,
       ...questionOf(data),
     } : {}),
   };
@@ -116,8 +119,9 @@ export function cardBlock(card) {
  * What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review, and for a question
  * its tool asked itself its name and arguments; null if unusable.
  */
-const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args}) => blockFacts({
-  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args},
+const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args, keepSite, kept}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args,
+    keep_site: keepSite || undefined, kept},
   name,
   preview,
 });

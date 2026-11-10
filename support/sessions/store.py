@@ -800,7 +800,7 @@ def _auto(column: str, path: str) -> str:
     field = f"json_extract({column}, '{path}.{{}}')".format
     return (
         f"(({field('origin')} = 'auto' AND {field('allowed')} = 0) "
-        f"OR {field('allowance')} = 'once')"
+        f"OR {field('allowance')} IN ('once', 'kept'))"
     )
 
 
@@ -1881,7 +1881,8 @@ class SessionStore:
         """The ``tool.finished`` events of auto mode's blocks and allowances (#339).
 
         A block has ``origin`` ``auto`` and is not allowed; an allowance used
-        has ``allowance`` ``once``: in the call's ``approval``, or in one of
+        has ``allowance`` ``once`` (``kept`` for a scheduled task's kept
+        answer, #619): in the call's ``approval``, or in one of
         its ``tool_asks`` (a question its tool asked itself). The newest
         *limit* (1..1000), in id order.
         """
