@@ -301,23 +301,39 @@ async def test_transport_failure_closes_stream(error: httpx.TransportError) -> N
 
 
 @pytest.mark.asyncio
-async def test_a_streamed_http_error_keeps_the_servers_reason_apart_from_its_words() -> (
-    None
-):
-    """The message stays as it was; the start of the body is there for whoever must tell why."""
-    reason = b'{"error":{"message":"image input is not supported"}}'
+@pytest.mark.parametrize(
+    ("stream_body", "whole_body", "requests", "overflow"),
+    [
+        # Refused twice: the whole call's error, classified as it classifies it.
+        (b'{"error":{"message":"image input is not supported"}}', None, 2, False),
+        (b'{"error":{"message":"bad option"}}', b'{"error":{"code":"context_length_exceeded"}}', 2, True),
+        # A refusal that is already a context overflow is raised at once.
+        (b'{"error":{"code":"context_length_exceeded"}}', None, 1, True),
+    ],
+    ids=["refused-twice", "whole-overflows", "stream-overflows"],
+)
+async def test_a_refused_stream_raises_the_whole_calls_error(
+    stream_body: bytes, whole_body: bytes | None, requests: int, overflow: bool
+) -> None:
+    """The caller sees the whole call's error, so a too-long prompt reaches the refit."""
+    sent: list[bool] = []
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        streamed = json.loads(request.content).get("stream") is True
+        sent.append(streamed)
+        body = stream_body if streamed or whole_body is None else whole_body
+        return httpx.Response(400, stream=Bytes([body]))
+
     provider = OpenAICompatLLM(
-        "http://example.test/v1",
-        "test",
-        transport=httpx.MockTransport(
-            lambda _: httpx.Response(400, stream=Bytes([reason]))
-        ),
+        "http://example.test/v1", "test", transport=httpx.MockTransport(refuse)
     )
     try:
         with pytest.raises(ProviderError) as failure:
             _ = [part async for part in provider.stream_chat([])]
-        assert str(failure.value) == "POST /chat/completions failed with HTTP 400"
-        assert "image input is not supported" in failure.value.detail
+        assert failure.value.status_code == 400
+        assert failure.value.context_overflow is overflow
+        assert len(sent) == requests and sent[0] is True
+        assert not provider.sends_whole_replies
         assert len(failure.value.detail) <= 500
     finally:
         await provider.close()

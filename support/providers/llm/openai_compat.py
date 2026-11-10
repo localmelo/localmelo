@@ -781,7 +781,6 @@ class OpenAICompatLLM(BaseLLMProvider):
         emitted = False
         opened = False
         whole: tuple[Message, str] | None = None
-        refused: ProviderError | None = None
         try:
             async with self._http.stream(
                 "POST", "/chat/completions", json=payload, headers=attempt_headers()
@@ -921,11 +920,8 @@ class OpenAICompatLLM(BaseLLMProvider):
                             if not isinstance(final, str) or finish:
                                 raise ProviderError("Malformed SSE finish reason")
                             finish = final
-        except _StreamRefusedError as exc:
-            # Nothing reached the caller: the whole reply, below.
-            refused = (
-                exc.__cause__ if isinstance(exc.__cause__, ProviderError) else None
-            )
+        except _StreamRefusedError:
+            pass  # nothing reached the caller: the whole reply, below
         # A transport error, before or after part of the reply, is retried as
         # the whole-reply call's is: the caller's displays start the reply again.
         except httpx.ConnectError as exc:
@@ -953,14 +949,11 @@ class OpenAICompatLLM(BaseLLMProvider):
                     "Streaming response ended before completion", retryable=True
                 )
             # Nothing reached the caller, so the request can be sent again: ask
-            # for the whole reply. This raises its own error if it fails, but
-            # the stream's error when the server refuses the whole one alike.
-            try:
-                whole = await self._complete(messages, tools)
-            except ProviderError as failure:
-                if refused is not None and failure.status_code == refused.status_code:
-                    raise refused from failure
-                raise
+            # for the whole reply. Its own error, classified as the whole call
+            # classifies it, is what the caller sees if it fails too (a refusal
+            # that is a context overflow was raised above, without a second
+            # request, so the caller's refit sees it).
+            whole = await self._complete(messages, tools)
         if whole is not None:
             self.sends_whole_replies = True
             yield StreamFragment(
