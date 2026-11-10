@@ -46,7 +46,8 @@ export function reviewWords(review, folder = '') {
  * The sentences under a blocked step's title, in the page's language. English keeps the rules' own
  * sentences, which name the package, the file or the host; another language names the kind of step
  * in its own words (the step itself is on the card, as written), and the apps a script operates when
- * the review's `gist` names them. A review the model settled says what it found by its category. A
+ * the review's `gist` names them. A review the model settled says only that the model stopped it, in any
+ * language: the title already names what it found. A
  * review with no sentences of its own reads by category in any language. A question about attaching
  * a file to a page (#551) says the file, its folder and the site, and when the person did not name the
  * file, in every language alike, from the facts its `gist` carries.
@@ -58,9 +59,10 @@ export function reasonLines(review, categories) {
     return [t(key, {file: String(attach.file ?? ''), folder: String(attach.folder ?? ''), site: String(attach.site ?? '')})];
   }
   const written = (Array.isArray(review.reasons) ? review.reasons : []).map(String).filter(Boolean);
-  if (written.length && language() === 'en') return written;
+  // What the model found is the card's title already: the line says who found it, once, in every language.
   const modelFound = review.by === 'model' && !['beyond_request', 'opaque', 'unreviewed'].includes(categories[0]);
-  if (modelFound) return [t('auto.reason.model', {what: t(`auto.words.${categories[0]}`)})];
+  if (modelFound) return [t('auto.reason.model')];
+  if (written.length && language() === 'en') return written;
   const apps = isObject(review.gist) && Array.isArray(review.gist.apps) ? nameList(review.gist.apps) : '';
   return categories.slice(0, 3).map((category) => (
     category === 'app_control' && apps ? t('auto.reason.appControlNamed', {apps}) : t(`auto.reason.${category}`)
@@ -85,17 +87,37 @@ export function gistWords(gist) {
   };
 }
 
+// The engine's words for a control, `a button "Sign in"` (and ` inside a box from accounts.example.org`), as the
+// request carries them in `on`: its kind, its label and the other site's box. null when the words are not those.
+const CONTROL_KINDS = ['link', 'button', 'textbox', 'checkbox', 'select'];
+export function controlOf(on) {
+  const found = /^an? ([a-z]+)(?: "(.*)")?(?: inside a box from (\S+))?$/.exec(String(on ?? '').trim());
+  if (!found || !CONTROL_KINDS.includes(found[1])) return null;
+  return {kind: found[1], label: found[2] ?? '', frame: found[3] ?? ''};
+}
+
+// What a click, a choice or typing is on, in a question: “Sign in” when it is named, else the kind of control.
+export function actionTitle(key, control, site) {
+  return control.label
+    ? t(`approval.${key}`, {label: control.label, site})
+    : t(`approval.${key}Kind`, {kind: t(`approval.kind.${control.kind}`), site});
+}
+
 /**
  * What a page question puts into the page, as its card shows it, or null for another question: typing
  * (`browser-type:<site>`: the whole text) or a form sent (`browser-submit:<site>`: where it goes and what it
- * holds). `title` asks it in words with its site, `what` names the text, `text` is all of it, uncut.
+ * holds). `title` asks it in words with its site (and the box typed into), `what` names the text, `text` is all
+ * of it, uncut. The live approval card and a blocked step's card both show these.
  */
 export function pageText(tool, args = {}) {
   const name = String(tool ?? '');
   const a = isObject(args) ? args : {};
   const site = String(a.site || name.slice(name.indexOf(':') + 1));
   if (name.startsWith('browser-type:')) {
-    return {title: t('approval.typeSite', {site}), what: t('approval.actTyped'), text: String(a.text ?? '')};
+    // The box it types into, when melo named it.
+    const control = controlOf(a.on);
+    const title = control ? actionTitle('typeInto', control, site) : t('approval.typeSite', {site});
+    return {title, what: t('approval.actTyped'), text: String(a.text ?? '')};
   }
   if (!name.startsWith('browser-submit:')) return null;
   const rows = (Array.isArray(a.fields) ? a.fields : []).filter(Array.isArray).map(([field, value]) => `${field}: ${value}`);

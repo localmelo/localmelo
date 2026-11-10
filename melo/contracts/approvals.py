@@ -1371,9 +1371,16 @@ TASK_ASKS_NOBODY: Final = (
 ALLOW_IN_TASK: Final = (
     "that the task goes on without it, and that once it has finished this step is "
     "new work they ask the chat for. A task that cannot finish without the step "
-    "ends with Ending: blocked instead, and then they can allow it once. Until "
-    "they do, trying it again here is blocked again: their go-ahead comes to you "
-    "as a message, and then you run exactly that step again."
+    "ends with Ending: blocked instead, and then they can allow it once. Tried "
+    "again before they do, it is reviewed again and blocked; once they allow it, "
+    "melo tells you which step, and you run exactly that step again."
+)
+# A step of a task that the person cannot allow from the task (a text a review
+# filed under passwords or keys, a site refused in the task).
+BLOCKED_IN_TASK: Final = (
+    "that the task goes on without it, and that this step cannot be allowed "
+    "from the task: tried again, it is reviewed again and blocked. If it is "
+    "needed, they can ask for it in a chat, where they decide on it themselves."
 )
 ALLOW_NEVER: Final = (
     "that this step cannot be allowed: melo never changes its own runtime, "
@@ -1476,10 +1483,12 @@ def block_note(
     folder: str = "the folder",
     second: bool = False,
     changed: bool = False,
+    allowable: bool = True,
 ) -> str:
     """The text the model reads for a step auto mode blocked.
 
-    *task*: the run is a saved task, offered the allowance while its job is unfinished;
+    *task*: the run is a saved task, offered the allowance while its job is
+    unfinished when the step is *allowable*;
     *folder*: the workspace, for a step that can never be allowed; *second*:
     a second block of the same kind in this turn, which stops the run;
     *changed*: the user allowed a step and this retry differs from it.
@@ -1497,7 +1506,7 @@ def block_note(
     if review is not None and "self" in review.categories:
         allow = ALLOW_NEVER.format(folder=folder)
     elif task:
-        allow = ALLOW_IN_TASK
+        allow = ALLOW_IN_TASK if allowable else BLOCKED_IN_TASK
     else:
         # A kind the card asks about was blocked only because nobody could be
         # asked now (#465).

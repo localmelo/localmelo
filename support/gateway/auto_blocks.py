@@ -13,10 +13,11 @@ an allowance, or has one waiting, is not allowed again.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, Final
 
 from localmelo.melo.contracts.review import TITLES
+from localmelo.support.gateway.handover import fenced
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import SessionStore
 
@@ -78,13 +79,16 @@ def _categories(approval: dict[str, Any]) -> list[str]:
 def allowable(approval: dict[str, Any]) -> tuple[str, list[str]] | None:
     """A block's step key and categories when Allow once may run it, else ``None``.
 
-    Never for a step that changes localmelo itself, and never for a call a
-    stopped turn did not review (it has no categories of its own).
+    Never for a step that changes localmelo itself, never for a call a
+    stopped turn did not review (it has no categories of its own), and never
+    for a question its tool asked itself (``tool``) without its arguments:
+    the person sees all of it first, or nothing is allowed.
     """
     key = approval.get("step_key")
     categories = [c for c in _categories(approval) if c in TITLES]
     if (
-        approval.get("origin") != "auto"
+        ("tool" in approval and not isinstance(approval.get("arguments"), dict))
+        or approval.get("origin") != "auto"
         or approval.get("allowed") is not False
         or not isinstance(key, str)
         or not key
@@ -285,3 +289,55 @@ async def denied_steps(
             if block["turn"] == turn and not block["preview"]:
                 block["preview"] = previews.get(block["call_id"], "")
     return out
+
+
+# What a task's run reads about a step the person allowed once (#617), in melo's
+# words: the step as it was asked, fenced as data, so a retry can repeat it.
+ALLOWED_HEAD: Final = (
+    "[melo's note: the person allowed one blocked step once]\n"
+    "It runs only exactly as below: the same site, the same box and every "
+    "character of the text; anything else is reviewed again. The step:"
+)
+ALLOWED_END: Final = "[end of the allowed step]"
+# The order a step's facts are told in; the text, all of it, comes last.
+_TOLD: Final = ("site", "on", "field", "to", "how", "browser")
+
+
+def _step_told(question: str, arguments: dict[str, Any]) -> str:
+    """One allowed question as data lines: its kind and site, then its facts, then its text."""
+    kind = "typing" if question.startswith("browser-type:") else "sending a form"
+    lines = [f"step: {kind}"]
+    lines += [f"{name}: {arguments[name]}" for name in _TOLD if arguments.get(name)]
+    fields = arguments.get("fields")
+    if isinstance(fields, list) and fields:
+        lines.append("fields:")
+        lines += [
+            f"- {row[0]}: {row[1]}"
+            for row in fields
+            if isinstance(row, list) and len(row) == 2
+        ]
+    if "text" in arguments:
+        lines += ["text:", str(arguments["text"])]
+    return "\n".join(lines)
+
+
+async def allowed_note(
+    store: SessionStore, session_ids: Sequence[str], live: Callable[[str], bool]
+) -> str:
+    """The note of each step blocked in *session_ids* that holds a live allowance, or ``""``.
+
+    Only a question its tool asked itself (a text typed, a form sent), written
+    from its stored record, never from anyone's words about it; *live* says
+    whether its key is allowed once and not used.
+    """
+    told = [
+        _step_told(str(block["question"]), block["arguments"])
+        for session in session_ids
+        for block in await blocked_steps(store, session)
+        if block["question"]
+        and isinstance(block["arguments"], dict)
+        and block["used_at"] is None
+        and isinstance(block["step_key"], str)
+        and live(block["step_key"])
+    ]
+    return fenced("allowed", ALLOWED_HEAD, "\n\n".join(told), ALLOWED_END)

@@ -715,6 +715,16 @@ _UNKNOWN_TARGET = "Clicks on {site} where melo cannot tell what it clicks."
 # ``credentials`` into no category; a read (its address can hold a key), a
 # search, typing, a form sent, or any access not listed never does.
 _VALUE_FREE_ACCESS: Final = frozenset({"act", "point", "dialog"})
+# The site questions that hold the whole step: the text typed, the form sent and
+# where it goes. Each is reviewed by itself, and its verdict is never kept for
+# the next; only such a question shows a person all it does, so only such a one
+# may be allowed once after Auto blocked it.
+_WHOLE_ACCESS: Final = frozenset({"type", "submit"})
+
+
+def whole_step(arguments: Mapping[str, Any]) -> bool:
+    """Whether a site question with *arguments* holds all its step does (:data:`_WHOLE_ACCESS`)."""
+    return arguments.get("access") in _WHOLE_ACCESS
 
 
 def _personal(
@@ -994,12 +1004,16 @@ class _ToolAsk:
             if tool_name.startswith(prefix):
                 return await self._window(tool_name, arguments, preview, words)
         request = self._request(tool_name, arguments, preview)
-        earlier = self._earlier(request)
+        key = allowance_key(request)
+        held = find_auto(self._policy)
+        # The person allowed this exact question once: a block alike to it (another
+        # text refused on the same site) does not hold it back; nothing else lifts.
+        allowed = held is not None and held.allowed_once(key)
+        earlier = None if allowed else self._earlier(request)
         if earlier is not None:
             return earlier
         reviewer = self._reviewer
         auto = review_mode(self._policy, request) == "auto" and reviewer is not None
-        key = step_key(tool_name, request.arguments, self._workspace_root)
         if auto and reviewer is not None and self._run.reviews.stop:
             # The turn already stopped: no site opens either.
             return ApprovalDecision(False, STOPPED_NOTE, origin="auto")
@@ -1043,7 +1057,7 @@ class _ToolAsk:
                 # from a page leaves the computer: each is reviewed by itself, even
                 # on a site you named, and the verdict of one is never kept for the
                 # next.
-                sends = access == "submit"
+                whole = whole_step(arguments)
                 typing = access == "type"
                 reading = access in ("", "read")
                 if arguments.get("target") == "unknown":
@@ -1091,13 +1105,12 @@ class _ToolAsk:
                     if kinds := _personal(reviewer, tool_name, arguments):
                         doubt += _PERSONAL.format(kinds=kinds)
                     undecided = ActionReview("undecided", (), (doubt,))
-                    held = find_auto(self._policy)
                     # The person allowed this exact question once (the text, the
                     # site, the box): no model reviews it again, as the gate does
                     # for a call allowed once; the policy runs it on the allowance.
                     review = (
                         undecided
-                        if held is not None and held.allowed_once(key)
+                        if allowed
                         else await reviewer.review(
                             self._run.reviews,
                             tool_name=tool_name,
@@ -1105,12 +1118,12 @@ class _ToolAsk:
                             preview=preview,
                             review=undecided,
                             mode="auto",
-                            key=f"{key}|{self._call.id}" if sends or typing else key,
+                            key=f"{key}|{self._call.id}" if whole else key,
                             workspace=self._workspace_root,
                             # One routine verdict reads the site's plain pages.
                             shared=(
                                 ""
-                                if sends or typing
+                                if whole
                                 else plain_page_key(
                                     tool_name, request.arguments, self._workspace_root
                                 )
@@ -1127,14 +1140,6 @@ class _ToolAsk:
 
         decided = await self._ask(settle, request)
         site = question_site_key(tool_name)
-        if isinstance(decided, Allowance):
-            # The question ran on the person's Allow once: the record says so,
-            # and the step is shown as allowed and used.
-            self.refused.append(
-                {"request_id": request.request_id, "tool": tool_name,
-                 "allowed": True, "origin": "user", "allowance": "once",
-                 "step_key": allowance_key(request)}
-            )  # fmt: skip
         if decided.allow and site is not None:
             if decided.origin == "user" and not isinstance(decided, Allowance):
                 # The person's own answer here; an Allow once given for one exact
@@ -1147,6 +1152,14 @@ class _ToolAsk:
                 # Auto kept on the way to this answer goes with it.
                 await self._take_back(site, "auto")
                 return refusal
+        if isinstance(decided, Allowance):
+            # The question runs on the person's Allow once: the record says so,
+            # and the step is shown as allowed and used.
+            self.refused.append(
+                {"request_id": request.request_id, "tool": tool_name,
+                 "allowed": True, "origin": "user", "allowance": "once",
+                 "step_key": allowance_key(request)}
+            )  # fmt: skip
         self._ended_by_words(request, decided, preview)
         if is_refusal(decided):
             # A task its chat continues on its own never asks it again.
@@ -1182,6 +1195,7 @@ class _ToolAsk:
                 workspace=self._workspace_root,
                 changed=policy is not None
                 and policy.has_allowances(self._call.tool_name),
+                allowable=bool(self.refused and self.refused[-1].get("step_key")),
             )
             return dataclasses.replace(decided, reason=note)
         return decided
@@ -1270,14 +1284,17 @@ class _ToolAsk:
                             *_question_keys(name, arguments)]}
         )  # fmt: skip
         if decided.origin == "auto" and review is not None:
-            # Auto's block, kept as the gate keeps one: what the review found and
-            # the question whole, for the person to see. Only a step a chat's card
-            # would have asked about gets the key Allow once is kept under.
-            self.refused[-1].update(
-                mode="auto", review=review.to_json(), arguments=copy.deepcopy(arguments)
-            )
-            if asks_in_auto(review) and not on_refused:
-                self.refused[-1]["step_key"] = allowance_key(request)
+            # Auto's block, kept as the gate keeps one, with what the review found.
+            # Allow once may run it only when the question holds the whole step
+            # (a text typed, a form sent: the card shows all of it), a chat's card
+            # would have asked about it, and its site was not refused: then the
+            # key and the question whole, for the person to see. Any other keeps
+            # no text.
+            self.refused[-1].update(mode="auto", review=review.to_json())
+            if whole_step(arguments) and asks_in_auto(review) and not on_refused:
+                self.refused[-1].update(
+                    step_key=allowance_key(request), arguments=copy.deepcopy(arguments)
+                )
         # An automatic block leaves the person's word: it can come from nobody
         # being there to ask.
         if site is None or decided.origin != "user":

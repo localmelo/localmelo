@@ -105,14 +105,18 @@ const TYPING = {
   request_id: 'q1', tool: 'browser-type:https://notes.example', allowed: false, origin: 'auto', mode: 'auto',
   reason: 'sends data from this Mac', step_key: 'k9', preview: 'type 98 character(s) into a textbox "Note" on notes.example in Safari',
   arguments: {site: 'notes.example', access: 'type', how: 'type', text: TYPED, on: 'a textbox "Note"'},
-  review: {verdict: 'ask', categories: ['send_out'], reasons: ['Posts a note.'], by: 'model'},
+  review: {verdict: 'high', categories: ['send_out'], reasons: ['Sends data from this Mac, as your model\'s review says.'], by: 'model'},
 };
 
 test('a blocked typing step shows its site and the whole text, as text, with Allow once', () => {
   const facts = blockFacts({approval: TYPING, name: 'browser_type', preview: TYPING.preview});
   assert.equal(facts.step, TYPED, 'the whole text, uncut');
   const card = blockCard(fakeDoc(), facts, {onAllow: () => {}});
-  assert.equal(byClass(card, 'block-gist').textContent, 'Let melo type on notes.example?');
+  // The same facts as the live card for this question: the site and the box it types into.
+  assert.equal(byClass(card, 'block-gist').textContent, 'Type into “Note” on notes.example?');
+  // What the model found is the title: said once.
+  assert.equal((text(card).match(/Send data from this Mac/gi) ?? []).length, 1);
+  assert.match(text(card), /Your model's review stopped it\./);
   const step = byClass(card, 'block-step');
   assert.equal(step.textContent, TYPED, 'drawn as text: the markup in it stays characters');
   assert.equal(step.innerHTML, undefined);

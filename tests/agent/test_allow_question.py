@@ -52,6 +52,7 @@ class Types(BaseToolProvider):
                         "properties": {
                             "text": {"type": "string"},
                             "site": {"type": "string"},
+                            "kind": {"type": "string"},
                         },
                         "required": ["text"],
                     },
@@ -61,9 +62,18 @@ class Types(BaseToolProvider):
             )
         ]
 
-    async def _type(self, text: str, site: str = SITE) -> str:
+    async def _type(self, text: str, site: str = SITE, kind: str = "type") -> str:
+        """Ask as the browser asks typing (*kind* ``type``), a form sent, a click or a read."""
+        asks = {
+            "type": lambda: sites.require_type(site, text, 'a textbox "Note"'),
+            "submit": lambda: sites.require_submit(
+                site, f"{site}/post", "click", [("note", text)]
+            ),
+            "act": lambda: sites.require_act(site, "click", 'a button "Post"'),
+            "read": lambda: sites.require_site(site),
+        }
         try:
-            await sites.require_type(site, text, 'a textbox "Note"')
+            await asks[kind]()
         except BrowserError as error:
             return str(error)
         self.typed.append(text)
@@ -91,15 +101,21 @@ def task_agent(llm: FakeModel, root: Path, types: Types) -> Agent:
 
 
 async def kept_ask(
-    tmp_path: Path, policy: Any, reviews: list[Any], plans: list[Message] | None = None
+    tmp_path: Path,
+    policy: Any,
+    reviews: list[Any],
+    plans: list[Message] | None = None,
+    read: list[str] | None = None,
 ) -> dict[str, Any]:
-    """The kept record of the run's one refused typing question."""
+    """The kept record of the run's one refused typing question; *read* gets what the model read of it."""
     llm = FakeModel(plans or [typing(), _answer("It needs the note.")], reviews)
     recorder = Recorder()
     await task_agent(llm, tmp_path / "ws", Types()).run_task(
         "do the daily check-in", on_event=recorder, approval=policy
     )
     [kept] = recorder.of("tool.finished")[0].data["tool_asks"]
+    if read is not None:
+        read.extend(llm.tool_messages())
     return dict(kept)
 
 
@@ -144,7 +160,8 @@ async def test_a_refused_question_is_allowable_only_where_a_chat_would_ask(
     kept = await kept_ask(tmp_path, _refused_site(auto) if refused else auto, reviews)
 
     assert (kept["origin"], kept["allowed"], kept["mode"]) == ("auto", False, "auto")
-    assert kept["arguments"]["text"] == NOTE, "the whole text, for the person"
+    # The whole text only with the key: a block nobody can allow keeps none.
+    assert kept.get("arguments", {}).get("text") == (NOTE if can_allow else None)
     assert ("step_key" in kept) is can_allow, case
     assert (allowable(kept) is not None) is can_allow, case
 
@@ -160,7 +177,7 @@ async def test_a_refused_question_is_allowable_only_where_a_chat_would_ask(
         ("no key", {"origin": "auto", "allowed": False, "review": {"categories": ["send_out"]}}),
         ("unreadable review", {"origin": "auto", "allowed": False, "step_key": "k", "review": "x"}),
         ("unknown kind", {"origin": "auto", "allowed": False, "step_key": "k", "review": {"categories": ["made_up"]}}),
-        ("changes localmelo", {"origin": "auto", "allowed": False, "step_key": "k", "review": {"categories": ["self", "send_out"]}}),
+        ("a question without its text", {"origin": "auto", "allowed": False, "tool": "browser-type:x", "step_key": "k", "review": {"categories": ["send_out"]}}),
         ("the person's own no", {"origin": "user", "allowed": False, "step_key": "k", "review": {"categories": ["send_out"]}}),
         ("ran already", {"origin": "user", "allowed": True, "allowance": "once", "step_key": "k"}),
     ],
@@ -169,6 +186,36 @@ def test_a_record_missing_or_off_anything_is_not_allowable(
     case: str, record: dict[str, Any]
 ) -> None:
     assert allowable(record) is None, case
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "can_allow"),
+    [
+        # The card shows all of it and an allowed retry runs: typing, a form sent.
+        ("type", True),
+        ("submit", True),
+        # The card shows only a preview of what a click or a page does.
+        ("act", False),
+        ("read", False),
+    ],
+)
+async def test_only_a_question_that_holds_its_whole_step_gets_allow_once(
+    tmp_path: Path, kind: str, can_allow: bool
+) -> None:
+    blocked = verdict(verdict="ask", category="beyond_request", fits_request="no")
+    plans = [
+        _calls(("browser_type", {"text": NOTE, "kind": kind}, "call_1")),
+        _answer("Not done."),
+    ]
+    read: list[str] = []
+    kept = await kept_ask(tmp_path, AutoPolicy(task=True), [blocked], plans, read)
+
+    assert ("step_key" in kept, "arguments" in kept) == (can_allow, can_allow), kind
+    # The model reads what is true: the person can allow it once, or cannot here.
+    [note] = read
+    assert ("then they can allow it once" in note) is can_allow
+    assert ("cannot be allowed from the task" in note) is not can_allow
 
 
 # ── One exact step, once (rule 3 and 4) ──
@@ -296,11 +343,47 @@ async def test_an_allowance_on_a_site_refused_since_lifts_nothing(
         [typing(NOTE, "call_2"), typing("Short note.", "call_3"), _answer("Done.")],
         [verdict()],
     )
-    types = Types()
+    types, recorder = Types(), Recorder()
 
     await task_agent(llm, tmp_path / "ws", types).run_task(
-        "go ahead", approval=_refused_site(auto)
+        "go ahead", on_event=recorder, approval=_refused_site(auto)
     )
 
-    # Neither the allowed text nor a later one Auto found routine is typed there.
+    # Neither the allowed text nor a later one Auto found routine is typed there,
+    # and nothing says the allowed step ran.
     assert types.typed == []
+    asked = [a for e in recorder.of("tool.finished") for a in e.data["tool_asks"]]
+    assert not any(a.get("allowance") for a in asked)
+
+
+@pytest.mark.asyncio
+async def test_an_allowed_text_runs_though_another_text_on_its_site_stays_refused(
+    tmp_path: Path,
+) -> None:
+    """Two texts refused on one site; the person allows A: A runs once, B stays refused."""
+    auto = AutoPolicy(task=True)
+    other = "Checked in for today."
+    llm = FakeModel(
+        [typing(NOTE, "call_1"), typing(other, "call_2"), _answer("Blocked.")],
+        [SENDS, SENDS],
+    )
+    recorder = Recorder()
+    await task_agent(llm, tmp_path / "ws", Types()).run_task(
+        "do the daily check-in", on_event=recorder, approval=auto
+    )
+    a, b = (e.data["tool_asks"][0] for e in recorder.of("tool.finished"))
+    auto.allow_once(a["step_key"], ["send_out"], "browser_type")
+    # The chat continues the task on its own: both blocks are refused before review.
+    earlier = EarlierBlocks(
+        auto,
+        {k["call_key"]: ("Auto mode", k["step_key"]) for k in (a, b)},
+        {k["call_key"]: k["loose_keys"] for k in (a, b)},
+    )
+    llm = FakeModel(
+        [typing(NOTE, "call_3"), typing(other, "call_4"), _answer("Done.")], []
+    )
+    types = Types()
+
+    await task_agent(llm, tmp_path / "ws", types).run_task("go on", approval=earlier)
+
+    assert types.typed == [NOTE]

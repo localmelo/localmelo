@@ -21,6 +21,7 @@ from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.schema import Message
+from localmelo.support.gateway.auto_blocks import ALLOWED_HEAD
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.tests.agent.test_allow_question import NOTE, SENDS, SITE, Types, typing
@@ -111,6 +112,11 @@ async def settled(console: Console, task_id: str) -> dict[str, Any]:
         await asyncio.sleep(0.02)
 
 
+def told(request: list[Message]) -> str:
+    """All a planning request held."""
+    return "\n".join(m.content for m in request)
+
+
 async def finished_calls(console: Console, task_id: str) -> list[dict[str, Any]]:
     return [
         e.event["data"]
@@ -136,9 +142,11 @@ async def test_a_blocked_typing_step_is_listed_carded_and_allowed_once(
         console,
         client,
         types,
-        _llm,
+        llm,
     ):
         task_id = await scheduled_task(console, tmp_path)
+        # No allowance yet: no note of one.
+        assert not any(ALLOWED_HEAD in told(r) for r in llm.requests)
         body = (await client.get(f"/api/tasks/{task_id}")).json()["task"]
         [blocked] = body["blocked"]
         assert blocked["can_allow"] is True and blocked["used_at"] is None
@@ -177,6 +185,10 @@ async def test_a_blocked_typing_step_is_listed_carded_and_allowed_once(
         assert allowed.status_code == 202, allowed.text
         assert set(allowed.json()["task"]["allowances"]) == {blocked["step_key"]}
         await settled(console, task_id)
+        # The continued run read the allowed step, its whole text, in melo's note.
+        went_on = told(llm.requests[2])
+        assert ALLOWED_HEAD in went_on
+        assert f"text:\n{NOTE}" in went_on.split(ALLOWED_HEAD, 1)[1]
 
         # The allowed text ran once; the same text again was a new block (the
         # job finished since, so nothing is offered any more).
