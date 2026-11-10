@@ -663,6 +663,33 @@ async def test_a_file_only_the_chats_reading_names_is_not_asked_for(
     assert "file_missing" not in (task["ending"] or {}).get("reasons", [])
 
 
+async def test_a_run_again_card_does_not_ask_for_a_file_the_reading_names(
+    setup: Setup, tmp_path: Path
+) -> None:
+    from dataclasses import replace
+
+    from localmelo.support.gateway import task_endings
+
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    request = with_reading(
+        "Read my site and tell me which jobs fit",
+        "Write the advice to career-advice.md",
+    )
+    llm.replies = [says("Jobs that fit: ML systems engineer.\nEnding: ready")]
+    task_id = await start(workers, folder, request)
+    await ended(workers, task_id)
+    record = await workers.tasks.get_task(task_id)
+    base = (await task_endings.baseline(str(folder))).since(
+        {"git": False, "snapshot": True, "stamps": {}, "tests": False}
+    )
+    # A task that never ran and is run again: its card holds the request, reading too.
+    again = replace(record, card=f"{request}\n\nthanks")
+    ending = await workers._ending(task_id, "done", None, str(folder), base, again)
+    assert "file_missing" not in (ending or {}).get("reasons", [])
+
+
 async def test_a_named_file_written_is_ready(setup: Setup, tmp_path: Path) -> None:
     workers, llm, _ = setup
     folder = tmp_path / "localmelo-workspace"

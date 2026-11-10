@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -313,10 +314,15 @@ async def test_the_models_task_create_starts_a_task_on_the_persons_words(
         record = await _task(console, started["task_id"])
         assert (record.level, record.front_id) == (1, console.main_id)
         assert record.spec["user_words"] == typed, "what judges a step reads only this"
-        assert record.spec["objective"] == (
-            f"{typed}\n\n{READING_HEAD}\nTask name: Slides\n"
-            "Make 6 slides from notes/a.md\n"
-            "What the chat did so far:\nThe first try stopped at step 3."
+        assert re.fullmatch(
+            re.escape(f"{typed}\n\n{READING_HEAD}\n")
+            + r"<<reading nonce=(\w+)>>\n"
+            + re.escape(
+                "Task name: Slides\nMake 6 slides from notes/a.md\n"
+                "What the chat did so far:\nThe first try stopped at step 3.\n"
+            )
+            + r"<<end reading nonce=\1>>",
+            record.spec["objective"],
         )
 
 

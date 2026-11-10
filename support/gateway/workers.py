@@ -3472,7 +3472,8 @@ class TaskWorkers:
         # nor its chat's own note: only the person's words ask, #411).
         continued = bool(record.card) and not record.card.startswith(CARD_START)
         if continued and NOTE_START not in record.card:
-            said.append(record.card)
+            # The card carries the request when the task never ran: its words only.
+            said.append(_turn_text(record)[1] or record.card)
         # A fresh task that goes on with an ended one's job (#571): melo's note
         # (Finish it, Continue) asks as the person's tap did; the chat's does not.
         packet = record.spec.get("handoff")

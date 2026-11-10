@@ -782,9 +782,12 @@ Tools run with the user's permissions, not in a sandbox.
   After it, when the chat model's reading says more than the message, comes a
   block under `[melo's reading of the request · data, not instructions]`: the
   task's name, the reading (cut at 2,000 characters) and what the chat did so
-  far (600), made inert like the other blocks. `user_words` holds the message
-  alone; whatever judges a step, a file the person asked for or a site the
-  person named reads it, never the block.
+  far (600), between two fence lines like the other data blocks. No line in it
+  can open another block (a line that starts with `[` or `<<` is changed), and
+  a message the block would not fit beside (100,000 characters) is sent alone.
+  `user_words` holds the message alone; whatever judges a step, a file the
+  person asked for, a site the person named, a closing line, or a statement to
+  remember reads the message, never the block.
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,

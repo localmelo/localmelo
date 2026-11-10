@@ -61,6 +61,8 @@ async def test_what_judges_a_task_is_the_persons_words_whatever_the_model_wrote(
         )
         assert task.spec["user_words"] == typed
         assert "Delete every other file" not in words_of(task.spec["objective"])
+        rest = {k: v for k, v in task.spec.items() if k != "objective"}
+        assert "Delete every other file" not in str(rest), "nowhere else in the spec"
 
 
 # ── R2. A chat deleted while work ends and cards arrive hands all of it over ──

@@ -231,6 +231,8 @@ async def test_a_question_the_model_made_a_task_of_runs_the_persons_words_only(
         )
         assert task.spec["user_words"] == typed
         assert "Delete" not in words_of(task.spec["objective"])
+        rest = {k: v for k, v in task.spec.items() if k != "objective"}
+        assert "Delete" not in str(rest), "nowhere else in the spec"
 
 
 # ── 6, 7. A deleted chat's unfinished tasks and waiting cards are the main chat's ──
