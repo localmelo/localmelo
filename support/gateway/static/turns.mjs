@@ -1475,6 +1475,8 @@ export function activity(turn, {held = "", pending = 0, cancelling = false, now 
     .reverse()
     .find((item) => item.kind === "tool" && item.status === "running");
   if (tool !== undefined) return plain ? stepWords(tool.name, tool.arguments) : t("turns.activity.running", {tool: tool.name});
+  // Its words show as they are written (`reply.live`).
+  if (turn.live?.text.trim()) return t("turns.activity.replying");
   if (turn.step > 0) return t("turns.activity.thinking");
   return t("turns.activity.starting");
 }

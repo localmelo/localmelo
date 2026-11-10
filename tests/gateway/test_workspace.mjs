@@ -158,6 +158,7 @@ test('a reply being written grows in place, starts over from 0, and its stored r
   assert.deepEqual(live({at: 0, text: 'Hello\n'}), {live: true});
   live({at: 6, text: 'world\n'});
   assert.deepEqual(turn.live, {step: 1, attempt: 1, text: 'Hello\nworld\n'});
+  assert.equal(activity(turn), 'Writing the reply');
   const cursor = view.lastEventId;
   live({at: 0, text: 'Hello\nworld\n'}); // a reconnect: the text so far, once
   assert.equal(turn.live.text, 'Hello\nworld\n');
