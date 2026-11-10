@@ -200,14 +200,22 @@ async def test_separate_reasoning_never_reaches_content() -> None:
             ],
             "Let me think\n about it.\n",
         ),
+        # A think block in the content although reasoning has a field of its own.
+        (
+            [StreamFragment(kind="reasoning", text="Plan."), "<think>\n", "secret\n", "</think>\n", "Hi\n"],
+            "<think>\nsecret\n</think>\nHi\n",
+        ),
+        # A second block after the first, which the declared framing parsed.
+        (["<think>a</think>\n", "<think>\n", "b\n", "</think>\n"], "<think>a</think>\n<think>\nb\n</think>\n"),
     ],
-    ids=["tool-call-as-text", "reasoning-again"],
+    ids=["tool-call-as-text", "reasoning-again", "think-in-content", "later-think-block"],
 )
 async def test_text_a_whole_reply_check_hides_is_never_shown(
     fragments: list[object], content: str
 ) -> None:
-    thinking = "Let me think about it.\n" if len(fragments) == 3 else ""
-    display = Display("none")
+    first = fragments[0]
+    thinking = first.text if isinstance(first, StreamFragment) else ""
+    display = Display("explicit" if fragments[0] == "<think>a</think>\n" else "none")
     llm = StreamLLM(
         [[*fragments, Message(role="assistant", content=content, thinking=thinking)]]
     )
@@ -216,7 +224,7 @@ async def test_text_a_whole_reply_check_hides_is_never_shown(
         await _scoped_chat(llm).plan_step([], [], [], "hi")
     finally:
         STREAM_DISPLAY.reset(token)
-    assert display.text() == ""
+    assert display.text().strip() == ""
 
 
 async def test_no_display_keeps_the_complete_reply_path() -> None:

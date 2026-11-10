@@ -7,6 +7,7 @@ import dataclasses
 import json
 import logging
 import math
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -596,16 +597,24 @@ def _quote_data_delimiter(text: str, delimiter: str) -> str:
     )
 
 
+# A think block's mark anywhere in content, or a spelled-out block at its
+# start: the finished reply's views split these off as thinking.
+_THINK_MARK = re.compile(r"</?think\b|\A\s*<thinking\b", re.IGNORECASE)
+
+
 def _may_hide(text: str, reasoning: Sequence[str], tools: Sequence[ToolDef]) -> bool:
     """Whether the streamed *text* so far may be text a check of the whole reply hides.
 
-    A tool call written as text (:func:`~localmelo.melo.schema.broken_tool_call`,
-    judged on the text so far, so markup on a line is caught before the line
-    shows), or content that so far repeats the *reasoning* word for word, as
-    unfinished thinking a server sends again as content does
+    A think block in the content (:data:`_THINK_MARK`: any block, also after
+    the first and also when the server sends reasoning in a field of its
+    own), a tool call written as text
+    (:func:`~localmelo.melo.schema.broken_tool_call`, judged on the text so
+    far, so markup on a line is caught before the line shows), or content
+    that so far repeats the *reasoning* word for word, as unfinished thinking
+    a server sends again as content does
     (:func:`~localmelo.melo.schema.unfinished_thinking`).
     """
-    if broken_tool_call(text, tools):
+    if _THINK_MARK.search(text) or broken_tool_call(text, tools):
         return True
     words = text.split()
     thought = "".join(reasoning).split()
@@ -1253,12 +1262,13 @@ class Chat:
             if filter is not None:
                 _, tail = filter.finish()
                 rest = kept + tail
-                # Held text of a reply that is only unfinished thinking, or a
-                # tool call written as text, stays held.
+                # Held text of a reply that is only unfinished thinking, holds
+                # a think block, or is a tool call written as text stays held.
                 if (
                     saw_text
                     and rest
                     and not self.unfinished(reply)
+                    and not _THINK_MARK.search(shown + rest)
                     and (
                         reply.tool_calls or not broken_tool_call(shown + rest, offered)
                     )
