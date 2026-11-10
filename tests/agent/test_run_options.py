@@ -278,7 +278,7 @@ class TestMemoryOption:
         assert "echo q" in first[1].content
 
     @pytest.mark.asyncio
-    async def test_memory_off_skips_long_term_and_promotion(self) -> None:
+    async def test_memory_off_skips_long_term_and_clears_reflections(self) -> None:
         emb = FakeEmbedding()
         options = AgentOptions(steps_per_attempt=1, max_attempts=2, memory=False)
         agent = _echo_agent(_continue_then_answer(), options, embedding=emb)
@@ -286,7 +286,7 @@ class TestMemoryOption:
         assert agent._embedding is emb
 
         assert await agent.run("echo q") == "answer"
-        # No recall, no long-term writes, no reflection promotion.
+        # No recall, no long-term writes.
         assert emb.calls == 0
         assert agent.hippo.long._entries == []
         # The reflection was still cleared at the end of the run.

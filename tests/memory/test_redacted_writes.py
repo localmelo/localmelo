@@ -60,7 +60,7 @@ class TestStoreStep:
             tool_result=ToolResult("echo", output=f"{OTP} {KEY}"),
         )
 
-        summary = await hippo.store_step(task.task_id, step)
+        await hippo.store_step(task.task_id, step)
 
         stored = await hippo.get_task(task.task_id)
         assert stored is not None
@@ -74,9 +74,6 @@ class TestStoreStep:
         assert CODE not in stored_step.tool_result.output
         assert KEY not in stored_step.tool_result.output
         assert REDACTED in stored_step.thought
-        # The summary it returns is redacted too.
-        assert CODE not in summary
-        assert KEY not in summary
         # The caller's own task and step are untouched: they are what the
         # model and the run still read.
         assert CODE in task.query

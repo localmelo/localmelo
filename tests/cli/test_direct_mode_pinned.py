@@ -130,6 +130,9 @@ same, as ``tests/cli/test_thinking_steps_config.py`` and the legacy A/B check.
 The chat request timeout's default moved to 300 s; only the comment in
 ``_build_direct_mode_agent`` that names it changed, so it has a new hash; the requests are
 the same.
+``_ExitSignals``'s docstring says the reflections are cleared at an exit (nothing stores
+them since the default mode keeps no long-term store); only that sentence changed, so it
+has a new hash; the requests are the same.
 ``_check_args`` is not pinned.
 """
 
@@ -154,7 +157,7 @@ PINNED = {
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
     "_build_direct_mode_agent": "f89ab7da89f46292e2493eba968b9789d6d7873f20e8f15bab2d3c4c9dd2796b",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
-    "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
+    "_ExitSignals": "f172fbb9c2d03681cdc7c6dbc7fcf22afd0d254f9c8c194d112ee34e7abf90d9",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
     "_direct_options": "75d050739b74c5b80e7af4136de127695669800ae6b074d97dcb94e2db5b3b20",
