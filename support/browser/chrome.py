@@ -92,7 +92,10 @@ this computer, and melo's rule sees only addresses written as such. List only
 servers whose pages you wrote. melo's own ports stay blocked as an address a
 page or melo names, not for what a listed page's own script reaches by other
 means. A page's own requests are judged by its origin only, so a server both
-written by the person in this run and listed is treated as listed.
+written by the person in this run and listed is treated as listed. While
+melo's navigation to a listed site loads, any GET of the main frame to that
+site passes, one the previous page starts or one a redirect chain leads back
+to included.
 
 A box the page puts up blocks it until it is answered: an ``alert`` is closed
 with OK; a ``confirm`` during an act is put to the person through
@@ -733,7 +736,12 @@ class _Chrome:
                 # driver's), never for another.
                 page = await self._page_of(frame)
                 if page in self.written or page in self.listed:
-                    main = frame == page and params.get("resourceType") == "Document"
+                    # melo's own navigation is a GET of the main frame.
+                    main = (
+                        frame == page
+                        and params.get("resourceType") == "Document"
+                        and request.get("method") == "GET"
+                    )
                     verdict = rule.decide(
                         url,
                         origin,

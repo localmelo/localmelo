@@ -248,7 +248,12 @@ def test_who_reaches_a_listed_server_in_background_chrome(
 
 
 async def _pause(
-    browser: chrome._Chrome, url: str, kind: str, headers: dict[str, str], ident: str
+    browser: chrome._Chrome,
+    url: str,
+    kind: str,
+    headers: dict[str, str],
+    ident: str,
+    method: str = "GET",
 ) -> None:
     browser._dispatch(
         {
@@ -257,7 +262,7 @@ async def _pause(
                 "requestId": ident,
                 "frameId": "PAGE1",
                 "resourceType": kind,
-                "request": {"url": url, "method": "GET", "headers": headers},
+                "request": {"url": url, "method": method, "headers": headers},
             },
         }
     )
@@ -268,7 +273,7 @@ async def _pause(
 async def test_background_chrome_lets_melos_own_navigation_through_and_tells_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The driver marks the listed site it opens for that load only; a request of another page is blocked and told."""
+    """The driver marks the listed site it opens for that load only, for a GET of the main frame; any other request is blocked and told."""
     calls = Calls()
     browser = _browser(rule(), calls)
     driver = ChromeBackgroundDriver(command=["unused"], local=rule())
@@ -284,6 +289,8 @@ async def test_background_chrome_lets_melos_own_navigation_through_and_tells_the
 
     async def load(session: str, start: Callable[[], Awaitable[Any]]) -> None:
         await _pause(browser, FIXTURE, "Document", {}, "nav")  # Chrome pauses the load
+        # Under the mark: a post of the main frame is not melo's navigation.
+        await _pause(browser, FIXTURE, "Document", {}, "post", method="POST")
 
     monkeypatch.setattr(driver, "_target", target)
     monkeypatch.setattr(driver, "_focus", target)
@@ -294,10 +301,12 @@ async def test_background_chrome_lets_melos_own_navigation_through_and_tells_the
     # The same address asked by the page itself after the load, and by a public page.
     await _pause(browser, FIXTURE, "Document", {}, "self")
     await _pause(browser, FIXTURE, "XHR", {"Referer": PUBLIC}, "public")
+    blocked = ("Fetch.failRequest", "BlockedByClient")
     assert [(m, p.get("errorReason")) for m, p in calls.answered()] == [
-        ("Fetch.continueRequest", None),
-        ("Fetch.failRequest", "BlockedByClient"),
-        ("Fetch.failRequest", "BlockedByClient"),
+        ("Fetch.continueRequest", None),  # the load
+        blocked,  # a post of the main frame, under the mark
+        blocked,  # the page's own request after the load
+        blocked,  # a public page's
     ]
     assert [a.port for a in driver.local_attempts()] == [A]  # told, once
 

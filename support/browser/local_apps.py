@@ -41,15 +41,16 @@ itself:
   web_fetch_allow_local`` lists (the session's
   :class:`~localmelo.support.web.guard.LocalAllow`, given to the page as
   ``listed``). A request to it goes on only when it is melo's own
-  navigation of the page's main frame to exactly that site (``opening``, set
-  by the driver while it loads the address melo opens), or when the page that
-  sends it is itself on a listed server (``sender``: the ``Origin`` header,
-  else the ``Referer``, which Chrome sets and a page can only shorten or
-  drop). A request of any other page, a public one's, a frame's of a public
-  page, or one with neither header, is blocked and told, as before. melo's
-  own ports stay blocked even when listed, as an address a page or melo
-  names; not for what a listed page's own script reaches by other means.
-  Three limits:
+  navigation of the page's main frame to exactly that site (a GET request
+  under ``opening``, set by the driver while it loads the address melo
+  opens), or when the page that sends it is itself on a listed server
+  (``sender``: the ``Origin`` header, else the ``Referer``, which Chrome sets
+  and a page can only shorten or drop). A request of any other page, a
+  public one's, a frame's of a public page, or one with neither header, is
+  blocked and told, as before. melo's own ports stay blocked even when
+  listed, as an address a page or melo names; not for what a listed page's
+  own script reaches by other means.
+  Four limits:
 
   - A page on a listed server is trusted like the developer's own app:
     Chrome's own check does not stop its WebSockets or its requests to names
@@ -57,6 +58,10 @@ itself:
     as such. List only servers whose pages you wrote.
   - A page's own requests are judged by its origin only. A server that is
     both written by the person in this run and listed is treated as listed.
+  - ``opening`` names the site, not the exact address or the redirects of
+    the load: while melo's navigation loads, any GET of the main frame to
+    that site passes, including one the previous page starts and one that
+    reaches the site again through a redirect chain.
   - Safari tells only where a page landed, so a public page passed through
     inside one step is not seen.
 - Anything else goes on unchanged.
