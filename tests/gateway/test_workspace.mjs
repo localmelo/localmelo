@@ -4946,10 +4946,11 @@ test('a chat\'s header names its folder: alone in default mode, after the model 
     Object.assign(h.state().sessions[0], {workspace_label: folder});
     Object.assign(h.state().view.session, {workspace_label: folder});
     h.run('syncUI()');
-    return h.text('header-model');
+    return [h.text('header-model'), h.element('header-model').hidden];
   };
-  assert.deepEqual([await subtitle(folderRoutes(), '~/w'), await subtitle(baseRoutes(), '~/w')], ['In ~/w', 'Qwen-27B · ~/w']);
-  assert.deepEqual([await subtitle(folderRoutes(), ''), await subtitle(baseRoutes(), '')], ['Qwen-27B', 'Qwen-27B'], 'A chat without a folder keeps the model');
+  assert.deepEqual([await subtitle(folderRoutes(), '~/w'), await subtitle(baseRoutes(), '~/w')], [['In ~/w', false], ['Qwen-27B · ~/w', false]]);
+  assert.deepEqual([await subtitle(folderRoutes(), ''), await subtitle(baseRoutes(), '')], [['', true], ['Qwen-27B', false]],
+    'A chat without a folder has no second line: the chip, the composer and the panel name the model');
 });
 
 test('the starters show on an empty new chat, step aside for text, and fill the composer without sending', async () => {

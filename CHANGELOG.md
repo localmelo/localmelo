@@ -1102,6 +1102,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Changed
 
 - The macOS app looks like the Mac around it: its window has no title band (the console reaches the top edge, the window buttons sit over the sidebar, and the top strip still moves the window), and the menu-bar item is Melo's head as a line drawing in the bar's own colour, with the ears and crown in Melo's fur colour, instead of a coloured tile. (#590)
+- The console is calmer and more of a piece: the composer's chips share one look, the header names the chat's folder instead of repeating the model, replies are signed "Melo", code that does not fit shows that it scrolls, the first screen keeps its shape in a narrow window, Take over is the first button under a browser page, and the app says in plain words when another app holds its port. (#590)
 - Developer only: two memory items are marked as conflicting without the chat model only when one says exactly what the other denies. Part of #428.
 - Developer only: an opened memory item names the chat turns it came from, so melo can open one when it needs what was said word for word. Part of #428.
 - Developer only: a memory item that repeats one already kept joins it, and one that changes it replaces it, as the chat's model judges; two different facts that share a word such as "lives" no longer replace each other. Part of #428.

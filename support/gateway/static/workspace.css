@@ -896,21 +896,23 @@ button:hover:not(:disabled) {
   text-underline-offset: 3px;
 }
 .answer code {
-  font:
-    var(--text-small)/1.65 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-small);
   background: var(--soft);
-  padding: 2px 5px;
+  padding: 1px 4px;
   border-radius: var(--radius-control);
 }
+/* Code wider than its box scrolls inside it; a shade at the right edge says there is more, and goes at the end. */
 .answer pre {
-  background: var(--sidebar);
+  background:
+    linear-gradient(to left, var(--sidebar), var(--sidebar)) right / 20px 100% no-repeat local,
+    linear-gradient(to left, color-mix(in srgb, var(--ink) 12%, transparent), transparent) right / 20px 100% no-repeat scroll,
+    var(--sidebar);
   border: 1px solid var(--line);
   padding: 16px;
   border-radius: var(--radius-card);
   overflow-x: auto;
+  scrollbar-width: thin;
   white-space: pre;
   max-width: 100%;
 }
@@ -1168,9 +1170,13 @@ dialog.picture-box {
 }
 /* The folder a new chat works in: a chip in the toolbar, the panel it opens above it, and the starters under the composer. */
 .folder-picker { position: relative; min-width: 0; }
-.folder-chip { display: flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 3px var(--space-2); background: none; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
+/* The composer's chips (folder, model, mode) share one look: a 28 px box with a field edge, its words cut at the end. */
+.folder-chip, .composer-models .model-button, .mode-chip { max-width: 100%; min-height: 28px; padding: 0 var(--space-2); background: none; border: 1px solid var(--control); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
+.folder-chip, .mode-chip { display: inline-flex; align-items: center; gap: var(--space-1); }
 .folder-chip > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.folder-chip:hover, .folder-chip[aria-expanded="true"] { background: var(--soft); }
+/* The model chip's words are one text (name and caret), so it stays a line box to be cut with an ellipsis. */
+.composer-models .model-button { line-height: 26px; }
+.folder-chip:hover, .folder-chip[aria-expanded="true"], .composer-models .model-button:hover, .composer-models .model-button[aria-expanded="true"] { background: var(--soft); }
 .folder-menu { position: absolute; left: 0; bottom: calc(100% + var(--space-2)); z-index: 20; width: min(360px, 80vw); max-height: 60dvh; overflow-y: auto; padding: var(--space-1); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-float); }
 .folder-menu-title { margin: 0; padding: var(--space-2) var(--space-2) var(--space-1); font-size: var(--text-caption); color: var(--ink-3); }
 #folder-list { margin-bottom: var(--space-1); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); }
@@ -1324,11 +1330,10 @@ dialog::backdrop {
   background: var(--surface);
   z-index: 2;
 }
-.details-drawer h2 { display: inline-block; margin: 0 12px 12px 0; font-size: var(--text-title); }
-.drawer-tabs { display: flex; gap: 6px; margin: 12px 0; }
-.drawer-tabs button, .details-drawer button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; background: var(--soft); }
-.drawer-tabs [aria-pressed="true"], .worker-kinds [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-.drawer-tabs { flex-wrap: wrap; }
+.details-drawer h2 { margin: var(--space-2) 0 0; font-size: var(--text-title); }
+.details-drawer .drawer-tabs { margin: var(--space-3) 0; }
+.drawer-content button { border: 1px solid var(--line); border-radius: var(--radius-control); padding: 6px 9px; background: var(--soft); }
+.worker-kinds [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .drawer-event pre { margin: 2px 0; font-size: var(--text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
 .drawer-tool, .drawer-memory, .drawer-run, .drawer-event { padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .drawer-content p { margin: 4px 0; }
@@ -1451,6 +1456,9 @@ dialog::backdrop {
     max-width: 340px;
     margin-left: auto;
     margin-right: auto;
+    font-size: var(--text-heading);
+    letter-spacing: -0.5px;
+    text-wrap: balance;
   }
   .composer-area {
     padding: 10px 16px max(12px, env(safe-area-inset-bottom));
@@ -1461,7 +1469,6 @@ dialog::backdrop {
   .composer-toolbar { position: relative; }
   .folder-picker { position: static; }
   .folder-menu { right: 0; width: auto; }
-  .starters { flex-direction: column; align-items: stretch; }
   #composer-note {
     display: none;
   }
@@ -1497,8 +1504,12 @@ dialog::backdrop {
     font-size: var(--text-small);
     text-decoration: none;
   }
-  .folder-chip, .folder-item, .folder-action, #folder-use, .folder-path input, .starters button { min-height: 44px; }
+  .folder-item, .folder-action, #folder-use, .folder-path input { min-height: 44px; }
   .icon-button { min-width: 44px; }
+}
+@media (pointer: coarse) {
+  .folder-chip, .composer-models .model-button, .mode-chip, .starters button { min-height: 44px; }
+  .composer-models .model-button { line-height: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -2211,7 +2222,7 @@ dialog::backdrop {
 .panel-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; margin: 6px 16px 0; padding: 3px; border-radius: var(--radius-card); background: var(--raised); }
 .panel-tab { display: grid; justify-items: center; padding: 6px 2px 5px; border: 0; border-radius: var(--radius-control); background: none; color: var(--ink-3); font-size: var(--text-caption); }
 .panel-tab-glyph { font-size: 15px; line-height: 1.2; }
-.panel-tab[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--tab-shadow); }
+.panel-tab:is([aria-selected="true"], [aria-pressed="true"]) { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--tab-shadow); }
 .panel-body { flex: 1; padding: 6px 12px 24px; }
 .panel-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .panel-section { margin: 18px 8px 6px; font-size: var(--text-small); font-weight: 600; }
@@ -2364,7 +2375,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .panel .task-panel { flex: 1; padding: 14px 16px 28px; overflow-wrap: anywhere; }
 .panel .task-panel[hidden] { display: none; }
 .panel .task-panel a:not(.worker-row, .task-back) { color: var(--accent); }
-.task-back { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-left: -4px; padding: 2px 8px 2px 4px; border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-small); font-weight: 600; text-decoration: none; }
+.task-back { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin-left: -4px; padding: 2px 8px 2px 4px; border: 0; border-radius: var(--radius-control); background: none; color: var(--ink-2); font-size: var(--text-small); font-weight: 600; text-decoration: none; }
 .task-back::before { content: "‹"; font-size: var(--text-title); font-weight: 400; line-height: 1; }
 .task-back:hover { background: var(--tint); color: var(--ink); }
 .panel .task-panel .task-title { margin: 8px 0 4px; font-size: var(--text-heading); font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
@@ -2575,7 +2586,6 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 
 /* Ask or Auto (#339): the chip beside the model, its menu above it, and the card under a step Auto blocked. */
 .mode-picker { position: relative; flex: none; }
-.mode-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 3px var(--space-2); background: none; border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink-2); font-size: var(--text-caption); white-space: nowrap; }
 .mode-chip:hover:not(:disabled), .mode-chip[aria-expanded="true"] { background: var(--soft); }
 .mode-chip:disabled { opacity: 0.6; }
 .mode-chip[data-mode="auto"] { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -2636,7 +2646,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
-  .mode-chip, .mode-item, .block-allow, .mode-grant-remove { min-height: 44px; }
+  .mode-item, .block-allow, .mode-grant-remove { min-height: 44px; }
   .block-why, .block-step, .block-code, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }
@@ -2733,7 +2743,7 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .app:has(> .browser-panel:not([hidden])) > :is(.chat, .panel) { visibility: hidden; }
 /* The top bar is the chat header's height, so the page does not jump when the view opens. */
 .bp-head { display: flex; align-items: center; gap: var(--space-3); min-height: 72px; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--line); }
-.bp-back { flex: none; margin-left: 0; border: 0; background: none; }
+.bp-back { flex: none; margin-left: 0; }
 .bp-titles { flex: 1; min-width: 0; }
 .bp-title, .bp-address { display: block; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bp-title { font-size: var(--text-body); font-weight: 650; letter-spacing: -0.01em; }
@@ -2763,6 +2773,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .bp-foot-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-height: 36px; }
 .bp-status { display: inline-flex; align-items: center; gap: 7px; min-height: 1.5em; margin-right: auto; color: var(--ink-2); }
 .bp-take, .bp-give, .bp-stop, .bp-window { flex: none; padding: 5px 12px; font-size: var(--text-small); }
+/* Take over is the way out of "View only": first of the footer's buttons, as tall as the row. */
+.bp-take { min-height: 36px; padding: 0 var(--space-3); }
 .bp-hint { margin: 0; color: var(--ink-2); line-height: 1.45; text-wrap: pretty; }
 .bp-status:not(:empty)::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--control); }
 .browser-panel[data-state="live"] .bp-status::before { background: var(--ok); }

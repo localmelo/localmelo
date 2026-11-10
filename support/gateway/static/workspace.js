@@ -467,9 +467,11 @@ function applyChrome() {
 }
 
 /** Under a chat's title: its folder in default mode, its model and its folder in developer mode. */
+/** The header's second line: the chat's folder. The model already shows in the chip, the composer and the panel,
+ * so only a developer sees it here too. */
 function chatSubtitle(model, folder) {
-  if (!folder) return model;
-  return developerMode ? `${model} · ${folder}` : t("folder.chip", { name: folder });
+  if (developerMode) return folder ? `${model} · ${folder}` : model;
+  return folder ? t("folder.chip", { name: folder }) : "";
 }
 
 /** A chat's second line in the sidebar: its folder, which tells chats apart; a developer sees the model first. */
@@ -525,11 +527,13 @@ function syncUI() {
   $("starters").hidden = !fresh || !!pendingOutbox() || input.value !== "";
   $("model-banner").hidden = !(S.health?.configured === false && !setup);
   refreshStreamNotice();
-  $("header-model").textContent = session
+  const subtitle = session
     ? chatSubtitle(session.model || t("header.yourConfiguredModel"), session.workspace_label)
     : model?.name
-      ? `${model.name} · ${model.backend_label}`
+      ? developerMode ? `${model.name} · ${model.backend_label}` : ""
       : t("header.connectModel");
+  $("header-model").textContent = subtitle;
+  $("header-model").hidden = !subtitle;
   const connection = connectionState({ turn, held, pending, session });
   const modelChip = $("connection-btn");
   // With melo_serve, the chip that names the model opens its chat models: the model, its backend and a caret.
@@ -597,6 +601,7 @@ function syncUI() {
     const heading = workers.state.mode === "detail" ? workers.state.session?.title || t("header.workerRun") : t("header.workers");
     $("header-title").textContent = heading;
     $("header-model").textContent = t("header.readOnly");
+    $("header-model").hidden = false;
     document.title = `localmelo · ${heading}`;
   }
   const welcome = $("welcome-description");
@@ -1600,7 +1605,7 @@ function assistantNode(turn, newest = false) {
   // The live row, the work box and the failure card word every state, so the face is decoration there. A
   // finished answer with no work box above it has nothing else saying the turn is done.
   icon.alt = face === "done" && shownItems(turn).length === 0 ? t("chat.done") : "";
-  label.append(icon, el("span", "", "localmelo"));
+  label.append(icon, el("span", "", t("common.melo")));
   article.append(label);
   if (!turn.finishedAt || shownItems(turn).length > 0) article.append(workGroup(turn));
   // The page melo browses, as a card in the reply: outside the folded steps, the same node at every redraw.
