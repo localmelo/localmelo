@@ -3763,7 +3763,9 @@ class BrowserToolProvider(BaseToolProvider):
         question, shows no step on the chat's card and adds nothing to the chat.
         The address is checked before and after, as a step checks it
         (:meth:`_recheck`), but a page found at a private address is only not
-        pictured: it is not blanked, and no site is approved or refused here.
+        pictured: it is not blanked, and no site is approved or refused here. A
+        page on a listed test server is pictured like a public one, when its tab
+        is on one (``_on_listed``).
         """
         if self._owners.held:
             raise BrowserError("The person has the page.")
@@ -3772,16 +3774,25 @@ class BrowserToolProvider(BaseToolProvider):
             if tab_id is None or tab_id not in self._origins or tab_id not in self._raw:
                 return None
             raw = self._raw[tab_id]
-            await self._public_now(raw)
+            await self._public_now(raw, tab_id)
             shot = await self._driver.screenshot(raw)
-            await self._public_now(raw)  # a page that moved while it was pictured
+            await self._public_now(
+                raw, tab_id
+            )  # a page that moved while it was pictured
             return shot
 
-    async def _public_now(self, raw: str) -> None:
-        """:class:`BrowserError` unless the browser says tab *raw* is at a public address. It changes nothing."""
+    async def _public_now(self, raw: str, tab: str) -> None:
+        """:class:`BrowserError` unless the browser says tab *raw* (*tab* for melo) is at a public address, or on a listed test server while the tab is in ``_on_listed``. It changes nothing.
+
+        The list is passed only for a tab in that set, as a step on it would;
+        it asks no site, marks nothing and does not move the tab in or out of
+        the set (see :meth:`_require`, which a watcher must not call).
+        """
         url = await self._driver.location(raw)
         sites.require_origin(url)
-        await addresses.require_public(url)
+        await addresses.require_public(
+            url, self._listed if tab in self._on_listed else None
+        )
 
     # ── Other apps' windows ──
 

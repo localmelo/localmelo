@@ -23,7 +23,7 @@ from localmelo.melo.executor.models import ToolOutput
 from localmelo.support import config, web_local
 from localmelo.support.browser import chrome, local_apps
 from localmelo.support.browser.chrome import ChromeBackgroundDriver
-from localmelo.support.browser.driver import TabInfo
+from localmelo.support.browser.driver import BrowserError, TabInfo
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.web.guard import LocalAllow
 from localmelo.tests.browser.fakes import FakeDriver, button, link, page
@@ -361,6 +361,30 @@ async def test_a_listed_site_is_asked_about_like_any_site() -> None:
     public, listed = asks.asked
     assert public.split(":", 1)[0] == listed.split(":", 1)[0]  # the same question
     assert "example.com" in public and f"127.0.0.1:{A}" in listed, asks.asked
+
+
+async def test_the_picture_route_pictures_a_page_on_a_listed_server_only_in_a_tab_on_one() -> (
+    None
+):
+    """A watcher's picture follows the steps' rule for the list and marks nothing."""
+    driver = _driver()
+    provider = BrowserToolProvider(driver, listed=_listed(A))
+    tools = {tool.definition.name: tool for tool in await provider.start()}
+    with asking(Asks()):
+        assert not (await run(tools, "browser_open", url=FIXTURE)).is_error  # t1
+        assert not (
+            await run(tools, "browser_open", url=PUBLIC, tab="new")
+        ).is_error  # t2
+    driver.queue["t2"] = [FIXTURE]  # the public page's tab found on a listed address
+    marks: dict[str, Any] = {}
+    token = TOOL_MARKS.set(marks)
+    try:
+        assert await provider.watcher_picture("t1") is not None  # in the set
+        with pytest.raises(BrowserError):  # a listed address, but not in the set
+            await provider.watcher_picture("t2")
+    finally:
+        TOOL_MARKS.reset(token)
+    assert "allowed_local" not in marks
 
 
 async def test_melos_own_port_is_refused_even_when_listed() -> None:
