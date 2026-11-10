@@ -21,6 +21,7 @@
  */
 import {t} from './i18n.mjs';
 import {maker} from './dom.mjs';
+import {ENDING_MARKS, endingLabel} from './endings.mjs';
 
 /** The states in which a run uses the browser: the card watches its source, and the chat's chip names it. */
 export const ACTIVE = new Set(['working', 'waiting', 'you']);
@@ -82,7 +83,9 @@ export const sourceOf = (card) => ({session: card.session, gen: card.gen, run: c
  * nothing is watched) and whether this page has painted a picture of it. `own` is the state that colours it (one
  * map, in the stylesheet); `fresh` says the picture is arriving: a picture that is not is dimmed, and one whose
  * stream broke or stopped changing says so. `size` is `full` while the run is active, `kept` once it ended with a
- * picture on the page, else `line`.
+ * picture on the page, else `line`. A task's card whose run is over and that carries its task's `ending` (from the
+ * chat's end card of that task) says how the task ended, as the task's page does: a task that needs the person
+ * never reads as done.
  */
 export function browserLook(card, stream = null, {retained = false} = {}) {
   const active = ACTIVE.has(card.state);
@@ -91,7 +94,8 @@ export function browserLook(card, stream = null, {retained = false} = {}) {
   const picture = retained && !gone;
   const fresh = Boolean(stream?.picture) && stream?.link === 'open' && meta?.state === 'live';
   const broken = active && picture && (stream?.link === 'retry' || meta?.state === 'stale');
-  const own = broken ? 'stale' : card.state;
+  const ended = !active && card.task && card.ending ? card.ending : null;
+  const own = broken ? 'stale' : ended ? (ended.state === 'ready' ? 'done' : 'stopped') : card.state;
   let sub = card.site;
   if (broken && stream?.link === 'retry') sub = t('browser.reconnecting');
   else if (!broken && card.state === 'you') sub = t('browser.state.paused');
@@ -100,8 +104,8 @@ export function browserLook(card, stream = null, {retained = false} = {}) {
   if (active && !picture) note = gone ? t(`browser.closed.${meta.reason || 'tab'}`) : t('browser.loading.note');
   return {
     own,
-    glyph: GLYPHS[own],
-    word: broken ? t('browser.stale.title') : stateWord(card.state),
+    glyph: (ended && ENDING_MARKS[ended.state]) || GLYPHS[own],
+    word: broken ? t('browser.stale.title') : ended ? endingLabel(ended) : stateWord(card.state),
     sub,
     now: card.state === 'working' && !broken && card.action ? t(`browser.action.${card.action}`) : '',
     note,

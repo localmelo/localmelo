@@ -44,7 +44,7 @@ import logging
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable, Coroutine, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
@@ -137,9 +137,16 @@ class Ask:
     # What ask_person showed, and the internal turn that handles the ask.
     parts: dict[str, str] = field(default_factory=dict)
     turn_id: str = ""
-    # A message sent as its answer, delivered when its Undo window ends:
-    # (the echo, the words, the delivery).
-    held: tuple[int, str, asyncio.Task[None]] | None = None
+
+
+@dataclass(eq=False)
+class _Held:
+    """A message sent as a task's answer, delivered when its Undo window ends."""
+
+    task_id: str
+    title: str
+    typed: str
+    delivery: asyncio.Task[None] | None = None
 
 
 @dataclass
@@ -209,6 +216,8 @@ class OwnerAsks:
         self._listeners: list[Callable[[StoredEvent], None]] = []
         self._closed = False
         self.undo_s = ANSWER_UNDO_S
+        # The messages sent as a task's answer that wait out their Undo, by echo id.
+        self._held: dict[int, _Held] = {}
         # Per chat and key: the outcome of a queued message being kept.
         self._admitting: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
         # The numbers of notes, and the newest notes of each chat by key, so a
@@ -369,37 +378,78 @@ class OwnerAsks:
         It is delivered when :attr:`undo_s` ends, unless taken back
         (:meth:`take_back`); None when not exactly one ask waits.
         """
-        waiting = [a for a in self.waiting_on_person(chat_id) if a.held is None]
+        waiting = [
+            a for a in self.waiting_on_person(chat_id) if self.held(a.task_id) is None
+        ]
         if len(waiting) != 1 or not typed.strip():
             return None
         ask = waiting[0]
-        echo = await self._echo(ask, "answer_sent", "ask.sentAnswer", typed=typed,
-                                undo_s=self.undo_s)  # fmt: skip
-        delivery = asyncio.create_task(
-            self._deliver(ask, typed.strip(), echo["id"]), context=contextvars.Context()
+
+        async def deliver(text: str) -> None:
+            await self.reply(ask.task_id, text, ask.ask_id)
+
+        return await self.send_answer(
+            chat_id, ask.task_id, ask.title, typed, deliver, ask_id=ask.ask_id
         )
-        ask.held = (echo["id"], typed, delivery)
+
+    async def send_answer(
+        self,
+        chat_id: str,
+        task_id: str,
+        title: str,
+        typed: str,
+        deliver: Callable[[str], Awaitable[Any]],
+        *,
+        ask_id: str = "",
+    ) -> dict[str, Any]:
+        """The person's *typed* message, sent to *task_id* as their answer: its line with Undo.
+
+        *deliver* gets the words when :attr:`undo_s` ends, unless the person
+        took them back (:meth:`take_back`) before: an open question's answer
+        (:meth:`answer_from_chat`), or a message to a task that asked for the
+        person (``Front.answer_waiting``, #617).
+        """
+        key = "ask.sentAnswer"
+        data = {"echo": "answer_sent", "task_id": task_id, "title": title,
+                "line": t_in("en", key, title=title), "said": said(key, title=title),
+                "typed": typed, "undo_s": self.undo_s,
+                **({"ask_id": ask_id} if ask_id else {})}  # fmt: skip
+        echo = await self.console.front_for(chat_id).echo(data)
+        held = _Held(task_id, title, typed)
+        self._held[echo["id"]] = held
+        held.delivery = asyncio.create_task(
+            self._deliver(chat_id, echo["id"], deliver), context=contextvars.Context()
+        )
         return echo
 
-    async def _deliver(self, ask: Ask, text: str, echo_id: int) -> None:
-        await asyncio.sleep(self.undo_s)
-        ask.held = None
-        await self.reply(ask.task_id, text, ask.ask_id)
-        # The Undo goes: the answer is the task's now.
-        with contextlib.suppress(Exception):
-            await self.console.front_for(ask.chat_id).echo(
-                {"echo": "answer_delivered", "of": echo_id}
-            )
+    def held(self, task_id: str) -> int | None:
+        """The echo of a message sent as *task_id*'s answer that waits out its Undo, or None."""
+        return next((i for i, h in self._held.items() if h.task_id == task_id), None)
 
-    def take_back(self, echo_id: int) -> tuple[Ask, str] | None:
-        """Undo a message sent as an answer, before it is delivered: its ask and words."""
-        for ask in self._asks.values():
-            if ask.held is not None and ask.held[0] == echo_id:
-                _, typed, delivery = ask.held
-                delivery.cancel()
-                ask.held = None
-                return ask, typed
-        return None
+    async def _deliver(
+        self, chat_id: str, echo_id: int, deliver: Callable[[str], Awaitable[Any]]
+    ) -> None:
+        await asyncio.sleep(self.undo_s)
+        held = self._held.pop(echo_id, None)
+        if held is None:
+            return
+        try:
+            await deliver(held.typed.strip())
+        finally:
+            # The Undo goes: the answer is the task's now.
+            with contextlib.suppress(Exception):
+                await self.console.front_for(chat_id).echo(
+                    {"echo": "answer_delivered", "of": echo_id}
+                )
+
+    def take_back(self, echo_id: int) -> tuple[str, str, str] | None:
+        """Undo a message sent as an answer, before it is delivered: its task, title and words."""
+        held = self._held.pop(echo_id, None)
+        if held is None:
+            return None
+        if held.delivery is not None:
+            held.delivery.cancel()
+        return held.task_id, held.title, held.typed
 
     async def answer_named(self, chat_id: str, words: str) -> dict[str, Any]:
         """``/answer TASK TEXT``: the person's answer to that task's question, at once."""
@@ -423,8 +473,8 @@ class OwnerAsks:
             )
         if not text:
             raise ApiError(400, "invalid_request", t("errors.blankMessage"))
-        if chosen.held is not None:
-            self.take_back(chosen.held[0])
+        if (held := self.held(chosen.task_id)) is not None:
+            self.take_back(held)
         replied = await self.reply(chosen.task_id, text, chosen.ask_id)
         if replied is None:
             return await self._said_here(chat_id, "ask.noneWaiting")
@@ -1087,9 +1137,9 @@ class OwnerAsks:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(self.settle(), 5.0)
         self._closed = True
-        for ask in self._asks.values():
-            if ask.held is not None:
-                ask.held[2].cancel()
+        for held in self._held.values():
+            if held.delivery is not None:
+                held.delivery.cancel()
         drains = [drain for drain in self._drains.values() if not drain.done()]
         for drain in drains:
             drain.cancel()

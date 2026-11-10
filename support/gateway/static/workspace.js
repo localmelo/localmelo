@@ -40,7 +40,7 @@ import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnP
 import { memoryNodes } from "./memory.mjs";
 import { parseCommand, setupSlash } from "./slash.mjs";
 import { askAboutNotes } from "./memory-tab.mjs";
-import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, timeline, unansweredSleep } from "./main-chat.mjs";
+import { answered, askTurn, byDay, cardBlock, cardNode, echoDone, echoNodes, endedTasks, isMain, mergeCards, mergeEchoes, shortTime, stepState, taskEnds, timeline, unansweredSleep } from "./main-chat.mjs";
 import { reportText } from "./endings.mjs";
 import {
   acknowledgeNote,
@@ -1127,7 +1127,9 @@ function viewSnapshot() {
 
 /** Make the open chat's browser cards and the header chip current: a card's node is made once, and kept across redraws. */
 function syncBrowser() {
-  const cards = S.view?.browsers ?? [];
+  // A task's card once its run is over says how the task ended, from the chat's end card of it.
+  const ends = taskEnds(S.view?.cards ?? []);
+  const cards = (S.view?.browsers ?? []).map((card) => (card.task && ends.has(card.session) ? { ...card, ending: ends.get(card.session) } : card));
   browserCards.sync(cards);
   browser.card(cards.at(-1) ?? null, cards);
 }
@@ -1278,7 +1280,9 @@ function mainNodes(view, turns, placed) {
     if (item.kind === "turn") return [turnNode(item.turn, item.turn === newest, askTurn(item.turn, echoes))];
     if (item.kind === "card") {
       const card = item.card;
-      return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card) })];
+      const step = stepState(card, { given: S.cardAllows, busy: S.allowing, echoes });
+      return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
+        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block) } })];
     }
     if (item.kind === "echo") {
       const echo = item.echo;
