@@ -427,8 +427,7 @@ def holds_secret_value(text: str) -> bool:
 def gives_password(text: str) -> bool:
     """Whether *text* gives a password as the sign-in contract reads one
     (:func:`~localmelo.melo.contracts.sign_in.password_spans`), or shows where one
-    was cut out: the mark left there counts as the value it stood for, so a
-    sentence that gave a password stays one after the cut."""
+    was cut out: the mark left there is read as a value, so ``pw: […]`` is one."""
     return bool(password_spans(text.replace(SPENT, _STOOD_FOR)))
 
 

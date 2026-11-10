@@ -29,15 +29,16 @@ characters is cut there and counted as ``trimmed``.
 
 A password a message or a session's title gives is cut out before anything is
 stored, indexed, kept as a note or read by a model, and ``[…]`` stands in its
-place (:func:`~localmelo.melo.contracts.sign_in.without_passwords`): the value
-reaches no record. Nothing is typed from a loaded chat, so no handle is made and
-the passwords of the person at the keyboard are not touched. An assistant
-message is cut the same way, after its keys are redacted as the store redacts
-an answer: in a file it can repeat what the person gave, and a stored answer is
-read again by search and by a model when the chat goes on. A
-user message is cut to the store's limit after that, so no part of a value is
-left at the cut. A title is cut to the store's limit too: a longer one would
-stop the run.
+place (:func:`~localmelo.melo.contracts.sign_in.without_passwords`): what the
+sign-in contract reads as the value reaches no record. Nothing is typed from a
+loaded chat, so no handle is made and the passwords of the person at the
+keyboard are not touched. An assistant message is cut the same way, after its
+keys are redacted as the store redacts an answer: in a file it can repeat what
+the person gave, and a stored answer is read again by search and by a model
+when the chat goes on. A user message and a title keep their other text as the
+store keeps a person's words. A user message is cut to the store's limit after
+that, so no part of a value is left at the cut. A title is cut to the store's
+limit too: a longer one would stop the run.
 
 With ``ingest=compress`` (:data:`MODES`) everything above happens first, so one ingest
 serves every way of recalling, and then each chat is encoded into memory items by the

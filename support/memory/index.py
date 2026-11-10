@@ -310,9 +310,9 @@ def _merged(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
 
 
 def _clean(text: str) -> str:
-    """*text* without its secrets: a sentence a note would refuse is left out, the
-    rest redacted. A private key block is redacted whole first: left out line by
-    line, its header would go and its body stay."""
+    """*text* without its secrets: a sentence that holds one is left out
+    (:func:`_kept`), the rest redacted. A private key block is redacted whole
+    first: left out line by line, its header would go and its body stay."""
     text = text.strip()
     if "PRIVATE KEY" in text:
         text = redact_secrets(text)[0]
