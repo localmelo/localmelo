@@ -35,8 +35,8 @@ from localmelo.melo.schema import (
     CHECKPOINT_END,
     CHECKPOINT_HEADER,
     CHECKPOINT_LINE,
+    CHECKPOINT_TARGET,
     REFLECTIONS_HEADER,
-    WINDOW_FIT_TARGET,
     Message,
     RunResult,
     ToolCall,
@@ -211,7 +211,7 @@ async def test_the_checkpoint_comes_at_the_line_and_the_window_starts_over(
     assert plans[first - 1]["estimate"] <= CHECKPOINT_LINE * LIMIT
     [detail, *_] = _checkpoints(events)
     assert detail["before"] > CHECKPOINT_LINE * LIMIT
-    assert detail["after"] <= WINDOW_FIT_TARGET * LIMIT and detail["units"] > 0
+    assert detail["after"] <= CHECKPOINT_TARGET * LIMIT and detail["units"] > 0
     # The checkpoint request is the next planning request plus the asking message.
     assert _wire(asked)[: len(before)] == _wire(before)
     # After it: [system][the task's words with the block][kept units], none of the

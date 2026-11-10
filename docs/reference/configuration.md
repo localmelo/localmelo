@@ -351,7 +351,7 @@ the same prefix as the planning request, with the same tools) asks the model for
 with its size in words (about 650 words in all): where its results are, the next steps, what failed,
 what works, and where the work stands, with only the findings the next steps need. Notes over their
 size keep where the results are and the next steps whole; the state is cut first. Then the oldest
-units leave the working window for good, oldest first, down to 70% of the limit, keeping the fit's
+units leave the working window for good, oldest first, down to 50% of the limit, keeping the fit's
 pins, and the checkpoint stands right after the task's message in their place: `[Work checkpoint:
 ...]` with the task's words, the model's notes, the files the run wrote, and the results that left
 the context (one line per source, such as a page and the parts read; every other result is still in
@@ -361,7 +361,7 @@ unreadable, a request that failed or timed out after its retries, or no request 
 the block keeps the last checkpoint's notes, or, with none, the units stay while the request fits
 and go with the computed lines alone once it does not. The request's output limit (4,096 tokens)
 keeps it well inside a client's read timeout on a slow local model. A checkpoint comes only when
-what can leave, less the most the block puts back, frees at least half the room between 85% and 70%;
+what can leave, less the most the block puts back, frees at least half the room between 85% and 50%;
 otherwise (a single step too large) the fit acts as before, and the units it drops, like those the
 window's message cap drops, are added to the block's list at the next request, so no drop goes
 unsaid. In a chat, earlier turns that leave the context are listed there too. Each checkpoint is a

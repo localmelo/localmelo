@@ -29,8 +29,9 @@ WINDOW_FIT_TARGET = 0.7
 # checkpoint's own asking message, so the checkpoint call fits as it is and sees
 # everything that is about to leave.
 CHECKPOINT_LINE = 0.85
-# Where a checkpoint leaves the window: the request fit's own target for now.
-CHECKPOINT_TARGET = WINDOW_FIT_TARGET
+# Where a checkpoint leaves the window. At a small context 0.70 gave a checkpoint
+# every two to four steps, 0.50 one every eight; the call after one re-reads less.
+CHECKPOINT_TARGET = 0.5
 # Once in each fill (up to a checkpoint), the first planning request past
 # EARLY_LINE of the input limit, or past halfway from where the fill began to
 # CHECKPOINT_LINE when that is later (every fill after a checkpoint), asks a task

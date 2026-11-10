@@ -77,8 +77,9 @@ logger = logging.getLogger(__name__)
 # a text's words, and a list's items and words an item. The notes are where the
 # work stands and where its results are, not a copy of what was read (that is in
 # the result file, or read again for an exact passage): about 650 words in all,
-# some 1,000 tokens, small next to the room a checkpoint frees (about 23,000
-# tokens with a context of 131,072), since every later request reads the block.
+# some 1,000 tokens, small next to the room a checkpoint frees (35% of the input
+# limit, about 39,000 tokens with a context of 131,072), since every later
+# request reads the block.
 TEXT_WORDS = {"results": 80, "state": 250}
 LIST_SIZES = {"next": (8, 20), "failed": (4, 20), "works": (4, 20)}
 # A word in characters, with room to spare: the bound a field keeps is its size
