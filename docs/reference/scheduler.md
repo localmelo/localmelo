@@ -269,6 +269,65 @@ set at P5), resume falls back to computed P2. Resuming an unpaused task returns
 409 `not_paused`. The task PATCH route rejects `first` with 400; it is not supported
 yet.
 
+## Task endings
+
+When a worker's run ends done or out of steps, code decides how the task ended
+and stores it as the task's `ending` (the JSON column `tasks.ending`, `null` on
+older rows). The `sched.finished` event carries it, and task bodies, Activity
+rows, task cards and `melo-task list|show` (`Why:`) show it.
+
+```text
+{state, proposed, reasons[], question, tests[], uncommitted[], notes[], missing[], turn, run_id, at}
+```
+
+| Field | Meaning |
+|---|---|
+| `state` | `ready`, `draft`, `blocked`, `failed` or `dropped`. Ready needs proof; any doubt leaves `draft` with its reasons. |
+| `proposed` | What the worker's report proposed on its last line: `Ending: ready`, `Ending: blocked: <what it needs>`, `Ending: failed` or `Ending: dropped` (no line counts as `ready`). It is never evidence. |
+| `reasons` | Why the task is not `ready` (below). Out of steps puts `out_of_steps` first. |
+| `question` | For `blocked`: what the task needs; a report whose last line is a question is `blocked`. |
+| `tests` | The last 5 tests the run ran: `{command, exit_code, outcome}`, `outcome` being `passed`, `failed` or `unknown`; secrets in the command are redacted. |
+| `uncommitted` | Every path left uncommitted in a git folder. |
+| `notes` | `no_tests` when no test applied and none was owed. |
+| `missing` | With `file_missing`: the files the task was asked to write that are not in its folder. |
+
+Reasons (`OWED` ones can be settled by **Finish it**, `POST /api/tasks/{id}/continue`):
+
+| Reason | When | Owed |
+|---|---|---|
+| `tests_failed` | The run's last test failed after code changed (or in an unchecked folder). | yes |
+| `tests_still_fail` | The last test failed and nothing was changed. | no |
+| `tests_unverified` | The last test's result is unknown. | yes |
+| `tests_missing` | Code changed and no test started after the last call that could change it, or tests were asked for where a test setup applies. | yes |
+| `no_runner` | A Finish it run found a test setup but could run no test. | no |
+| `commit_missing` | A commit was asked for and the task's changes are not committed. | yes |
+| `file_missing` | The words asked the task to write or save a named file that is not in the folder. | no |
+| `unchecked` | The folder could not be checked and a Finish it can still run a test or commit. | yes |
+| `too_large`, `unreadable`, `stashed` | The folder could not be checked (too many files or changes, unreadable, or `git stash list` grew), and a Finish it cannot help. | no |
+| `question` | The task is `blocked`: it proposed `blocked` or ended its report with a question. | no |
+| `out_of_steps` | The run used all its steps. | no |
+| `finish_tried` | A Finish it run's ending: it never offers Finish it again. | no |
+
+How the evidence is read:
+
+- Only the newest turn's own `tool.started`/`tool.finished` events (same `run_id`, paired by `call_id`) and the folder's state count, against the baseline the task kept since it last ended `ready`.
+- In git: `git status --porcelain -uall`, `HEAD` and the length of `git stash list` under the task folder. More than 2,000 changes is `too_large`.
+- Outside git: a snapshot of the size and mtime of every code file under the folder, skipping `.git`, `.venv`, `venv`, `node_modules`, `__pycache__`, caches, `site-packages`, `.build` and `DerivedData`. More than 2,000 code files or 40,000 files is `too_large`.
+- A test is one shape: a plain test-runner command with no shell operators (`pytest`, `npm test`, `cargo test`, `go test`, `make test` and the like), or a `python_exec` that only runs one such command and exits with its code. Its exit code is the result; any other call that starts a runner is `unknown`.
+- A call could change code unless it is known to read (git reads, `git add`/`commit`, prints).
+
+The snapshot cannot see:
+
+- an edit that keeps a file's size and puts its mtime back;
+- a write inside a skipped folder;
+- a write through a symlink (the link is read, a linked folder is not walked);
+- a command's write outside the folder.
+
+A `file_write` or `file_edit` names its file, so those writes count wherever
+they are. A data file a test reads (`.json`, `.csv`, `.yaml`) is not code
+outside git, so changing only it owes no test. A commit hook that rewrites
+files after the last test is not seen.
+
 ## Controlled Resume (S3b.2 PR3b-1)
 
 `POST /api/tasks/{task_id}/resume` (also `/api/v2/tasks/{task_id}/resume`)

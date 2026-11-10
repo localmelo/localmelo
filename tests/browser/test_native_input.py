@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +102,7 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
     try:
         button = el(raw, "Check in")
         done = await driver.act(None, Act("click", raw.url, button, doc=raw.doc))
-        assert done.via == "browser" and done.why == "" and not done.native_failed
+        assert done.via == "browser" and done.why == ""
         assert native(log) == [
             {
                 "node": str(100 + button.at),
@@ -118,11 +119,11 @@ async def test_a_click_is_the_browsers_own_on_the_node_melo_checked(
 
 
 async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) -> None:
-    for mode, why, site in (
-        ("no_native", "melo's browser cannot act on page elements itself", False),
-        ("no_uids", "could not name that element", False),
-        ("native_missed", "did not reach it", True),
-        ("native_error", "did not reach it", True),
+    for mode, why in (
+        ("no_native", "melo's browser cannot act on page elements itself"),
+        ("no_uids", "could not name that element"),
+        ("native_missed", "did not reach it"),
+        ("native_error", "did not reach it"),
     ):
         driver, raw, _ = await opened(mode, tmp_path / mode)
         try:
@@ -130,7 +131,6 @@ async def test_the_page_script_click_is_the_backup_and_says_why(tmp_path: Path) 
                 None, Act("click", raw.url, el(raw, "Check in"), doc=raw.doc)
             )
             assert done.via == "page-script" and why in done.why, mode
-            assert done.native_failed is site, mode
             # This page ignores a script's click: nothing changed, and the act says so.
             assert done.changes is not None and done.changes.texts == (), mode
         finally:
@@ -144,7 +144,7 @@ async def test_a_covered_element_is_clicked_by_the_page_script(tmp_path: Path) -
             None, Act("click", raw.url, el(raw, "Hidden away"), doc=raw.doc)
         )
         assert done.via == "page-script" and "covers it" in done.why
-        assert not done.native_failed and native(log) == []
+        assert native(log) == []
     finally:
         await driver.close()
 
@@ -158,7 +158,7 @@ async def test_an_element_the_browsers_reading_names_twice_is_left_to_the_page_s
             None, Act("click", raw.url, el(raw, "Happy"), doc=raw.doc)
         )
         assert done.via == "page-script" and "could not name" in done.why
-        assert not done.native_failed and native(log) == []
+        assert native(log) == []
     finally:
         await driver.close()
 
@@ -338,18 +338,6 @@ async def test_a_stale_element_is_refused_before_the_browser_acts(
         await driver.close()
 
 
-async def test_a_site_starts_with_the_page_script_when_asked(tmp_path: Path) -> None:
-    driver, raw, log = await opened("", tmp_path)
-    try:
-        done = await driver.act(
-            None,
-            Act("click", raw.url, el(raw, "Happy"), doc=raw.doc, native=False),
-        )
-        assert done.via == "page-script" and done.why == "" and native(log) == []
-    finally:
-        await driver.close()
-
-
 async def test_a_redraw_is_seen_as_the_element_gone_and_the_page_waited_for(
     tmp_path: Path,
 ) -> None:
@@ -449,6 +437,29 @@ async def test_a_click_waits_for_the_first_change_then_for_quiet(timing: None) -
     typing = Polled([])
     await typing._look("k", "d", a_click("type"))
     assert 1 <= typing.polls <= 8
+
+
+async def test_a_trusted_click_that_reached_nothing_still_waits_a_moment_for_a_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No time passes between two polls here, the page is quiet at once, and
+    # the cap is far off.
+    monkeypatch.setattr(pagescript, "LOOK_STEP_S", 0)
+    monkeypatch.setattr(pagescript, "QUIET_S", 0)
+    monkeypatch.setattr(pagescript, "LOOK_CAP_S", 5.0)
+    missed = {"doc": True, "count": 0, "quiet": 9999, "target": False, "reached": False}
+    # A page whose own handler took the press before melo's listener saw it
+    # answers a moment later: the look is still on, so the reply is seen.
+    late = Polled([missed, missed, {**missed, "count": 1}])
+    data, _ = await late._look("k", "d", a_click())
+    assert late.polls == 3 and data["count"] == 1
+    # With no reply, the look ends at that moment, long before the cap.
+    monkeypatch.setattr(pagescript, "MISSED_LOOK_S", 0.05)
+    none = Polled([])
+    none.answers_end = missed
+    start = time.monotonic()
+    await none._look("k", "d", a_click())
+    assert 0.05 <= time.monotonic() - start < 2.0
 
 
 async def test_the_look_stops_at_the_cap_and_says_the_page_was_still_changing(

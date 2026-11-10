@@ -80,15 +80,6 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS documents_session ON documents(session_id);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS sleep_processed (
-    session_id TEXT NOT NULL,
-    turn INTEGER NOT NULL,
-    note_id INTEGER NOT NULL DEFAULT 0,
-    finished REAL NOT NULL,
-    failures INTEGER NOT NULL DEFAULT 0,
-    completed INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (session_id, turn, note_id)
-);
 CREATE TABLE IF NOT EXISTS sleep_runs (
     run_id  TEXT PRIMARY KEY,
     started REAL NOT NULL,
@@ -489,6 +480,20 @@ async def _add_chunks(conn: aiosqlite.Connection) -> None:
         raise
 
 
+async def _empty_removed_table(conn: aiosqlite.Connection) -> None:
+    """Delete the rows of ``sleep_processed`` in an index.db an older version made.
+
+    The removed model pass kept turn ids there and nothing reads them now; the table
+    stays, so an older process on the same file still finds it."""
+    async with conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sleep_processed'"
+    ) as cur:
+        if await cur.fetchone() is None:
+            return
+    await conn.execute("DELETE FROM sleep_processed")
+    await conn.commit()
+
+
 def _document(row: Sequence[Any]) -> Document:
     blob = row[8]
     return Document(
@@ -524,6 +529,7 @@ class ConversationIndex:
                 try:
                     await prepare_connection(conn, _SCHEMA)
                     await _add_chunks(conn)
+                    await _empty_removed_table(conn)
                 except BaseException:
                     with contextlib.suppress(Exception):
                         await conn.close()
@@ -721,11 +727,6 @@ class ConversationIndex:
             row = await cur.fetchone()
         async with secure_deletes(conn):
             await conn.execute(f"DELETE FROM documents{where}", args)
-            await conn.execute(
-                "DELETE FROM sleep_processed WHERE session_id = ?"
-                + (" AND turn = ?" if turn is not None else ""),
-                args,
-            )
             if turn is None:
                 await conn.execute(
                     "DELETE FROM encoded WHERE session_id = ?", (session_id,)
@@ -834,7 +835,6 @@ class ConversationIndex:
                 await conn.execute("DELETE FROM items")
                 await conn.execute("DELETE FROM encoded")
                 await conn.execute("DELETE FROM sleep_runs")
-                await conn.execute("DELETE FROM sleep_processed")
                 await conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES ('forgotten_at', ?)",
                     (time.time(),),
@@ -863,61 +863,6 @@ class ConversationIndex:
         conn = await self._ready()
         await conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
-        )
-        await conn.commit()
-
-    async def processed_since(self, since: float) -> set[tuple[str, int]]:
-        """Processed sleep turns; prune expired ids without retaining any text."""
-        conn = await self._ready()
-        await conn.execute("DELETE FROM sleep_processed WHERE finished < ?", (since,))
-        await conn.commit()
-        async with conn.execute(
-            "SELECT session_id, turn FROM sleep_processed "
-            "WHERE note_id = 0 AND completed = 1"
-        ) as cur:
-            return {(str(row[0]), int(row[1])) for row in await cur.fetchall()}
-
-    async def work_done(self, session_id: str, turn: int, note_id: int) -> bool:
-        """A completed per-note rewrite, independent of ordinary turn replay."""
-        conn = await self._ready()
-        async with conn.execute(
-            "SELECT completed FROM sleep_processed "
-            "WHERE session_id = ? AND turn = ? AND note_id = ?",
-            (session_id, turn, note_id),
-        ) as cur:
-            row = await cur.fetchone()
-        return bool(row and row[0])
-
-    async def failed_attempt(
-        self, session_id: str, turn: int, finished: float, note_id: int = 0
-    ) -> int:
-        """Count an unreadable reply/timeout without completing its work."""
-        conn = await self._ready()
-        await conn.execute(
-            "INSERT INTO sleep_processed "
-            "(session_id, turn, note_id, finished, failures, completed) "
-            "VALUES (?, ?, ?, ?, 1, 0) ON CONFLICT(session_id, turn, note_id) "
-            "DO UPDATE SET failures = failures + 1",
-            (session_id, turn, note_id, finished),
-        )
-        await conn.commit()
-        async with conn.execute(
-            "SELECT failures FROM sleep_processed "
-            "WHERE session_id = ? AND turn = ? AND note_id = ?",
-            (session_id, turn, note_id),
-        ) as cur:
-            row = await cur.fetchone()
-        assert row is not None
-        return int(row[0])
-
-    async def mark_processed(
-        self, session_id: str, turn: int, finished: float, note_id: int = 0
-    ) -> None:
-        conn = await self._ready()
-        await conn.execute(
-            "INSERT OR REPLACE INTO sleep_processed "
-            "(session_id, turn, note_id, finished) VALUES (?, ?, ?, ?)",
-            (session_id, turn, note_id, finished),
         )
         await conn.commit()
 

@@ -1,8 +1,9 @@
 """``[memory] sleep`` and ``melo memory sleep``: a developer setting, off by default.
 
-The setting is ``off``, ``rules``, ``model`` or ``model+tags``.
-It is saved only when not ``off``, checked, set for one run with
-``-X``, and listed by the developer help only. The command is for developer
+The setting is ``off`` or ``rules``; a saved file that says ``model`` or
+``model+tags`` (values that were removed) reads as ``rules``. It is saved only
+when not ``off``, checked, set for one run with ``-X``, and listed by the
+developer help only. The command is for developer
 mode: it runs the setting's sleep over the notes and chats and prints the report.
 """
 
@@ -43,14 +44,47 @@ def test_it_is_off_by_default_saved_only_when_set_and_checked(tmp_path: Path) ->
     ):
         save(cfg)
         assert "sleep" not in path.read_text()
-        for variant in ("rules", "model+tags"):
-            cfg.memory = MemoryConfig(sleep=variant)
-            assert not [e for e in cfg.validate() if "[memory]" in e]
-            save(cfg)
-            assert f'[memory]\nsleep = "{variant}"\n' in path.read_text()
-            assert config.load().memory == MemoryConfig(sleep=variant)
-    cfg.memory = MemoryConfig(sleep="deep")
-    assert any("[memory] sleep 'deep' is not recognised" in e for e in cfg.validate())
+        cfg.memory = MemoryConfig(sleep="rules")
+        assert not [e for e in cfg.validate() if "[memory]" in e]
+        save(cfg)
+        assert '[memory]\nsleep = "rules"\n' in path.read_text()
+        assert config.load().memory == MemoryConfig(sleep="rules")
+    for refused in ("deep", "model", "model+tags"):
+        cfg.memory = MemoryConfig(sleep=refused)
+        assert any(
+            f"[memory] sleep {refused!r} is not recognised" in e for e in cfg.validate()
+        )
+
+
+@pytest.mark.parametrize("removed", ["model", "model+tags"])
+def test_a_saved_model_value_reads_as_rules_and_is_saved_as_rules(
+    tmp_path: Path, removed: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        f'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+        f'[memory]\nsleep = "{removed}"\n'
+    )
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        cfg = config.load()
+        assert cfg.memory.sleep == "rules"
+        assert not [e for e in cfg.validate() if "[memory]" in e]
+        save(cfg)
+    assert '[memory]\nsleep = "rules"\n' in path.read_text()
+    assert f'sleep = "{removed}"' not in path.read_text()
+
+
+@pytest.mark.parametrize("value", ["model", "model+tags"])
+def test_x_refuses_a_removed_value(
+    capsys: pytest.CaptureFixture[str], value: str
+) -> None:
+    with pytest.raises(SystemExit) as stop:
+        cli._parse(["-X", f"{KEY}={value}", "--base-url", "http://127.0.0.1:1/v1", "q"])
+    assert stop.value.code == 2
+    assert f"[memory] sleep {value!r} is not recognised" in capsys.readouterr().err
 
 
 def test_a_sleep_lock_path_with_a_nul_is_refused(home: Path) -> None:
@@ -65,7 +99,7 @@ def test_x_sets_it_for_one_run_and_only_the_developer_help_lists_it(
     cli._parse(["-X", f"{KEY}=rules", "--base-url", "http://127.0.0.1:1/v1", "q"])
     assert config.overrides() == {KEY: "rules"}
     assert config.load().memory.sleep == "rules"
-    assert config_cli.main(["keys", "sleep", "-X", f"{KEY}=model+tags"]) == 0
+    assert config_cli.main(["keys", "sleep", "-X", f"{KEY}=rules"]) == 0
     assert any(line.startswith(KEY) for line in capsys.readouterr().out.splitlines())
     developer = cli._build_parser(developer=True).format_help()
     assert any(
@@ -99,8 +133,11 @@ def test_the_command_is_for_developer_mode_and_prints_the_report(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('[ui]\nmode = "developer"\n')
     assert memory_cli.main(["sleep"]) == 0  # the setting is off
-    assert "Sleep off: 0 changes, 0 model calls, run " in capsys.readouterr().out
+    assert "Sleep off: 0 changes, run " in capsys.readouterr().out
     assert memory_cli.main(["sleep", "rules"]) == 0
-    assert "Sleep rules: 0 changes, 0 model calls, run " in capsys.readouterr().out
-    assert memory_cli.main(["sleep", "model"]) == 0
-    assert "Sleep model: 0 changes, 0 model calls, run " in capsys.readouterr().out
+    assert "Sleep rules: 0 changes, run " in capsys.readouterr().out
+    for removed in ("model", "model+tags"):
+        with pytest.raises(SystemExit) as stop:
+            memory_cli.main(["sleep", removed])
+        assert stop.value.code == 2
+        assert f"invalid choice: {removed!r}" in capsys.readouterr().err

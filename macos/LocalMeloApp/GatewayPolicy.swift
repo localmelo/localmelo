@@ -328,7 +328,7 @@ var attachedStoppedMessage: String {
 
 /// Another process listens on the port the gateway was to use.
 func portHeldMessage(_ port: Int) -> String {
-    L10n.t("app.fail.portHeld", "Port {port} is held by another process. Stop the existing listener and try again.",
+    L10n.t("app.fail.portHeld", "Another app is using the connection localmelo needs (port {port}). Quit that app, then choose Try Again.",
            ["port": String(port)])
 }
 

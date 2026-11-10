@@ -77,8 +77,8 @@ before the run with a plain message (see
 | `across_chats` | `[memory]` | `true` | Memory across chats in the web console and the app: melo keeps a note when you ask it to remember something or judges what you tell it worth keeping, indexes every finished chat turn and task result, and brings back what matches each new message, with where it came from. `false` turns all of it off. Direct runs and workers never use it. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
 | `retriever` | `[memory]` | `"auto"` | How a console or app chat finds notes for a message: `"auto"` (words, and meaning too when an embedding model is set up), `"bm25"` (words only, no model request), `"embedding"` (the same as `auto` with a model; `melo serve` refuses to start without one) or `"llm"` (words pick up to 20 candidates and the chat model chooses among them within 4 s, falling back to words alone on a timeout, an error or an unreadable reply; no embedding calls). A developer setting for comparing the ways: `-X memory.retriever=llm` for one run, listed by `melo -h all`. Every recall's timings are in the `recall` object of `turn.memory`. See [How recall finds notes](../concepts/memory.md#memory-across-chats). |
 | `keep_statements` | `[memory]` | `false` | A developer setting for comparison. `true`: after a console or app chat turn, code keeps as a note each plain, lasting fact the user stated about themselves that the model did not keep with `remember` ("I live in …", "my advisor is …", "call me …", "我的…是…"), with the same `Remembered · Undo` line; never a question, a to-do, an "if", a "not", the past, what others think, a passing state or a secret. By default only the model's judgement and your own requests keep notes, except that a change you state to an existing note ("My weekly sync is on Friday." after a note for Wednesday) replaces it when the chat kept no note that turn, whatever this says. `-X memory.keep_statements=on` for one run, listed by `melo -h all`. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
-| `sleep` | `[memory]` | `"off"` | A developer setting for comparison: tidy the notes in one pass over the chats since the last pass. `"rules"` merges duplicate notes, writes the newer value of a note's subject and recovers lasting statements no note kept, with no chat-model call, at most 20 changes per run, each undoable. Existing-fact checks may use a configured embedding (1.5 seconds per candidate, word fallback on failure); `"model"` adds an evidence-checked model pass and resolves dangling references; `"model+tags"` spends the same twelve-request limit on tagged turns first. Each request has an eight-second timeout and stops on new activity or a held lock (`sleep_lock`, else the shared GPU lock). When it is not `"off"`, melo also runs it by itself while the computer is idle (no turn in the gateway's chats for 20 minutes, no task running or queued, the GPU lock file absent when `[scheduler] gpu_lock_file` is set, on AC power, at most once every 6 hours; a terminal chat that runs on its own and workers outside the gateway are not seen) and says so in the main chat with Undo. Run it by hand with `melo memory sleep` (developer mode) or `POST /api/memory/sleep`. Saved only when not `"off"`; `-X memory.sleep=rules` for one run, listed by `melo -h all`. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
-| `sleep_lock` | `[memory]` | `""` | Optional lock-file path for sleep requests. While it exists, no chat or embedding request is started; checked again before each request. Unset: sleep reads the shared GPU lock `[scheduler] gpu_lock_file` instead, where a lock held by `[scheduler] lock_self` is yours and does not stop it. Rules that make no request still run; a blocked request stops the pass (`aborted` is `stopped: gpu_lock`) without losing completed changes, which stay undoable. Sleep only reads the lock, never writes or removes it. |
+| `sleep` | `[memory]` | `"off"` | A developer setting for comparison: tidy the notes in one pass over the chats since the last pass. `"rules"` merges duplicate notes, writes the newer value of a note's subject and recovers lasting statements no note kept, with no chat-model call, at most 20 changes per run, each undoable. Existing-fact checks may use a configured embedding (1.5 seconds per candidate, word fallback on failure); each such request first checks for new activity and a held lock (`sleep_lock`, else the shared GPU lock), and stops the run if there is either. A saved `"model"` or `"model+tags"` from an older version reads as `"rules"`. When it is not `"off"`, melo also runs it by itself while the computer is idle (no turn in the gateway's chats for 20 minutes, no task running or queued, the GPU lock file absent when `[scheduler] gpu_lock_file` is set, on AC power, at most once every 6 hours; a terminal chat that runs on its own and workers outside the gateway are not seen) and says so in the main chat with Undo. Run it by hand with `melo memory sleep` (developer mode) or `POST /api/memory/sleep`. Saved only when not `"off"`; `-X memory.sleep=rules` for one run, listed by `melo -h all`. See [Memory across chats](../concepts/memory.md#memory-across-chats). |
+| `sleep_lock` | `[memory]` | `""` | Optional lock-file path for sleep requests. While it exists, no embedding request is started; checked again before each request. Unset: sleep reads the shared GPU lock `[scheduler] gpu_lock_file` instead, where a lock held by `[scheduler] lock_self` is yours and does not stop it. Rules that make no request still run; a blocked request stops the pass (`aborted` is `stopped: gpu_lock`) without losing completed changes, which stay undoable. Sleep only reads the lock, never writes or removes it. |
 | `recall_records` | `[memory]` | `3` | A developer setting for comparison. The most notes the recall block of a console or app chat message holds, 0 to 20. The default is what recall always held. `-X memory.recall_records=8` for one run, listed by `melo -h all`. |
 | `recall_docs` | `[memory]` | `2` | A developer setting for comparison. The most chat turns that block holds, 0 to 20 (at most two from one chat). `-X memory.recall_docs=8` for one run. |
 | `recall_chars` | `[memory]` | `4000` | A developer setting for comparison. The size bound of that block in characters, 200 to 8000; an item that would pass it is left out. A block that recalled nothing and carries only the lines about what melo kept is not cut. It was 900 before; a config that saved a value keeps it. Saved only when not `4000`; `-X memory.recall_chars=900` for one run. |
@@ -342,8 +342,8 @@ calibration. The proxy is an estimate, not a bound: templates and vision models 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
 down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs, the latest
-reflection and the latest work checkpoint; images, failed checks and older reflections go only when nothing else is left. It leaves
-history and the retained conversation unchanged.
+reflection and the latest work checkpoint; images, failed checks and older reflections go only
+when nothing else is left. It leaves history and the retained conversation unchanged.
 
 With a token budget, long work does not wait for the fit. Before a planning request that would
 pass 85% of the input limit, the run writes a work checkpoint: one extra request (of kind
@@ -359,11 +359,10 @@ the computed lines alone, and the run goes on. A checkpoint comes only when what
 least half the room between 85% and 70%; otherwise (a single step too large) the fit acts as before,
 and the units it drops, like those the window's message cap drops, are added to the block's list at
 the next request, so no drop goes unsaid. In a chat, earlier turns that leave the context are listed
-there too. Each
-checkpoint is a `checkpoint` notice (see [Events](events.md)) and counts in the result's
+there too. Each checkpoint is a `checkpoint` notice (see [Events](events.md)) and counts in the result's
 `checkpoints`. Earlier, once in each fill, the first planning request past 60% of the limit (after a
-checkpoint: halfway from where the window was left to 85%) in work whose result goes into a file (your words ask for a file, or a file was written) ends with one line
-that asks the model to write what it has to that file now, while the results are still in context;
+checkpoint: halfway from where the window was left to 85%) in work whose result goes into a
+file (your words ask for a file, or a file was written) ends with one line that asks the model to write what it has to that file now, while the results are still in context;
 the line is on that request only, not in the window. Without a token budget nothing of this
 happens.
 
@@ -670,6 +669,22 @@ chat_model = "Qwen/Qwen3-8B"
 | `LOCALMELO_DETECT_URLS` | The URLs that the [first run](../guides/configure.md#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
 | The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. It is used before a key saved in the keychain. |
+| `LOCALMELO_CHAT` | `local` makes bare `melo` keep the terminal's own chat instead of the gateway's main chat, as `[cli] chat = "local"` does. For scripts and test harnesses. |
+
+These are for tests, screenshots and the macOS app; a person never needs them:
+
+| Variable | Effect |
+|---|---|
+| `LOCALMELO_NOW` | Pins the clock for memory tests and benchmarks: ISO 8601 (no zone means local time) or epoch seconds. The model's `Date:` line and recall's age decay read it; the times stored for new turns and notes stay on the wall clock. Empty or invalid: the wall clock (an invalid value logs one warning). |
+| `LOCALMELO_APP_INSTANCE` | The macOS app's per-launch id (32 hex characters) for the gateway it starts: that gateway's `/api/auth/login` needs the matching `X-LocalMelo-Instance` header, and `melo` opens no browser for it. |
+| `LOCALMELO_LAUNCH_AGENTS` | The folder for the background service's plist, in place of `~/Library/LaunchAgents`. |
+| `LOCALMELO_DESKTOP_HELPER` | The whole command line of the desktop control helper (an MCP server) that handles other apps' windows; empty for none. The test suite sets it empty. |
+| `LOCALMELO_SAFARIDRIVER` | A command line (split as a shell would) in place of `/usr/bin/safaridriver`. Tests and screenshots must set it: the real program opens Safari. |
+| `LOCALMELO_CHROME` | A command line in place of the installed Google Chrome, for `[browser] driver = "chrome"`. |
+| `LOCALMELO_ASCII` | `1` draws ASCII stand-ins for the terminal's symbols. See [the terminal guide](../guides/terminal.md). |
+| `LOCALMELO_BELL` | `0` turns off the terminal bell for approvals and long turns. |
+| `LOCALMELO_CPR` | `1` lets the terminal UI ask the terminal for the cursor position (off by default). |
+| `LOCALMELO_SPINNER_FRAME` | A number that fixes the terminal UI's spinner frame, for screenshots and tests. |
 
 See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 
@@ -681,7 +696,13 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
 | `~/.cache/localmelo/gateway/sessions.db` | The console's chats and tasks, and what you allowed in them (the `grants` table; see [What you allowed](#what-you-allowed)). | By the gateway. |
+| `~/.cache/localmelo/gateway/auth/token` | The bearer token for API clients (mode 0600). `melo console --reset` makes a new one. | By the gateway. |
+| `~/.cache/localmelo/gateway/endpoint.json` | The running gateway's pid, host, port and id; `melo`, `melo-task` and the app find the gateway through it. | By every gateway as it starts. |
+| `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl` | One record per model call of the gateway, with `machine.jsonl` beside it (mode 0600, pruned after 30 days). Off with `[scheduler] call_log = false`; `[scheduler] call_log_dir` moves it. | By the gateway. |
 | `~/.cache/localmelo/cli/sessions.db` | The terminal's own chats, and the grants of the terminal's own chat. | At the terminal's first message. |
+| `~/.cache/localmelo/cli_history`, `~/.cache/localmelo/logs/cli.log` | The terminal's input history and log. | By bare `melo` in a terminal. |
+| `~/.cache/localmelo/logs/gateway.log` | The output of a gateway the terminal started in the background (mode 0600). | By bare `melo`, when no gateway runs. |
+| `~/.cache/localmelo/browser/chrome` | The Chrome profile melo browses with (`[browser] driver = "chrome"`). | At the first page. |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 

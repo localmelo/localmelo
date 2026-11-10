@@ -1,6 +1,7 @@
 """Restart classification preserves uncertainty without launching workers."""
 
 import asyncio
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -829,7 +830,7 @@ async def test_startup_failure_stays_unavailable_and_retries(
 
         def fail(label: str) -> None:
             if label == "recovery_commit":
-                raise RuntimeError("injected failure")
+                raise sqlite3.OperationalError("injected failure")
             original(label)
 
         monkeypatch.setattr(store, "_before_commit", fail)
@@ -841,6 +842,58 @@ async def test_startup_failure_stays_unavailable_and_retries(
         await workers.open()
         assert (await workers.get(task.task_id))["state"] == "interrupted"
         assert await RecoveryStore(store).active_intent(task.task_id) is None
+    finally:
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
+async def test_one_unrecoverable_task_is_fenced_and_the_rest_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    workers = TaskWorkers(store, gate, Config, hub)
+    try:
+        await workers.tasks.open()
+        spec = TaskSpec.from_payload({"objective": "do work"})
+        before, bad, after = [
+            (
+                await workers.tasks.create_task(
+                    spec, origin="user", workspace=str(tmp_path)
+                )
+            )[0]
+            for _ in range(3)
+        ]
+        # The middle task holds a recovery intent whose stored request is unreadable.
+        async with store.component_transaction("seed_bad_intent") as conn:
+            await conn.execute(
+                "INSERT INTO recovery_operations VALUES (?, 'bad', 'recovery', "
+                "'{not json', 'prepared', NULL, NULL, 'queued')",
+                (bad.task_id,),
+            )
+        with caplog.at_level("WARNING"):
+            await workers.open()
+        assert workers._opened
+        states = {
+            task.task_id: (await workers.get(task.task_id))
+            for task in (before, bad, after)
+        }
+        # The tasks around it were classified as usual.
+        assert states[before.task_id]["state"] == "interrupted"
+        assert states[after.task_id]["state"] == "interrupted"
+        fenced = states[bad.task_id]
+        assert fenced["state"] == "interrupted" and fenced["wait_reason"]
+        assert not workers.is_active(bad.task_id)
+        # The unreadable intent is retired, so the next start does not hit it again.
+        assert await RecoveryStore(store).active_intent(bad.task_id) is None
+        mentions = [r for r in caplog.records if bad.task_id in r.getMessage()]
+        assert len(mentions) == 1
     finally:
         await workers.aclose()
         await hub.aclose()

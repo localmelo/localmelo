@@ -998,9 +998,12 @@ class ChatMemory:
         # The corpus of ``recall_source = "auto"`` in the items state: its own, so a
         # turn in the turns state never removes the items another turn looks up.
         self._auto_items = Corpus()
-        # The turns newer turns replaced (records.newer_turns), for one corpus
-        # and its version.
-        self._newer: tuple[Corpus, int, dict[tuple[str, int], Item]] | None = None
+        # What is read off all of one corpus's items, for it and its version: the
+        # turns newer turns replaced (records.newer_turns) and the notes that say
+        # what a replaced memory item says (records.notes_of_replaced).
+        self._newer: (
+            tuple[Corpus, int, dict[tuple[str, int], Item], dict[str, Item]] | None
+        ) = None
         # One statement at a time on each file's connection: a write that
         # began while another task's read was open on it fails at once.
         self._lock = asyncio.Lock()
@@ -1314,20 +1317,29 @@ class ChatMemory:
         for item in stored:
             corpus.add(_memory_item(item, labels, self.surface))
 
+    def _derived(
+        self, corpus: Corpus
+    ) -> tuple[dict[tuple[str, int], Item], dict[str, Item]]:
+        """The turns a newer turn replaced and the notes of replaced memory items,
+        read off *corpus* once for each of its versions."""
+        cached = self._newer
+        if cached is None or cached[0] is not corpus or cached[1] != corpus.version:
+            items = corpus.items.values()
+            cached = (
+                corpus,
+                corpus.version,
+                records.newer_turns(items),
+                records.notes_of_replaced(items),
+            )
+            self._newer = cached
+        return cached[2], cached[3]
+
     def _replaced(
         self, corpus: Corpus, notes: bool = True
     ) -> dict[tuple[str, int], Item]:
         """The turns a newer note or turn replaced, each to the newer one; a
         note's replacement wins over a turn's. Without *notes*, a turn's only."""
-        cached = self._newer
-        if cached is None or cached[0] is not corpus or cached[1] != corpus.version:
-            cached = (
-                corpus,
-                corpus.version,
-                records.newer_turns(corpus.items.values()),
-            )
-            self._newer = cached
-        return {**cached[2], **(replaced_turns(corpus) if notes else {})}
+        return {**self._derived(corpus)[0], **(replaced_turns(corpus) if notes else {})}
 
     def _drop_notes(self, keys: Iterable[str] | None = None) -> None:
         """Take the notes *keys* (every note without) out of both corpora, so the
@@ -1435,6 +1447,7 @@ class ChatMemory:
                 else []
             )
             replaced = self._replaced(corpus, notes)
+            followed = self._derived(corpus)[1]
         if not notes:
             found = [item for item in found if not item.is_record]
             loose = [item for item in loose if not item.is_record]
@@ -1451,6 +1464,7 @@ class ChatMemory:
             exclude_session=exclude_session,
             keep_from_turn=keep_from_turn,
             known=corpus.items,
+            followed=followed,
         )
         # The chat's own turns that left the window read as this chat's.
         newer = [this_chat(item, exclude_session) for item in newer]
@@ -3188,18 +3202,16 @@ class ChatMemory:
         *,
         now: float | None = None,
         chats: SessionStore | None = None,
-        budget: int | None = None,
         began: float | None = None,
     ) -> sleeping.SleepReport:
         """Tidy the notes with sleep *variant* (``[memory] sleep`` when ``None``);
         what it changed. *chats* gives it the turns to replay (without them,
-        only duplicates are merged). Model variants share a twelve-call limit;
-        each request to a model server first checks the lock (``[memory]
-        sleep_lock``, else the shared GPU lock ``[scheduler] gpu_lock_file``,
-        where a lock of ``lock_self`` is ours) and new activity: a chat, main
-        chat, task or worker turn that started after *began*, the time the
-        caller took before its own idle checks (``None``: now). The run then
-        stops, saved and undoable. Nothing happens with memory off or ``off``.
+        only duplicates are merged). Each embedding request first checks the lock
+        (``[memory] sleep_lock``, else the shared GPU lock ``[scheduler]
+        gpu_lock_file``, where a lock of ``lock_self`` is ours) and new activity:
+        a chat, main chat, task or worker turn that started after *began*, the
+        time the caller took before its own idle checks (``None``: now). The run
+        then stops, saved and undoable. Nothing happens with memory off or ``off``.
         """
         cfg = self._settings()
         began = time.time() if began is None else began
@@ -3212,17 +3224,7 @@ class ChatMemory:
         until = await index.meta("sleep_until")
         forgotten = await index.forgotten_at()
         turns = (
-            await sleeping.sleep_turns(
-                chats,
-                (
-                    max(until, forgotten)
-                    if variant == "rules"
-                    else max(
-                        forgotten,
-                        (began if now is None else now) - sleeping.BACKLOG_SECONDS,
-                    )
-                ),
-            )
+            await sleeping.sleep_turns(chats, max(until, forgotten))
             if chats is not None
             else []
         )
@@ -3238,19 +3240,6 @@ class ChatMemory:
                     ):
                         return True
             return False
-
-        async def notes_for(typed: str) -> list[int]:
-            embedded = await self._embed([typed], EMBED_TIMEOUT_S, query=True)
-            vector = unit(embedded.vectors[0]) if embedded.vectors else None
-            found = ranked(
-                await self._sync(),
-                typed,
-                vector,
-                embedded.model,
-                now=clock.now(),
-                coverage=0.0,
-            )
-            return [int(item.key[2:]) for item in found if item.is_record][:6]
 
         async def embed_note(text: str) -> tuple[Sequence[float] | None, str]:
             embedded = await self._embed([text], EMBED_TIMEOUT_S, query=False)
@@ -3270,13 +3259,8 @@ class ChatMemory:
                     variant=variant,
                     now=now,
                     until=max(until, forgotten),
-                    provider=(
-                        self.chat_provider() if variant.startswith("model") else None
-                    ),
-                    notes_for=notes_for,
                     is_active=active,
                     lock=lock,
-                    budget=budget,
                     embed_note=embed_note if self.embedding()[0] is not None else None,
                     lock_self=lock_self,
                 )

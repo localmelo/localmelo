@@ -18,6 +18,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import call_key
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
 from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.contracts.tools import NO_EFFECT
 from localmelo.melo.executor.models import ExecutionOutcome
 from localmelo.melo.executor.preview import call_preview
 from localmelo.melo.schema import (
@@ -374,7 +375,7 @@ class _Emitter:
         exit_codes: Sequence[int] | None,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
-        marks: Mapping[str, bool] | None = None,
+        marks: Mapping[str, Any] | None = None,
     ) -> None:
         """The checked *result* of *call*, whose executor *outcome* gives the status.
 
@@ -424,7 +425,7 @@ class _Emitter:
         not_started: bool = False,
         approval: Mapping[str, Any] | None = None,
         asks: Sequence[Mapping[str, Any]] = (),
-        marks: Mapping[str, bool] | None = None,
+        marks: Mapping[str, Any] | None = None,
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
@@ -872,9 +873,27 @@ def _asks(asks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return {"tool_asks": [dict(ask) for ask in asks]} if asks else {}
 
 
-def _marks(marks: Mapping[str, bool] | None) -> dict[str, Any]:
-    """``allowed_local`` of a tool event: only when the call's tool set it (true)."""
-    return {"allowed_local": True} if marks and marks.get("allowed_local") else {}
+def _marks(marks: Mapping[str, Any] | None) -> dict[str, Any]:
+    """What the call's tool said of its own call, for its event: each key only when it set it.
+
+    ``allowed_local`` (true), ``phases`` (seconds by phase name, numbers only)
+    and ``effect`` (only :data:`NO_EFFECT`, the contract's own value).
+    """
+    if not marks:
+        return {}
+    out: dict[str, Any] = {}
+    if marks.get("allowed_local") is True:
+        out["allowed_local"] = True
+    phases = marks.get("phases")
+    if isinstance(phases, dict) and phases:
+        out["phases"] = {
+            str(name): float(seconds)
+            for name, seconds in phases.items()
+            if isinstance(seconds, int | float) and not isinstance(seconds, bool)
+        }
+    if marks.get("effect") == NO_EFFECT:
+        out["effect"] = NO_EFFECT
+    return out
 
 
 def _image_entry(image: ImagePart) -> dict[str, Any]:

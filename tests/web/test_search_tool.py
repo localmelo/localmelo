@@ -110,7 +110,7 @@ def test_the_rule_is_short_and_says_to_report_the_count_it_is_given() -> None:
     assert "never orders" in NOTE and "Keep secrets out" in NOTE
 
 
-async def test_the_prompt_line_mentions_safari_only_when_the_browser_is_on() -> None:
+async def test_the_prompt_line_mentions_the_browser_only_when_it_is_on() -> None:
     plain, _ = _provider()
     assert plain.system_notes() == (NOTE,)
     config_ = config.Config(chat_backend="vllm", embedding_backend="none")
@@ -120,7 +120,7 @@ async def test_the_prompt_line_mentions_safari_only_when_the_browser_is_on() -> 
         searcher=FakeSearcher(),  # type: ignore[arg-type]
     )
     [note] = with_browser.system_notes()
-    assert note.startswith(NOTE) and "Safari" in note
+    assert note.startswith(NOTE) and "melo's browser" in note
 
 
 # ── the answer ──

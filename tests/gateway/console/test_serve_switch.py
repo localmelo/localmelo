@@ -111,6 +111,8 @@ async def test_a_switch_waits_for_a_running_turn_and_a_turn_meanwhile_follows_it
     await until(lambda: switch.waiting_for == 1)
     await console.sessions.start_turn(second, "hi", "hi")  # its turn waits
     await until(lambda: console.serve.held(second) == "Switching")
+    # The count is sampled: a sample taken between the turn's start and its hold says 2.
+    await until(lambda: switch.waiting_for == 1)
     health = (await client.get("/api/health")).json()["switch"]
     assert (health["state"], health["title"], health["detail"]) == (
         "waiting",

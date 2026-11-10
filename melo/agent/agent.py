@@ -2199,8 +2199,8 @@ class Agent(_RecallLoop, _NotesLoop, _CheckpointLoop):
         # before.
         exit_codes: list[int] | None = [] if events.active or self._notes_mode else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
-        # What the tool says of its own call (``allowed_local``), for the event.
-        marks: dict[str, bool] | None = {} if events.active else None
+        # What the tool says of its own call (``allowed_local``, ``phases``), for the event.
+        marks: dict[str, Any] | None = {} if events.active else None
         marks_slot = TOOL_MARKS.set(marks) if marks is not None else None
         gate = None
         ask_slot = None

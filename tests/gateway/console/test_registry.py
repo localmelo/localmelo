@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -13,7 +12,7 @@ from localmelo.melo.contracts import work_folder
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
-from localmelo.support.gateway.console.registry import ConsoleSessions, SettingsSource
+from localmelo.support.gateway.console.registry import ConsoleSessions, chat_options
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStoreError
 
@@ -25,21 +24,13 @@ def registry(
     builder: FakeBuilder,
     *,
     max_open: int = 8,
-    idle_close_s: float = 900.0,
-    mcp_config: str | None = None,
 ) -> ConsoleSessions:
-    settings: SettingsSource = (
-        cast(SettingsSource, lambda: SimpleNamespace(mcp_config=mcp_config))
-        if mcp_config
-        else make_cfg
-    )
     return ConsoleSessions(
         console.store,
         console.broker,
-        settings,
+        make_cfg,
         builder=builder,
         max_open=max_open,
-        idle_close_s=idle_close_s,
     )
 
 
@@ -93,47 +84,6 @@ async def test_the_cap_closes_the_least_recently_used(
     assert first_agent.closed
     assert reg.get(first.session_id).kept is not None  # type: ignore[union-attr]
     assert reg.get(second.session_id).agent is not None  # type: ignore[union-attr]
-
-
-async def test_the_idle_sweep_keeps_the_conversation(
-    console: Console, builder: FakeBuilder, workspace: str
-) -> None:
-    turn = await seed_turn(console.store, workspace)
-    reg = registry(console, builder, idle_close_s=0)
-    entry = await open_session(reg, turn.session_id)
-    # Only an Agent a builder really gave MCP tools is swept; the flag is
-    # what that builder will report when MCP lands (PR 3+).
-    entry.built_with_mcp = True
-    cast(FakeAgent, entry.agent).messages = [Message(role="user", content="idle")]
-    entry.last_used = 0
-    assert await reg.close_idle() == 1
-    assert entry.agent is None
-    assert entry.kept is not None
-
-
-async def test_an_mcp_config_alone_does_not_mark_the_agent(
-    console: Console, builder: FakeBuilder, workspace: str
-) -> None:
-    turn = await seed_turn(console.store, workspace)
-    reg = registry(console, builder, idle_close_s=0, mcp_config="/tmp/mcp.json")
-    entry = await open_session(reg, turn.session_id)
-    # default_builder does not read mcp_config and builds no MCP tools, so
-    # the sweep must not close this Agent as if it held MCP processes.
-    assert entry.built_with_mcp is False
-    entry.last_used = 0
-    assert await reg.close_idle() == 0
-    assert entry.agent is not None
-
-
-async def test_the_idle_sweep_leaves_an_agent_without_mcp(
-    console: Console, builder: FakeBuilder, workspace: str
-) -> None:
-    turn = await seed_turn(console.store, workspace)
-    reg = registry(console, builder, idle_close_s=0)
-    entry = await open_session(reg, turn.session_id)
-    entry.last_used = 0
-    assert await reg.close_idle() == 0
-    assert entry.agent is not None
 
 
 async def test_settings_changed_closes_idle_agents(
@@ -615,3 +565,18 @@ async def test_delete_store_failure_keeps_open_session(
     assert entry is not None
     assert entry.agent is agent and not agent.closed
     assert await console.store.get_session(turn.session_id) is not None
+
+
+@pytest.mark.parametrize(
+    ("mode", "kept"),
+    [(None, False), ("legacy", False), ("drop", True), ("compress", True)],
+)
+def test_only_a_legacy_chat_runs_without_the_cores_long_term_memory(
+    workspace: str, mode: str | None, kept: bool
+) -> None:
+    cfg = make_cfg()
+    if mode is not None:
+        cfg.agent.reasoning = mode
+    options = chat_options(cfg, workspace)
+    assert options.memory is kept
+    assert options.reasoning == (mode or "legacy")

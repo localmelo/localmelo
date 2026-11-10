@@ -155,7 +155,7 @@ export function setupPanel({
   const head = node('header', 'panel-head');
   const handle = button('panel-handle', '', () => setSheet(false));
   handle.setAttribute('aria-label', t('panel.closeActivity'));
-  head.append(handle, ring, node('h2', 'panel-name', 'Melo'), status);
+  head.append(handle, ring, node('h2', 'panel-name', t('common.melo')), status);
   const tablist = node('div', 'panel-tabs');
   tablist.setAttribute('role', 'tablist');
   tablist.setAttribute('aria-label', 'Melo');

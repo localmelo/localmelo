@@ -1,11 +1,12 @@
 """Sleep: an undo sticks, a stopped run can still be undone, the GPU lock is honoured.
 
-Synthetic notes and turns on a temporary memory folder, a scripted model and
+Synthetic notes and turns on a temporary memory folder, a stub embedding model and
 temporary lock files; no server, and never the real GPU lock. An undo keeps the
-pairs it separated apart (``kept_apart``) and a retired note from being retired
-again, and a note it removed is not written again from the same turn. A run that
-is cancelled saves what it changed. Every request to a model server first checks
-the lock (``[memory] sleep_lock``, else ``[scheduler] gpu_lock_file``).
+pairs it separated apart (``kept_apart``), and a note it removed is not written
+again from the same turn. A run that is cancelled saves what it changed. Every
+request to the embedding model first checks the lock (``[memory] sleep_lock``,
+else ``[scheduler] gpu_lock_file``) and whether the user is active. An undo log
+an earlier version saved, with the changes of its model pass, still undoes.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,25 +22,15 @@ import pytest
 
 from localmelo.support.config import Config
 from localmelo.support.memory import ChatMemory, records, sleep
+from localmelo.support.memory.index import ConversationIndex
 from localmelo.support.sessions.store import NewSession, SessionStore
+from localmelo.tests.memory.chat_memory_helpers import FakeEmbedding
 
 from . import test_sleep as rules
-from .test_sleep_checks import (
-    AT,
-    C3,
-    C4,
-    model_only,
-    pair,
-    run_model,
-    states,
-    tidy,
-    turn,
-)
-from .test_sleep_model import op, use
+from .test_sleep_checks import AT, C3, C4, TRAIN, pair, states, tidy
 
 memory = rules.memory
 chats = rules.chats
-__all__ = ["model_only"]
 
 
 def saved_runs(memory: ChatMemory) -> list[str]:
@@ -48,10 +39,9 @@ def saved_runs(memory: ChatMemory) -> list[str]:
         return [str(row[0]) for row in conn.execute("SELECT run_id FROM sleep_runs")]
 
 
-def forget_processed(memory: ChatMemory) -> None:
-    """As if a cut-short run had not marked its turns: they come back."""
+def reset_watermark(memory: ChatMemory) -> None:
+    """As if a cut-short run had not moved the watermark: its turns come back."""
     with sqlite3.connect(Path(memory.directory) / "index.db") as conn:
-        conn.execute("DELETE FROM sleep_processed")
         conn.execute("DELETE FROM meta WHERE key = 'sleep_until'")
 
 
@@ -80,6 +70,32 @@ async def watched(tmp_path: Path) -> AsyncIterator[tuple[ChatMemory, Path]]:
 
 
 FOREIGN = "holder: bench:7\npurpose: a benchmark\nrun: 7\n"
+BUS = "You take the 8:15 bus to work."
+SAID_TRAIN = "My usual train to the office is the 7:40."
+SAID_BUS = "My usual bus to the office is the 8:15."
+
+
+class Embedder(FakeEmbedding):
+    """An embedding model whose vector is far from the notes' ``[1, 0]`` for every
+    text (so no fact counts as held), and which runs ``after`` once it answered."""
+
+    after: Callable[[], Awaitable[None]] | None = None
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        await super().embed(texts)  # keeps the call
+        if self.after is not None:
+            await self.after()
+        return [[0.0, 1.0] for _ in texts]
+
+
+async def embedder(memory: ChatMemory, monkeypatch: pytest.MonkeyPatch) -> Embedder:
+    """Give *memory* the embedding model and two notes with vectors that a turn
+    can restate: a run that reads such a turn embeds what it says."""
+    provider = Embedder("m")
+    monkeypatch.setattr(memory, "embedding", lambda: (provider, "m"))
+    await rules.put(memory, TRAIN, vector=[1.0, 0.0])
+    await rules.put(memory, BUS, vector=[1.0, 0.0])
+    return provider
 
 
 # ── 1. An undo sticks ──
@@ -112,61 +128,6 @@ async def test_rules_do_not_retire_an_undone_replacement_again(
     assert await apart(memory) == {older: [newer], newer: [older]}
     assert (await tidy(memory)).changes == []
     assert await states(memory) == {older: "active", newer: "active"}
-
-
-async def test_a_model_replacement_that_was_undone_is_not_made_again(
-    memory: ChatMemory, model_only: None
-) -> None:
-    older, newer = await pair(memory, *C4)
-    text = "Your new manager is Daniel Kim from next week."
-    saying = [[op("UPDATE", C4[1][1], text, older)]]
-    first = await run_model(memory, [turn("n", C4[1][1], AT + 20)], saying)
-    assert [c.op for c in first.changes] == ["O2b"]
-    assert await memory.undo_sleep(first.run_id) is not None
-    # The user says it again in a later turn and the model proposes the same.
-    again = await run_model(memory, [turn("n", C4[1][1], AT + 30, 2)], saying)
-    assert again.changes == []
-    assert await states(memory) == {older: "active", newer: "active"}
-    assert await rules.texts(memory) == {C4[0][0], C4[1][0]}  # nothing was written
-
-
-async def test_a_model_update_that_wrote_a_note_is_not_written_again_after_its_undo(
-    memory: ChatMemory,
-) -> None:
-    old = await rules.put(memory, "Your gym day is Monday.", AT, session="o")
-    source = turn("n", "My gym day moved to Friday.", AT + 20)
-    text = "Your gym day moved to Friday."
-    saying = [[op("UPDATE", source.typed, text, old)]]
-    first = await run_model(memory, [source], saying)
-    (change,) = first.changes
-    assert (change.op, change.before_ids) == ("UPDATE", [old])
-    assert await memory.undo_sleep(first.run_id) == {
-        "run_id": first.run_id,
-        "restored": 1,
-        "removed": 1,
-        "kept": 0,
-    }
-    forget_processed(memory)  # the turn comes back, as after a cut-short run
-    again = await run_model(memory, [source], saying)
-    assert again.changes == [] and again.proposals[0]["verdict"] == "noop"
-    assert await rules.texts(memory) == {"Your gym day is Monday."}
-
-
-async def test_a_retirement_that_was_undone_is_not_made_again(
-    memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    old = await rules.put(memory, "You are allergic to peanuts.")
-    quote = "I'm no longer allergic to peanuts."
-    await rules.chat(chats, quote)
-    use(monkeypatch, [[op("RETIRE", quote, note=old)], [op("RETIRE", quote, note=old)]])
-    first = await memory.sleep("model", chats=chats)
-    assert [c.op for c in first.changes] == ["RETIRE"]
-    assert await memory.undo_sleep(first.run_id) is not None
-    assert await apart(memory) == {old: [old]}  # "do not retire me again"
-    await rules.chat(chats, quote)
-    again = await memory.sleep("model", chats=chats)
-    assert again.changes == [] and again.proposals[0]["verdict"] == "noop"
-    assert await rules.texts(memory) == {"You are allergic to peanuts."}
 
 
 async def test_a_third_newer_note_still_replaces_a_restored_note(
@@ -246,7 +207,7 @@ async def test_a_note_an_undo_removed_is_not_written_again_even_when_its_turn_re
     # The watermark stops the turn from being read again ...
     assert (await memory.sleep(chats=chats)).changes == []
     # ... and when it is read again (it was never marked), the note is not rewritten.
-    forget_processed(memory)
+    reset_watermark(memory)
     assert await index.meta("sleep_until") == 0
     assert (await memory.sleep(chats=chats)).changes == []
     assert await memory.records() == []
@@ -284,10 +245,87 @@ async def test_forgetting_the_chat_forgets_what_was_undone(
     said = await rules.chat(chats, "I live in Utrecht.")
     await memory.undo_sleep((await memory.sleep(chats=chats)).run_id)
     await memory.forget_session(said.session_id)
-    forget_processed(memory)
+    reset_watermark(memory)
     assert [c.text for c in (await memory.sleep(chats=chats)).changes] == [
         "You live in Utrecht."
     ]
+
+
+# ── An undo log an earlier version saved ──
+
+
+async def test_an_undo_log_with_the_changes_of_the_removed_model_pass_still_undoes(
+    memory: ChatMemory,
+) -> None:
+    """Notes as an earlier model pass left them, and the log it saved: ``UPDATE``
+    (a note superseded by a new one), ``RETIRE``, ``ADD`` and ``O4`` (a pronoun
+    reworded). The log loads and undoes, and is gone afterwards."""
+    store, index = memory.stores()
+    gym = await rules.put(memory, "Your gym day is Monday.", AT)
+    cashews = await rules.put(memory, "You are allergic to cashews.", AT)
+    pronoun = await rules.put(memory, "Her office is on Pine Street.", AT)
+    baseline = {str(note): 0 for note in (gym, cashews, pronoun)}
+    moved = await rules.put(memory, "Your gym day moved to Friday.", AT + 20)
+    kite = await rules.put(memory, "You enjoy kitesurfing.", AT + 20)
+    ada = await rules.put(memory, "Dr. Ada's office is on Pine Street.", AT + 20)
+    for old, keeper in ((gym, moved), (pronoun, ada), (cashews, None)):
+        assert await store.set_status(
+            [old], "superseded", keeper=keeper, admitted_by="sleep", reason="run"
+        )
+    await index.save_run(
+        "earlier",
+        AT + 30,
+        [
+            {"op": "UPDATE", "before": [gym], "after": moved},
+            {"op": "RETIRE", "before": [cashews], "after": None, "baseline": baseline},
+            {"op": "ADD", "before": [], "after": kite},
+            {"op": "O4", "before": [pronoun], "after": ada},
+        ],
+    )
+    assert saved_runs(memory) == ["earlier"]
+    undone = await memory.undo_sleep("earlier")
+    assert undone == {"run_id": "earlier", "restored": 3, "removed": 3, "kept": 0}
+    assert await rules.texts(memory) == {
+        "Your gym day is Monday.",
+        "You are allergic to cashews.",
+        "Her office is on Pine Street.",
+    }
+    assert saved_runs(memory) == [] and await memory.undo_sleep("earlier") is None
+
+
+async def test_an_index_with_the_removed_turn_table_opens_with_it_empty(
+    tmp_path: Path,
+) -> None:
+    """The removed model pass kept turn ids in ``sleep_processed``: its rows go when
+    the file opens, the table stays; a file without it opens as before."""
+    old, new = str(tmp_path / "old.db"), str(tmp_path / "new.db")
+    raw = sqlite3.connect(old)
+    raw.executescript("""
+        CREATE TABLE sleep_processed (
+            session_id TEXT NOT NULL, turn INTEGER NOT NULL,
+            note_id INTEGER NOT NULL DEFAULT 0, finished REAL NOT NULL,
+            failures INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, turn, note_id));
+        INSERT INTO sleep_processed (session_id, turn, finished) VALUES ('s1', 4, 1.0);
+        """)
+    raw.commit()
+    raw.close()
+    for path in (old, new):
+        index = ConversationIndex(path)
+        try:
+            assert await index.count() == 0
+        finally:
+            await index.aclose()
+
+    def tables(path: str, name: str) -> list[Any]:
+        with sqlite3.connect(path) as conn:
+            return conn.execute(
+                "SELECT name FROM sqlite_master WHERE name = ?", (name,)
+            ).fetchall()
+
+    with sqlite3.connect(old) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sleep_processed").fetchone() == (0,)
+    assert tables(old, "sleep_processed") and not tables(new, "sleep_processed")
 
 
 # ── 2. A cancelled run keeps its undo log ──
@@ -394,81 +432,49 @@ async def test_a_second_cancel_while_the_log_is_saved_does_not_drop_it(
     assert saved_runs(memory) == [note.provenance["run_id"]]
 
 
-async def test_a_model_run_cancelled_mid_call_keeps_its_first_change(
-    memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await rules.chat(chats, "I enjoy kitesurfing.")  # the oldest turn goes first
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    provider = use(
-        monkeypatch, [[op("ADD", "I enjoy kitesurfing.", "You enjoy kitesurfing.")]]
-    )
-    waiting = asyncio.Event()
-
-    async def hang_on_the_second_call() -> None:
-        if len(provider.calls) == 2:
-            waiting.set()
-            await asyncio.Event().wait()
-
-    provider.after = hang_on_the_second_call
-    task = asyncio.create_task(memory.sleep("model", chats=chats))
-    await asyncio.wait_for(waiting.wait(), 10)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    (note,) = await memory.records()
-    assert note.text == "You enjoy kitesurfing."
-    run_id = note.provenance["run_id"]
-    assert saved_runs(memory) == [run_id]
-    assert (await memory.undo_sleep(run_id) or {})["removed"] == 1
-    assert await memory.records() == []
-
-
 # ── 3. The GPU lock is honoured ──
 
 
-async def test_the_gpu_lock_is_the_default_sleep_lock_and_stops_a_run_before_its_first_call(
+async def test_the_gpu_lock_is_the_default_sleep_lock_and_stops_a_run_before_its_first_embedding(
     watched: tuple[ChatMemory, Path],
     chats: SessionStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     memory, lock = watched
     lock.write_text(FOREIGN)
-    provider = use(monkeypatch, [[]])
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    report = await memory.sleep("model", chats=chats)
-    assert report.aborted == "stopped: gpu_lock" and report.model_calls == 0
+    provider = await embedder(memory, monkeypatch)
+    await rules.chat(chats, SAID_TRAIN)
+    report = await memory.sleep("rules", chats=chats)
+    assert report.aborted == "stopped: gpu_lock"
     assert not provider.calls and await memory.stores()[1].meta("sleep_until") == 0
     assert lock.read_text() == FOREIGN  # read only
 
 
-async def test_a_lock_taken_mid_run_stops_it_after_the_current_call_and_it_is_saved(
+async def test_a_lock_taken_mid_run_stops_it_before_the_next_embedding_and_it_is_saved(
     watched: tuple[ChatMemory, Path],
     chats: SessionStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     memory, lock = watched
-    older = await rules.put(memory, "You live in Lisbon.", rules.LONG_AGO)
-    newer = await rules.put(memory, "You live in Utrecht.", rules.LONG_AGO + 5)
-    quote = "I'm allergic to peanuts."
-    await rules.chat(chats, quote)  # the model reads this one first
-    await rules.chat(chats, "My dentist is Lee Park.")  # the rules write this one
-    provider = use(monkeypatch, [[op("ADD", quote, "You are allergic to peanuts.")]])
+    await rules.put(memory, "You live in Lisbon.", rules.LONG_AGO)
+    await rules.put(memory, "You live in Utrecht.", rules.LONG_AGO + 5)
+    provider = await embedder(memory, monkeypatch)
+    before = {n.id for n in await memory.records()}
+    await rules.chat(chats, SAID_BUS)
+    await rules.chat(chats, SAID_TRAIN)  # the newest turn is read first
 
     async def a_benchmark_starts() -> None:
         lock.write_text(FOREIGN)
 
     provider.after = a_benchmark_starts
-    report = await memory.sleep("model", chats=chats)
-    assert report.aborted == "stopped: gpu_lock"
-    assert report.model_calls == 1 and len(provider.calls) == 1
-    # What the rules did before the call is kept, saved and undoable; the reply
-    # that came while the lock was taken is not applied.
+    report = await memory.sleep("rules", chats=chats)
+    assert report.aborted == "stopped: gpu_lock" and len(provider.calls) == 1
+    # What the run did before the lock was taken is kept, saved and undoable.
     assert [c.op for c in report.changes] == ["O1", "O3"]
-    assert "You are allergic to peanuts." not in await rules.texts(memory)
     assert saved_runs(memory) == [report.run_id]
     assert await memory.stores()[1].meta("sleep_until") == 0
     assert await memory.undo_sleep(report.run_id) is not None
-    assert {n.id for n in await memory.records()} == {older, newer}
+    assert {n.id for n in await memory.records()} == before
 
 
 async def test_a_lock_that_is_gone_lets_the_next_run_go_on(
@@ -478,15 +484,16 @@ async def test_a_lock_that_is_gone_lets_the_next_run_go_on(
 ) -> None:
     memory, lock = watched
     lock.write_text(FOREIGN)
-    provider = use(monkeypatch, [[]])
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    assert (await memory.sleep("model", chats=chats)).model_calls == 0
+    provider = await embedder(memory, monkeypatch)
+    await rules.chat(chats, SAID_TRAIN)
+    assert (await memory.sleep("rules", chats=chats)).aborted == "stopped: gpu_lock"
+    assert not provider.calls
     lock.unlink()
-    assert (await memory.sleep("model", chats=chats)).model_calls == 1
+    assert (await memory.sleep("rules", chats=chats)).aborted == ""
     assert len(provider.calls) == 1
 
 
-async def test_the_rules_variant_needs_no_lock(
+async def test_a_run_that_embeds_nothing_needs_no_lock(
     watched: tuple[ChatMemory, Path], chats: SessionStore
 ) -> None:
     memory, lock = watched
@@ -494,9 +501,9 @@ async def test_the_rules_variant_needs_no_lock(
     await rules.put(memory, "You live in Lisbon.", rules.LONG_AGO)
     await rules.put(memory, "You live in Utrecht.", rules.LONG_AGO + 5)
     await rules.chat(chats, "My dentist is Lee Park.")
-    report = await memory.sleep("rules", chats=chats)
+    report = await memory.sleep("rules", chats=chats)  # no embedding model is set up
     assert [c.op for c in report.changes] == ["O1", "O3"]
-    assert report.aborted == "" and report.model_calls == 0
+    assert report.aborted == ""
     assert await memory.stores()[1].meta("sleep_until") > 0
 
 
@@ -508,13 +515,13 @@ async def test_a_lock_of_our_own_holder_does_not_stop_a_run(
     memory, lock = watched
     lock.write_text("holder: melo-test\nrun: 3\n")
     memory._settings().scheduler.lock_self = "melo-test"  # type: ignore[union-attr]
-    use(monkeypatch, [[]])
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    report = await memory.sleep("model", chats=chats)
-    assert report.model_calls == 1 and report.aborted == ""
+    provider = await embedder(memory, monkeypatch)
+    await rules.chat(chats, SAID_TRAIN)
+    report = await memory.sleep("rules", chats=chats)
+    assert report.aborted == "" and len(provider.calls) == 1
     lock.write_text(FOREIGN)
-    await rules.chat(chats, "I enjoy kitesurfing.")
-    assert (await memory.sleep("model", chats=chats)).aborted == "stopped: gpu_lock"
+    await rules.chat(chats, SAID_BUS)
+    assert (await memory.sleep("rules", chats=chats)).aborted == "stopped: gpu_lock"
 
 
 async def test_an_explicit_sleep_lock_replaces_the_gpu_lock(
@@ -527,12 +534,12 @@ async def test_an_explicit_sleep_lock_replaces_the_gpu_lock(
     gpu.write_text(FOREIGN)
     own = tmp_path / "sleep-lock"
     memory._settings().memory.sleep_lock = str(own)  # type: ignore[union-attr]
-    provider = use(monkeypatch, [[], []])
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    assert (await memory.sleep("model", chats=chats)).model_calls == 1
+    provider = await embedder(memory, monkeypatch)
+    await rules.chat(chats, SAID_TRAIN)
+    assert (await memory.sleep("rules", chats=chats)).aborted == ""
     own.write_text("held")  # any file counts, whatever its words
-    await rules.chat(chats, "I enjoy kitesurfing.")
-    assert (await memory.sleep("model", chats=chats)).aborted == "stopped: gpu_lock"
+    await rules.chat(chats, SAID_BUS)
+    assert (await memory.sleep("rules", chats=chats)).aborted == "stopped: gpu_lock"
     assert len(provider.calls) == 1
 
 
@@ -593,26 +600,27 @@ async def test_a_turn_that_began_before_the_runs_start_time_counts_as_activity(
 ) -> None:
     began = time.time()  # the caller took it before its idle checks
     await asyncio.sleep(0.01)
-    await rules.chat(chats, "I'm allergic to peanuts.")  # started in the gap
-    provider = use(monkeypatch, [[]])
-    report = await memory.sleep("model", chats=chats, began=began)
+    await rules.chat(chats, SAID_TRAIN)  # started in the gap
+    provider = await embedder(memory, monkeypatch)
+    report = await memory.sleep("rules", chats=chats, began=began)
     assert report.aborted == "stopped: user_active" and not provider.calls
 
 
-async def test_a_turn_before_the_call_is_not_activity_and_none_means_now(
+async def test_a_turn_before_the_run_is_not_activity_and_none_means_now(
     memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    provider = use(monkeypatch, [[]])
-    report = await memory.sleep("model", chats=chats)  # began=None: at entry
+    await rules.chat(chats, SAID_TRAIN)
+    provider = await embedder(memory, monkeypatch)
+    report = await memory.sleep("rules", chats=chats)  # began=None: at entry
     assert report.aborted == "" and len(provider.calls) == 1
 
 
 async def test_a_task_that_starts_during_the_run_stops_it(
     memory: ChatMemory, chats: SessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    provider = use(monkeypatch, [[]])
+    await rules.chat(chats, SAID_BUS)
+    await rules.chat(chats, SAID_TRAIN)
+    provider = await embedder(memory, monkeypatch)
 
     async def a_task_starts() -> None:
         await chats.begin_turn(
@@ -623,7 +631,7 @@ async def test_a_task_that_starts_during_the_run_stops_it(
         )
 
     provider.after = a_task_starts
-    report = await memory.sleep("model", chats=chats)
+    report = await memory.sleep("rules", chats=chats)
     assert report.aborted == "stopped: user_active" and len(provider.calls) == 1
 
 
@@ -636,6 +644,7 @@ async def test_a_task_that_began_earlier_is_not_activity(
         holder=rules.HOLDER,
         new_session=NewSession(kind="task"),
     )
-    await rules.chat(chats, "I'm allergic to peanuts.")
-    use(monkeypatch, [[]])
-    assert (await memory.sleep("model", chats=chats)).aborted == ""
+    await rules.chat(chats, SAID_TRAIN)
+    provider = await embedder(memory, monkeypatch)
+    report = await memory.sleep("rules", chats=chats)
+    assert report.aborted == "" and len(provider.calls) == 1

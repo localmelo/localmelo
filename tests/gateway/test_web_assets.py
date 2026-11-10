@@ -121,6 +121,24 @@ async def test_bad_or_absent_instance_has_no_header(
         assert "x-localmelo-instance" not in (await client.get("/")).headers
 
 
+async def test_the_page_and_its_modules_are_revalidated_on_every_use(
+    client: httpx.AsyncClient,
+) -> None:
+    # A file with a Last-Modified and no Cache-Control may be reused by a
+    # browser's own freshness guess after an update; no-cache makes each use ask,
+    # and the ETag answers a file that did not change with a 304.
+    assert (await client.get("/")).headers["cache-control"] == "no-cache"
+    module = await client.get("/assets/workspace.js")
+    assert module.status_code == 200 and module.headers["etag"]
+    assert module.headers["cache-control"] == "no-cache"
+    same = await client.get(
+        "/assets/workspace.js", headers={"If-None-Match": module.headers["etag"]}
+    )
+    assert same.status_code == 304 and same.headers["cache-control"] == "no-cache"
+    other = await client.get("/assets/workspace.js", headers={"If-None-Match": '"x"'})
+    assert other.status_code == 200 and other.content == module.content
+
+
 async def _walk_modules(client: httpx.AsyncClient, scripts: list[str]) -> set[str]:
     """Serve each script and, one import after another, every module it imports."""
     reached: set[str] = set()

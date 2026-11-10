@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Make the macOS app's icon files from the logo art. This is the engine of `scripts/art_pack.py`, which hands it the
+"""Make the macOS app's icon from the emblem art. This is the engine of `scripts/art_pack.py`, which hands it the
 pack's brand pictures (docs/guides/art-pack.md); run it alone to make the files again from the committed pictures in
 docs/assets, on a Mac:
 
@@ -15,8 +15,8 @@ them into the app.
   The paper differs a little along each edge, so a flat tile shows a rectangle: the emblem fades into the tile
   over ICON_FEATHER px at its edges. Every size is resampled from the source with a Lanczos filter, so a source
   smaller than 1024 px is upscaled for the largest size. A picture with transparent pixels is laid on white first.
-- macos/assets/MenuBarLogo.png and MenuBarLogo@2x.png: the round logo (docs/assets/icon_small.png) at 18 points,
-  18 and 36 px, with rounded corners, for the menu-bar item.
+
+The menu-bar item's mark is not made here: scripts/make_menu_bar_mark.py derives it from Melo's head.
 """
 
 from __future__ import annotations
@@ -43,7 +43,6 @@ ICONSET = {
     for n in (16, 32, 128, 256, 512)
     for suffix, scale in (("", 1), ("@2x", 2))
 }
-MENU_BAR_POINTS, MENU_BAR_RADIUS = 18, 4
 
 
 def resize(pixels: np.ndarray, height: int, width: int) -> np.ndarray:
@@ -92,12 +91,6 @@ def draw_icon(emblem: np.ndarray, size: int) -> tuple[np.ndarray, np.ndarray]:
     return canvas, coverage(size, side, ICON_RADIUS * scale)
 
 
-def draw_menu_bar_logo(logo: np.ndarray, scale: int) -> tuple[np.ndarray, np.ndarray]:
-    """The round logo at 18 points, `scale` px to the point, as colours and alpha, with rounded corners."""
-    size = MENU_BAR_POINTS * scale
-    return resize(logo, size, size), coverage(size, size, MENU_BAR_RADIUS * scale)
-
-
 def flatten(image: Image.Image) -> np.ndarray:
     """A picture as (h, w, 3) colours; where it is transparent it is laid on white first."""
     rgba = image.convert("RGBA")
@@ -120,11 +113,9 @@ def icon_image(emblem: np.ndarray, size: int) -> Image.Image:
     return Image.fromarray(pixels)
 
 
-def build_icons(
-    out: Path, emblem: np.ndarray | None = None, logo: np.ndarray | None = None
-) -> list[str]:
-    """Write the icon from `emblem` and the menu-bar logo from `logo` into `out`; each is skipped when it is None.
-    The names written. The icon needs macOS's iconutil."""
+def build_icons(out: Path, emblem: np.ndarray | None = None) -> list[str]:
+    """Write the icon from `emblem` into `out` (nothing when it is None); the names written. The icon needs macOS's
+    iconutil."""
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     if emblem is not None:
@@ -145,19 +136,11 @@ def build_icons(
                 check=True,
             )
         written.append("AppIcon.icns")
-    if logo is not None:
-        for scale, name in ((1, "MenuBarLogo.png"), (2, "MenuBarLogo@2x.png")):
-            save(out / name, *draw_menu_bar_logo(logo, scale))
-            written.append(name)
     return written
 
 
 def main() -> None:
-    written = build_icons(
-        ASSETS,
-        load(ROOT / "docs/assets/melo.png"),
-        load(ROOT / "docs/assets/icon_small.png"),
-    )
+    written = build_icons(ASSETS, load(ROOT / "docs/assets/melo.png"))
     print(f"Wrote {', '.join(written)} in {ASSETS}")
 
 

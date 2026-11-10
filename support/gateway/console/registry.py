@@ -95,8 +95,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Seconds an idle Agent is kept before the sweep closes it.
-IDLE_CLOSE_S: Final = 900.0
 # Agents open at once; opening one more closes the least recently used idle
 # Agent of any kind first.
 MAX_OPEN: Final = 8
@@ -104,7 +102,7 @@ MAX_OPEN: Final = 8
 CLOSE_ALL_TIMEOUT_S: Final = 10.0
 # Of that, the reserve an Agent's begin_exit leaves for its own save.
 EXIT_SAVE_RESERVE_S: Final = 1.0
-# Seconds between idle sweeps.
+# Seconds between the console's sweeps (the timer that writes the main chat's cards).
 SWEEP_INTERVAL_S: Final = 60.0
 
 # What a chat has in a folder no task may work in: it reads, and changes nothing.
@@ -168,7 +166,14 @@ def chat_options(settings: Config, workspace: str) -> AgentOptions:
             max_extensions=TASK_EXTENSIONS,
         ),
     )
-    return dataclasses.replace(options, attempt_policy="none")
+    # The core's long-term store of a legacy Agent costs a model server its prefix
+    # cache and one unbounded embedding call per tool call, and nothing in a chat
+    # reads it back usefully. The other modes use the option for their own recall.
+    return dataclasses.replace(
+        options,
+        attempt_policy="none",
+        memory=options.memory and options.reasoning != "legacy",
+    )
 
 
 async def default_builder(
@@ -258,7 +263,6 @@ class OpenSession:
     agent: Agent | None
     kept: list[Message] | None = None
     mcp_error: str = ""
-    built_with_mcp: bool = False
     resumed: ResumeInfo | None = None
     lock: SessionLock = field(default_factory=SessionLock)
     last_used: float = 0.0
@@ -284,9 +288,8 @@ class ConsoleSessions:
 
     *settings* is read again on every open, so a settings change reaches
     the next Agent. *builder* returns a started Agent and must close it and
-    raise on failure; *idle_close_s* and *max_open* are the bounds of
-    :data:`IDLE_CLOSE_S` and :data:`MAX_OPEN`. *clock* replaces time in
-    tests.
+    raise on failure; *max_open* is the bound of :data:`MAX_OPEN`. *clock*
+    replaces time in tests.
     """
 
     def __init__(
@@ -299,7 +302,6 @@ class ConsoleSessions:
         front_builder: AgentBuilder | None = None,
         gate: ChatGate | None = None,
         memory: ChatMemory | None = None,
-        idle_close_s: float = IDLE_CLOSE_S,
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
         ledger: ApprovalLedger | None = None,
@@ -333,7 +335,6 @@ class ConsoleSessions:
         self._builder: AgentBuilder = builder or self._default_builder
         # The main chat's own Agent (the front); None builds it as any chat.
         self._front_builder = front_builder
-        self._idle_close_s = idle_close_s
         self._max_open = max_open
         self._clock = clock
         self._holder = process_holder("gateway")
@@ -570,10 +571,6 @@ class ConsoleSessions:
                 runner=runner,
                 policy=policy,
                 agent=agent,
-                # MCP is deferred (decision 5 B) and default_builder never
-                # reads mcp_config, so no console Agent has MCP tools yet:
-                # the idle sweep must not close it as if it did (2.10).
-                built_with_mcp=False,
                 lock=self.lock(session_id),
                 last_used=self._clock(),
                 main=info.kind == "front",
@@ -592,7 +589,6 @@ class ConsoleSessions:
             entry.agent = agent
             entry.settings_epoch = epoch
             entry.model = model
-            entry.built_with_mcp = False
             entry.last_used = self._clock()
 
         try:
@@ -1236,7 +1232,6 @@ class ConsoleSessions:
             runner=runner,
             policy=policy,
             agent=agent,
-            built_with_mcp=False,
             lock=self.lock(session_id),
             last_used=self._clock(),
             settings_epoch=epoch,
@@ -1507,38 +1502,7 @@ class ConsoleSessions:
                 return turn
         return None
 
-    # ── Sweeps ──
-
-    async def close_idle(self) -> int:
-        """Close every idle Agent older than ``idle_close_s``; return how many.
-
-        An Agent with a turn running or an approval pending is left alone.
-        """
-        now = self._clock()
-        closed = 0
-        for entry in list(self._sessions.values()):
-            if entry.agent is None or entry.runner.busy:
-                continue
-            # The sweep frees MCP servers' processes; an Agent without MCP
-            # is kept and only the open cap closes it.
-            if not entry.built_with_mcp:
-                continue
-            if self._broker.pending(entry.session_id):
-                continue
-            if now - entry.last_used < self._idle_close_s:
-                continue
-            async with entry.lock:
-                if (
-                    self._sessions.get(entry.session_id) is entry
-                    and entry.agent is not None
-                    and not entry.runner.busy
-                    and not entry.lock.pending
-                    and self._clock() - entry.last_used >= self._idle_close_s
-                    and not self._broker.pending(entry.session_id)
-                ):
-                    await self._keep_locked(entry)
-                    closed += 1
-        return closed
+    # ── Settings changes ──
 
     async def settings_changed(self) -> None:
         """Close every idle Agent at once, keeping each conversation.
