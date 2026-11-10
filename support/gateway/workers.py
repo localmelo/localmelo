@@ -700,6 +700,12 @@ class TaskWorkers:
         # Auto mode's policy of each task in Auto, kept across its runs for
         # the steps allowed once (#339).
         self._auto: dict[str, AutoPolicy] = {}
+        # What a scheduled task kept (#619): a count per chore that a Remove, a new
+        # request or a delete moves on, so a launch that read the store before
+        # it does not keep what it read; and, by the create key of the fresh
+        # task a keep's go-ahead starts, the chore whose answer that task holds.
+        self._kept_epoch: dict[str, int] = {}
+        self._keep_goes_on: dict[str, str] = {}
         # The chat a task asks when it is stuck (#369); the console sets it.
         self.owner: OwnerChannel | None = None
         # Who shows a task's browser in the chat that owns it; the console sets it.
@@ -969,6 +975,9 @@ class TaskWorkers:
                     self._ready.pop(record.task_id, None)
                 elif not repeated:
                     if auto is not None:
+                        # A policy handed to another task holds nothing a
+                        # scheduled task kept: that task's launch reads its own (#619).
+                        auto.kept = None
                         self._auto[record.task_id] = auto
                     self._register(record)
                     self._eligible.add(record.task_id)
@@ -1457,22 +1466,68 @@ class TaskWorkers:
             raise
 
     async def _kept_for(self, record: TaskRecord) -> ScheduledKeep | None:
-        """What a run of a scheduled task may type and send without asking (#619), or ``None``.
+        """What *record*'s run may type and send without asking (#619), or ``None``.
 
-        Only a run the chore runner started for that chore (:func:`run_chore`,
-        by the stored origin and request key), of its request as it is now
-        (the run's own words); a store that cannot be read keeps nothing.
+        Read from the store, for the scheduled task and the request of the run
+        :meth:`_scheduled_run` names, as that request is now; a store that
+        cannot be read keeps nothing.
         """
-        chore_id = run_chore(record.origin, record.request_key)
-        if chore_id is None:
+        found = await self._scheduled_run(record)
+        if found is None:
             return None
+        chore_id, run = found
         try:
             return await ChoreStore(self.store).live_keep(
-                chore_id, str(record.spec.get("user_words") or "")
+                chore_id, str(run.spec.get("user_words") or "")
             )
         except Exception:
             log.exception("Could not read what chore %s keeps", chore_id)
             return None
+
+    async def _scheduled_run(self, record: TaskRecord) -> tuple[str, TaskRecord] | None:
+        """The chore whose kept answer *record* may use, and the run of it that answer is read for.
+
+        A run the chore runner started (:func:`run_chore`, by the stored origin
+        and request key): itself. The fresh task a keep's go-ahead started for
+        that run's job (:meth:`keep_block`): the run it follows, tied by stored
+        ids (its packet's source, the create key it was admitted under, the
+        source's request key). Every other task, any other successor among
+        them, holds nothing.
+        """
+        chore_id = run_chore(record.origin, record.request_key)
+        if chore_id is not None:
+            return chore_id, record
+        packet = Handoff.read(record.spec)
+        if record.origin != "user_rule" or packet.origin != "task" or not packet.source:
+            return None
+        key = successor_key(packet.source)
+        chore_id = self._keep_goes_on.get(key)
+        if chore_id is None:
+            return None
+        try:
+            source = await self.tasks.get_task(packet.source)
+            admitted = await self.tasks.by_create_key(key)
+        except TaskStoreError:
+            return None
+        if (
+            admitted is None
+            or admitted.task_id != record.task_id
+            or run_chore(source.origin, source.request_key) != chore_id
+        ):
+            return None
+        return chore_id, source
+
+    async def _hold_kept(self, auto: AutoPolicy, record: TaskRecord) -> None:
+        """Give *auto*, *record*'s Auto policy, what its run may type and send without asking (#619).
+
+        A Remove, a new request or a delete that lands while the store is read
+        wins: checked again once assigned (:meth:`drop_kept`).
+        """
+        found = await self._scheduled_run(record)
+        epoch = None if found is None else self._kept_epoch.get(found[0], 0)
+        auto.kept = await self._kept_for(record)
+        if found is not None and self._kept_epoch.get(found[0], 0) != epoch:
+            auto.kept = None
 
     async def keep_offers(
         self, record: TaskRecord, blocks: builtins.list[dict[str, Any]]
@@ -1497,6 +1552,7 @@ class TaskWorkers:
         Called when the person removes a kept answer, changes the request or
         deletes the chore; the next run reads what is left.
         """
+        self._kept_epoch[chore_id] = self._kept_epoch.get(chore_id, 0) + 1
         for policy in self._auto.values():
             if policy.kept is not None and policy.kept.chore_id == chore_id:
                 policy.kept = None
@@ -1510,9 +1566,12 @@ class TaskWorkers:
         that is not a scheduled task's run (a chat's task, a one-time task)
         or a block nothing may be kept for, ``not_found`` for an unknown block
         or a scheduled task deleted, ``request_changed`` when its request
-        changed since the run. The step then goes ahead as on Allow once; when
-        it cannot (it ran already, its job finished), the answer is kept for
-        the next runs only.
+        changed since the run. The step then goes ahead as on Allow once, and
+        the run that goes on holds the answer from now on (the rest of today's
+        run on that site, #619): a running run at once, a stopped one when it
+        starts again, and the fresh task Allow once starts for an ended one.
+        When it cannot go on (it ran already, its job finished), the answer is
+        kept for the next runs only: ``"kept"``.
         """
         record = await self.tasks.get_task(task_id)
         chore_id = run_chore(record.origin, record.request_key)
@@ -1539,10 +1598,25 @@ class TaskWorkers:
             raise BlockError("not_found") from exc
         except ChoreStaleError as exc:
             raise BlockError("request_changed") from exc
+        # The fresh task the go-ahead may start holds the answer too
+        # (_scheduled_run); no other task admitted under that key later does.
+        mark = successor_key(task_id)
+        self._keep_goes_on[mark] = chore_id
         try:
-            return await self.allow_once(task_id, request_id)
+            body, how = await self.allow_once(task_id, request_id)
         except (BlockError, JobFinishedError):
+            self._keep_goes_on.pop(mark, None)
             return await self._body(await self.tasks.get_task(task_id)), "kept"
+        except BaseException:
+            self._keep_goes_on.pop(mark, None)
+            raise
+        if how != "successor":
+            self._keep_goes_on.pop(mark, None)
+        held = self._auto.get(task_id)
+        if how == "queued" and held is not None:
+            # The run reads the message at its next step: it holds the answer now.
+            await self._hold_kept(held, record)
+        return body, how
 
     async def _allowed_note(self, record: TaskRecord) -> str:
         """The note of the steps allowed once in *record*'s task and not used, or ``""``.
@@ -3082,7 +3156,7 @@ class TaskWorkers:
                 # but what the person kept for a chore's runs (#619).
                 auto = self._auto.setdefault(task_id, AutoPolicy(task=True))
                 auto.asking = None
-                auto.kept = await self._kept_for(record)
+                await self._hold_kept(auto, record)
                 policy = auto
             if record.origin == "user_rule":
                 # A chore follows the chat it came from for a human check (#583):

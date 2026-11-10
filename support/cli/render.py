@@ -392,6 +392,8 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
             return "auto-allowed"
         if approval.get("allowance") == "once":
             return "allowed once"
+        if approval.get("allowance") == "kept":
+            return kept_words(approval)
         return "allowed for the session" if approval.get("remember") else "allowed"
     if origin == "auto":
         return f"blocked: {reason}" if reason else "blocked"
@@ -402,6 +404,25 @@ def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     if origin == "user":
         return f"denied: {reason}" if reason else "denied"
     return ""
+
+
+def kept_words(asked: Mapping[str, Any]) -> str:
+    """What a question that ran on a scheduled task's kept answer says (#619), as the task's page says it."""
+    tool = str(asked.get("tool") or "")
+    site = tool.partition("://")[2]
+    what = "send a form" if tool.startswith("browser-submit:") else "type"
+    return f"Allowed to {what} on {site} without asking: you allow this for this scheduled task"
+
+
+def kept_tag(data: Mapping[str, Any]) -> str:
+    """The tag of a call whose own questions ran on a scheduled task's kept answer (``tool_asks``), each once; else ``""``."""
+    asks = data.get("tool_asks")
+    found = [
+        kept_words(one)
+        for one in (asks if isinstance(asks, list) else [])
+        if isinstance(one, Mapping) and one.get("allowance") == "kept"
+    ]
+    return "; ".join(dict.fromkeys(found))
 
 
 # A declined step's status word, by how it was declined (#465).
@@ -1590,7 +1611,7 @@ class TurnRenderer:
             )
             line = Text(declined_line(declined), style="muted")
             return Group(header, Hung(line, self.symbols))
-        tag = approval_tag(status, approval)
+        tag = approval_tag(status, approval) or kept_tag(data)
         if status == "cancelled":
             withdrawn = approval is not None and approval.get("origin") == "withdrawn"
             meta = ["not run" if withdrawn else f"stopped after {duration}"]

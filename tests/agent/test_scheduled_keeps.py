@@ -37,13 +37,14 @@ OTHER = "https://other.example"
 
 
 class Sends(Types):
-    """:class:`Types`, and a form sent elsewhere (``away``) or typed then sent in one call (``both``)."""
+    """:class:`Types`, and a form sent elsewhere (``away``), where the page decides
+    (``page``), or typed then sent in one call (``both``)."""
 
     async def _type(self, text: str, site: str = SITE, kind: str = "type") -> str:
-        if kind == "away":
+        if kind in ("away", "page"):
+            to = f"{OTHER}/post" if kind == "away" else ""
             return await self._asked(
-                text,
-                sites.require_submit(site, f"{OTHER}/post", "click", [("n", text)]),
+                text, sites.require_submit(site, to, "enter", [("n", text)])
             )
         if kind == "both":
             typed = await super()._type(text, site, "type")
@@ -112,10 +113,13 @@ def _same(asked: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [
         ("another site", [SENDS], {"site": OTHER}, "kept"),
         ("a form sent to another site", [SENDS], {"kind": "away"}, "kept"),
+        ("a form whose target the page decides", [SENDS], {"kind": "page"}, "kept"),
         ("credentials", [verdict(verdict="ask", category="credentials")], {}, "kept"),
         ("not asked for", [verdict(verdict="ask", category="beyond_request", fits_request="no")], {}, "kept"),
+        ("does not fit the task", [verdict(verdict="ask", category="send_out", fits_request="no")], {}, "kept"),
         ("could not be reviewed", ["not json", "not json"], {}, "kept"),
         ("a secret in the text", [SENDS], {"text": SECRET}, "kept"),
+        ("a phone number in the text", [SENDS], {"text": "Call me at 415-555-0134 today."}, "kept"),
         ("a site refused in the task", [SENDS], {}, "refused"),
         ("someone can be asked (a chat)", [SENDS], {}, "asking"),
     ],

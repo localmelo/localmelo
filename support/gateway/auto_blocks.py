@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Final
 
-from localmelo.melo.contracts.approvals import kept_review, kept_site
-from localmelo.melo.contracts.review import TITLES, ActionReview
+from localmelo.melo.contracts.approvals import keep_holds
+from localmelo.melo.contracts.review import TITLES, ActionReview, ModelAnswer
 from localmelo.support.gateway.handover import fenced
 from localmelo.support.gateway.i18n import t
 from localmelo.support.sessions.store import SessionStore
@@ -208,6 +208,9 @@ async def blocked_steps(store: SessionStore, session_id: str) -> list[dict[str, 
                     "preview": str(approval.get("preview") or "") if question else "",
                     "question": str(approval.get("tool") or "") if question else None,
                     "arguments": asked if isinstance(asked, dict) else None,
+                    # Whether the text holds the person's details (#619): only
+                    # an explicit ``False`` lets a kept answer be made from it.
+                    "personal": approval.get("personal") if question else None,
                 }
             )
     # The step as the chat shows it: its tool.started preview.
@@ -306,24 +309,39 @@ def keep_site(block: dict[str, Any]) -> str | None:
 
     Only a block Allow once may run as it was written (``can_allow`` from
     :func:`allowable`: the whole text typed or form sent kept, no secret in
-    it, its site not refused), that the model reviewed as ``send_out`` alone
-    (:func:`kept_review`), on the site its question names (and for a form,
-    sent there: :func:`kept_site`). Whether its task is a scheduled task's
-    run is the caller's to check.
+    it, its site not refused) and that a kept answer would have let run, by
+    the gate's own predicate (:func:`keep_holds`) on what the block stored:
+    its review with the model's answer, and ``personal`` (``False`` only when
+    melo's detector found none of the person's details in the text). Whether
+    its task is a scheduled task's run is the caller's to check.
     """
     question, arguments = block.get("question"), block.get("arguments")
     if not (block.get("can_allow") and question and isinstance(arguments, dict)):
         return None
-    found = block.get("review")
-    review = found if isinstance(found, dict) else {}
+    found = keep_holds(
+        str(question),
+        arguments,
+        _review(block.get("review")),
+        personal=block.get("personal") is not False,
+    )
+    return None if found is None else found[0]
+
+
+def _review(stored: object) -> ActionReview:
+    """The fields of a stored review :func:`keep_holds` reads; anything missing reads as not reviewed."""
+    review = stored if isinstance(stored, dict) else {}
     categories = review.get("categories")
-    read = ActionReview(
+    model = review.get("model")
+    return ActionReview(
         "high" if review.get("verdict") == "high" else "undecided",
         tuple(str(c) for c in categories) if isinstance(categories, list) else (),
         by="model" if review.get("by") == "model" else "rules",
+        model=(
+            ModelAnswer(fits_request=str(model.get("fits_request") or ""))
+            if isinstance(model, dict) and not model.get("error")
+            else None
+        ),
     )
-    site = kept_site(str(question), arguments) if kept_review(read) else None
-    return None if site is None else site[0]
 
 
 async def kept_uses(store: SessionStore, session_id: str) -> list[dict[str, Any]]:

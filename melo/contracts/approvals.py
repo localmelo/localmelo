@@ -869,19 +869,46 @@ def kept_site(name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None
 def kept_review(review: ActionReview | None) -> bool:
     """Whether a scheduled task's kept answer may stand for the person's answer after *review* (#619).
 
-    The model reviewed the step and every category it names is ``send_out``
-    ("Send data from this Mac?"): the one question a kept answer answers. A
-    step filed under anything else (passwords or keys, money, an account's
-    settings, something the person did not ask for), one that could not be
+    The model reviewed the step, said it fits the request (``fits_request``
+    ``yes``; ``user_asked`` is not read: a scheduled run has nobody asking),
+    and every category the review names is ``send_out`` ("Send data from this
+    Mac?"): the one question a kept answer answers, the posting rules' stops
+    for a repeating task and for a text the person neither wrote nor asked to
+    send among them. A step filed under anything else (passwords or keys,
+    money, an account's settings, something the person did not ask for), one
+    the model found off the request or was unsure of, one that could not be
     reviewed, and a routine one (it needs no answer) are not.
     """
     return (
         review is not None
         and review.verdict == "high"
         and review.by == "model"
+        and review.model is not None
+        and review.model.fits_request == "yes"
         and bool(review.categories)
         and set(review.categories) == {"send_out"}
     )
+
+
+def keep_holds(
+    name: str,
+    arguments: Mapping[str, Any],
+    review: ActionReview | None,
+    *,
+    personal: bool,
+) -> tuple[str, str] | None:
+    """Whether a scheduled task's kept answer would cover this very step: the site and kind it holds, or ``None`` (#619).
+
+    The one predicate the agent's gate (a step that runs on a kept answer) and
+    the offer (a block one may be made from, and the route that makes it)
+    both use: the review (:func:`kept_review`), the site and kind
+    (:func:`kept_site`), and no detail of the person's: *personal* is whether
+    melo's own detector finds their phone number, street address or real name
+    in what the step sends, whatever the review said.
+    """
+    if personal or not kept_review(review):
+        return None
+    return kept_site(name, arguments)
 
 
 @dataclass(frozen=True)
@@ -897,12 +924,9 @@ class ScheduledKeep:
     chore_id: str
     sites: Mapping[str, frozenset[str]]
 
-    def covers(self, name: str, arguments: Mapping[str, Any]) -> str | None:
-        """The kept site of the question *name* when this keeps its kind there, else ``None``."""
-        found = kept_site(name, arguments)
-        if found is None or found[1] not in self.sites.get(found[0], ()):
-            return None
-        return found[0]
+    def keeps(self, site: str, kind: str) -> bool:
+        """Whether this keeps the kind of step *kind* on *site* (as :func:`keep_holds` gives them)."""
+        return kind in self.sites.get(site, ())
 
 
 # The reason of the decision that runs a step on a scheduled task's kept answer.

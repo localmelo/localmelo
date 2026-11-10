@@ -59,7 +59,7 @@ from localmelo.melo.contracts.approvals import (
     find_folder_asker,
     holds_grant,
     is_refusal,
-    kept_review,
+    keep_holds,
     question_key,
     question_site_key,
     review_mode,
@@ -1307,8 +1307,12 @@ class _ToolAsk:
             # Any other keeps no text.
             self.refused[-1].update(mode="auto", review=review.to_json())
             if writable:
+                # ``personal``: what a kept answer of a scheduled task needs to
+                # tell whether it would cover this step (#619, keep_holds).
                 self.refused[-1].update(
-                    step_key=allowance_key(request), arguments=copy.deepcopy(arguments)
+                    step_key=allowance_key(request),
+                    arguments=copy.deepcopy(arguments),
+                    personal=self._personal_in(request),
                 )
         # An automatic block leaves the person's word: it can come from nobody
         # being there to ask.
@@ -1346,19 +1350,34 @@ class _ToolAsk:
         runs only) and nobody can be asked in it; (b) the question holds the
         whole step and the person could decide on it (:meth:`_writable`, the
         same predicate an Allow once has); (c) its site (and for a form, where
-        it goes) is a kept site for its kind (:meth:`ScheduledKeep.covers`);
-        (d) the model reviewed it and found only ``send_out``
-        (:func:`kept_review`); (e) no secret in it and (f) its site is not
-        refused in this task, both in (b). Anything else is decided as before.
+        it goes) is a kept site for its kind (:meth:`ScheduledKeep.keeps`);
+        (d) the model reviewed it, found it fits the request and found only
+        ``send_out``, and no detail of the person's is in it (:func:`keep_holds`,
+        the predicate the offer uses too); (e) no secret in it and (f) its site
+        is not refused in this task, both in (b). Anything else is decided as
+        before.
         """
         held = find_auto(self._policy)
-        return (
-            held is not None
-            and held.kept is not None
-            and held.asking is None
-            and kept_review(request.review)
-            and held.kept.covers(request.tool_name, request.arguments) is not None
-            and self._writable(request)
+        if (
+            held is None
+            or held.kept is None
+            or held.asking is not None
+            or not self._writable(request)
+        ):
+            return False
+        found = keep_holds(
+            request.tool_name,
+            request.arguments,
+            request.review,
+            personal=self._personal_in(request),
+        )
+        return found is not None and held.kept.keeps(*found)
+
+    def _personal_in(self, request: ApprovalRequest) -> bool:
+        """Whether melo's own detector finds the person's phone number, address or real name in what *request* sends (#619); with nothing to read them, as if it did."""
+        reviewer = self._reviewer
+        return reviewer is None or bool(
+            _personal(reviewer, request.tool_name, request.arguments)
         )
 
     async def _take_back(self, site: str, by: str | None = None) -> bool:
