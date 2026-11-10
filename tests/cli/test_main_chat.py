@@ -61,6 +61,7 @@ class FakeGateway:
         self.closed = False
         self.lose_stream = False
         self.refuse_mode = False
+        self.refuse_kept = False  # a kept answer is refused (409 not_offered)
         self.note_refused = False  # a note's turn ended on the way
         self.notes_in: list[str] = []  # the words that reached a turn, in order
         self.note_hold: asyncio.Event | None = None  # the next note waits for it
@@ -100,13 +101,14 @@ class FakeGateway:
             request = {"request_id": "r1", "call_id": "c1", "tool_name": "shell_exec",
                        "arguments": {"command": "ls"}, "arguments_complete": True,
                        "preview": "ls", "workspace_root": "/tmp/w",
-                       "review": None}  # fmt: skip
+                       "review": None, "offers_chat": "once" not in text}  # fmt: skip
             if "big" in text:
                 request["arguments_complete"] = False
             if "high" in text:
                 request["review"] = {"verdict": "high", "title": "Install software?",
                                      "reasons": ["Installs x with pip."],
                                      "categories": ["install"]}  # fmt: skip
+                request["offers_chat"] = False
             self.pending[session_id] = [request]
             self.emit(session_id, "approval.requested",
                       {k: request[k] for k in ("request_id", "call_id", "tool_name",
@@ -216,6 +218,8 @@ class FakeGateway:
             return httpx.Response(200, headers={"content-type": "text/event-stream"},
                                   content=self._stream(parts[2], after))  # fmt: skip
         if parts[:2] == ["api", "approvals"]:
+            if self.refuse_kept and body["choice"] in ("session", "always"):
+                return _error(409, "not_offered", "This step asks every time.")
             for session_id, asked in self.pending.items():
                 if asked and asked[0]["request_id"] == parts[2]:
                     self.pending[session_id] = []
@@ -461,6 +465,38 @@ async def test_an_approval_is_the_terminals_list_answered_through_the_gateway(
         ("POST", "/api/approvals/r1", {"choice": "session", "reason": ""})
     ]
     await _until(lambda: "Ran it." in setup.out.text())
+
+
+async def test_the_relay_offers_a_kept_answer_only_where_the_gateway_says_so(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    assert session.enter("approve once") is None
+    await _until(lambda: session.approver.pending is not None)
+    pending = session.approver.pending
+    assert pending is not None and not pending.offer_session
+    session.approver.answer("session")  # not offered: ignored, the list stays
+    assert session.approver.pending is pending
+    session.approver.answer("deny")
+    await setup.idle()
+    # The gateway refuses a kept answer all the same: the list asks again without it.
+    gateway.refuse_kept = True
+    assert session.enter("approve it") is None
+    await _until(lambda: session.approver.pending is not None)
+    first = session.approver.pending
+    assert first is not None and first.offer_session
+    session.approver.answer("session")
+    await _until(
+        lambda: session.approver.pending is not None
+        and session.approver.pending is not first
+    )
+    again = session.approver.pending
+    assert again is not None and not again.offer_session
+    session.approver.answer("once")
+    await _until(lambda: setup.out.text().count("Ran it.") == 2)
+    answered = [r[2]["choice"] for r in gateway.requests if r[1] == "/api/approvals/r1"]
+    assert answered == ["deny", "session", "once"]
 
 
 async def test_a_high_impact_call_offers_no_grant_and_starts_on_no(

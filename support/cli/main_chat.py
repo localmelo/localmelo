@@ -767,6 +767,18 @@ def _outside(found: object) -> OutsideAccess | None:
     return OutsideAccess(path, folder, access, grantable)
 
 
+def kept_offered(pending: Mapping[str, Any]) -> bool:
+    """Whether the gateway says an answer to *pending* may be kept for the chat.
+
+    The gateway's word, read as the console's card reads it: ``outside.grantable``
+    for a folder outside the workspace, else ``offers_chat``; missing is no.
+    """
+    outside = _outside(pending.get("outside"))
+    if outside is not None:
+        return outside.grantable
+    return pending.get("offers_chat") is True
+
+
 def approval_request(pending: Mapping[str, Any]) -> ApprovalRequest:
     """A pending approval as the gateway lists it, for the terminal's approval list."""
     review = pending.get("review")
@@ -1196,23 +1208,36 @@ class MainChat:
                     "warn",
                 )
                 return
-            # The main chat's own "allow" counts in every chat: its list says so.
-            decision = await self.host.approver.ask(
-                approval_request(pending), everywhere=chat_id == self.main_id
-            )
-            # Answered here: the gateway's "resolved" for it cancels nothing now.
-            if self._asks.get(request_id) is asyncio.current_task():
-                del self._asks[request_id]
-            choice = (
-                "deny"
-                if not decision.allow
-                else (
-                    "always"
-                    if decision.always
-                    else "session" if decision.remember else "once"
+            request = approval_request(pending)
+            # A kept answer is offered only where the gateway says so. One it
+            # refuses all the same (409 not_offered) asks again without it.
+            offered = kept_offered(pending)
+            while True:
+                # The main chat's own "allow" counts in every chat: its list says so.
+                decision = await self.host.approver.ask(
+                    request, offer_session=offered, everywhere=chat_id == self.main_id
                 )
-            )
-            await self.client.answer(request_id, choice, decision.reason)
+                # Answered here: the gateway's "resolved" for it cancels nothing now.
+                if self._asks.get(request_id) is asyncio.current_task():
+                    del self._asks[request_id]
+                choice = (
+                    "deny"
+                    if not decision.allow
+                    else (
+                        "always"
+                        if decision.always
+                        else "session" if decision.remember else "once"
+                    )
+                )
+                try:
+                    await self.client.answer(request_id, choice, decision.reason)
+                except GatewayError as exc:
+                    if exc.code != "not_offered" or not offered:
+                        raise
+                    self._say(str(exc), "warn")
+                    offered = False
+                    continue
+                return
         except GatewayError as exc:
             self._say(f"Could not answer the approval: {exc}", "error")
         finally:
