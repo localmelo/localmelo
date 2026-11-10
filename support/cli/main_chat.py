@@ -461,8 +461,18 @@ class GatewayClient:
             "GET", _path(session_id, "turns"), params={"limit": limit}
         )
 
-    async def send(self, session_id: str, text: str, key: str) -> dict[str, Any]:
-        body = {"text": text, "client_request_id": key}
+    async def send(
+        self, session_id: str, text: str, key: str, seen: int | None = None
+    ) -> dict[str, Any]:
+        """A message to *session_id*; *seen* is the stored id of the newest card or line printed there.
+
+        The gateway reads it as the page's ``seen`` (API v2, ``POST /turns``):
+        a reply goes to the task that waits only when that task's request is
+        among what was printed. Without it, nothing counts as printed.
+        """
+        body: dict[str, Any] = {"text": text, "client_request_id": key}
+        if seen is not None:
+            body["seen"] = seen
         return await self.call("POST", _path(session_id, "turns"), json=body)
 
     async def create(
@@ -921,6 +931,10 @@ class MainChat:
         self._asks: dict[str, asyncio.Task[None]] = {}
         # The card and echo events already drawn, by id.
         self._seen: set[int] = set()
+        # The newest stored card or line the terminal printed in each chat (chat id -> event id): what a
+        # message of that chat says it had in front of the person. Only a line printed counts, never one
+        # that arrived and drew nothing, and only the id the gateway gave the event.
+        self._drawn: dict[str, int] = {}
         # The browser cards of each open chat that are in use, by chat and card key: what Done gives back.
         self._browsers: dict[str, dict[str, Mapping[str, Any]]] = {}
         self._lost = False
@@ -1069,12 +1083,16 @@ class MainChat:
             if isinstance(card.get("id"), int):
                 self._seen.add(card["id"])
             out.print(card_line(card, symbols, width))
+            self._drew(self.chat.id, card.get("id"))
         for echo in left:
             self._seen.add(int(echo["id"]))
             # A row, not the input: history is read again at every start.
             if echo.get("note_back") and echo.get("typed"):
                 self._not_sent(self.chat.title, str(echo["typed"]))
-            out.print(echo_line(echo, symbols, width))
+            line = echo_line(echo, symbols, width)
+            out.print(line)
+            if line.plain:
+                self._drew(self.chat.id, echo["id"])
         out.print(Text(""))
 
     # ── The stream ──
@@ -1141,6 +1159,7 @@ class MainChat:
                 return
             # A card stands apart from the turns around it.
             self.host.out.print(*([line, Text("")] if kind == CARD_EVENT else [line]))
+            self._drew(chat_id, event_id)
             return
         turn, number = self._turn, event.get("turn")
         if kind == "turn.started":
@@ -1256,6 +1275,23 @@ class MainChat:
 
     def _say(self, text: str, style: str) -> None:
         self.host.out.print(Text(text, style=style))
+
+    def _drew(self, chat_id: str | None, event_id: object) -> None:
+        """The terminal printed the stored card or line *event_id* of *chat_id*: the next message says so."""
+        if chat_id and type(event_id) is int:
+            self._drawn[chat_id] = max(self._drawn.get(chat_id, 0), event_id)
+
+    def _show_echo(self, chat_id: str | None, echo: Mapping[str, Any]) -> None:
+        """Print *echo*, the line a request of *chat_id* answered with, unless the stream drew it first."""
+        event_id = echo.get("id")
+        if isinstance(event_id, int):
+            if event_id in self._seen:
+                return
+            self._seen.add(event_id)
+        line = echo_line(echo, self.host.renderer.symbols, self.host.out.width)
+        self.host.out.print(line)
+        if line.plain:
+            self._drew(chat_id, event_id)
 
     # ── Approvals ──
 
@@ -1434,6 +1470,8 @@ class MainChat:
         loop = asyncio.get_running_loop()
         key = "" if retry else uuid.uuid4().hex
         turn = _Turn(key, loop.create_future(), retry=bool(retry), chat=self.chat)
+        # What was printed when the person pressed Enter, before anything is awaited.
+        seen = self._drawn.get(self.chat.id or "")
         turn.notes, self._early_notes = self._early_notes, []
         self._turn = turn
         try:
@@ -1462,15 +1500,10 @@ class MainChat:
                     with contextlib.suppress(GatewayError):
                         await self.client.rename(chat.id, chat.title)
             else:
-                body = await self.client.send(chat.id, text, turn.key)
+                body = await self.client.send(chat.id, text, turn.key, seen)
             echo = body.get("echo")
             if isinstance(echo, dict):
-                event_id = echo.get("id")
-                if not (isinstance(event_id, int) and event_id in self._seen):
-                    if isinstance(event_id, int):
-                        self._seen.add(event_id)
-                    symbols, width = self.host.renderer.symbols, self.host.out.width
-                    self.host.out.print(echo_line(echo, symbols, width))
+                self._show_echo(chat.id, echo)
                 return "echo"
             if isinstance(body.get("note"), dict):
                 # A turn of another window runs: the words joined it.
@@ -1530,15 +1563,10 @@ class MainChat:
         shown = _sleeps(page.get("echoes") or [])
         if not shown:
             raise ValueError(t_in("en", "slash.memoryUndoNone"))
-        echo = await self.client.tap(int(shown[-1]["id"]), "undo")
-        event_id = echo.get("id")
         # The stream may have drawn it already; a side chat's stream is not the main chat's.
-        if isinstance(event_id, int) and event_id in self._seen:
-            return
-        if isinstance(event_id, int):
-            self._seen.add(event_id)
-        symbols, width = self.host.renderer.symbols, self.host.out.width
-        self.host.out.print(echo_line(echo, symbols, width))
+        self._show_echo(
+            self.main_id, await self.client.tap(int(shown[-1]["id"]), "undo")
+        )
 
     @property
     def mode(self) -> ChatMode:

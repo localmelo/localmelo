@@ -65,6 +65,9 @@ class FakeGateway:
         self.refuse_kept = False  # a kept answer is refused (409 not_offered)
         self.note_refused = False  # a note's turn ended on the way
         self.notes_in: list[str] = []  # the words that reached a turn, in order
+        # The line code answers the next message with in place of a turn (a reply that
+        # reached a task, a step allowed once), as the gateway's rules do for a `/task`.
+        self.reply_echo: dict[str, Any] | None = None
         self.note_hold: asyncio.Event | None = None  # the next note waits for it
         self.note_waiting = False
         self.note_error: tuple[int, str] | None = None
@@ -183,9 +186,12 @@ class FakeGateway:
             session_id = parts[2]
             if method == "POST":
                 text = body["text"]
+                data = self.reply_echo
+                self.reply_echo = None
                 if text.startswith("/task"):
                     data = {"echo": "started", "task_id": "t1", "title": text[6:],
                             "line": f"Started a task: {text[6:]} · Normal"}  # fmt: skip
+                if data is not None:
                     echo_id = self.emit(session_id, "attention.echo", data, None)
                     return httpx.Response(200, json={"echo": {"id": echo_id, **data}})
                 if any(
@@ -953,6 +959,133 @@ async def test_cards_are_one_coloured_line_with_how_to_open_them(
     text = setup.out.text()
     assert "✓ Done: Fix CI · 2 tests fixed.  melo task show t42" in text
     assert "⚠ Waits for you: Trip · Needs your approval  /chats opens it" in text
+
+
+def _sent(gateway: FakeGateway, chat: str = MAIN) -> list[dict[str, Any]]:
+    """The bodies of the messages sent to *chat*, oldest first."""
+    return [
+        r[2]
+        for r in gateway.requests
+        if r[0] == "POST" and r[1] == f"/api/sessions/{chat}/turns"
+    ]
+
+
+ENDED = {"state": "done", "source_id": "t42", "source_kind": "task",
+         "title": "Fix CI", "line": "One step needs you"}  # fmt: skip
+
+
+async def test_a_message_says_the_newest_card_the_terminal_printed_and_no_newer_one(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    remote = setup.session.remote
+    assert isinstance(remote, MainChat)
+    first = gateway.emit(MAIN, "attention.card", ENDED, None)
+    await _until(lambda: "Fix CI" in setup.out.text())
+    assert setup.session.enter("hello") is None
+    await setup.idle()
+    assert _sent(gateway)[-1]["seen"] == first
+    # A line that arrived and drew nothing was not printed: it is not counted.
+    quiet = gateway.emit(MAIN, "attention.echo", {"echo": "answer_delivered", "of": 1}, None)  # fmt: skip
+    await _until(lambda: quiet in remote._seen)
+    assert setup.session.enter("yes") is None
+    await setup.idle()
+    assert _sent(gateway)[-1]["seen"] == first
+    # A card printed after it is the newest.
+    second = gateway.emit(MAIN, "attention.card", {**ENDED, "title": "Fix docs"}, None)
+    await _until(lambda: "Fix docs" in setup.out.text())
+    assert setup.session.enter("ok") is None
+    await setup.idle()
+    assert _sent(gateway)[-1]["seen"] == second
+
+
+async def test_a_side_chat_says_what_it_printed_itself(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    session = setup.session
+    gateway.emit(MAIN, "attention.card", ENDED, None)
+    await _until(lambda: "Fix CI" in setup.out.text())
+    assert session.enter("/side Trip") is None
+    await _until(lambda: "first message starts it" in setup.out.text())
+    await setup.idle()
+    side = "side00000001"
+    for text in ("plan it", "go on"):
+        assert session.enter(text) is None
+        await setup.idle()
+    # The main chat's card was printed in the main chat: it is not this chat's.
+    assert "seen" not in _sent(gateway, side)[-1]
+    card = gateway.emit(side, "attention.card", {**ENDED, "title": "Book it"}, None)
+    await _until(lambda: "Book it" in setup.out.text())
+    assert session.enter("ok") is None
+    await setup.idle()
+    assert _sent(gateway, side)[-1]["seen"] == card
+
+
+@pytest.mark.parametrize(
+    ("echo", "printed"),
+    [
+        (
+            {"echo": "answer_sent", "task_id": "t42", "title": "Fix CI", "typed": "B",
+             "undo_s": 10, "line": "Sent to “Fix CI” as your answer"},
+            "→ Sent to “Fix CI” as your answer",
+        ),
+        (
+            {"echo": "sent", "task_id": "t42", "title": "Fix CI", "how": "allowed",
+             "request_id": "r1", "line": "Allowed once: typing; the task goes on with this step"},
+            "→ Allowed once: typing; the task goes on with this step",
+        ),
+        (
+            {"echo": "failed", "line": "Could not allow the step in Fix CI: it ended"},
+            "→ Could not allow the step in Fix CI: it ended",
+        ),
+    ],
+)  # fmt: skip
+async def test_an_answer_that_reached_a_task_is_one_line_and_no_turn(
+    chat: tuple[Setup, FakeGateway], echo: dict[str, Any], printed: str
+) -> None:
+    setup, gateway = chat
+    gateway.reply_echo = echo
+    assert setup.session.enter("yes") is None
+    await setup.idle()
+    await _until(lambda: printed in setup.out.text())
+    await asyncio.sleep(
+        0.05
+    )  # the stream brings the same line too: it is not drawn twice
+    assert setup.out.text().count(printed) == 1
+    assert "Answer to yes." not in setup.out.text()
+    # The line is printed, so the next message counts it.
+    assert setup.session.enter("again") is None
+    await setup.idle()
+    assert _sent(gateway)[-1]["seen"] == max(
+        e["id"] for e in gateway.events if e["type"] == "attention.echo"
+    )
+
+
+async def test_nothing_printed_and_no_count_given_send_no_seen(
+    chat: tuple[Setup, FakeGateway],
+) -> None:
+    setup, gateway = chat
+    assert setup.session.enter("hello") is None
+    await setup.idle()
+    assert "seen" not in _sent(gateway)[-1]
+    # A caller with no count of its own (a script) sends the message as before.
+    bodies: list[dict[str, Any]] = []
+
+    def take(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(202, json={})
+
+    client = GatewayClient(
+        "http://127.0.0.1:1", transport=httpx.MockTransport(take), headers={}
+    )
+    await client.send(MAIN, "hello", "k1")
+    await client.send(MAIN, "hello", "k2", 7)
+    await client.aclose()
+    assert bodies == [
+        {"text": "hello", "client_request_id": "k1"},
+        {"text": "hello", "client_request_id": "k2", "seen": 7},
+    ]
 
 
 async def test_side_starts_a_side_chat_made_by_its_first_message(
