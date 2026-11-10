@@ -59,13 +59,20 @@ def test_the_card_is_where_the_work_stands_and_claims_no_more_than_the_record() 
 def test_the_card_fits_the_store_and_reads_no_malformed_evidence() -> None:
     huge = "x" * 5000
     full = {"state": huge, "failed": ["the build folder is locked"]}
-    events = [event("notice", {"kind": "checkpoint", "detail": {"checkpoint": full}})]
+    events = [
+        event("notice", {"kind": "checkpoint", "detail": {"checkpoint": full}}),
+        # The same command once before, finished: the cut-off rerun is the newest.
+        event("tool.started", {"name": "shell", "call_id": "first",
+                               "arguments": {"command": "make build"}}, id=2),
+        event("tool.finished", {"name": "shell", "call_id": "first",
+                                "status": "success"}, id=3),
+    ]  # fmt: skip
     for n in range(80):
         events += [
             event("tool.started", {"name": "file_read", "call_id": str(n),
-                                   "arguments": {"path": f"{n}-{huge}"}}, id=2 * n + 2),
+                                   "arguments": {"path": f"{n}-{huge}"}}, id=2 * n + 4),
             event("tool.finished", {"name": "file_read", "call_id": str(n),
-                                    "status": "success"}, id=2 * n + 3),
+                                    "status": "success"}, id=2 * n + 5),
         ]  # fmt: skip
     events += [
         event("tool.started", {"name": "shell", "call_id": "last",

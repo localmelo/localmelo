@@ -51,8 +51,9 @@ def build_park_card(
     data. Within :data:`MAX_CARD_CHARS`: a card over it is measured and built
     again, the older calls counted on one line down to :data:`FEW_LINES`, then
     the model's notes cut by the excess, then the calls down to the newest one;
-    a hard cut is the last resort. No model call; only events the store kept count,
-    and a credential is masked wherever it shows.
+    a hard cut is the last resort. No model call; only events the store kept count.
+    A credential is masked in each call's argument before it is shortened, and
+    in the whole card after its cuts (the goal and the notes are masked as cut).
     """
     if isinstance(spec, TaskSpec):
         spec = spec.to_dict()

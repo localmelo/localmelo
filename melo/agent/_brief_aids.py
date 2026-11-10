@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.memory.procedures.mask import mask_credentials
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import Message, ReflectionEntry
@@ -62,7 +63,7 @@ def _describe(name: str, arguments: dict[str, object]) -> str:
     key, value = _key_arg(arguments)
     if not key:
         return name
-    arg = _shorten(redact_secrets(value)[0], ARG_LIMIT)
+    arg = _shorten(mask_credentials(redact_secrets(value)[0]), ARG_LIMIT)
     return f"{name} `{arg}`" if key in _SHELL_ARGS else f"{name} {arg}"
 
 
@@ -159,7 +160,8 @@ def _spans(parts: Sequence[int]) -> str:
 
 
 def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> list[str]:
-    """The cue list of a work checkpoint: one line per source, oldest first.
+    """The cue list of a work checkpoint: one line per source, by their newest
+    call, oldest first (a source called again moves to the end).
 
     A source is a tool and its key argument, whole (two long addresses that
     share their start are two sources), shown shortened; its line names the parts read of a
@@ -169,7 +171,8 @@ def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> lis
     """
     order: dict[tuple[str, str], list[Dropped]] = {}
     for entry in dropped:
-        order.setdefault((entry.tool, entry.target), []).append(entry)
+        key = (entry.tool, entry.target)
+        order[key] = [*order.pop(key, []), entry]
     lines = []
     for entries in order.values():
         line = entries[0].source
