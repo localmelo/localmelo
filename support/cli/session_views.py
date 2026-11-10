@@ -176,7 +176,7 @@ def memory_view(
         )
     chars = sum(len(message.content) for message in messages)
     title = f"Working memory: {len(messages)} of {window_max} messages · {turns} turn{'s' if turns != 1 else ''}, {len(with_tools)} with tool steps · {chars:,} chars"
-    long_term = (
+    embedding = (
         "off (--memory off)"
         if not memory
         else backend.embedding or "off (no embedding backend)"
@@ -196,6 +196,6 @@ def memory_view(
     return Group(
         Text(in_symbols(title, symbols)),
         *(Text(row) for row in rows),
-        Text("Long-term memory: " + clean_output(long_term)),
+        Text("Embedding model: " + clean_output(embedding)),
         *(Text(note, style="muted") for note in notes),
     )

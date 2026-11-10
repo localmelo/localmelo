@@ -65,8 +65,8 @@ class BackendInfo:
     :data:`SOURCE_TEXT`. *listed* is the number of models the server
     listed when melo chose the one it says is loaded, else 0. *key_env* names a
     cloud vendor's key variable. *memory_told* says the first run just told
-    the user that long-term memory is off and how to add it, so the banner
-    does not say it again. *note* is the server's words for the welcome row,
+    the user that there is no embedding model and how to add one, so the
+    banner does not say it again. *note* is the server's words for the welcome row,
     beside the model, when its backend has some (``Splash via melo_serve``).
     *follows* says the session chose no model and its backend serves its own
     (melo_serve): *model* is what it served when the row was made, and an Agent
@@ -109,12 +109,12 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
         return "long-term memory off (--memory off)"
     if not backend.embedding:
         if backend.memory_told:
-            return "no long-term memory"
+            return "no embedding model"
         if backend.key == "openai-compatible":
-            return "no long-term memory · -X endpoint.embedding_url=URL adds one"
-        return "no long-term memory · melo setup adds one"
+            return "no embedding model · -X endpoint.embedding_url=URL adds one"
+        return "no embedding model · melo setup adds one"
     # The model id can come from a server's listing; never draw its escapes.
-    return f"long-term memory · {clean_output(backend.embedding)}"
+    return f"embedding model · {clean_output(backend.embedding)}"
 
 
 def model_rows(backend: BackendInfo) -> list[str]:

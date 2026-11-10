@@ -731,10 +731,8 @@ class RecordingLLM(BaseLLMProvider):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("mode", "recall"), [("legacy", True), ("drop", False), ("replay", False)]
-)
-async def test_recall_is_read_only_in_legacy(mode: str, recall: bool) -> None:
+@pytest.mark.parametrize("mode", ["legacy", "drop", "replay"])
+async def test_no_mode_embeds_or_recalls_without_a_retriever(mode: str) -> None:
     embedding = CountingEmbedding()
     llm = RecordingLLM()
     agent = _agent(
@@ -742,12 +740,11 @@ async def test_recall_is_read_only_in_legacy(mode: str, recall: bool) -> None:
         _options(reasoning=mode),
         embedding=embedding,
     )
-    await agent.hippo.long.add("a fact", [1.0, 0.0, 0.0, 0.0])
     await agent.run_task("q")
     await agent.close()
     prompt = "\n".join(message.content for message in llm.calls[0])
-    assert ("[RECALL]" in prompt) is recall
-    assert embedding.calls == (1 if recall else 0)
+    assert "[RECALL]" not in prompt
+    assert embedding.calls == 0
 
 
 @pytest.mark.asyncio
@@ -963,17 +960,3 @@ async def test_the_explicit_modes_write_no_raw_step_summary(mode: str) -> None:
     # R5's recall may embed the query when the plan is on; what the explicit
     # modes must not do is write the raw step summary to long-term memory.
     assert len(agent.hippo.long._entries) == 0
-
-    embedding = CountingEmbedding()
-    server = Scripted(
-        _reply("", thinking="draft", calls=1),
-        _reply("done"),
-    )
-    legacy = _agent(
-        server.llm(),
-        _options(reasoning="legacy"),
-        embedding=embedding,
-    )
-    await legacy.run_task("q")
-    await legacy.close()
-    assert embedding.calls >= 1

@@ -1508,7 +1508,7 @@
   "settings.approvals.title": "新对话开始时",
   "settings.backend.melo_serve": "melo_serve（本地模型，统一地址）",
   "settings.backend.mlc": "MLC（本地服务器）",
-  "settings.backend.none": "无（没有长期记忆）",
+  "settings.backend.none": "无（只按字词搜索）",
   "settings.backend.ollama": "Ollama（本地服务器）",
   "settings.backend.sglang": "SGLang（本地服务器）",
   "settings.backend.vllm": "oMLX 或 vLLM（兼容 OpenAI，本地）",

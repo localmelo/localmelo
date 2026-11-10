@@ -20,6 +20,8 @@ from localmelo.melo.schema import (
     ToolResult,
 )
 
+from .test_long_store import _apply
+
 # ── ToolRegistry vs ToolIndex split ──
 
 
@@ -388,11 +390,11 @@ class TestSqliteHistory:
 
 class TestSqliteLongTerm:
     @pytest.mark.asyncio
-    async def test_add_and_search(self, tmp_path: Path) -> None:
+    async def test_apply_and_search(self, tmp_path: Path) -> None:
         db = tmp_path / "long.db"
         lt = SqliteLongTerm(db)
-        await lt.add("hello world", [1.0, 0.0, 0.0])
-        await lt.add("goodbye world", [0.0, 1.0, 0.0])
+        await _apply(lt, "hello world", embedding=[1.0, 0.0, 0.0])
+        await _apply(lt, "goodbye world", embedding=[0.0, 1.0, 0.0])
         results = await lt.search([1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0][0] == "hello world"
@@ -413,8 +415,8 @@ class TestSqliteLongTerm:
 
         # Session 1: write
         lt1 = SqliteLongTerm(db)
-        await lt1.add("alpha", [1.0, 0.0, 0.0], metadata={"src": "test"})
-        await lt1.add("beta", [0.0, 1.0, 0.0])
+        await _apply(lt1, "alpha", kind="episodic", embedding=[1.0, 0.0, 0.0])
+        await _apply(lt1, "beta", kind="episodic", embedding=[0.0, 1.0, 0.0])
         await lt1.aclose()
 
         # Session 2: search
@@ -422,8 +424,7 @@ class TestSqliteLongTerm:
         results = await lt2.search([1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0][0] == "alpha"
-        # R6-lite's search merges the typed columns into the legacy metadata.
-        assert results[0][2]["src"] == "test"
+        # The search merges the typed columns into the row's metadata.
         assert results[0][2]["kind"] == "episodic"
         await lt2.aclose()
 
@@ -433,9 +434,9 @@ class TestSqliteLongTerm:
         db = tmp_path / "long.db"
 
         lt = SqliteLongTerm(db)
-        await lt.add("doc about cats", [0.9, 0.1, 0.0])
-        await lt.add("doc about dogs", [0.1, 0.9, 0.0])
-        await lt.add("doc about fish", [0.0, 0.1, 0.9])
+        await _apply(lt, "doc about cats", embedding=[0.9, 0.1, 0.0])
+        await _apply(lt, "doc about dogs", embedding=[0.1, 0.9, 0.0])
+        await _apply(lt, "doc about fish", embedding=[0.0, 0.1, 0.9])
         await lt.aclose()
 
         lt2 = SqliteLongTerm(db)
@@ -446,22 +447,12 @@ class TestSqliteLongTerm:
         await lt2.aclose()
 
     @pytest.mark.asyncio
-    async def test_metadata_preserved(self, tmp_path: Path) -> None:
-        db = tmp_path / "long.db"
-        lt = SqliteLongTerm(db)
-        await lt.add("x", [1.0, 0.0], metadata={"step_id": "abc", "num": 42})
-        results = await lt.search([1.0, 0.0], top_k=1)
-        assert results[0][2]["step_id"] == "abc"
-        assert results[0][2]["num"] == 42
-        await lt.aclose()
-
-    @pytest.mark.asyncio
     async def test_a_vector_from_another_model_is_skipped(self, tmp_path: Path) -> None:
         """Changing the embedding model degrades recall, it does not raise."""
         db = tmp_path / "long.db"
         lt = SqliteLongTerm(db)
-        await lt.add("old model", [1.0, 0.0, 0.0])
-        await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
+        await _apply(lt, "old model", embedding=[1.0, 0.0, 0.0])
+        await _apply(lt, "new model", embedding=[1.0, 0.0, 0.0, 0.0])
         new = await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5)
         old = await lt.search([1.0, 0.0, 0.0], top_k=5)
         assert [(text, score) for text, score, _meta in new] == [("new model", 1.0)]
@@ -473,8 +464,8 @@ class TestLongTermDimensions:
     @pytest.mark.asyncio
     async def test_a_vector_from_another_model_is_skipped(self) -> None:
         lt = LongTerm()
-        await lt.add("old model", [1.0, 0.0, 0.0])
-        await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
+        await _apply(lt, "old model", embedding=[1.0, 0.0, 0.0])
+        await _apply(lt, "new model", embedding=[1.0, 0.0, 0.0, 0.0])
         new = await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5)
         old = await lt.search([1.0, 0.0, 0.0], top_k=5)
         assert [(text, score) for text, score, _meta in new] == [("new model", 1.0)]

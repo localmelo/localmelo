@@ -11,6 +11,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import _resolve_memory_dir
+from localmelo.melo.agent.options import ReasoningMode
 from localmelo.melo.checker import TASK_BUILTINS
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -257,14 +258,22 @@ def _continue_then_answer() -> FakeLLM:
 
 class TestMemoryOption:
     @pytest.mark.asyncio
-    async def test_memory_on_writes_and_promotes(self) -> None:
-        """Control for the next test: the same run uses long-term memory."""
+    async def test_a_legacy_run_makes_no_embedding_request(self) -> None:
+        """A tool step, a dropped window head and a reflection embed nothing."""
         emb = FakeEmbedding()
-        options = AgentOptions(steps_per_attempt=1, max_attempts=2)
-        agent = _echo_agent(_continue_then_answer(), options, embedding=emb)
+        replies = [_echo_call(str(i)) for i in range(5)]
+        llm = FakeLLM([*replies, _reflection("continue"), _answer("answer")])
+        options = AgentOptions(steps_per_attempt=5, max_attempts=2, window_messages=8)
+        agent = _echo_agent(llm, options, embedding=emb)
         assert await agent.run("echo q") == "answer"
-        assert emb.calls > 0
-        assert agent.hippo.long._entries
+        sizes = [len(call["messages"]) for call in llm.calls]
+        assert any(b < a for a, b in zip(sizes, sizes[1:], strict=False))
+        assert emb.calls == 0
+        assert agent.hippo.long._entries == []
+        # The first request is the system prompt, then the task itself.
+        first = llm.calls[0]["messages"]
+        assert [m.role for m in first[:2]] == ["system", "user"]
+        assert "echo q" in first[1].content
 
     @pytest.mark.asyncio
     async def test_memory_off_skips_long_term_and_promotion(self) -> None:
@@ -302,22 +311,28 @@ class TestPersistence:
         assert _resolve_memory_dir(AgentOptions()) is None
 
     @pytest.mark.asyncio
-    async def test_memory_dir_option_enables_sqlite(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("reasoning", "stores_long_term"), [("legacy", False), ("drop", True)]
+    )
+    async def test_memory_dir_option_enables_sqlite(
+        self, tmp_path: Path, reasoning: ReasoningMode, stores_long_term: bool
+    ) -> None:
         mem = tmp_path / "memory"
         agent = Agent(
             llm=FakeLLM([_answer("ok")]),
             embedding=FakeEmbedding(),
-            options=AgentOptions(memory_dir=str(mem)),
+            options=AgentOptions(memory_dir=str(mem), reasoning=reasoning),
         )
         assert agent._memory_dir == str(mem)
         assert isinstance(agent.hippo.history, SqliteHistory)
-        assert isinstance(agent.hippo.long, SqliteLongTerm)
+        assert isinstance(agent.hippo.long, SqliteLongTerm) is stores_long_term
         try:
             assert await agent.run("q") == "ok"
         finally:
             await agent.close()
         assert (mem / "history.db").exists()
-        assert (mem / "long_term.db").exists()
+        if not stores_long_term:
+            assert not (mem / "long_term.db").exists()
 
     @pytest.mark.asyncio
     async def test_memory_dir_option_wins_over_env(
@@ -351,7 +366,7 @@ class TestPersistence:
         agent = Agent(llm=FakeLLM())
         assert agent._memory_dir == str(tmp_path / "env")
         assert isinstance(agent.hippo.history, SqliteHistory)
-        # No embedding provider: long-term memory stays in process.
+        # A legacy agent opens no long-term file.
         assert type(agent.hippo.long) is LongTerm
         await agent.close()
 

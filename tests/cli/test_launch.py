@@ -281,7 +281,7 @@ def test_with_no_config_the_first_run_saves_and_the_session_uses_the_config() ->
     faked.first.assert_called_once_with()
     assert (choice.backend.model, choice.backend.source) == ("m", "saved")
     assert choice.cfg is not None and choice.checked
-    # The first run has just said how long-term memory is added.
+    # The first run has just said how an embedding model is added.
     assert choice.backend.memory_told
 
 
@@ -587,13 +587,13 @@ def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
     assert choice.backend.embedding == "OpenAI-compatible server · nomic-embed-text"
     assert (
         memory_text(choice.backend, memory=True)
-        == "long-term memory · OpenAI-compatible server · nomic-embed-text"
+        == "embedding model · OpenAI-compatible server · nomic-embed-text"
     )
     plain = _choice(Faked(cfg=_configured(), listed=["chat-a"]).choose(base_url=URL))
     assert plain.backend.embedding == ""
     assert (
         memory_text(plain.backend, memory=True)
-        == "no long-term memory · -X endpoint.embedding_url=URL adds one"
+        == "no embedding model · -X endpoint.embedding_url=URL adds one"
     )
 
 
@@ -609,7 +609,7 @@ def test_memory_text_names_a_configured_embedding_backend_and_model() -> None:
     assert backend.embedding == "OpenAI-compatible server · Qwen3-Embedding-0.6B"
     assert (
         memory_text(backend, memory=True)
-        == "long-term memory · OpenAI-compatible server · Qwen3-Embedding-0.6B"
+        == "embedding model · OpenAI-compatible server · Qwen3-Embedding-0.6B"
     )
 
 

@@ -18,6 +18,8 @@ import pytest
 from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 
+from .test_long_migration import _create_v0
+
 
 def _v(*values: float) -> list[float]:
     return list(values)
@@ -111,26 +113,6 @@ async def test_in_memory_filtered_search_indexes_its_rows() -> None:
         await store.aclose()
 
 
-async def test_add_keeps_its_signature_and_writes_the_legacy_defaults(
-    tmp_path: Path,
-) -> None:
-    store = SqliteLongTerm(tmp_path / "long_term.db")
-    try:
-        await store.add("a step summary", [1.0, 0.0], {"step_id": "s1"})
-        entries = await store.active_entries()
-        assert len(entries) == 1
-        entry = entries[0]
-        assert entry.kind == "episodic"
-        assert entry.source == "step_summary"
-        assert entry.status == "active"
-        assert entry.admitted_by == ""
-        assert entry.task_id == ""
-        assert entry.vector == (1.0, 0.0)
-        assert entry.created_at > 0
-    finally:
-        await store.aclose()
-
-
 async def test_apply_writes_every_typed_column(tmp_path: Path) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
@@ -164,7 +146,7 @@ async def test_a_text_only_entry_is_skipped_by_cosine_and_found_by_bm25(
 ) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("vector row about cats", [1.0, 0.0])
+        await _apply(store, "vector row about cats", embedding=[1.0, 0.0])
         await _apply(store, "my cat is called Miso", kind="profile")
         scored = await store.search([1.0, 0.0], top_k=5)
         assert [text for text, _score, _meta in scored] == ["vector row about cats"]
@@ -194,8 +176,8 @@ async def test_the_bm25_index_is_rebuilt_after_an_apply_and_a_forget(
 async def test_mixed_dimension_vectors_are_skipped(tmp_path: Path) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("two", [1.0, 0.0])
-        await store.add("three", [1.0, 0.0, 0.0])
+        await _apply(store, "two", embedding=[1.0, 0.0])
+        await _apply(store, "three", embedding=[1.0, 0.0, 0.0])
         assert [text for text, _s, _m in await store.search([1.0, 0.0, 0.0])] == [
             "three"
         ]
@@ -208,7 +190,11 @@ async def test_500_active_entries_rank_under_five_milliseconds(tmp_path: Path) -
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
         for index in range(500):
-            await store.add(f"entry {index} about cats and dogs", [1.0, index / 500])
+            await _apply(
+                store,
+                f"entry {index} about cats and dogs",
+                embedding=[1.0, index / 500],
+            )
         await store.search_text("cats", top_k=20)  # builds the index once
         started = time.perf_counter()
         rows = await store.search_text("cats", top_k=20)
@@ -222,7 +208,7 @@ async def test_500_active_entries_rank_under_five_milliseconds(tmp_path: Path) -
 async def test_count_entries_counts_every_row(tmp_path: Path) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("one", [1.0, 0.0])
+        await _apply(store, "one", embedding=[1.0, 0.0])
         await _apply(store, "two words that are long enough", kind="episodic")
         assert await store.count_entries() == 2
     finally:
@@ -234,15 +220,15 @@ async def test_forget_removes_the_task_s_entries_and_decisions(
 ) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("a legacy step summary", [1.0, 0.0], {"step_id": "s1"})
+        await _apply(store, "a note that names no task", kind="episodic", task_id="")
         await _apply(store, "I live in Berlin", kind="profile", task_id="t1")
         await _apply(store, "I live in Paris", kind="profile", task_id="t2")
         await store.forget("t1")
         assert {entry.text for entry in await store.active_entries()} == {
-            "a legacy step summary",
+            "a note that names no task",
             "I live in Paris",
         }
-        assert {row["task_id"] for row in await store.decisions()} == {"t2"}
+        assert {row["task_id"] for row in await store.decisions()} == {"", "t2"}
     finally:
         await store.aclose()
 
@@ -250,7 +236,7 @@ async def test_forget_removes_the_task_s_entries_and_decisions(
 async def test_forget_all_clears_both_tables(tmp_path: Path) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("a legacy step summary", [1.0, 0.0])
+        await _apply(store, "a note with a vector", embedding=[1.0, 0.0])
         await _apply(store, "I live in Berlin", kind="profile")
         await store.forget_all()
         assert await store.count_entries() == 0
@@ -264,7 +250,7 @@ async def test_the_file_and_its_directory_are_private(tmp_path: Path) -> None:
     directory.mkdir()
     store = SqliteLongTerm(directory / "long_term.db")
     try:
-        await store.add("one", [1.0, 0.0])
+        await _apply(store, "one", embedding=[1.0, 0.0])
         file_mode = stat.S_IMODE(os.stat(directory / "long_term.db").st_mode)
         assert file_mode == 0o600
     finally:
@@ -293,7 +279,7 @@ async def test_apply_rolls_back_both_the_entry_and_the_decision(
 ) -> None:
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("one", [1.0, 0.0])
+        await _apply(store, "one", embedding=[1.0, 0.0])
         conn = await store._ensure_ready()
         real_execute = conn.execute
 
@@ -307,14 +293,23 @@ async def test_apply_rolls_back_both_the_entry_and_the_decision(
             await _apply(store, "I live in Berlin", kind="profile")
         monkeypatch.setattr(conn, "execute", real_execute)
         assert await store.count_entries() == 1
-        assert await store.decisions() == []
+        assert (
+            len(await store.decisions()) == 1
+        )  # the first write's, not the failed one
     finally:
         await store.aclose()
 
 
 async def test_the_in_memory_store_answers_the_same_typed_calls() -> None:
     store = LongTerm()
-    await store.add("a step summary", [1.0, 0.0], {"task_id": "t1"})
+    await _apply(
+        store,
+        "a step summary",
+        kind="episodic",
+        source="step_summary",
+        task_id="t1",
+        embedding=[1.0, 0.0],
+    )
     await _apply(store, "I live in Berlin", kind="profile", task_id="t2")
     assert [entry.kind for entry in await store.active_entries()] == [
         "episodic",
@@ -462,9 +457,12 @@ async def test_both_stores_make_the_same_decisions_and_answer_the_same_searches(
 async def test_search_returns_the_metadata_merged_with_the_typed_columns(
     tmp_path: Path,
 ) -> None:
+    _create_v0(
+        tmp_path / "long_term.db",
+        [("cats", [1.0, 0.0], {"step_id": "s1", "custom": 1})],
+    )
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("cats", [1.0, 0.0], {"step_id": "s1", "custom": 1})
         _text, _score, meta = (await store.search([1.0, 0.0], top_k=1))[0]
         assert meta["step_id"] == "s1"
         assert meta["custom"] == 1
@@ -482,7 +480,7 @@ def test_a_vector_row_may_hold_a_tuple_stored_as_float32(tmp_path: Path) -> None
     async def run() -> None:
         store = SqliteLongTerm(tmp_path / "long_term.db")
         try:
-            await store.add("one", [0.1, 0.2])
+            await _apply(store, "one", embedding=[0.1, 0.2])
             entry = (await store.active_entries())[0]
             assert entry.vector is not None
             assert entry.vector == tuple(
@@ -497,10 +495,15 @@ def test_a_vector_row_may_hold_a_tuple_stored_as_float32(tmp_path: Path) -> None
 async def test_two_legacy_rows_with_equal_scores_keep_their_id_order(
     tmp_path: Path,
 ) -> None:
+    _create_v0(
+        tmp_path / "long_term.db",
+        [
+            ("first in id order", [1.0, 0.0], {}),
+            ("second in id order", [1.0, 0.0], {}),
+        ],
+    )
     store = SqliteLongTerm(tmp_path / "long_term.db")
     try:
-        await store.add("first in id order", [1.0, 0.0])
-        await store.add("second in id order", [1.0, 0.0])
         rows = await store.search([1.0, 0.0], top_k=5)
         assert [text for text, _score, _meta in rows] == [
             "first in id order",

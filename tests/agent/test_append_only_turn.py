@@ -5,10 +5,9 @@ earlier one. Within a run, what step N sent must be what step N+1 sends first,
 so only the new turns are prefilled. These tests read the requests as an
 OpenAI-compatible server receives them: the tools, then each message.
 
-Legacy recall puts the long-term context right after the system prompt. It is
-read at the run's first step and kept; it is read again only after the window
-evicted its oldest messages, where the request has changed already, and at the
-next run.
+A legacy run with an embedding provider and memory on adds no recalled block
+after the system prompt, so the requests of later runs extend those of earlier
+ones as well.
 """
 
 from __future__ import annotations
@@ -62,7 +61,7 @@ class Script(BaseLLMProvider):
 
 
 class SameEmbedding(BaseEmbeddingProvider):
-    """One vector for every text: the store returns its oldest entries first."""
+    """One vector for every text."""
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
@@ -124,59 +123,7 @@ async def test_each_step_extends_the_previous_request(tmp_path: Path) -> None:
     assert len(requests) == 4
     for previous, current in zip(requests, requests[1:], strict=False):
         assert _extends(previous, current)
-    # The run's first request reads what earlier runs left in long-term memory.
-    opening = provider.requests[first_run][0]
-    assert BLOCK in opening[1].content
-    assert "contents of part 1" in opening[1].content
-    # This run's own steps reach it at the next run, not mid-run.
-    assert (
-        "contents of part 2"
-        not in provider.requests[-1][0][1].content.split(
-            "[end of retrieved context and reflections]"
-        )[0]
-    )
+    # No request of either run carries a recalled block.
+    for messages, _tools in provider.requests:
+        assert not any(BLOCK in m.content for m in messages)
     assert result.to_dict()["prefix_cache"]["schema_changes"] == 0
-
-
-async def test_block_is_read_again_after_the_window_evicts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    provider = Script()
-    agent = _agent(
-        tmp_path,
-        provider,
-        window_messages=8,
-        window_eviction="chunk",
-    )
-    reads: list[int] = []
-    retrieve = agent.hippo.retrieve_context
-
-    async def counted(query: str) -> list[Message]:
-        reads.append(len(provider.requests))
-        return await retrieve(query)
-
-    monkeypatch.setattr(agent.hippo, "retrieve_context", counted)
-    try:
-        provider.files = [f"part{index}.txt" for index in range(1, 7)]
-        result = await agent.run_task("Read the six parts")
-        assert result.status == "completed"
-    finally:
-        await agent.close()
-    requests = [_wire(r) for r in provider.requests]
-    shrunk = [
-        n
-        for n in range(1, len(requests))
-        if len(provider.requests[n][0]) < len(provider.requests[n - 1][0])
-    ]
-    assert shrunk, "the window never evicted"
-    # Read at the first step and again only where the window lost messages.
-    assert reads == [0, *shrunk]
-    for n in range(1, len(requests)):
-        if n not in shrunk:
-            assert _extends(requests[n - 1], requests[n])
-    # The step that left the window is in the block read after it.
-    after = provider.requests[shrunk[0]][0][1].content
-    assert (
-        "contents of part 1"
-        in after.split("[end of retrieved context and reflections]")[0]
-    )

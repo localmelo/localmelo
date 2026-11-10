@@ -1593,7 +1593,7 @@
   "settings.approvals.title": "New chats start in",
   "settings.backend.melo_serve": "melo_serve (local models, one address)",
   "settings.backend.mlc": "MLC (local endpoint)",
-  "settings.backend.none": "None (no long-term memory)",
+  "settings.backend.none": "None (search by words only)",
   "settings.backend.ollama": "Ollama (local endpoint)",
   "settings.backend.sglang": "SGLang (local endpoint)",
   "settings.backend.vllm": "oMLX or vLLM (OpenAI-compatible, local)",

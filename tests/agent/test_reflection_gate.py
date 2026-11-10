@@ -32,7 +32,7 @@ from localmelo.melo.agent._reflection import (
     _reflection_from_object,
     _serialize_reflections,
 )
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     Message,
@@ -72,34 +72,17 @@ class FakeLLM(BaseLLMProvider):
         pass
 
 
-class FakeEmbedding(BaseEmbeddingProvider):
-    """Embeds every text alike and keeps each text it was given."""
-
-    def __init__(self) -> None:
-        self.texts: list[str] = []
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        self.texts.extend(texts)
-        return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
-
-    async def close(self) -> None:
-        pass
-
-
 async def _echo(text: str) -> str:
     return text
 
 
 def _agent(
     llm: BaseLLMProvider,
-    *,
-    embedding: BaseEmbeddingProvider | None = None,
     **options: Any,
 ) -> Agent:
     """An agent whose only tool is echo (named in every query below)."""
     agent = Agent(
         llm=llm,
-        embedding=embedding,
         options=AgentOptions(builtins=frozenset(), **options),
     )
     agent.hippo.register_tool(
@@ -409,20 +392,15 @@ STILL_PROSE = "Still no JSON, sorry."
 UNPARSED = "Could not parse reflection response"
 
 
-def _never_embedded(embedding: FakeEmbedding, *texts: str) -> bool:
-    return not any(text in embedded for embedded in embedding.texts for text in texts)
-
-
 class TestUnreadableReflection:
     @pytest.mark.asyncio
     async def test_an_unread_reply_starts_the_next_attempt_without_a_reflection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        embedding = FakeEmbedding()
         llm = FakeLLM(
             [_echo_call("a"), _answer(PROSE), _answer(STILL_PROSE), _answer("42")]
         )
-        agent = _agent(llm, embedding=embedding, steps_per_attempt=1, max_attempts=3)
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
         added = _added_reflections(agent, monkeypatch)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.error) == ("completed", "42", "")
@@ -432,16 +410,13 @@ class TestUnreadableReflection:
         assert _kinds(llm) == ["plan", "reflect", "reflect", "plan"]
         assert added == []
         assert "[REFLECTION]" not in _planning_texts(llm)[-1]
-        # Neither reply reached long-term memory or the run's result.
-        assert embedding.texts
-        assert _never_embedded(embedding, PROSE, STILL_PROSE)
+        # Neither reply reached the run's result.
         assert UNPARSED not in json.dumps(result.to_dict())
 
     @pytest.mark.asyncio
     async def test_an_unread_reply_keeps_the_previous_reflection(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        embedding = FakeEmbedding()
         llm = FakeLLM(
             [
                 _echo_call("a"),
@@ -452,20 +427,18 @@ class TestUnreadableReflection:
                 _answer("42"),
             ]
         )
-        agent = _agent(llm, embedding=embedding, steps_per_attempt=1, max_attempts=3)
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
         added = _added_reflections(agent, monkeypatch)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.attempts) == ("completed", "42", 3)
         # The second boundary sent exactly two requests and added nothing.
         assert _kinds(llm) == ["plan", "reflect", "plan", "reflect", "reflect", "plan"]
         assert [entry.summary for entry in added] == ["echo a was not it"]
-        # The third attempt plans with the first attempt's reflection, and
-        # long-term memory receives that one, never the unreadable replies.
+        # The third attempt plans with the first attempt's reflection, never
+        # with the unreadable replies.
         assert "[REFLECTION]\nAttempt 0: echo a was not it" in (
             _planning_texts(llm)[-1]
         )
-        assert any("Attempt 0: echo a was not it" in t for t in embedding.texts)
-        assert _never_embedded(embedding, PROSE, STILL_PROSE)
         assert UNPARSED not in json.dumps(result.to_dict())
 
     @pytest.mark.asyncio
@@ -716,19 +689,13 @@ class TestOverBudget:
     async def test_a_done_is_trimmed_and_keeps_its_answer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        embedding = FakeEmbedding()
         data = _bulky("done", best_effort_result="42")
         llm = FakeLLM([_echo_call("a"), _answer(json.dumps(data))])
-        agent = _agent(llm, embedding=embedding, steps_per_attempt=1, max_attempts=3)
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
         added = _added_reflections(agent, monkeypatch)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.error) == ("completed", "42", "")
         [stored] = added
         assert _size(stored) <= MAX_REFLECTION_CHARS
-        # Long-term memory receives the trimmed copy, never what it dropped.
-        dropped = data["failed_hypotheses"][len(stored.failed_hypotheses) :]
-        assert dropped
-        assert any(
-            t.startswith(f"Attempt 0: {data['summary']}") for t in embedding.texts
-        )
-        assert _never_embedded(embedding, *dropped)
+        # The trim dropped some of the hypotheses.
+        assert data["failed_hypotheses"][len(stored.failed_hypotheses) :]

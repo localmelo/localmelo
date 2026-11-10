@@ -10,7 +10,8 @@ calls may run.
 ## Agent
 
 An agent is built from model providers: `Agent(llm=..., embedding=...)`. The
-embedding provider is optional; without it there is no long-term memory. To use
+embedding provider is optional; it serves the recall of the reasoning modes other
+than `legacy`, and a `legacy` run does not use it. To use
 the backends of a configuration, as `melo` and the gateway do, build the
 providers with `providers_for(cfg)` from `localmelo.support.backends`. `Config`,
 `load` and `save` come from `localmelo.support.config`.
@@ -48,7 +49,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `refused_steps` | `0` | Steps whose every call a policy check refused (the tool returned `refuse_call(...)` from `localmelo.melo.contracts.tools`, or a policy or Auto refused a question the tool asked or denied the call) that do not count toward `max_steps`, at most this many per run. They still send their requests. Your own Deny, a question left unanswered, and a call refused before in the same run (same tool, same arguments) always count. `0`: every step counts. |
 | `tool_exposure` | `"retrieve"` | `"retrieve"` or `"all"`; see [How tools are offered](tools.md#how-tools-are-offered). |
 | `builtins` | `None` | The built-in tools to register: `None` for the mode's default set, an empty collection for none, or a collection of names. |
-| `memory` | `True` | `False` turns long-term memory off. |
+| `memory` | `True` | `False` turns long-term memory off in the reasoning modes other than `legacy`; a `legacy` run has none. |
 | `memory_dir` | `None` | A directory for SQLite memory, with `~` expanded. `None` follows the environment variables; see [Memory](../guides/memory.md#keep-memory-between-runs). |
 | `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
 | `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers: only `"interactive"` offers `shell_exec`; `"interactive"` and `"gateway"` also offer `list_files`; `"direct"` and `"python"` register `file_read`, `file_write` and `python_exec`. Naming `shell_exec` in `builtins` is a `direct` or `python` caller's opt-in and lets the run use it; the checker refuses an unnamed one there, and refuses it in `gateway` mode even when named; the refusal names the mode and, in direct or python mode, the way to enable it. An explicit `builtins` wins over the default registration. |

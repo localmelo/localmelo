@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -226,42 +226,11 @@ class TestAgentLoopAfterMerge:
         assert any(t.name == "shell_exec" for t in tools)
 
 
-# ── 2b. Single system message with recalled memory ────────────────────────────
+# ── 2b. Single system message ─────────────────────────────────────────────────
 
 
-class TestSingleSystemMessageWithMemory:
+class TestSingleSystemMessage:
     """MLC-compat: planning calls must contain exactly one system message."""
-
-    @pytest.mark.asyncio
-    async def test_single_system_msg_with_long_term_memory(self) -> None:
-        """When long-term memory returns [memory] items, plan_step merges
-        them into one [RECALL] block."""
-        llm = FakeLLM([Message(role="assistant", content="ok")])
-        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=AgentOptions())
-
-        # Seed long-term memory so retrieve_context returns system messages.
-        await agent.hippo.long.add("fact alpha", [1.0, 0.0, 0.0, 0.0])
-        await agent.hippo.long.add("fact beta", [0.0, 1.0, 0.0, 0.0])
-
-        await agent.run("recall test")
-
-        planning = llm.calls
-        assert len(planning) >= 1
-        sent = planning[0]["messages"]
-
-        sys_msgs = [m for m in sent if m.role == "system"]
-        assert (
-            len(sys_msgs) == 1
-        ), f"Expected exactly 1 system message, got {len(sys_msgs)}"
-        # The fixed prefix keeps the system prompt stable, so the recall block rides
-        # in the user message.
-        said = "\n".join(m.content for m in sent)
-        assert "[RECALL]" in said
-        assert "fact alpha" in said
-        assert "fact beta" in said
-        # Memory prefix must be stripped.
-        assert "[memory]" not in said
-        await agent.close()
 
     @pytest.mark.asyncio
     async def test_single_system_msg_without_memory(self) -> None:
@@ -291,7 +260,6 @@ class TestSingleSystemMessageWithMemory:
         llm.responses.append(Message(role="assistant", content="done"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
-        await agent.hippo.long.add("remembered fact", [1.0, 0.0, 0.0, 0.0])
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -378,15 +346,16 @@ class TestPersistentMemoryWiring:
                 embedding=FakeEmbedding(),
             )
             assert isinstance(agent.hippo.history, SqliteHistory)
-            assert isinstance(agent.hippo.long, SqliteLongTerm)
+            # A legacy Agent opens no long-term store, even with an embedding.
+            assert not isinstance(agent.hippo.long, SqliteLongTerm)
 
             result = await agent.run("test query")
             assert result == "ok"
 
-            # Task was persisted in SQLite
+            # Task was persisted in SQLite; the long-term file was never made
             tasks_dir = Path(mem_dir)
             assert (tasks_dir / "history.db").exists()
-            assert (tasks_dir / "long_term.db").exists()
+            assert not (tasks_dir / "long_term.db").exists()
             await agent.close()
 
     @pytest.mark.asyncio
@@ -1314,7 +1283,7 @@ class TestAgentCloseCascade:
 
             # Verify SQLite files were created
             assert (Path(mem_dir) / "history.db").exists()
-            assert (Path(mem_dir) / "long_term.db").exists()
+            assert not (Path(mem_dir) / "long_term.db").exists()
 
 
 # ── 16. has_embedding → embedding provider consistency ─────────────────────

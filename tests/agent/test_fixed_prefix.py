@@ -175,12 +175,13 @@ async def test_dynamic_recall_and_schema_changes(
     chat = _chat.Chat(provider, system_notes=["Static note"])
     token = chat.begin_prefix()
     try:
-        context = [Message("system", "[memory] source record 123")]
         task = Message("user", "unchanged task")
         first = [ToolDef("alpha", "first", {})]
         second = [ToolDef("beta", "second", {})]
-        await chat.plan_step(context, [task], first, task.content)
-        await chat.plan_step([], [task], second, task.content)
+        await chat.plan_step(
+            [task], first, task.content, query_block="source record 123"
+        )
+        await chat.plan_step([task], second, task.content)
         await chat.reflect([task], task.content, 2)
     finally:
         _chat.PREFIX_RUN.reset(token)
@@ -221,9 +222,7 @@ async def test_data_delimiters_cannot_be_forged() -> None:
                 ReflectionEntry(attempt_id=1, summary=payload(reflect_marker))
             ],
         )
-        await chat.plan_step(
-            [], [task], [], task.content, query_block=payload(plan_marker)
-        )
+        await chat.plan_step([task], [], task.content, query_block=payload(plan_marker))
     finally:
         _chat.PREFIX_RUN.reset(token)
     for (messages, _), marker in zip(
@@ -242,7 +241,7 @@ async def test_empty_recall_coalesces_multiple_task_messages() -> None:
     token = chat.begin_prefix()
     try:
         await chat.plan_step(
-            [], [Message("user", "first"), Message("user", "second")], [], "first"
+            [Message("user", "first"), Message("user", "second")], [], "first"
         )
     finally:
         _chat.PREFIX_RUN.reset(token)
@@ -302,7 +301,7 @@ async def test_cache_telemetry_excludes_unprefixed_calls(
     try:
         await chat.retrieve([Message("user", "find")])
         assert chat.stats.prefix_cached_tokens is None
-        await chat.plan_step([], [Message("user", "task")], [], "task")
+        await chat.plan_step([Message("user", "task")], [], "task")
         await chat.reflect([Message("user", "task")], "task", 1)
     finally:
         _chat.PREFIX_RUN.reset(token)
@@ -333,15 +332,11 @@ async def test_fit_before_coalescing_preserves_current_recall(
     chat = _chat.Chat(provider)
     token = chat.begin_prefix()
     try:
-        await chat.plan_step(
-            [Message("system", "[memory] current source")], short, [], "unchanged task"
-        )
+        await chat.plan_step(short, [], "unchanged task", query_block="current source")
         limit = request_proxy(provider.requests[-1][0], None, replay=False)[0] - 500
         chat.context_budget = ContextBudget(limit + 2, 1, 1)
         chat.reset_stats()
-        await chat.plan_step(
-            [Message("system", "[memory] current source")], short, [], "unchanged task"
-        )
+        await chat.plan_step(short, [], "unchanged task", query_block="current source")
     finally:
         _chat.PREFIX_RUN.reset(token)
     sent = provider.requests[-1][0]
