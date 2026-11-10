@@ -361,6 +361,8 @@ button:hover:not(:disabled) {
 .main-card[data-ending="draft"] .main-card-mark, .main-card[data-ending="blocked"] .main-card-mark { background: var(--surface); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .main-card[data-ending="failed"] .main-card-mark { background: var(--raised); color: var(--error); }
 .main-card[data-ending="dropped"] .main-card-mark { background: var(--raised); color: var(--ink-3); }
+/* Its step answered since: the mark of a line on the thread, not of what asks. */
+.main-card[data-answered][data-ending] .main-card-mark { background: var(--tint); color: var(--ok); box-shadow: none; }
 .main-card-why { margin: 4px 0 0; color: var(--warn); font-size: var(--text-small); font-weight: 500; overflow-wrap: anywhere; }
 /* A ready task's note (no tests apply) is a remark, not a warning. */
 .main-card[data-ending="ready"] .main-card-why { color: var(--ink-3); font-weight: 400; }
@@ -2392,7 +2394,7 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .sched-title { font-weight: 600; overflow-wrap: anywhere; }
 .sched-when { color: var(--ink-2); font-size: var(--text-small); }
 /* How the last run went: a line of the row that opens that run, coloured by its ending as the Activity rows are. */
-a.sched-last { display: block; width: fit-content; max-width: 100%; padding: 2px 0; color: var(--ink-3); font-size: var(--text-small); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; overflow-wrap: anywhere; text-wrap: pretty; }
+a.sched-last { display: block; width: fit-content; max-width: 100%; padding: 2px 0; color: var(--ink-3); font-size: var(--text-small); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 60%, transparent); text-underline-offset: 2px; overflow-wrap: anywhere; text-wrap: pretty; }
 a.sched-last:hover { text-decoration-color: currentColor; }
 a.sched-last:is([data-ending="draft"], [data-ending="blocked"]) { color: var(--warn); }
 a.sched-last[data-ending="failed"] { color: var(--error); }
@@ -2710,8 +2712,8 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .block-done { color: var(--ink-2); }
 .block-card[data-state="used"] .block-done { color: var(--ok); }
 /* Answered, a blocked step asks nothing more: its facts stay, on the quiet surface of a record. */
-.block-card:is([data-state="pending"], [data-state="used"], [data-state="expired"], [data-state="kept"]) { background: none; box-shadow: none; }
-.task-block:has(> .block-card:is([data-state="pending"], [data-state="used"], [data-state="expired"], [data-state="kept"])) > summary { color: var(--ink-2); }
+.block-card:is([data-state="pending"], [data-state="used"], [data-state="kept"]) { background: none; box-shadow: none; }
+.task-block:has(> .block-card:is([data-state="pending"], [data-state="used"], [data-state="kept"])) > summary { color: var(--ink-2); }
 .block-error { margin: var(--space-2) 0 0 calc(1.25em + var(--space-2)); color: var(--error); font-size: var(--text-small); }
 .task-blocked { display: grid; gap: var(--space-2); }
 .task-blocked h2 { margin-bottom: 0; }

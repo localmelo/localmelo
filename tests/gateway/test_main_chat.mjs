@@ -457,7 +457,7 @@ const blockedRow = (id, request, at = NOON) => ({id, ts: at, data: {
 // A task's body as `GET /tasks/{id}` gives it, with one stored block (`blocked`) and its allowances: what every
 // screen reads a block's state from (`taskBlock`).
 const bodyOf = (block, allowances = {}) => ({task_id: 't', allowances, blocked: [{name: 'python_exec', preview: '', can_allow: true,
-  used_at: null, question: null, arguments: null, keep_site: null, kept: false, ...block}]});
+  used_at: null, question: null, arguments: null, keep_site: null, kept: false, allowed_until: allowances[block.step_key] ?? null, ...block}]});
 const readOf = (block, allowances, now = NOON) => taskBlock(bodyOf(block, allowances), block.request_id, now);
 
 test('a step Auto blocked in a task is a card of its own, with the block and Allow once', () => {
@@ -543,14 +543,14 @@ test('a card that needs the person allows its one blocked step, then says how it
   const foot = doc.made.find((item) => item.className === 'main-card-foot');
   assert.deepEqual(foot.children.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Allow this step', 'Open task']);
   assert.equal(foot.children[0].textContent, 'Blocked: Install software', 'the step it allows, as its own card names it');
-  // The question restates the step the card shows: it is not said twice.
-  assert.equal(doc.made.some((item) => item.textContent === 'May I install it?'), false);
+  // The model's own question shows, block or not.
+  assert.ok(doc.made.some((item) => item.textContent === 'May I install it?'));
   doc.made.find((item) => item.textContent === 'Allow this step').listeners.click();
   assert.deepEqual(allowed, ['r1'], 'the same Allow once the step itself offers');
   // Allowed anywhere (this card, the task's page, the person's typed yes): its task's body says so, and so does the card,
   // in the line the task's page shows, with no button and no amber box.
   for (const [read, said] of [[readOf(stored, {k1: NOON + 1800}), /^Allowed once · melo can run it until /],
-    [readOf({...stored, used_at: NOON + 60}), /^Allowed once · ran at /], [readOf(stored, {k1: NOON - 1}), /^Allowance expired$/]]) {
+    [readOf({...stored, used_at: NOON + 60}), /^Allowed once · ran at /]]) {
     const after = fakeDoc();
     const node = cardNode({doc: after, card, open: () => {}, step: mainChat.stepState(card, {read})});
     assert.deepEqual(after.made.filter((item) => item.tag === 'button').map((item) => item.textContent), ['Open task']);
@@ -558,7 +558,17 @@ test('a card that needs the person allows its one blocked step, then says how it
     assert.equal(notes[0], 'Blocked: Install software');
     assert.match(notes[1], said);
     assert.equal(node.dataset.answered, 'true');
+    // Its heading says where the task is now, as the task's stage words it, not the Needs you it was.
+    const moved = fakeDoc();
+    cardNode({doc: moved, card, open: () => {}, step: mainChat.stepState(card, {read: {...read, stage: {key: 'went_on', label: 'panel.state.wentOn'}}})});
+    assert.equal(moved.made.find((item) => item.className === 'main-card-title').textContent, 'Goes on in a newer task: Check-in');
   }
+  // An allowance that ran out unused is no answer: Allow this step is back, beside the line that says so.
+  const lapsed = fakeDoc();
+  const node = cardNode({doc: lapsed, card, open: () => {}, step: mainChat.stepState(card, {read: readOf(stored, {k1: NOON - 1})})});
+  assert.ok(lapsed.made.some((item) => item.textContent === 'Allowance expired'));
+  assert.ok(lapsed.made.some((item) => item.tag === 'button' && item.textContent === 'Allow this step'));
+  assert.equal(node.dataset.answered, undefined, 'it still asks');
 });
 
 test('a scheduled task\'s card also offers to keep the answer for its next runs on the step\'s site', () => {

@@ -20,10 +20,19 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    ALLOW_ONCE_S,
+    ApprovalDecision,
+    ApprovalRequest,
+    AutoPolicy,
+)
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.schema import Message
-from localmelo.support.gateway.auto_blocks import blocked_steps, go_ahead_text
+from localmelo.support.gateway.auto_blocks import (
+    blocked_steps,
+    go_ahead_text,
+    own_allowances,
+)
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.sessions.approvals import ChatPolicy, chat_mode
@@ -734,6 +743,15 @@ async def test_allow_once_on_a_chats_ended_task_goes_on_in_a_fresh_task(
         # The ended task was never reopened, and keeps no policy.
         assert await console.store.list_turns(task_id) == turns
         assert task_id not in console.workers._auto
+        # A pending allowance in the fresh task (seeded, so no run can use it
+        # first) is the ended task's block's: its key, never another step's.
+        policy = AutoPolicy(task=True)
+        policy.allow_once(blocked["step_key"], ["credentials"])
+        policy.allow_once("another-step", ["delete"])
+        console.workers._auto[fresh["task_id"]] = policy
+        body = await console.workers.get(task_id)
+        assert set(body["allowances"]) == {blocked["step_key"]}
+        assert body["blocked"][0]["allowed_until"] == policy.given[blocked["step_key"]]
 
 
 @pytest.mark.asyncio
@@ -832,3 +850,15 @@ async def test_the_gateway_is_registered_before_the_console_starts(
     assert server.port in guard.ports
     assert str((tmp_path / "sessions.db").resolve()) in guard.files
     assert server.port not in own_gateway.current().ports
+
+
+def test_a_later_block_of_a_step_does_not_take_an_earlier_blocks_allowance() -> None:
+    """An allowance is kept by step; the block it was given for is one made before it."""
+    given = {"k1": 1000.0 + ALLOW_ONCE_S}
+    blocks: list[dict[str, Any]] = [
+        {"step_key": "k1", "ts": 900.0},
+        {"step_key": "k1", "ts": 1100.0},
+        {"step_key": "k2", "ts": 900.0},
+    ]
+    own_allowances(blocks, given)
+    assert [b["allowed_until"] for b in blocks] == [given["k1"], None, None]

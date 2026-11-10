@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -59,6 +60,7 @@ from localmelo.support.gateway.auto_blocks import (
     go_ahead_text,
     keep_site,
     kept_uses,
+    own_allowances,
     ran_once,
 )
 from localmelo.support.gateway.chat_gate import (
@@ -1655,20 +1657,29 @@ class TaskWorkers:
             log.exception("Could not read the allowed steps of task %s", record.task_id)
             return ""
 
+    async def went_on(self, record: TaskRecord) -> bool:
+        """Whether *record* ended and its work goes on in a newer task (#571)."""
+        return (
+            record.state in TERMINAL_PHASES
+            and await self.tasks.by_create_key(successor_key(record.task_id))
+            is not None
+        )
+
     async def open_blocks(self, task_id: str) -> builtins.list[dict[str, Any]]:
         """The steps Auto blocked in *task_id* that its Allow once may still run.
 
         As its page lists them (``blocked``): one it can allow, not run on an
-        allowance since, and with none waiting for its step.
+        allowance since, and with no allowance of its own waiting (one that
+        ran out unused is open again, as Allow once is).
         """
         body = await self._body(await self.tasks.get_task(task_id))
-        given = body["allowances"]
+        now = time.time()
         return [
             block
             for block in body["blocked"]
             if block["can_allow"]
             and block["used_at"] is None
-            and block["step_key"] not in given
+            and not (block["allowed_until"] and block["allowed_until"] > now)
         ]
 
     async def continue_stopped(self, task_id: str) -> tuple[dict, str]:
@@ -3667,6 +3678,8 @@ class TaskWorkers:
                 }
                 for b in body["blocked"]
             ]
+        # Each block's own allowance: the step's, when it was given after the block.
+        own_allowances(body["blocked"], body["allowances"])
         if record.state == "failed" and record.wait_reason == "invalid_workspace":
             body["folder_problem"] = await self.folder_problem(record.task_id)
         # A run that used all its steps is stopped, and continues from its page (#341).

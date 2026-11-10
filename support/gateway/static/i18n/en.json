@@ -1418,6 +1418,7 @@
   "panel.state.running": "Working",
   "panel.state.stopped": "Stopped",
   "panel.state.waiting": "Waiting for your approval",
+  "panel.state.wentOn": "Goes on in a newer task",
   "panel.stepNow": "now",
   "panel.tab.activity": "Activity",
   "panel.tab.memory": "Memory",

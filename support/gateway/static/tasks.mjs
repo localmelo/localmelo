@@ -172,7 +172,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
   const pendingOf = (task) => (Array.isArray(task.pending_approvals) ? task.pending_approvals : []);
   // The steps auto mode blocked (#339); "open" ones were not allowed and run since.
   const blockedOf = (task) => (Array.isArray(task.blocked) ? task.blocked : []);
-  const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !task.allowances?.[block.step_key]);
+  const openBlocks = (task) => blockedOf(task).filter((block) => !block.used_at && !(block.allowed_until > Date.now() / 1000));
   // A finished task's ending colours its state: Ready, Done, not finished, Needs you…
   const endingOf = (task) => (isStopped(task) ? null : readEnding(task.ending));
   // The blocked step a Needs you stands on: the only one shown of the run that ended so (as its chat's card has it).
@@ -235,7 +235,9 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const facts = full ? null : node('p', 'task-facts');
     const stateCell = full ? row(t('tasks.row.state'), stateText(task)) : node('span', '', stateText(task));
     const ending = readEnding(task.ending);
-    if (endingOf(task)) stateCell.dataset.ending = ending.state;
+    // Its work goes on in a newer task: its state says so, and nothing here still asks.
+    const wentOn = task.stage?.key === 'went_on';
+    if (endingOf(task) && !wentOn) stateCell.dataset.ending = ending.state;
     else if (task.stage?.awaited === 'person') stateCell.dataset.awaited = 'person';
     if (facts) {
       const time = node('time', '', t('tasks.updated', {when: when(task.updated_at)}));
@@ -244,7 +246,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       facts.append(...[stateCell, time, ...folder].flatMap((part, index) => (index ? [node('span', 'task-facts-gap', ' · '), part] : [part])));
     }
     // Why it is not ready, and the tests its run ran (from its own calls, never from its report). A Needs you that
-    // stands on a blocked step says what it needs in that step's box, once.
+    // stands on a blocked step leaves its generic words to that step's box; the model's own question always shows.
     const why = ending ? endingWhy(ending, {asks: !endedOn(task)}) : '';
     if (why) row(t('ending.row'), why);
     if (ending?.tests.length) {
@@ -302,8 +304,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       actions.append(button('', t(state.busy === 'resume' ? 'tasks.resuming' : 'common.resume'), () => resume(), {disabled: Boolean(state.busy)}));
     }
     if (task.successor?.task_id) {
-      // Its work went on in a newer task (#571): nothing here would start another.
-      nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
+      // Its work went on in a newer task (#571): nothing here would start another. The state says so already.
+      if (!wentOn) nodes.push(node('p', 'muted task-goes-on', t('tasks.goesOn', {title: task.successor.title})));
     } else if (isStopped(task)) {
       actions.append(button('', t(state.busy === 'continue' ? 'common.starting' : 'failure.continue'), () => keepGoing(), {disabled: Boolean(state.busy)}));
     } else if (canFinish(ending)) {

@@ -11,7 +11,7 @@
  */
 
 import {ENDING_MARKS, canFinish, endingLabel, endingWhy, finishLabel, readEnding} from "./endings.mjs";
-import {answerLine, blockCard, blockFacts, pageText} from "./blocked.mjs";
+import {answerLine, blockCard, blockFacts, pageText, ranOut} from "./blocked.mjs";
 import {maker, startOfDay} from "./dom.mjs";
 import {formatTime, saidText, t} from "./i18n.mjs";
 import {LEVELS, levelCode, levelLabel, levelMeaning} from "./levels.mjs";
@@ -224,8 +224,11 @@ export function byDay(sessions, now) {
   return groups;
 }
 
-/** A card's words: its mark, its heading and its action. */
-export function cardWords(card) {
+/**
+ * A card's words: its mark, its heading and its action. *stage* is its task's stage once the step the card stands on
+ * was answered (`stepState`): the heading then says where the task is now, never the Needs you it was.
+ */
+export function cardWords(card, stage = null) {
   const open = t(card.sourceKind === "task" ? "mainChat.openTask" : "mainChat.openSideChat");
   const title = card.title;
   if (card.state === "waiting") return {mark: "!", heading: t("mainChat.card.waiting", {title}), action: t("common.review")};
@@ -241,6 +244,7 @@ export function cardWords(card) {
   // A done task says how code found it ended, in the words of every screen: Ready, Done, not finished (Finish it),
   // Needs you…
   const ending = card.state === "done" ? card.ending : null;
+  if (ending && stage) return {mark: "✓", heading: t("mainChat.card.ended", {state: t(stage.label, {chat: ""}), title}), action: open};
   if (ending) {
     const heading = t("mainChat.card.ended", {state: endingLabel(ending), title});
     return {mark: ENDING_MARKS[ending.state], heading, action: open, ...(canFinish(ending) ? {more: finishLabel(ending)} : {})};
@@ -261,7 +265,7 @@ export function cardWords(card) {
  */
 export function cardNode({doc, card, open, resume = null, approval = null, block = null, step = null}) {
   const {node: el} = maker(doc);
-  const words = cardWords(card);
+  const words = cardWords(card, step?.state === "answered" ? step.stage ?? null : null);
   const node = el("article", "main-card");
   node.dataset.state = card.state;
   if (card.ending) node.dataset.ending = card.ending.state;
@@ -320,8 +324,9 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
  * task's run (`facts.keepSite`) also offers to keep the answer for its next runs on that site (`onKeep`), as the step's
  * own card does. Until its task's body is read (`reading`), and when nothing may allow it now (`closed`), no button.
  */
-function stepNodes(el, {state = "open", line = "", error = "", onAllow = null, onKeep = null}, facts = null) {
-  const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
+function stepNodes(el, {state = "open", line = "", expired = "", error = "", onAllow = null, onKeep = null}, facts = null) {
+  const what = [...(facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : []),
+    ...(expired ? [el("span", "main-card-note", expired)] : [])];
   const site = facts?.keepSite ? facts.keepSite.slice(facts.keepSite.indexOf("://") + 3) : "";
   if (state === "answered") return [...what, el("span", "main-card-note", line)];
   if (state === "reading" || state === "closed") return what;
@@ -361,11 +366,13 @@ export function stepState(card, {read = null, busy = {}} = {}) {
   if (!id) return null;
   if (!read) return {state: "reading"};
   const line = answerLine(read.facts, read.allowing);
-  if (line) return {state: "answered", line, facts: read.facts};
-  if (!read.facts.allow && !read.facts.keepSite) return {state: "closed", facts: read.facts};
+  if (line) return {state: "answered", line, facts: read.facts, stage: read.stage};
+  // An allowance that ran out unused is no answer: the step asks again, and says so.
+  const expired = ranOut(read.allowing);
+  if (!read.facts.allow && !read.facts.keepSite) return {state: "closed", facts: read.facts, expired};
   const now = busy[id];
   const going = now === "allowing" || now === "keeping";
-  return {state: going ? "allowing" : "open", error: now && !going ? now : "", facts: read.facts};
+  return {state: going ? "allowing" : "open", error: now && !going ? now : "", facts: read.facts, expired};
 }
 
 // ── Echoes: what the main chat did with a task ──

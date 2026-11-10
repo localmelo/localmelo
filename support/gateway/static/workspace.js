@@ -34,7 +34,7 @@ import { folderName, setupFolderPicker } from "./folder.mjs";
 import { modeOf, setupModeChip } from "./mode.mjs";
 import { setupWindowBar } from "./window-bar.mjs";
 import { activeSwitch, setupServe } from "./serve.mjs";
-import { allowState, blockCard, blockFacts, taskBlock } from "./blocked.mjs";
+import { allowState, answerLine, blockCard, blockFacts, taskBlock } from "./blocked.mjs";
 import { picturesNode, setupPictureBox, shotsNode, takenPictures } from "./pictures.mjs";
 import { isStandIn, pictureItems, requestOf, setupMedia, splitAttachments, turnPictures, uploadType } from "./composer-media.mjs";
 import { memoryNodes } from "./memory.mjs";
@@ -835,6 +835,8 @@ async function loadSession(id) {
   view.echoes = mergeEchoes([], turns.echoes ?? []);
   view.browsers = mergeBrowsers([], turns.browser ?? []);
   S.view = view;
+  // Its cards' steps may have been answered since they were read: once, from their tasks.
+  rereadBlockTasks(view);
   renderSessions();
   renderMessages(true);
   syncUI();
@@ -1117,9 +1119,9 @@ function viewSnapshot() {
     S.outbox[S.activeId ?? "new"] ?? null,
     // Allow once (#339): a request under way, and each allowance still open or run out.
     S.allowing,
-    // Where each card's blocked step stands, as its task's body says it (`blockTasks`), and each allowance still open.
-    [...blockTasks.entries()].map(([id, read]) => [id, read.task?.blocked ?? null,
-      Object.entries(read.task?.allowances ?? {}).map(([key, until]) => [key, until > nowSeconds()])]),
+    // Where the open chat's card steps stand, as their tasks' bodies say it (`blockTasks`), and each allowance still open.
+    blockCardTasks(view).map(({ id }) => [id, blockTasks.get(id)?.task?.blocked?.map((block) => [block, block.allowed_until > nowSeconds()]) ?? null,
+      blockTasks.get(id)?.task?.stage ?? null]),
     // A task's approval drawn in its chat's card, as last read (#369), unless the panel shows that task.
     showsItems(view) ? [...taskApprovals.entries()] : null,
     panel.state.task,
@@ -1508,58 +1510,87 @@ async function answerTaskApproval(request, state, choice) {
 
 // ── A task's blocked step on its chat's card: read from the task's own body, as its page reads it ──
 
-// The bodies of the tasks whose blocked steps cards show, by task id: `{task}` once read, `{reading: true}` meanwhile.
-// The body is the one record of whether a step was answered (`taskBlock`); a card keeps no copy of its own.
+// The bodies of the tasks whose blocked steps cards show, by task id: `{task}` once read, with `reading` (the number of
+// the read under way) meanwhile. The body is the one record of whether a step was answered (`taskBlock`); a card keeps
+// no copy of its own.
 const blockTasks = new Map();
+let blockReads = 0;
+// How many tasks a chat reads for its block cards when it draws them: those of its newest cards. An older card shows
+// its step and Open task, and is read once its task's page is opened.
+const BLOCK_READS = 5;
+
+/** The tasks of *view*'s block cards, newest first: `{id, requests}` with the request ids its cards show. */
+function blockCardTasks(view = S.view) {
+  const found = new Map();
+  for (const card of [...(view?.cards ?? [])].reverse()) {
+    if (card.sourceKind !== "task") continue;
+    const request = card.state === "blocked" ? card.requestId : card.block?.requestId;
+    if (!request) continue;
+    if (!found.has(card.sourceId)) found.set(card.sourceId, new Set());
+    found.get(card.sourceId).add(request);
+  }
+  return [...found].map(([id, requests]) => ({ id, requests }));
+}
 
 /**
- * Read a card's task body (again); the chat is drawn again when it changed. A task gone reads as none; a read that
- * failed otherwise keeps what was read before (or is tried again at the next draw).
+ * Read a card's task body (again); the chat is drawn again when it changed. A task gone reads as none. A read that
+ * failed keeps what was read before, as not reading; an answer older than the newest read of the task is dropped.
  */
 async function readBlockTask(id) {
+  const mine = ++blockReads;
   const known = blockTasks.get(id);
-  blockTasks.set(id, { ...(known ?? {}), reading: true });
+  blockTasks.set(id, { task: known?.task ?? null, reading: mine });
   let task = null;
   try {
     task = (await api(`/tasks/${encodeURIComponent(id)}`)).task ?? null;
   } catch (error) {
     if (error?.status !== 404) {
-      if (known?.task) blockTasks.set(id, known);
-      else blockTasks.delete(id);
+      if (blockTasks.get(id)?.reading === mine) blockTasks.set(id, { task: known?.task ?? null });
       return;
     }
   }
+  if (blockTasks.get(id)?.reading !== mine) return; // a newer read, or the task's page, has the newer body
   const changed = JSON.stringify(task) !== JSON.stringify(known?.task ?? null);
   blockTasks.set(id, { task });
   if (changed) renderMessages(false, true);
 }
 
-/** A task body read elsewhere on this page (its page in the panel): a card of the same task reads it too. */
+/** A task body read elsewhere on this page (its page in the panel): a card of the open chat reads it too. */
 function seeBlockTask(task) {
-  if (!task?.task_id || !blockTasks.has(task.task_id)) return;
+  if (!task?.task_id || !blockCardTasks().some((found) => found.id === task.task_id)) return;
   const known = blockTasks.get(task.task_id);
-  if (JSON.stringify(known.task) === JSON.stringify(task)) return;
+  if (!known?.reading && JSON.stringify(known?.task) === JSON.stringify(task)) return;
   blockTasks.set(task.task_id, { task });
   renderMessages(false, true);
 }
 
-/** The steps whose cards still ask (or whose allowance waits): their tasks are read again. */
+/** Read again, once, the tasks read for *view*'s block cards (the chat was opened, or a kept answer removed). */
+function rereadBlockTasks(view = S.view) {
+  for (const { id } of blockCardTasks(view)) if (blockTasks.has(id)) readBlockTask(id);
+}
+
+/**
+ * On a new card or line: the open chat's steps that can still be answered and are not are read again (an answer may
+ * have been given elsewhere). A finished job's step, one a newer task closed, and one answered already are not.
+ */
 function rereadAsked() {
   const now = nowSeconds();
-  for (const [id, read] of blockTasks) {
-    if (read.reading || !read.task) continue;
-    const asks = (read.task.blocked ?? []).some((block) => {
-      const found = taskBlock(read.task, block.request_id, now);
-      return found && found.allowing.state !== "used" && !(found.facts.kept && found.facts.keepSite);
+  for (const { id, requests } of blockCardTasks()) {
+    const read = blockTasks.get(id);
+    if (!read?.task || read.reading) continue;
+    const asks = [...requests].some((request) => {
+      const found = taskBlock(read.task, request, now);
+      const offered = found && (found.facts.allow || (found.facts.keepSite && !found.facts.kept));
+      return offered && !answerLine(found.facts, found.allowing);
     });
     if (asks) readBlockTask(id);
   }
 }
 
-/** Where a card's blocked step stands (`taskBlock`), or null until its task's body is read. */
+/** Where a card's blocked step stands (`taskBlock`), or null until its task's body is read (newest tasks only). */
 function blockOf(taskId, requestId) {
   const read = blockTasks.get(taskId);
-  if (!read) readBlockTask(taskId);
+  if (!read && blockCardTasks().slice(0, BLOCK_READS).some((found) => found.id === taskId)) readBlockTask(taskId);
   return read?.task ? taskBlock(read.task, requestId, nowSeconds()) : null;
 }
 
@@ -1592,13 +1623,16 @@ async function allowCardBlock(card, facts, how = "allow") {
   try {
     await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     delete S.allowing[facts.requestId];
-    await readBlockTask(card.sourceId);
     tasks.reread(card.sourceId);
     panel.refresh();
   } catch (error) {
+    // Refused ("allowed already") or failed: the card shows where the step stands beside why.
     S.allowing[facts.requestId] = error.message || t("panel.taskChangeFailed");
   }
+  await readBlockTask(card.sourceId);
   renderMessages(false, true);
+  // The card was drawn again: focus stays in it, on its Open task, not at the top of the page.
+  if (!$("messages").contains(document.activeElement)) $("messages").querySelector(`[data-focus-key="card:${card.id}"]`)?.focus();
 }
 
 /** A card's Open: the side chat, or the task. */
@@ -3320,6 +3354,7 @@ const panel = setupPanel({
   live: followOptions,
   replying: (id) => id === S.activeId && replying(),
   folder: () => S.view?.session?.workspace_label ?? "",
+  keepRemoved: () => rereadBlockTasks(),
 });
 const pictureBox = setupPictureBox({ dialog: $("picture-box") });
 

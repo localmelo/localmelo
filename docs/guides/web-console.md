@@ -1048,8 +1048,9 @@ commands and file changes.
 - **Allow a blocked step.** **Allow once** on its card runs that exact step
   once, within 30 minutes, and sends "Go ahead with the step melo blocked:
   use your passwords or keys." as your message. While melo works the
-  button waits; afterwards the card reads `Allowed once · ran at 14:02` or
-  `Allowance expired`.
+  button waits; afterwards the card reads `Allowed once · ran at 14:02`. An
+  allowance that ran out unused says `Allowance expired` beside **Allow
+  once** again: the step still asks.
 - **Tasks.** A task you started follows its chat's mode at each step: a switch
   reaches its next decision, and a card that waits stays for you. It asks in
   its chat, as in Ask, and waits for your answer. A task another program or
@@ -1060,8 +1061,10 @@ commands and file changes.
   while its job is unfinished. A task that ended on its blocked step says
   so once: its state reads **Needs you**, its report shows without the
   `Ending:` line (developer mode shows the report as written), and the
-  step's box is where what it needs is said. Answered there or on the
-  chat's card, both say the same line and neither offers a button. Once it finished, the step is new work you
+  step's box shows the step. Answered there or on the chat's card, both
+  say the same line and neither offers a button; a run whose work goes on
+  in a newer task reads **Goes on in a newer task** as its state, on its
+  page, in the card's heading, in the panel and in `melo task`. Once it finished, the step is new work you
   ask the chat for. Typing on a page and sending a form are blocked steps
   like any other: the card says the site and the box and shows the whole
   text, or where the form goes and what it holds, and **Allow once** runs

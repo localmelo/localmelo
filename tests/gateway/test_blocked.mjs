@@ -160,18 +160,17 @@ test('a scheduled task\'s blocked step offers to keep the answer on its site, an
   assert.ok(byClass(finished, 'block-keep'));
 });
 
-test('after Allow once the button goes: waiting, ran, or run out', () => {
+test('after Allow once the button goes while it waits or once it ran', () => {
   assert.deepEqual(allowState({}), {state: 'open'});
   assert.deepEqual(allowState({until: 100, now: 50}), {state: 'pending', at: 100});
   assert.deepEqual(allowState({until: 100, now: 150}), {state: 'expired'});
   assert.deepEqual(allowState({until: 100, used: 60, now: 150}), {state: 'used', at: 60});
   const facts = blockFacts(item(INSTALL));
-  for (const allowing of [{state: 'pending', at: 100}, {state: 'used', at: 60}, {state: 'expired'}]) {
+  for (const allowing of [{state: 'pending', at: 100}, {state: 'used', at: 60}]) {
     const card = blockCard(fakeDoc(), facts, {allowing});
     assert.equal(byClass(card, 'block-allow'), null, allowing.state);
     assert.equal(card.dataset.state, allowing.state);
   }
-  assert.match(text(blockCard(fakeDoc(), facts, {allowing: {state: 'expired'}})), /Allowance expired/);
   // While melo works, the button waits.
   const busy = blockCard(fakeDoc(), facts, {busy: 'running'});
   assert.equal(byClass(busy, 'block-allow').disabled, true);
@@ -183,7 +182,9 @@ test('after Allow once the button goes: waiting, ran, or run out', () => {
 test('a task\'s blocked step reads one way from its body: asked, allowed in the task its job went on in, ran, kept', () => {
   const stored = {request_id: 'r1', step_key: 'k1', name: 'python_exec', preview: 'pip install matplotlib', review: INSTALL.review,
     can_allow: true, used_at: null, question: null, arguments: null, keep_site: null, kept: false};
-  const body = (block = {}, allowances = {}) => ({task_id: 't', allowances, blocked: [{...stored, ...block}]});
+  // The server gives each block its own allowance (`allowed_until`), from the step's when it was given after the block.
+  const body = (block = {}, allowances = {}) => ({task_id: 't', allowances,
+    blocked: [{...stored, allowed_until: allowances.k1 ?? null, ...block}]});
   const asked = taskBlock(body(), 'r1', 100);
   assert.deepEqual([asked.facts.allow, asked.allowing.state, answerLine(asked.facts, asked.allowing)], [true, 'open', '']);
   assert.equal(taskBlock(body(), 'other', 100), null);
@@ -201,6 +202,24 @@ test('a task\'s blocked step reads one way from its body: asked, allowed in the 
   assert.equal(byClass(card, 'block-title'), null);
   assert.match(byClass(card, 'block-done').textContent, /^Allowed once · melo can run it until /);
   assert.equal(card.dataset.state, 'pending');
+});
+
+test('a step that ran reads that it ran, also once its job finished', () => {
+  const ran = taskBlock({blocked: [{request_id: 'r1', step_key: 'k1', review: INSTALL.review, can_allow: false, finished: true,
+    used_at: 150, allowed_until: 1900}]}, 'r1', 300);
+  assert.match(answerLine(ran.facts, ran.allowing), /^Allowed once · ran at /);
+  const words = text(blockCard(fakeDoc(), ran.facts, {allowing: ran.allowing}));
+  assert.doesNotMatch(words, /finished without this step/);
+});
+
+test('an allowance that ran out unused asks again: Allow once is back beside the line that says so', () => {
+  const lapsed = taskBlock({blocked: [{request_id: 'r1', step_key: 'k1', review: INSTALL.review, can_allow: true, used_at: null,
+    allowed_until: 100}]}, 'r1', 300);
+  assert.equal(answerLine(lapsed.facts, lapsed.allowing), '');
+  const card = blockCard(fakeDoc(), lapsed.facts, {allowing: lapsed.allowing});
+  assert.ok(byClass(card, 'block-allow'));
+  assert.equal(byClass(card, 'block-done').textContent, 'Allowance expired');
+  assert.equal(card.dataset.state, 'expired', 'the look of a step that asks (only answered ones go quiet)');
 });
 
 test('the chip shows the chat\'s mode, its menu picks one, and Escape closes it', async () => {

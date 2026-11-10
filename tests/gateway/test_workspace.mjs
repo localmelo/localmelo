@@ -849,6 +849,8 @@ function makeElement(tag, id = '') {
       if (selector === '[data-approval-deny]') return findNode(element, (node) => 'approvalDeny' in node.dataset);
       const focus = selector.match(/^\[data-approval-focus="(\w+)"\]$/);
       if (focus) return findNode(element, (node) => node.dataset.approvalFocus === focus[1]);
+      const key = selector.match(/^\[data-focus-key="([^"]+)"\]$/);
+      if (key) return findNode(element, (node) => node.dataset.focusKey === key[1]);
       return null;
     },
     scrollIntoView() {},
@@ -5916,7 +5918,8 @@ test('a task\'s approval is answered in its chat\'s card, and melo\'s explanatio
 const R9 = {request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: "shutil.rmtree('.git')", reason: 'deletes files',
   review: {verdict: 'high', categories: ['delete'], reasons: ['Deletes .git.']}, can_allow: true, used_at: null, question: null,
   arguments: null, keep_site: null, kept: false, turn: 1};
-const blockedTask = (allowances = {}) => taskRow('t', {state: 'done', card: '', title: 'Tidy the repo', blocked: [R9], allowances,
+const blockedTask = (allowances = {}) => taskRow('t', {state: 'done', card: '', title: 'Tidy the repo',
+  blocked: [{...R9, allowed_until: allowances['key-9'] ?? null}], allowances,
   ending: {state: 'blocked', reasons: ['question'], question: 'May I delete .git?', turn: 1},
   stage: stageOf('finished', 'ending.state.blocked', {awaited: 'person', ending: 'blocked'})});
 const TURNS_T = 'GET /sessions/t/turns?limit=50&events=true';
@@ -5985,15 +5988,61 @@ test('the page of a task that ended on its blocked step says the step once, and 
   const text = flatten(plain.element('task-panel'));
   assert.match(text, /Needs you/);
   assert.match(flatten(answerBox(plain)), /Opened the repo; deleting was blocked\./);
-  // The report's own Ending line, the question that restates the step, and a note that the task went on are not shown.
+  // The report's own Ending line and a note that the task went on are not shown; the model's question is, once.
   assert.doesNotMatch(text, /Ending:/);
-  assert.doesNotMatch(text, /How it ended|May I delete \.git\?/);
+  assert.equal(text.split('May I delete .git?').length - 1, 1);
   assert.doesNotMatch(text, /went on without them/);
   // The step's title is its fold's summary, once.
   assert.equal(text.split('Blocked: Delete files that cannot be restored').length - 1, 1);
   // A developer reads the record as written.
   const developer = await openTask(routes, 't');
   assert.match(flatten(answerBox(developer)), /Ending: blocked: May I delete \.git\?/);
+});
+
+test('a Needs you beside its one blocked step leaves out only the generic words; two blocks keep them', async () => {
+  const generic = (blocked) => taskRow('t', {state: 'done', card: '', blocked,
+    ending: {state: 'blocked', reasons: ['question'], question: '', turn: 1},
+    stage: stageOf('finished', 'ending.state.blocked', {awaited: 'person', ending: 'blocked'})});
+  const read = async (task) => flatten((await openTask({'GET /tasks/t': {task}, [TURNS_T]: {turns: [], has_earlier: false}}, 't')).element('task-panel'));
+  assert.doesNotMatch(await read(generic([R9])), /It asks you something/);
+  assert.match(await read(generic([R9, {...R9, request_id: 'r10'}])), /How it ended\s*It asks you something/);
+});
+
+test('Allow once whose job goes on in a fresh task keeps the page on its own task, read again', async () => {
+  const state = {allowed: false};
+  const fresh = taskRow('t2', {state: 'queued', title: 'Tidy the repo'});
+  const h = await openTask({
+    'GET /tasks/t': () => ({task: state.allowed
+      ? {...blockedTask({'key-9': Date.now() / 1000 + 1800}), successor: {task_id: 't2', title: 'Tidy the repo'},
+        stage: stageOf('went_on', 'panel.state.wentOn')}
+      : blockedTask()}),
+    'POST /tasks/t/blocks/r9/allow': () => { state.allowed = true; return {status: 202, body: {task: fresh, message: 'successor'}}; },
+    [TURNS_T]: {turns: [], has_earlier: false},
+  }, 't');
+  await findNode(h.element('task-panel'), (node) => node.classList?.contains('block-allow')).click();
+  await settle(); await settle();
+  const text = flatten(h.element('task-panel'));
+  assert.match(text, /Tidy the repo/);
+  assert.match(text, /Goes on in a newer task/);
+  assert.match(text, /Allowed once · melo can run it until/);
+  assert.equal(h.net.callsTo('/tasks/t2').length, 0, 'the fresh task is not shown in its place');
+});
+
+test('a new card re-reads the task of a step that can still be answered, not one answered already', async () => {
+  const open = cardRow(6, {at: NOW - 30, state: 'blocked', source_id: 't', source_kind: 'task', title: 'Tidy the repo', line: 'Blocked',
+    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: '', review: R9.review});
+  const done = cardRow(7, {at: NOW - 20, state: 'blocked', source_id: 'u', source_kind: 'task', title: 'Check the notes', line: 'Blocked',
+    request_id: 'r9', step_key: 'key-9', name: 'python_exec', preview: '', review: R9.review});
+  const h = harness(mainRoutes({
+    'GET /tasks/t': () => ({task: blockedTask()}),
+    'GET /tasks/u': () => ({task: {...blockedTask(), task_id: 'u', blocked: [{...R9, used_at: NOW - 10}]}}),
+  }, {cards: [open, done]}));
+  await h.run('init()'); await settle();
+  const reads = (id) => h.net.callsTo(`/tasks/${id}`).length;
+  const before = [reads('t'), reads('u')];
+  h.stream().emit({id: 40, session_id: 'm', turn: null, type: 'attention.echo', ts: NOW, data: {echo: 'notice', line: 'x'}});
+  await settle();
+  assert.deepEqual([reads('t') - before[0], reads('u') - before[1]], [1, 0]);
 });
 
 // ── Slash commands in the composer ──

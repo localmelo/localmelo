@@ -55,11 +55,12 @@ export const endingName = (ending) => {
 export const endingLabel = (ending) => t(`ending.state.${endingName(ending)}`);
 
 /**
- * Why it is not ready, in words: its question, then what code found missing. `asks: false` leaves the question out
- * where the blocked step it stands on is shown already (the step's box or card says what it needs).
+ * Why it is not ready, in words: its question, then what code found missing. The model's own question always shows;
+ * `asks: false` leaves out only the generic "It asks you something" where the blocked step it stands on is shown
+ * already (the stored ending cannot tell a question from a step that stopped it).
  */
 export function endingWhy(ending, {asks: shown = true} = {}) {
-  const asks = ending.state === 'blocked' && shown ? ending.question || t('ending.reason.question') : '';
+  const asks = ending.state === 'blocked' ? ending.question || (shown ? t('ending.reason.question') : '') : '';
   const files = (ending.missing ?? []).join(', ');
   const why = ending.reasons.filter((reason) => WHY.has(reason)).map((reason) => t(`ending.reason.${reason}`, {files}));
   const notes = (ending.notes ?? []).map((note) => t(`ending.note.${note}`));

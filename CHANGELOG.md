@@ -96,7 +96,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - The app at rest no longer uses a full CPU core: the menu-bar item stops redrawing itself without pause.
 - A calmer chat: a reply's time shows once, copying is an icon button, task cards and suggestions sit apart from the talk, and the panel's tasks have a line between them.
 - Calmer task pages, Settings and details: short times, a task's facts on one line, plain words for each tool, and a failed task's card saying why in your language.
-- A blocked step reads the same on its chat card and its task page, answered or not, also after a reload; the Scheduled tab says how each last run really ended.
+- A blocked step reads the same on its chat card and its task page, answered or not, also after a reload; a run whose work goes on in a newer task says so instead of Needs you; the Scheduled tab says how each last run really ended.
 
 ### Terminal
 
@@ -110,6 +110,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - Attach a text file with `/attach`, and run a shell command with `!`.
 - The terminal keeps a running turn when its connection to the gateway breaks, and shows the rest of it when the connection is back.
 - `melo` no longer starts tool servers it will not use when the gateway is already running.
+- `melo task` says Did not finish where it said Failed, and Goes on in a newer task for a run whose work went on.
 
 ### Setup
 

@@ -870,7 +870,9 @@ the mode it ended with. A task in Auto asks nobody, so nothing holds it, and its
 under the write sandbox. Its object adds `blocked`, the steps Auto blocked
 (oldest first: `request_id`, `call_id`, `name`, `step_key`, `reason`,
 `review`, `preview`, `ts`, `turn`, `can_allow`, `used_at`, when the
-allowed step ran, else `null`, and `question` and `arguments`), and `allowances` as a chat's.
+allowed step ran, else `null`, `allowed_until`, when this block's own Allow
+once runs out, else `null` (an allowance given before the block was made is
+an earlier block's), and `question` and `arguments`), and `allowances` as a chat's.
 A step a tool's own question decides (typing on a page, a form sent, a click,
 a page opened) has that question's name in `question`
 (`browser-type:https://notes.example`) and its own `preview`; a call's own
@@ -897,7 +899,8 @@ On a task whose job went on in a newer one (`successor`), each block reads
 where its Allow once stands from that task: `allowances` adds that task's
 allowance of the block's `step_key`, and `used_at` is when the step ran
 there. The page and the chat's cards read a block's state from this object
-only.
+only. Such a task's `stage` is `went_on` ("Goes on in a newer task"), however
+it ended.
 
 A scheduled task's run (a chore's timed run or Run now, by its stored request
 key) also has, on each block, `keep_site`: the origin (`https://notes.example`)
@@ -1045,7 +1048,7 @@ A one-time chore (`"kind": "once"`) runs once. Its `when` reads `once, Fri Oct 3
 
 A one-time chore whose `request` starts with `Reminder: ` is a reminder. Its run's objective is that request plus a note that tells the model to say the reminder in one short sentence and not to do the task; the task's `reason` is `Reminder`, and its card in the main chat has `reminder: true` (the console words it `Reminder: <title>`, and for a failed run the card's line is the full words).
 
-`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `ending` how it ended, as the task's own `ending`, or null while it has not ended; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time (the owner chat gets one `notice` row for that run, `said` key `chores.skipped`), unless that run has waited on the person for an hour or more (an approval, an answer, a pause) and its page is not held: it is then stopped, the chat gets a `notice` row (`chores.waitedOut`) and the time's run starts, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
+`last` is the chore's newest run as its task stands (`state` is the task's: `queued`, `running`, `held`, `waiting`, `parked`, `interrupted`, `done`, `failed`, `cancelled` or `expired`; `ending` how it ended, as the task's own `ending`, or null while it has not ended and for an older finished task with no decided ending; `line` the result's first sentence, or why it did not finish). The gateway starts a due chore with a tick every 30 s that calls no model; a chore due while the computer slept runs once at the next tick, one whose last run has not ended skips that time (the owner chat gets one `notice` row for that run, `said` key `chores.skipped`), unless that run has waited on the person for an hour or more (an approval, an answer, a pause) and its page is not held: it is then stopped, the chat gets a `notice` row (`chores.waitedOut`) and the time's run starts, and a start repeated after a crash is the same task (the key is `chore:<id>:<planned time>`).
 
 ## GET /api/sessions
 

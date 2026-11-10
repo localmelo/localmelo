@@ -6,7 +6,8 @@
  * /api/chores/{id}` with the revision that was read (a 409 reloads the list); "Run now" is `POST
  * /api/chores/{id}/run`; "Delete" asks first, then calls `DELETE`. Under each chore, one line per site its runs may
  * type and send on without asking (`keeps`, kept from a blocked step's card), or that one was dropped because the
- * request changed; its Remove is `DELETE /api/chores/{id}/keeps?site=`. How the last run went links to that run's page. `root` is mounted in the panel's body while the
+ * request changed; its Remove is `DELETE /api/chores/{id}/keeps?site=` (then `keepRemoved()`). How the last run went
+ * links to that run's page. `root` is mounted in the panel's body while the
  * tab is open; `show()` reads the list again and `reload()` does so quietly, unless an edit is open.
  */
 import {formatTime, saidText, t} from './i18n.mjs';
@@ -68,7 +69,7 @@ export function lastLine(chore) {
   return t('sched.last', {what: [ran, last.line].filter(Boolean).join(' · ')});
 }
 
-export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, developer = () => false}) {
+export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, developer = () => false, keepRemoved = () => {}}) {
   const state = {loaded: false, error: '', chores: [], checkin: null, scope: 'all', open: null, edit: null, ask: null, notice: '', busy: false};
   let reads = 0;
   let scope = 0; // which chat the panel follows: rescope() moves it on
@@ -250,6 +251,7 @@ export function setupScheduledTab({doc, api, chat = () => '', clock = Date.now, 
   async function unkeep(chore, keep) {
     const mine = scope;
     const done = await call(`/chores/${encodeURIComponent(chore.id)}/keeps?site=${encodeURIComponent(keep.site)}`, {method: 'DELETE'}, t('sched.keep.removeFailed'));
+    if (done) keepRemoved();
     if (mine !== scope) return;
     if (done) replace(done.chore);
     draw();

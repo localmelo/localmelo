@@ -194,24 +194,26 @@ const siteOf = (facts) => facts.keepSite.slice(facts.keepSite.indexOf('://') + 3
 /**
  * How the person answered a blocked step, in the one quiet line every screen shows, or '' while it is still asked:
  * kept for this scheduled task on its site (this run goes on now, when it was allowed here too), allowed once (until
- * when), ran (when), or the allowance ran out.
+ * when), or ran (when). An allowance that ran out unused is no answer: the step asks again (`ranOut`).
  */
 export function answerLine(facts, allowing) {
   if (facts.kept && facts.keepSite) {
     const now = allowing.state === 'pending' || allowing.state === 'used';
     return t(now ? 'auto.blocked.keptNow' : 'auto.blocked.kept', {site: siteOf(facts)});
   }
-  if (!facts.allow) return '';
   if (allowing.state === 'pending') return t('auto.blocked.pending', {time: clock(allowing.at)});
-  if (allowing.state === 'used') return t('auto.blocked.used', {time: clock(allowing.at)});
-  return allowing.state === 'expired' ? t('auto.blocked.expired') : '';
+  return allowing.state === 'used' ? t('auto.blocked.used', {time: clock(allowing.at)}) : '';
 }
 
+/** The line beside a step's Allow once when its earlier allowance ran out unused, or ''. */
+export const ranOut = (allowing) => (allowing.state === 'expired' ? t('auto.blocked.expired') : '');
+
 /**
- * A blocked step of a task as its page and its chat's card both show it, from the task's own body (`blocked`,
- * `allowances`): `{block, facts, allowing}`, or null when the task has no such block (or none auto mode named).
- * `facts` are `blockFacts`; `allow` holds while Allow once can still run it, or while there is an answer to say
- * (`answerLine`). The one reader of a block's state: no screen keeps its own copy of whether it was answered.
+ * A blocked step of a task as its page and its chat's card both show it, from the task's own body (`blocked`, each
+ * block with its own `allowed_until` and `used_at`): `{block, facts, allowing}`, or null when the task has no such
+ * block (or none auto mode named), and the task's `stage`. `facts` are `blockFacts`; `allow` holds while Allow once may run it now (the
+ * server's `can_allow`, its job not finished). The one reader of a block's state: no screen keeps its own copy of
+ * whether it was answered.
  */
 export function taskBlock(task, requestId, now) {
   const block = (Array.isArray(task?.blocked) ? task.blocked : []).find((one) => one?.request_id === requestId);
@@ -220,11 +222,13 @@ export function taskBlock(task, requestId, now) {
     review: block.review, reason: block.reason, tool: block.question ?? undefined, arguments: block.arguments,
     keep_site: block.keep_site ?? undefined, kept: block.kept === true}, name: block.name, preview: block.preview});
   if (!read || !read.category) return null;
-  const allowing = allowState({until: task.allowances?.[block.step_key] ?? null, used: block.used_at, now});
-  // A job that finished has no step left to allow: it is new work for the chat.
-  if (block.finished) return {block, facts: {...read, allow: false, finished: true}, allowing};
-  const allow = read.allow && (block.can_allow !== false || allowing.state !== 'open');
-  return {block, facts: {...read, allow}, allowing};
+  const allowing = allowState({until: block.allowed_until ?? null, used: block.used_at, now});
+  // A job that finished has no step left to allow; one whose step ran did not finish without it.
+  const finished = block.finished === true && allowing.state !== 'used';
+  const allow = read.allow && block.can_allow !== false && block.finished !== true;
+  // The task's stage as the gateway's one table words it (#605): a card whose step was answered says it.
+  const stage = task.stage && typeof task.stage.label === 'string' ? task.stage : null;
+  return {block, facts: {...read, allow, ...(finished ? {finished} : {})}, allowing, stage};
 }
 
 /** A call's code or command on one line, for the card's monospace step. */
@@ -298,12 +302,18 @@ export function blockCard(doc, facts, {allowing = {state: 'open'}, busy = false,
     fold.append(node('summary', '', facts.stepLabel || t('gist.showCode')), step);
     card.append(fold);
   }
-  const answered = answerLine(facts, allowing);
+  const answered = answerLine(facts, allowing) || (!facts.allow && !facts.keepSite && ranOut(allowing));
   if (answered) {
     const foot = node('div', 'block-foot');
     foot.append(node('span', 'block-done', answered));
     card.append(foot);
     return card;
+  }
+  if (facts.allow && ranOut(allowing)) {
+    // It ran out unused: the step asks again, and the button is back.
+    const foot = node('div', 'block-foot');
+    foot.append(node('span', 'block-done', ranOut(allowing)));
+    card.append(foot);
   }
   // A finished job has nothing to allow now; a scheduled task's next runs are still the person's to decide.
   if (facts.allow) card.append(allowRow(doc, {busy, onAllow}));

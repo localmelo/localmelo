@@ -65,9 +65,9 @@ Spacing steps: `--space-1` 4 px, `--space-2` 8 px, `--space-3` 12 px, `--space-4
 | **Stopped** | what is left, with **Continue** | a line on the thread |
 | **Reminder** | your words, at their time | a line on the thread |
 | **Approval for** | how an approval was answered | a line on the thread |
-| **Needs you** | its question, or the one step to allow | amber box |
+| **Needs you** | its question, or the one step to allow | amber box while it asks; once the step is answered, a line |
 | **Needs your approval** | the step, with **Review** | amber box |
-| **A step was blocked** | the step Auto stopped, with **Allow once** | amber box |
+| **A step was blocked** | the step Auto stopped, with **Allow once** | amber box while it asks; once answered, a line that says how |
 | Suggestion | a message melo can pass to a running task | a line; buttons while it can be taken |
 
 ## Before you change a screen
