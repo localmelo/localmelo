@@ -1287,11 +1287,18 @@ class _ToolAsk:
             # Auto's block, kept as the gate keeps one, with what the review found.
             # Allow once may run it only when the question holds the whole step
             # (a text typed, a form sent: the card shows all of it), a chat's card
-            # would have asked about it, and its site was not refused: then the
-            # key and the question whole, for the person to see. Any other keeps
-            # no text.
+            # would have asked about it, its site was not refused and it holds no
+            # secret: then the key and the question whole, for the person to see.
+            # Any other keeps no text.
             self.refused[-1].update(mode="auto", review=review.to_json())
-            if whole_step(arguments) and asks_in_auto(review) and not on_refused:
+            if (
+                whole_step(arguments)
+                and asks_in_auto(review)
+                and not on_refused
+                # A text that holds a password or a key by melo's own detectors
+                # is kept nowhere, whatever the review filed it under.
+                and not holds_secret(arguments, request.preview)
+            ):
                 self.refused[-1].update(
                     step_key=allowance_key(request), arguments=copy.deepcopy(arguments)
                 )

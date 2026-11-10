@@ -1336,6 +1336,17 @@ ALLOW_WHEN_OPEN: Final = (
     "this step once from the chat, switch the chat to Ask, or keep the chat open "
     "so that melo asks them on a card the next time."
 )
+# The same two for a step the person cannot allow once from the chat (a question
+# that does not hold its whole step, a text holding a secret, a site refused).
+ASK_WHEN_OPEN: Final = (
+    "that this step needs them and nobody could be asked now: they can keep the "
+    "chat open so that melo asks them on a card the next time, or switch the chat "
+    "to Ask."
+)
+BLOCKED_IN_CHAT: Final = (
+    "that this step stays blocked in Auto: they can do it themselves, change what "
+    "they ask for, or switch the chat to Ask so that melo asks them first."
+)
 # A question only the person can answer (another app's window, a press in one, a page to
 # take over) that Auto refused because nobody has the chat open: the model reads the
 # truth, so it does not make up a reason.
@@ -1488,7 +1499,8 @@ def block_note(
     """The text the model reads for a step auto mode blocked.
 
     *task*: the run is a saved task, offered the allowance while its job is
-    unfinished when the step is *allowable*;
+    unfinished; *allowable*: the person can allow the step once (in a task or
+    a chat), else the note says what they can do instead;
     *folder*: the workspace, for a step that can never be allowed; *second*:
     a second block of the same kind in this turn, which stops the run;
     *changed*: the user allowed a step and this retry differs from it.
@@ -1507,9 +1519,11 @@ def block_note(
         allow = ALLOW_NEVER.format(folder=folder)
     elif task:
         allow = ALLOW_IN_TASK if allowable else BLOCKED_IN_TASK
-    else:
+    elif asks_in_auto(review):
         # A kind the card asks about was blocked only because nobody could be
-        # asked now (#465).
-        allow = ALLOW_WHEN_OPEN if asks_in_auto(review) else ALLOW_IN_CHAT
+        # asked now (#465); Allow once on the block only where it has a key.
+        allow = ALLOW_WHEN_OPEN if allowable else ASK_WHEN_OPEN
+    else:
+        allow = ALLOW_IN_CHAT if allowable else BLOCKED_IN_CHAT
     note = BLOCK_NOTE.format(it=it, off_goal=off_goal, allow=allow)
     return note + ALLOWED_EXACTLY if changed else note

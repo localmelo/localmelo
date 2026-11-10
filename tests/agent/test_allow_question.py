@@ -19,6 +19,7 @@ from localmelo.melo.contracts.approvals import (
     AutoPolicy,
     EarlierBlocks,
     allowance_key,
+    block_note,
 )
 from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -33,6 +34,8 @@ SITE = "https://notes.example"
 NOTE = "Checked in for today, all is well here."
 # The review of a typing step the request does not ask for: it sends data out.
 SENDS = verdict(verdict="ask", category="send_out", reason="Posts a note.")
+# A text with a key in it, by melo's own detectors (test data, not a real key).
+SECRET = "Checked in. token=abcdef0123456789abcdef0123456789"
 
 
 class Types(BaseToolProvider):
@@ -147,6 +150,8 @@ def _refused_site(inner: AutoPolicy) -> EarlierBlocks:
         ),
         # A site refused earlier in this task stands over a later step on it.
         ("refused site", [SENDS], True, False),
+        # A text melo's detectors find a key in keeps no text, whatever the review says.
+        ("holds a key", [SENDS], False, False),
     ],
 )
 async def test_a_refused_question_is_allowable_only_where_a_chat_would_ask(
@@ -157,11 +162,15 @@ async def test_a_refused_question_is_allowable_only_where_a_chat_would_ask(
         Message(role="assistant", content=r) if isinstance(r, str) else r
         for r in reviews
     ]
-    kept = await kept_ask(tmp_path, _refused_site(auto) if refused else auto, reviews)
+    plans = [typing(SECRET), _answer("Not typed.")] if case == "holds a key" else None
+    kept = await kept_ask(
+        tmp_path, _refused_site(auto) if refused else auto, reviews, plans
+    )
 
     assert (kept["origin"], kept["allowed"], kept["mode"]) == ("auto", False, "auto")
     # The whole text only with the key: a block nobody can allow keeps none.
     assert kept.get("arguments", {}).get("text") == (NOTE if can_allow else None)
+    assert SECRET not in repr(kept)
     assert ("step_key" in kept) is can_allow, case
     assert (allowable(kept) is not None) is can_allow, case
 
@@ -216,6 +225,10 @@ async def test_only_a_question_that_holds_its_whole_step_gets_allow_once(
     [note] = read
     assert ("then they can allow it once" in note) is can_allow
     assert ("cannot be allowed from the task" in note) is not can_allow
+    # In a chat too: Allow once only for a block that has its key.
+    review = ActionReview("high", ("beyond_request",), ("Posts a note.",))
+    chat_note = block_note(review, allowable=can_allow)
+    assert ("allow this step once from the chat" in chat_note) is can_allow
 
 
 # ── One exact step, once (rule 3 and 4) ──
