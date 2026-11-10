@@ -24,6 +24,8 @@ final class MenuBar {
     private var appearanceWatch: NSKeyValueObservation?
     private var wasWaiting = false
     private var state = MenuBarState.unknown
+    /// What the button shows now, so a call that would show the same writes nothing.
+    private var drawn: MenuBarFace?
 
     /// `menu` is the app menu's copy; the item puts its two first lines in front of its entries. *chooseModel* and
     /// *cancelSwitch* are what a pick of the Model submenu and its Cancel Switch send; *menuOpens* runs as the menu
@@ -49,7 +51,8 @@ final class MenuBar {
         statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeft
         // The mark's colours are the bar's: a change of the bar's appearance (a light or a dark wallpaper behind
-        // it, or the system's setting) draws it again.
+        // it, or the system's setting) draws it again. The button announces its appearance after every layout, not only
+        // after a change, and drawing is a layout: `show` draws only a face that differs, or this would never rest.
         appearanceWatch = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             DispatchQueue.main.async { self?.refresh() }
         }
@@ -110,22 +113,22 @@ final class MenuBar {
         self.state = state
         var waiting = false
         if case .waiting = state { waiting = true }
-        let count = menuTitle(state), label = menuBarLabel(state), line = menuStatusLine(state)
+        let line = menuStatusLine(state)
         if let button = statusItem.button {
-            if let mark = mark {
-                button.image = mark.image(for: button.effectiveAppearance, badge: waiting)
-                button.title = count
-            } else {
-                // Without the mark the item must still be there: its name stands in for it.
-                button.image = nil
-                button.title = count.isEmpty ? "localmelo" : "localmelo · \(count)"
+            let face = menuBarFace(state, picture: mark.map { _ in
+                MenuBarMark.key(for: button.effectiveAppearance, badge: waiting)
+            })
+            if face != drawn {
+                drawn = face
+                button.image = mark?.image(for: button.effectiveAppearance, badge: waiting)
+                button.title = face.title
+                // Title and help say the words too: left alone they are the bare count and the tooltip, which
+                // VoiceOver would read on top of the label.
+                button.setAccessibilityLabel(face.label)
+                button.setAccessibilityTitle(face.label)
+                button.setAccessibilityHelp("")
+                button.toolTip = face.label
             }
-            // Title and help say the words too: left alone they are the bare count and the tooltip, which
-            // VoiceOver would read on top of the label.
-            button.setAccessibilityLabel(label)
-            button.setAccessibilityTitle(label)
-            button.setAccessibilityHelp("")
-            button.toolTip = label
         }
         runningLine.title = line ?? ""
         runningLine.isHidden = line == nil
@@ -134,7 +137,7 @@ final class MenuBar {
         // Someone working in another app cannot see the dot: the start of a wait is said aloud, as a failure is.
         if waiting && !wasWaiting {
             NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                                 userInfo: [.announcement: label, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+                                 userInfo: [.announcement: menuBarLabel(state), .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
         wasWaiting = waiting
     }
