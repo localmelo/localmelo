@@ -1287,7 +1287,7 @@ function mainNodes(view, turns, placed) {
       const card = item.card;
       const step = stepState(card, { given: S.cardAllows, busy: S.allowing, echoes });
       return [cardNode({ doc: document, card, open: openCard, resume: continueCard, approval: taskApprovalNode(card), block: cardAllow(card),
-        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block) } })];
+        step: step && { ...step, onAllow: () => allowCardBlock(card, card.block), onKeep: () => allowCardBlock(card, card.block, "keep") } })];
     }
     if (item.kind === "echo") {
       const echo = item.echo;
@@ -1512,21 +1512,31 @@ function cardAllow(card) {
   const busy = S.allowing[facts.requestId];
   return {
     allowing: allowState({ until: given.until ?? null, used: given.used ?? null, now: nowSeconds() }),
-    busy: busy === "allowing" ? "allowing" : false,
+    busy: busy === "allowing" || busy === "keeping" ? busy : false,
     developer: developerMode,
-    error: busy && busy !== "allowing" ? busy : "",
+    error: busy && busy !== "allowing" && busy !== "keeping" ? busy : "",
     onAllow: () => allowCardBlock(card, facts),
+    onKeep: () => allowCardBlock(card, facts, "keep"),
   };
 }
 
-/** Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. */
-async function allowCardBlock(card, facts) {
-  S.allowing[facts.requestId] = "allowing";
+/**
+ * Allow once a step Auto blocked in a task, from its card in the chat: the task's own route. `keep` also keeps the
+ * answer for a scheduled task's next runs on the step's site (#619).
+ */
+async function allowCardBlock(card, facts, how = "allow") {
+  S.allowing[facts.requestId] = how === "keep" ? "keeping" : "allowing";
   renderMessages(false, true);
   try {
-    const { task } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/allow`, { method: "POST" });
+    const { task, message } = await api(`/tasks/${encodeURIComponent(card.sourceId)}/blocks/${encodeURIComponent(facts.requestId)}/${how}`, { method: "POST" });
     const block = (task?.blocked ?? []).find((item) => item.request_id === facts.requestId);
-    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null };
+    if (block?.kept) {
+      card.kept = true;
+      if (card.block) card.block.kept = true;
+    }
+    // A keep says whether the step goes ahead now (the run, or the fresh task its job goes on in) or only later runs use it.
+    S.cardAllows[facts.requestId] = { until: task?.allowances?.[facts.stepKey] ?? null, used: block?.used_at ?? null,
+      ...(how === "keep" ? { now: message !== "kept" } : {}) };
     delete S.allowing[facts.requestId];
     panel.refresh();
   } catch (error) {

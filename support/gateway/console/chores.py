@@ -60,6 +60,7 @@ from localmelo.support.gateway.chore_store import (
     REMINDER_REASON,
     Chore,
     ChoreStore,
+    run_key,
 )
 from localmelo.support.gateway.finishing import is_out_of_steps
 from localmelo.support.gateway.front_rules import FINISHED, level_word
@@ -246,7 +247,7 @@ class ChoreRunner:
             return None
         slot = int(chore.next_run or now)
         try:
-            task = await self._start(chore, f"chore:{chore.chore_id}:{slot}")
+            task = await self._start(chore, run_key(chore.chore_id, str(slot)))
         except TaskConflictError:
             await self.store.advance(chore, next_run=next_run, enabled=over)
             return None
@@ -392,6 +393,8 @@ class ChoreRunner:
         async with self.guard(chore_id):
             chore = await self.store.get(chore_id)
             await self.store.delete(chore_id, revision=revision)
+            # What it kept went with its row: a run going on uses it no more (#619).
+            self.console.workers.drop_kept(chore_id)
             run = await self._open_run(chore)
             if run is not None and self._works_in_folder(run, chore_id):
                 self._leaving[run.task_id] = chore
@@ -461,13 +464,28 @@ class ChoreRunner:
                 raise ApiError(409, "invalid_transition", t("errors.choreRunning"))
             now = self.clock()
             task_id = await self._start(
-                fresh, f"chore:{fresh.chore_id}:now:{int(now * 1000)}"
+                fresh, run_key(fresh.chore_id, f"now:{int(now * 1000)}")
             )
             fresh = await self.store.get(fresh.chore_id)
             await self.store.advance(
                 fresh, next_run=fresh.next_run, task_id=task_id, ran_at=now
             )
         return await self.console.workers.get(task_id)
+
+    async def update(self, chore_id: str, *, revision: int, **changes: Any) -> Chore:
+        """Change a chore (:meth:`ChoreStore.update`); a new request drops what it kept (#619), in its runs going on too."""
+        before = await self.store.get(chore_id)
+        chore = await self.store.update(chore_id, revision=revision, **changes)
+        if chore.request != before.request:
+            self.console.workers.drop_kept(chore_id)
+        return chore
+
+    async def remove_keep(self, chore_id: str, site: str) -> Chore:
+        """Take back what chore *chore_id* kept on *site* (#619): its next steps there are blocked again, also in a run going on."""
+        chore = await self.store.get(chore_id)  # gone: not found
+        await self.store.remove_keep(chore_id, site)
+        self.console.workers.drop_kept(chore_id)
+        return chore
 
     async def ran_in_chat(self, chore_id: str, task_id: str) -> None:
         """The chat ran this chore for the message that saved it: that is its last
@@ -658,6 +676,17 @@ class ChoreRunner:
             "created_at": chore.created_at,
             # A one-time chore that ran late (the computer slept or the gateway was down).
             "late_min": self.late_min(chore),
+            # What its runs may type and send without asking, per site (#619);
+            # ``dropped``: the request changed since, so it no longer holds.
+            "keeps": [
+                {
+                    "site": keep.site,
+                    "host": keep.site.partition("://")[2],
+                    "since": keep.made_at,
+                    "dropped": not keep.holds_for(chore),
+                }
+                for keep in await self.store.keeps(chore.chore_id)
+            ],
         }
 
     async def checkin_body(self) -> dict[str, Any]:

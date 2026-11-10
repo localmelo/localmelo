@@ -87,6 +87,8 @@ export function readCard(row) {
       name: String(data.block.name ?? ""),
       preview: String(data.block.preview ?? ""),
       review: data.block.review && typeof data.block.review === "object" ? data.block.review : {},
+      // A scheduled task's run (#619): the site its answer may be kept on for the next runs, and whether it is.
+      ...(typeof data.block.keep_site === "string" && data.block.keep_site ? {keepSite: data.block.keep_site, kept: data.block.kept === true} : {}),
       ...questionOf(data.block),
     }} : {}),
     // A step Auto blocked in a task (#369): the block as the task's page has it, with Allow once.
@@ -97,6 +99,9 @@ export function readCard(row) {
       review: data.review && typeof data.review === "object" ? data.review : {},
       canAllow: data.can_allow === true,
       finished: data.finished === true,
+      // A scheduled task's run (#619): the site its answer may be kept on for the next runs, and whether it is.
+      keepSite: typeof data.keep_site === "string" ? data.keep_site : "",
+      kept: data.kept === true,
       ...questionOf(data),
     } : {}),
   };
@@ -121,8 +126,9 @@ export function cardBlock(card) {
  * What a blocked step says (`blocked.mjs`), from its request id, step key, tool, preview and review, and for a question
  * its tool asked itself its name and arguments; null if unusable.
  */
-const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args}) => blockFacts({
-  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args},
+const stepFacts = ({requestId, stepKey, name, preview, review, question, arguments: args, keepSite, kept}) => blockFacts({
+  approval: {origin: "auto", allowed: false, request_id: requestId, step_key: stepKey, review, tool: question, arguments: args,
+    keep_site: keepSite || undefined, kept},
   name,
   preview,
 });
@@ -314,18 +320,36 @@ export function cardNode({doc, card, open, resume = null, approval = null, block
 
 /**
  * The Allow this step of a card that needs the person: the step it allows in the words of its own card (*facts*),
- * then the button, what it did once clicked, or why it did not.
+ * then the button, what it did once clicked, or why it did not. A scheduled task's run (`facts.keepSite`) also offers
+ * to keep the answer for its next runs on that site (`onKeep`), as the step's own card does.
  */
-function stepNodes(el, {state = "open", error = "", onAllow = null}, facts = null) {
+function stepNodes(el, {state = "open", now = true, error = "", onAllow = null, onKeep = null}, facts = null) {
   const what = facts ? [el("span", "main-card-note", facts.gist?.sentence || facts.title)] : [];
-  if (state === "allowed") return [...what, el("span", "main-card-note", t("cards.allowedOnce"))];
+  const site = facts?.keepSite ? facts.keepSite.slice(facts.keepSite.indexOf("://") + 3) : "";
+  if (state === "allowed") {
+    // Kept: this run goes on with the step now, or (nothing was allowed now) only its later runs use it.
+    const words = facts?.kept ? (now ? "auto.blocked.keptNow" : "auto.blocked.keptLater") : "cards.allowedOnce";
+    return [...what, el("span", "main-card-note", t(words, {site}))];
+  }
   const allow = el("button", "outline-button", t("mainChat.card.allowStep"));
   allow.type = "button";
   allow.disabled = state === "allowing";
   if (onAllow) allow.addEventListener("click", onAllow);
-  const problem = error ? el("span", "main-card-note", t("auto.blocked.failed", {problem: error})) : null;
-  if (problem) problem.setAttribute("role", "alert");
-  return [...what, allow, ...(problem ? [problem] : [])];
+  if (site && !facts.kept) {
+    const keep = el("button", "outline-button block-keep", t("auto.blocked.keep", {site}));
+    keep.type = "button";
+    keep.disabled = state === "allowing";
+    if (onKeep) keep.addEventListener("click", onKeep);
+    return [...what, allow, keep, ...(error ? [alertNote(el, error)] : [])];
+  }
+  return [...what, allow, ...(error ? [alertNote(el, error)] : [])];
+}
+
+/** Why a card's step was not allowed, read out as it appears. */
+function alertNote(el, error) {
+  const problem = el("span", "main-card-note", t("auto.blocked.failed", {problem: error}));
+  problem.setAttribute("role", "alert");
+  return problem;
 }
 
 /**
@@ -337,9 +361,15 @@ export function stepState(card, {given = {}, busy = {}, echoes = []} = {}) {
   const id = card.block?.requestId;
   if (!id) return null;
   const typed = echoes.some((echo) => echo.kind === "sent" && echo.how === "allowed" && String(echo.request_id) === id);
-  if (typed || given[id]) return {state: "allowed"};
+  // `now`: the step goes ahead (allowed once here, by the typed yes, or a keep whose run or fresh task goes on); a keep
+  // that only later runs use says so.
+  if (typed || given[id]) {
+    const {until = null, used = null, now = null} = given[id] ?? {};
+    return {state: "allowed", now: typed || (now ?? (until != null || used != null))};
+  }
   const now = busy[id];
-  return {state: now === "allowing" ? "allowing" : "open", error: now && now !== "allowing" ? now : ""};
+  const going = now === "allowing" || now === "keeping";
+  return {state: going ? "allowing" : "open", error: now && !going ? now : ""};
 }
 
 // ── Echoes: what the main chat did with a task ──

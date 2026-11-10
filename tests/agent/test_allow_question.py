@@ -221,9 +221,10 @@ async def test_only_a_question_that_holds_its_whole_step_gets_allow_once(
     kept = await kept_ask(tmp_path, AutoPolicy(task=True), [blocked], plans, read)
 
     assert ("step_key" in kept, "arguments" in kept) == (can_allow, can_allow), kind
-    # The model reads what is true: the person can allow it once, or cannot here.
+    # The model reads what is true: the person can allow it on the task's page, or
+    # cannot there (a task nobody can be asked for, #619).
     [note] = read
-    assert ("then they can allow it once" in note) is can_allow
+    assert ("can allow it there" in note) is can_allow
     assert ("cannot be allowed from the task" in note) is not can_allow
     # In a chat too: Allow once only for a block that has its key.
     review = ActionReview("high", ("beyond_request",), ("Posts a note.",))

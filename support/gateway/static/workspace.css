@@ -2373,6 +2373,10 @@ a.memory-from { color: var(--accent); text-decoration: underline; text-underline
 .sched-switchrow, .sched-main { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .sched-switchrow { font-size: var(--text-body); }
 .sched-line { margin: 0; color: var(--ink-3); font-size: var(--text-small); text-wrap: pretty; }
+/* What a chore's runs may do without asking: lines that hang under its row, space only. */
+.sched-keeps { display: grid; gap: var(--space-1); margin: var(--space-1) 0 0; padding: 0; list-style: none; }
+.sched-keep { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.sched-keep > button { flex: none; white-space: nowrap; }
 .sched-switch { position: relative; flex: none; width: 40px; height: 24px; padding: 0; border: 1px solid var(--control); border-radius: var(--radius-pill); background: var(--raised); }
 .sched-switch::after { content: ""; position: absolute; inset: -10px -6px; }
 .sched-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--control); transition: transform 0.15s, background-color 0.15s; }
@@ -2694,7 +2698,9 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .block-code .block-step { margin: var(--space-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; }
 .block-step { display: block; margin-left: calc(1.25em + var(--space-2)); padding: var(--space-2) var(--space-3); overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); color: var(--ink); font: var(--text-caption)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: normal; text-overflow: ellipsis; white-space: nowrap; }
 .block-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: var(--space-3) 0 0 calc(1.25em + var(--space-2)); font-size: var(--text-small); }
-.block-allow { background: var(--surface); color: var(--ink); font-weight: 600; }
+.block-allow, .block-keep { background: var(--surface); color: var(--ink); font-weight: 600; }
+/* The second choice of a scheduled task's step: its own line under Allow once, space apart, no box. */
+.block-foot + .block-keep-row { margin-top: var(--space-2); }
 .block-once { margin-left: auto; color: var(--ink-3); font-size: var(--text-caption); }
 .block-done { color: var(--ink-2); }
 .block-card[data-state="used"] .block-done { color: var(--ok); }
@@ -2704,10 +2710,16 @@ dialog.settings { width: min(880px, calc(100vw - 48px)); height: min(640px, calc
 .task-blocked > p { margin: 0; }
 .task-block > summary { padding: var(--space-2) 0; color: var(--warn); font-weight: 600; cursor: pointer; }
 .task-block > .block-card { margin: 0; }
+/* What a scheduled task's run typed or sent on its kept answer: peers, a hairline between them, no box. */
+.task-kept { display: grid; gap: var(--space-2); }
+.task-kept-row { display: grid; gap: var(--space-1); }
+.task-kept-row + .task-kept-row { padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.task-kept-row > p { margin: 0; color: var(--ink-2); font-size: var(--text-small); }
+.task-kept-row > .block-step { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   .mode-picker { position: static; }
   .mode-menu { right: 0; width: auto; }
-  .mode-item, .block-allow, .mode-grant-remove { min-height: 44px; }
+  .mode-item, .block-allow, .block-keep, .mode-grant-remove { min-height: 44px; }
   .block-why, .block-step, .block-code, .block-foot, .block-error { margin-left: 0; padding-left: 0; }
   .block-step { padding: var(--space-2) var(--space-3); }
   .block-once { flex-basis: 100%; margin-left: 0; }

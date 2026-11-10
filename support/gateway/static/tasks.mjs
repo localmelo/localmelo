@@ -2,7 +2,7 @@ import {taskLive} from './task-live.mjs';
 import {maker} from './dom.mjs';
 import {LEVELS, levelCode, levelLabel} from './levels.mjs';
 import {formatTime, t} from './i18n.mjs';
-import {allowState, blockCard, blockFacts} from './blocked.mjs';
+import {allowState, blockCard, blockFacts, pageText} from './blocked.mjs';
 import {canFinish, endingWhy, finishLabel, readEnding, testWords} from './endings.mjs';
 import {shortTime} from './main-chat.mjs';
 import {withoutFrame} from './turns.mjs';
@@ -277,6 +277,7 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const view = {rerender: render, answer: answerApproval, reload: () => refresh(), workspace: task.workspace_label, scope: 'task'};
     for (const request of pendingOf(task)) nodes.push(approvalCard(request, view));
     if (blockedOf(task).length) nodes.push(blockedBox(task));
+    if (task.kept_uses?.length) nodes.push(keptBox(task));
     const pack = packFold(doc, task);
     if (pack) nodes.push(pack);
     const project = projectLine(doc, task);
@@ -629,7 +630,8 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
     const now = Date.now() / 1000;
     for (const block of blockedOf(task)) {
       const read = blockFacts({approval: {origin: 'auto', allowed: false, request_id: block.request_id, step_key: block.step_key,
-        review: block.review, reason: block.reason, tool: block.question ?? undefined, arguments: block.arguments}, name: block.name, preview: block.preview});
+        review: block.review, reason: block.reason, tool: block.question ?? undefined, arguments: block.arguments,
+        keep_site: block.keep_site ?? undefined, kept: block.kept === true}, name: block.name, preview: block.preview});
       if (!read || !read.category) continue;
       // A job that finished has no step left to allow: it is new work for the chat.
       const facts = block.finished ? {...read, allow: false, finished: true} : read;
@@ -640,27 +642,46 @@ export function setupTasks({api, root, newId, navigate, approvalCard, every = de
       const action = facts.allow && allowing.state === 'open' ? t('auto.blocked.allow') : '';
       fold.append(node('summary', '', [facts.title, action].filter(Boolean).join(' · ')), blockCard(doc, facts, {
         allowing,
-        busy: state.busy === `allow:${block.request_id}` ? 'allowing' : Boolean(state.busy),
+        busy: state.busy === `allow:${block.request_id}` ? 'allowing' : state.busy === `keep:${block.request_id}` ? 'keeping' : Boolean(state.busy),
         developer: developer(),
         error: state.blockError[block.request_id] || '',
         onAllow: () => allow(block.request_id),
+        onKeep: () => allow(block.request_id, 'keep'),
       }));
       box.append(fold);
     }
     return box;
   }
 
-  async function allow(requestId) {
+  // Allow once, or (`keep`) keep the answer for a scheduled task's next runs on the step's site and allow it once.
+  async function allow(requestId, how = 'allow') {
     const epoch = state.epoch;
-    const outcome = await act(`allow:${requestId}`, (id) => api(`${path(id)}/blocks/${encodeURIComponent(requestId)}/allow`, {method: 'POST'}));
+    const outcome = await act(`${how}:${requestId}`, (id) => api(`${path(id)}/blocks/${encodeURIComponent(requestId)}/${how}`, {method: 'POST'}));
     if (!outcome || epoch !== state.epoch) return;
     if (outcome.data) {
       delete state.blockError[requestId];
+      const site = String(blockedOf(state.task).find((block) => block.request_id === requestId)?.keep_site ?? '').split('://')[1] ?? '';
       state.task = outcome.data.task;
-      state.notice = t('tasks.blocked.allowed');
+      state.notice = how !== 'keep' ? t('tasks.blocked.allowed')
+        : t(outcome.data.message === 'kept' ? 'auto.blocked.keptLater' : 'auto.blocked.keptNow', {site});
       live?.sync(outcome.data.task);
     } else state.blockError[requestId] = outcome.error?.message || t('tasks.requestFailed');
     render();
+  }
+
+  // The steps that ran on a scheduled task's kept answer (#619): what went where, without asking, once each.
+  function keptBox(task) {
+    const box = node('section', 'task-kept');
+    for (const use of task.kept_uses) {
+      const site = String(use.question).slice(String(use.question).indexOf('://') + 3);
+      const sent = String(use.question).startsWith('browser-submit:');
+      const page = pageText(use.question, use.arguments);
+      const row = node('div', 'task-kept-row');
+      row.append(node('p', '', t(sent ? 'tasks.kept.sent' : 'tasks.kept.typed', {site})));
+      if (page?.text) row.append(node('code', 'block-step', page.text));
+      box.append(row);
+    }
+    return box;
   }
 
   // A task refused its folder never ran: it says why and starts again in a folder the person chooses.

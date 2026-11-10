@@ -44,6 +44,7 @@ function harness({chores = [], checkinState = checkin(), chat = '', developer = 
     if (path === '/checkin') { h.checkin = {...h.checkin, on: options.body.on, next_at: options.body.on ? at(28, 7, 30) : null}; return {checkin: h.checkin}; }
     const id = path.split('/')[2].split('?')[0];
     const found = (h.known ?? h.chores).find((item) => item.id === id);
+    if (method === 'DELETE' && path.includes('/keeps?')) return {chore: found};
     if (method === 'DELETE') return {deleted: id};
     if (path.endsWith('/run')) return {chore: {...found, last_run: NOW / 1000, last: {state: 'queued', line: '', task_id: 't1'}}, task: {}};
     const change = {...options.body};
@@ -111,6 +112,20 @@ test('each chore shows its title, when it runs, its next run and its last result
   assert.deepEqual(h.switches().map((item) => item.attributes['aria-checked']), ['true', 'true', 'false']);
   assert.equal(second.dataset.enabled, 'false');
   assert.ok(!h.text().includes(EMPTY));
+});
+
+test('a chore lists what its runs may type and send without asking, and Remove takes one back', async () => {
+  const keeps = [{site: 'https://notes.example', host: 'notes.example', since: at(27, 9), dropped: false},
+    {site: 'https://old.example', host: 'old.example', since: at(20, 9), dropped: true}];
+  const h = harness({chores: [chore('a', {keeps})]});
+  h.known = [chore('a', {keeps: keeps.slice(1)})];
+  await h.tab.show();
+  assert.match(h.rows()[0].text(), /May type and send on notes\.example without asking · since Oct 27/);
+  assert.match(h.rows()[0].text(), /No longer allowed on old\.example: the request changed/);
+  h.button('Remove what Chore a may do on notes.example').click();
+  await settle();
+  assert.deepEqual(h.calls.at(-1).slice(0, 2), ['DELETE', '/chores/a/keeps?site=https%3A%2F%2Fnotes.example']);
+  assert.doesNotMatch(h.text(), /notes\.example/);
 });
 
 test('a chore switch names the revision it read, and the row takes the answer', async () => {

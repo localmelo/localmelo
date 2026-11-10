@@ -299,7 +299,7 @@ The commands of the [terminal](terminal.md#commands) work on this page and in th
 - **One folder, one run at a time.** A chore works in one folder of its own in your workspace, `chore-` and its id, and every run uses it: a later run finds what the last one left. The files in it are plain data a run may read, never instructions it follows. Runs never overlap: one place decides whether a chore may start, whether the time comes, **Run now** is pressed or a message saves the chore and runs it at once. While the last run has not ended (it may be waiting for you or paused), the next time is skipped, the chat that saved the chore says so once (“Skipped ‘Daily check-in’ this time: its last run has not finished, and it may be waiting for you.”), and **Run now** says the same instead of starting a second run. A run that has waited for you for an hour or more does not hold the chore for good: when the next time comes, melo ends that run with a plain line in the chat (“Ended the last run of ‘Daily check-in’: it had waited for you for over an hour, and the chore's next time came. This time's run starts now.”) and starts the new one; a run whose page you hold is yours and is never ended this way. The run that starts with the message (`… now and every day at 9`) works in the chore's folder when the message saves the schedule first; when the chat starts the work first and saves the schedule after, that one run stays in the chat's folder and the later runs use the chore's. Deleting the chore removes the folder with what its runs left; a run already going when you delete it is not cancelled but goes on and ends in place, the chat says where its folder is, and melo removes the folder once that run has ended, as long as melo has not been restarted by then (a restart forgets it, and the folder stays where the chat said). When a folder cannot be removed, the chat says so and where it is, and it stays. melo only ever removes the folder of a chore it deleted; it never removes a folder because of its name. A reminder's run only says the reminder: no browser, and a folder of its own like any run.
 - **A run that waits for you** asks in the chat that saved it, with the same card as any task, and the check-in names it once it has waited a whole beat. A chore asks each time: it uses no chat's grant but its **Always in this chat** for a human check, and in Auto it blocks what it would ask. A picture check on a page is worked through by a chore's run itself, as in a task you started, with nobody at its side. What a repeating chore posts in your name asks each time, whatever the words of its request say: its schedule counts as well as the words. A password you gave in the message is typed by the run it was given for only: later runs rely on the sign-in melo's browser kept, or ask you.
 - **When it ends,** the chat that saved the chore follows up as it does for a task it started (see below), except for a reminder, whose card says it.
-- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. A row opens to its priority in developer mode (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
+- **The Scheduled tab.** The check-in on top, then each chore: its title, when it runs, the next run, how the last run went, and a switch. Under it, one line for each site its runs may type and send on without asking, with **Remove** (see [Auto mode](#auto-mode)). A row opens to its priority in developer mode (`Priority: P2 · normal`), **Run now**, **Edit time** and **Delete**, which asks first. The main chat lists every chore, a side chat its own; `#/scheduled` opens the tab.
 - **Reminders.** A reminder is a chore that runs once. `remind me to send the report on Friday at 9`, `in 2 hours` or `提醒我明天九点给导师发邮件` makes a card, `Remind you on Fri Oct 30 at 9:00?`, with **Remind me** and **Cancel**; it always shows the date and time it understood. Relative words (`tomorrow`, `Friday`, `in 2 hours`, `下周一`, `两小时后`) become that date and time on your computer's clock. A day with no time is 9:00, a bare hour from 1 to 6 is the afternoon, and a time already past today is tomorrow unless you said `today`. `Friday` on a Friday is next week. With no usable time, the main chat asks `When should I remind you?` and never guesses: reply with just a time (`Friday at 9`). At its time, melo says the reminder in a card, `Reminder: send the report`, also when the run did not finish. A reminder missed while the computer slept or the gateway was down runs when melo starts again and says how late it ran (`ran 2 h late`). On the Scheduled tab it shows its date and time, then `Reminded today at 9:01 AM`; **Edit time** takes a date and time and sets a done reminder again. A reminder is at most a year ahead; `every …` still makes a repeating chore.
 - **The check-in.** Every 30 minutes it looks for something to tell you: a chore's finished run, or a task, of the main chat or of a side chat, that has waited a whole beat on your approval or your answer. With nothing, it does nothing and uses no model; otherwise one model call writes a short note, posted as one card in the main chat. Its switch turns it off.
 
@@ -1066,9 +1066,35 @@ commands and file changes.
   keys, a step on a site refused earlier in the task, and a click, a choice
   or a page opened have no **Allow once**. Two boxes described by the same
   words on one page count as the same box. A step that types and sends in
-  one go (typing, then Enter) needs two allowances today and may not
-  finish: a later change lets a scheduled task keep what it may type and
-  send on its site.
+  one go (typing, then Enter) asks two questions; **Allow once** covers one
+  of them, so such a step may need a kept answer to finish.
+- **Keep it for a scheduled task.** On a typing or sending step of a
+  chore's run that the review found fits the task and stopped only because
+  it sends data from your Mac, the card also offers **Always allow for this
+  scheduled task on <site>**. It runs the step once, as **Allow once**
+  does, and from then on the rest of that run and the chore's later runs
+  type and send on that exact site (scheme, host and port) without asking:
+  a check-in's send right after its note is not asked again (a run that
+  had ended goes on in a fresh task, which holds the answer too). The click
+  then says `Allowed for this scheduled task on example.com. This run goes
+  on now.`, or `… Its later runs use it.` when the step can no longer go
+  ahead (it ran already, or its job has finished); opened later, the step
+  says `Allowed for this scheduled task on example.com.` Each step is
+  still reviewed; what still stops, as before:
+  passwords and keys (a secret in the text too), a text in which melo finds
+  your phone number, address or name, a step the review finds does not fit
+  the task (or is unsure of), a form sent to another site or where the page
+  decides, a site refused in the run and every other site. melo finds a
+  phone number or a street address only by its written shape, and your name
+  only as your Mac account spells it, in the text the step shows: other
+  details of yours, or these written another way, it does not see. A call that types and then
+  sends runs when both questions pass. The run's page lists what it was
+  allowed this way (`Allowed to type on example.com without asking: you
+  allow this for this scheduled task`), and so does the terminal. The
+  Scheduled tab lists it under the chore (`May type and send on example.com
+  without asking · since Nov 10`) with **Remove**; changing the chore's
+  request drops it (the tab says so) and deleting the chore deletes it. It
+  has no end date. A chat and a one-time task never offer it.
 - An **Allow once** on a blocked step lives in memory: restarting
   localmelo forgets it, and an allowance the retried turn did not use goes
   when that turn ends. Sites allowed for a chat are grants, which are kept
@@ -1085,7 +1111,7 @@ Everything you allow "for this chat" is a grant: a tool, a site, a folder outsid
 - **The page:** the rule above and the steps that always ask, in two sentences; how typing and sending a form are
   handled is folded under **Typing and sending a form**. Then two groups, **Everywhere** and **Per chat** (a small heading per chat). A row says what is allowed in plain words, the chat, who decided (You or Auto), when, and **Revoke**, which works at once, in chats that are running too. With none, the page says so. **Always allow this folder** is not a grant: it stays in **Chats and folders**.
 - **`/grants`** lists the same rows with numbers (everywhere first, newest first, then each chat, the one with the newest grant first); `/grants revoke N` takes the N-th back.
-- **Never kept, never listed:** **Allow once**, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret).
+- **Never kept, never listed:** **Allow once**, a click on a password, code or card field, a consent control or a box from another site, a press in another app's window, paying, changing an account's settings, and every high-impact step (in Auto, opening an app a page asked for too) ask every time. Typing and sending a form are never kept for a chat: Ask asks every time, and Auto checks each one against your request, runs what the task plainly needs and stops the rest (it asks you, or blocks a secret). A scheduled task's **Always allow for this scheduled task** is not a grant either: it belongs to that chore and is listed on the Scheduled tab.
 
 Deleting a chat deletes its grants. Moving a side chat to another folder takes back its own (the main chat's still hold).
 

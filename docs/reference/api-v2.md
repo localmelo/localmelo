@@ -894,6 +894,34 @@ allowance or while one waits, 409 `invalid_transition` for a job that finished
 (`can_allow` is `false` then, and the block and its card carry `finished: true`:
 the step is new work for the chat). A task's allowances go when it finishes.
 
+A scheduled task's run (a chore's timed run or Run now, by its stored request
+key) also has, on each block, `keep_site`: the origin (`https://notes.example`)
+on which the person's answer may be kept for the chore's next runs, or `null`.
+It is set only for a block that a kept answer would have let run: one that can
+be allowed, that the model found fits the request and reviewed as sending data
+out and nothing else, whose text melo's detector found none of the person's
+phone number, street address or account name in (the block's `personal` is
+`false`; it matches written shapes and the Mac account's name only), on
+the site its question names (a form sent to that same site). `kept` says the
+chore keeps that site now. The task body
+also has `kept_uses`: each step that ran on a kept answer, as `{"question",
+"arguments", "ts"}` (`[]` when none ran so, as in any task no kept answer held). `POST
+/api/tasks/{task_id}/blocks/{request_id}/keep` takes no body: the chore and the
+site come from the stored block. It keeps typing and sending on that site for
+the chore, then allows the step once as `/allow` does; the answer is 202 with
+`"message"` as for `/allow`, or `"kept"` when the step cannot run now (it ran
+already, or its job finished). After `"queued"`, `"continued"` or `"successor"`
+the run that goes on (the fresh task, for a successor) holds the kept answer
+for the rest of its run. 409 `not_keepable` for a block of any other task
+(a chat's, a one-time task) or one with no `keep_site`, 404 `not_found` for no
+such block or a chore deleted, 409 `request_changed` when the chore's request
+changed since that run. In a later run, a typing or sending question on a kept
+site runs without asking when the model's review finds it fits the request and
+only `send_out`, melo's detectors find no secret and none of the person's
+details, and the site is not refused in the run; its
+`tool_asks` row has `"allowance": "kept"`, `"origin": "user"` and the whole
+`arguments`.
+
 Explicit user workspaces must be existing directories
 strictly inside home, outside hidden folders and `~/Library`; default
 workspace selection is described in [Scheduler](scheduler.md#tasks-workers-and-the-scheduler-store-s3a).
@@ -1000,6 +1028,7 @@ Saved requests that run on a schedule (see [Chores that repeat](../guides/web-co
 - `GET /api/chores` answers `{"chores": [...], "checkin": {"on": true, "every_min": 30, "next_at": 1793413200.0, "last_at": null}, "scope": "all"}`, oldest first. `?session_id=ID` of a side chat keeps that chat's own and gives `"scope": "chat"`; the main chat's id, an empty or no `session_id` lists all. An unknown or non-chat id is 404 `not_found`.
 - `POST /api/chores` takes `request` (required, at most 100,000 characters), `schedule`, and optional `title` (at most 200; default derived from the request), `level` (`P1` to `P4`, 1 to 4, or the older words `Today`, `Normal`, `Whenever`, `If idle`; default from the request's words, as for a task) and `front_id` (a chat; default the main chat). `schedule` is `{"kind": "daily" | "weekdays", "at": "HH:MM"}` (local time), `{"kind": "hours", "every": 1..24}` or, for a reminder, `{"kind": "once", "at": "YYYY-MM-DDTHH:MM"}` (a local date and time to the minute; it must be ahead and at most 366 days away, else 400 `invalid_request`); other keys are refused. A bad body is 400 `invalid_request`; 50 chores are the most (409 `chore_limit`). Answers 201 `{"chore"}`; the first `next_run` is the schedule's next time plus a jitter of up to 120 s.
 - `PATCH /api/chores/{id}` takes the `revision` read plus `title`, `request`, `schedule`, `level` and `enabled` (at least one). A stale revision is 409 `stale_revision`, an unknown chore 404 `not_found`. A new `schedule` or `enabled: true` plans `next_run` from now (a missed day is not run); `enabled: false` sets it to null. A new `once` schedule also switches a done reminder back on; `enabled: true` on one whose time has passed is 400 `invalid_request`.
+- A chore's body has `keeps`: one `{"site", "host", "since", "dropped"}` per site its runs may type and send on without asking (see `POST /api/tasks/{task_id}/blocks/{request_id}/keep`); `dropped` is `true` once the chore's request changed, and such a row no longer holds. `DELETE /api/chores/{id}/keeps?site=ORIGIN` takes one back (dropped or not) and answers `{"chore"}`, also for a site with none; an unknown chore is 404 `not_found`. A new `request` drops every row; deleting the chore deletes them.
 - `DELETE /api/chores/{id}` answers `{"deleted": id}` and removes the chore's folder; with `?revision=N` a stale revision is 409 `stale_revision`. A run that is already going is not cancelled: it ends in place, and the answer then carries `"folder": "running"` while the folder stays until that run has ended (the gateway then removes it, from the record it kept when it deleted the chore; a restart before that forgets it and the folder stays, at the path the notice gave). When the folder could not be removed, `"folder": "left"` says so, and it stays. Nothing removes a folder because of its name. In both cases the chat that saved the chore gets a `notice` echo (`said` key `chores.folderRunning` or `chores.folderLeft`) with the folder's path.
 - `POST /api/chores/{id}/run` starts a task now and leaves the schedule: 202 `{"chore", "task"}`. While the chore's last run has not ended (a paused or interrupted run has not) it is 409 `invalid_transition`: runs of a chore are one at a time, decided under one per-chore lock that the tick, this route, a chat's save-and-run and a delete share. A chore deleted a moment ago is 404 and starts nothing.
 - `PUT /api/checkin` with `{"on": false}` switches the check-in (kept in the file) and answers `{"checkin": {...}}`; `next_at` is null while it is off.
@@ -1313,8 +1342,8 @@ Its `data`:
   continue with `POST /api/tasks/{id}/continue`), `waiting` (an approval waits
   for an answer), `answered` (that approval was answered) or `blocked` (a
   step Auto blocked in a task: `request_id`, `step_key`, `name`, `preview`,
-  `review`, `can_allow`, `question` and `arguments` as in the task's `blocked`, `line` `Blocked: deletes
-  files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`).
+  `review`, `can_allow`, `question`, `arguments`, `keep_site` and `kept` as in the task's `blocked`, `line` `Blocked: deletes
+  files`; Allow once is `POST /api/tasks/{id}/blocks/{request_id}/allow`, keeping it for a scheduled task `.../keep`).
   Every `blocked` card is shown: none folds into a newer card of its task.
   A task's `done` card whose `ending` is `blocked` (it needs the person) has
   `block` (`request_id`, `step_key`, `name`, `preview`, `review`, as in the

@@ -225,6 +225,23 @@ def add_routes(app: FastAPI, console: Console) -> None:
             content={"task": _approvals(console, task), "message": outcome},
         )
 
+    @app.post("/api/tasks/{task_id}/blocks/{request_id}/keep")
+    async def keep_block(task_id: str, request_id: str) -> JSONResponse:
+        """Keep the answer to a step Auto blocked in a scheduled task's run for its next runs, and allow it once (#619).
+
+        Only the block's id is sent: the scheduled task and the site come from
+        the stored block. Any other task's block is refused (409).
+        """
+        console.require_store()
+        try:
+            task, outcome = await _call(console.workers.keep_block(task_id, request_id))
+        except BlockError as exc:
+            raise ApiError(exc.status, exc.code, exc.message) from exc
+        return JSONResponse(
+            status_code=202,
+            content={"task": _approvals(console, task), "message": outcome},
+        )
+
     @app.post("/api/tasks/{task_id}/resume")
     @app.post("/api/v2/tasks/{task_id}/resume", include_in_schema=False)
     async def resume(task_id: str, body: ResumeTask) -> JSONResponse:

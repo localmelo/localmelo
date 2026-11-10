@@ -377,6 +377,17 @@ def test_an_empty_output_says_so() -> None:
             {"allowed": True, "origin": "user", "remember": False, "allowance": "once"},
             "allowed once",
         ),
+        # A scheduled task's kept answer (#619): the page's line, short.
+        (
+            {
+                "allowed": True,
+                "origin": "user",
+                "remember": False,
+                "allowance": "kept",
+                "tool": "browser-type:https://notes.example",
+            },
+            "allowed for this scheduled task",
+        ),
     ],
 )
 def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
@@ -388,7 +399,8 @@ def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
     )
     assert "a file  todo.md (68 chars)" in text
     header = next(line for line in text.split("\n") if "a file  todo.md" in line)
-    assert header.endswith(tag)
+    # The whole tag, and the step's whole preview, on an 80-column line.
+    assert header.endswith(f" · {tag}") and cells(header) <= 80, header
 
 
 def test_a_denial_shows_its_reason() -> None:
