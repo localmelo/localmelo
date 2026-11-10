@@ -752,14 +752,16 @@ class OpenAICompatLLM(BaseLLMProvider):
     async def _stream(
         self, messages: list[Message], tools: list[ToolDef] | None
     ) -> AsyncGenerator[StreamFragment, None]:
-        """Stream one OpenAI-compatible response; never retry after a delta.
+        """Stream one OpenAI-compatible response.
 
         A server that does not stream still answers. A response that is one
         JSON body is read as the completion :meth:`chat` would return. A
-        stream that ends before it delivered anything is asked for again,
-        once, without streaming. Either way the reply comes marked
-        ``whole=True``, and the server is not asked to stream again. A stream
-        that breaks after part of a reply reached the caller keeps its error.
+        stream that ends before it delivered anything, or that the server
+        refuses (400 or 422, not a context overflow), is asked for again, once,
+        without streaming. Either way the reply comes marked ``whole=True``,
+        and the server is not asked to stream again. A stream cut after part
+        of a reply reached the caller raises a retryable error, as a cut whole
+        reply does; the caller's displays start the reply again.
         """
         if self.sends_whole_replies:
             reply, finish = await self._complete(messages, tools)

@@ -279,7 +279,7 @@ The bar under the input box answers "how much has this used" and "what runs besi
 - The interactive UI streams a reply as it is written, by default, drawing only text the release filter has already redacted.
 - `/stream off` turns it off for later turns, `melo -X cli.stream=false` for one run and `melo config set cli.stream false` for good.
 - A server that does not stream needs no setting: melo shows the reply when it is complete and says so once (`This server sends replies whole; melo shows them when they are complete.`).
-- A stream that breaks after part of a reply is still an error.
+- A stream that breaks after part of a reply is asked again, and the reply starts over; if every try fails, the turn ends with the error and the broken reply's words go.
 - The main chat streams too: the gateway sends the reply's lines as they are written, and `/stream off` leaves them out here.
 - Direct mode and workers never stream.
 
