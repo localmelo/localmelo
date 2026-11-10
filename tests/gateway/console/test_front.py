@@ -39,6 +39,7 @@ from localmelo.support.gateway.console.front import (
     thinking_off,
 )
 from localmelo.support.gateway.console.registry import chat_options
+from localmelo.support.gateway.handover import READING_HEAD
 from localmelo.support.memory.service import NO_MORE_TRIES, TRY_ONCE_MORE
 from localmelo.support.sessions.agents import session_options
 from localmelo.support.sessions.attachments import TextAttachment
@@ -287,10 +288,18 @@ async def test_the_started_lines_change_sets_the_persons_level(tmp_path: Path) -
 async def test_the_models_task_create_starts_a_task_on_the_persons_words(
     tmp_path: Path,
 ) -> None:
-    # #410: the model's task_create starts the task, not an offer; the person's
-    # message is its request, and the model's objective is not sent at all.
+    # #410: the model's task_create starts the task, not an offer. The person's
+    # message is its request, first and as typed; the model's title, objective and
+    # progress ride after it as its reading, data under the reading's heading.
     replies = (
-        tool_call("task_create", {"title": "Slides", "objective": "Make 6 slides"}),
+        tool_call(
+            "task_create",
+            {
+                "title": "Slides",
+                "objective": "Make 6 slides from notes/a.md",
+                "progress": "The first try stopped at step 3.",
+            },
+        ),
         answer("Started it as a task."),
     )
     typed = "can you make slides from my notes today, urgent"
@@ -303,8 +312,12 @@ async def test_the_models_task_create_starts_a_task_on_the_persons_words(
         assert (started["echo"], started["title"]) == ("started", "Slides")
         record = await _task(console, started["task_id"])
         assert (record.level, record.front_id) == (1, console.main_id)
-        assert record.spec["user_words"] == typed
-        assert record.spec["objective"] == typed, "the person's words alone"
+        assert record.spec["user_words"] == typed, "what judges a step reads only this"
+        assert record.spec["objective"] == (
+            f"{typed}\n\n{READING_HEAD}\nTask name: Slides\n"
+            "Make 6 slides from notes/a.md\n"
+            "What the chat did so far:\nThe first try stopped at step 3."
+        )
 
 
 def llm_tools(console: Console) -> list[Any]:

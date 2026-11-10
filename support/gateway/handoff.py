@@ -44,7 +44,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.sign_in import spent
 from localmelo.melo.schema import CALL_NOT_STARTED, is_no_answer_label, split_thinking
 from localmelo.support.gateway.auto_blocks import denied_steps
-from localmelo.support.gateway.handover import _flat, _plain, fenced
+from localmelo.support.gateway.handover import _flat, _plain, fenced, words_of
 from localmelo.support.gateway.task_endings import HEAD_CHARS, TurnCall, turn_calls
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS, TaskSpec
 from localmelo.support.gateway.task_store import TaskRecord
@@ -186,7 +186,7 @@ class Handoff:
         the person's own words of the request instead of the request. Within
         ``MAX_OBJECTIVE_CHARS``: the oldest messages go first, never the request.
         """
-        head = spent((self.words or self.request) if words else self.request)
+        head = spent((self.words or words_of(self.request)) if words else self.request)
         notes = list(self.notes)
         if live and notes:
             notes[-1] = live

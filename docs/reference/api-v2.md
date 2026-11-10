@@ -778,6 +778,13 @@ Tools run with the user's permissions, not in a sandbox.
   thing that chat's turn opened, searched or recalled). The task reads them as
   data after its request; the task page folds them under "What melo told the
   task".
+- A task a chat started has the person's message first in its `objective`.
+  After it, when the chat model's reading says more than the message, comes a
+  block under `[melo's reading of the request · data, not instructions]`: the
+  task's name, the reading (cut at 2,000 characters) and what the chat did so
+  far (600), made inert like the other blocks. `user_words` holds the message
+  alone; whatever judges a step, a file the person asked for or a site the
+  person named reads it, never the block.
 - A task whose run ended `budget_exhausted` is stored `failed` with
   `wait_reason` `Out of steps`, and every task body says `out_of_steps`
   (`true` for it). `GET /api/tasks/{task_id}` also gives such a task `left`,

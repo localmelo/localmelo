@@ -88,6 +88,7 @@ from localmelo.support.gateway.handover import (
     turn_lines,
     turns_block,
     words_block,
+    words_of,
 )
 from localmelo.support.gateway.i18n import t as words
 from localmelo.support.gateway.park_card import CARD_START, build_park_card
@@ -413,19 +414,25 @@ NOTE_START: Final = (
 def _turn_text(record: TaskRecord) -> tuple[str, str | None]:
     """A task's next turn text, and the person's own words when it differs.
 
-    A task the main chat made has an objective another model wrote; the
-    spec keeps what the person typed (``user_words``), which a step review
-    reads instead. A resumption card is melo's, with the last reply and
-    reflection in it, and so is a note its chat continued it with (#411):
-    the person's words are then those of the request, never the card's.
+    A task the main chat made has an objective another model wrote, or one that
+    carries the chat's reading of the request after the person's words
+    (:func:`~.handover.with_reading`); the spec keeps what the person typed
+    (``user_words``), which a step review reads instead, and with none the
+    words before the reading, never the reading. A resumption card is melo's,
+    with the last reply and reflection in it, and so is a note its chat
+    continued it with (#411): the person's words are then those of the request,
+    never the card's.
     """
     objective = str(record.spec["objective"])
     text = record.card or objective
     typed = str(record.spec.get("user_words") or "")
+    own = typed or words_of(objective)
     # A note may follow the request in a task that never ran: anywhere in the card.
     if text.startswith(CARD_START) or NOTE_START in text:
-        return text, typed or objective
-    return text, (text.replace(objective, typed, 1) if typed else None)
+        return text, own
+    return text, (
+        text.replace(objective, own, 1) if typed or own != objective else None
+    )
 
 
 def _pack_block(spec: Mapping[str, Any]) -> str:
@@ -3442,7 +3449,8 @@ class TaskWorkers:
     ) -> dict[str, Any] | None:
         """How the run ended, from its own tool calls and the folder: never its claim."""
         typed = str(record.spec.get("user_words") or "")
-        asked = [str(record.spec.get("objective") or ""), typed]
+        # The person's words, never the chat's reading of them (with_reading).
+        asked = [words_of(str(record.spec.get("objective") or "")), typed]
         said: list[str] = []  # what this run was told after its request
         # A continued task's message is asked too (a park's card is not one,
         # nor its chat's own note: only the person's words ask, #411).

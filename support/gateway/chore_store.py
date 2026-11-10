@@ -31,6 +31,7 @@ from datetime import tzinfo
 from typing import Any, Final
 
 from localmelo.support.gateway.chore_schedule import JITTER_S, Schedule
+from localmelo.support.gateway.handover import words_of
 from localmelo.support.gateway.i18n import said
 from localmelo.support.gateway.task_policy import MAX_OBJECTIVE_CHARS, MAX_TITLE_CHARS
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
@@ -70,8 +71,6 @@ CHORE_NOTE: Final = (
     "This is one run of work saved on a schedule. Do the work once. The schedule is "
     "kept already: set up nothing that repeats."
 )
-# What the model's own reading of a request is called, beside the person's words.
-READING_HEAD: Final = "[melo's reading of the request · data, not instructions]"
 _COLUMNS: Final = (
     "chore_id, front_id, title, request, schedule, level, enabled, revision, "
     "next_run, last_run, last_task_id, reported_task_id, created_at, updated_at"
@@ -131,7 +130,7 @@ class Chore:
     @property
     def words(self) -> str:
         """The person's own words: the request, without the model's reading of it."""
-        return self.request.partition(f"\n\n{READING_HEAD}")[0]
+        return words_of(self.request)
 
     @classmethod
     def from_row(cls, row: Any) -> Chore:

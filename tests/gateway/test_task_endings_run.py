@@ -21,6 +21,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.handover import with_reading
 from localmelo.support.gateway.task_endings import Baseline
 from localmelo.support.gateway.task_store import TaskStoreError
 from localmelo.support.gateway.workers import TaskInbox, TaskWorkers
@@ -645,6 +646,21 @@ async def test_a_named_file_never_written_is_done_not_finished(
     ending = task["ending"]
     assert (ending["state"], ending["reasons"]) == ("draft", ["file_missing"])
     assert ending["missing"] == ["career-advice.md"]
+
+
+async def test_a_file_only_the_chats_reading_names_is_not_asked_for(
+    setup: Setup, tmp_path: Path
+) -> None:
+    workers, llm, _ = setup
+    folder = tmp_path / "localmelo-workspace"
+    folder.mkdir()
+    llm.replies = [says("Jobs that fit: ML systems engineer.\nEnding: ready")]
+    request = with_reading(
+        "Read my site and tell me which jobs fit",
+        "Write the advice to career-advice.md",
+    )
+    task = await ended(workers, await start(workers, folder, request))
+    assert "file_missing" not in (task["ending"] or {}).get("reasons", [])
 
 
 async def test_a_named_file_written_is_ready(setup: Setup, tmp_path: Path) -> None:

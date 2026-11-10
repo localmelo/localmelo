@@ -106,7 +106,6 @@ from localmelo.support.gateway.chore_schedule import (
 )
 from localmelo.support.gateway.chore_store import (
     CHORE_NOTE,
-    READING_HEAD,
     REMINDER_PREFIX,
     Chore,
     ChoreError,
@@ -139,6 +138,7 @@ from localmelo.support.gateway.handover import (
     Handover,
     handover_of,
     task_line,
+    with_reading,
 )
 from localmelo.support.gateway.i18n import said, said_text, t, t_in
 from localmelo.support.gateway.reminder_time import Reminder, parse_reminder, parse_when
@@ -283,8 +283,6 @@ _ENDED_WORDS: Final = {
 # The note a chat keeps of the news it has told (its floor, and the endings and
 # side chats told since): `attention.news` in that chat, newest wins.
 NEWS_EVENT: Final = "attention.news"
-# How much of the model's own reading of a request rides beside the person's words.
-READING_CHARS: Final = 2000
 # What a news block with only tasks in it is about.
 NEWS_TASKS: Final = "tasks that ended since the last message"
 # The cards the main chat reads back after a start, a page at a time.
@@ -573,15 +571,17 @@ TASK_TOOLS: Final = (
         "continue_current true it takes over the rest of your current work instead: "
         "your turn ends with this call, which must be the only call of its step. Its "
         "steps ask or are blocked as this chat's Ask or Auto says, and its result "
-        "comes back to this chat. The user's own message is its request; code sets "
-        "its priority from their words.",
+        "comes back to this chat. The user's own message is its request; your title, "
+        "objective and progress reach the task beside it as your reading of it, and "
+        "code sets its priority from their words.",
         {
             "title": {"type": "string", "description": TITLE_HINT},
             "objective": {
                 "type": "string",
                 "description": (
                     "What the task should do, with every detail the user gave. Name "
-                    "the person or thing it is about; never he, she or it."
+                    "the person or thing it is about, and which earlier work a "
+                    "message points back at; never he, she or it."
                 ),
             },
             "uses_website": {
@@ -603,8 +603,9 @@ TASK_TOOLS: Final = (
             "progress": {
                 "type": "string",
                 "description": (
-                    "With continue_current: what you did and found, what is "
-                    "decided, and the next useful step, briefly."
+                    "What you did and found, what is decided, and the next useful "
+                    "step, briefly; a task started without continue_current reads "
+                    "it as what you did so far."
                 ),
             },
         },
@@ -774,7 +775,9 @@ class TaskTools(BaseToolProvider):
     ) -> str:
         if continue_current is True:
             return await self._hand_off(str(title), str(objective), str(progress))
-        return await self._begin(str(title), str(objective), uses_website is True)
+        return await self._begin(
+            str(title), str(objective), uses_website is True, progress=str(progress)
+        )
 
     async def _may_start(self) -> tuple[TurnInfo | None, str, TaskRecord | None]:
         """The running turn, why it may start no task (``""`` when it may), and
@@ -877,13 +880,16 @@ class TaskTools(BaseToolProvider):
         objective: str = "",
         uses_website: bool = False,
         earlier: TaskRecord | None = None,
+        progress: str = "",
     ) -> str:
         """Start the running turn's message as a task, and what the model reads of it.
 
         The model read the person's words and chose a task, so its call starts
-        one. Only a person's own turn does, once per message, and the task's
-        objective is their message; the model's title only names it. *earlier*
-        is the finished task this work follows on.
+        one. Only a person's own turn does, once per message. The task's request
+        is their message as typed; the model's title, objective and progress ride
+        after it as its reading, data the task reads and nothing that judges a
+        step does (:func:`with_reading`). *earlier* is the finished task this
+        work follows on.
         """
         front = self._front
         turn, refused, started = await self._may_start()
@@ -892,14 +898,9 @@ class TaskTools(BaseToolProvider):
         if started is not None:
             return _already(started, turn)  # a retry of the turn that started it
         typed = front.typed()
-        # The model's reading rides along only where code read the words as
-        # work it hands over as they are (/task); any other start is the
-        # person's words alone, the model's title naming it.
-        reading = objective.strip()[:READING_CHARS]
-        work = turn.user_text
-        carries = route(typed).route == "delegate"
-        if carries and reading and norm(reading) != norm(work):
-            work = f"{work}\n\n{READING_HEAD}\n{reading}"
+        # What the model understood rides along as data after the person's words,
+        # for every start (with_reading); it never stands in for them.
+        work = with_reading(turn.user_text, objective, name=title, progress=progress)
         echo = await front.delegate(
             work, typed=typed, title=title, turn=turn, earlier=earlier
         )
@@ -948,11 +949,10 @@ class TaskTools(BaseToolProvider):
         if found is None:
             return _NO_SCHEDULE
         text = typed.strip()
-        about = str(reading).strip()[:READING_CHARS]
+        about = str(reading).strip()
         if not about and len(found.work) < 2:
             return _NO_WORK
-        if about and norm(about) != norm(text):
-            text = f"{text}\n\n{READING_HEAD}\n{about}"
+        text = with_reading(text, about)
         name = str(title).strip() or short_title(found.work or about)
         receipt = await front.receipt(turn)
         # One hold from saving to the first run's link: nothing else starts, links
