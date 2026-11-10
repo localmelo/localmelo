@@ -13,7 +13,10 @@ answer acts, as in :mod:`.note_judge`:
   or replaces what the old one states, and the person's own typed words give the new
   value. Two items that can both be true (another event of the same kind, something
   done again) are ``other``, as a new trace in the brain updates an old one only when
-  the two predict different things about the same thing. The old item is out of date,
+  the two predict different things about the same thing. So an item about one
+  occurrence on one date still stands when the arrangement it belongs to changes from
+  a later date: only news about that very occurrence changes it (an episode is not
+  rewritten by a change to the routine it came from). The old item is out of date,
   and the newer fact stays current whichever was encoded first
   (:meth:`~.hippo_route.Router.route`). Two texts cannot show the new one is true (it
   may come from a page or a misread recap), so code checks the answer before it acts
@@ -58,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 # Bump it when the prompt or what is asked of the model changes: it is part of the
 # cache key (the encoder's own version is not touched, so its windows stay cached).
-JUDGE_VERSION: Final = "judge-2"
+JUDGE_VERSION: Final = "judge-3"
 
 SYSTEM_PROMPT: Final = """\
 You compare one new memory item with up to three older items kept for the same \
@@ -81,6 +84,11 @@ activity on the same day, another event of the same kind on another date or in \
 another year, something done again, added detail, or another person. If you are \
 not sure, answer "other".
 
+An older item about one occurrence on one date (one session, one appointment, \
+one delivery) stays true when the new item changes the arrangement from a later \
+date, or only mentions such a change: that is "other". It is "changes" only when \
+the new item says that very occurrence moved, was cancelled or is different.
+
 Reply with JSON only, no prose and no code fence. "item" is the number of the \
 older item, or null for "other". Examples:
 {"verdict": "same", "item": 1} for new "The user has a pottery class on Wednesdays \
@@ -93,6 +101,12 @@ class moved to Fridays".
 and old 1 "The user has a pottery class on Wednesdays."
 {"verdict": "other", "item": null} for new "The user went to a cooking class again \
 on 12 March." and old 1 "The user went to a cooking class on 26 February."
+{"verdict": "other", "item": null} for new "From 20 March the user's pottery \
+class is on Fridays." and old 1 "The user's pottery class on Wednesday 11 March is \
+at 18:00." (the class of 11 March comes before the change and still stands)
+{"verdict": "changes", "item": 1} for new "The pottery class of 11 March was moved \
+to 13 March." and old 1 "The user's pottery class on Wednesday 11 March is at \
+18:00.", typed "they moved the 11 March class to the 13th".
 """
 
 
