@@ -33,6 +33,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 
 ### Tasks
 
+- When one task needs you and asked last, your next message goes to it with Undo; a plain yes allows its one blocked step once, and its card has Allow this step.
 - A task says where it is in the same words on its page, in the side panel and in the terminal, and the reason it waits after a restart reads in your language.
 - A task says honestly how it ended: Ready only with proof, otherwise Done, not finished, with the reason and a one-tap Finish it.
 - Ready means done: a task asked to write a named file that is missing says so on its card.
