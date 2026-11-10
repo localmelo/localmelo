@@ -521,6 +521,7 @@
   "browser.untitled": "Untitled page",
   "browser.viewOnly": "View only",
   "cards.allowedOnce": "Allowed once: the task goes on with this step",
+  "cards.allowedOnceStep": "Allowed once: {what}; the task goes on with this step",
   "cards.answer.allowedAutomatically": "Allowed automatically",
   "cards.answer.allowedForChat": "Allowed for this chat",
   "cards.answer.allowedForTask": "Allowed for this task",

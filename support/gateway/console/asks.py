@@ -433,14 +433,28 @@ class OwnerAsks:
         held = self._held.pop(echo_id, None)
         if held is None:
             return
+        front = self.console.front_for(chat_id)
         try:
             await deliver(held.typed.strip())
-        finally:
-            # The Undo goes: the answer is the task's now.
+        except Exception as exc:
+            # Not delivered: the person's words stay in the chat, with why.
+            logger.warning(
+                "A message sent as an answer was not delivered", exc_info=True
+            )
+            key, params = "front.echo.sendFailed", {
+                "title": held.title,
+                "problem": str(exc),
+            }
             with contextlib.suppress(Exception):
-                await self.console.front_for(chat_id).echo(
-                    {"echo": "answer_delivered", "of": echo_id}
-                )
+                await front.echo(
+                    {"echo": "failed", "of": echo_id, "line": t_in("en", key, **params),
+                     "said": said(key, **params)},
+                    held.typed,
+                )  # fmt: skip
+            return
+        # The Undo goes: the answer is the task's now.
+        with contextlib.suppress(Exception):
+            await front.echo({"echo": "answer_delivered", "of": echo_id})
 
     def take_back(self, echo_id: int) -> tuple[str, str, str] | None:
         """Undo a message sent as an answer, before it is delivered: its task, title and words."""

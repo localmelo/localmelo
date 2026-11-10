@@ -64,7 +64,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -75,6 +75,7 @@ from pydantic import Field
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import TOOL_ASK
+from localmelo.melo.contracts.review import TITLES
 from localmelo.melo.contracts.sign_in import hide_passwords
 from localmelo.melo.contracts.tools import (
     BaseToolProvider,
@@ -136,6 +137,7 @@ from localmelo.support.gateway.front_rules import (
     reply_language,
     route,
     triage,
+    yes_step,
 )
 from localmelo.support.gateway.handoff import Handoff, from_chat
 from localmelo.support.gateway.handover import (
@@ -1199,7 +1201,7 @@ def _refused(head: str, echoes: list[dict[str, Any]], typed: str) -> str:
     """
     language = "zh-Hans" if is_chinese(typed) else "en"
     shown = [
-        f"“{said_in(language, echo['said'])}” with a “{_button(echo, language)}” button"
+        f"“{said_in(language, _short(echo['said']))}” with a “{_button(echo, language)}” button"
         for echo in echoes
         if isinstance(echo.get("said"), dict)
     ]
@@ -1209,6 +1211,22 @@ def _refused(head: str, echoes: list[dict[str, Any]], typed: str) -> str:
         "so in one short sentence with these words, and name no other button, card "
         "or control."
     )
+
+
+def _short(words: dict[str, Any]) -> dict[str, Any]:
+    """*words* with the task's title on one line and cut as a card cuts it."""
+    params = words.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("title"), str):
+        return words
+    return {**words, "params": {**params, "title": card_title(params["title"])}}
+
+
+def _kind(block: Mapping[str, Any]) -> str:
+    """The first kind of step a block's review named, as its card titles it."""
+    review = block.get("review")
+    kinds = review.get("categories") if isinstance(review, Mapping) else None
+    first = kinds[0] if isinstance(kinds, list) and kinds else ""
+    return str(first) if first in TITLES else "beyond_request"
 
 
 def _card_asks(data: dict[str, Any]) -> bool:
@@ -1686,7 +1704,8 @@ class Front:
         Its newest cards and lines and the person's own messages, by when they
         happened (a card at its source's time, as the page orders them). Rows
         the page draws nothing for, and answers that fold into their card, are
-        left out; a turn melo began itself is stood for by its row.
+        left out; a turn melo began itself is stood for by its row. A message
+        of the person's counts at the end of its turn (now while it runs).
         """
         chat, store = self.chat_id, self.console.store
         if chat is None:
@@ -1701,7 +1720,12 @@ class Front:
             if data.get("source_kind") != "task":
                 task = ""
             at = float(data.get("at") or event.event.get("ts") or 0)
-            found.append((at, Shown(task, asks=bool(task) and _card_asks(data))))
+            block = data.get("block")
+            offered = (
+                str(block.get("request_id") or "") if isinstance(block, dict) else ""
+            )
+            asks = bool(task) and _card_asks(data)
+            found.append((at, Shown(task, asks=asks, block=offered)))
         for event in await store.events_of_type(chat, ECHO_EVENT, limit=SHOWN_ROWS):
             data = event.event.get("data") or {}
             kind = data.get("echo")
@@ -1712,20 +1736,28 @@ class Front:
                 found.append((at, Shown(person=True)))  # the person's words above it
             asks = kind == FOLLOWUP_ECHO
             found.append((at, Shown(str(data.get("task_id") or ""), asks=asks)))
+        now = time.time()
         for turn in await store.list_turns(chat, limit=SHOWN_ROWS):
             if not turn.origin:
-                found.append((turn.started_at, Shown(person=True)))
+                # At its end, or now while it runs: a card that came while the
+                # turn ran was shown before the turn's reply and its notes.
+                at = max(turn.started_at, turn.finished_at or now)
+                found.append((at, Shown(person=True)))
         found.sort(key=lambda item: item[0])
         return [item for _, item in found]
 
-    async def _answered(self, typed: str) -> TaskRecord | None:
-        """The task of this chat *typed* answers without naming it (:func:`answered_task`), or None.
+    async def _answered(self, typed: str) -> tuple[TaskRecord, str] | None:
+        """The task of this chat *typed* answers without naming it (:func:`answered_task`)
+        and the step its newest card offers to allow (``""`` for none), or None.
 
         Waiting: the stage table has it waiting for the person, and its job
-        did not go on in a newer task. A message continues it when it ended
-        and its worker's job is not finished (:func:`job_finished`).
+        did not go on in a newer task. A message continues it only when it
+        asked (``stage.need == "review"``: it stopped on a blocked step or a
+        question) and no answer of the person's to it waits out its Undo; a
+        task that ran out of steps waits too, and takes none (its card has
+        Continue).
         """
-        workers = self.console.workers
+        workers, asks = self.console.workers, self.console.asks
         records = await self.records()
         waiting: list[TaskRecord] = []
         takes: set[str] = set()
@@ -1738,18 +1770,23 @@ class Front:
             if (await workers.newest(record)).task_id != record.task_id:
                 continue
             waiting.append(record)
-            if stage.key == "finished" and not job_finished(record):
+            if stage.need == "review" and asks.held(record.task_id) is None:
                 takes.add(record.task_id)
         if len(waiting) != 1 or not takes:
             return None  # what the rule refuses anyway: nothing more to read
+        shown = await self._shown()
         found = answered_task(
             typed,
             [_ref(record) for record in waiting],
             takes,
-            await self._shown(),
+            shown,
             [_ref(record) for record in records],
         )
-        return next((r for r in waiting if found and r.task_id == found.task_id), None)
+        if found is None:
+            return None
+        cards = [s.block for s in shown if s.task_id == found.task_id]
+        offered = next((b for b in reversed(cards) if b is not None), "")
+        return waiting[0], offered
 
     async def answer_waiting(self, typed: str) -> dict[str, Any] | None:
         """The person's plain reply to the one task of this chat that asked for them last (#617).
@@ -1765,19 +1802,21 @@ class Front:
         """
         chat = self.chat_id
         try:
-            record = await self._answered(typed)
+            found = await self._answered(typed)
             blocks = (
-                await self.console.workers.open_blocks(record.task_id)
-                if record is not None and plain_yes(typed)
+                await self.console.workers.open_blocks(found[0].task_id)
+                if found is not None and plain_yes(typed)
                 else []
             )
         except Exception:
             logger.warning("Could not tell which task a reply answers", exc_info=True)
             return None
-        if record is None or chat is None:
+        if found is None or chat is None:
             return None
-        if len(blocks) == 1:
-            return await self._allow_block(record, blocks[0], typed)
+        record, offered = found
+        step = yes_step(typed, offered, blocks)
+        if step is not None:
+            return await self._allow_block(record, step, typed)
 
         async def deliver(text: str) -> None:
             now = await self.record(record.task_id) or record
@@ -1788,11 +1827,11 @@ class Front:
         )
 
     async def _allow_block(
-        self, record: TaskRecord, block: dict[str, Any], typed: str
+        self, record: TaskRecord, block: Mapping[str, Any], typed: str
     ) -> dict[str, Any]:
         """Allow once *block*, a step Auto blocked in *record*: what the step's Allow once calls."""
-        request_id = str(block["request_id"])
         try:
+            request_id = str(block["request_id"])
             await self.console.workers.allow_once(record.task_id, request_id)
         except BlockError as exc:
             return await self._failed(
@@ -1802,9 +1841,10 @@ class Front:
             return await self._failed(
                 typed, "front.echo.allowFailed", title=record.title, problem=_plain(exc)
             )
+        words = said("cards.allowedOnceStep", what=said(f"auto.title.{_kind(block)}"))
         return await self._echo(
-            "sent", record.task_id, record.title, t_in("en", "cards.allowedOnce"),
-            typed, how="allowed", request_id=request_id, said=said("cards.allowedOnce"),
+            "sent", record.task_id, record.title, said_in("en", words), typed,
+            how="allowed", request_id=request_id, said=words,
         )  # fmt: skip
 
     # ── Code's rules, before any model call ──

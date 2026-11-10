@@ -217,15 +217,9 @@ async def test_a_worker_that_stopped_before_finishing_goes_on_in_a_fresh_one(
     async with owner_console(
         tmp_path, monkeypatch, main=[messages(ids), OK], follow_up=False, run=False
     ) as (console, client, _, _):
-        console.asks.undo_s = 0.01
         old = ids["task"] = await task_of(client, console, "write the vendors list")
         await stop_run(console, old)
-        # It is the one task waiting for the person, and it asked last: the
-        # person's reply goes to it by code, with Undo (#617).
-        reply = "the vendors need their prices too"
-        sent = await _post_turn(client, str(console.main_id), reply)
-        assert sent.json()["echo"]["echo"] == "answer_sent"
-        await until(lambda: others(console, old))
+        await say(client, console, "the vendors need their prices too")
         # The same job, a fresh task (#571): the ended one never runs again.
         assert await state(console, old) == "failed"
         [new] = await others(console, old)
