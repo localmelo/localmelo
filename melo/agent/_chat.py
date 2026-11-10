@@ -492,12 +492,15 @@ class CallTelemetry:
     total tokens (``cached_tokens``, ``reasoning_tokens``), only the fields
     the server sent. ``prefix`` is :func:`~localmelo.melo.agent._prefix_diag.compare`
     of a planning request with the run's previous one, ``None`` for the
-    first planning request or any other kind.
+    first planning request or any other kind. ``dropped`` holds the messages
+    of the whole units the request's fit left out (a tool call and its
+    results), as the request came in.
     """
 
     kind: str
     details: dict[str, int]
     prefix: dict[str, Any] | None
+    dropped: tuple[Message, ...] = ()
 
 
 @dataclass
@@ -584,6 +587,23 @@ def _unanswered_as_notes(messages: list[Message]) -> list[Message]:
             )
             for m in messages
         ]
+    )
+
+
+def _dropped_units(
+    given: Sequence[Message], sent: Sequence[Message]
+) -> tuple[Message, ...]:
+    """The tool calls of *given* that *sent* lost, each with its results."""
+    asked = {call.id for m in given for call in m.tool_calls}
+    kept = {call.id for m in sent for call in m.tool_calls}
+    gone = asked - kept
+    if not gone:
+        return ()
+    return tuple(
+        m
+        for m in given
+        if (m.tool_calls and all(call.id in gone for call in m.tool_calls))
+        or (m.role == "tool" and m.tool_call_id in gone)
     )
 
 
@@ -779,6 +799,47 @@ class Chat:
                 f"(max_calls {self.max_calls})"
             )
 
+    def _budget_accounting(self) -> RequestAccounting | None:
+        """The run's request accounting (its context budget), or None without one."""
+        scoped = BUDGET_ACCOUNTING.get()
+        return (
+            scoped[1] if scoped is not None and scoped[0] is self else self._accounting
+        )
+
+    def _estimator(
+        self, kind: str, accounting: RequestAccounting | None
+    ) -> Callable[[list[Message], list[ToolDef] | None], int]:
+        """The estimate a fit of a request of *kind* reads.
+
+        With *accounting*, the calibrated request proxy in tokens; without it,
+        the prompt cap's characters.
+        """
+        # The reasoning counts where the provider sends it.
+        replay = bool(getattr(self.llm, "reasoning_field", None))
+
+        def estimate(candidate: list[Message], offered: list[ToolDef] | None) -> int:
+            if accounting is None:
+                return prompt_chars(candidate, count_thinking=replay)
+            size, _ = request_proxy(candidate, offered, replay=replay)
+            return calibrated(size, accounting.ratios.get((self.llm.model, kind)))
+
+        return estimate
+
+    def forget_cuts(self) -> None:
+        """Forget every held cut: the window they were made on is gone."""
+        self._fit_cuts.clear()
+
+    def calls_left(self) -> int | None:
+        """Requests the run may still send before ``max_calls`` (``None``: no limit).
+
+        The call that ``reserve_answer`` keeps for the closing answer is not
+        counted.
+        """
+        if self.max_calls is None:
+            return None
+        limit = self.max_calls - 1 if self.reserve_answer else self.max_calls
+        return max(limit - (self.stats.n_llm + self.stats.llm_errors), 0)
+
     async def _request(
         self,
         messages: list[Message],
@@ -845,26 +906,13 @@ class Chat:
         attempt = 1
         retry_attempt = 1
         fitted = kind in ("plan", "reflect")
-        scoped = BUDGET_ACCOUNTING.get()
-        accounting = (
-            (
-                scoped[1]
-                if scoped is not None and scoped[0] is self
-                else self._accounting
-            )
-            if fitted
-            else None
-        )
+        accounting = self._budget_accounting() if fitted else None
         pruned = {"tool_results": 0, "thinking": 0, "units": 0}
         overflow_retried = False
         # The reasoning counts where the provider sends it.
         replay = bool(getattr(self.llm, "reasoning_field", None))
-
-        def estimate(candidate: list[Message], offered: list[ToolDef] | None) -> int:
-            if accounting is None:
-                return prompt_chars(candidate, count_thinking=replay)
-            size, _ = request_proxy(candidate, offered, replay=replay)
-            return calibrated(size, accounting.ratios.get((self.llm.model, kind)))
+        estimate = self._estimator(kind, accounting)
+        given = messages
 
         # The context budget's input tokens, else the prompt cap's characters.
         limit = (
@@ -1063,6 +1111,7 @@ class Chat:
                 and not isinstance(value, bool)
             },
             prefix,
+            _dropped_units(given, messages) if pruned["units"] else (),
         )
         recorder = CALL_RECORDER.get()
         if recorder is not None:
@@ -1237,32 +1286,18 @@ class Chat:
             display.closed()
         return reply
 
-    async def plan_step(
+    def _plan_messages(
         self,
         context: list[Message],
         short: list[Message],
-        tools: list[ToolDef],
         query: str,
         *,
         query_block: str = "",
-        recalls: Sequence[Any] = (),
         coalesce_users: bool = False,
-        on_ready: Callable[[list[Message]], None] | None = None,
-        tail_note: str = "",
         earlier: str = "",
-    ) -> Message:
-        """One planning request: the window and *tools*, for the next step.
-
-        *earlier*, the chat's earlier turns (see
-        :func:`~localmelo.melo.agent._earlier.earlier_block`), rides on the
-        request's copy of the task query once the window holds nothing before
-        it (see :func:`_pin_earlier`); while an earlier turn is still in the
-        window, the request is as it was.
-        """
-        ready_args: dict[str, Any] = (
-            {"on_ready": on_ready} if on_ready is not None else {}
-        )
-        self._plan_tools = list(tools)
+    ) -> tuple[list[Message], list[Message]]:
+        """The messages of a planning request (see :meth:`plan_step`), and the
+        turns among them from before the task (``fit_request``'s *history*)."""
         all_context = [*context, *short]
         memory = [
             m
@@ -1304,6 +1339,94 @@ class Chat:
         messages.extend(_pin_earlier(rest, query, earlier))
         if coalesce_users:
             messages = coalesce_user_messages(messages)
+        return messages, history
+
+    def plan_size(
+        self,
+        context: list[Message],
+        short: list[Message],
+        tools: list[ToolDef],
+        query: str,
+        **shape: Any,
+    ) -> tuple[int, int] | None:
+        """The estimate of the planning request these would make, and the input limit.
+
+        The estimate is the one the request's fit reads (the calibrated proxy of
+        the request as built, before any fit); *shape* are :meth:`plan_step`'s
+        ``query_block``, ``coalesce_users`` and ``earlier``. ``None`` without a
+        context budget.
+        """
+        accounting = self._budget_accounting()
+        if accounting is None:
+            return None
+        messages, _ = self._plan_messages(context, short, query, **shape)
+        size = self._estimator("plan", accounting)(messages, tools)
+        return size, accounting.budget.input_limit
+
+    async def checkpoint(
+        self,
+        context: list[Message],
+        short: list[Message],
+        tools: list[ToolDef],
+        query: str,
+        asking: str,
+        **shape: Any,
+    ) -> Message | None:
+        """One request for a work checkpoint: the next planning request, then *asking*.
+
+        The request is the planning request these would make (see
+        :meth:`plan_size`), with the same tools, and one user message at its end,
+        so a server's prompt cache holds all of it but that message. Like a
+        reflection that shares the plan's prefix, it is of kind ``reflect``,
+        counts as auxiliary and is fitted with the planning requests' held cut.
+        ``None`` when the prompt check refused it.
+        """
+        messages, history = self._plan_messages(context, short, query, **shape)
+        try:
+            return await self._request(
+                [*messages, Message(role="user", content=asking)],
+                tools=tools or None,
+                kind="reflect",
+                history=history,
+                held_as="plan",
+            )
+        except PromptCapError:
+            return None
+
+    async def plan_step(
+        self,
+        context: list[Message],
+        short: list[Message],
+        tools: list[ToolDef],
+        query: str,
+        *,
+        query_block: str = "",
+        recalls: Sequence[Any] = (),
+        coalesce_users: bool = False,
+        on_ready: Callable[[list[Message]], None] | None = None,
+        tail_note: str = "",
+        earlier: str = "",
+    ) -> Message:
+        """One planning request: the window and *tools*, for the next step.
+
+        *earlier*, the chat's earlier turns (see
+        :func:`~localmelo.melo.agent._earlier.earlier_block`), rides on the
+        request's copy of the task query once the window holds nothing before
+        it (see :func:`_pin_earlier`); while an earlier turn is still in the
+        window, the request is as it was.
+        """
+        ready_args: dict[str, Any] = (
+            {"on_ready": on_ready} if on_ready is not None else {}
+        )
+        self._plan_tools = list(tools)
+        messages, history = self._plan_messages(
+            context,
+            short,
+            query,
+            query_block=query_block,
+            coalesce_users=coalesce_users,
+            earlier=earlier,
+        )
         self._plan = _PlanSnapshot(messages, list(tools), list(short), history)
         return await self._request(
             _with_tail(messages, tail_note, coalesce_users),

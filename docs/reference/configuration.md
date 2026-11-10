@@ -341,9 +341,24 @@ calibration. The proxy is an estimate, not a bound: templates and vision models 
 
 When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
 tool outputs, removes optional old thinking and old recall, and then evicts old complete units,
-down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs and the latest
-reflection; images, failed checks and older reflections go only when nothing else is left. It leaves
+down to 70% of the limit. It keeps the task, tool schemas, matching call/result pairs, the latest
+reflection and the latest work checkpoint; images, failed checks and older reflections go only when nothing else is left. It leaves
 history and the retained conversation unchanged.
+
+With a token budget, long work does not wait for the fit. Before a planning request that would
+pass 85% of the input limit, the run writes a work checkpoint: one extra request (of kind
+`reflect`, on the same prefix as the planning request, with the same tools) asks the model for its
+notes on where the work stands, what it found, where its results are, what failed, what works and
+what comes next. Then the oldest units leave the working window for good, down to 70% of the limit,
+by the fit's own rules, and the checkpoint stands right after the task's message in their place:
+`[Work checkpoint: ...]` with the task's words, the model's notes, the files the run wrote, and a
+list of what was already read or run (one line per source, such as a page and the parts read). The
+next request extends that one until the window fills again; a later checkpoint replaces the block.
+When the model's notes cannot be read, or no request is left for them (`max_calls`), the block holds
+the computed lines alone, and the run goes on. The fit stays as the net for a single step too large:
+the units it drops are added to the block's list at the next request, so no drop goes unsaid. Each
+checkpoint is a `checkpoint` notice (see [Events](events.md)) and counts in the result's
+`checkpoints`. Without a token budget nothing of this happens.
 
 If the pinned context cannot fit, the run ends with
 `context_budget_exceeded` and a remediation message. A classified context-overflow response gets at

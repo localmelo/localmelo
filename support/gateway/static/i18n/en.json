@@ -2313,6 +2313,7 @@
   "turns.approval.words.long": "Not allowed: you sent a message instead of answering",
   "turns.approval.words.short": "ended by your message",
   "turns.bytes": "{n} bytes",
+  "turns.checkpoint": "Noted where the work stands; older results left the context.",
   "turns.declined.closed": "Not run: the chat was closed before an answer",
   "turns.declined.denied": "Not run: you declined it",
   "turns.declined.deniedNote": "Not run: you declined it. Your note: {note}",

@@ -20,12 +20,15 @@ import unicodedata
 from collections.abc import Iterable, Sequence
 from typing import Final
 
+from localmelo.melo.contracts.folders import WRITE_TOOLS
+from localmelo.melo.contracts.task_files import (
+    MAX_FILES,
+    resolve,
+    shown_path,
+    written_paths,
+)
 from localmelo.support.sessions.store import SessionStore
 
-# The tools that write a file whose path is their ``path`` argument.
-WRITE_TOOLS: Final = frozenset({"file_write", "file_edit"})
-# The files the chat names at most.
-MAX_FILES: Final = 20
 # The tool events read to find them, newest first, at most.
 MAX_EVENTS: Final = 2000
 # Folders a walk for a bare name never enters, and how many entries it reads.
@@ -118,34 +121,6 @@ def files_line(names: Sequence[str]) -> str:
     return line if len(line) <= LINE_CHARS else line[: LINE_CHARS - 1] + "…"
 
 
-def _inside(folder: str, path: str) -> bool:
-    try:
-        return os.path.commonpath([folder, path]) == folder
-    except ValueError:
-        return False
-
-
-def _resolve(folder: str | None, path: str) -> str | None:
-    """*path* as the file tools read it: ``~`` expanded, relative to *folder*."""
-    expanded = os.path.expanduser(path.strip())
-    if not expanded:
-        return None
-    if not os.path.isabs(expanded):
-        if not folder:
-            return None
-        expanded = os.path.join(folder, expanded)
-    return os.path.realpath(expanded)
-
-
-def shown_path(folder: str | None, path: str) -> str:
-    """*path* as the person reads it: relative to the task's folder when it is in it."""
-    if folder:
-        root = os.path.realpath(folder)
-        if _inside(root, path):
-            return os.path.relpath(path, root)
-    return path
-
-
 async def written_files(
     store: SessionStore, task_id: str, folder: str | None
 ) -> list[str]:
@@ -153,30 +128,22 @@ async def written_files(
 
     Each ``tool.started`` of a writing tool is paired with its
     ``tool.finished`` by run and call id; only a call that succeeded counts.
-    A file named twice is named once, where it was last written.
+    A file named twice is named once, where it was last written (see
+    :func:`~localmelo.melo.contracts.task_files.written_paths`, which a run's
+    work checkpoint reads its own calls with).
     """
     started = await store.events_of_type(task_id, "tool.started", limit=MAX_EVENTS)
     finished = await store.events_of_type(task_id, "tool.finished", limit=MAX_EVENTS)
-    done = set()
+    status: dict[tuple[object, object], object] = {}
     for stored in finished:
         data = stored.event.get("data") or {}
-        if data.get("name") in WRITE_TOOLS and data.get("status") == "success":
-            done.add((stored.event.get("run_id"), data.get("call_id")))
-    paths: list[str] = []
+        status[(stored.event.get("run_id"), data.get("call_id"))] = data.get("status")
+    calls: list[tuple[object, object, object]] = []
     for stored in started:
         data = stored.event.get("data") or {}
         key = (stored.event.get("run_id"), data.get("call_id"))
-        arguments = data.get("arguments")
-        if data.get("name") not in WRITE_TOOLS or key not in done:
-            continue
-        given = arguments.get("path") if isinstance(arguments, dict) else None
-        resolved = _resolve(folder, given) if isinstance(given, str) else None
-        if resolved is None or not os.path.isfile(resolved):
-            continue
-        if resolved in paths:
-            paths.remove(resolved)
-        paths.append(resolved)
-    return [shown_path(folder, path) for path in paths[-MAX_FILES:]]
+        calls.append((data.get("name"), data.get("arguments"), status.get(key)))
+    return written_paths(calls, folder)
 
 
 def _found_under(folder: str, name: str) -> bool:
@@ -201,7 +168,7 @@ def missing_files(folder: str | None, names: Sequence[str]) -> list[str]:
     """
     missing: list[str] = []
     for name in names:
-        resolved = _resolve(folder, name)
+        resolved = resolve(folder, name)
         if resolved is not None and os.path.isfile(resolved):
             continue
         bare = "/" not in name and not name.startswith("~")

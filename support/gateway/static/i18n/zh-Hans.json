@@ -2212,6 +2212,7 @@
   "turns.approval.words.long": "未允许：你发来了消息，没有回答",
   "turns.approval.words.short": "被你的消息结束",
   "turns.bytes": "{n} 字节",
+  "turns.checkpoint": "已记下工作进展；较早的结果已移出上下文。",
   "turns.declined.closed": "未运行：回答之前对话已关闭",
   "turns.declined.denied": "未运行：你拒绝了",
   "turns.declined.deniedNote": "未运行：你拒绝了。你的说明：{note}",

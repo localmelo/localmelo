@@ -4,7 +4,9 @@ Each applies only to a brief run (``AgentOptions.brief_probe``): a push after
 steps of reading that changed nothing, a note of the tool output that left
 the window, the pointers a reflection hands to the next attempt, and (with
 ``AgentOptions.brief_items``) the numbered items of the brief that no edit has
-touched yet.
+touched yet. What left the window is read here for every run
+(:func:`dropped_calls`): a brief run's note lists it call by call, and a work
+checkpoint lists it source by source (:func:`covered_lines`).
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import os
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from localmelo.melo.checker.redaction import redact_secrets
@@ -58,20 +61,114 @@ def _describe(name: str, arguments: dict[str, object]) -> str:
     return name
 
 
-def dropped_notes(messages: Sequence[Message]) -> list[str]:
-    """One line per tool result among the dropped *messages*."""
+# The tools whose results end with an exit status the cue keeps.
+_COMMANDS = frozenset({"shell_exec", "python_exec"})
+_EXIT = re.compile(r"\[exit code (-?\d+)\]")
+# Lines of the cue list a work checkpoint shows at most: past it, the oldest
+# sources are counted per tool on one line.
+COVERED_LINES = 30
+
+
+@dataclass(frozen=True)
+class Dropped:
+    """One tool result that left the context: its call and what came of it.
+
+    *source* is the tool and its key argument (shortened and redacted), *part*
+    the part of a page the call read (``None`` for a tool that reads no parts),
+    *status* ``exit N`` for a command, ``failed`` for a call with an error, else
+    ``""``.
+    """
+
+    call_id: str
+    tool: str
+    source: str
+    chars: int
+    part: int | None
+    status: str
+
+
+def dropped_calls(messages: Sequence[Message]) -> list[Dropped]:
+    """One entry per tool result among the dropped *messages*, in their order."""
     calls = {call.id: call for msg in messages for call in msg.tool_calls if call.id}
-    notes = []
+    found = []
     for msg in messages:
         if msg.role != "tool":
             continue
         call = calls.get(msg.tool_call_id)
         name = call.tool_name if call is not None else "tool"
-        notes.append(
-            f"{_describe(name, call.arguments if call is not None else {})} "
-            f"({len(msg.content):,} chars)"
+        arguments = call.arguments if call is not None else {}
+        part = arguments.get("part")
+        exits = _EXIT.findall(msg.content)
+        if msg.tool_result is not None and msg.tool_result.error:
+            status = "failed"
+        elif name in _COMMANDS:
+            status = f"exit {exits[-1] if exits else 0}"
+        else:
+            status = ""
+        found.append(
+            Dropped(
+                call_id=msg.tool_call_id,
+                tool=name,
+                source=_describe(name, arguments),
+                chars=len(msg.content),
+                part=(
+                    part
+                    if type(part) is int
+                    else 1 if name == "web_fetch" or "part" in arguments else None
+                ),
+                status=status,
+            )
         )
-    return notes
+    return found
+
+
+def dropped_notes(messages: Sequence[Message]) -> list[str]:
+    """One line per tool result among the dropped *messages* (a brief run's note)."""
+    return [f"{d.source} ({d.chars:,} chars)" for d in dropped_calls(messages)]
+
+
+def _spans(parts: Sequence[int]) -> str:
+    """``1-3, 7`` for the parts 1, 2, 3 and 7."""
+    spans: list[list[int]] = []
+    for part in sorted(set(parts)):
+        if spans and part == spans[-1][1] + 1:
+            spans[-1][1] = part
+        else:
+            spans.append([part, part])
+    return ", ".join(f"{a}-{b}" if a != b else str(a) for a, b in spans)
+
+
+def covered_lines(dropped: Sequence[Dropped], limit: int = COVERED_LINES) -> list[str]:
+    """The cue list of a work checkpoint: one line per source, oldest first.
+
+    A source is a tool and its key argument; its line names the parts read of a
+    page (``web_fetch <url> parts 1-62``) and the last status of a command
+    (``shell_exec `ls` (exit 0)``). Past *limit* lines, the oldest sources
+    become one line that counts them per tool.
+    """
+    order: dict[str, list[Dropped]] = {}
+    for entry in dropped:
+        order.setdefault(entry.source, []).append(entry)
+    lines = []
+    for source, entries in order.items():
+        line = source
+        parts = [e.part for e in entries if e.part is not None]
+        if parts:
+            line += f" part{'s' if len(set(parts)) > 1 else ''} {_spans(parts)}"
+        if entries[-1].status:
+            line += f" ({entries[-1].status})"
+        lines.append(line)
+    if len(lines) <= limit:
+        return lines
+    older = list(order.values())[: len(lines) - limit + 1]
+    counts: dict[str, int] = {}
+    for entries in older:
+        counts[entries[0].tool] = counts.get(entries[0].tool, 0) + 1
+    summary = "earlier: " + ", ".join(
+        f"{count} {tool} source{'s' if count > 1 else ''}"
+        for tool, count in counts.items()
+    )
+    return [summary, *lines[len(older) :]]
 
 
 def render_dropped(notes: Sequence[str], window: Sequence[Message] = ()) -> str:

@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
-    REFLECTIONS_HEADER,
+    PINNED_HEADERS,
     Message,
     ToolDef,
     starts_with_reply_label,
@@ -123,6 +123,92 @@ def _removable(unit: list[Message]) -> bool:
     )
 
 
+class _Pins:
+    """What a fit of *units* keeps, and what each of its levels may drop.
+
+    *before_task* says whether a unit is made only of turns before the current
+    task (a chat's earlier tasks); such a unit may go whole at any level. The
+    pins are found once, in the units as they came: the newest complete unit
+    and the task's latest failing check (kept at levels 0 and 1), the task's own
+    message and the newest block of each of
+    :data:`~localmelo.melo.schema.PINNED_HEADERS` (kept at every level).
+    """
+
+    def __init__(
+        self,
+        units: list[list[Message]],
+        before_task: Callable[[list[Message]], bool],
+    ) -> None:
+        self.before_task = before_task
+        # Protect the newest complete structural unit and the task's latest
+        # failing check, as well as all malformed or unfinished protocol units.
+        complete = [unit for unit in units if _removable(unit)]
+        self.newest = complete[-1] if complete else None
+        self.failing = next(
+            (
+                unit
+                for unit in reversed(units)
+                if not before_task(unit)
+                and any(m.role == "tool" and _failed(m) for m in unit)
+            ),
+            None,
+        )
+        # What the last level keeps: the task's own message (the first user turn
+        # after the earlier tasks) and the newest block of each pinned header.
+        self.task = next(
+            (
+                unit
+                for unit in units
+                if not before_task(unit) and unit[0].role == "user"
+            ),
+            None,
+        )
+        self.blocks = [
+            block
+            for header in PINNED_HEADERS
+            if (
+                block := next(
+                    (
+                        unit
+                        for unit in reversed(units)
+                        if unit[0].role == "user" and unit[0].content.startswith(header)
+                    ),
+                    None,
+                )
+            )
+            is not None
+        ]
+
+    def droppable(self, unit: list[Message], level: int, last: list[Message]) -> bool:
+        """Whether *unit* may go at *level*; *last*, the request's last unit, stays."""
+        if unit is last:
+            return False
+        if level >= 2:
+            return self.before_task(unit) or (
+                unit is not self.task
+                and not any(unit is block for block in self.blocks)
+                and all(m.role != "system" for m in unit)
+            )
+        if unit is self.newest:
+            return False
+        if self.before_task(unit):
+            return True
+        if unit is self.failing or not _removable(unit):
+            return False
+        if level == 0 and any(m.role == "tool" and _failed(m) for m in unit):
+            return False
+        if level == 0 and any(
+            m.images or (m.tool_result and m.tool_result.images) for m in unit
+        ):
+            return False
+        # A user message can resemble a recall block; keep it unless the unit
+        # is the agent's own empty-reply/nudge pair.
+        return not (
+            any(m.role == "user" for m in unit)
+            and not starts_with_reply_label(unit[0].content)
+        )
+
+
 def fit_request(
     messages: list[Message],
     tools: list[ToolDef] | None,
@@ -145,7 +231,8 @@ def fit_request(
     levels, each only when the one before cannot reach the target: plain old
     turns; then images and failure evidence too, but the latest failing
     check; then any unit but the system prompt, the task's own message, the
-    newest reflections block and the last unit, so the floor is those alone.
+    newest reflections block, the newest work checkpoint and the last unit, so
+    the floor is those alone (see :class:`_Pins`).
     The newest result becomes a preview only when that floor is over *limit*,
     as the last step before the fit fails.
 
@@ -180,62 +267,11 @@ def fit_request(
             force_smaller_than is None or size < force_smaller_than
         )
 
-    # Protect the newest complete structural unit and the task's latest
-    # failing check, as well as all malformed or unfinished protocol units.
-    complete = [unit for unit in units if _removable(unit)]
-    newest = complete[-1] if complete else None
-    failing = next(
-        (
-            unit
-            for unit in reversed(units)
-            if not before_task(unit)
-            and any(m.role == "tool" and _failed(m) for m in unit)
-        ),
-        None,
-    )
-
-    # What the last level keeps: the task's own message (the first user turn
-    # after the earlier tasks) and the newest block of reflections.
-    task = next(
-        (unit for unit in units if not before_task(unit) and unit[0].role == "user"),
-        None,
-    )
-    lesson = next(
-        (
-            unit
-            for unit in reversed(units)
-            if unit[0].role == "user" and unit[0].content.startswith(REFLECTIONS_HEADER)
-        ),
-        None,
-    )
+    pins = _Pins(units, before_task)
+    newest = pins.newest
 
     def droppable(unit: list[Message], level: int = 0) -> bool:
-        if unit is units[-1]:
-            return False
-        if level >= 2:
-            return before_task(unit) or (
-                unit is not task
-                and unit is not lesson
-                and all(m.role != "system" for m in unit)
-            )
-        if unit is newest:
-            return False
-        if before_task(unit):
-            return True
-        if unit is failing or not _removable(unit):
-            return False
-        if level == 0 and any(m.role == "tool" and _failed(m) for m in unit):
-            return False
-        if level == 0 and any(
-            m.images or (m.tool_result and m.tool_result.images) for m in unit
-        ):
-            return False
-        # A user message can resemble a recall block; keep it unless the unit
-        # is the agent's own empty-reply/nudge pair.
-        return not (
-            any(m.role == "user" for m in unit)
-            and not starts_with_reply_label(unit[0].content)
-        )
+        return pins.droppable(unit, level, units[-1])
 
     def held() -> tuple[object, ...] | None:
         """The oldest unit kept after the last unit this fit dropped."""
@@ -377,3 +413,45 @@ def fit_request(
         "Request cannot fit without removing pinned context; increase the input "
         "budget or reduce the task, schemas, images, or current tool output."
     )
+
+
+def units_to_leave(
+    messages: list[Message],
+    *,
+    target: float,
+    estimate: Callable[[list[Message]], int],
+    history: Sequence[Message] = (),
+) -> list[Message]:
+    """The messages of the oldest units that must leave *messages* for good.
+
+    The units go as :func:`fit_request` drops them (the same levels, oldest
+    first, and the same pins, see :class:`_Pins`), until *estimate* of what is
+    left is at most *target*: whole units only, nothing shortened, nothing
+    copied. ``[]`` when *messages* is there already; when it cannot get there,
+    every unit the last level may drop. *history* is as for
+    :func:`fit_request`.
+    """
+    earlier = {id(m) for m in history}
+    units = group_turns(messages, empty_prefix=True)
+
+    def before_task(unit: list[Message]) -> bool:
+        return all(id(m) in earlier for m in unit)
+
+    pins = _Pins(units, before_task)
+    kept = list(units)
+    gone: list[list[Message]] = []
+
+    def fits() -> bool:
+        return estimate([m for unit in kept for m in unit]) <= target
+
+    if fits():
+        return []
+    for depth in range(3):
+        for unit in list(kept):
+            if not pins.droppable(unit, depth, kept[-1]):
+                continue
+            kept = [candidate for candidate in kept if candidate is not unit]
+            gone.append(unit)
+            if fits():
+                return [m for unit in gone for m in unit]
+    return [m for unit in gone for m in unit]

@@ -30,6 +30,7 @@ from localmelo.melo.schema import (
     RunResult,
     ToolCall,
     ToolResult,
+    WorkCheckpoint,
     exception_text,
 )
 
@@ -60,6 +61,7 @@ NOTICE_MESSAGES: Mapping[str, str] = {
         "The model gave no answer after thinking; the answer is the end of its thinking."
     ),
     "no_change": "Nothing has changed in the workspace yet.",
+    "checkpoint": "Noted where the work stands; older results left the context.",
     "brief_items": "Some numbered items of the brief have no edit yet.",
     "brief_check_failed": (
         "The task's check still fails; the run ends completed with failing tests."
@@ -527,6 +529,38 @@ class _Emitter:
             return
         detail = {} if scope is None else {"scope": scope}
         self._notice("no_change", NOTICE_MESSAGES["no_change"], detail)
+
+    def checkpoint(
+        self, checkpoint: WorkCheckpoint, *, units: int, before: int, after: int
+    ) -> None:
+        """The run wrote a work checkpoint, and *units* of its window left for good.
+
+        *before* and *after* are the next planning request's estimate (the
+        calibrated proxy) before and after; ``text`` is the block the window
+        holds now and ``checkpoint`` its fields, both redacted.
+        """
+        if self._sink is None:
+            return
+
+        def redacted(value: object) -> object:
+            if isinstance(value, str):
+                return redact_secrets(value)[0]
+            if isinstance(value, list):
+                return [redacted(item) for item in value]
+            return value
+
+        fields = {key: redacted(value) for key, value in checkpoint.to_dict().items()}
+        self._notice(
+            "checkpoint",
+            NOTICE_MESSAGES["checkpoint"],
+            {
+                "units": units,
+                "before": before,
+                "after": after,
+                "text": redact_secrets(checkpoint.render())[0],
+                "checkpoint": fields,
+            },
+        )
 
     def brief_items(self, scope: str, marks: dict[str, str]) -> None:
         """A brief run named the items no edit has touched; *marks* maps each

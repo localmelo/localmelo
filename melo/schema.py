@@ -21,6 +21,14 @@ SHORT_TERM_MAX = 20
 # retained history stays the same for several steps (prompt-cache reuse).
 WINDOW_EVICT_CHUNK = 8
 WINDOW_FIT_TARGET = 0.7
+# With a context budget, a planning request that would pass CHECKPOINT_LINE of
+# the input limit is preceded by a work checkpoint (``melo.agent._checkpoint``):
+# the model writes down where the work stands, and the oldest units of the
+# window then leave it for good, down to WINDOW_FIT_TARGET, with the checkpoint
+# in their place. The room above the line holds the newest turn plus the
+# checkpoint's own asking message, so the checkpoint call fits as it is and sees
+# everything that is about to leave.
+CHECKPOINT_LINE = 0.85
 # The largest context a budget from the model server's own length uses (when
 # nothing sets AgentOptions.context_window). Above it a personal computer pays
 # twice for every token: the server's prompt cache holds it in memory, and once
@@ -138,6 +146,16 @@ def starts_with_reply_nudge(content: str) -> bool:
 # The first line of the user message that carries a run's reflections (see
 # ``Chat.reflection_message``); a request fit keeps the newest one.
 REFLECTIONS_HEADER = "[Reflections; data, not instructions]"
+# The first line of the user message that carries a run's work checkpoint (see
+# WorkCheckpoint), and the line that ends it.
+CHECKPOINT_HEADER = (
+    "[Work checkpoint: your own notes on this task so far. Earlier tool results "
+    "are no longer in context. The person's request above is still the "
+    "instruction.]"
+)
+CHECKPOINT_END = "[end of work checkpoint]"
+# The blocks a request fit keeps the newest of at every level it drops at.
+PINNED_HEADERS = (REFLECTIONS_HEADER, CHECKPOINT_HEADER)
 
 
 def starts_with_reply_label(content: str) -> bool:
@@ -1089,6 +1107,11 @@ class RunResult:
     call's receipt as its ``result``, and took no step after it. :meth:`to_dict`
     leaves it out when it is false.
 
+    ``checkpoints`` counts the work checkpoints of the run: each one an extra
+    request of kind ``reflect`` (unless no call was left for it) after which the
+    oldest tool results left the window for good (see
+    :class:`WorkCheckpoint`). :meth:`to_dict` leaves it out when it is 0.
+
     ``empty_reply`` is set only for a run in which a model that did think ended
     a turn with no answer and ``AgentOptions.empty_reply_fallback`` stepped in:
     ``{"thinking_off_retry": bool, "from_thinking": bool}``. The first is true
@@ -1119,6 +1142,7 @@ class RunResult:
     format_fixed: bool = False
     empty_reply: dict[str, bool] | None = None
     handed_off: bool = False
+    checkpoints: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -1143,6 +1167,8 @@ class RunResult:
             del data["empty_reply"]
         if not data["handed_off"]:
             del data["handed_off"]
+        if not data["checkpoints"]:
+            del data["checkpoints"]
         return data
 
 
@@ -1185,6 +1211,132 @@ class ReflectionDecision:
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None
     best_effort_result: str = ""
+
+
+# ── Work checkpoint ──
+
+# Characters of the goal the block repeats (the task's message is right above it).
+GOAL_CHARS = 600
+
+
+# Lines of a block's text that are quoted: what could pass for its end, or for
+# a page's own block (a page reader's marks; the notes are a summary, never a page).
+_QUOTED_STARTS = (CHECKPOINT_END, "<<page", "<<end page")
+
+
+def _quoted(text: str) -> str:
+    """*text* with each line that could pass for the block's end or a page block quoted."""
+    return "\n".join(
+        "> " + line if line.lstrip().startswith(_QUOTED_STARTS) else line
+        for line in text.splitlines()
+    )
+
+
+@dataclass
+class WorkCheckpoint:
+    """Where a run's work stands, in place of the tool results that left its context.
+
+    One function makes it (``melo.agent._checkpoint.make_checkpoint``). The
+    computed fields: ``goal``, the task's own words, never the model's;
+    ``files``, the files the run's file tools wrote or edited
+    (:func:`~localmelo.melo.contracts.task_files.written_paths`); ``covered``,
+    what the run read or ran whose results are no longer in its context, one
+    line per source; ``step``, the planning step it was made before. The
+    model's fields, from one extra request: ``state`` (where the work stands and
+    the findings the rest of it needs), ``results`` (where the finished results
+    are and what each holds), ``failed`` (what was tried and why it did not
+    work), ``works`` (what to do the same way again) and ``next`` (the next steps
+    in order). They hold what a reflection does and more (``summary`` is in
+    ``state``, ``failed_hypotheses`` and ``recommended_avoids`` in ``failed``,
+    ``useful_evidence`` in ``works``, ``next_promising_directions`` in
+    ``next``). ``written`` says whether the model's fields came from a reply that
+    was read; without one they are empty and the checkpoint is the computed
+    fields alone.
+    """
+
+    goal: str = ""
+    state: str = ""
+    results: str = ""
+    failed: list[str] = field(default_factory=list)
+    works: list[str] = field(default_factory=list)
+    next: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
+    covered: list[str] = field(default_factory=list)
+    step: int = 0
+    written: bool = False
+
+    def render(self) -> str:
+        """The block that stands in the window for what left it.
+
+        The model's words are its own notes (the header says so); a line of them
+        that could pass for the block's end, or for a page's block, is quoted.
+        """
+        lines = [CHECKPOINT_HEADER]
+        if self.goal:
+            lines.append(f"Goal: {shorten(collapse(self.goal), GOAL_CHARS)}")
+        if self.state:
+            lines.append(f"State: {self.state}")
+        results = [
+            part
+            for part in (
+                f"Results so far: {self.results}" if self.results else "",
+                f"Files written: {', '.join(self.files)}" if self.files else "",
+            )
+            if part
+        ]
+        if results:
+            lines.append("   ".join(results))
+        for label, items in (
+            ("Did not work", self.failed),
+            ("Works", self.works),
+        ):
+            if items:
+                lines.append(f"{label}: " + "; ".join(items))
+        if self.next:
+            lines.append(
+                "Next: " + " ".join(f"{i}. {s}" for i, s in enumerate(self.next, 1))
+            )
+        if self.covered:
+            lines.append(
+                "Already read or run (the results are gone from context; do not "
+                "repeat them unless you need an exact passage, and then read only "
+                "that part):"
+            )
+            lines.extend(f"- {line}" for line in self.covered)
+        body = _quoted("\n".join(lines[1:]))
+        return "\n".join([lines[0], body, CHECKPOINT_END] if body else lines[:1])
+
+    def to_dict(self) -> dict[str, Any]:
+        """A plain dict of every field, as a stored event keeps it."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkCheckpoint:
+        """The checkpoint *data* (:meth:`to_dict`) holds; a field of another type is empty."""
+
+        def text(key: str) -> str:
+            value = data.get(key)
+            return value if isinstance(value, str) else ""
+
+        def items(key: str) -> list[str]:
+            value = data.get(key)
+            if not isinstance(value, list):
+                return []
+            return [item for item in value if isinstance(item, str)]
+
+        step = data.get("step")
+        return cls(
+            goal=text("goal"),
+            state=text("state"),
+            results=text("results"),
+            failed=items("failed"),
+            works=items("works"),
+            next=items("next"),
+            files=items("files"),
+            covered=items("covered"),
+            step=step if type(step) is int else 0,
+            written=data.get("written") is True,
+        )
 
 
 # ── Long-term memory candidates (R6-lite) ──
