@@ -2569,7 +2569,7 @@ class TaskWorkers:
 
     @contextlib.asynccontextmanager
     async def _call_record(
-        self, task_id: str, execution_id: str, tool: str
+        self, task_id: str, execution_id: str, tool: str, local: bool
     ) -> AsyncIterator[None]:
         """Name a call that can change something for as long as it runs.
 
@@ -2583,7 +2583,11 @@ class TaskWorkers:
 
         async def write() -> None:
             await recovery.open_call(
-                task_id, execution_id=execution_id, call_id=call_id, tool=tool
+                task_id,
+                execution_id=execution_id,
+                call_id=call_id,
+                tool=tool,
+                local=local,
             )
 
         cut = False
@@ -2762,8 +2766,10 @@ class TaskWorkers:
                         )
             capture_execution = execution_id
 
-            def call(tool: str) -> contextlib.AbstractAsyncContextManager[None]:
-                return self._call_record(task_id, capture_execution, tool)
+            def call(
+                tool: str, local: bool
+            ) -> contextlib.AbstractAsyncContextManager[None]:
+                return self._call_record(task_id, capture_execution, tool, local)
 
             async def capture(pid: int) -> None:
                 await self._capture_process(task_id, capture_execution, pid)
@@ -2981,6 +2987,17 @@ class TaskWorkers:
                             if record.card:
                                 await runner.resume()
                             text, words = _turn_text(record)
+                            continued = await self.tasks.continued(task_id)
+                            if (
+                                continued is not None
+                                and continued.check
+                                and await self.tasks.resume_waiting_turn(task_id)
+                            ):
+                                # The restart's continue, its turn not begun: the
+                                # step that may be half done is checked first. The
+                                # note is melo's: the person's words stay as they were.
+                                words = text if words is None else words
+                                text = f"{continued.check}\n\n{text}"
                             if (
                                 record.origin == "user_rule"
                                 or _moved(record.spec)
@@ -3348,8 +3365,11 @@ class TaskWorkers:
             else ""
         )
         body["priority_events"] = await self.tasks.priority_events(record.task_id)
-        # When the start continued it by itself: its page says so, with the time.
-        body["continued_at"] = await self.tasks.continued_at(record.task_id)
+        # When the start continued it by itself: its page says so, with the time,
+        # and whether its turn checked a step that may have been half done first.
+        continued = await self.tasks.continued(record.task_id)
+        body["continued_at"] = continued.at if continued else None
+        body["continued_check"] = bool(continued and continued.check)
         # Ask or Auto, and what Auto blocked (#339): the chat's mode now for a
         # person's task that has not ended (#576), else the mode it ended with.
         body["approvals"] = await self._chat_mode_of(record) or chat_mode(

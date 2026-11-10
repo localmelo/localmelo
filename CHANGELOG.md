@@ -44,6 +44,7 @@ Each release cuts its own section. localmelo has no release yet: v0.1.0 is due 2
 - A scheduled task can browse, and keeps its folder.
 - `melo task` creates, lists, follows and controls the gateway's tasks from the terminal.
 - One task that cannot be restored after a restart no longer keeps the console from opening; it waits with the reason on its page.
+- After a restart, a task cut off in the middle of a file write or a local command goes on and checks that step first; only a step melo cannot check, such as one that reaches outside this computer, waits for you.
 - A task goes on by itself when localmelo starts again after a stop or a crash, and its page says so; only work that may be half done waits for you.
 - Worker runs (`melo worker BRIEF`) run their `Check:` lines when the model is done, and a failed check exits 4.
 

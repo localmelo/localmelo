@@ -12,11 +12,15 @@ from typing import Literal
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.process_identity import gone
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.restart_check import check_note
 from localmelo.support.gateway.resume_evidence import (
     Process,
+    ResumeEvidence,
     ResumeRefusedError,
     collect_evidence,
-    in_flight,
+)
+from localmelo.support.gateway.resume_evidence import (
+    settled as settled_apart,
 )
 from localmelo.support.gateway.task_store import (
     RESTART,
@@ -35,25 +39,41 @@ from localmelo.support.sessions.store import (
 
 log = logging.getLogger(__name__)
 
+# Why a task waits for the person after a restart, in plain words: what
+# happened and what to do. The task's page shows the sentence as it is.
 FENCED_REASON = (
-    "this task could not be restored after the restart; "
-    "check its work before resuming it"
+    "localmelo could not read this task's record when it started: "
+    "check its work, then resume."
 )
 # A run a stop cut off, written by the stop itself: the next start decides it.
 STOPPED_REASON = "localmelo stopped; this task continues when it opens again"
-# Something may be half done: a call that can change something had not
-# returned, or a process of the run may still be running.
-IN_FLIGHT_REASON = "gateway restarted; earlier effects or processes may still be active"
+# Something of the run may still be going, or its record is not complete: a
+# process of the run may still be running, or the record is unknown.
+IN_FLIGHT_REASON = (
+    "localmelo stopped before it could tell whether this task's last step "
+    "finished: check its work, then resume."
+)
+# A call that can change something had not returned, and its effect is not one
+# melo can look at afterwards (or more than one call had not returned).
+CALL_REASON = (
+    "A step melo cannot check by itself, such as one that reaches outside this "
+    "computer, was running when localmelo stopped: check whether it happened, "
+    "then resume."
+)
 # The person asked for a pause that had not settled when localmelo stopped.
-PAUSED_REASON = "paused before localmelo stopped; resume it to go on"
+PAUSED_REASON = (
+    "You paused this task before localmelo stopped: "
+    "resume it when you want it to go on."
+)
 # The run was cut off by a crash the time before too, since it last ended done or failed.
 CRASHED_REASON = (
-    "localmelo stopped unexpectedly twice while this task ran; "
-    "check its work before continuing it"
+    "localmelo closed unexpectedly twice while this task was working: "
+    "check its work, then resume."
 )
 # The task's folder could not be used at start (a disk not mounted yet).
 WORKSPACE_REASON = (
-    "its folder was not there when localmelo started; resume it once it is back"
+    "This task's folder was missing when localmelo started: "
+    "resume it once the folder is back."
 )
 
 Outcome = Literal["keep", "reconcile", "continue", "wait"]
@@ -71,8 +91,11 @@ class RestartFacts:
     live, so no stop wrote it down.
     ``crashed_before``: a crash cut it before, since it last ended ``done`` or
     ``failed`` (the ``crashes`` count).
-    ``in_flight``: something may be half done (see ``resume_evidence.in_flight``),
-    or its last turn ended without a complete record of how.
+    ``in_flight``: something of the run may still be going (see
+    ``resume_evidence.settled``), or its last turn ended without a complete
+    record of how. ``calls``: whether the effect of each call that had not
+    returned stays where melo can look (``None``: not recorded or not
+    readable); by default one unknown call, which waits.
     ``workspace_valid``: its folder can be used now.
     """
 
@@ -86,7 +109,13 @@ class RestartFacts:
     crash: bool = False
     crashed_before: bool = False
     in_flight: bool = True
+    calls: tuple[bool | None, ...] = (None,)
     workspace_valid: bool = True
+
+
+def checkable(calls: tuple[bool | None, ...]) -> bool:
+    """Whether melo can check the open *calls* itself: none, or exactly one local."""
+    return calls == () or calls == (True,)
 
 
 def restart_outcome(facts: RestartFacts) -> Outcome:
@@ -102,6 +131,7 @@ def restart_outcome(facts: RestartFacts) -> Outcome:
         return "keep" if facts.settled else "wait"
     if (
         facts.in_flight
+        or not checkable(facts.calls)
         or not facts.workspace_valid
         or (facts.crash and facts.crashed_before)
     ):
@@ -184,14 +214,14 @@ class StartupRecovery:
             assert page[-1].id is not None
             after = page[-1].id
 
-    async def _in_flight(self, task: TaskRecord) -> bool:
+    async def _evidence(self, task: TaskRecord) -> ResumeEvidence | None:
+        """The task's evidence; ``None`` when its identity contradicts itself (unknown)."""
         try:
-            evidence = await collect_evidence(
+            return await collect_evidence(
                 self.tasks, self.recovery, task, verifier=self.verifier
             )
         except ResumeRefusedError:
-            return True  # contradictory identity: unknown is in flight
-        return in_flight(evidence)
+            return None
 
     async def _classify(self, task: TaskRecord) -> None:
         provenance = await self.recovery.provenance(task.task_id)
@@ -237,6 +267,7 @@ class StartupRecovery:
         )
         finished = ended and _recorded(turns[0], events)
         crash = task.state in {"running", "held"}
+        evidence = await self._evidence(task)
         facts = RestartFacts(
             state=task.state,
             never_started=never_started,
@@ -250,7 +281,14 @@ class StartupRecovery:
             finished=finished,
             crash=crash,
             crashed_before=task.crashes > 0,
-            in_flight=(ended and not finished) or await self._in_flight(task),
+            in_flight=(ended and not finished)
+            or evidence is None
+            or not settled_apart(evidence),
+            calls=(
+                (None,)
+                if evidence is None
+                else tuple(local for _, local in evidence.open_calls)
+            ),
             workspace_valid=(
                 self.workspace_valid is None or await self.workspace_valid(task.task_id)
             ),
@@ -274,7 +312,7 @@ class StartupRecovery:
                 crash=False,
             )
             return
-        evidence = [
+        steps = [
             event
             for event in events
             if event.event.get("type")
@@ -291,8 +329,8 @@ class StartupRecovery:
             task.card
             if settled
             else (
-                build_park_card(task.spec, evidence)
-                if evidence
+                build_park_card(task.spec, steps)
+                if steps
                 else ("" if task.state == "parked" else task.card)
             )
         )
@@ -308,6 +346,8 @@ class StartupRecovery:
             reason = PAUSED_REASON
         elif facts.in_flight:
             reason = IN_FLIGHT_REASON
+        elif not checkable(facts.calls):
+            reason = CALL_REASON
         elif not facts.workspace_valid:
             reason = WORKSPACE_REASON
         elif facts.crash and facts.crashed_before:
@@ -324,6 +364,13 @@ class StartupRecovery:
                 crash=crash,
             )
         if outcome == "continue":
+            # One step whose effect melo can look at may be half done: the
+            # continued turn starts with what to check first.
+            check = (
+                check_note(evidence.open_calls[0][0], steps)
+                if evidence is not None and evidence.open_calls
+                else ""
+            )
             generation, previous = await self.tasks.park_identity(task.task_id)
             await self.tasks.resume_recovered(
                 task.task_id,
@@ -335,6 +382,7 @@ class StartupRecovery:
                 first_start=False,
                 actor=RESTART,
                 because=RESTART,
+                check=check,
             )
 
 

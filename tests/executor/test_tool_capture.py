@@ -10,9 +10,11 @@ import pytest
 
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.builtins import _run_python, _run_shell
+from localmelo.melo.executor.executor import stays_local
 from localmelo.melo.executor.models import (
     ErrorCategory,
     ExecutionRequest,
@@ -26,12 +28,20 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef
 
 
-def _entry(events: list[str], *, fail: bool = False) -> Any:
-    """A TOOL_ENTRY that notes when a call's record opens and closes."""
+def _entry(
+    events: list[str],
+    *,
+    fail: bool = False,
+    seen: list[tuple[str, bool]] | None = None,
+) -> Any:
+    """A TOOL_ENTRY that notes when a call's record opens and closes (and, in
+    *seen*, each call's tool and whether the executor found its effect local)."""
 
     @contextlib.asynccontextmanager
-    async def entry(tool: str) -> Any:
+    async def entry(tool: str, local: bool) -> Any:
         events.append("entry")
+        if seen is not None:
+            seen.append((tool, local))
         if fail:
             raise RuntimeError("capture unavailable")
         try:
@@ -61,7 +71,11 @@ async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
     async def denied(request: ExecutionRequest) -> ApprovalDecision:
         return ApprovalDecision(False)
 
-    token = TOOL_ENTRY.set(_entry(calls))
+    async def person_allowed(request: ExecutionRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, origin="user")
+
+    seen: list[tuple[str, bool]] = []
+    token = TOOL_ENTRY.set(_entry(calls, seen=seen))
     try:
         # A read changes nothing: no record.
         result = await executor.execute_structured(
@@ -80,6 +94,14 @@ async def test_entry_follows_the_tier_and_closes_however_the_call_returns(
             )
         )
         assert result.status == ExecutionStatus.SUCCESS and calls == ["entry", "exit"]
+        # A write in the folder stays local; a command a person allowed alone,
+        # with no routine review, is not.
+        await executor.execute_structured(
+            ExecutionRequest(tool_name="python_exec", arguments={"code": "pass"}),
+            approve=person_allowed,
+        )
+        assert seen == [("file_write", True), ("python_exec", False)]
+        calls.clear()
 
         # A call cancelled while it runs closes its record too.
         started = asyncio.Event()
@@ -301,7 +323,7 @@ async def test_entry_callback_suppressed_cancellation_never_invokes_tool() -> No
         return "ok"
 
     @contextlib.asynccontextmanager
-    async def capture(name: str) -> Any:
+    async def capture(name: str, local: bool) -> Any:
         entered.set()
         with contextlib.suppress(asyncio.CancelledError):
             await asyncio.Event().wait()
@@ -376,3 +398,56 @@ async def test_unsupported_platform_fallback_needs_incomplete_entry(
         if entry_token is not None:
             TOOL_ENTRY.reset(entry_token)
         PROCESS_RECORD.reset(process_token)
+
+
+ROUTINE = ActionReview("routine")
+
+
+@pytest.mark.parametrize(
+    ("tool", "in_folder", "decision", "review", "local"),
+    [
+        # A file write or edit is local exactly when its path is in the folder.
+        ("file_write", True, None, None, True),
+        ("file_edit", False, None, None, False),
+        # A command is local only when the rules found it routine and a grant
+        # or Auto mode let it run, never one a person allowed alone.
+        ("shell_exec", True, ApprovalDecision(True, origin="session"), ROUTINE, True),
+        ("python_exec", True, ApprovalDecision(True, origin="auto"), ROUTINE, True),
+        ("shell_exec", True, ApprovalDecision(True, origin="user"), ROUTINE, False),
+        ("shell_exec", True, ApprovalDecision(True, origin="session"), None, False),
+        (
+            "shell_exec",
+            True,
+            ApprovalDecision(True, origin="auto"),
+            ActionReview("routine", by="model"),
+            False,
+        ),
+        (
+            "shell_exec",
+            True,
+            ApprovalDecision(True, origin="session"),
+            ActionReview("high"),
+            False,
+        ),
+        # Anything else is not local: a browser action, a provided tool.
+        (
+            "browser_click",
+            True,
+            ApprovalDecision(True, origin="policy"),
+            ROUTINE,
+            False,
+        ),
+        ("custom", True, None, None, False),
+    ],
+)
+def test_a_changing_call_is_local_only_as_the_checks_before_it_found(
+    tool: str,
+    in_folder: bool,
+    decision: ApprovalDecision | None,
+    review: ActionReview | None,
+    local: bool,
+) -> None:
+    assert (
+        stays_local(tool, in_folder=in_folder, decision=decision, review=review)
+        is local
+    )

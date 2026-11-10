@@ -13,7 +13,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.checker.checker import HARNESS_CALL, Checker
 from localmelo.melo.checker.tiers import changes_nothing
@@ -38,6 +38,7 @@ from localmelo.melo.contracts.folders import (
     outside_access,
 )
 from localmelo.melo.contracts.pause import TOOL_DEADLINE
+from localmelo.melo.contracts.review import ActionReview
 from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED, TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
@@ -415,6 +416,7 @@ class Executor:
         #    about (#571): asked only about a call that every check above let
         #    through, and before the tool's timeout starts.
         asked = False
+        decided: ApprovalDecision | None = None
         if approve is not None and (
             (outside is not None and not own_read)
             or self.requires_approval(request.tool_name)
@@ -466,6 +468,7 @@ class Executor:
                     error_category=ErrorCategory.APPROVAL_DENIED,
                 )
             asked = True
+            decided = decision
 
         # 9. Re-check: an approved file path is resolved again, since a
         #    person may take a while to answer. A path that resolves
@@ -517,7 +520,13 @@ class Executor:
                 # length, so a restart knows it may be half done; one that only
                 # reads here needs no record.
                 if capture is not None and not changes_nothing(tool_def):
-                    async with capture(request.tool_name):
+                    local = stays_local(
+                        request.tool_name,
+                        in_folder=policy is not None and outside is None,
+                        decision=decided,
+                        review=getattr(approve, "review", None),
+                    )
+                    async with capture(request.tool_name, local):
                         task = asyncio.current_task()
                         if task is not None and task.cancelling():
                             raise asyncio.CancelledError()
@@ -672,6 +681,43 @@ def _outside(
     if reason is not None:
         return None, never_text(path, reason)
     return access, ""
+
+
+# The tools whose effect, when it stays local, melo can look at afterwards:
+# the folder's files, and what a reviewed command did on this Mac.
+_COMMANDS: Final = frozenset({"shell_exec", "python_exec"})
+
+
+def stays_local(
+    tool_name: str,
+    *,
+    in_folder: bool,
+    decision: ApprovalDecision | None,
+    review: ActionReview | None,
+) -> bool:
+    """Whether a changing call's effect stays where melo can look at it afterwards.
+
+    Decided before the call runs, from what the checks above already found;
+    nothing new is classed here. A file write or edit is local when the
+    workspace policy resolved its path inside the task's folder. A command
+    (``shell_exec``, ``python_exec``) is local only when the review's rules
+    found it routine (nothing that reaches outside this Mac, writes outside the
+    folder, installs or sends) and no person was asked about this call: a
+    session grant or Auto mode allowed it. Every other tool, a browser action
+    or a provided tool included, is not local.
+    """
+    if tool_name in WRITE_TOOLS:
+        return in_folder
+    if tool_name in _COMMANDS:
+        return (
+            review is not None
+            and review.verdict == "routine"
+            and review.by == "rules"
+            and decision is not None
+            and decision.allow
+            and decision.origin in ("session", "auto")
+        )
+    return False
 
 
 async def _invoke(

@@ -12,13 +12,15 @@ import pytest
 
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor.process_gate import PROCESS_RECORD, gated_exec
+from localmelo.melo.schema import RESTART_CHECK_HEADER
 from localmelo.support.config import Config
 from localmelo.support.gateway import workers as worker_module
 from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.restart_check import CHECK_ASK
 from localmelo.support.gateway.startup_recovery import (
-    IN_FLIGHT_REASON,
+    CALL_REASON,
     StartupRecovery,
 )
 from localmelo.support.gateway.task_policy import TaskSpec
@@ -350,10 +352,10 @@ async def test_worker_context_hooks_bind_execution(
                 self.session_id, execution_id=execution
             ) == [(123, 123, "boot", "birth")]
             # A call that can change something is named while it runs.
-            async with entry("shell_exec"):
+            async with entry("shell_exec", False):
                 assert await recovery.open_calls(
                     self.session_id, execution_id=execution
-                ) == ["shell_exec"]
+                ) == [("shell_exec", False)]
             assert not await recovery.open_calls(
                 self.session_id, execution_id=execution
             )
@@ -525,10 +527,40 @@ async def main():
     worker._lock, worker._closed, worker._stopping = asyncio.Lock(), False, set()
     worker._invalid_workspace = set()
     if mode in ("in-call", "after-call"):
-        async with TaskWorkers._call_record(worker, task.task_id, "run", "shell_exec"):
+        # A call melo cannot check itself (a command no review let run alone).
+        async with TaskWorkers._call_record(
+            worker, task.task_id, "run", "shell_exec", False
+        ):
             if mode == "in-call":
                 os._exit(9)
         os._exit(9)
+    if mode == "in-write":
+        # The executor classes a file write in the task's folder as local.
+        from localmelo.melo.checker.checker import Checker
+        from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
+        from localmelo.melo.executor import Executor, register_builtins
+        from localmelo.melo.executor.models import ExecutionRequest
+        from localmelo.melo.memory.coordinator import Hippo
+
+        hippo = Hippo()
+        executor = Executor(hippo, Checker(mode="interactive"), workspace_root=workspace)
+        register_builtins(
+            executor, hippo, names={"file_write"}, workspace_root=workspace
+        )
+
+        async def dies(**kwargs):
+            os._exit(9)
+
+        executor.register("file_write", dies)
+        TOOL_ENTRY.set(
+            lambda tool, local: TaskWorkers._call_record(
+                worker, task.task_id, "run", tool, local
+            )
+        )
+        await executor.execute_structured(ExecutionRequest(
+            tool_name="file_write", arguments={"path": "notes.md", "content": "x"},
+        ))
+        os._exit(3)  # the write returned: the test fails
 
     async def record(pid):
         Path(pid_file).write_text(str(pid))
@@ -609,7 +641,7 @@ async def test_worker_crash_keeps_capture_before_release(
         await store.aclose()
 
 
-@pytest.mark.parametrize("mode", ["in-call", "after-call"])
+@pytest.mark.parametrize("mode", ["in-call", "after-call", "in-write"])
 async def test_a_death_in_a_changing_call_waits_and_after_it_continues(
     tmp_path: Path, mode: str
 ) -> None:
@@ -637,12 +669,21 @@ async def test_a_death_in_a_changing_call_waits_and_after_it_continues(
         await StartupRecovery(store, tasks).run()
         record = await tasks.get_task(task.task_id)
         if mode == "in-call":
-            # The call may be half done: the task waits for the person.
+            # The call may be half done, and melo cannot check it: the task
+            # waits for the person.
             assert record.state == "interrupted"
-            assert record.wait_reason == IN_FLIGHT_REASON
+            assert record.wait_reason == CALL_REASON
+            return
+        assert record.state == "queued"
+        assert await tasks.resume_waiting_turn(task.task_id)
+        continued = await tasks.continued(task.task_id)
+        assert continued is not None
+        if mode == "in-write":
+            # A write in its folder may be half done: its turn checks it first.
+            assert continued.check.startswith(RESTART_CHECK_HEADER)
+            assert "file_write" in continued.check and CHECK_ASK in continued.check
         else:
-            assert record.state == "queued"
-            assert await tasks.resume_waiting_turn(task.task_id)
+            assert continued.check == ""
     finally:
         await store.aclose()
 

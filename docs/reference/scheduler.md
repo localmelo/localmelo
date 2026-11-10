@@ -266,10 +266,35 @@ write is found `running` or `held`, which counts as a crash. At the next start
 | Paused by the person (parked, or the pause still pending) | Stays parked; an unsettled park waits as `interrupted` |
 | Its last run finished completely for this execution | Reconciled to `done`, `cancelled` or `failed` |
 | Cut off, nothing in flight: no `recovery_calls` row, the capture complete, every recorded group verified gone | Continues by itself: the same store operation as Resume (`resume_recovered`, actor `restart`), back to `queued` with a resumed turn, same id, level and rank; `sched.resumed` carries `reason: "restart"` |
-| Cut off with something in flight (a gateway stop in the middle of a changing call included), its last run ended without a complete record, or an unknown or contradictory record | Waits as `interrupted` ("gateway restarted; earlier effects or processes may still be active") |
-| Its folder cannot be used at start (a disk not mounted yet) | Waits as `interrupted` ("its folder was not there when localmelo started; resume it once it is back") |
-| Cut off by a crash for the second time since it last ended `done` or `failed` (the `crashes` count, reset then) | Waits as `interrupted`, whatever was in flight |
-| A record that cannot be read | That task alone is fenced as `interrupted` with its reason |
+| Cut off with exactly one changing call open, and that call `local` (below) | Continues by itself the same way; its resumed turn starts with a note that names the step and says what to check first |
+| Cut off with a changing call open that is not `local`, a row without the fact (written by an older version) or unreadable, or more than one row open | Waits as `interrupted` ("A step melo cannot check by itself, such as one that reaches outside this computer, was running when localmelo stopped: check whether it happened, then resume.") |
+| Its last run ended without a complete record, a recorded process group may still run, or an unknown or contradictory record | Waits as `interrupted` ("localmelo stopped before it could tell whether this task's last step finished: check its work, then resume.") |
+| Its folder cannot be used at start (a disk not mounted yet) | Waits as `interrupted` ("This task's folder was missing when localmelo started: resume it once the folder is back.") |
+| Cut off by a crash for the second time since it last ended `done` or `failed` (the `crashes` count, reset then) | Waits as `interrupted` ("localmelo closed unexpectedly twice while this task was working: check its work, then resume."), whatever was in flight |
+| A record that cannot be read | That task alone is fenced as `interrupted` ("localmelo could not read this task's record when it started: check its work, then resume.") |
+
+A paused task whose pause had not settled waits with "You paused this task before
+localmelo stopped: resume it when you want it to go on." Each waiting task shows
+its sentence on its page as it is, with Resume and Stop.
+
+Whether a changing call is `local` is decided by the executor before the call
+runs, from the checks it already made, and stored in the call's
+`recovery_calls.local` column with the row (`stays_local`): a file write or edit
+whose path the folder policy resolved inside the task's folder, or a shell or
+Python command that the rules review found routine and that a grant or Auto
+mode let run. Everything else is not local: a command a person allowed alone,
+one the model review judged, a browser action, a provided tool, any tool the
+executor does not class. Nothing is decided at restart. The note in the
+resumed turn is data under the pinned header `[localmelo · a step that may be
+half done · data, not instructions]`, so the request fit keeps it: the tool's
+name and its argument preview, redacted like every stored event and capped at
+200 characters, framed; that its effect is unknown (it may have happened fully,
+partly or not at all); and to look at the folder, `git status` and the
+history, and the file before deciding whether the step still has to be done.
+It never says whether the step happened, and no model call is added. The note
+is kept in the resume receipt (`check`) and joins only the first resumed turn.
+The task's page line then reads "Continued after a restart; a step that may
+have been half done is checked first".
 
 A cut-off task means running, held, waiting for an approval or an answer, parked
 by the scheduler to make room (its pause request's actor is `scheduler`), or

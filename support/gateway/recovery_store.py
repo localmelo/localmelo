@@ -655,13 +655,17 @@ class RecoveryStore:
             )
 
     async def open_call(
-        self, task_id: str, *, execution_id: str, call_id: str, tool: str
+        self, task_id: str, *, execution_id: str, call_id: str, tool: str, local: bool
     ) -> None:
         """Name a call that can change something before it starts.
 
-        Only the current, running execution opens one: a call of a run that
-        is being recovered does not start.
+        *local* says whether its effect stays where melo can look at it
+        afterwards, as the executor decided before the call. Only the current,
+        running execution opens one: a call of a run that is being recovered
+        does not start.
         """
+        if not isinstance(local, bool):
+            raise ValueError("local must be a boolean")
         for value, name in (
             (execution_id, "execution_id"),
             (call_id, "call_id"),
@@ -677,8 +681,9 @@ class RecoveryStore:
             if not current or current[0] != "running":
                 raise TaskConflictError("capture execution is not current and running")
             await conn.execute(
-                "INSERT INTO recovery_calls VALUES (?, ?, ?, ?)",
-                (task_id, execution_id, call_id, tool),
+                "INSERT INTO recovery_calls (task_id, execution_id, call_id, tool, "
+                "local) VALUES (?, ?, ?, ?, ?)",
+                (task_id, execution_id, call_id, tool, int(local)),
             )
 
     async def close_call(
@@ -691,17 +696,20 @@ class RecoveryStore:
                 (task_id, execution_id, call_id),
             )
 
-    async def open_calls(self, task_id: str, *, execution_id: str) -> list[str]:
-        """The tools of this execution's calls that had not returned, oldest first."""
+    async def open_calls(
+        self, task_id: str, *, execution_id: str
+    ) -> list[tuple[str, bool | None]]:
+        """This execution's calls that had not returned, oldest first: each tool and
+        whether its effect stays local (``None``: not recorded, or not readable)."""
         _text(execution_id, "execution_id")
         async with self.store.component_transaction("calls_open") as conn:
             rows = await (
                 await conn.execute(
-                    "SELECT tool FROM recovery_calls WHERE task_id = ? AND execution_id = ? ORDER BY rowid",
+                    "SELECT tool, local FROM recovery_calls WHERE task_id = ? AND execution_id = ? ORDER BY rowid",
                     (task_id, execution_id),
                 )
             ).fetchall()
-        return [str(row[0]) for row in rows]
+        return [(str(row[0]), _local(row[1])) for row in rows]
 
     @staticmethod
     async def _advance_start_receipt(
@@ -822,3 +830,10 @@ class RecoveryStore:
             (host,) = hosts
             return host
         return ""
+
+
+def _local(value: object) -> bool | None:
+    """A ``recovery_calls.local`` value: 1 or 0, else unknown (NULL, or anything else)."""
+    if type(value) is int and value in (0, 1):
+        return value == 1
+    return None
