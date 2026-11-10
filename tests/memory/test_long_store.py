@@ -293,9 +293,8 @@ async def test_apply_rolls_back_both_the_entry_and_the_decision(
             await _apply(store, "I live in Berlin", kind="profile")
         monkeypatch.setattr(conn, "execute", real_execute)
         assert await store.count_entries() == 1
-        assert (
-            len(await store.decisions()) == 1
-        )  # the first write's, not the failed one
+        # the first write's, not the failed one
+        assert len(await store.decisions()) == 1
     finally:
         await store.aclose()
 

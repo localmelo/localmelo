@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from localmelo.tests.agent.test_reflection_gate import (
     _planning_calls,
     _reflection_calls,
 )
+from localmelo.tests.memory.test_long_migration import _create_v0
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -400,6 +402,36 @@ class TestPersistence:
             await agent.close()
         assert (mem / "history.db").exists()
         assert not (mem / "long_term.db").exists()
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_run_leaves_an_existing_long_term_file_alone(
+        self, tmp_path: Path
+    ) -> None:
+        mem = tmp_path / "memory"
+        mem.mkdir()
+        path = mem / "long_term.db"
+        _create_v0(path, [("an old step summary", [1.0, 0.0], {"step_id": "s1"})])
+        before = path.read_bytes()
+        emb = FakeEmbedding()
+        agent = _echo_agent(
+            FakeLLM([_echo_call("a"), _answer("ok")]),
+            AgentOptions(memory_dir=str(mem)),
+            embedding=emb,
+        )
+        assert type(agent.hippo.long) is LongTerm
+        try:
+            assert await agent.run("echo q") == "ok"
+        finally:
+            await agent.close()
+        # Not read, not migrated, not changed: the same bytes at version 0.
+        assert emb.calls == 0
+        assert path.read_bytes() == before
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone() == (0,)
+        finally:
+            conn.close()
+        assert sorted(p.name for p in mem.glob("long_term.db*")) == ["long_term.db"]
 
 
 # ── attempt_policy="none" ───────────────────────────────────────────────────

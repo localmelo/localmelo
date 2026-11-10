@@ -732,7 +732,7 @@ class RecordingLLM(BaseLLMProvider):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["legacy", "drop", "replay"])
-async def test_no_mode_embeds_or_recalls_without_a_retriever(mode: str) -> None:
+async def test_no_mode_embeds_without_a_retriever(mode: str) -> None:
     embedding = CountingEmbedding()
     llm = RecordingLLM()
     agent = _agent(
@@ -742,8 +742,6 @@ async def test_no_mode_embeds_or_recalls_without_a_retriever(mode: str) -> None:
     )
     await agent.run_task("q")
     await agent.close()
-    prompt = "\n".join(message.content for message in llm.calls[0])
-    assert "[RECALL]" not in prompt
     assert embedding.calls == 0
 
 

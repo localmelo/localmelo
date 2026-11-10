@@ -694,8 +694,8 @@ confirmation, a finished task, Stop winning the race) shows the server's text.
 ## Inspect a chat
 
 In developer mode, **Details** opens the session's details in the [panel](#the-panel-beside-a-chat), in place of
-its tabs: its tools and the grants that hold in it (a side chat shows the main chat's too, open or not), working
-and long-term memory status, and finished runs with paging when a page supplies
+its tabs: its tools and the grants that hold in it (a side chat shows the main chat's too, open or not), the working
+window and the embedding model, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
 revoked there, and a main chat grant revoked there is revoked everywhere; the tools view may open a paused session. **Close details** or Esc returns to the tabs. On a narrow
 screen the panel's sheet opens with them.

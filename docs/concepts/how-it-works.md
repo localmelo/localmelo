@@ -41,7 +41,7 @@ With `--reasoning compress`, each reply is compressed into a short note before t
 - The notes, the reply's code drafts and one digest per attempt stay in a RAM-only note store beside the window.
 - The loop then recalls: a frozen block of earlier thinking rides on the task query at the start of an attempt, each tool turn appends the notes and drafts the window no longer shows, and the `recall` tool lets the model ask for more.
 - Every block is delimited, framed as data and checked by the candidate boundary; the first request that carries one records it in `history.db`'s `llm_calls.recall_json`.
-- `legacy` keeps its own path unchanged. See [Recall in the loop](memory.md#recall-in-the-loop).
+- `legacy` has no recall in the loop. See [Recall in the loop](memory.md#recall-in-the-loop).
 
 ## Reflection
 
