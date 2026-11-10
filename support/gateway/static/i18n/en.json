@@ -780,6 +780,8 @@
   "errors.blockAllowedAlready": "This step was allowed already.",
   "errors.blockNotAllowable": "This step cannot be allowed.",
   "errors.blockNotFound": "No blocked step has this id here.",
+  "errors.browserNoPage": "melo has no page open there.",
+  "errors.browserNoPicture": "melo could not take a picture of that page.",
   "errors.choreLimit": "At most {n} chores. Delete one first.",
   "errors.choreNotFound": "No chore has id {id}",
   "errors.choreRunning": "This chore's last run has not finished. Wait for it, or stop it first.",

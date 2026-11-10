@@ -1,4 +1,4 @@
-"""``/api/sessions/{id}/browser`` and the live stream ``/browser/live``: the chat that owns the tab, the guard, the rotation.
+"""``/api/sessions/{id}/browser``, its picture and the live stream ``/browser/live``: the chat that owns the tab, the guard, the rotation.
 
 The route runs under the loopback guard on a real server (the system picks the
 port) and is read with a WebSocket client. The browser is a scripted one that
@@ -8,7 +8,9 @@ streams; no Chrome runs.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import dataclasses
 import json
 import socket
 from collections.abc import AsyncIterator, MutableMapping
@@ -61,6 +63,16 @@ class BrowsingAgent(FakeAgent):
         super().__init__(workspace)
         self.driver = site()
         driver = self.driver if streams else FakeDriver(page(HOME, "Welcome."))
+        self.pictured: list[str | None] = []  # the tabs the driver took a picture of
+        real = driver.screenshot
+
+        async def shot(tab: str | None, mark: Any = None) -> Any:
+            # The stand-in's own picture is not valid base64; a real driver's is.
+            self.pictured.append(tab)
+            got = await real(tab, mark)
+            return dataclasses.replace(got, data=base64.b64encode(MARKER).decode())
+
+        driver.screenshot = shot  # type: ignore[method-assign,assignment]
         self.provider = BrowserToolProvider(driver)  # type: ignore[arg-type]
         self.tool_providers = (self.provider,) if browser else ()
 
@@ -300,6 +312,151 @@ async def test_an_open_chat_is_watched_in_the_browser_it_browses_in(
     assert refused.value.response.status_code == 403
 
 
+# ── The picture ──
+
+
+def picture_url(served: Served, session_id: str) -> str:
+    return f"http://127.0.0.1:{served.port}/api/sessions/{session_id}/browser/picture"
+
+
+async def test_a_picture_is_what_the_driver_took_for_the_tab_asked_and_is_not_cached(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME, HOME + "news")  # t1, then t2
+    url = picture_url(served, session_id)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        current = await client.get(url)
+        first = await client.get(url, params={"tab": "t1"})
+        unknown = await client.get(url, params={"tab": "t9"})
+        malformed = await client.get(url, params={"tab": "../x"})
+    for got in (current, first):
+        assert got.status_code == 200 and got.content == MARKER
+        assert got.headers["content-type"] == "image/png"
+        assert got.headers["cache-control"] == "no-store"
+    assert agent.pictured == ["t2", "t1"], "the tab melo is on, then the one named"
+    assert (unknown.status_code, unknown.json()["error"]["code"]) == (404, "no_page")
+    assert malformed.status_code == 400
+    assert malformed.json()["error"]["code"] == "invalid_request"
+
+
+async def test_no_browser_or_no_page_is_a_404_and_starts_nothing(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    no_page = await chat(console, builder, workspace)  # a browser, no page yet
+    stored = (await seed_turn(console.store, str(workspace))).session_id  # not open
+    builder.browser = False
+    no_browser = await chat(console, builder, workspace)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        for session_id in (no_page, stored, no_browser):
+            got = await client.get(picture_url(served, session_id))
+            assert got.status_code == 404, session_id
+            assert got.json()["error"]["code"] == "no_page", session_id
+        unknown = await client.get(picture_url(served, "0123456789ab"))
+    assert unknown.json()["error"]["code"] == "not_found"
+    assert builder.agents[no_page].driver.started == 0
+
+
+async def test_a_picture_is_refused_while_the_live_view_is_off_and_needs_no_stream(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    streaming = await chat(console, builder, workspace)
+    await browse(builder, streaming, HOME)
+    builder.streams = False  # a browser that takes pictures but cannot stream
+    still = await chat(console, builder, workspace)
+    await browse(builder, still, HOME)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        for session_id in (streaming, still):
+            got = await client.get(picture_url(served, session_id))
+            assert (got.status_code, got.content) == (200, MARKER), session_id
+        console.cfg.browser.live = False
+        for session_id in (streaming, still):
+            got = await client.get(picture_url(served, session_id))
+            assert got.status_code == 403, session_id
+            assert got.json()["error"]["code"] == "not_available", session_id
+    assert builder.agents[streaming].pictured == ["t1"], "none after it was turned off"
+
+
+async def test_a_picture_changes_nothing_melo_sees_or_does(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME)
+    provider, driver = agent.provider, agent.driver
+    tools = {t.definition.name: t for t in await provider.start()}
+    await run(
+        tools, "browser_screenshot"
+    )  # melo's own: the view its point numbers refer to
+    seen = provider._views["t1"]
+    provider._points["t1"] = (seen, 10.0, 20.0)  # a click point melo made
+    kept = (dict(provider._views), dict(provider._points), list(driver.calls))
+    card, marks = provider.card(), len(driver.marks)
+    driver.scroll = (0.0, 300.0)  # the page scrolled since: a new view would differ
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        got = await client.get(picture_url(served, session_id))
+    assert got.status_code == 200
+    assert (dict(provider._views), dict(provider._points), driver.calls) == kept
+    assert driver.marks[marks:] == [None], "no ring is drawn on the page"
+    assert provider.live_current() == "t1" and not provider.live_busy()
+    assert provider.card() == card, "no step shows on the chat's card"
+
+
+async def test_a_picture_waits_for_the_step_that_is_running(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME)
+    tools = {t.definition.name: t for t in await agent.provider.start()}
+    release = asyncio.Event()
+    real = agent.driver.open
+
+    async def slow(*args: Any, **kwargs: Any) -> Any:
+        await release.wait()
+        return await real(*args, **kwargs)
+
+    agent.driver.open = slow  # type: ignore[method-assign,assignment]
+    step = asyncio.create_task(run(tools, "browser_open", url=HOME + "news", tab="new"))
+    await until(agent.provider.live_busy)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        waiting = asyncio.create_task(client.get(picture_url(served, session_id)))
+        await asyncio.sleep(0.2)
+        assert not waiting.done() and agent.pictured == []
+        release.set()
+        await step
+        got = await waiting
+    assert got.status_code == 200
+    assert agent.pictured == ["t2"], "the page the step ended on"
+
+
+async def test_a_page_at_a_private_address_is_not_pictured_and_is_left_as_it_is(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME)
+    provider, driver = agent.provider, agent.driver
+    tools = {t.definition.name: t for t in await provider.start()}
+    await run(tools, "browser_screenshot")
+    kept = (dict(provider._origins), dict(provider._views), list(driver.calls))
+    taken = len(agent.pictured)
+    private = "http://127.0.0.1:9/admin"
+    url = picture_url(served, session_id)
+    async with httpx.AsyncClient(headers=served.bearer) as client:
+        driver.queue["t1"] = [private]  # found there before the picture
+        before = await client.get(url)
+        driver.queue["t1"] = [HOME, private]  # moved while it was pictured
+        meanwhile = await client.get(url)
+        after = await client.get(
+            url
+        )  # the page is as it was: not blanked, still approved
+    for refused in (before, meanwhile):
+        assert refused.status_code == 409
+        assert refused.json()["error"]["code"] == "no_picture"
+        assert private not in refused.text
+    assert agent.pictured[taken:] == ["t1", "t1"], "the first was never taken"
+    assert after.status_code == 200
+    assert (dict(provider._origins), dict(provider._views), driver.calls) == kept
+
+
 # ── The stream ──
 
 
@@ -503,6 +660,21 @@ async def test_the_stream_is_behind_the_guard(
     )
 
 
+async def test_the_picture_is_behind_the_guard(
+    console: Console, builder: Builder, workspace: Path, served: Served
+) -> None:
+    session_id = await chat(console, builder, workspace)
+    agent = await browse(builder, session_id, HOME)
+    url = picture_url(served, session_id)
+    async with httpx.AsyncClient() as client:
+        none = await client.get(url)
+        wrong = await client.get(url, headers={"Authorization": "Bearer " + "0" * 64})
+        allowed = await client.get(url, headers=served.bearer)
+    assert (none.status_code, wrong.status_code) == (401, 401)
+    assert MARKER not in none.content + wrong.content
+    assert allowed.content == MARKER and agent.pictured == ["t1"]
+
+
 async def test_rotating_the_token_ends_an_open_stream(
     console: Console, builder: Builder, workspace: Path, served: Served
 ) -> None:
@@ -658,6 +830,7 @@ async def test_a_source_that_is_not_the_chats_now_is_refused_on_every_route_and_
         await browse(builder, session_id, HOME)
         await until_card(client, served, session_id, state="working")
         started = agent.driver.started
+        assert (await client.get(base + "/picture", params=right)).status_code == 200
         named = "?" + str(httpx.QueryParams(right))
         async with connect(
             served.url(session_id, named), additional_headers=served.bearer
@@ -671,6 +844,7 @@ async def test_a_source_that_is_not_the_chats_now_is_refused_on_every_route_and_
                 query["gen"] = builder.agents[other].provider.generation
             for refused in (
                 await client.get(base, params=query),
+                await client.get(base + "/picture", params=query),
                 await client.post(base + "/done", params=query),
                 await client.post(base + "/window", params=query),
             ):
@@ -694,6 +868,7 @@ async def test_a_source_that_is_not_the_chats_now_is_refused_on_every_route_and_
         await until_card(client, served, session_id, state="done")
         gone = await client.get(base, params=right)
         assert gone.status_code == 409
+        assert (await client.get(base + "/picture", params=right)).status_code == 409
         # A client that names neither gen nor run (an older one) is served as before.
         assert (await client.get(base)).status_code == 200
 

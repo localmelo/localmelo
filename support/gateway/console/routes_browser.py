@@ -1,4 +1,4 @@
-"""The live view of a browser: ``GET /api/sessions/{id}/browser``, the stream ``/browser/live``, and the person's Done.
+"""The live view of a browser: ``GET /api/sessions/{id}/browser``, the stream ``/browser/live``, a picture, and the person's Done.
 
 ``{id}`` is the source of the browser: a chat, or a running task whose card a chat shows. ``GET`` says whether the
 chat has a page open in melo's browser (the current tab, its
@@ -26,6 +26,16 @@ The meta also says ``owner``: ``melo``, or ``you`` once the person took the tab
 over (with ``place``: ``window``, a real Chrome window this stream is a live copy
 of, or ``app``, this panel; ``form`` and ``failed`` say why it is in the app; and
 ``dialog`` for a box the page shows them); ``takeover`` says a viewer may take it.
+
+``GET /browser/picture`` is one picture of the page the chat's browser is on (the
+optional ``tab=tN`` names another tab of the chat), as the driver takes it, for a
+script that must see where a task ended. It is for whoever may watch: it is
+refused (403 ``not_available``) while the live view is off, and it needs no driver
+that streams. It starts nothing and changes nothing the run sees or does (see
+:meth:`BrowserToolProvider.watcher_picture`): no browser or page open is a 404
+``no_page``, and a page that must not be pictured now (it moved to a local or
+private address, a secret field has focus, the browser stopped) a 409
+``no_picture``.
 
 ``POST /browser/done`` is the person's Done from anywhere (the app's pill, the
 terminal, the console): every page they have comes back to melo, and the run
@@ -73,16 +83,18 @@ gateway's token rotates.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, WebSocket
+from fastapi.responses import JSONResponse, Response
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from localmelo.support.browser.driver import BrowserError
 from localmelo.support.browser.live import LiveRefusedError, LiveView, Viewer
 from localmelo.support.browser.provider import BrowserToolProvider
 from localmelo.support.browser.takeover import INPUT_TYPES, quiet_frames
@@ -172,17 +184,22 @@ def live_of(console: Console, session_id: str) -> LiveView | None:
     return browser.live if browser is not None else None
 
 
+def live_on(console: Console) -> bool:
+    """Whether the person allows watching melo's browser at all (``[browser] live``; turning it off holds at once)."""
+    return console.cfg.browser.live is True
+
+
 def available(console: Console, session_id: str) -> bool:
     """Whether the browser of *session_id*, or of the work it will start, can be watched now.
 
-    The live view must be on (turning it off holds at once). Then a source with
+    The live view must be on. Then a source with
     a browser open is watched in that browser, which streams or not; one with
     none open gets the browser the settings name: Chrome streams, Safari's
     windows do not.
     """
-    browser = console.cfg.browser
-    if browser.live is not True:
+    if not live_on(console):
         return False
+    browser = console.cfg.browser
     found = browser_of(console, session_id)
     return found.live is not None if found is not None else browser.driver == "chrome"
 
@@ -222,6 +239,34 @@ def add_routes(app: FastAPI, console: Console) -> None:
         state["available"] = available(console, session_id)
         state["driver"] = console.cfg.browser.driver
         return JSONResponse(content=state, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/sessions/{session_id}/browser/picture")
+    async def browser_picture(
+        session_id: str,
+        tab: Annotated[str | None, Query(pattern=f"^{_TAB.pattern}$")] = None,
+        gen: str | None = None,
+        run: str | None = None,
+        owner: str | None = None,
+    ) -> Response:
+        console.require_store()
+        await console.require_session(session_id)
+        if not live_on(console):
+            raise ApiError(403, "not_available", t("browser.closed.unavailable"))
+        try:
+            browser = resolve(console, session_id, gen=gen, run=run, owner=owner)
+        except StaleSourceError:
+            raise stale_source() from None
+        try:
+            shot = await browser.watcher_picture(tab) if browser is not None else None
+        except BrowserError:
+            raise ApiError(409, "no_picture", t("errors.browserNoPicture")) from None
+        if shot is None:
+            raise ApiError(404, "no_page", t("errors.browserNoPage"))
+        return Response(
+            base64.b64decode(shot.data),
+            media_type=shot.mime_type,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post("/api/sessions/{session_id}/browser/done")
     async def browser_done(

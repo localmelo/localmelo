@@ -128,6 +128,7 @@ from localmelo.support.browser.driver import (
     Element,
     PageMovedError,
     PointHit,
+    Shot,
     StaleElementError,
     TabInfo,
     Upload,
@@ -3657,6 +3658,34 @@ class BrowserToolProvider(BaseToolProvider):
             text=f"A picture of {self._origins[tab_id]} was taken and kept with this chat.",
             images=[ImagePart(mime_type=shot.mime_type, data=shot.data)],
         )
+
+    async def watcher_picture(self, tab: str | None = None) -> Shot | None:
+        """A picture of *tab* (default the current one) for somebody who watches, not for the model.
+
+        None when the chat has no page there; :class:`BrowserError` when the page
+        must not be pictured now. It runs under the steps' own lock, so it never
+        interleaves with one, and it changes nothing a step sees or does: it
+        keeps no view or point (``_views``, ``_points``), draws no mark, asks no
+        question, shows no step on the chat's card and adds nothing to the chat.
+        The address is checked before and after, as a step checks it
+        (:meth:`_recheck`), but a page found at a private address is only not
+        pictured: it is not blanked, and no site is approved or refused here.
+        """
+        async with self._lock:
+            tab_id = tab or self._tab
+            if tab_id is None or tab_id not in self._origins or tab_id not in self._raw:
+                return None
+            raw = self._raw[tab_id]
+            await self._public_now(raw)
+            shot = await self._driver.screenshot(raw)
+            await self._public_now(raw)  # a page that moved while it was pictured
+            return shot
+
+    async def _public_now(self, raw: str) -> None:
+        """:class:`BrowserError` unless the browser says tab *raw* is at a public address. It changes nothing."""
+        url = await self._driver.location(raw)
+        sites.require_origin(url)
+        await addresses.require_public(url)
 
     # ── Other apps' windows ──
 
